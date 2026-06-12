@@ -15426,3 +15426,79 @@ fn equality_sign_extends_mixed_width_signed_operands() {
         assert_eq!(sim.get("n").unwrap(), Value::new(0, 1, false), "{config:?}");
     }
 }
+
+#[test]
+fn ternary_sign_extends_narrow_signed_branch() {
+    // Regression: the ternary result took the selected branch at its own
+    // width zero-extended, so `cond ? (i8 -1) : (i32 5)` produced
+    // 32'h000000ff instead of 32'hffffffff (both branches signed ->
+    // narrower branch sign-extends, LRM 11.4.11).  Covers const-fold and
+    // the runtime backends.
+    let code = r#"
+    module Top (
+        c : input  logic,
+        y : input  i8,
+        z : input  i32,
+        zw: input  signed logic<128>,
+        yw: input  signed logic<96>,
+        zp: input  signed logic<192>,
+        q : output i32,
+        qc: output i32,
+        qw: output signed logic<128>,
+        qm: output signed logic<128>,
+        qp: output signed logic<192>,
+    ) {
+        const Y: i8  = 0 - 1;
+        const Z: i32 = 5;
+        assign qc = if 1'b1 ? Y : Z;
+        assign q  = if c ? y : z;
+        assign qw = if c ? y : zw;
+        assign qm = if c ? yw : zw;
+        assign qp = if c ? y : zp;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("c", Value::new(1, 1, false));
+        sim.set("y", Value::new(0xff, 8, true)); // -1
+        sim.set("z", Value::new(5, 32, true));
+        use num_bigint::BigUint;
+        let minus_two = |w: usize| (BigUint::from(1u32) << w) - BigUint::from(2u32);
+        sim.set("zw", Value::new_biguint(BigUint::from(5u32), 128, true));
+        sim.set("yw", Value::new_biguint(minus_two(96), 96, true)); // -2
+        sim.set("zp", Value::new_biguint(BigUint::from(5u32), 192, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("qc").unwrap().payload_u128(),
+            0xffff_ffffu128,
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("q").unwrap().payload_u128(),
+            0xffff_ffffu128,
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("qw").unwrap().payload_u128(),
+            u128::MAX,
+            "qw {config:?}"
+        );
+        assert_eq!(
+            sim.get("qm").unwrap().payload_u128(),
+            u128::MAX - 1,
+            "qm {config:?}"
+        );
+        assert_eq!(
+            sim.get("qp").unwrap().payload().into_owned(),
+            (BigUint::from(1u32) << 192) - BigUint::from(1u32),
+            "qp {config:?}"
+        );
+
+        // Unsigned mix keeps zero-extension.
+        sim.set("c", Value::new(0, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("q").unwrap().payload_u128(), 5u128, "{config:?}");
+    }
+}

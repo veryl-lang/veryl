@@ -90,9 +90,21 @@ impl ProtoExpression {
                 cond,
                 true_expr,
                 false_expr,
+                width,
                 ..
             } => {
-                cond.can_build_binary()
+                // The wide-ptr select copies branch buffers without sign-
+                // filling a narrower signed branch; leave that rare shape
+                // to the interpreter (the aot_c backend bails likewise).
+                let both_signed = true_expr.expr_context().signed
+                    && false_expr.expr_context().signed
+                    && true_expr.width() > 0
+                    && false_expr.width() > 0;
+                let needs_sign_fill = is_wide_ptr(*width)
+                    && both_signed
+                    && (true_expr.width() < *width || false_expr.width() < *width);
+                !needs_sign_fill
+                    && cond.can_build_binary()
                     && true_expr.can_build_binary()
                     && false_expr.can_build_binary()
             }
@@ -1757,25 +1769,89 @@ impl ProtoExpression {
                 let result_wide = *width > 64;
                 let t_wide = true_expr.width() > 64;
                 let f_wide = false_expr.width() > 64;
+                // Both-signed branches sign-extend to the result width
+                // (LRM 11.4.11) instead of riding on zero-extended loads.
+                // Width 0 marks the unsized all_bit sentinel; leave it alone.
+                let both_signed = true_expr.expr_context().signed
+                    && false_expr.expr_context().signed
+                    && true_expr.width() > 0
+                    && false_expr.width() > 0;
 
                 // Widen branches to match; skip when the value is already
                 // I128 (unsized all_bit literal).
                 if result_wide || t_wide || f_wide {
                     if !t_wide && builder.func.dfg.value_type(true_payload) != I128 {
-                        true_payload = builder.ins().uextend(I128, true_payload);
-                        if let Some(v) = true_mask_xz
-                            && builder.func.dfg.value_type(v) != I128
-                        {
-                            true_mask_xz = Some(builder.ins().uextend(I128, v));
+                        if both_signed && *width > true_expr.width() {
+                            (true_payload, true_mask_xz) = expand_sign(
+                                *width,
+                                true_expr.width(),
+                                true_payload,
+                                true_mask_xz,
+                                builder,
+                            );
+                        } else {
+                            true_payload = builder.ins().uextend(I128, true_payload);
+                            if let Some(v) = true_mask_xz
+                                && builder.func.dfg.value_type(v) != I128
+                            {
+                                true_mask_xz = Some(builder.ins().uextend(I128, v));
+                            }
                         }
+                    } else if t_wide && both_signed && *width > true_expr.width() {
+                        // Already-I128 branch narrower than the result
+                        // (e.g. i96 vs i128): the load zero-extended it.
+                        (true_payload, true_mask_xz) = expand_sign(
+                            *width,
+                            true_expr.width(),
+                            true_payload,
+                            true_mask_xz,
+                            builder,
+                        );
                     }
                     if !f_wide && builder.func.dfg.value_type(false_payload) != I128 {
-                        false_payload = builder.ins().uextend(I128, false_payload);
-                        if let Some(v) = false_mask_xz
-                            && builder.func.dfg.value_type(v) != I128
-                        {
-                            false_mask_xz = Some(builder.ins().uextend(I128, v));
+                        if both_signed && *width > false_expr.width() {
+                            (false_payload, false_mask_xz) = expand_sign(
+                                *width,
+                                false_expr.width(),
+                                false_payload,
+                                false_mask_xz,
+                                builder,
+                            );
+                        } else {
+                            false_payload = builder.ins().uextend(I128, false_payload);
+                            if let Some(v) = false_mask_xz
+                                && builder.func.dfg.value_type(v) != I128
+                            {
+                                false_mask_xz = Some(builder.ins().uextend(I128, v));
+                            }
                         }
+                    } else if f_wide && both_signed && *width > false_expr.width() {
+                        (false_payload, false_mask_xz) = expand_sign(
+                            *width,
+                            false_expr.width(),
+                            false_payload,
+                            false_mask_xz,
+                            builder,
+                        );
+                    }
+                } else if both_signed {
+                    if *width > true_expr.width() {
+                        (true_payload, true_mask_xz) = expand_sign(
+                            *width,
+                            true_expr.width(),
+                            true_payload,
+                            true_mask_xz,
+                            builder,
+                        );
+                    }
+                    if *width > false_expr.width() {
+                        (false_payload, false_mask_xz) = expand_sign(
+                            *width,
+                            false_expr.width(),
+                            false_payload,
+                            false_mask_xz,
+                            builder,
+                        );
                     }
                 }
 
