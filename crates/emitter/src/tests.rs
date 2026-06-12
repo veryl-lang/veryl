@@ -482,6 +482,62 @@ endmodule
 }
 
 #[test]
+fn reset_port_cast() {
+    let code = r#"module ModuleA (
+    rst: input reset,
+) {
+    let r_h: reset_async_high = rst as reset_async_high;
+    let r_l: reset_async_low  = rst as reset_async_low ;
+}
+
+interface InterfaceA {
+    var rst: reset;
+    modport mp {
+        rst: input,
+    }
+}
+
+module ModuleB (
+    port: modport InterfaceA::mp,
+) {
+    let r_h: reset_async_high = port.rst as reset_async_high;
+    let r_l: reset_async_low  = port.rst as reset_async_low ;
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input var logic rst
+);
+    logic r_h; always_comb r_h = ~rst;
+    logic r_l; always_comb r_l = rst;
+endmodule
+
+interface prj_InterfaceA;
+    logic rst;
+    modport mp (
+        input rst
+    );
+endinterface
+
+module prj_ModuleB (
+    prj_InterfaceA.mp port
+);
+    logic r_h; always_comb r_h = ~port.rst;
+    logic r_l; always_comb r_l = port.rst;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+
+    metadata.build.reset_type = ResetType::AsyncLow;
+
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn sync_reset_cast() {
     let code = r#"module ModuleA {
     var a: reset;
