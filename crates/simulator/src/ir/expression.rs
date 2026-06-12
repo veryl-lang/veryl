@@ -1686,7 +1686,10 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
                 let width = comptime.expr_context.width;
                 let mut expr_context: ExpressionContext = (&comptime.expr_context).into();
-                if matches!(op, Op::Div | Op::Rem) {
+                if matches!(
+                    op,
+                    Op::Div | Op::Rem | Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq
+                ) {
                     // See build_binary for the merge() rationale.
                     expr_context.signed = x.expr_context().signed & y.expr_context().signed;
                 }

@@ -707,10 +707,13 @@ impl ProtoExpression {
                 let (mut x_payload, mut x_mask_xz) = x.build_binary(context, builder)?;
                 let (mut y_payload, mut y_mask_xz) = y.build_binary(context, builder)?;
 
-                // Re-derive signed from the operand contexts for
-                // Div/Rem: the outer expr_context may have dropped
-                // signed via merge() when a sibling branch is unsigned.
-                let signed = if matches!(op, Op::Div | Op::Rem) {
+                // Div/Rem and comparisons take signedness from their two
+                // operands alone; the outer expr_context may have dropped
+                // signed via merge() with an unsigned sibling.
+                let signed = if matches!(
+                    op,
+                    Op::Div | Op::Rem | Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq
+                ) {
                     x.expr_context().signed & y.expr_context().signed
                 } else {
                     expr_context.signed

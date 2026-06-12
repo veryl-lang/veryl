@@ -403,10 +403,13 @@ impl Expression {
                     }
                 }
 
-                // Re-derive signed from the operands for Div/Rem: the
-                // outer-propagated expr_context may have dropped signed
-                // via merge() when a sibling branch is unsigned.
-                let signed = if matches!(op, Op::Div | Op::Rem) {
+                // Div/Rem and comparisons take signedness from their two
+                // operands alone (SV 11.4.4); the outer expr_context may
+                // have dropped signed via merge() with an unsigned sibling.
+                let signed = if matches!(
+                    op,
+                    Op::Div | Op::Rem | Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq
+                ) {
                     x.comptime().expr_context.signed & y.comptime().expr_context.signed
                 } else {
                     signed
