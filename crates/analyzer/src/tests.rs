@@ -10992,6 +10992,44 @@ fn invalid_select() {
 }
 
 #[test]
+fn invalid_range_assign() {
+    let code = r#"
+    proto package a_proto_pkg {
+        type T;
+    }
+    package a_pkg::<W: u32> for a_proto_pkg {
+        type T = logic<W>;
+    }
+    interface b_if::<PKG: a_proto_pkg> {
+        var b: PKG::T;
+
+        modport mp {
+            b: output,
+        }
+    }
+    module c_module::<PKG: a_proto_pkg> (
+        b: modport b_if::<PKG>::mp[2]
+    ) {
+        assign b[0].b = 0;
+        assign b[1].b = 0;
+    }
+    module d_module::<D: u32> {
+        inst e: e_module;
+    }
+    module e_module {
+        inst b: b_if::<a_pkg::<32>>[2];
+        inst c: c_module::<a_pkg::<32>>(b: b[0:1]);
+    }
+    module f_module {
+        inst d: d_module::<8>;
+    }
+    "#;
+
+    let error = analyze(code);
+    assert!(error.is_empty());
+}
+
+#[test]
 fn clock_domain() {
     let code = r#"
     module ModuleA (
