@@ -531,9 +531,9 @@ impl Simulator {
                 // dispatch against the per-stmt Cranelift path and panics
                 // on divergence.  The whole-event backend only exists on
                 // native (BackendRegistry stays empty on wasm), so this
-                // branch is effectively native-only at runtime.
-                self.validate_event_aot(whole, stmts_ptr);
-                true
+                // branch is effectively native-only at runtime.  NotReady
+                // returns false → normal per-stmt fallback below.
+                self.validate_event_aot(whole, stmts_ptr)
             }
         } else {
             false
@@ -758,7 +758,17 @@ impl Simulator {
     /// first divergence.  Leaves the Cranelift result live (ground truth).
     /// Slow (clones ff/comb each event) — diagnostics only.  Unreachable on
     /// wasm since no whole-event backend ever registers there.
-    fn validate_event_aot(&mut self, whole: &dyn CompiledWhole, stmts_ptr: *const Vec<Statement>) {
+    ///
+    /// Returns true when the AOT function ran (and was compared).  NotReady —
+    /// the compile hasn't landed (or failed) — writes nothing, so comparing
+    /// would diff an empty log against the real Cranelift effect and report a
+    /// phantom divergence; mirror the non-validate path instead: return false
+    /// and let the caller run the per-stmt Cranelift dispatch.
+    fn validate_event_aot(
+        &mut self,
+        whole: &dyn CompiledWhole,
+        stmts_ptr: *const Vec<Statement>,
+    ) -> bool {
         let ff_ptr = self.ir.ff_values.as_ptr();
         let comb_ptr = self.ir.comb_values.as_ptr() as *mut u8;
         let log_ptr = (&*self.ir.write_log_buffer) as *const _ as *mut u8;
@@ -769,7 +779,12 @@ impl Simulator {
         let wide_count_before = self.ir.write_log_buffer.wide_count as usize;
 
         // Whole-event backend, then capture its pushed entries + ff/comb.
-        let _ = whole.try_dispatch(ff_ptr, comb_ptr, log_ptr);
+        if matches!(
+            whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
+            crate::backend::DispatchOutcome::NotReady,
+        ) {
+            return false;
+        }
         // The committed FF effect is what `ff_commit_from_log` writes: all
         // narrow entries first (typed stores of `width_class` bytes), then all
         // wide entries (memcpy of `native_bytes`), last-write-wins per byte.
@@ -858,6 +873,7 @@ impl Simulator {
             }
             panic!("AOT-C event validate divergence (see above)");
         }
+        true
     }
 
     /// Set a variable value by VarId. Used to write clock/reset signal values
