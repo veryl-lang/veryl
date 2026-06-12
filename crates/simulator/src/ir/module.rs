@@ -1,6 +1,6 @@
 use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole};
 use crate::ir::context::{Context, Conv, ScopeContext};
-use crate::ir::declaration::stable_topo_sort;
+use crate::ir::declaration::{stable_topo_sort, stable_topo_sort_with_blocks};
 use crate::ir::derived_clock::{
     DerivedClockSchedule, build_schedule as build_derived_clock_schedule, extract_eval_proto_stmts,
 };
@@ -482,70 +482,18 @@ fn build_chunked_via_registry(
     ProtoStatements(blocks)
 }
 
-/// Acyclicity check for the Phase-2 `stable_topo_sort` schedule, using the SAME
-/// edge model (most-recent-PRIOR-writer + single-writer special case, FF offsets
-/// excluded). Decides whether to return the schedule or fall through to Phase 3's
-/// combinational-loop diagnostic; a bipartite "every-writer → reader" check would
-/// instead false-positive on legitimate sequential reassignment.
-fn comb_schedule_acyclic(sorted: &[ProtoStatement]) -> bool {
-    let n = sorted.len();
-    let mut s_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
-    let mut s_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
-    for s in sorted {
-        let mut ins = vec![];
-        let mut outs = vec![];
-        s.gather_variable_offsets(&mut ins, &mut outs);
-        ins.retain(|o| !o.is_ff());
-        outs.retain(|o| !o.is_ff());
-        s_inputs.push(ins);
-        s_outputs.push(outs);
+fn pass_diag_phase(phase: &str) {
+    if std::env::var("VERYL_PASS_DIAG").is_ok() {
+        log::info!("pass_diag: analyze_dependency exit = {phase}");
     }
-    let mut w: HashMap<VarOffset, Vec<usize>> = HashMap::default();
-    for (i, outs) in s_outputs.iter().enumerate() {
-        for &key in outs {
-            w.entry(key).or_default().push(i);
-        }
-    }
-    let mut a: Vec<HashSet<usize>> = vec![HashSet::default(); n];
-    let mut deg: Vec<usize> = vec![0; n];
-    for (ri, ins) in s_inputs.iter().enumerate() {
-        for key in ins {
-            if let Some(wis) = w.get(key) {
-                if wis.len() == 1 {
-                    let wi = wis[0];
-                    if wi != ri && a[wi].insert(ri) {
-                        deg[ri] += 1;
-                    }
-                } else if let Some(&wi) = wis.iter().rev().find(|&&w| w < ri)
-                    && a[wi].insert(ri)
-                {
-                    deg[ri] += 1;
-                }
-            }
-        }
-    }
-    let mut q: VecDeque<usize> = VecDeque::new();
-    for (i, &d) in deg.iter().enumerate() {
-        if d == 0 {
-            q.push_back(i);
-        }
-    }
-    let mut cnt = 0;
-    while let Some(idx) = q.pop_front() {
-        cnt += 1;
-        for &succ in &a[idx] {
-            deg[succ] -= 1;
-            if deg[succ] == 0 {
-                q.push_back(succ);
-            }
-        }
-    }
-    cnt == n
 }
 
+/// Returns the scheduled statements plus an exact required-pass hint when the
+/// block-aware sort could derive one (see `stable_topo_sort_with_blocks`);
+/// `None` means the caller must fall back to `compute_required_passes`.
 pub(crate) fn analyze_dependency(
     statements: Vec<ProtoStatement>,
-) -> Result<Vec<ProtoStatement>, SimulatorError> {
+) -> Result<(Vec<ProtoStatement>, Option<usize>), SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
         Var(VarOffset),
@@ -666,9 +614,12 @@ pub(crate) fn analyze_dependency(
             Ok(ret)
         };
 
-    // Phase 1: Try with CompiledBlocks as atomic nodes.
+    // Phase 1: Try with CompiledBlocks as atomic nodes. The bipartite model
+    // orders every reader after ALL writers of its inputs, so the schedule
+    // settles in exactly one pass.
     if let Ok(sorted) = try_topo_sort(&table) {
-        return Ok(sorted);
+        pass_diag_phase("phase1: bipartite, CBs atomic");
+        return Ok((sorted, Some(1)));
     }
 
     // Phase 2: Expand CompiledBlocks and SequentialBlocks and retry.
@@ -680,6 +631,10 @@ pub(crate) fn analyze_dependency(
         matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty())
             || matches!(x, ProtoStatement::SequentialBlock(_))
     });
+
+    // Flattened stmt id → source block (original table key); set by the
+    // Phase-2 full flatten.
+    let mut block_of: Option<Vec<usize>> = None;
 
     if has_expandable {
         // FAST PATH: flatten only blocks WITHOUT an intra-block reorder hazard
@@ -747,7 +702,8 @@ pub(crate) fn analyze_dependency(
                 }
             }
             if let Ok(sorted) = try_topo_sort(&fast) {
-                return Ok(sorted);
+                pass_diag_phase("phase2-fast: hazard-flatten + bipartite");
+                return Ok((sorted, Some(1)));
             }
         }
 
@@ -774,6 +730,7 @@ pub(crate) fn analyze_dependency(
         sorted_keys.sort();
 
         let mut new_table: HashMap<usize, ProtoStatement> = HashMap::default();
+        let mut flat_block_of: Vec<usize> = Vec::new();
         let mut new_id = 0usize;
         for key in sorted_keys {
             let stmt = table.remove(&key).unwrap();
@@ -781,26 +738,34 @@ pub(crate) fn analyze_dependency(
             flatten(stmt, &mut flat);
             for sub in flat {
                 new_table.insert(new_id, sub);
+                flat_block_of.push(key);
                 new_id += 1;
             }
         }
         table = new_table;
+        block_of = Some(flat_block_of);
 
-        // Sort the flattened (program-order) statements with `stable_topo_sort`,
-        // NOT the bipartite `try_topo_sort`: the bipartite model makes a reader
-        // wait for EVERY writer of a var, reordering sequential reassignment —
-        // flattened `x=a; y=x; x=b` would become `x=a; x=b; y=x`, so `y` wrongly
-        // reads `b`. `stable_topo_sort` links `y` to its most recent PRIOR writer
-        // only. (reorder_by_level applies the matching WAR/WAW leveling downstream.)
+        // Sort the flattened (program-order) statements with the block-aware
+        // `stable_topo_sort`, NOT the bipartite `try_topo_sort`: the bipartite
+        // model makes a reader wait for EVERY writer of a var, reordering
+        // sequential reassignment — flattened `x=a; y=x; x=b` would become
+        // `x=a; x=b; y=x`, so `y` wrongly reads `b`. `stable_topo_sort` links
+        // `y` to its most recent PRIOR writer only. (reorder_by_level applies
+        // the matching WAR/WAW leveling downstream.)
         let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
         sorted_keys.sort();
         let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-        let sorted = stable_topo_sort(stmts);
-        if comb_schedule_acyclic(&sorted) {
-            return Ok(sorted);
+        let blocks: Vec<usize> = sorted_keys
+            .iter()
+            .map(|k| block_of.as_ref().unwrap()[*k])
+            .collect();
+        let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
+        if !fell_back {
+            pass_diag_phase("phase2-full: flatten + stable_topo_sort");
+            return Ok((sorted, passes_hint));
         }
-        // Not a DAG under the sequential model — fall through to Phase 3, which
-        // re-derives the order and reports the genuine combinational loop.
+        // The sort gave up (a cycle survives the semantic model) — fall
+        // through to Phase 3's combinational-loop diagnostic.
     }
 
     // Phase 3: Check for genuine combinational loop vs false positive
@@ -814,11 +779,17 @@ pub(crate) fn analyze_dependency(
 
     if !has_any_cb || !has_non_expandable_cb {
         // DAG-based sort failed (false cycle from inlined function bodies).
-        // Fall back to direct statement-level sort.
+        // Fall back to direct statement-level sort (block-aware when Phase 2
+        // flattened the table and recorded statement origins).
         let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
         sorted_keys.sort();
         let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-        let sorted = stable_topo_sort(stmts);
+        let (sorted, passes_hint, _) = if let Some(block_of) = &block_of {
+            let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
+            stable_topo_sort_with_blocks(stmts, &blocks)
+        } else {
+            (stable_topo_sort(stmts), None, false)
+        };
         // Verify no genuine combinational loop remains.
         let n = sorted.len();
         let mut s_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
@@ -876,7 +847,8 @@ pub(crate) fn analyze_dependency(
             }
         }
         if cnt == n {
-            return Ok(sorted);
+            pass_diag_phase("phase3: stable_topo_sort (no non-expandable CB)");
+            return Ok((sorted, passes_hint));
         }
         // `deg > 0` includes the cycle's downstream cone; isolate just the
         // cycle (SCC size >= 2) so the diagnostic focuses on the real loop.
@@ -998,7 +970,7 @@ pub(crate) fn analyze_dependency(
             ret.push(stmt);
         }
     }
-    Ok(ret)
+    Ok((ret, None))
 }
 
 /// Compute the number of eval_comb passes required for convergence.
@@ -1016,9 +988,9 @@ pub(crate) fn analyze_dependency(
 /// Pair is (high_bit_inclusive, low_bit_inclusive) matching Veryl's
 /// `Assign.select` convention. Overlap: two ranges overlap if their
 /// bit intervals intersect.
-type BitRange = Option<(usize, usize)>;
+pub(crate) type BitRange = Option<(usize, usize)>;
 
-fn ranges_overlap(a: BitRange, b: BitRange) -> bool {
+pub(crate) fn ranges_overlap(a: BitRange, b: BitRange) -> bool {
     match (a, b) {
         (None, _) | (_, None) => true,
         (Some((a_hi, a_lo)), Some((b_hi, b_lo))) => a_lo <= b_hi && b_lo <= a_hi,
@@ -1028,7 +1000,10 @@ fn ranges_overlap(a: BitRange, b: BitRange) -> bool {
 /// Collect (offset, bit_range) outputs for bit-aware SCC analysis.
 /// Only captures writes that are precisely bit-ranged (via Assign.select);
 /// everything else falls back to full-width (None).
-fn gather_bit_aware_outputs(stmt: &ProtoStatement, out: &mut Vec<(VarOffset, BitRange)>) {
+pub(crate) fn gather_bit_aware_outputs(
+    stmt: &ProtoStatement,
+    out: &mut Vec<(VarOffset, BitRange)>,
+) {
     match stmt {
         ProtoStatement::Assign(x) => out.push((x.dst, x.select)),
         ProtoStatement::AssignDynamic(x) => {
@@ -1061,9 +1036,15 @@ fn gather_bit_aware_outputs(stmt: &ProtoStatement, out: &mut Vec<(VarOffset, Bit
         }
         ProtoStatement::CompiledBlock(x) => {
             if !x.original_stmts.is_empty() {
+                // Match gather_variable_offsets: FF offsets written inside a
+                // compiled block are event-time state, and keeping them here
+                // would let `stable_topo_sort`'s RAW/WAR edges manufacture
+                // false comb cycles through registers.
+                let mut inner = vec![];
                 for s in &x.original_stmts {
-                    gather_bit_aware_outputs(s, out);
+                    gather_bit_aware_outputs(s, &mut inner);
                 }
+                out.extend(inner.into_iter().filter(|(off, _)| !off.is_ff()));
             } else {
                 for &off in &x.output_offsets {
                     if !off.is_ff() {
@@ -1590,6 +1571,9 @@ fn trace_scc_cycles(sorted: &[ProtoStatement], meta: &ModuleVariableMeta) {
 }
 
 fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
+    use daggy::petgraph::Graph;
+    use daggy::petgraph::algo::tarjan_scc;
+
     let n = sorted.len();
     if n == 0 {
         return 1;
@@ -1599,47 +1583,144 @@ fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
         compute_scc_stats(sorted);
     }
 
-    // For each comb variable, record the position of its last writer.
-    let mut var_last_writer: HashMap<VarOffset, usize> = HashMap::default();
+    let mut writer_ranges: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
+    let mut full_writers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
     for (pos, stmt) in sorted.iter().enumerate() {
-        let mut inputs = vec![];
-        let mut outputs = vec![];
-        stmt.gather_variable_offsets(&mut inputs, &mut outputs);
-        for key in outputs {
-            var_last_writer.insert(key, pos);
+        let mut outs = vec![];
+        gather_bit_aware_outputs(stmt, &mut outs);
+        for (key, br) in outs {
+            writer_ranges.entry(key).or_default().push((pos, br));
+        }
+        if let ProtoStatement::Assign(a) = stmt
+            && a.select.is_none()
+            && a.dynamic_select.is_none()
+        {
+            full_writers.entry(a.dst).or_default().push(pos);
         }
     }
 
-    // Reverse scan: for each statement, compute the maximum backward
-    // chain depth. Because backward edges point from higher to lower
-    // positions, delay[writer_pos] is already computed when we visit pos.
-    let mut delay = vec![0usize; n];
-    for pos in (0..n).rev() {
-        let mut inputs = vec![];
-        let mut outputs = vec![];
-        sorted[pos].gather_variable_offsets(&mut inputs, &mut outputs);
-        let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
+    // Statement dataflow edges writer→reader.  Self-references and
+    // non-overlapping writers are skipped; a BACKWARD edge is also dropped
+    // when an unconditional full-width write earlier in the pass already
+    // produced the value (the read is stable on re-execution).  Forward
+    // edges stay: the read inherits whatever extra passes its producer
+    // needs.
+    let mut graph: Graph<usize, ()> = Graph::new();
+    let nodes: Vec<_> = (0..n).map(|i| graph.add_node(i)).collect();
+    let mut in_edges: Vec<Vec<usize>> = vec![Vec::new(); n];
+    {
+        let mut edge_set: HashSet<(usize, usize)> = HashSet::default();
+        let mut ins = vec![];
+        let mut outs = vec![];
+        let mut reads = vec![];
+        let mut output_set: HashSet<VarOffset> = HashSet::default();
+        for (pos, stmt) in sorted.iter().enumerate() {
+            ins.clear();
+            outs.clear();
+            stmt.gather_variable_offsets(&mut ins, &mut outs);
+            output_set.clear();
+            output_set.extend(outs.iter().cloned());
+            reads.clear();
+            stmt.gather_reads_with_ranges(&mut reads);
 
-        for key in &inputs {
-            if output_set.contains(key) {
-                continue; // self-reference within same statement
+            for (key, rr) in &reads {
+                if output_set.contains(key) {
+                    continue;
+                }
+                let covered = full_writers
+                    .get(key)
+                    .is_some_and(|fw| fw.first().is_some_and(|&f| f < pos));
+                if let Some(wranges) = writer_ranges.get(key) {
+                    for (writer_pos, wr) in wranges {
+                        if *writer_pos == pos
+                            || (covered && *writer_pos > pos)
+                            || !ranges_overlap(*wr, *rr)
+                        {
+                            continue;
+                        }
+                        if edge_set.insert((*writer_pos, pos)) {
+                            graph.add_edge(nodes[*writer_pos], nodes[pos], ());
+                            in_edges[pos].push(*writer_pos);
+                        }
+                    }
+                }
             }
-            if let Some(&writer_pos) = var_last_writer.get(key)
-                && writer_pos > pos
-            {
-                delay[pos] = delay[pos].max(delay[writer_pos] + 1);
+        }
+    }
+
+    // Delay D[stmt] = extra eval passes before its value settles: forward
+    // in-edges cost 0, backward 1, and delay flows THROUGH forward edges
+    // (a backward→forward→backward chain is depth 2, not 1).  Propagate
+    // over the SCC condensation (tarjan_scc yields reverse topological
+    // order, so the reversed walk visits writers first); within a
+    // non-trivial SCC, seed from cross-SCC edges and scan backward edges
+    // highest-position-first (positions strictly decrease along a backward
+    // chain, so it terminates; intra-SCC forward hops stay uncounted).
+    let sccs = tarjan_scc(&graph);
+    let mut delay = vec![0usize; n];
+    let mut members: HashSet<usize> = HashSet::default();
+    let mut positions: Vec<usize> = Vec::new();
+    for scc in sccs.iter().rev() {
+        // Singleton SCCs (the common, acyclic case) stay allocation-free.
+        if let [node] = scc.as_slice() {
+            let r = node.index();
+            let mut d = 0usize;
+            for &w in &in_edges[r] {
+                d = d.max(delay[w] + usize::from(w > r));
+            }
+            delay[r] = d;
+            continue;
+        }
+        members.clear();
+        members.extend(scc.iter().map(|nx| nx.index()));
+        positions.clear();
+        positions.extend(scc.iter().map(|nx| nx.index()));
+        positions.sort_unstable();
+        // Cross-SCC seeds.
+        for &r in &positions {
+            let mut d = 0usize;
+            for &w in &in_edges[r] {
+                if members.contains(&w) {
+                    continue;
+                }
+                d = d.max(delay[w] + usize::from(w > r));
+            }
+            delay[r] = d;
+        }
+        // Intra-SCC backward chains, highest position first.
+        for idx in (0..positions.len()).rev() {
+            let r = positions[idx];
+            for &w in &in_edges[r] {
+                if members.contains(&w) && w > r {
+                    delay[r] = delay[r].max(delay[w] + 1);
+                }
             }
         }
     }
 
     let max_delay = delay.iter().copied().max().unwrap_or(0);
-    let passes = max_delay + 1;
+    // +1 safety margin when any backward chain exists: intra-SCC forward
+    // hops stay uncounted (a terminating approximation, measured one pass
+    // short on a real design), and no tight static bound exists for
+    // value-dependent false-SCC convergence.  VERYL_MIN_PASSES_OVERRIDE
+    // remains the escape hatch.
+    let passes = if max_delay == 0 { 1 } else { max_delay + 2 };
     if passes > 1 {
         log::info!(
             "compute_required_passes: {} passes needed ({} stmts, {} backward edge chain depth)",
             passes,
             n,
             max_delay
+        );
+    }
+    if passes > 1 && std::env::var("VERYL_PASS_DIAG").is_ok() {
+        dump_backward_edge_chain(
+            sorted,
+            &delay,
+            &in_edges,
+            &writer_ranges,
+            &full_writers,
+            max_delay,
         );
     }
     // SCC iteration depth is computed only as a diagnostic — `passes`
@@ -1653,6 +1734,136 @@ fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
         log::info!("  (diagnostic) SCC iteration depth: {}", scc_depth);
     }
     passes
+}
+
+/// `VERYL_PASS_DIAG=1` diagnostic: aggregate backward-edge stats
+/// (classified by whether the reader also has a PRIOR writer of the same
+/// var — sequential reassignment vs a read-before-producer the sort
+/// failed to order) plus one max-delay chain walk.
+fn dump_backward_edge_chain(
+    sorted: &[ProtoStatement],
+    delay: &[usize],
+    in_edges: &[Vec<usize>],
+    writer_ranges: &HashMap<VarOffset, Vec<(usize, BitRange)>>,
+    full_writers: &HashMap<VarOffset, Vec<usize>>,
+    max_delay: usize,
+) {
+    let covered_by_prior_full = |key: &VarOffset, pos: usize| -> bool {
+        full_writers
+            .get(key)
+            .is_some_and(|fw| fw.first().is_some_and(|&f| f < pos))
+    };
+    // Latest writer past `pos` whose range overlaps the read.
+    let later_writer = |key: &VarOffset, rr: BitRange, pos: usize| -> Option<usize> {
+        writer_ranges.get(key).and_then(|ws| {
+            ws.iter()
+                .rev()
+                .take_while(|(p, _)| *p > pos)
+                .find(|(_, wr)| ranges_overlap(*wr, rr))
+                .map(|(p, _)| *p)
+        })
+    };
+    let n = sorted.len();
+    let mut stmt_reads: Vec<Vec<(VarOffset, BitRange)>> = Vec::with_capacity(n);
+    let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    for s in sorted {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        stmt_outputs.push(outs);
+        let mut reads = vec![];
+        s.gather_reads_with_ranges(&mut reads);
+        stmt_reads.push(reads);
+    }
+
+    let describe_stmt = |idx: usize| -> String {
+        let (tok_beg, kind) = match &sorted[idx] {
+            ProtoStatement::Assign(x) => (Some(x.token.beg), "Assign"),
+            _ => (
+                None,
+                match &sorted[idx] {
+                    ProtoStatement::If(_) => "If",
+                    ProtoStatement::AssignDynamic(_) => "AssignDynamic",
+                    ProtoStatement::For(_) => "For",
+                    ProtoStatement::SequentialBlock(_) => "SeqBlock",
+                    ProtoStatement::CompiledBlock(_) => "CompiledBlock",
+                    ProtoStatement::SystemFunctionCall(_) => "SysFn",
+                    ProtoStatement::TbMethodCall { .. } => "TbCall",
+                    _ => "?",
+                },
+            ),
+        };
+        if let Some(tok) = tok_beg {
+            let src = tok.source.to_string();
+            let file = src.rsplit('/').next().unwrap_or(&src);
+            format!("#{idx} [{kind}] {file}:{}", tok.line)
+        } else {
+            format!("#{idx} [{kind}]")
+        }
+    };
+
+    // Aggregate: classify every backward edge.
+    let mut total = 0usize;
+    let mut with_prior = 0usize;
+    for (pos, reads) in stmt_reads.iter().enumerate() {
+        let output_set: HashSet<VarOffset> = stmt_outputs[pos].iter().cloned().collect();
+        for (key, rr) in reads {
+            if output_set.contains(key) || covered_by_prior_full(key, pos) {
+                continue;
+            }
+            if later_writer(key, *rr, pos).is_some() {
+                total += 1;
+                if writer_ranges[key].iter().any(|(w, _)| *w < pos) {
+                    with_prior += 1;
+                }
+            }
+        }
+    }
+    log::info!(
+        "pass_diag: {} backward edges total, {} with a prior writer (reassignment), {} without",
+        total,
+        with_prior,
+        total - with_prior
+    );
+
+    // Walk one max-delay chain over the metric's own edges: pick an
+    // in-edge whose writer accounts for the current delay (a backward hop
+    // costs one pass, a forward hop inherits).  Step-bounded — forward
+    // sub-chains can be arbitrarily long.
+    let Some(mut pos) = (0..n).find(|&p| delay[p] == max_delay) else {
+        return;
+    };
+    log::info!("pass_diag: longest chain (depth {max_delay}):");
+    for _ in 0..64 {
+        if delay[pos] == 0 {
+            break;
+        }
+        let Some(&w) = in_edges[pos]
+            .iter()
+            .find(|&&w| delay[w] + usize::from(w > pos) == delay[pos])
+        else {
+            log::info!("  (chain broken at {})", describe_stmt(pos));
+            return;
+        };
+        if w > pos {
+            log::info!(
+                "  {} (delay {}) <- written later by {} (delay {})",
+                describe_stmt(pos),
+                delay[pos],
+                describe_stmt(w),
+                delay[w],
+            );
+        } else {
+            log::info!(
+                "  {} (delay {}) <- forward from {}",
+                describe_stmt(pos),
+                delay[pos],
+                describe_stmt(w),
+            );
+        }
+        pos = w;
+    }
+    log::info!("  chain tail: {}", describe_stmt(pos));
 }
 
 /// Compute the max backward-edge chain depth inside any non-trivial SCC
@@ -2214,19 +2425,31 @@ impl Conv<&air::Module> for ProtoModule {
             .chain(all_post_comb_fns)
             .collect();
 
-        let unified_sorted = analyze_dependency(unified)?;
+        let (unified_sorted, passes_hint) = analyze_dependency(unified)?;
         // No DCE/inlining: unified list includes internal child comb that would be incorrectly removed.
+        // reorder_by_level preserves the sort's dependency relations (readers
+        // stay relative to their version writers via the RAW/WAR leveling), so
+        // an exact pass hint derived from the schedule remains valid.
         let unified_sorted = reorder_by_level(unified_sorted);
-        let required_comb_passes = compute_required_passes(&unified_sorted);
+        let required_comb_passes =
+            passes_hint.unwrap_or_else(|| compute_required_passes(&unified_sorted));
+        if passes_hint.is_some() && std::env::var("VERYL_PASS_DIAG").is_ok() {
+            log::info!(
+                "pass_diag: exact hint {} passes (positional metric would give {})",
+                required_comb_passes,
+                compute_required_passes(&unified_sorted)
+            );
+        }
 
-        // Invariant: `analyze_dependency` rejects real combinational loops
-        // via `combinational_loop` error, so reaching this point means the
-        // stmt-level graph is a well-formed DAG.  Any remaining non-trivial
-        // SCC in the expanded dataflow view indicates duplicate
-        // ProtoStatements in the simulator IR assembly.  We assert SCC == 0
-        // in debug builds so any future regression that reintroduces this
-        // class of bug surfaces immediately, and expose the count on
-        // `Module`/`Ir` for test-local assertion.
+        // A non-trivial SCC in the expanded dataflow view is either
+        // structurally-cyclic-but-logically-false feedback (the multi-pass
+        // settle resolves it) or duplicate ProtoStatements from an IR
+        // assembly bug.  Under the positional metric the settled kind
+        // always leaves a counted backward edge, so SCC + single-pass can
+        // only be the duplicate bug.  Exact-hint paths are exempt (a
+        // strict block-aware schedule legitimately settles a false SCC in
+        // one pass); the test-local `nontrivial_comb_scc == 0` assertions
+        // cover the historical duplicate scenarios there.
         //
         // Skip the (heavy: Tarjan + per-stmt I/O scan) computation in
         // release-without-tests since the assert is a no-op there and the
@@ -2236,12 +2459,13 @@ impl Conv<&air::Module> for ProtoModule {
         } else {
             0
         };
-        debug_assert_eq!(
-            nontrivial_comb_scc, 0,
-            "ProtoModule {:?}: {} nontrivial SCC(s) in unified_sorted. \
-             analyze_dependency would have rejected a real combinational loop, \
-             so this indicates duplicate ProtoStatements in the simulator IR.",
-            src.name, nontrivial_comb_scc,
+        debug_assert!(
+            nontrivial_comb_scc == 0 || passes_hint.is_some() || required_comb_passes > 1,
+            "ProtoModule {:?}: {} nontrivial SCC(s) in unified_sorted but a \
+             single-pass schedule — this indicates duplicate ProtoStatements \
+             in the simulator IR.",
+            src.name,
+            nontrivial_comb_scc,
         );
 
         let unified_sorted = dce_aggressive(unified_sorted);

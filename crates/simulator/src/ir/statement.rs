@@ -1027,6 +1027,100 @@ impl ProtoStatement {
         }
     }
 
+    /// Read-side counterpart of `gather_bit_aware_outputs`: every read
+    /// carries its static bit range when known (`None` = full width /
+    /// runtime-determined).  Mirrors `gather_variable_offsets`' walk,
+    /// including the SequentialBlock internal-read filtering and the
+    /// CompiledBlock comb-only encoding.
+    pub fn gather_reads_with_ranges(&self, out: &mut Vec<(VarOffset, Option<(usize, usize)>)>) {
+        match self {
+            ProtoStatement::Assign(x) => {
+                x.expr.gather_reads_with_ranges(out);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.gather_reads_with_ranges(out);
+                }
+            }
+            ProtoStatement::AssignDynamic(x) => {
+                x.dst_index_expr.gather_reads_with_ranges(out);
+                x.expr.gather_reads_with_ranges(out);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.gather_reads_with_ranges(out);
+                }
+            }
+            ProtoStatement::If(x) => {
+                if let Some(cond) = &x.cond {
+                    cond.gather_reads_with_ranges(out);
+                }
+                for s in &x.true_side {
+                    s.gather_reads_with_ranges(out);
+                }
+                for s in &x.false_side {
+                    s.gather_reads_with_ranges(out);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => match x {
+                ProtoSystemFunctionCall::Display { args, .. }
+                | ProtoSystemFunctionCall::Write { args, .. } => {
+                    for arg in args {
+                        arg.gather_reads_with_ranges(out);
+                    }
+                }
+                ProtoSystemFunctionCall::Readmemh { .. } => {}
+                ProtoSystemFunctionCall::Assert {
+                    condition, args, ..
+                } => {
+                    condition.gather_reads_with_ranges(out);
+                    for arg in args {
+                        arg.gather_reads_with_ranges(out);
+                    }
+                }
+                ProtoSystemFunctionCall::Finish => {}
+            },
+            ProtoStatement::CompiledBlock(x) => {
+                if !x.stmt_deps.is_empty() {
+                    for (ins, _) in &x.stmt_deps {
+                        for &off in ins {
+                            if !off.is_ff() {
+                                out.push((VarOffset::Comb(off.raw()), None));
+                            }
+                        }
+                    }
+                } else {
+                    for &off in &x.input_offsets {
+                        if !off.is_ff() {
+                            out.push((VarOffset::Comb(off.raw()), None));
+                        }
+                    }
+                }
+            }
+            ProtoStatement::For(x) => {
+                for e in x.range.dynamic_bounds() {
+                    e.gather_reads_with_ranges(out);
+                }
+                for s in &x.body {
+                    s.gather_reads_with_ranges(out);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                let mut all_reads = vec![];
+                let mut all_outs = vec![];
+                for s in body {
+                    s.gather_reads_with_ranges(&mut all_reads);
+                    let mut ins = vec![];
+                    s.gather_variable_offsets(&mut ins, &mut all_outs);
+                }
+                let output_set: HashSet<VarOffset> = all_outs.into_iter().collect();
+                for (off, range) in all_reads {
+                    if !output_set.contains(&off) {
+                        out.push((off, range));
+                    }
+                }
+            }
+            ProtoStatement::TbMethodCall { .. } => {}
+            ProtoStatement::Break => {}
+        }
+    }
+
     /// Same as `gather_variable_offsets` but fully expands dynamic reads
     /// and writes to every element offset. Used by dead-store elimination
     /// (`dup_assign_dce`) so a runtime-indexed read keeps every element it

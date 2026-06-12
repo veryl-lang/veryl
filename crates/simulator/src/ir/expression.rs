@@ -353,6 +353,70 @@ impl ProtoExpression {
         }
     }
 
+    /// Like `gather_variable_offsets` but each read carries its static bit
+    /// range when known (`Some((msb, lsb))` from a constant bit select),
+    /// `None` for full-width or runtime-determined reads.
+    pub fn gather_reads_with_ranges(&self, out: &mut Vec<(VarOffset, Option<(usize, usize)>)>) {
+        match self {
+            ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select,
+                ..
+            } => {
+                if let Some(dyn_sel) = dynamic_select {
+                    out.push((*var_offset, None));
+                    dyn_sel.index_expr.gather_reads_with_ranges(out);
+                } else {
+                    out.push((*var_offset, *select));
+                }
+            }
+            ProtoExpression::Value { .. } => (),
+            ProtoExpression::Unary { x, .. } => x.gather_reads_with_ranges(out),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.gather_reads_with_ranges(out);
+                y.gather_reads_with_ranges(out);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.gather_reads_with_ranges(out);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.gather_reads_with_ranges(out);
+                true_expr.gather_reads_with_ranges(out);
+                false_expr.gather_reads_with_ranges(out);
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                stride,
+                index_expr,
+                num_elements,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.gather_reads_with_ranges(out);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_reads_with_ranges(out);
+                }
+                // Base + last encoding, as in `gather_variable_offsets`.
+                out.push((*base_offset, None));
+                if *num_elements > 1 {
+                    let last_offset = VarOffset::new(
+                        base_offset.is_ff(),
+                        base_offset.raw() + *stride * (*num_elements as isize - 1),
+                    );
+                    out.push((last_offset, None));
+                }
+            }
+        }
+    }
+
     /// Same as `gather_variable_offsets` but fully expands DynamicVariable
     /// reads to every element offset. Used by dead-store elimination
     /// (`dup_assign_dce`) so a runtime-indexed read keeps every element it

@@ -1,6 +1,7 @@
 use crate::backend::inst::try_compile_inst_chunks;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
+use crate::ir::module::{BitRange, gather_bit_aware_outputs, ranges_overlap};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::statement::{ProtoAssignStatement, msb_first_window, size_fill_literal_rhs};
@@ -16,27 +17,76 @@ use veryl_parser::token_range::TokenRange;
 
 /// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
 ///
-/// Builds Read-After-Write (RAW) dependency edges: for each variable written by
-/// statement A and read by statement B (where B != A), add edge A → B.
-/// Self-references (a statement that both reads and writes the same variable)
-/// are skipped to avoid false cycles.
+/// Dependency edges come in two classes:
 ///
-/// Falls back to source order if a cycle is detected.
+/// - SEMANTIC edges the final order must respect for sequential
+///   correctness: single-writer RAW, (same-block) prior-writer binding,
+///   WAR, and WAW.
+/// - BEST-EFFORT edges that only improve settle locality: a reader with no
+///   same-block prior writer (split-driver nets, cross-block reads) is
+///   placed after every overlapping writer so it sees settled values in
+///   one pass.
+///
+/// Offset- and statement-granularity conflation (whole `if` statements,
+/// dynamic indices, shared inlined-function scratch) can fabricate cycles
+/// out of best-effort edges, so the sort degrades gracefully: inside each
+/// cycle (SCC) those edges are dropped and the affected readers are PINNED
+/// before their write group, reading the previous pass's settled value
+/// (interleaving INTO the group would re-read the same mid-computation
+/// value on every pass, never settling).  If even the pin would close a
+/// cycle, the sort falls back to source order and the caller reports a
+/// combinational loop.
 pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
+    stable_topo_sort_impl(statements, None).0
+}
+
+/// Result of the block-aware sort: the schedule, an exact required-pass
+/// hint (`Some(1)` when one settle pass provably suffices), and whether
+/// the sort fell back to source order (the caller then runs its
+/// combinational-loop diagnostic).
+pub(crate) type SortOutcome = (Vec<ProtoStatement>, Option<usize>, bool);
+
+/// Block-aware variant: `blocks[i]` is the source block (always_comb /
+/// assign declaration) statement `i` was flattened from.  A reader binds
+/// its OWN block's prior version (sequential reassignment) and reads other
+/// blocks' vars SETTLED.  The one-pass hint is exact on strict success: a
+/// same-block prior version is re-produced THIS pass (a block's statements
+/// execute as a unit), and every other read is ordered after its writers.
+pub(crate) fn stable_topo_sort_with_blocks(
+    statements: Vec<ProtoStatement>,
+    blocks: &[usize],
+) -> SortOutcome {
+    stable_topo_sort_impl(statements, Some(blocks))
+}
+
+fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize]>) -> SortOutcome {
     let n = statements.len();
     if n <= 1 {
-        return statements;
+        return (statements, Some(1), false);
     }
 
-    // Gather per-statement inputs and outputs (variable offsets).
-    let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    // writer_ranges values are in ascending statement order; the edge
+    // rules below rely on it.
     let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
-    for s in &statements {
+    let mut stmt_reads: Vec<Vec<(VarOffset, BitRange)>> = Vec::with_capacity(n);
+    let mut writer_ranges: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
+    {
         let mut ins = vec![];
-        let mut outs = vec![];
-        s.gather_variable_offsets(&mut ins, &mut outs);
-        stmt_inputs.push(ins);
-        stmt_outputs.push(outs);
+        let mut bit_outs = vec![];
+        for (i, s) in statements.iter().enumerate() {
+            ins.clear();
+            let mut outs = vec![];
+            s.gather_variable_offsets(&mut ins, &mut outs);
+            stmt_outputs.push(outs);
+            let mut reads = vec![];
+            s.gather_reads_with_ranges(&mut reads);
+            stmt_reads.push(reads);
+            bit_outs.clear();
+            gather_bit_aware_outputs(s, &mut bit_outs);
+            for &(off, br) in &bit_outs {
+                writer_ranges.entry(off).or_default().push((i, br));
+            }
+        }
     }
 
     // Build a map: variable → set of statement indices that write it.
@@ -52,108 +102,523 @@ pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStat
         }
     }
 
-    // Build adjacency list and in-degree count for Kahn's algorithm.
-    // Edge: writer_stmt → reader_stmt (RAW dependency).
-    // For variables with multiple writers (sequential reassignment from inlined
-    // functions), only the most recent writer before the reader is relevant.
-    let mut adj: Vec<HashSet<usize>> = vec![HashSet::default(); n];
-    let mut in_degree: Vec<usize> = vec![0; n];
+    // SPLIT-DRIVER nets: multi-writer vars whose writers carry static,
+    // pairwise-disjoint ranges (per-bit generate assigns).  A later writer
+    // never clobbers an earlier one, so the prior-binding and WAR rules
+    // would only manufacture false ordering constraints for them.
+    let mut split_driver: HashSet<VarOffset> = HashSet::default();
+    'next_var: for (key, ws) in &writers {
+        if ws.len() < 2 {
+            continue;
+        }
+        let Some(ranges) = writer_ranges.get(key) else {
+            continue;
+        };
+        for (i, (_, a)) in ranges.iter().enumerate() {
+            if a.is_none() {
+                continue 'next_var;
+            }
+            for (_, b) in ranges.iter().skip(i + 1) {
+                if ranges_overlap(*a, *b) {
+                    continue 'next_var;
+                }
+            }
+        }
+        split_driver.insert(*key);
+    }
 
-    for (reader_idx, ins) in stmt_inputs.iter().enumerate() {
-        for key in ins {
-            if let Some(writer_indices) = writers.get(key) {
-                if writer_indices.len() == 1 {
-                    let writer_idx = writer_indices[0];
-                    if writer_idx != reader_idx && adj[writer_idx].insert(reader_idx) {
-                        in_degree[reader_idx] += 1;
-                    }
-                } else if let Some(&writer_idx) =
-                    writer_indices.iter().rev().find(|&&w| w < reader_idx)
-                    && adj[writer_idx].insert(reader_idx)
+    // --- Edge construction ---------------------------------------------
+    let mut adj_sem: Vec<HashSet<usize>> = vec![HashSet::default(); n];
+    let mut adj_opt: Vec<HashSet<usize>> = vec![HashSet::default(); n];
+    // Settled-value reads (reader, var, read range): if degradation drops
+    // their group edges, the reader is pinned before the group instead.
+    let mut opt_groups: Vec<(usize, VarOffset, BitRange)> = Vec::new();
+    // Cross-block prior bindings (indistinguishable without block
+    // identity) and any degradation void the one-pass hint.
+    let mut hint_blocked = blocks.is_none();
+
+    // Without block info every prior writer binds, as before.
+    let same_block = |w: usize, r: usize| -> bool { blocks.map(|b| b[w] == b[r]).unwrap_or(true) };
+    // Bits of `key` a statement writes on EVERY execution path, as merged
+    // (lo, hi) spans (full width = (0, usize::MAX)); an If contributes the
+    // INTERSECTION of its branches (a lowered case guarantees a bit only
+    // when every arm incl. the default writes it).
+    fn merge_spans(mut v: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+        v.sort_unstable();
+        let mut m: Vec<(usize, usize)> = Vec::new();
+        for (lo, hi) in v {
+            match m.last_mut() {
+                Some(last) if lo <= last.1.saturating_add(1) => last.1 = last.1.max(hi),
+                _ => m.push((lo, hi)),
+            }
+        }
+        m
+    }
+    fn guaranteed_write_spans(stmt: &ProtoStatement, key: &VarOffset) -> Vec<(usize, usize)> {
+        fn intersect(a: &[(usize, usize)], b: &[(usize, usize)]) -> Vec<(usize, usize)> {
+            let mut out = Vec::new();
+            let (mut i, mut j) = (0, 0);
+            while i < a.len() && j < b.len() {
+                let lo = a[i].0.max(b[j].0);
+                let hi = a[i].1.min(b[j].1);
+                if lo <= hi {
+                    out.push((lo, hi));
+                }
+                if a[i].1 < b[j].1 {
+                    i += 1;
+                } else {
+                    j += 1;
+                }
+            }
+            out
+        }
+        match stmt {
+            ProtoStatement::Assign(a) if a.dst == *key && a.dynamic_select.is_none() => {
+                match a.select {
+                    None => vec![(0, usize::MAX)],
+                    Some((hi, lo)) => vec![(lo, hi)],
+                }
+            }
+            ProtoStatement::If(x) => {
+                let t = merge_spans(
+                    x.true_side
+                        .iter()
+                        .flat_map(|s| guaranteed_write_spans(s, key))
+                        .collect(),
+                );
+                let f = merge_spans(
+                    x.false_side
+                        .iter()
+                        .flat_map(|s| guaranteed_write_spans(s, key))
+                        .collect(),
+                );
+                intersect(&t, &f)
+            }
+            ProtoStatement::SequentialBlock(body) => merge_spans(
+                body.iter()
+                    .flat_map(|s| guaranteed_write_spans(s, key))
+                    .collect(),
+            ),
+            _ => Vec::new(),
+        }
+    }
+    // A prior-bound read stays stable across passes iff every bit a LATER
+    // overlapping writer can leave in the slot (the only cross-pass leak
+    // channel) is re-produced unconditionally by the reader's own block
+    // before the read (conditional producers reach here via
+    // uncovered-branch latch designs — that diagnostic is a warning).
+    let prior_unconditional_cover = |reader_idx: usize, key: &VarOffset, rr: BitRange| -> bool {
+        let wranges = &writer_ranges[key];
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        let mut last_p = usize::MAX;
+        for (p, _) in wranges {
+            if *p >= reader_idx || !same_block(*p, reader_idx) || *p == last_p {
+                continue;
+            }
+            last_p = *p;
+            spans.extend(guaranteed_write_spans(&statements[*p], key));
+        }
+        let merged = merge_spans(spans);
+        for (p, wr) in wranges {
+            if *p <= reader_idx || !ranges_overlap(*wr, rr) {
+                continue;
+            }
+            let (hi, lo) = match wr {
+                None => (usize::MAX, 0),
+                Some((hi, lo)) => (*hi, *lo),
+            };
+            if !merged.iter().any(|(m_lo, m_hi)| *m_lo <= lo && hi <= *m_hi) {
+                return false;
+            }
+        }
+        true
+    };
+
+    // RAW, range-filtered: a read of `x[A]` does not depend on a writer
+    // of `x[B]` (packed per-bit drivers, pipeline-phase vectors).
+    let mut relevant: Vec<usize> = Vec::new();
+    for (reader_idx, reads) in stmt_reads.iter().enumerate() {
+        for (key, rr) in reads {
+            let Some(wranges) = writer_ranges.get(key) else {
+                continue;
+            };
+            relevant.clear();
+            relevant.extend(
+                wranges
+                    .iter()
+                    .filter(|(_, wr)| ranges_overlap(*wr, *rr))
+                    .map(|(p, _)| *p),
+            );
+            relevant.dedup();
+            if relevant.is_empty() {
+                continue;
+            }
+            if relevant.len() == 1 {
+                let writer_idx = relevant[0];
+                if writer_idx == reader_idx {
+                    // Self-reference only.
+                } else if writer_idx < reader_idx
+                    || writers.get(key).is_some_and(|ws| ws.len() == 1)
                 {
-                    in_degree[reader_idx] += 1;
+                    adj_sem[writer_idx].insert(reader_idx);
+                } else {
+                    // Sole overlapping writer comes later: a settled-value
+                    // read, droppable so a fabricated cycle degrades
+                    // instead of collapsing to source order.
+                    adj_opt[writer_idx].insert(reader_idx);
+                    opt_groups.push((reader_idx, *key, *rr));
+                }
+            } else if relevant.binary_search(&reader_idx).is_ok() {
+                // The reader itself writes overlapping bits (shared inlined
+                // scratch, carry chains): the value is produced
+                // intra-statement, so it stays in source order.  KNOWN
+                // LIMITATION: a read its own write does not cover also
+                // depends on the other writers, but edges here close
+                // sem/opt cycles across shared-scratch statement clusters
+                // and collapse real designs to source order.
+            } else if let Some(&writer_idx) = (!split_driver.contains(key))
+                .then(|| {
+                    relevant
+                        .iter()
+                        .rev()
+                        .find(|&&w| w < reader_idx && same_block(w, reader_idx))
+                })
+                .flatten()
+            {
+                adj_sem[writer_idx].insert(reader_idx);
+                if relevant.last().is_some_and(|&w| w > reader_idx)
+                    && !prior_unconditional_cover(reader_idx, key, *rr)
+                {
+                    if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
+                        log::info!(
+                            "pass_diag: hint blocked: uncovered prior binding reader #{reader_idx} var {key:?} range {rr:?}"
+                        );
+                    }
+                    hint_blocked = true;
+                }
+            } else {
+                // Split-driver net, cross-block read, or same-block
+                // read-before-write: wait for every overlapping writer so
+                // the read sees settled values.
+                for &writer_idx in &relevant {
+                    adj_opt[writer_idx].insert(reader_idx);
+                }
+                opt_groups.push((reader_idx, *key, *rr));
+            }
+        }
+    }
+
+    // WAR: a reader between two overlapping writes must precede the later
+    // write, else the re-write clobbers the value it read.  Scoped to a
+    // SAME-block prior (matching the RAW binding) — a cross-block reader
+    // orders after every writer, so a WAR edge would only close a false
+    // cycle.
+    for (reader_idx, reads) in stmt_reads.iter().enumerate() {
+        for (key, rr) in reads {
+            if split_driver.contains(key) {
+                continue;
+            }
+            let Some(wranges) = writer_ranges.get(key) else {
+                continue;
+            };
+            let has_prior = wranges.iter().any(|(p, wr)| {
+                *p < reader_idx && ranges_overlap(*wr, *rr) && same_block(*p, reader_idx)
+            });
+            if !has_prior {
+                continue;
+            }
+            if let Some(&(next_writer, _)) = wranges
+                .iter()
+                .find(|(p, wr)| *p > reader_idx && ranges_overlap(*wr, *rr))
+            {
+                adj_sem[reader_idx].insert(next_writer);
+            }
+        }
+    }
+
+    // WAW: chain consecutive writers of a reassigned var so overlapping
+    // writes keep source order.  Skip only when next reaches prev over
+    // SEMANTIC edges (a genuine cycle); best-effort reachability does not
+    // skip — that cycle degrades by dropping the best-effort edges,
+    // keeping write order instead of silently inverting it.
+    {
+        let mut stack: Vec<usize> = Vec::new();
+        let mut visited: HashSet<usize> = HashSet::default();
+        for (key, writer_indices) in &writers {
+            if split_driver.contains(key) {
+                continue;
+            }
+            for pair in writer_indices.windows(2) {
+                let (prev, next) = (pair[0], pair[1]);
+                let mut reachable = false;
+                stack.clear();
+                stack.push(next);
+                visited.clear();
+                while let Some(node) = stack.pop() {
+                    if node == prev {
+                        reachable = true;
+                        break;
+                    }
+                    if visited.insert(node) {
+                        stack.extend(adj_sem[node].iter().copied());
+                    }
+                }
+                if !reachable {
+                    adj_sem[prev].insert(next);
+                } else {
+                    // Two overlapping writes whose order the sort cannot
+                    // guarantee: never claim an exact one-pass schedule.
+                    if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
+                        log::info!(
+                            "pass_diag: hint blocked: WAW skip prev #{prev} next #{next} var {key:?}"
+                        );
+                    }
+                    hint_blocked = true;
                 }
             }
         }
     }
 
-    // WAR: a reader between two writes of a var must precede the later write, else
-    // the re-write clobbers the value it read — e.g. `o = a + ext` is otherwise
-    // dragged past a later `a = ...` by its forward read of `ext`. Only the
-    // prior-AND-next-writer case (single-writer cross-block reads stay RAW); the
-    // WAW loop below chains any further writers, so keep the two in sync.
-    for (reader_idx, ins) in stmt_inputs.iter().enumerate() {
-        for key in ins {
-            if let Some(writer_indices) = writers.get(key)
-                && writer_indices.iter().any(|&w| w < reader_idx)
-                && let Some(&next_writer) = writer_indices.iter().find(|&&w| w > reader_idx)
-                && adj[reader_idx].insert(next_writer)
-            {
-                in_degree[next_writer] += 1;
-            }
+    // Best-effort edges duplicated in the semantic class are redundant;
+    // dropping them must actually remove the constraint.
+    for u in 0..n {
+        if !adj_sem[u].is_empty() && !adj_opt[u].is_empty() {
+            let sem = &adj_sem[u];
+            adj_opt[u].retain(|v| !sem.contains(v));
         }
     }
 
-    // WAW ordering: chain consecutive writers of the same variable so that
-    // bit-select assigns to a packed variable keep source order.
-    // Skip when next already reaches prev (would create a cycle).
-    for writer_indices in writers.values() {
-        for pair in writer_indices.windows(2) {
-            let (prev, next) = (pair[0], pair[1]);
-            let mut reachable = false;
-            let mut stack = vec![next];
-            let mut visited = HashSet::default();
-            while let Some(node) = stack.pop() {
-                if node == prev {
-                    reachable = true;
+    // --- Kahn with graceful degradation ---------------------------------
+    // Adjacency lists are passed per call because the degradation rung
+    // below inserts pin edges between attempts.
+    let kahn = |adj_sem: &[HashSet<usize>],
+                adj_opt: &[HashSet<usize>],
+                opt_filter: &dyn Fn(usize, usize) -> bool|
+     -> Option<Vec<usize>> {
+        let mut in_degree: Vec<usize> = vec![0; n];
+        for succs in adj_sem.iter() {
+            for &v in succs {
+                in_degree[v] += 1;
+            }
+        }
+        for (u, succs) in adj_opt.iter().enumerate() {
+            for &v in succs {
+                if opt_filter(u, v) {
+                    in_degree[v] += 1;
+                }
+            }
+        }
+
+        let mut queue: VecDeque<usize> = VecDeque::new();
+        for (i, &deg) in in_degree.iter().enumerate() {
+            if deg == 0 {
+                queue.push_back(i);
+            }
+        }
+        let mut sorted_indices: Vec<usize> = Vec::with_capacity(n);
+        let mut successors: Vec<usize> = Vec::new();
+        while let Some(idx) = queue.pop_front() {
+            sorted_indices.push(idx);
+            successors.clear();
+            successors.extend(adj_sem[idx].iter().copied());
+            successors.extend(adj_opt[idx].iter().copied().filter(|&v| opt_filter(idx, v)));
+            // Index order for determinism.
+            successors.sort_unstable();
+            successors.dedup();
+            for &succ in &successors {
+                in_degree[succ] -= 1;
+                if in_degree[succ] == 0 {
+                    queue.push_back(succ);
+                }
+            }
+        }
+        (sorted_indices.len() == n).then_some(sorted_indices)
+    };
+
+    let mut order = kahn(&adj_sem, &adj_opt, &|_, _| true);
+    if order.is_none() {
+        hint_blocked = true;
+    }
+
+    if order.is_none() {
+        // Drop the best-effort edges inside each SCC of the full graph and
+        // pin the affected readers before their write groups (see the
+        // function doc); everything outside keeps its one-pass order.
+        use daggy::petgraph::Graph;
+        use daggy::petgraph::algo::tarjan_scc;
+        let mut g: Graph<(), ()> = Graph::new();
+        let nodes: Vec<_> = (0..n).map(|_| g.add_node(())).collect();
+        for (u, succs) in adj_sem.iter().enumerate() {
+            for &v in succs {
+                g.add_edge(nodes[u], nodes[v], ());
+            }
+        }
+        for (u, succs) in adj_opt.iter().enumerate() {
+            for &v in succs {
+                g.add_edge(nodes[u], nodes[v], ());
+            }
+        }
+        let mut scc_id: Vec<usize> = vec![usize::MAX; n];
+        let mut nontrivial = 0usize;
+        for (i, scc) in tarjan_scc(&g).into_iter().enumerate() {
+            if scc.len() > 1 {
+                nontrivial += 1;
+                for node in scc {
+                    scc_id[node.index()] = i;
+                }
+            }
+        }
+        if std::env::var("VERYL_PASS_DIAG").is_ok() {
+            log::info!(
+                "pass_diag: stable_topo_sort n={n}: cycle; relaxing best-effort edges in {nontrivial} SCC(s)",
+            );
+            trace_first_scc_cycle(&statements, &adj_sem, &adj_opt, &scc_id);
+        }
+        let opt_live = |u: usize, v: usize| scc_id[u] == usize::MAX || scc_id[u] != scc_id[v];
+
+        // A pin that would itself close a cycle in the live graph means
+        // even previous-pass semantics cannot linearize the group — bail
+        // to source order and let the caller report the loop.
+        let mut pinned: HashSet<(usize, usize)> = HashSet::default();
+        let mut stack: Vec<usize> = Vec::new();
+        let mut visited: HashSet<usize> = HashSet::default();
+        for (reader, key, rr) in &opt_groups {
+            let reader = *reader;
+            if scc_id[reader] == usize::MAX {
+                continue;
+            }
+            let mut first: Option<usize> = None;
+            let mut dropped = false;
+            for (p, wr) in &writer_ranges[key] {
+                if *p == reader || !ranges_overlap(*wr, *rr) {
+                    continue;
+                }
+                if first.is_none() {
+                    first = Some(*p);
+                }
+                if scc_id[*p] != usize::MAX && scc_id[*p] == scc_id[reader] {
+                    dropped = true;
+                }
+            }
+            let Some(first) = first else {
+                continue;
+            };
+            if !dropped || !pinned.insert((reader, first)) {
+                continue;
+            }
+            stack.clear();
+            stack.push(first);
+            visited.clear();
+            let mut reach = false;
+            while let Some(u) = stack.pop() {
+                if u == reader {
+                    reach = true;
                     break;
                 }
-                if visited.insert(node) {
-                    for &succ in &adj[node] {
-                        stack.push(succ);
-                    }
+                if visited.insert(u) {
+                    stack.extend(adj_sem[u].iter().copied());
+                    stack.extend(adj_opt[u].iter().copied().filter(|&v| opt_live(u, v)));
                 }
             }
-            if !reachable && adj[prev].insert(next) {
-                in_degree[next] += 1;
+            if reach {
+                return (statements, None, true);
             }
+            adj_sem[reader].insert(first);
         }
+
+        order = kahn(&adj_sem, &adj_opt, &opt_live);
     }
 
-    // Kahn's algorithm with FIFO queue (VecDeque) for stable ordering.
-    // Initialize queue with zero-in-degree nodes in source order.
-    let mut queue: VecDeque<usize> = VecDeque::new();
-    for (i, &deg) in in_degree.iter().enumerate() {
-        if deg == 0 {
-            queue.push_back(i);
-        }
-    }
-
-    let mut sorted_indices: Vec<usize> = Vec::with_capacity(n);
-    while let Some(idx) = queue.pop_front() {
-        sorted_indices.push(idx);
-        // Collect successors in index order for determinism
-        let mut successors: Vec<usize> = adj[idx].iter().cloned().collect();
-        successors.sort_unstable();
-        for succ in successors {
-            in_degree[succ] -= 1;
-            if in_degree[succ] == 0 {
-                queue.push_back(succ);
-            }
-        }
-    }
-
-    // If not all nodes were processed, a cycle was detected — fall back to source order.
-    if sorted_indices.len() != n {
-        return statements;
-    }
+    let Some(sorted_indices) = order else {
+        // Any cycle surviving the relaxation is semantic-only (a cycle lies
+        // inside one SCC whose best-effort edges were just dropped, and
+        // pins are insertion-guarded), so dropping more best-effort edges
+        // cannot help — fall back to source order.
+        return (statements, None, true);
+    };
 
     // Reconstruct statement list in sorted order.
     let mut result: Vec<Option<ProtoStatement>> = statements.into_iter().map(Some).collect();
-    sorted_indices
+    let sorted: Vec<ProtoStatement> = sorted_indices
         .into_iter()
         .map(|i| result[i].take().unwrap())
-        .collect()
+        .collect();
+    (sorted, (!hint_blocked).then_some(1), false)
+}
+
+/// `VERYL_PASS_DIAG=1` diagnostic: BFS one shortest cycle inside the
+/// first nontrivial SCC and print it with source locations, edge class
+/// and connecting variable offsets.
+fn trace_first_scc_cycle(
+    statements: &[ProtoStatement],
+    adj_sem: &[HashSet<usize>],
+    adj_opt: &[HashSet<usize>],
+    scc_id: &[usize],
+) {
+    let n = statements.len();
+    let Some(first_id) = scc_id.iter().copied().find(|&x| x != usize::MAX) else {
+        return;
+    };
+    let members: Vec<usize> = (0..n).filter(|&i| scc_id[i] == first_id).collect();
+    log::info!("pass_diag: first SCC has {} members", members.len());
+    let mset: HashSet<usize> = members.iter().cloned().collect();
+    let start = members[0];
+    let mut parent: HashMap<usize, usize> = HashMap::default();
+    let mut bfsq: VecDeque<usize> = VecDeque::new();
+    bfsq.push_back(start);
+    let mut closer: Option<usize> = None;
+    'bfs: while let Some(u) = bfsq.pop_front() {
+        for &v in adj_sem[u].iter().chain(adj_opt[u].iter()) {
+            if !mset.contains(&v) {
+                continue;
+            }
+            if v == start {
+                closer = Some(u);
+                break 'bfs;
+            }
+            if let std::collections::hash_map::Entry::Vacant(e) = parent.entry(v) {
+                e.insert(u);
+                bfsq.push_back(v);
+            }
+        }
+    }
+    let Some(last) = closer else {
+        return;
+    };
+    let mut path = vec![start];
+    let mut cur = last;
+    let mut rev = vec![];
+    while cur != start {
+        rev.push(cur);
+        cur = parent[&cur];
+    }
+    rev.reverse();
+    path.extend(rev);
+    for (i, &m) in path.iter().enumerate() {
+        let nxt = path.get(i + 1).copied().unwrap_or(start);
+        let kind = if adj_sem[m].contains(&nxt) {
+            "sem"
+        } else {
+            "opt"
+        };
+        let desc = match statements[m].token() {
+            Some(t) => {
+                let src = t.beg.source.to_string();
+                let file = src.rsplit('/').next().unwrap_or(&src).to_string();
+                format!("{file}:{}", t.beg.line)
+            }
+            None => "generated".to_string(),
+        };
+        let mut ins = vec![];
+        let mut outs = vec![];
+        statements[m].gather_variable_offsets(&mut ins, &mut outs);
+        let outs: HashSet<VarOffset> = outs.into_iter().collect();
+        ins.clear();
+        let mut nxt_outs = vec![];
+        statements[nxt].gather_variable_offsets(&mut ins, &mut nxt_outs);
+        let via: Vec<VarOffset> = ins.into_iter().filter(|o| outs.contains(o)).collect();
+        log::info!("  cycle[{i}] #{m} {desc} -[{kind}]-> #{nxt} via {via:?}");
+    }
 }
 
 pub struct ProtoDeclaration {
