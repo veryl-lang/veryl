@@ -14417,7 +14417,7 @@ fn regression_rev_for_non_additive_step_rejected() {
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, AnalyzerError::InvalidStatement { .. })),
+            .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
         "rev for-loop with a non-additive step should be rejected: {errors:?}"
     );
 
@@ -14440,7 +14440,7 @@ fn regression_rev_for_non_additive_step_rejected() {
     assert!(
         !errors
             .iter()
-            .any(|e| matches!(e, AnalyzerError::InvalidStatement { .. })),
+            .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
         "rev for-loop with an additive step should be accepted: {errors:?}"
     );
 
@@ -14463,7 +14463,7 @@ fn regression_rev_for_non_additive_step_rejected() {
     assert!(
         !errors
             .iter()
-            .any(|e| matches!(e, AnalyzerError::InvalidStatement { .. })),
+            .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
         "forward for-loop with a non-additive step should be accepted: {errors:?}"
     );
 }
@@ -14595,8 +14595,101 @@ fn for_zero_step_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, AnalyzerError::InvalidStatement { .. })),
+                .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
             "{errors:?}"
+        );
+    }
+}
+
+#[test]
+fn for_degenerate_step_rejected() {
+    // Regression: degenerate non-additive steps previously panicked the
+    // compiler (`/= 0`, `%= 0` divide-by-zero; `-=` subtract overflow) or
+    // silently unrolled to one iteration while the emitted SV loop was
+    // infinite (`*= 1`, `<<= 0`, `*= 2` from 0, a stalling `|=`).  All of
+    // them must produce a diagnostic instead.
+    for step in [
+        "/= 0", "%= 0", "-= 1", "/= 2", "%= 3", "&= 1", ">>= 1", "*= 1", "*= 0", "<<= 0", "|= 0",
+        "^= 0",
+    ] {
+        let code = format!(
+            r#"
+            module Top (
+                o: output logic<32>,
+            ) {{
+                always_comb {{
+                    var acc: logic<32>;
+                    acc = 0;
+                    for i in 1..10 step {step} {{
+                        acc += i;
+                    }}
+                    o = acc;
+                }}
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
+            "step {step}: {errors:?}"
+        );
+    }
+
+    // Value-dependent stalls with const bounds: `*= 2` parked at 0, `|= 2`
+    // stuck at 3 below the bound, `^= 1` oscillating between 3 and 2.
+    for (start, step) in [("0", "*= 2"), ("1", "|= 2"), ("3", "^= 1")] {
+        let code = format!(
+            r#"
+            module Top (
+                o: output logic<32>,
+            ) {{
+                always_comb {{
+                    var acc: logic<32>;
+                    acc = 0;
+                    for i in {start}..10 step {step} {{
+                        acc += i;
+                    }}
+                    o = acc;
+                }}
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
+            "start {start} step {step}: {errors:?}"
+        );
+    }
+
+    // Advancing steps stay accepted, including ones that stall only after
+    // crossing the end of the range.
+    for (start, step) in [("1", "*= 2"), ("1", "<<= 1"), ("1", "|= 12"), ("2", "^= 8")] {
+        let code = format!(
+            r#"
+            module Top (
+                o: output logic<32>,
+            ) {{
+                always_comb {{
+                    var acc: logic<32>;
+                    acc = 0;
+                    for i in {start}..10 step {step} {{
+                        acc += i;
+                    }}
+                    o = acc;
+                }}
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
+            "start {start} step {step}: {errors:?}"
         );
     }
 }

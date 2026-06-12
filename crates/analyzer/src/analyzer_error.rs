@@ -708,6 +708,22 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_for_step),
+        help("make the step strictly advance the induction variable toward the end of the range"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("{cause}")]
+    InvalidForStep {
+        cause: InvalidForStepKind,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_test),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1836,6 +1852,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidRangeAssign { token_source, .. } => *token_source,
             AnalyzerError::NonConstantSelectWidth { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
+            AnalyzerError::InvalidForStep { token_source, .. } => *token_source,
             AnalyzerError::InvalidTbUsage { token_source, .. } => *token_source,
             AnalyzerError::MissingTbPort { token_source, .. } => *token_source,
             AnalyzerError::UnknownTbPort { token_source, .. } => *token_source,
@@ -2284,6 +2301,14 @@ impl AnalyzerError {
     pub fn invalid_statement(kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidStatement {
             kind: kind.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_for_step(cause: InvalidForStepKind, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidForStep {
+            cause,
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -3181,6 +3206,35 @@ impl fmt::Display for InvalidSelectKind {
             }
             InvalidSelectKind::OutOfDimension { .. } => "out of dimension".fmt(f),
             InvalidSelectKind::SelectAfterRange => "select after range is not allowed".fmt(f),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum InvalidForStepKind {
+    /// `step += 0`: an additive step of 0 never advances.
+    ZeroStep,
+    /// Reverse loop with a non-additive step: cannot be inverted to descend.
+    NonAdditiveReverse,
+    /// The step op can only hold or decrease the induction variable.
+    NeverAdvances,
+    /// Const-bound scan found the step stalling before the end of the range.
+    StopsAdvancing,
+}
+
+impl fmt::Display for InvalidForStepKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidForStepKind::ZeroStep => "for-loop with a zero step never advances".fmt(f),
+            InvalidForStepKind::NonAdditiveReverse => {
+                "reverse for-loop with a non-additive step never terminates".fmt(f)
+            }
+            InvalidForStepKind::NeverAdvances => {
+                "for-loop step can never advance toward the end of the range".fmt(f)
+            }
+            InvalidForStepKind::StopsAdvancing => {
+                "for-loop step stops advancing before reaching the end of the range".fmt(f)
+            }
         }
     }
 }

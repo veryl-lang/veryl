@@ -100,21 +100,24 @@ fn pow_mod_width(mag: &BigUint, negative: bool, exp: usize, width: usize) -> Big
 }
 
 impl Op {
-    pub fn eval(&self, x: usize, y: usize) -> usize {
+    /// Step evaluation for for-range iteration.  Checked: returns `None` on
+    /// division by zero or overflow so degenerate user-written steps can't
+    /// panic the compiler or the simulator.
+    pub fn eval(&self, x: usize, y: usize) -> Option<usize> {
         match self {
-            Op::Add => x + y,
-            Op::Sub => x - y,
-            Op::Mul => x * y,
-            Op::Div => x / y,
-            Op::Rem => x % y,
-            Op::BitAnd => x & y,
-            Op::BitOr => x | y,
-            Op::BitXor => x ^ y,
+            Op::Add => x.checked_add(y),
+            Op::Sub => x.checked_sub(y),
+            Op::Mul => x.checked_mul(y),
+            Op::Div => x.checked_div(y),
+            Op::Rem => x.checked_rem(y),
+            Op::BitAnd => Some(x & y),
+            Op::BitOr => Some(x | y),
+            Op::BitXor => Some(x ^ y),
             Op::ArithShiftL | Op::LogicShiftL => {
-                x.unbounded_shl(y.min(usize::BITS as usize) as u32)
+                Some(x.unbounded_shl(y.min(usize::BITS as usize) as u32))
             }
             Op::ArithShiftR | Op::LogicShiftR => {
-                x.unbounded_shr(y.min(usize::BITS as usize) as u32)
+                Some(x.unbounded_shr(y.min(usize::BITS as usize) as u32))
             }
             _ => unimplemented!(),
         }

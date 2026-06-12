@@ -15701,3 +15701,36 @@ fn false_comb_cycle_with_split_drivers() {
         );
     }
 }
+
+#[test]
+fn runtime_stepped_for_stall_guard_terminates() {
+    // `*= 2` from 0 stalls at 0.  With a runtime bound the loop can't be
+    // unrolled or rejected at analysis, so the simulator's progress guard
+    // must break out instead of spinning forever in one delta step.
+    let code = r#"
+    module Top (
+        i_n: input  logic<8>,
+        o_a: output logic<8>,
+    ) {
+        always_comb {
+            o_a = 0;
+            for _i in 0..i_n step *= 2 {
+                o_a += 1;
+            }
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i_n", Value::new(10, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // One iteration runs (i parked at 0), then the guard breaks.
+        assert_eq!(
+            sim.get("o_a").unwrap(),
+            Value::new(1, 8, false),
+            "config={config:?}"
+        );
+    }
+}

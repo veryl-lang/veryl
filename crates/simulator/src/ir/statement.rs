@@ -324,7 +324,13 @@ impl Statement {
                         if step_body(i) == ControlFlow::Break {
                             break;
                         }
-                        i = op.eval(i as usize, r.step as usize) as u64;
+                        // Progress guard: a stalled or faulting step would
+                        // spin this delta step forever (const-bound cases are
+                        // rejected at analysis; runtime bounds reach here).
+                        match op.eval(i as usize, r.step as usize) {
+                            Some(n) if n as u64 > i => i = n as u64,
+                            _ => break,
+                        }
                     }
                 } else {
                     let mut i = start;

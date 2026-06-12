@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 423
+expression: out
+---
+invalid_for_step (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_for_step)
+
+  × for-loop step stops advancing before reaching the end of the range
+   ╭─[../../testcases/error/invalid_for_step.veryl:5:32]
+ 4 │         a = 0;
+ 5 │         for i in 0..10 step *= 2 {
+   ·                                ┬
+   ·                                ╰── Error location
+ 6 │             a += i;
+   ╰────
+  help: make the step strictly advance the induction variable toward the end of the range
