@@ -15162,6 +15162,52 @@ fn as_cast_is_width_context_boundary() {
 }
 
 #[test]
+fn narrowing_cast_of_wide_operand_representation() {
+    // A narrowing `as` cast keeps its >128-bit operand in the wide-pointer
+    // domain while the node itself is a ≤128-bit SCALAR: consumers (the
+    // assign store, a wide parent op promoting its operands) must not
+    // dereference the scalar as a result-slot pointer.
+    let code = r#"
+    module Top (
+        a : input  logic<192>,
+        o : output logic<64> ,
+        p : output logic<100>,
+        q : output logic<192>,
+    ) {
+        assign o = a as 64;
+        assign p = a as 100;
+        assign q = (a as 100) + 192'd1;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        use num_bigint::BigUint;
+        let a: BigUint = (BigUint::from(0xdead_beef_cafe_f00du64) << 128u32)
+            | (BigUint::from(0x0123_4567_89ab_cdefu64) << 64u32)
+            | BigUint::from(0xfedc_ba98_7654_3210u64);
+        sim.set("a", Value::new_biguint(a.clone(), 192, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap().payload_u128(),
+            0xfedc_ba98_7654_3210u128,
+            "o {config:?}"
+        );
+        let low100: BigUint = a.clone() & ((BigUint::from(1u32) << 100u32) - BigUint::from(1u32));
+        assert_eq!(
+            sim.get("p").unwrap(),
+            Value::new_biguint(low100.clone(), 100, false),
+            "p {config:?}"
+        );
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new_biguint(low100 + BigUint::from(1u32), 192, false),
+            "q {config:?}"
+        );
+    }
+}
+
+#[test]
 fn concat_element_as_cast_uses_target_width() {
     // A concatenation element that is an `as` cast must occupy the CAST
     // width in the result, not the source expression's width, and the
