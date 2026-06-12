@@ -14405,6 +14405,82 @@ fn comb_block_cycle_war_preserves_blocking_order() {
 }
 
 #[test]
+fn comb_backward_reader_not_interleaved_into_write_group() {
+    // A reader with NO prior writer of `hit` (a backward edge, resolved by an
+    // extra eval pass) must never be scheduled BETWEEN the constituent writes
+    // of `hit` (the always_comb reset + the unrolled conditional sets): there
+    // it re-reads the same mid-computation value on every pass and never
+    // converges. Here the single-writer RAW edge on `c3` drags `gate` down
+    // the schedule, which used to land it after the reset / first iteration.
+    // The match is at iteration 1 so an interleaved reader sees hit==0.
+    let code = r#"
+    module Top (
+        k:  input  logic<8>,
+        en: input  logic<8>,
+        o:  output logic<8>,
+    ) {
+        var hit : logic<8>;
+        var gate: logic<8>;
+        var c0  : logic<8>;
+        var c1  : logic<8>;
+        var c2  : logic<8>;
+        var c3  : logic<8>;
+        var d0  : logic<8>;
+        var d1  : logic<8>;
+        var d2  : logic<8>;
+        var d3  : logic<8>;
+        var d4  : logic<8>;
+        var d5  : logic<8>;
+        var d6  : logic<8>;
+        var d7  : logic<8>;
+        assign gate = hit & c3;
+        assign c0 = en + 1;
+        assign c1 = c0 + 0;
+        assign c2 = c1 + 0;
+        assign c3 = c2 + 0;
+        // Deep chain feeding the scan key: the conditional writers of `hit`
+        // schedule late (depth 9) while its reset (no inputs) hoists early;
+        // `gate` (depth 5) used to land in between.
+        assign d0 = k + 1;
+        assign d1 = d0 + 0;
+        assign d2 = d1 + 0;
+        assign d3 = d2 + 0;
+        assign d4 = d3 + 0;
+        assign d5 = d4 + 0;
+        assign d6 = d5 + 0;
+        assign d7 = d6 + 0;
+        var tbl: logic<8> [4];
+        assign tbl[0] = 8'd16;
+        assign tbl[1] = 8'd32;
+        assign tbl[2] = 8'd48;
+        assign tbl[3] = 8'd64;
+        always_comb {
+            hit = 8'd0;
+            for i in 0..4 {
+                if tbl[i] == d7 {
+                    hit = 8'd255;
+                }
+            }
+        }
+        assign o = gate;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("k", Value::new(63, 8, false));
+        sim.set("en", Value::new(254, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // d7 = 64, hit = 255 (tbl[3] == d7), c3 = 255, o = 255.
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(255, 8, false),
+            "o config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn array_range_assign_multidim_unpacked() {
     // Range over the outer dim of a 2-D unpacked array, nested literal.
     // o[0+:2] = '{'{1,2},'{3,4}} => arr[0][0]=1, arr[0][1]=2, arr[1][0]=3, arr[1][1]=4.
@@ -15500,5 +15576,128 @@ fn ternary_sign_extends_narrow_signed_branch() {
         sim.set("c", Value::new(0, 1, false));
         sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("q").unwrap().payload_u128(), 5u128, "{config:?}");
+    }
+}
+
+/// A logically-false feedback whose write group the sort cannot
+/// linearize even with a pin.  It must surface as a CombinationalLoop
+/// error, NOT interleave the reader into the group where it re-reads the
+/// same mid-computation value on every pass — the silent miscompute
+/// (q2 == 0 forever) this test guards against.  If a future scheduler
+/// handles the design, the Ok arm's value assertions take over.
+#[test]
+fn false_comb_cycle_unpinnable_is_rejected_not_miscomputed() {
+    let code = r#"
+    module Top (
+        en: input  logic,
+        q2: output logic,
+    ) {
+        var h: logic;
+        var s: logic;
+        var p: logic;
+        always_comb {
+            h = 0;
+            if p {
+                h = 1;
+            }
+        }
+        assign s = h;
+        assign p = en | s;
+        assign q2 = s;
+    }
+    "#;
+    for config in Config::all() {
+        if config.use_4state {
+            continue;
+        }
+        symbol_table::clear();
+        match analyze_top(code, &config, "Top") {
+            Err(SimulatorError::CombinationalLoop { .. }) => {}
+            Err(e) => panic!("unexpected error {e:?}, config={config:?}"),
+            Ok(ir) => {
+                let mut sim = Simulator::new(ir, None);
+                sim.set("en", Value::new(1, 1, false));
+                for _ in 0..3 {
+                    sim.step(&Event::Clock(VarId::SYNTHETIC));
+                }
+                assert_eq!(
+                    sim.get("q2").unwrap(),
+                    Value::new(1, 1, false),
+                    "q2 must reach the settled value, config={config:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A structurally-cyclic but logically-false comb feedback (stall masks
+/// the update that feeds the stall) plus split-driver per-bit assigns:
+/// exercises the degradation path (SCC relax + reader pin) and the extra
+/// settle passes that make the feedback converge.
+#[test]
+fn false_comb_cycle_with_split_drivers() {
+    let code = r#"
+    module Top (
+        i_clk  : input  '_ clock   ,
+        i_rst  : input  '_ reset   ,
+        i_addr : input     logic<2>,
+        i_en   : input     logic   ,
+        o_stall: output    logic   ,
+        o_upd  : output    logic<4>,
+    ) {
+        var r_pend: logic<4>;
+
+        // Split-driver net: per-bit assigns of one packed vector,
+        // depending on a stall that depends on the net (false path:
+        // i_en gates the feedback off).
+        var w_upd: logic<4>;
+        for i in 0..4 :g_upd {
+            assign w_upd[i] = r_pend[i] | (i_en && !o_stall && (i_addr == i));
+        }
+
+        assign o_stall = w_upd[i_addr] && !i_en;
+        assign o_upd   = w_upd;
+
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                r_pend = 0;
+            } else {
+                r_pend = w_upd;
+            }
+        }
+    }
+    "#;
+    for config in Config::all() {
+        if config.use_4state {
+            // The initial X takes more settle iterations to clear around
+            // the feedback than the schedule's pass count; 2-state is
+            // what this regression targets.
+            continue;
+        }
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_en", Value::new(1, 1, false));
+        sim.set("i_addr", Value::new(2, 2, false));
+        sim.step(&rst);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o_upd").unwrap(),
+            Value::new(0b0100, 4, false),
+            "bit 2 set via the enabled path, config={config:?}"
+        );
+        assert_eq!(
+            sim.get("o_stall").unwrap(),
+            Value::new(0, 1, false),
+            "stall masked while enabled, config={config:?}"
+        );
+        sim.set("i_en", Value::new(0, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o_stall").unwrap(),
+            Value::new(1, 1, false),
+            "pending bit 2 stalls once enable drops, config={config:?}"
+        );
     }
 }
