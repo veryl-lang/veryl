@@ -1427,14 +1427,13 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement) -> Option<String> {
 
 /// Event-path FF write to a dynamic-indexed array.  Writes the element
 /// slot and pushes a WriteLogEntry at `current_base + stride*idx`.
-/// 2-state, narrow, no select/dynamic_select; else bails.
+/// 2-state, narrow; a static bit-select does an element RMW (mirroring
+/// AssignDynamicStatement::eval_step: merge into the NEXT slot — same-event
+/// prior writes must be visible — and push the merged element).  A dynamic
+/// bit-select still bails.
 fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<String> {
-    if a.select.is_some() || a.dynamic_select.is_some() {
-        ev_diag(&format!(
-            "dyn FF: select={:?} dynsel={}",
-            a.select,
-            a.dynamic_select.is_some()
-        ));
+    if a.dynamic_select.is_some() {
+        ev_diag("dyn FF: dynsel");
         return None;
     }
     if a.dst_width == 0 || a.dst_width > 64 {
@@ -1458,11 +1457,33 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
     let idx = emit_expr(&a.dst_index_expr)?;
     let max_idx = a.dst_num_elements.saturating_sub(1);
     let dwmask = width_mask(a.dst_width);
-    let payload = format!(
-        "(((uint64_t)({rhs})) & 0x{dw:x}ULL)",
-        rhs = rhs,
-        dw = dwmask
-    );
+    let payload = if let Some((hi, lo)) = a.select {
+        let nbits = hi.checked_sub(lo)?.checked_add(1)?;
+        if hi >= a.dst_width || nbits > 64 {
+            ev_diag(&format!("dyn FF: select={:?} w={}", a.select, a.dst_width));
+            return None;
+        }
+        let vmask = width_mask(nbits);
+        let pmask = !(vmask << lo) & dwmask;
+        format!(
+            "(((uint64_t)*((const {ct}*)(ff_values + {wbase:#x} + (intptr_t){stride} * (intptr_t)_idx)) & 0x{pm:x}ULL) \
+              | ((((uint64_t)({rhs})) & 0x{vm:x}ULL) << {lo})) & 0x{dw:x}ULL",
+            ct = cty,
+            wbase = dst_base_raw,
+            stride = a.dst_stride,
+            pm = pmask,
+            rhs = rhs,
+            vm = vmask,
+            lo = lo,
+            dw = dwmask,
+        )
+    } else {
+        format!(
+            "(((uint64_t)({rhs})) & 0x{dw:x}ULL)",
+            rhs = rhs,
+            dw = dwmask
+        )
+    };
     let push = emit_log_push("_woff", "_wval", nb);
     Some(format!(
         "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
