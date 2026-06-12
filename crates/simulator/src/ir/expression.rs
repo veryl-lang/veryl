@@ -1710,15 +1710,25 @@ impl Conv<&air::Expression> for ProtoExpression {
                     // is already sized by the cast in gather_context), but a
                     // NARROWING cast must still truncate the operand value:
                     // mask to the cast width, and re-extend by the cast
-                    // signedness when the outer context is wider.
+                    // signedness when the outer context is wider.  A
+                    // same-width cast that flips signedness needs the same
+                    // re-extension: a wider context must extend by the cast
+                    // signedness, not the operand's own (SV `longint'(a)`
+                    // sign-extends a 64-bit unsigned `a`).
                     let cast_width = comptime.r#type.total_width();
                     let operand_width = x.comptime().expr_context.width;
-                    let proto = Conv::conv(context, x.as_ref())?;
+                    let proto: ProtoExpression = Conv::conv(context, x.as_ref())?;
+                    let outer: ExpressionContext = (&comptime.expr_context).into();
+                    let needs_reinterpret = |cw: usize| {
+                        outer.width > cw
+                            && operand_width <= cw
+                            && proto.width() == cw
+                            && proto.expr_context().signed != comptime.r#type.signed
+                    };
                     if let Some(cw) = cast_width
                         && cw > 0
-                        && operand_width > cw
+                        && (operand_width > cw || needs_reinterpret(cw))
                     {
-                        let outer: ExpressionContext = (&comptime.expr_context).into();
                         let node_width = outer.width.max(cw);
                         let value_node = |payload: BigUint| ProtoExpression::Value {
                             value: Value::new_biguint(payload, node_width, false),
