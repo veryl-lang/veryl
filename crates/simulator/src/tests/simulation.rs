@@ -15786,3 +15786,60 @@ fn runtime_stepped_for_stall_guard_terminates() {
         );
     }
 }
+
+#[test]
+fn pow_negative_exponent_follows_lrm_table() {
+    // Regression: a negative signed exponent was reinterpreted as a huge
+    // unsigned magnitude (3 ** -1 computed 3^255 in const-eval and a
+    // modular inverse in the JIT).  IEEE 1800 11.4.3.1 (power operator rules): 0 for |base|>1, 1 for
+    // base==1, ±1 for base==-1.
+    let code = r#"
+    module Top (
+        n : input  i8,
+        b : input  i32,
+        r : output logic<32>,
+        rc: output logic<32>,
+        r1: output logic<32>,
+        rm: output i32,
+        rz: output logic<32>,
+    ) {
+        const N: i8 = 0 - 1;
+        assign rc = 3 ** N;
+        assign r  = (b ** n) as 32;
+        assign r1 = 1 ** N;
+        assign rm = (0 - 1) ** n;
+        assign rz = ((0 as i32) ** n) as 32;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("n", Value::new(0xff, 8, true)); // -1
+        sim.set("b", Value::new(3, 32, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("rc").unwrap().payload_u128(), 0, "rc {config:?}");
+        // 0 ** negative is x per the power operator rules: the interpreter models it
+        // (4-state), the JIT approximates with 0 like its div-by-zero
+        // handling, so only the payload is asserted here.
+        assert_eq!(sim.get("rz").unwrap().payload_u128(), 0, "rz {config:?}");
+        assert_eq!(sim.get("r").unwrap().payload_u128(), 0, "r {config:?}");
+        assert_eq!(sim.get("r1").unwrap().payload_u128(), 1, "r1 {config:?}");
+        // (-1) ** -1 = -1
+        assert_eq!(
+            sim.get("rm").unwrap().payload_u128(),
+            0xffff_ffff,
+            "rm {config:?}"
+        );
+
+        // (-1) ** -2 = 1
+        sim.set("n", Value::new(0xfe, 8, true)); // -2
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("rm").unwrap().payload_u128(), 1, "rm2 {config:?}");
+
+        // Positive exponents still compute normally.
+        sim.set("n", Value::new(3, 8, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("r").unwrap().payload_u128(), 27, "r3 {config:?}");
+    }
+}
