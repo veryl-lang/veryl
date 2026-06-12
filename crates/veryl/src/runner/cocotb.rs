@@ -1,4 +1,5 @@
 use crate::runner::{Runner, copy_wave};
+//use fern::meta;
 use futures::prelude::*;
 use log::{error, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -168,11 +169,53 @@ impl Runner for Cocotb {
 
         let module = format!("{}_{}", metadata.project.name, top.unwrap());
 
-        let (py_waves, args) = match wave.then_some(metadata.test.waveform_format) {
-            Some(WaveFormFormat::Vcd) => ("True", "['--trace']"),
-            Some(WaveFormFormat::Fst) => ("True", "['--trace-fst', '--trace-structs']"),
-            None => ("False", "[]"),
+        // Create storage for build and test arguments
+        let mut vec_build_args = Vec::new();
+        let mut vec_test_args = Vec::new();
+
+        // Parse wave arguments
+        let (py_waves, wave_args) = match wave.then_some(metadata.test.waveform_format) {
+            Some(WaveFormFormat::Vcd) => ("True", "'--trace-vcd',"),
+            Some(WaveFormFormat::Fst) => ("True", "'--trace-fst', '--trace-structs',"),
+            None => ("False", ""),
         };
+
+        // Parse verilator compile arguments (verilate)
+        for item in &metadata.test.verilator.compile_args {
+            vec_build_args.push(item);
+        }
+
+        // Parse verilator run arguments (calling generated binary)
+        for item in &metadata.test.verilator.simulate_args {
+            vec_test_args.push(item);
+        }
+
+        // Format arguments for cocotb
+        let mut build_args = String::new();
+        let mut test_args = String::new();
+
+        if !vec_build_args.is_empty() {
+            for arg in &vec_build_args {
+                build_args.push_str(&format!("'{arg}',"));
+            }
+            // If wave_args isn't empty, add it to the build args.
+            if !wave_args.is_empty() {
+                build_args.push_str(wave_args);
+            }
+            build_args = format!("[{}]", build_args.strip_suffix(',').unwrap());
+        } else {
+            build_args.push_str("[]");
+        }
+
+        if !vec_test_args.is_empty() {
+            for arg in &vec_test_args {
+                test_args.push_str(&format!("'{arg}',"));
+            }
+            test_args = format!("[{}]", test_args.strip_suffix(',').unwrap());
+        } else {
+            test_args.push_str("[]");
+        }
+
         let runner_path = temp_dir.path().join("runner.py");
         let runner_text = format!(
             r#"
@@ -197,13 +240,14 @@ if cocotb_version.startswith("2."):
         hdl_toplevel="{module}",
         always=True,
         waves={py_waves},
-        build_args={args},
+        build_args={build_args},
     )
 
     runner.test(
         hdl_toplevel="{module}",
         test_module="{test},",
         waves={py_waves},
+        test_args={test_args},
     )
 elif cocotb_version.startswith("1.9."):
     import cocotb.runner
@@ -216,13 +260,14 @@ elif cocotb_version.startswith("1.9."):
         hdl_toplevel="{module}",
         always=True,
         waves={py_waves},
-        build_args={args},
+        build_args={build_args},
     )
 
     runner.test(
         hdl_toplevel="{module}",
         test_module="{test},",
         waves={py_waves},
+        test_args={test_args},
     )
 else:
     raise RuntimeError("unsupported cocotb version")
