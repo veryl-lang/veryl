@@ -182,7 +182,9 @@ impl Op {
                 }
             }
             Op::As => ExpressionContext {
-                width: x.width,
+                // The cast target determines the node's width for the parent;
+                // fall back to the operand width for unsizable target types.
+                width: if y.width > 0 { y.width } else { x.width },
                 signed: y.signed,
                 is_const: x.is_const & y.is_const,
                 is_global: x.is_global & y.is_global,
@@ -821,6 +823,19 @@ impl Op {
         signed: bool,
         mask_cache: &mut MaskCache,
     ) -> Value {
+        /// Expand to `width`, or trunc when the value is WIDER — a
+        /// narrowing `as` cast keeps its operand in the source domain, so
+        /// the truncating BitAnd can see a >64-bit operand under a ≤64-bit
+        /// op.  Keeps both operands in the same `Value` variant.
+        fn resize(v: &Value, width: usize, signed: bool) -> std::borrow::Cow<'_, Value> {
+            if v.width() > width {
+                let mut t = v.clone();
+                t.trunc(width);
+                std::borrow::Cow::Owned(t)
+            } else {
+                v.expand(width, signed)
+            }
+        }
         match self {
             Op::Add => {
                 let x = x.expand(width, signed);
@@ -987,8 +1002,8 @@ impl Op {
                 }
             }
             Op::BitAnd => {
-                let x = x.expand(width, false);
-                let y = y.expand(width, false);
+                let x = resize(x, width, false);
+                let y = resize(y, width, false);
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {

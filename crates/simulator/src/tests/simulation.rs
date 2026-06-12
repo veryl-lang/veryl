@@ -15099,3 +15099,185 @@ fn reduction_operand_self_determined() {
         );
     }
 }
+
+#[test]
+fn as_cast_is_width_context_boundary() {
+    // Regression: the cast width was ignored in self-determined contexts
+    // (`{(e as 16) * (f as 16)}` multiplied at 8 bits), the outer width
+    // leaked into the cast operand (`((g - h) >> 4) as 8` computed g-h at
+    // 32 bits keeping borrow bits), and a narrowing cast was not truncated
+    // at runtime.  Per LRM 6.24.1 the cast operand sizes as if assigned to
+    // a cast-width variable.  Covers const-fold and the runtime backends.
+    let code = r#"
+    module Top (
+        e : input  logic<8>,
+        f : input  logic<8>,
+        g : input  logic<8>,
+        h : input  logic<8>,
+        v : input  logic<32>,
+        w : output logic<16>,
+        u : output logic<32>,
+        t : output logic<32>,
+        s : output logic<32>,
+        wc: output logic<16>,
+        uc: output logic<32>,
+    ) {
+        const E: logic<8> = 200;
+        const F: logic<8> = 200;
+        const G: logic<8> = 0;
+        const H: logic<8> = 1;
+        assign wc = {(E as 16) * (F as 16)};
+        assign uc = (((G - H) >> 4) as 8) + 32'h0;
+        assign w  = {(e as 16) * (f as 16)};
+        assign u  = (((g - h) >> 4) as 8) + 32'h0;
+        assign t  = (v as 8) + 32'h0;
+        assign s  = (v as i8) + 32'sh0;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("e", Value::new(200, 8, false));
+        sim.set("f", Value::new(200, 8, false));
+        sim.set("g", Value::new(0, 8, false));
+        sim.set("h", Value::new(1, 8, false));
+        sim.set("v", Value::new(0x1ff, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("wc").unwrap().payload_u128(),
+            0x9c40,
+            "wc {config:?}"
+        );
+        assert_eq!(sim.get("uc").unwrap().payload_u128(), 0xf, "uc {config:?}");
+        assert_eq!(sim.get("w").unwrap().payload_u128(), 0x9c40, "w {config:?}");
+        assert_eq!(sim.get("u").unwrap().payload_u128(), 0xf, "u {config:?}");
+        assert_eq!(sim.get("t").unwrap().payload_u128(), 0xff, "t {config:?}");
+        assert_eq!(
+            sim.get("s").unwrap().payload_u128(),
+            0xffff_ffff,
+            "s {config:?}"
+        );
+    }
+}
+
+#[test]
+fn concat_element_as_cast_uses_target_width() {
+    // A concatenation element that is an `as` cast must occupy the CAST
+    // width in the result, not the source expression's width, and the
+    // value must truncate (b=11 -> 3 bits).
+    let code = r#"
+    module Top (
+        a: input  logic<8> ,
+        b: input  logic<32>,
+        o: output logic<8> ,
+        p: output logic<16>,
+    ) {
+        always_comb {
+            o = {a[7:4], b as 3, 1'b0};
+            p = {a[7:4], b as 3} << 1;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x80, 8, false));
+        sim.set("b", Value::new(11, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap().payload_u128(),
+            0x86,
+            "concat element cast width, {config:?}",
+        );
+        assert_eq!(
+            sim.get("p").unwrap().payload_u128(),
+            0x0086,
+            "concat element cast width under shift, {config:?}",
+        );
+    }
+}
+
+#[test]
+fn as_cast_width_boundary_wide() {
+    // >64-bit variants of the boundary: a narrowing cast with a wide
+    // (>64) target width, and narrow casts re-extended into a wide outer
+    // context (signed and unsigned).
+    let code = r#"
+    module Top (
+        v : input  logic<128>,
+        n : input  logic<32>,
+        a : output logic<128>,
+        b : output logic<128>,
+        c : output logic<128>,
+    ) {
+        assign a = (v as 100) + 128'h0;
+        assign b = (n as 8) + 128'h0;
+        assign c = (n as i8) + 128'sh0;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("v", Value::from_u128(u128::MAX, 0, 128, false));
+        sim.set("n", Value::new(0x1ff, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("a").unwrap().payload_u128(),
+            (1u128 << 100) - 1,
+            "a {config:?}"
+        );
+        assert_eq!(sim.get("b").unwrap().payload_u128(), 0xff, "b {config:?}");
+        assert_eq!(
+            sim.get("c").unwrap().payload_u128(),
+            u128::MAX,
+            "c {config:?}"
+        );
+    }
+}
+
+#[test]
+fn as_cast_wide_operand_to_narrow_context() {
+    // Wide (>64) operand cast down into a narrow (<=64) outer context:
+    // the masked operand must leave the BigUint domain (and the I128 /
+    // wide-ptr domains in the JIT backends).  std's utils::truncate hits
+    // this shape.
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        v : input  logic<128>,
+        u : input  logic<256>,
+        o : output logic<32>,
+        q : output logic<32>,
+        r : output logic<32>,
+    ) {
+        assign o = (v as 8) + 32'h1;
+        assign q = (v as i8) + 32'sh0;
+        assign r = (u as 8) + 32'h1;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("v", Value::from_u128(u128::MAX - 0x70, 0, 128, false));
+        sim.set(
+            "u",
+            Value::new_biguint(
+                (BigUint::from(1u32) << 200u32) + BigUint::from(0x4242u32),
+                256,
+                false,
+            ),
+        );
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap().payload_u128(), 0x90, "o {config:?}");
+        assert_eq!(
+            sim.get("q").unwrap().payload_u128(),
+            0xffff_ff8f,
+            "q {config:?}"
+        );
+        assert_eq!(sim.get("r").unwrap().payload_u128(), 0x43, "r {config:?}");
+    }
+}

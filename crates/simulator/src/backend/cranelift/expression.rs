@@ -716,8 +716,51 @@ impl ProtoExpression {
                     expr_context.signed
                 };
                 let wide = expr_context.width > 64;
-                let x_wide = x.width() > 64;
-                let y_wide = y.width() > 64;
+                let mut x_wide = x.width() > 64;
+                let mut y_wide = y.width() > 64;
+
+                // A narrowing `as` cast hands a >64-bit operand to a ≤64-bit
+                // value op (its truncating BitAnd): reduce such operands to
+                // the node domain.  Comparison/logical ops are excluded —
+                // they evaluate at operand width.
+                let value_domain_op = matches!(
+                    op,
+                    Op::Add
+                        | Op::Sub
+                        | Op::Mul
+                        | Op::Div
+                        | Op::Rem
+                        | Op::BitAnd
+                        | Op::BitOr
+                        | Op::BitXor
+                        | Op::BitXnor
+                        | Op::LogicShiftL
+                        | Op::LogicShiftR
+                        | Op::ArithShiftL
+                        | Op::ArithShiftR
+                        | Op::Pow
+                );
+                if !wide && value_domain_op {
+                    let width_mask = gen_mask_for_width(expr_context.width);
+                    if x_wide && builder.func.dfg.value_type(x_payload) == I128 {
+                        x_payload = builder.ins().ireduce(I64, x_payload);
+                        x_payload = band_const(builder, x_payload, width_mask, false);
+                        if let Some(xm) = x_mask_xz {
+                            let xm = builder.ins().ireduce(I64, xm);
+                            x_mask_xz = Some(band_const(builder, xm, width_mask, false));
+                        }
+                        x_wide = false;
+                    }
+                    if y_wide && builder.func.dfg.value_type(y_payload) == I128 {
+                        y_payload = builder.ins().ireduce(I64, y_payload);
+                        y_payload = band_const(builder, y_payload, width_mask, false);
+                        if let Some(ym) = y_mask_xz {
+                            let ym = builder.ins().ireduce(I64, ym);
+                            y_mask_xz = Some(band_const(builder, ym, width_mask, false));
+                        }
+                        y_wide = false;
+                    }
+                }
 
                 // Ensure operand types match: widen I64 to I128 if the other is I128.
                 // Dispatch on the actual cranelift value type since an
@@ -2316,6 +2359,31 @@ impl ProtoExpression {
                 op_nb,
             },
         );
+
+        // A ≤128-bit node computed in the wide-ptr domain (a narrowing
+        // `as` cast keeps its operand in the source domain): the caller
+        // consumes a scalar, so hand back the masked low bits instead of
+        // the result-slot pointer.
+        if !is_wide_ptr(width) {
+            let wide = width > 64;
+            let load_scalar = |builder: &mut FunctionBuilder, ptr: CraneliftValue| {
+                if wide {
+                    let lo = builder.ins().load(I64, MemFlags::trusted(), ptr, 0);
+                    let hi = builder.ins().load(I64, MemFlags::trusted(), ptr, 8);
+                    builder.ins().iconcat(lo, hi)
+                } else {
+                    builder.ins().load(I64, MemFlags::trusted(), ptr, 0)
+                }
+            };
+            let width_mask = gen_mask_for_width(width);
+            let p = load_scalar(builder, payload);
+            let p = band_const(builder, p, width_mask, wide);
+            let m = mask_xz.map(|mp| {
+                let m = load_scalar(builder, mp);
+                band_const(builder, m, width_mask, wide)
+            });
+            return Some((p, m));
+        }
 
         Some((payload, mask_xz))
     }
