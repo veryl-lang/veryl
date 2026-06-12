@@ -1020,7 +1020,7 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
             if let Some(c) = &x.cond
                 && emit_expr(c).is_none()
             {
-                out.push("If-cond-expr".to_string());
+                out.push(format!("If-cond-expr {}", classify_uncovered_expr(c)));
             }
             for s in x.true_side.iter().chain(x.false_side.iter()) {
                 collect_uncovered(s, out);
@@ -1137,12 +1137,26 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
             element_native_bytes,
             select,
             dynamic_select,
+            index_expr,
+            num_elements,
             ..
-        } => format!(
-            "DynVar(w={width},enb={element_native_bytes},sel={},dynsel={})",
-            select.is_some(),
-            dynamic_select.is_some()
-        ),
+        } => {
+            let ds = match dynamic_select {
+                Some(d) => format!(
+                    ",ds_ew={},ds_win={},ds_ne={},ds_idx:{}",
+                    d.elem_width,
+                    d.window,
+                    d.num_elements,
+                    classify_uncovered_expr(&d.index_expr)
+                ),
+                None => String::new(),
+            };
+            format!(
+                "DynVar(w={width},enb={element_native_bytes},ne={num_elements},sel={},idx:{}{ds})",
+                select.is_some(),
+                classify_uncovered_expr(index_expr),
+            )
+        }
     }
 }
 
@@ -3259,9 +3273,53 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             //   idx = clamp(index_expr.to_usize(), 0..num_elements-1)
             //   ptr = base + stride * idx
             //   value = *((Tn*)ptr); if select: extract bits
-            // Falls back to Cranelift for a nested dynamic_select or width > 64.
-            if dynamic_select.is_some() {
-                return None; // unsupported
+            // Falls back to Cranelift for width > 64.
+            if let Some(dyn_sel) = dynamic_select {
+                // Dynamic bit-select off a dynamically indexed element
+                // (`arr[i][j]`): read the FULL element, then extract `window`
+                // bits at bit offset clamp(sel_idx)*elem_width.  eval ignores a
+                // static `select` when dynamic_select is present — mirror that.
+                // Wide (>8-byte) elements stay on Cranelift.
+                if *element_native_bytes > 8 || *num_elements == 0 {
+                    return None;
+                }
+                if dyn_sel.elem_width == 0 || dyn_sel.elem_width >= 64 {
+                    return None;
+                }
+                if dyn_sel.window == 0 || dyn_sel.window >= 64 {
+                    return None;
+                }
+                if dyn_sel.num_elements == 0 {
+                    return None;
+                }
+                let cty = native_c_type(*element_native_bytes)?;
+                let (buf, base_off) = match base_offset {
+                    VarOffset::Ff(o) => ("ff_values", *o),
+                    VarOffset::Comb(o) => ("comb_values", *o),
+                };
+                let idx_str = emit_expr(index_expr)?;
+                let sel_str = emit_expr(&dyn_sel.index_expr)?;
+                let max_idx = num_elements.saturating_sub(1);
+                let max_sel = dyn_sel.num_elements.saturating_sub(1);
+                let mask = (1u64 << dyn_sel.window) - 1;
+                return Some(format!(
+                    "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
+                        uint64_t _idx = _idx_raw < {maxi} ? _idx_raw : {maxi}; \
+                        uint64_t _el = (uint64_t)*((const {ct}*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); \
+                        uint64_t _bsel_raw = (uint64_t)({bsel}); \
+                        uint64_t _bsel = _bsel_raw < {maxs} ? _bsel_raw : {maxs}; \
+                        ((_el >> (_bsel * {ew})) & 0x{mask:x}ULL); }})",
+                    idx = idx_str,
+                    maxi = max_idx,
+                    ct = cty,
+                    b = buf,
+                    off = base_off,
+                    stride = stride,
+                    bsel = sel_str,
+                    maxs = max_sel,
+                    ew = dyn_sel.elem_width,
+                    mask = mask,
+                ));
             }
             // Wide (>16 native-byte) array element: a static narrow (≤64-bit)
             // bit-select reads a field via funnel-shift+mask off the dynamic
@@ -3464,7 +3522,9 @@ fn expr_c_type(width: usize) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::backend::ChunkArtifact;
-    use crate::ir::{ExpressionContext, ProtoAssignStatement, ProtoSystemFunctionCall};
+    use crate::ir::{
+        ExpressionContext, ProtoAssignStatement, ProtoDynamicBitSelect, ProtoSystemFunctionCall,
+    };
     use veryl_analyzer::value::ValueU64;
     use veryl_parser::token_range::TokenRange;
 
@@ -4004,6 +4064,58 @@ mod tests {
         assert!(s.contains("uint32_t"));
         // Stride and clamped idx feed the address computation.
         assert!(s.contains("(intptr_t)4 * (intptr_t)_idx"));
+    }
+
+    #[test]
+    fn emit_expr_dynamic_variable_with_dynamic_select() {
+        // arr[i][j]: 8-element u32 array at comb[0x200], stride=4, then a
+        // 1-bit dynamic select over 32 one-bit lanes of the element.
+        let e = ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(0x200),
+            stride: 4,
+            element_native_bytes: 4,
+            index_expr: Box::new(const_expr(2, 4)),
+            num_elements: 8,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(const_expr(5, 8)),
+                elem_width: 1,
+                window: 1,
+                num_elements: 32,
+            }),
+            width: 1,
+            expr_context: ctx(1, false),
+        };
+        let s = emit_expr(&e).unwrap();
+        // Element index clamps to num_elements-1 == 7.
+        assert!(s.contains("_idx_raw < 7 ?"));
+        assert!(s.contains("comb_values + 0x200"));
+        // Bit-select index clamps to dyn_sel.num_elements-1 == 31, then
+        // shifts by elem_width and masks the 1-bit window.
+        assert!(s.contains("_bsel_raw < 31 ?"));
+        assert!(s.contains("(_el >> (_bsel * 1)) & 0x1ULL"));
+    }
+
+    #[test]
+    fn emit_expr_dynamic_variable_with_dynamic_select_wide_elem_rejects() {
+        // >8-byte elements stay on Cranelift.
+        let e = ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(0x200),
+            stride: 16,
+            element_native_bytes: 16,
+            index_expr: Box::new(const_expr(0, 4)),
+            num_elements: 4,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(const_expr(0, 8)),
+                elem_width: 1,
+                window: 1,
+                num_elements: 128,
+            }),
+            width: 1,
+            expr_context: ctx(1, false),
+        };
+        assert!(emit_expr(&e).is_none());
     }
 
     #[test]
