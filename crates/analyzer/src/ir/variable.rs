@@ -123,6 +123,10 @@ impl VarPathSelect {
         context: &mut Context,
         ignore_error: bool,
     ) -> Vec<AssignDestination> {
+        // In generic component, #type may not be concrete so this causes
+        // false positive of `invalid_range_assign` error.
+        let ignore_error = ignore_error || context.in_generic;
+
         let (path, select, token) = self.clone().into();
 
         let Some((id, mut base_comptime)) = context.find_path(&path) else {
