@@ -15177,6 +15177,58 @@ fn reduction_operand_self_determined() {
 }
 
 #[test]
+fn as_cast_samewidth_sign_reinterpretation() {
+    // Regression: a same-width cast like `(a as i64)` used to be fully
+    // transparent in the simulator IR, so a wider signed context
+    // zero-extended the operand while the emitted SystemVerilog
+    // (`longint'(a)`) sign-extends.
+    let code = r#"
+    module Top (
+        a : input  logic<64>,
+        b : input  logic<32>,
+        s : input  i32      ,
+        o : output logic<66>,
+        p : output logic<64>,
+        q : output logic<66>,
+        r : output logic<64>,
+    ) {
+        assign o = (a as i64) + 66'sd0;
+        assign p = (b as i32) + 64'sd0;
+        assign q = (s as i64) + 66'sd0;
+        assign r = (s as u32) + 64'sd0;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0xffff_ffff_ffff_fffe, 64, false));
+        sim.set("b", Value::new(0xffff_fffe, 32, false));
+        sim.set("s", Value::new(0xffff_fffe, 32, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap().payload_u128(),
+            0x3_ffff_ffff_ffff_fffe,
+            "o {config:?}"
+        );
+        assert_eq!(
+            sim.get("p").unwrap().payload_u128(),
+            0xffff_ffff_ffff_fffe,
+            "p {config:?}"
+        );
+        assert_eq!(
+            sim.get("q").unwrap().payload_u128(),
+            0x3_ffff_ffff_ffff_fffe,
+            "q {config:?}"
+        );
+        assert_eq!(
+            sim.get("r").unwrap().payload_u128(),
+            0xffff_fffe,
+            "r {config:?}"
+        );
+    }
+}
+
+#[test]
 fn as_cast_is_width_context_boundary() {
     // Regression: the cast width was ignored in self-determined contexts
     // (`{(e as 16) * (f as 16)}` multiplied at 8 bits), the outer width
