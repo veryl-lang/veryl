@@ -4,7 +4,7 @@
 use super::runtime::{
     Context as CraneliftContext, HelperSig, alloc_wide_slot, call_helper_ret, call_helper_void,
 };
-use crate::ir::{ProtoDynamicBitSelect, native_bytes as calc_native_bytes};
+use crate::ir::{ProtoDynamicBitSelect, ProtoExpression, native_bytes as calc_native_bytes};
 use crate::wide_ops;
 use cranelift::prelude::Value as CraneliftValue;
 use cranelift::prelude::types::{I32, I64, I128};
@@ -587,6 +587,22 @@ pub(crate) fn wide_any_xz(
     }
 }
 
+/// Cranelift-side refinement of `ProtoExpression::builds_wide_pointer`:
+/// `build_binary_wide_binary` hands back a masked SCALAR for a
+/// non-comparison Binary whose own evaluation width is ≤128 even when an
+/// operand lives in wide-pointer storage (a narrowing `as` cast keeps its
+/// operand in the source domain), so consumers must not dereference it.
+/// Every other node kind matches the shared predicate, which the AOT-C
+/// emitter keeps using as-is: its wide builder always produces a buffer.
+pub(crate) fn returns_wide_pointer(expr: &ProtoExpression) -> bool {
+    match expr {
+        ProtoExpression::Binary { expr_context, .. } => {
+            expr.builds_wide_pointer() && expr_context.width > 128
+        }
+        _ => expr.builds_wide_pointer(),
+    }
+}
+
 pub(crate) fn expand_sign(
     dst_width: usize,
     src_width: usize,
@@ -596,14 +612,19 @@ pub(crate) fn expand_sign(
 ) -> (CraneliftValue, Option<CraneliftValue>) {
     if dst_width != src_width {
         let dst_wide = dst_width > 64;
-        let src_wide = src_width > 64;
         // narrow → wide: uextend payload to I128 before downstream
-        // `bor_const(.., wide=true)` builds an I128 mask.
-        if dst_wide && !src_wide {
+        // `bor_const(.., wide=true)` builds an I128 mask.  Gate on the
+        // ACTUAL value type, not the logical widths: the caller may have
+        // widened a narrow operand already (e.g. the binary-op type
+        // unification when the other operand is wide).
+        if dst_wide && builder.func.dfg.value_type(payload) != I128 {
             payload = builder.ins().uextend(I128, payload);
-            if let Some(m) = mask_xz {
-                mask_xz = Some(builder.ins().uextend(I128, m));
-            }
+        }
+        if dst_wide
+            && let Some(m) = mask_xz
+            && builder.func.dfg.value_type(m) != I128
+        {
+            mask_xz = Some(builder.ins().uextend(I128, m));
         }
         let mask = gen_mask_for_width(dst_width) ^ gen_mask_for_width(src_width);
         let msb = builder.ins().ushr_imm(payload, (src_width - 1) as i64);

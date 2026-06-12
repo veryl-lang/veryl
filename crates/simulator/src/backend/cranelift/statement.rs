@@ -347,7 +347,7 @@ impl ProtoAssignDynamicStatement {
             let (raw, _mask_xz) = self.expr.build_binary(context, builder)?;
             // A `builds_wide_pointer` expr returns a pointer; the field is its
             // low word. A scalar IS that word. (cf. `wide_shift_amount`.)
-            let sv = if self.expr.builds_wide_pointer() {
+            let sv = if returns_wide_pointer(&self.expr) {
                 builder.ins().load(I64, MemFlags::trusted(), raw, 0)
             } else {
                 raw
@@ -360,7 +360,7 @@ impl ProtoAssignDynamicStatement {
         // Build the wide RHS into a pointer (a register result is force-stored
         // into a fresh slot; `builds_wide_pointer()` is the gate, not `width`).
         let (payload, _mask_xz) = self.expr.build_binary(context, builder)?;
-        let src_ptr = if self.expr.builds_wide_pointer() {
+        let src_ptr = if returns_wide_pointer(&self.expr) {
             // The slot is sized to the expr's width, which may be NARROWER than
             // the dst element; the copy below reads `nb` (dst) bytes, so a
             // narrower source would read past it into uninitialised stack. When
@@ -718,7 +718,7 @@ impl ProtoAssignStatement {
         // no rhs_select is the implicit truncation `narrow = wide`, read
         // with window (dst_width-1, 0).
         let rhs_window = self.rhs_select.or_else(|| {
-            if self.expr.builds_wide_pointer() {
+            if returns_wide_pointer(&self.expr) {
                 Some((self.dst_width - 1, 0))
             } else {
                 None
@@ -726,7 +726,7 @@ impl ProtoAssignStatement {
         });
         if let Some((beg, end)) = rhs_window {
             let select_width = beg - end + 1;
-            if self.expr.builds_wide_pointer() {
+            if returns_wide_pointer(&self.expr) {
                 // Producers clamp windows to the source width, so these
                 // reads stay inside its allocation.
                 let read = |builder: &mut FunctionBuilder, ptr| {
@@ -1310,7 +1310,7 @@ impl ProtoAssignStatement {
             let (raw, _mask_xz) = self.expr.build_binary(context, builder)?;
             // A `builds_wide_pointer` expr returns a pointer; the field is its
             // low word. A scalar IS that word. (cf. `wide_shift_amount`.)
-            let sv = if self.expr.builds_wide_pointer() {
+            let sv = if returns_wide_pointer(&self.expr) {
                 builder.ins().load(I64, MemFlags::trusted(), raw, 0)
             } else {
                 raw
@@ -1363,7 +1363,7 @@ impl ProtoAssignStatement {
         // must be promoted into a slot, else `payload` (a scalar) is
         // dereferenced as a pointer (SIGSEGV).  `is_wide_ptr(expr_width)`
         // alone gets this wrong and crashed the v4 OoO core's wide datapath.
-        let src_ptr = if self.expr.builds_wide_pointer() {
+        let src_ptr = if returns_wide_pointer(&self.expr) {
             payload
         } else {
             // Build produced a register (narrow or collapsed wide result):
@@ -1383,7 +1383,7 @@ impl ProtoAssignStatement {
         // extraction; a narrower source is copied into a zeroed dst-sized
         // slot first so the wide ops never read past its storage (and into
         // its 4-state mask words).
-        let src_nb = if self.expr.builds_wide_pointer() {
+        let src_nb = if returns_wide_pointer(&self.expr) {
             calc_native_bytes(expr_width)
         } else {
             // Force-stored above into an nb-sized zeroed slot.
@@ -1452,7 +1452,7 @@ impl ProtoAssignStatement {
         // 4-state mask: direct store (skip for packed FF) + parallel wide
         // log entries at `current_offset + nb`.
         if let Some(mask_xz) = mask_xz {
-            let mask_ptr = if self.expr.builds_wide_pointer() {
+            let mask_ptr = if returns_wide_pointer(&self.expr) {
                 mask_xz
             } else {
                 // Force-store (see the payload src_ptr note above): the

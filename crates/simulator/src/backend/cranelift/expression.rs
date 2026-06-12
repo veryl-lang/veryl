@@ -2141,14 +2141,14 @@ impl ProtoExpression {
         // OoO-core wide_shl SIGSEGV).  When it's a register, force-store into a
         // fresh slot (bypassing ensure_wide_ptr_val's own width-based guard,
         // which would also be fooled by the inflated width field).
-        let x_ptr = if x.builds_wide_pointer() {
+        let x_ptr = if returns_wide_pointer(x) {
             x_payload
         } else {
             let slot = alloc_wide_zero(builder, op_nb);
             builder.ins().store(MemFlags::trusted(), x_payload, slot, 0);
             slot
         };
-        let y_ptr = if y.builds_wide_pointer() {
+        let y_ptr = if returns_wide_pointer(y) {
             y_payload
         } else {
             let slot = alloc_wide_zero(builder, op_nb);
