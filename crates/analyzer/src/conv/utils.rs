@@ -2227,6 +2227,22 @@ pub fn eval_factor_symbol(
 
             return Ok(ir::Factor::Value(x));
         }
+        // Reached only when evaluated without IR context (e.g. cast emit in emitter)
+        SymbolKind::Port(x) => {
+            let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
+            let x = Comptime::from_type(r#type, x.clock_domain, token);
+
+            return Ok(ir::Factor::Value(x));
+        }
+        SymbolKind::ModportVariableMember(x) => {
+            let variable = symbol_table::get(x.variable).unwrap();
+            if let SymbolKind::Variable(x) = &variable.kind {
+                let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
+                let x = Comptime::from_type(r#type, x.clock_domain, token);
+
+                return Ok(ir::Factor::Value(x));
+            }
+        }
         SymbolKind::Enum(_)
         | SymbolKind::Struct(_)
         | SymbolKind::Union(_)
