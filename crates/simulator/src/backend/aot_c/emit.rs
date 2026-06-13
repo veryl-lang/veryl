@@ -971,6 +971,67 @@ pub fn diag_enabled() -> bool {
     std::env::var("VERYL_AOT_C_DIAG").as_deref() == Ok("1")
 }
 
+/// `VERYL_AOT_C_BOOLFOLD`: branchless LogicAnd/LogicOr (see `emit_expr_inner`).
+/// `1` (default) folds only cheap force-eval arms (`is_cheap_boolfold_arm`);
+/// `0` = off; `2` = every site (benchmark only).  Cached.
+fn boolfold_mode() -> u8 {
+    static E: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *E.get_or_init(|| match std::env::var("VERYL_AOT_C_BOOLFOLD").as_deref() {
+        Ok("0") => 0,
+        Ok("2") => 2,
+        _ => 1,
+    })
+}
+
+/// Cheap force-eval arm for boolfold: a shallow ≤64-bit tree of scalar reads /
+/// constants / comparisons / bitwise+logical ops.  Excludes arithmetic, shifts,
+/// wide ops, array reads, ternaries, concat — keeps the force-eval UB-free.
+fn is_cheap_boolfold_arm(e: &ProtoExpression, depth: u32) -> bool {
+    if depth == 0 {
+        return false;
+    }
+    match e {
+        ProtoExpression::Value { .. } => true,
+        ProtoExpression::Variable {
+            var_full_width,
+            dynamic_select,
+            ..
+        } => dynamic_select.is_none() && *var_full_width <= 64,
+        ProtoExpression::Unary {
+            x, expr_context, ..
+        } => expr_context.width <= 64 && is_cheap_boolfold_arm(x, depth - 1),
+        ProtoExpression::Binary {
+            op,
+            x,
+            y,
+            expr_context,
+            ..
+        } => {
+            expr_context.width <= 64
+                && matches!(
+                    op,
+                    Op::Eq
+                        | Op::Ne
+                        | Op::EqWildcard
+                        | Op::NeWildcard
+                        | Op::Less
+                        | Op::Greater
+                        | Op::LessEq
+                        | Op::GreaterEq
+                        | Op::LogicAnd
+                        | Op::LogicOr
+                        | Op::BitAnd
+                        | Op::BitOr
+                        | Op::BitXor
+                )
+                && is_cheap_boolfold_arm(x, depth - 1)
+                && is_cheap_boolfold_arm(y, depth - 1)
+        }
+        // DynamicVariable (array read), Ternary, Concatenation: not cheap.
+        _ => false,
+    }
+}
+
 /// Capped event-FF bail-reason diagnostic.
 fn ev_diag(msg: &str) {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2816,6 +2877,18 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             };
             let xs = emit_expr_inner(x, operand_needs_clean)?;
             let ys = emit_expr_inner(y, operand_needs_clean)?;
+            // VERYL_AOT_C_BOOLFOLD: narrow LogicAnd/LogicOr as a branchless
+            // bitwise reduce of the `!=0` predicates — force-evaluates the
+            // short-circuited right arm to drop the data-dependent branch.
+            // Logic ops are 0/1, so no width mask.
+            let bf = boolfold_mode();
+            if bf > 0
+                && matches!(op, Op::LogicAnd | Op::LogicOr)
+                && (bf == 2 || is_cheap_boolfold_arm(y, 3))
+            {
+                let bit = if matches!(op, Op::LogicAnd) { "&" } else { "|" };
+                return Some(format!("((uint64_t)((({xs}) != 0) {bit} (({ys}) != 0)))"));
+            }
             if is_signed_cmp || is_signed_divrem {
                 let x_w = x.width();
                 let y_w = y.width();
