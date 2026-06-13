@@ -2057,10 +2057,13 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     // chunk and bounds spill locality (the unsplit body regresses L1d
     // locality).  chunk_size=0 disables splitting (single-function emit).
     // Override via VERYL_AOT_C_CHUNK_SIZE.
+    //
+    // 128 (was 900): smaller chunks shrink each function's live set and spill
+    // traffic; below ~50 the call/boundary overhead starts to erode the gain.
     let chunk_size: usize = std::env::var("VERYL_AOT_C_CHUNK_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(900);
+        .unwrap_or(128);
 
     let mut body = String::new();
     body.push_str(
