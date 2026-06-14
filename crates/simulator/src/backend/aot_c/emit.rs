@@ -259,6 +259,409 @@ fn reset_wide_tmp() {
     WIDE_TMP_CTR.with(|c| c.set(0));
 }
 
+// ---------------------------------------------------------------------------
+// Chunk-local comb intermediate localization (VERYL_AOT_C_LOCALIZE, default on,
+// `=0` to opt out).  A comb scalar written and read only within its emit chunk
+// is kept in a C local instead of round-tripping `comb_values` (gcc can't drop
+// the store — escaping restrict param — but the emitter's global read-set can).
+// Soundness: localize only a signal (a) written by one top-level unconditional
+// full-width scalar (≤64-bit) Assign, (b) read only in that chunk, (c) not
+// blocklisted (event-read / array-range / partial-write / port).  Blocklist
+// built in `module.rs`.
+thread_local! {
+    /// Comb offsets the caller marked unsafe to localize (read outside the
+    /// comb function / dynamically / partial-written / port-visible).
+    static LOCALIZE_BLOCKLIST: std::cell::RefCell<std::collections::HashSet<isize>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+    /// Comb offsets localized in the chunk currently being emitted.
+    static CURRENT_LOCAL: std::cell::RefCell<std::collections::HashSet<isize>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+    /// Runtime-indexed comb array ranges (base, num_elements, stride) — a
+    /// candidate offset inside any of these is excluded (a constant-indexed
+    /// element could be read dynamically by an event / another statement).
+    static LOCALIZE_RANGES: std::cell::RefCell<Vec<(isize, usize, isize)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    /// Byte ranges (offset, native_bytes) localized in the just-emitted comb —
+    /// these comb_values bytes are intentionally left stale, so the validate
+    /// dual-run must skip them.  Read by `prepare_comb` right after emit.
+    static LAST_LOCALIZED_BYTES: std::cell::RefCell<Vec<(isize, usize)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    /// Set only between `set_localize_blocklist`/`clear_localize_blocklist`, i.e.
+    /// when `module.rs` has installed a sound read-set.  `emit_function`
+    /// localizes ONLY when armed, so a direct call (tests, diagnostics) never
+    /// localizes unsoundly.
+    static LOCALIZE_ARMED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Take the (offset, native_bytes) ranges localized by the most recent
+/// `emit_function` call.  `prepare_comb` hands these to the compiled handle so
+/// the validate dual-run can skip the intentionally-stale comb bytes.
+pub fn take_last_localized_bytes() -> Vec<(isize, usize)> {
+    LAST_LOCALIZED_BYTES.with(|b| std::mem::take(&mut *b.borrow_mut()))
+}
+
+#[inline]
+fn localize_armed() -> bool {
+    LOCALIZE_ARMED.with(|a| a.get())
+}
+
+/// Install the caller-computed blocklist + array ranges and arm localization
+/// for the next comb emit.  The caller (`module.rs`) gates on
+/// `VERYL_AOT_C_LOCALIZE` and only calls this when localization is on AND a
+/// sound global read-set has been computed.  Always paired with
+/// `clear_localize_blocklist`.
+pub fn set_localize_blocklist(
+    set: std::collections::HashSet<isize>,
+    ranges: Vec<(isize, usize, isize)>,
+) {
+    LOCALIZE_BLOCKLIST.with(|b| *b.borrow_mut() = set);
+    LOCALIZE_RANGES.with(|r| *r.borrow_mut() = ranges);
+    LOCALIZE_ARMED.with(|a| a.set(true));
+}
+
+pub fn clear_localize_blocklist() {
+    LOCALIZE_BLOCKLIST.with(|b| b.borrow_mut().clear());
+    LOCALIZE_RANGES.with(|r| r.borrow_mut().clear());
+    LOCALIZE_ARMED.with(|a| a.set(false));
+}
+
+fn clear_current_local() {
+    CURRENT_LOCAL.with(|c| c.borrow_mut().clear());
+}
+
+#[inline]
+fn is_localized(off: isize) -> bool {
+    CURRENT_LOCAL.with(|c| c.borrow().contains(&off))
+}
+
+/// Comb local hex name for an offset (`_cl_<hex>`).
+#[inline]
+fn local_name(off: isize) -> String {
+    format!("_cl_{off:x}")
+}
+
+#[derive(Default)]
+struct LocalAnalysis {
+    /// off -> Some(chunk) while every write so far is a clean top-level full
+    /// scalar Assign in that one chunk; None once disqualified.
+    write_chunk: HashMap<isize, Option<usize>>,
+    /// Disqualified offsets (conditional / partial / wide / dynamic / array /
+    /// CompiledBlock-touched write).
+    bad: std::collections::HashSet<isize>,
+    /// off -> Some(chunk) while read in one chunk only; None if read in 2+.
+    read_chunk: HashMap<isize, Option<usize>>,
+    /// off -> native storage byte width (for the validate skip-range).
+    width: HashMap<isize, usize>,
+}
+
+impl LocalAnalysis {
+    fn note_read(&mut self, off: isize, i: usize) {
+        match self.read_chunk.get(&off) {
+            None => {
+                self.read_chunk.insert(off, Some(i));
+            }
+            Some(Some(k)) if *k != i => {
+                self.read_chunk.insert(off, None);
+            }
+            _ => {}
+        }
+    }
+
+    fn walk_reads(&mut self, e: &ProtoExpression, i: usize) {
+        match e {
+            ProtoExpression::Variable {
+                var_offset,
+                dynamic_select,
+                ..
+            } => {
+                if let VarOffset::Comb(o) = var_offset {
+                    self.note_read(*o, i);
+                }
+                if let Some(ds) = dynamic_select {
+                    self.walk_reads(&ds.index_expr, i);
+                }
+            }
+            ProtoExpression::Value { .. } => {}
+            ProtoExpression::Unary { x, .. } => self.walk_reads(x, i),
+            ProtoExpression::Binary { x, y, .. } => {
+                self.walk_reads(x, i);
+                self.walk_reads(y, i);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (e, _, _) in elements {
+                    self.walk_reads(e, i);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                self.walk_reads(cond, i);
+                self.walk_reads(true_expr, i);
+                self.walk_reads(false_expr, i);
+            }
+            ProtoExpression::DynamicVariable {
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                // The array base/elements are covered by the blocklist (the
+                // module-level pass records every runtime-indexed range); only
+                // the index sub-expression carries localizable scalar reads.
+                self.walk_reads(index_expr, i);
+                if let Some(ds) = dynamic_select {
+                    self.walk_reads(&ds.index_expr, i);
+                }
+            }
+        }
+    }
+
+    fn disqualify(&mut self, off: isize) {
+        self.bad.insert(off);
+        self.write_chunk.insert(off, None);
+    }
+
+    /// Mark every comb offset mentioned (read or write) in a CompiledBlock as
+    /// unsafe — its pre-compiled child reads/writes comb_values directly,
+    /// bypassing any local we'd introduce.
+    fn poison(&mut self, s: &ProtoStatement) {
+        match s {
+            ProtoStatement::Assign(a) => {
+                self.poison_expr(&a.expr);
+                if let VarOffset::Comb(o) = a.dst {
+                    self.bad.insert(o);
+                }
+            }
+            ProtoStatement::AssignDynamic(a) => {
+                self.poison_expr(&a.dst_index_expr);
+                self.poison_expr(&a.expr);
+                if let VarOffset::Comb(o) = a.dst_base {
+                    self.bad.insert(o);
+                }
+            }
+            ProtoStatement::If(x) => {
+                if let Some(c) = &x.cond {
+                    self.poison_expr(c);
+                }
+                for s in &x.true_side {
+                    self.poison(s);
+                }
+                for s in &x.false_side {
+                    self.poison(s);
+                }
+            }
+            ProtoStatement::For(x) => {
+                if let VarOffset::Comb(o) = x.var_offset {
+                    self.bad.insert(o);
+                }
+                for s in &x.body {
+                    self.poison(s);
+                }
+            }
+            ProtoStatement::SequentialBlock(b) => {
+                for s in b {
+                    self.poison(s);
+                }
+            }
+            ProtoStatement::CompiledBlock(x) => {
+                for s in &x.original_stmts {
+                    self.poison(s);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(_)
+            | ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::Break => {}
+        }
+    }
+
+    fn poison_expr(&mut self, e: &ProtoExpression) {
+        match e {
+            ProtoExpression::Variable { var_offset, .. } => {
+                if let VarOffset::Comb(o) = var_offset {
+                    self.bad.insert(*o);
+                }
+            }
+            ProtoExpression::Value { .. } => {}
+            ProtoExpression::Unary { x, .. } => self.poison_expr(x),
+            ProtoExpression::Binary { x, y, .. } => {
+                self.poison_expr(x);
+                self.poison_expr(y);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (e, _, _) in elements {
+                    self.poison_expr(e);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                self.poison_expr(cond);
+                self.poison_expr(true_expr);
+                self.poison_expr(false_expr);
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                index_expr,
+                ..
+            } => {
+                if let VarOffset::Comb(o) = base_offset {
+                    self.bad.insert(*o);
+                }
+                self.poison_expr(index_expr);
+            }
+        }
+    }
+
+    fn walk_stmt(&mut self, s: &ProtoStatement, i: usize, top: bool) {
+        match s {
+            ProtoStatement::Assign(a) => {
+                self.walk_reads(&a.expr, i);
+                if let Some(ds) = &a.dynamic_select {
+                    self.walk_reads(&ds.index_expr, i);
+                }
+                if let VarOffset::Comb(o) = a.dst {
+                    let clean = top
+                        && a.select.is_none()
+                        && a.dynamic_select.is_none()
+                        && a.rhs_select.is_none()
+                        && a.dst_width > 0
+                        && a.dst_width <= 64;
+                    if clean && !self.bad.contains(&o) {
+                        self.width.insert(o, native_bytes(a.dst_width));
+                        match self.write_chunk.get(&o) {
+                            None => {
+                                self.write_chunk.insert(o, Some(i));
+                            }
+                            Some(Some(k)) if *k == i => {}
+                            Some(Some(_)) => {
+                                self.disqualify(o);
+                            }
+                            Some(None) => {}
+                        }
+                    } else {
+                        // Conditional (top == false), partial, wide, or dynamic
+                        // write — never localize (latch / overlap hazard).
+                        self.disqualify(o);
+                    }
+                }
+            }
+            ProtoStatement::AssignDynamic(a) => {
+                self.walk_reads(&a.dst_index_expr, i);
+                self.walk_reads(&a.expr, i);
+                if let Some(ds) = &a.dynamic_select {
+                    self.walk_reads(&ds.index_expr, i);
+                }
+                if let VarOffset::Comb(o) = a.dst_base {
+                    self.disqualify(o);
+                }
+            }
+            ProtoStatement::If(x) => {
+                if let Some(c) = &x.cond {
+                    self.walk_reads(c, i);
+                }
+                for s in &x.true_side {
+                    self.walk_stmt(s, i, false);
+                }
+                for s in &x.false_side {
+                    self.walk_stmt(s, i, false);
+                }
+            }
+            ProtoStatement::For(x) => {
+                if let VarOffset::Comb(o) = x.var_offset {
+                    self.disqualify(o);
+                }
+                let (start, end) = match &x.range {
+                    ProtoForRange::Forward { start, end, .. }
+                    | ProtoForRange::Reverse { start, end, .. }
+                    | ProtoForRange::Stepped { start, end, .. } => (start, end),
+                };
+                for b in [start, end] {
+                    if let ProtoForBound::Dynamic(e) = b {
+                        self.walk_reads(e, i);
+                    }
+                }
+                for s in &x.body {
+                    self.walk_stmt(s, i, false);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                // Unconditional grouping — preserve the incoming `top`.
+                for s in body {
+                    self.walk_stmt(s, i, top);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => match x {
+                ProtoSystemFunctionCall::Display { args, .. }
+                | ProtoSystemFunctionCall::Write { args, .. } => {
+                    for a in args {
+                        self.walk_reads(a, i);
+                    }
+                }
+                ProtoSystemFunctionCall::Assert {
+                    condition, args, ..
+                } => {
+                    self.walk_reads(condition, i);
+                    for a in args {
+                        self.walk_reads(a, i);
+                    }
+                }
+                ProtoSystemFunctionCall::Readmemh { .. } | ProtoSystemFunctionCall::Finish => {}
+            },
+            ProtoStatement::CompiledBlock(_) => {
+                self.poison(s);
+            }
+            ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
+        }
+    }
+}
+
+/// Per-chunk localization sets: comb offsets safe to keep in a C local within
+/// each chunk (written by one clean top-level scalar Assign there, read only in
+/// that chunk, not blocklisted).  Empty vec of empty sets when the knob is off.
+fn compute_localize_sets(
+    chunks: &[&[ProtoStatement]],
+    blocklist: &std::collections::HashSet<isize>,
+    ranges: &[(isize, usize, isize)],
+) -> (Vec<std::collections::HashSet<isize>>, HashMap<isize, usize>) {
+    let in_range = |off: isize| -> bool {
+        ranges.iter().any(|&(base, num, stride)| {
+            if stride == 0 || num == 0 {
+                return false;
+            }
+            let delta = off - base;
+            delta >= 0 && delta % stride == 0 && (delta / stride) < num as isize
+        })
+    };
+    let mut a = LocalAnalysis::default();
+    for (i, chunk) in chunks.iter().enumerate() {
+        for s in *chunk {
+            a.walk_stmt(s, i, true);
+        }
+    }
+    let mut sets: Vec<std::collections::HashSet<isize>> =
+        vec![std::collections::HashSet::new(); chunks.len()];
+    for (off, wc) in &a.write_chunk {
+        let Some(i) = wc else { continue };
+        if a.bad.contains(off) || blocklist.contains(off) || in_range(*off) {
+            continue;
+        }
+        // Reads must be confined to the write chunk (or absent — a dead local
+        // assign that gcc removes).
+        match a.read_chunk.get(off) {
+            Some(Some(k)) if k == i => {}
+            None => {}
+            _ => continue,
+        }
+        sets[*i].insert(*off);
+    }
+    (sets, a.width)
+}
+
 /// Pack `nb` (byte count) into the low 16 bits and `width` (bit count) into
 /// the high 16 bits — the irregular ABI of `wide_ashr`/`wide_scmp`/
 /// `wide_apply_mask`/`wide_fill_ones`/`wide_is_all_ones`.  Mirrors
@@ -1688,6 +2091,9 @@ pub fn prepare_event(stmts: &[ProtoStatement], async_mode: bool) -> Option<AotCe
 /// the comb path).
 fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     reset_wide_tmp();
+    // Localization never applies to the event path; clear any residue a failed
+    // comb emit may have left so event reads never hit `_cl_*`.
+    clear_current_local();
     EVENT_NARROW_PUSHES.with(|c| c.set(0));
     EVENT_WIDE_PUSHES.with(|c| c.set(0));
     let diag = std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1");
@@ -2082,9 +2488,43 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     } else {
         stmts.chunks(chunk_size).collect()
     };
+    // Chunk-local intermediate localization (VERYL_AOT_C_LOCALIZE): per chunk,
+    // the comb offsets that are written by one clean top-level scalar Assign in
+    // that chunk and read only there (and not blocklisted) become C locals
+    // instead of comb_values round-trips.  Empty sets when the knob is off.
+    LAST_LOCALIZED_BYTES.with(|b| b.borrow_mut().clear());
+    let localize_sets: Vec<std::collections::HashSet<isize>> = if localize_armed() {
+        let bl = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
+        let rg = LOCALIZE_RANGES.with(|r| r.borrow().clone());
+        let (sets, widths) = compute_localize_sets(&chunks, &bl, &rg);
+        // Record the localized byte ranges so the validate dual-run can skip
+        // them (these comb_values bytes are intentionally left stale).
+        LAST_LOCALIZED_BYTES.with(|b| {
+            let mut v = b.borrow_mut();
+            for set in &sets {
+                for &off in set {
+                    v.push((off, *widths.get(&off).unwrap_or(&8)));
+                }
+            }
+        });
+        sets
+    } else {
+        vec![std::collections::HashSet::new(); chunks.len()]
+    };
+    clear_current_local();
     let mut chunk_bodies: Vec<String> = Vec::with_capacity(chunks.len());
-    for chunk in &chunks {
+    for (i, chunk) in chunks.iter().enumerate() {
+        CURRENT_LOCAL.with(|c| *c.borrow_mut() = localize_sets[i].clone());
         let mut cb = String::new();
+        if !localize_sets[i].is_empty() {
+            // Declare the localized signals (sorted → deterministic source so
+            // the AOT-C cache hash is stable).
+            let mut offs: Vec<isize> = localize_sets[i].iter().copied().collect();
+            offs.sort_unstable();
+            for off in offs {
+                cb.push_str(&format!("    uint64_t {} = 0;\n", local_name(off)));
+            }
+        }
         for stmt in *chunk {
             let s = emit_stmt(stmt)?;
             cb.push_str("    ");
@@ -2093,6 +2533,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         }
         chunk_bodies.push(cb);
     }
+    clear_current_local();
 
     if chunks.len() == 1 {
         body.push_str(
@@ -2276,6 +2717,24 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                     pmask = pos_mask,
                     lo = lo,
                 ))
+            } else if is_localized(store_off) {
+                // Localized comb intermediate: assign the (width-masked, zero-
+                // extended) value to the C local instead of storing to the
+                // comb buffer.  Only ≤64-bit select-less scalars reach here
+                // (compute_localize_sets' candidate filter), so native_bits is
+                // 32 or 64 and a uint64_t local holds the value exactly.
+                let native_bits = nb * 8;
+                let val = if a.dst_width < native_bits && a.dst_width > 0 {
+                    let mask = (1u64 << a.dst_width) - 1;
+                    format!(
+                        "(((uint64_t)({rhs})) & 0x{m:x}ULL)",
+                        rhs = rhs_str,
+                        m = mask
+                    )
+                } else {
+                    format!("((uint64_t)({ct})({rhs}))", ct = cty, rhs = rhs_str)
+                };
+                Some(format!("{nm} = {val};", nm = local_name(store_off)))
             } else {
                 // Mask the stored value to its declared width when narrower
                 // than the native storage type: a sign-extended rhs (e.g.
@@ -3531,6 +3990,16 @@ fn emit_var_load(var_offset: &VarOffset, width: usize) -> Option<String> {
     // as __uint128_t and ≤64 loads stay as uint64_t.  Storage type
     // matches both: `*(uint128_t*)ptr` reads 16 bytes.
     let result_ty = expr_c_type(width)?;
+    // Localized signal: read the C local holding the (width-masked, zero-
+    // extended) value.  Only ≤64-bit comb signals are localized, so the local
+    // is uint64_t and the requested width is ≤64 → result_ty is uint64_t.
+    if matches!(var_offset, VarOffset::Comb(_)) && is_localized(off) {
+        return Some(format!(
+            "(({rt}){nm})",
+            rt = result_ty,
+            nm = local_name(off)
+        ));
+    }
     Some(format!(
         "(({rt})*((const {ct}*)({b} + {o:#x})))",
         rt = result_ty,
@@ -3620,7 +4089,8 @@ mod tests {
     use super::*;
     use crate::backend::ChunkArtifact;
     use crate::ir::{
-        ExpressionContext, ProtoAssignStatement, ProtoDynamicBitSelect, ProtoSystemFunctionCall,
+        ExpressionContext, ProtoAssignStatement, ProtoDynamicBitSelect, ProtoIfStatement,
+        ProtoSystemFunctionCall,
     };
     use veryl_analyzer::value::ValueU64;
     use veryl_parser::token_range::TokenRange;
@@ -4645,5 +5115,157 @@ mod tests {
         assert_eq!(written, 0xdeadbeef, "comb[0..4] should be 0xdeadbeef");
         // Best-effort cleanup; ignore failures.
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // --- Chunk-local localization (compute_localize_sets) ---
+    // A wrongly-localized comb offset is a silent miscompile, so each
+    // disqualification path gets a direct unit test rather than relying only on
+    // the slow, opt-in validate dual-run.
+
+    fn comb_assign(
+        off: isize,
+        width: usize,
+        select: Option<(usize, usize)>,
+        rhs: ProtoExpression,
+    ) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(off),
+            dst_width: width,
+            select,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: rhs,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        })
+    }
+
+    fn localize_sets(
+        chunks: &[&[ProtoStatement]],
+        blocklist: &[isize],
+        ranges: &[(isize, usize, isize)],
+    ) -> Vec<std::collections::HashSet<isize>> {
+        let bl: std::collections::HashSet<isize> = blocklist.iter().copied().collect();
+        compute_localize_sets(chunks, &bl, ranges).0
+    }
+
+    #[test]
+    fn localize_happy_path() {
+        // O is written by a clean top-level scalar Assign and read only in the
+        // same chunk → it is safe to keep in a C local.
+        let c0 = vec![
+            comb_assign(0x10, 32, None, const_expr(0, 32)),
+            comb_assign(0x20, 32, None, var_expr(VarOffset::Comb(0x10), 32)),
+        ];
+        let sets = localize_sets(&[&c0], &[], &[]);
+        assert!(
+            sets[0].contains(&0x10),
+            "single-chunk scalar should localize"
+        );
+    }
+
+    #[test]
+    fn localize_skips_conditional_write() {
+        // A write inside an `if` is conditional: the persisted comb_values byte
+        // carries the latch/hold value when the branch is not taken, so it must
+        // never become a chunk-local.
+        let c0 = vec![ProtoStatement::If(ProtoIfStatement {
+            cond: Some(const_expr(1, 1)),
+            true_side: vec![comb_assign(0x10, 32, None, const_expr(0, 32))],
+            false_side: vec![],
+        })];
+        let sets = localize_sets(&[&c0], &[], &[]);
+        assert!(
+            !sets[0].contains(&0x10),
+            "conditional write must not localize"
+        );
+    }
+
+    #[test]
+    fn localize_skips_cross_chunk_read() {
+        // Written in chunk 0 but read in chunk 1: a chunk-local in chunk 0 is
+        // invisible to chunk 1's noinline function, which reads comb_values.
+        let c0 = vec![comb_assign(0x10, 32, None, const_expr(0, 32))];
+        let c1 = vec![comb_assign(
+            0x20,
+            32,
+            None,
+            var_expr(VarOffset::Comb(0x10), 32),
+        )];
+        let sets = localize_sets(&[&c0, &c1], &[], &[]);
+        assert!(
+            !sets[0].contains(&0x10),
+            "cross-chunk read must not localize"
+        );
+    }
+
+    #[test]
+    fn localize_skips_blocklisted() {
+        // Blocklisted = an event (or a port / user-var / clock) reads it from
+        // comb_values across the comb→event boundary → load-bearing, keep it.
+        let c0 = vec![
+            comb_assign(0x10, 32, None, const_expr(0, 32)),
+            comb_assign(0x20, 32, None, var_expr(VarOffset::Comb(0x10), 32)),
+        ];
+        let sets = localize_sets(&[&c0], &[0x10], &[]);
+        assert!(
+            !sets[0].contains(&0x10),
+            "blocklisted offset must not localize"
+        );
+    }
+
+    #[test]
+    fn localize_skips_dynamic_array_range() {
+        // 0x108 is element 1 of a runtime-indexed array (base 0x100, 4 elems,
+        // stride 8): a dynamic index elsewhere may read it, so exclude it.
+        let c0 = vec![
+            comb_assign(0x108, 32, None, const_expr(0, 32)),
+            comb_assign(0x200, 32, None, var_expr(VarOffset::Comb(0x108), 32)),
+        ];
+        let sets = localize_sets(&[&c0], &[], &[(0x100, 4, 8)]);
+        assert!(
+            !sets[0].contains(&0x108),
+            "offset inside a dynamic array range must not localize"
+        );
+    }
+
+    #[test]
+    fn localize_skips_partial_write() {
+        // A bit-select write only updates part of the word; the rest comes from
+        // the persisted comb_values byte → not a full-scalar candidate.
+        let c0 = vec![comb_assign(0x10, 32, Some((3, 0)), const_expr(0, 4))];
+        let sets = localize_sets(&[&c0], &[], &[]);
+        assert!(
+            !sets[0].contains(&0x10),
+            "partial (select) write must not localize"
+        );
+    }
+
+    #[test]
+    fn localize_skips_wide_write() {
+        // >64-bit writes go through the wide path, not a uint64_t local.
+        let c0 = vec![comb_assign(0x10, 128, None, const_expr(0, 128))];
+        let sets = localize_sets(&[&c0], &[], &[]);
+        assert!(
+            !sets[0].contains(&0x10),
+            "wide (>64-bit) write must not localize"
+        );
+    }
+
+    #[test]
+    fn localize_skips_multi_chunk_write() {
+        // The same offset written in two chunks: neither chunk's local can hold
+        // the cross-chunk value, so it must stay in comb_values.
+        let c0 = vec![comb_assign(0x10, 32, None, const_expr(0, 32))];
+        let c1 = vec![comb_assign(0x10, 32, None, const_expr(1, 32))];
+        let sets = localize_sets(&[&c0, &c1], &[], &[]);
+        assert!(
+            !sets[0].contains(&0x10),
+            "multi-chunk write must not localize"
+        );
+        assert!(
+            !sets[1].contains(&0x10),
+            "multi-chunk write must not localize"
+        );
     }
 }

@@ -53,4 +53,10 @@ pub(crate) mod dead_var_dce {
     ) -> (Vec<ProtoStatement>, usize) {
         (stmts, 0)
     }
+    pub fn collect_localize_info(
+        _comb: &[ProtoStatement],
+        _event_slices: &[&[ProtoStatement]],
+    ) -> (HashSet<VarOffset>, Vec<(isize, usize, isize)>) {
+        (HashSet::default(), Vec::new())
+    }
 }
