@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 mod backend;
+mod incremental;
 mod keyword;
 mod server;
 #[cfg(test)]

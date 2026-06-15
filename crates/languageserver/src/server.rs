@@ -1,3 +1,4 @@
+use crate::incremental::LsIncrementalMap;
 use crate::keyword::KEYWORDS;
 use async_channel::{Receiver, Sender};
 use dashmap::DashMap;
@@ -14,8 +15,8 @@ use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
 use veryl_analyzer::symbol::{Symbol, TypeKind};
 use veryl_analyzer::symbol_path::SymbolPath;
 use veryl_analyzer::{
-    Analyzer, AnalyzerError, Context, attribute_table, definition_table, namespace_table,
-    symbol_table, unsafe_table,
+    Analyzer, AnalyzerError, Context, attribute_table, definition_table, fragment_cache,
+    namespace_table, symbol_table, unsafe_table,
 };
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
@@ -147,6 +148,7 @@ pub struct Server {
     config: ServerConfig,
     latest_change: Option<(Url, String, i32)>,
     work_done_progress: bool,
+    incremental: LsIncrementalMap,
 }
 
 impl Server {
@@ -165,6 +167,7 @@ impl Server {
             config: ServerConfig::default(),
             latest_change: None,
             work_done_progress: true,
+            incremental: LsIncrementalMap::default(),
         }
     }
 
@@ -222,6 +225,9 @@ impl Server {
                     }
                     if task.paths.is_empty() {
                         Analyzer::analyze_post_pass1();
+                        if let Some(inc) = self.incremental.get(&task.metadata) {
+                            inc.save();
+                        }
                         self.progress_done("background analyze done");
                         if self.background_tasks.is_empty() {
                             self.background_done = true;
@@ -692,24 +698,47 @@ impl Server {
         );
     }
 
-    fn background_analyze(&self, path: &PathSet, metadata: &Metadata) {
+    fn background_analyze(&mut self, path: &PathSet, metadata: &Metadata) {
         let src = path.src.clone();
-        if let Ok(text) = std::fs::read_to_string(&src) {
-            if self.document_map.contains_key(&src) {
-                return;
-            }
-            if let Some(src_id) = resource_table::get_path_id(&src) {
-                drop_tables(src_id);
-            }
-            if let Ok(x) = Parser::parse(&text, &src) {
-                let analyzer = Analyzer::new(metadata);
-                let _ = analyzer.analyze_pass1(&path.prj, &x.veryl);
+        // Files open in the editor are analyzed from their buffer by
+        // `on_change`; never cache or re-analyze them from disk here.
+        if self.document_map.contains_key(&src) {
+            return;
+        }
+        let Ok(text) = std::fs::read_to_string(&src) else {
+            return;
+        };
 
-                block_on(self.client.log_message(
-                    MessageType::INFO,
-                    format!("background_analyze: {}", src.to_string_lossy()),
-                ));
+        // A cache hit restores this file's pass1 state, skipping parse.
+        let restored = self
+            .incremental
+            .get(metadata)
+            .is_some_and(|inc| inc.try_restore(path, &text));
+        if restored {
+            return;
+        }
+
+        // Clear stale state from a previous analysis before re-registering.
+        if let Some(src_id) = resource_table::get_path_id(&src) {
+            drop_tables(src_id);
+        }
+        // Snapshot the ID counters before parse so the file's pass1 output
+        // can be captured as a fragment afterwards.
+        let watermark = self
+            .incremental
+            .get(metadata)
+            .map(|_| fragment_cache::watermark());
+        if let Ok(x) = Parser::parse(&text, &src) {
+            let analyzer = Analyzer::new(metadata);
+            let errors = analyzer.analyze_pass1(&path.prj, &x.veryl);
+            if let (Some(inc), Some(wm)) = (self.incremental.get(metadata), watermark.as_ref()) {
+                inc.capture(path, &text, wm, errors.is_empty());
             }
+
+            block_on(self.client.log_message(
+                MessageType::INFO,
+                format!("background_analyze: {}", src.to_string_lossy()),
+            ));
         }
     }
 
