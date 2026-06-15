@@ -1,6 +1,7 @@
 use crate::ir::{Shape, Type, TypeKind};
 use crate::{BigInt, BigUint, HashMap, Sign};
 use num_traits::{Num, One, ToPrimitive, Zero, one, zero};
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cell::LazyCell;
 use std::{fmt, str};
@@ -169,7 +170,7 @@ pub fn biguint_from_le_bytes(buf: &[u8]) -> BigUint {
 
 // repr(C) is necessary for pointer access from Cranelift
 #[repr(C)]
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ValueU64 {
     pub payload: u64,
     pub mask_xz: u64,
@@ -550,7 +551,7 @@ impl fmt::Binary for ValueU64 {
     }
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ValueBigUint {
     pub payload: Box<BigUint>,
     pub mask_xz: Box<BigUint>,
@@ -870,7 +871,7 @@ impl fmt::Binary for ValueBigUint {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Value {
     U64(ValueU64),
     BigUint(ValueBigUint),

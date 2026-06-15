@@ -13,6 +13,7 @@ use crate::symbol::{GenericParameterProperty, Symbol, SymbolKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use crate::symbol_table;
 use crate::value::Value;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{self, StrId, TokenId};
@@ -21,7 +22,7 @@ use veryl_parser::veryl_grammar_trait::{self as syntax_tree, Expression};
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PendingEntry {
     pub call_token_id: TokenId,
     pub call_token: Token,
@@ -38,6 +39,17 @@ thread_local! {
 
 pub fn push_pending(entry: PendingEntry) {
     PENDING.with(|f| f.borrow_mut().push(entry));
+}
+
+/// Returns the current number of pending entries. Used as a watermark to
+/// delimit one file's pass1 additions for fragment caching.
+pub fn pending_len() -> usize {
+    PENDING.with(|f| f.borrow().len())
+}
+
+/// Exports the pending entries added since the given watermark.
+pub fn export_pending_since(watermark: usize) -> Vec<PendingEntry> {
+    PENDING.with(|f| f.borrow()[watermark..].to_vec())
 }
 
 pub fn drain_pending() -> Vec<PendingEntry> {

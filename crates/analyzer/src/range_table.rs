@@ -82,6 +82,10 @@ where
         self.table.values().flat_map(|x| x.clone()).collect()
     }
 
+    pub fn export_by_path(&self, path: PathId) -> Vec<(TokenRange, T)> {
+        self.table.get(&path).cloned().unwrap_or_default()
+    }
+
     pub fn clear(&mut self) {
         self.table.clear()
     }

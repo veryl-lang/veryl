@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -6,7 +7,7 @@ use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::AttributeOpt;
 use veryl_parser::veryl_token::Token;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Attribute {
     Ifdef(StrId),
     Ifndef(StrId),
@@ -463,7 +464,7 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, Serialize, Deserialize)]
 pub enum AllowItem {
     MissingPort,
     MissingResetStatement,
@@ -496,7 +497,7 @@ impl fmt::Display for AllowItem {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, EnumIter)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, EnumIter, Serialize, Deserialize)]
 pub enum EnumEncodingItem {
     #[default]
     Sequential,
@@ -528,7 +529,7 @@ impl fmt::Display for EnumEncodingItem {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, Serialize, Deserialize)]
 pub enum CondTypeItem {
     Unique,
     Unique0,
@@ -561,7 +562,7 @@ impl fmt::Display for CondTypeItem {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, Serialize, Deserialize)]
 pub enum AlignItem {
     Number,
     Identifier,
@@ -590,7 +591,7 @@ impl fmt::Display for AlignItem {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, Serialize, Deserialize)]
 pub enum FormatItem {
     Compact,
     Skip,
@@ -619,7 +620,7 @@ impl fmt::Display for FormatItem {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, Serialize, Deserialize)]
 pub enum ExpandItem {
     Modport,
 }

@@ -3,6 +3,7 @@ use crate::StopWatch;
 use crate::cmd_check::CheckError;
 use crate::context::Context;
 use crate::diff::print_diff;
+use crate::incremental::Incremental;
 use crate::utils;
 use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -57,22 +58,52 @@ impl CmdBuild {
 
         let mut stopwatch = StopWatch::new();
 
+        // The fragment cache replaces parse + pass1 for unchanged files,
+        // which therefore never reach pass2/emit. When the caller needs
+        // the IR for simulation (`veryl test`), files containing selected
+        // tests are forced into the miss set: pass2 of a test file alone
+        // elaborates its whole instance tree from the definition_table,
+        // which restored fragments populate as well.
+        let ir_requested = ir.is_some();
+        let selected_tests = ir_requested.then_some(test_filter);
+        let mut incremental = Incremental::open(metadata, &paths, defines, selected_tests);
+
+        let analyzer = Analyzer::new(metadata);
+
         for path in &paths {
             info!("Processing file ({})", path.src.to_string_lossy());
 
-            let input = fs::read_to_string(&path.src)
-                .into_diagnostic()
-                .wrap_err("")?;
+            if let Some(x) = incremental.as_mut()
+                && x.try_restore(path)
+            {
+                continue;
+            }
+
+            let input = match incremental.as_mut().and_then(|x| x.take_input(&path.src)) {
+                Some(x) => x,
+                None => fs::read_to_string(&path.src)
+                    .into_diagnostic()
+                    .wrap_err("")?,
+            };
+
+            let watermark = incremental
+                .as_ref()
+                .map(|_| veryl_analyzer::fragment_cache::watermark());
             let parser = Parser::parse(&input, &path.src)?;
 
-            let analyzer = Analyzer::new(metadata);
             let mut errors = analyzer.analyze_pass1(&path.prj, &parser.veryl);
+            if let (Some(x), Some(watermark)) = (incremental.as_mut(), watermark.as_ref()) {
+                x.capture(path, &input, watermark, errors.is_empty());
+            }
             check_error = check_error.append(&mut errors).check_err()?;
 
-            let context = Context::new(path.clone(), input, parser, analyzer)?;
+            let context = Context::new(path.clone(), input, parser, analyzer.clone())?;
             contexts.push(context);
         }
 
+        if let Some(x) = incremental.as_ref() {
+            info!("Restored {}/{} files from cache", x.restored, paths.len());
+        }
         debug!(
             "Executed parse/analyze_pass1 ({} milliseconds, {} files)",
             stopwatch.lap(),
@@ -92,32 +123,38 @@ impl CmdBuild {
         }
 
         // Testbench files whose tests don't match `--test` will never be
-        // simulated, so skip pass2/emit for them.
-        if let Some(filter) = test_filter {
+        // simulated, so skip pass2/emit for them. Conversely, files whose
+        // tests WILL be simulated must not stay skipped (check_skip may
+        // have marked them unmodified): the simulator takes their top
+        // component from the IR, which only pass2 produces.
+        if ir_requested {
             let tests = veryl_analyzer::symbol_table::get_tests(&metadata.project.name);
             let mut test_file_ids: HashSet<PathId> = HashSet::new();
             let mut matching_file_ids: HashSet<PathId> = HashSet::new();
             for (name, prop) in &tests {
                 test_file_ids.insert(prop.path);
                 let name = name.to_string();
-                if name.contains(filter) {
+                if test_filter.is_none_or(|filter| name.contains(filter)) {
                     matching_file_ids.insert(prop.path);
                 }
             }
             let mut skipped = 0usize;
+            let mut unskipped = 0usize;
             for context in contexts.iter_mut() {
-                if context.skip {
-                    continue;
-                }
                 let path_id = resource_table::insert_path(&context.path.src);
-                if test_file_ids.contains(&path_id) && !matching_file_ids.contains(&path_id) {
+                if matching_file_ids.contains(&path_id) {
+                    if context.skip {
+                        context.skip = false;
+                        unskipped += 1;
+                    }
+                } else if !context.skip && test_file_ids.contains(&path_id) {
                     context.skip = true;
                     skipped += 1;
                 }
             }
             debug!(
-                "test filter {:?}: skipped {} non-matching testbench files",
-                filter, skipped
+                "test filter {:?}: skipped {} non-matching testbench files, unskipped {} matching ones",
+                test_filter, skipped, unskipped
             );
         }
 
@@ -246,6 +283,12 @@ impl CmdBuild {
         debug!("Executed filelist ({} milliseconds)", stopwatch.lap());
 
         let _ = check_error.check_err()?;
+
+        if let Some(x) = incremental.as_mut() {
+            x.save();
+            debug!("Saved fragment cache ({} milliseconds)", stopwatch.lap());
+        }
+
         Ok(all_pass)
     }
 
@@ -555,6 +598,221 @@ exclude_std = true
             filelist_text
                 .lines()
                 .any(|line| line == relative_path.to_string_lossy())
+        );
+    }
+
+    const INC_FILE_A: &str = r#"
+    package PackageA {
+        const WIDTH: u32 = 8;
+    }
+    "#;
+
+    const INC_FILE_B: &str = r#"
+    module ModuleB (
+        o_dat: output logic<PackageA::WIDTH>,
+    ) {
+        assign o_dat = 0;
+    }
+    "#;
+
+    const INC_FILE_B2: &str = r#"
+    module ModuleB (
+        o_dat: output logic<PackageA::WIDTH>,
+    ) {
+        assign o_dat = 1;
+    }
+
+    module ModuleB2 (
+        o_dat: output logic<PackageA::WIDTH>,
+    ) {
+        inst u0: ModuleB (o_dat);
+    }
+    "#;
+
+    fn create_incremental_project(root: &Path, name: &str) -> (Metadata, PathBuf) {
+        let project_path = root.join(name);
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        fs::write(
+            project_path.join("Veryl.toml"),
+            format!(
+                r#"[project]
+name = "{name}"
+version = "0.1.0"
+
+[build]
+sources = ["src"]
+target = {{type = "directory", path = "target"}}
+sourcemap_target = {{type = "none"}}
+exclude_std = true
+incremental = true
+"#
+            ),
+        )
+        .unwrap();
+        fs::write(src_path.join("a.veryl"), INC_FILE_A).unwrap();
+        fs::write(src_path.join("b.veryl"), INC_FILE_B).unwrap();
+
+        let mut metadata = Metadata::load(project_path.join("Veryl.toml")).unwrap();
+        // What main.rs records after a build; required for any restore.
+        metadata.build_info.veryl_version = Some(veryl_metadata::VERYL_VERSION.to_string());
+        (metadata, project_path)
+    }
+
+    #[test]
+    fn incremental_build_restores_fragments_and_matches_cold_output() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_incremental_project(tempdir.path(), "incremental");
+
+        // Cold build: populates the cache, restores nothing.
+        run_build(&mut metadata, None);
+        assert_eq!(crate::incremental::last_restored_count(), 0);
+        assert!(project_path.join(".build/cache/manifest.toml").exists());
+        let cold_a = fs::read_to_string(project_path.join("target/a.sv")).unwrap();
+        let cold_b = fs::read_to_string(project_path.join("target/b.sv")).unwrap();
+
+        // Warm build with no changes: everything is restored, outputs stay.
+        run_build(&mut metadata, None);
+        assert_eq!(crate::incremental::last_restored_count(), 2);
+        assert_eq!(
+            fs::read_to_string(project_path.join("target/a.sv")).unwrap(),
+            cold_a
+        );
+        assert_eq!(
+            fs::read_to_string(project_path.join("target/b.sv")).unwrap(),
+            cold_b
+        );
+
+        // Change b.veryl: a.veryl is restored, and b's pass2/emit resolve
+        // PackageA through the restored symbols.
+        fs::write(project_path.join("src/b.veryl"), INC_FILE_B2).unwrap();
+        run_build(&mut metadata, None);
+        assert_eq!(crate::incremental::last_restored_count(), 1);
+        let warm_b = fs::read_to_string(project_path.join("target/b.sv")).unwrap();
+        assert!(warm_b.contains("ModuleB2"));
+        assert_eq!(
+            fs::read_to_string(project_path.join("target/a.sv")).unwrap(),
+            cold_a
+        );
+
+        // The warm output must match a from-scratch build of the same
+        // sources (same project name in a separate root, because the
+        // project name prefixes emitted module names).
+        let cold_tempdir = tempfile::tempdir().unwrap();
+        let (mut cold_metadata, cold_path) =
+            create_incremental_project(cold_tempdir.path(), "incremental");
+        fs::write(cold_path.join("src/b.veryl"), INC_FILE_B2).unwrap();
+        run_build(&mut cold_metadata, None);
+        assert_eq!(
+            fs::read_to_string(cold_path.join("target/b.sv")).unwrap(),
+            warm_b
+        );
+    }
+
+    #[test]
+    fn incremental_build_change_in_dependency_rebuilds_dependents() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_incremental_project(tempdir.path(), "incremental_dep");
+
+        run_build(&mut metadata, None);
+
+        // Changing the package invalidates its dependent b.veryl too.
+        fs::write(
+            project_path.join("src/a.veryl"),
+            INC_FILE_A.replace("8", "16"),
+        )
+        .unwrap();
+        run_build(&mut metadata, None);
+        assert_eq!(crate::incremental::last_restored_count(), 0);
+        let b = fs::read_to_string(project_path.join("target/b.sv")).unwrap();
+        assert!(b.contains("WIDTH"));
+    }
+
+    const INC_FILE_T: &str = r#"
+    #[test(test_modb)]
+    module test_modb {
+        var d: logic<PackageA::WIDTH>;
+
+        inst u0: ModuleB (
+            o_dat: d,
+        );
+    }
+    "#;
+
+    fn run_build_with_ir(metadata: &mut Metadata) -> veryl_analyzer::ir::Ir {
+        Analyzer::new(metadata).clear();
+
+        let build = CmdBuild::new(OptBuild {
+            files: Vec::new(),
+            check: false,
+            out_dir: None,
+        });
+        let mut ir = veryl_analyzer::ir::Ir::default();
+        build
+            .exec(metadata, true, true, Some(&mut ir), None, &[])
+            .expect("build should succeed");
+
+        Analyzer::new(metadata).clear();
+        ir
+    }
+
+    fn ir_module_names(ir: &veryl_analyzer::ir::Ir) -> Vec<String> {
+        ir.components
+            .iter()
+            .filter_map(|x| match x {
+                veryl_analyzer::ir::Component::Module(m) => Some(m.name.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn incremental_test_build_keeps_test_ir() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_incremental_project(tempdir.path(), "incremental_test");
+        fs::write(project_path.join("src/t.veryl"), INC_FILE_T).unwrap();
+
+        // Cold build with a caller-supplied IR (the `veryl test` path).
+        let ir = run_build_with_ir(&mut metadata);
+        assert!(ir_module_names(&ir).iter().any(|x| x == "test_modb"));
+
+        // Warm build: a.veryl/b.veryl are restored, but the test file must
+        // be re-analyzed so the simulated top stays in the IR (it
+        // elaborates its instance tree from the restored definitions).
+        let ir = run_build_with_ir(&mut metadata);
+        assert_eq!(crate::incremental::last_restored_count(), 2);
+        assert!(ir_module_names(&ir).iter().any(|x| x == "test_modb"));
+    }
+
+    #[test]
+    fn incremental_build_corrupt_cache_falls_back() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_incremental_project(tempdir.path(), "incremental_corrupt");
+
+        run_build(&mut metadata, None);
+        let cold_b = fs::read_to_string(project_path.join("target/b.sv")).unwrap();
+
+        // Truncate every fragment blob; restore must fall back cleanly.
+        let fragments = project_path.join(".build/cache/fragments");
+        for dir in fs::read_dir(&fragments).unwrap().flatten() {
+            for file in fs::read_dir(dir.path()).unwrap().flatten() {
+                fs::write(file.path(), b"garbage").unwrap();
+            }
+        }
+        run_build(&mut metadata, None);
+        assert_eq!(crate::incremental::last_restored_count(), 0);
+        assert_eq!(
+            fs::read_to_string(project_path.join("target/b.sv")).unwrap(),
+            cold_b
         );
     }
 }

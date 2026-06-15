@@ -19,6 +19,7 @@ pub mod cmd_update;
 pub mod context;
 pub mod diff;
 pub mod doc;
+pub mod incremental;
 pub mod runner;
 pub mod stopwatch;
 pub mod utils;

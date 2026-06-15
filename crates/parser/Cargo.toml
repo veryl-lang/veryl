@@ -21,7 +21,11 @@ parol_runtime = {workspace = true}
 paste         = {workspace = true}
 regex         = {workspace = true}
 scnr2         = {workspace = true}
+serde         = {workspace = true}
 thiserror     = {workspace = true}
+
+[dev-dependencies]
+postcard      = {workspace = true}
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 miette        = {workspace = true, features = ["fancy-no-syscall"]}

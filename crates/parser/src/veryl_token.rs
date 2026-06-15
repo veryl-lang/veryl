@@ -5,9 +5,10 @@ use crate::veryl_grammar_trait::*;
 use once_cell::sync::Lazy;
 use paste::paste;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum TokenSource {
     File { path: PathId, text: TextId },
     Builtin,
@@ -79,7 +80,7 @@ impl TokenSource {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Token {
     pub id: TokenId,
     pub text: StrId,
@@ -199,7 +200,7 @@ impl From<Token> for miette::SourceSpan {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerylToken {
     pub token: Token,
     pub comments: Vec<Token>,

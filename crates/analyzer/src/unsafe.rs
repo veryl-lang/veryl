@@ -1,8 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Unsafe {
     Cdc,
 }

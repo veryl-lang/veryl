@@ -2,8 +2,11 @@ use crate::resource_table::{PathId, TokenId};
 use crate::veryl_grammar_trait::*;
 use crate::veryl_token::{Token, TokenSource, VerylToken};
 use paste::paste;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 pub struct TokenRange {
     pub beg: Token,
     pub end: Token,

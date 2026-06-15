@@ -1,11 +1,12 @@
 use crate::ir::{Comptime, Shape, Type, TypeKind, ValueVariant};
 use crate::value::{Value, string_to_byte_value};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Literal {
     Value(Value),
     Type(TypeLiteral),
@@ -69,7 +70,7 @@ impl fmt::Display for Literal {
 
 impl Literal {}
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TypeLiteral {
     Bit,
     BBool,

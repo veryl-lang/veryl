@@ -38,6 +38,7 @@ impl VerylWalker for AnalyzerPass1 {
     }
 }
 
+#[derive(Clone)]
 pub struct Analyzer {
     project_name: String,
     build_opt: Build,

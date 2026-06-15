@@ -8,12 +8,13 @@ use crate::{HashMap, HashSet};
 use bimap::BiMap;
 use daggy::petgraph::visit::Dfs;
 use daggy::{Dag, NodeIndex, Walker, petgraph::algo};
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
 use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_token::Token;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TypeDagCandidate {
     Path {
         path: Box<GenericSymbolPath>,
@@ -66,7 +67,7 @@ pub struct TypeResolveInfo {
     pub token: Token,
 }
 
-#[derive(Default, Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Context {
     #[default]
     Irrelevant,
@@ -618,6 +619,17 @@ thread_local!(static TYPE_DAG: RefCell<TypeDag> = RefCell::new(TypeDag::new()));
 
 pub fn add(cand: TypeDagCandidate) {
     TYPE_DAG.with(|f| f.borrow_mut().add(cand))
+}
+
+/// Returns the current number of pending candidates. Used as a watermark
+/// to delimit one file's pass1 additions for fragment caching.
+pub fn candidates_len() -> usize {
+    TYPE_DAG.with(|f| f.borrow().candidates.len())
+}
+
+/// Exports the candidates added since the given watermark.
+pub fn export_candidates_since(watermark: usize) -> Vec<TypeDagCandidate> {
+    TYPE_DAG.with(|f| f.borrow().candidates[watermark..].to_vec())
 }
 
 pub fn apply() -> Vec<AnalyzerError> {

@@ -16,6 +16,31 @@ pub fn new_text_id() -> TextId {
     })
 }
 
+/// Returns the last issued text ID value. Used to delimit per-file ID
+/// windows for fragment caching.
+pub fn peek_text_id() -> usize {
+    TEXT_ID.with(|f| *f.borrow())
+}
+
+/// Reserves `count` consecutive text IDs and returns the value the counter
+/// had before the reservation. The reserved IDs are `base+1..=base+count`.
+pub fn reserve_text_ids(count: usize) -> usize {
+    TEXT_ID.with(|f| {
+        let mut ret = f.borrow_mut();
+        let base = *ret;
+        *ret += count;
+        base
+    })
+}
+
+/// Inserts a text entry under a caller-provided (reserved) ID without
+/// touching `current_text`. Used by fragment restore.
+pub fn insert_with_id(id: TextId, info: TextInfo) {
+    TEXT_TABLE.with(|f| {
+        f.borrow_mut().table.insert(id, Arc::new(info));
+    })
+}
+
 #[derive(Clone, Debug)]
 pub struct TextInfo {
     pub text: String,
