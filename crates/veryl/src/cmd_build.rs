@@ -61,10 +61,11 @@ impl CmdBuild {
         // The fragment cache replaces parse + pass1 for unchanged files,
         // which therefore never reach pass2/emit. A caller-supplied IR
         // needs pass2 of every file, so the cache stays off there.
-        let mut incremental = if ir.is_none() {
-            Incremental::open(metadata, &paths, defines)
-        } else {
+        let ir_requested = ir.is_some();
+        let mut incremental = if ir_requested {
             None
+        } else {
+            Incremental::open(metadata, &paths, defines)
         };
 
         let analyzer = Analyzer::new(metadata);
@@ -122,32 +123,38 @@ impl CmdBuild {
         }
 
         // Testbench files whose tests don't match `--test` will never be
-        // simulated, so skip pass2/emit for them.
-        if let Some(filter) = test_filter {
+        // simulated, so skip pass2/emit for them. Conversely, files whose
+        // tests WILL be simulated must not stay skipped (check_skip may
+        // have marked them unmodified): the simulator takes their top
+        // component from the IR, which only pass2 produces.
+        if ir_requested {
             let tests = veryl_analyzer::symbol_table::get_tests(&metadata.project.name);
             let mut test_file_ids: HashSet<PathId> = HashSet::new();
             let mut matching_file_ids: HashSet<PathId> = HashSet::new();
             for (name, prop) in &tests {
                 test_file_ids.insert(prop.path);
                 let name = name.to_string();
-                if name.contains(filter) {
+                if test_filter.is_none_or(|filter| name.contains(filter)) {
                     matching_file_ids.insert(prop.path);
                 }
             }
             let mut skipped = 0usize;
+            let mut unskipped = 0usize;
             for context in contexts.iter_mut() {
-                if context.skip {
-                    continue;
-                }
                 let path_id = resource_table::insert_path(&context.path.src);
-                if test_file_ids.contains(&path_id) && !matching_file_ids.contains(&path_id) {
+                if matching_file_ids.contains(&path_id) {
+                    if context.skip {
+                        context.skip = false;
+                        unskipped += 1;
+                    }
+                } else if !context.skip && test_file_ids.contains(&path_id) {
                     context.skip = true;
                     skipped += 1;
                 }
             }
             debug!(
-                "test filter {:?}: skipped {} non-matching testbench files",
-                filter, skipped
+                "test filter {:?}: skipped {} non-matching testbench files, unskipped {} matching ones",
+                test_filter, skipped, unskipped
             );
         }
 
