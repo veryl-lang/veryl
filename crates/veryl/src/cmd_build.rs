@@ -59,14 +59,14 @@ impl CmdBuild {
         let mut stopwatch = StopWatch::new();
 
         // The fragment cache replaces parse + pass1 for unchanged files,
-        // which therefore never reach pass2/emit. A caller-supplied IR
-        // needs pass2 of every file, so the cache stays off there.
+        // which therefore never reach pass2/emit. When the caller needs
+        // the IR for simulation (`veryl test`), files containing selected
+        // tests are forced into the miss set: pass2 of a test file alone
+        // elaborates its whole instance tree from the definition_table,
+        // which restored fragments populate as well.
         let ir_requested = ir.is_some();
-        let mut incremental = if ir_requested {
-            None
-        } else {
-            Incremental::open(metadata, &paths, defines)
-        };
+        let selected_tests = ir_requested.then_some(test_filter);
+        let mut incremental = Incremental::open(metadata, &paths, defines, selected_tests);
 
         let analyzer = Analyzer::new(metadata);
 
@@ -731,6 +731,64 @@ incremental = true
         assert_eq!(crate::incremental::last_restored_count(), 0);
         let b = fs::read_to_string(project_path.join("target/b.sv")).unwrap();
         assert!(b.contains("WIDTH"));
+    }
+
+    const INC_FILE_T: &str = r#"
+    #[test(test_modb)]
+    module test_modb {
+        var d: logic<PackageA::WIDTH>;
+
+        inst u0: ModuleB (
+            o_dat: d,
+        );
+    }
+    "#;
+
+    fn run_build_with_ir(metadata: &mut Metadata) -> veryl_analyzer::ir::Ir {
+        Analyzer::new(metadata).clear();
+
+        let build = CmdBuild::new(OptBuild {
+            files: Vec::new(),
+            check: false,
+            out_dir: None,
+        });
+        let mut ir = veryl_analyzer::ir::Ir::default();
+        build
+            .exec(metadata, true, true, Some(&mut ir), None, &[])
+            .expect("build should succeed");
+
+        Analyzer::new(metadata).clear();
+        ir
+    }
+
+    fn ir_module_names(ir: &veryl_analyzer::ir::Ir) -> Vec<String> {
+        ir.components
+            .iter()
+            .filter_map(|x| match x {
+                veryl_analyzer::ir::Component::Module(m) => Some(m.name.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn incremental_test_build_keeps_test_ir() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_incremental_project(tempdir.path(), "incremental_test");
+        fs::write(project_path.join("src/t.veryl"), INC_FILE_T).unwrap();
+
+        // Cold build with a caller-supplied IR (the `veryl test` path).
+        let ir = run_build_with_ir(&mut metadata);
+        assert!(ir_module_names(&ir).iter().any(|x| x == "test_modb"));
+
+        // Warm build: a.veryl/b.veryl are restored, but the test file must
+        // be re-analyzed so the simulated top stays in the IR (it
+        // elaborates its instance tree from the restored definitions).
+        let ir = run_build_with_ir(&mut metadata);
+        assert_eq!(crate::incremental::last_restored_count(), 2);
+        assert!(ir_module_names(&ir).iter().any(|x| x == "test_modb"));
     }
 
     #[test]

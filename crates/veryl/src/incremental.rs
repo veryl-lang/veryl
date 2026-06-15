@@ -50,7 +50,16 @@ impl Drop for Incremental {
 impl Incremental {
     /// Opens the store and computes the miss set. Returns `None` when
     /// incremental builds are disabled.
-    pub fn open(metadata: &Metadata, paths: &[PathSet], defines: &[String]) -> Option<Incremental> {
+    ///
+    /// `selected_tests`: `None` for a plain build, `Some(filter)` when the
+    /// caller simulates the matching tests (`None` filter = all). Files with
+    /// a selected test are forced to miss so their pass2 IR is available.
+    pub fn open(
+        metadata: &Metadata,
+        paths: &[PathSet],
+        defines: &[String],
+        selected_tests: Option<Option<&str>>,
+    ) -> Option<Incremental> {
         if !metadata.build.incremental {
             return None;
         }
@@ -76,11 +85,17 @@ impl Incremental {
             };
             let hash = veryl_cache::content_hash(input.as_bytes());
 
+            let entry = store.entry(&path.src.to_string_lossy());
+            let has_selected_test = match selected_tests {
+                None => false,
+                Some(filter) => entry
+                    .is_some_and(|x| x.tests.iter().any(|t| filter.is_none_or(|f| t.contains(f)))),
+            };
+
             let hit = version_match
-                && store
-                    .entry(&path.src.to_string_lossy())
-                    .is_some_and(|x| x.hash == hash && x.fragment.is_some())
-                && !Self::dst_is_stale(metadata, path);
+                && entry.is_some_and(|x| x.hash == hash && x.fragment.is_some())
+                && !Self::dst_is_stale(metadata, path)
+                && !has_selected_test;
             if !hit {
                 miss.insert(path.src.clone());
             }
@@ -209,8 +224,8 @@ impl Incremental {
         self.store.put(src, hash, blob.as_deref());
     }
 
-    /// Records the dependency map of this build and persists the manifest.
-    /// Call only after a successful build.
+    /// Records the dependency map and per-file test names of this build
+    /// and persists the manifest. Call only after a successful build.
     pub fn save(&mut self) {
         let dependent_files = type_dag::dependent_files();
         for (path, dependents) in dependent_files {
@@ -224,6 +239,17 @@ impl Incremental {
                 .collect();
             self.store
                 .set_dependents(&src.to_string_lossy(), dependents);
+        }
+
+        // Only the root project's tests are ever simulated.
+        let mut tests: HashMap<PathBuf, Vec<String>> = HashMap::new();
+        for (name, property) in symbol_table::get_tests(&self.root_project) {
+            if let Some(src) = resource_table::get_path_value(property.path) {
+                tests.entry(src).or_default().push(name.to_string());
+            }
+        }
+        for (src, names) in tests {
+            self.store.set_tests(&src.to_string_lossy(), names);
         }
 
         self.store.save();
