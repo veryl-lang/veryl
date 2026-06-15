@@ -8,6 +8,7 @@ use crate::symbol::{
 };
 use crate::symbol_table;
 use crate::{SVec, svec};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use veryl_parser::resource_table::{self, PathId, StrId};
@@ -15,7 +16,7 @@ use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::{Token, TokenSource, is_anonymous_token};
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SymbolPath(pub SVec<StrId>);
 
 impl SymbolPath {
@@ -140,7 +141,7 @@ impl From<&str> for SymbolPath {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
 
 impl SymbolPathNamespace {
@@ -281,7 +282,7 @@ impl From<&GenericSymbolPath> for SymbolPathNamespace {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenericSymbolPathNamespace(pub GenericSymbolPath, pub Namespace);
 
 impl From<(&GenericSymbolPath, &Namespace)> for GenericSymbolPathNamespace {
@@ -291,7 +292,7 @@ impl From<(&GenericSymbolPath, &Namespace)> for GenericSymbolPathNamespace {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum GenericSymbolPathKind {
     Identifier,
     TypeLiteral,
@@ -311,14 +312,14 @@ impl fmt::Display for GenericSymbolPathKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct GenericSymbolPath {
     pub paths: Vec<GenericSymbol>,
     pub kind: GenericSymbolPathKind,
     pub range: TokenRange,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct GenericSymbol {
     pub base: Token,
     pub arguments: Vec<GenericSymbolPath>,

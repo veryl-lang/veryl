@@ -1,5 +1,6 @@
 pub mod doc_comment_table;
 pub mod finder;
+pub mod fragment_codec;
 pub mod generated;
 pub mod parser;
 pub mod parser_error;

@@ -12,6 +12,7 @@ use crate::namespace_table;
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use crate::symbol_table::{self, Import};
 use crate::value::Value;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::fmt;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -35,14 +36,31 @@ pub fn new_symbol_id() -> SymbolId {
     })
 }
 
+/// Returns the last issued symbol ID value. Used to delimit per-file ID
+/// windows for fragment caching.
+pub fn peek_symbol_id() -> usize {
+    SYMBOL_ID.with(|f| *f.borrow())
+}
+
+/// Reserves `count` consecutive symbol IDs and returns the value the counter
+/// had before the reservation. The reserved IDs are `base+1..=base+count`.
+pub fn reserve_symbol_ids(count: usize) -> usize {
+    SYMBOL_ID.with(|f| {
+        let mut ret = f.borrow_mut();
+        let base = *ret;
+        *ret += count;
+        base
+    })
+}
+
 /// A single line of a doc comment with its source line number.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocCommentLine {
     pub text: StrId,
     pub line: u32,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DocComment(pub Vec<DocCommentLine>);
 
 impl DocComment {
@@ -146,7 +164,7 @@ impl WavedromBlock {
 pub type GenericTable = HashMap<StrId, GenericSymbolPath>;
 pub type GenericTables = HashMap<Namespace, GenericTable>;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GenericMap {
     pub id: Option<SymbolId>,
     pub map: GenericTable,
@@ -219,7 +237,7 @@ impl fmt::Display for GenericMap {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Symbol {
     pub token: Token,
     pub id: SymbolId,
@@ -953,7 +971,7 @@ impl Symbol {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SymbolKind {
     Port(PortProperty),
     Variable(VariableProperty),
@@ -1333,7 +1351,7 @@ impl fmt::Display for SymbolKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Direction {
     Input,
     Output,
@@ -1387,7 +1405,7 @@ impl From<&syntax_tree::Direction> for Direction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Type {
     pub modifier: Vec<TypeModifier>,
     pub kind: TypeKind,
@@ -1695,7 +1713,7 @@ fn try_syntax_expr_to_param_width(expr: &syntax_tree::Expression) -> Option<ir::
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TypeKind {
     Clock,
     ClockPosedge,
@@ -1808,7 +1826,7 @@ impl TypeKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserDefinedType {
     pub path: GenericSymbolPath,
     // TODO remove this field because actual UserDefinedType should be resolved with replacing
@@ -1823,14 +1841,14 @@ impl From<&syntax_tree::ScopedIdentifier> for UserDefinedType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TypeModifierKind {
     Tri,
     Signed,
     Default,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeModifier {
     pub kind: TypeModifierKind,
     pub token: VerylToken,
@@ -2208,7 +2226,9 @@ impl From<&syntax_tree::GenericProtoBound> for Type {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 pub enum ClockDomain {
     Explicit(SymbolId),
     Inferred(SymbolId),
@@ -2265,7 +2285,7 @@ impl fmt::Display for ClockDomain {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VariableProperty {
     pub r#type: Type,
     pub affiliation: Affiliation,
@@ -2275,7 +2295,7 @@ pub struct VariableProperty {
     pub loop_variable: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Affiliation {
     ProjectNamespace,
     Module,
@@ -2291,7 +2311,7 @@ pub enum Affiliation {
     AlwaysFf,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortProperty {
     pub token: Token,
     pub r#type: Type,
@@ -2303,7 +2323,7 @@ pub struct PortProperty {
     pub is_proto: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Port {
     pub token: VerylToken,
     pub symbol: SymbolId,
@@ -2334,7 +2354,7 @@ impl Port {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ParameterKind {
     Param,
     Const,
@@ -2363,7 +2383,7 @@ impl From<&ParameterKind> for ir::VarKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParameterProperty {
     pub token: Token,
     pub r#type: Type,
@@ -2371,13 +2391,13 @@ pub struct ParameterProperty {
     pub value: Option<syntax_tree::Expression>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtoConstProperty {
     pub token: Token,
     pub r#type: Type,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Parameter {
     pub name: StrId,
     pub symbol: SymbolId,
@@ -2400,7 +2420,7 @@ impl Parameter {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleProperty {
     pub range: TokenRange,
     pub proto: Option<GenericSymbolPath>,
@@ -2415,7 +2435,7 @@ pub struct ModuleProperty {
     pub test: Option<TestProperty>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtoModuleProperty {
     pub range: TokenRange,
     pub parameters: Vec<Parameter>,
@@ -2423,12 +2443,12 @@ pub struct ProtoModuleProperty {
     pub definition: DefinitionId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AliasModuleProperty {
     pub target: GenericSymbolPath,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InterfaceProperty {
     pub range: TokenRange,
     pub proto: Option<GenericSymbolPath>,
@@ -2440,19 +2460,19 @@ pub struct InterfaceProperty {
     pub definition: DefinitionId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtoInterfaceProperty {
     pub range: TokenRange,
     pub parameters: Vec<Parameter>,
     pub members: Vec<SymbolId>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AliasInterfaceProperty {
     pub target: GenericSymbolPath,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionProperty {
     pub affiliation: Affiliation,
     pub range: TokenRange,
@@ -2472,18 +2492,18 @@ impl FunctionProperty {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemFuncitonProperty {
     pub ports: Vec<Port>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectTarget {
     pub identifiers: Vec<ConnectTargetIdentifier>,
     pub expression: syntax_tree::Expression,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectTargetIdentifier {
     pub path: Vec<(StrId, Vec<syntax_tree::Expression>)>,
 }
@@ -2533,7 +2553,7 @@ impl From<&syntax_tree::ExpressionIdentifier> for ConnectTargetIdentifier {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceProperty {
     pub array: Vec<syntax_tree::Expression>,
     pub type_name: GenericSymbolPath,
@@ -2542,7 +2562,7 @@ pub struct InstanceProperty {
     pub clock_domain: ClockDomain,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageProperty {
     pub range: TokenRange,
     pub proto: Option<GenericSymbolPath>,
@@ -2552,52 +2572,52 @@ pub struct PackageProperty {
     pub members: Vec<SymbolId>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AliasPackageProperty {
     pub target: GenericSymbolPath,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtoPackageProperty {
     pub range: TokenRange,
     pub members: Vec<SymbolId>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructProperty {
     pub members: Vec<SymbolId>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructMemberProperty {
     pub r#type: Type,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnionProperty {
     pub members: Vec<SymbolId>,
     pub generic_parameters: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnionMemberProperty {
     pub r#type: Type,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeDefProperty {
     pub r#type: Type,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtoTypeDefProperty {
     pub r#type: Option<Type>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnumProperty {
     pub r#type: Option<Type>,
     pub width: usize,
@@ -2605,7 +2625,7 @@ pub struct EnumProperty {
     pub encoding: EnumEncodingItem,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EnumMemberValue {
     ImplicitValue(BigUint),
     ExplicitValue(syntax_tree::Expression, Option<BigUint>),
@@ -2622,20 +2642,20 @@ impl EnumMemberValue {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnumMemberProperty {
     pub value: EnumMemberValue,
     pub prefix: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModportProperty {
     pub interface: SymbolId,
     pub members: Vec<SymbolId>,
     pub default: Option<ModportDefault>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModportDefault {
     Input,
     Output,
@@ -2643,25 +2663,25 @@ pub enum ModportDefault {
     Converse(Vec<Token>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModportVariableMemberProperty {
     pub direction: Direction,
     pub variable: SymbolId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModportFunctionMemberProperty {
     pub function: SymbolId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GenericBoundKind {
     Type,
     Inst(GenericSymbolPath),
     Proto(Box<Type>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProtoBound {
     ProtoModule(Symbol),
     ProtoInterface(Symbol),
@@ -2756,19 +2776,19 @@ impl fmt::Display for GenericBoundKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenericParameterProperty {
     pub bound: GenericBoundKind,
     pub default_value: Option<GenericSymbolPath>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenericConstProperty {
     pub bound: GenericBoundKind,
     pub value: syntax_tree::Expression,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenericInstanceProperty {
     pub base: SymbolId,
     pub arguments: Vec<GenericSymbolPath>,
@@ -2781,7 +2801,7 @@ impl GenericInstanceProperty {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TestType {
     Inline,
     CocotbEmbed(Box<syntax_tree::EmbedContent>),
@@ -2789,7 +2809,7 @@ pub enum TestType {
     Native,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestProperty {
     pub r#type: TestType,
     pub path: PathId,
@@ -2797,7 +2817,7 @@ pub struct TestProperty {
     pub ignored: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TbComponentKind {
     ClockGen,
     ResetGen,
@@ -2812,7 +2832,7 @@ impl std::fmt::Display for TbComponentKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TbComponentProperty {
     pub kind: TbComponentKind,
 }

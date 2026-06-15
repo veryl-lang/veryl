@@ -19,6 +19,7 @@ use crate::{AnalyzerError, HashMap, SVec, namespace_table};
 use connect::check_connect;
 use log::trace;
 use msb::check_msb;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -61,14 +62,14 @@ impl ResolveError {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Import {
     pub path: GenericSymbolPathNamespace,
     pub namespace: Namespace,
     pub wildcard: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Bind {
     pub token: Token,
     pub target: GenericSymbolPathNamespace,
@@ -76,17 +77,40 @@ pub struct Bind {
     pub property: InstanceProperty,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Msb {
     pub token: Token,
     pub path: SymbolPathNamespace,
     pub dimension: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Connect {
     Statement(ExpressionIdentifier, Expression),
     Declaration(HierarchicalIdentifier, Expression),
+}
+
+/// Pending-list lengths captured before one file's pass1; delimits the
+/// file's additions for fragment caching.
+#[derive(Clone, Copy, Debug)]
+pub struct PendingWatermark {
+    import: usize,
+    bind: usize,
+    msb: usize,
+    connect: usize,
+}
+
+/// Everything one file's pass1 wrote into the symbol table, in a
+/// serializable form. Part of the fragment cache payload.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SymbolTableFragment {
+    pub symbols: Vec<Symbol>,
+    pub imports: Vec<Import>,
+    pub binds: Vec<Bind>,
+    pub msbs: Vec<Msb>,
+    pub connects: Vec<Connect>,
+    pub reference_functions: Vec<(SymbolId, Vec<GenericSymbolPath>)>,
+    pub references: Vec<(SymbolId, Vec<Token>)>,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -1173,6 +1197,88 @@ impl SymbolTable {
         }
     }
 
+    /// Records the pending-list lengths before one file's pass1, so the
+    /// file's additions can be exported afterwards for fragment caching.
+    pub fn pending_watermark(&self) -> PendingWatermark {
+        PendingWatermark {
+            import: self.import_list.len(),
+            bind: self.bind_list.len(),
+            msb: self.msb_list.len(),
+            connect: self.connect_list.len(),
+        }
+    }
+
+    /// Exports everything one file's pass1 wrote into the symbol table:
+    /// the symbols in the file's ID window plus the pending entries added
+    /// since the watermark. Must be called before `analyze_post_pass1`
+    /// (which drains the pending lists and mutates symbols).
+    pub fn export_fragment(
+        &self,
+        symbol_window_start: usize,
+        symbol_window_end: usize,
+        watermark: &PendingWatermark,
+    ) -> SymbolTableFragment {
+        let in_window = |id: &SymbolId| id.0 > symbol_window_start && id.0 <= symbol_window_end;
+
+        let mut symbols: Vec<Symbol> = self
+            .symbol_table
+            .iter()
+            .filter(|(id, _)| in_window(id))
+            .map(|(_, symbol)| (**symbol).clone())
+            .collect();
+        symbols.sort_unstable_by_key(|x| x.id);
+
+        let mut reference_functions: Vec<_> = self
+            .reference_func_table
+            .iter()
+            .filter(|(id, _)| in_window(id))
+            .map(|(id, x)| (*id, x.clone()))
+            .collect();
+        reference_functions.sort_unstable_by_key(|(id, _)| *id);
+
+        let mut references: Vec<_> = self
+            .reference_table
+            .iter()
+            .filter(|(id, _)| in_window(id))
+            .map(|(id, x)| (*id, x.clone()))
+            .collect();
+        references.sort_unstable_by_key(|(id, _)| *id);
+
+        SymbolTableFragment {
+            symbols,
+            imports: self.import_list[watermark.import..].to_vec(),
+            binds: self.bind_list[watermark.bind..].to_vec(),
+            msbs: self.msb_list[watermark.msb..].to_vec(),
+            connects: self.connect_list[watermark.connect..].to_vec(),
+            reference_functions,
+            references,
+        }
+    }
+
+    /// Re-inserts a previously exported fragment. Symbol IDs must already
+    /// be rebased onto fresh ranges by the fragment codec. Fails if any
+    /// symbol conflicts with an existing one; the caller is expected to
+    /// fall back to a regular parse + pass1 after `drop`ping the file.
+    pub fn restore_fragment(&mut self, fragment: SymbolTableFragment) -> Result<(), Box<Symbol>> {
+        for symbol in fragment.symbols {
+            let token = symbol.token;
+            if self.insert(&token, symbol.clone()).is_none() {
+                return Err(Box::new(symbol));
+            }
+        }
+        self.import_list.extend(fragment.imports);
+        self.bind_list.extend(fragment.binds);
+        self.msb_list.extend(fragment.msbs);
+        self.connect_list.extend(fragment.connects);
+        for (id, functions) in fragment.reference_functions {
+            self.reference_func_table.insert(id, functions);
+        }
+        for (id, tokens) in fragment.references {
+            self.reference_table.entry(id).or_default().extend(tokens);
+        }
+        Ok(())
+    }
+
     pub fn add_generic_instance(&mut self, target: SymbolId, instance: SymbolId) {
         if let Some(symbol) = self.symbol_table.get_mut(&target).map(Rc::make_mut)
             && !symbol.generic_instances.contains(&instance)
@@ -2143,6 +2249,30 @@ pub fn get_reference_functions(id: SymbolId) -> Option<Vec<GenericSymbolPath>> {
 
 pub fn get_references(id: SymbolId) -> Option<Vec<Token>> {
     SYMBOL_TABLE.with(|f| f.borrow().get_references(id))
+}
+
+/// See [`SymbolTable::pending_watermark`].
+pub fn pending_watermark() -> PendingWatermark {
+    SYMBOL_TABLE.with(|f| f.borrow().pending_watermark())
+}
+
+/// See [`SymbolTable::export_fragment`].
+pub fn export_fragment(
+    symbol_window_start: usize,
+    symbol_window_end: usize,
+    watermark: &PendingWatermark,
+) -> SymbolTableFragment {
+    SYMBOL_TABLE.with(|f| {
+        f.borrow()
+            .export_fragment(symbol_window_start, symbol_window_end, watermark)
+    })
+}
+
+/// See [`SymbolTable::restore_fragment`].
+pub fn restore_fragment(fragment: SymbolTableFragment) -> Result<(), Box<Symbol>> {
+    let ret = SYMBOL_TABLE.with(|f| f.borrow_mut().restore_fragment(fragment));
+    clear_resolve_caches();
+    ret
 }
 
 pub fn clear() {

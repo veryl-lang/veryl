@@ -50,6 +50,11 @@ pub fn get_all() -> Vec<(TokenRange, Attribute)> {
     ATTRIBUTE_TABLE.with(|f| f.borrow().get_all())
 }
 
+/// Exports all entries belonging to one file. Used by fragment caching.
+pub fn export_by_path(path: PathId) -> Vec<(TokenRange, Attribute)> {
+    ATTRIBUTE_TABLE.with(|f| f.borrow().export_by_path(path))
+}
+
 pub fn clear() {
     ATTRIBUTE_TABLE.with(|f| f.borrow_mut().clear())
 }

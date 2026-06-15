@@ -6,6 +6,7 @@ use crate::symbol::{Direction, GenericMap, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
 use veryl_parser::token_range::TokenRange;
@@ -15,7 +16,7 @@ use veryl_parser::veryl_grammar_trait::{
 };
 use veryl_parser::veryl_token::{Token, TokenSource, is_anonymous_text};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ReferenceCandidate {
     Identifier {
         arg: Identifier,
@@ -833,6 +834,17 @@ thread_local!(static REFERENCE_TABLE: RefCell<ReferenceTable> = RefCell::new(Ref
 
 pub fn add(cand: ReferenceCandidate) {
     REFERENCE_TABLE.with(|f| f.borrow_mut().add(cand))
+}
+
+/// Returns the current number of pending candidates. Used as a watermark
+/// to delimit one file's pass1 additions for fragment caching.
+pub fn candidates_len() -> usize {
+    REFERENCE_TABLE.with(|f| f.borrow().candidates.len())
+}
+
+/// Exports the candidates added since the given watermark.
+pub fn export_candidates_since(watermark: usize) -> Vec<ReferenceCandidate> {
+    REFERENCE_TABLE.with(|f| f.borrow().candidates[watermark..].to_vec())
 }
 
 pub fn apply() -> Vec<AnalyzerError> {

@@ -6,12 +6,13 @@ use crate::symbol::SymbolKind;
 use crate::symbol_path::SymbolPath;
 use crate::symbol_table;
 use crate::{HashMap, HashSet, SVec, svec};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_token::{Token, VerylToken};
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DefineContext {
     pos: BTreeSet<StrId>,
     neg: BTreeSet<StrId>,
@@ -94,7 +95,7 @@ impl fmt::Display for DefineContext {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Namespace {
     pub paths: SVec<StrId>,
     pub define_context: DefineContext,

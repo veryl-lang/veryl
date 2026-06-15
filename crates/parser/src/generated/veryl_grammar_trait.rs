@@ -2970,7 +2970,7 @@ pub trait VerylGrammarTrait {
 /// `Number: IntegralNumber;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NumberIntegralNumber {
     pub integral_number: Box<IntegralNumber>,
 }
@@ -2981,7 +2981,7 @@ pub struct NumberIntegralNumber {
 /// `Number: RealNumber;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NumberRealNumber {
     pub real_number: Box<RealNumber>,
 }
@@ -2992,7 +2992,7 @@ pub struct NumberRealNumber {
 /// `IntegralNumber: Based;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IntegralNumberBased {
     pub based: Box<Based>,
 }
@@ -3003,7 +3003,7 @@ pub struct IntegralNumberBased {
 /// `IntegralNumber: BaseLess;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IntegralNumberBaseLess {
     pub base_less: Box<BaseLess>,
 }
@@ -3014,7 +3014,7 @@ pub struct IntegralNumberBaseLess {
 /// `IntegralNumber: AllBit;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IntegralNumberAllBit {
     pub all_bit: Box<AllBit>,
 }
@@ -3025,7 +3025,7 @@ pub struct IntegralNumberAllBit {
 /// `RealNumber: FixedPoint;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RealNumberFixedPoint {
     pub fixed_point: Box<FixedPoint>,
 }
@@ -3036,7 +3036,7 @@ pub struct RealNumberFixedPoint {
 /// `RealNumber: Exponent;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RealNumberExponent {
     pub exponent: Box<Exponent>,
 }
@@ -3047,7 +3047,7 @@ pub struct RealNumberExponent {
 /// `ScopedIdentifierGroup: DollarIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScopedIdentifierGroupDollarIdentifier {
     pub dollar_identifier: Box<DollarIdentifier>,
 }
@@ -3058,7 +3058,7 @@ pub struct ScopedIdentifierGroupDollarIdentifier {
 /// `ScopedIdentifierGroup: Identifier ScopedIdentifierOpt /* Option */;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScopedIdentifierGroupIdentifierScopedIdentifierOpt {
     pub identifier: Box<Identifier>,
     pub scoped_identifier_opt: Option<ScopedIdentifierOpt>,
@@ -3070,7 +3070,7 @@ pub struct ScopedIdentifierGroupIdentifierScopedIdentifierOpt {
 /// `Expression01Op: Operator01;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01OpOperator01 {
     pub operator01: Box<Operator01>,
 }
@@ -3081,7 +3081,7 @@ pub struct Expression01OpOperator01 {
 /// `Expression01Op: Operator02;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01OpOperator02 {
     pub operator02: Box<Operator02>,
 }
@@ -3092,7 +3092,7 @@ pub struct Expression01OpOperator02 {
 /// `Expression01Op: Operator03;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01OpOperator03 {
     pub operator03: Box<Operator03>,
 }
@@ -3103,7 +3103,7 @@ pub struct Expression01OpOperator03 {
 /// `Expression01Op: Operator04;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01OpOperator04 {
     pub operator04: Box<Operator04>,
 }
@@ -3114,7 +3114,7 @@ pub struct Expression01OpOperator04 {
 /// `Expression01Op: Operator05;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01OpOperator05 {
     pub operator05: Box<Operator05>,
 }
@@ -3125,7 +3125,7 @@ pub struct Expression01OpOperator05 {
 /// `Expression01Op: Operator06;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01OpOperator06 {
     pub operator06: Box<Operator06>,
 }
@@ -3136,7 +3136,7 @@ pub struct Expression01OpOperator06 {
 /// `Expression01Op: Operator07;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01OpOperator07 {
     pub operator07: Box<Operator07>,
 }
@@ -3147,7 +3147,7 @@ pub struct Expression01OpOperator07 {
 /// `Expression01Op: Star;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01OpStar {
     pub star: Box<Star>,
 }
@@ -3158,7 +3158,7 @@ pub struct Expression01OpStar {
 /// `Expression01Op: Operator08;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01OpOperator08 {
     pub operator08: Box<Operator08>,
 }
@@ -3169,7 +3169,7 @@ pub struct Expression01OpOperator08 {
 /// `Expression02Op: UnaryOperator;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression02OpUnaryOperator {
     pub unary_operator: Box<UnaryOperator>,
 }
@@ -3180,7 +3180,7 @@ pub struct Expression02OpUnaryOperator {
 /// `Expression02Op: Operator06;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression02OpOperator06 {
     pub operator06: Box<Operator06>,
 }
@@ -3191,7 +3191,7 @@ pub struct Expression02OpOperator06 {
 /// `Expression02Op: Operator05;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression02OpOperator05 {
     pub operator05: Box<Operator05>,
 }
@@ -3202,7 +3202,7 @@ pub struct Expression02OpOperator05 {
 /// `Expression02Op: Operator03;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression02OpOperator03 {
     pub operator03: Box<Operator03>,
 }
@@ -3213,7 +3213,7 @@ pub struct Expression02OpOperator03 {
 /// `Expression02Op: Operator04;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression02OpOperator04 {
     pub operator04: Box<Operator04>,
 }
@@ -3224,7 +3224,7 @@ pub struct Expression02OpOperator04 {
 /// `Factor: Number;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorNumber {
     pub number: Box<Number>,
 }
@@ -3235,7 +3235,7 @@ pub struct FactorNumber {
 /// `Factor: BooleanLiteral;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorBooleanLiteral {
     pub boolean_literal: Box<BooleanLiteral>,
 }
@@ -3246,7 +3246,7 @@ pub struct FactorBooleanLiteral {
 /// `Factor: IdentifierFactor;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorIdentifierFactor {
     pub identifier_factor: Box<IdentifierFactor>,
 }
@@ -3257,7 +3257,7 @@ pub struct FactorIdentifierFactor {
 /// `Factor: LParen Expression RParen;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorLParenExpressionRParen {
     pub l_paren: Box<LParen>,
     pub expression: Box<Expression>,
@@ -3270,7 +3270,7 @@ pub struct FactorLParenExpressionRParen {
 /// `Factor: LBrace ConcatenationList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorLBraceConcatenationListRBrace {
     pub l_brace: Box<LBrace>,
     pub concatenation_list: Box<ConcatenationList>,
@@ -3283,7 +3283,7 @@ pub struct FactorLBraceConcatenationListRBrace {
 /// `Factor: QuoteLBrace ArrayLiteralList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorQuoteLBraceArrayLiteralListRBrace {
     pub quote_l_brace: Box<QuoteLBrace>,
     pub array_literal_list: Box<ArrayLiteralList>,
@@ -3296,7 +3296,7 @@ pub struct FactorQuoteLBraceArrayLiteralListRBrace {
 /// `Factor: CaseExpression;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorCaseExpression {
     pub case_expression: Box<CaseExpression>,
 }
@@ -3307,7 +3307,7 @@ pub struct FactorCaseExpression {
 /// `Factor: SwitchExpression;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorSwitchExpression {
     pub switch_expression: Box<SwitchExpression>,
 }
@@ -3318,7 +3318,7 @@ pub struct FactorSwitchExpression {
 /// `Factor: StringLiteral;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorStringLiteral {
     pub string_literal: Box<StringLiteral>,
 }
@@ -3329,7 +3329,7 @@ pub struct FactorStringLiteral {
 /// `Factor: FactorGroup;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorFactorGroup {
     pub factor_group: Box<FactorGroup>,
 }
@@ -3340,7 +3340,7 @@ pub struct FactorFactorGroup {
 /// `FactorGroup: Msb;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorGroupMsb {
     pub msb: Box<Msb>,
 }
@@ -3351,7 +3351,7 @@ pub struct FactorGroupMsb {
 /// `FactorGroup: Lsb;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorGroupLsb {
     pub lsb: Box<Lsb>,
 }
@@ -3362,7 +3362,7 @@ pub struct FactorGroupLsb {
 /// `Factor: InsideExpression;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorInsideExpression {
     pub inside_expression: Box<InsideExpression>,
 }
@@ -3373,7 +3373,7 @@ pub struct FactorInsideExpression {
 /// `Factor: OutsideExpression;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorOutsideExpression {
     pub outside_expression: Box<OutsideExpression>,
 }
@@ -3384,7 +3384,7 @@ pub struct FactorOutsideExpression {
 /// `Factor: TypeExpression;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorTypeExpression {
     pub type_expression: Box<TypeExpression>,
 }
@@ -3395,7 +3395,7 @@ pub struct FactorTypeExpression {
 /// `Factor: FactorTypeFactor;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorFactorTypeFactor {
     pub factor_type_factor: Box<FactorTypeFactor>,
 }
@@ -3406,7 +3406,7 @@ pub struct FactorFactorTypeFactor {
 /// `BooleanLiteral: True;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BooleanLiteralTrue {
     pub r#true: Box<True>,
 }
@@ -3417,7 +3417,7 @@ pub struct BooleanLiteralTrue {
 /// `BooleanLiteral: False;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BooleanLiteralFalse {
     pub r#false: Box<False>,
 }
@@ -3428,7 +3428,7 @@ pub struct BooleanLiteralFalse {
 /// `IdentifierFactorOptGroup: FunctionCall;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentifierFactorOptGroupFunctionCall {
     pub function_call: Box<FunctionCall>,
 }
@@ -3439,7 +3439,7 @@ pub struct IdentifierFactorOptGroupFunctionCall {
 /// `IdentifierFactorOptGroup: StructConstructor;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentifierFactorOptGroupStructConstructor {
     pub struct_constructor: Box<StructConstructor>,
 }
@@ -3450,7 +3450,7 @@ pub struct IdentifierFactorOptGroupStructConstructor {
 /// `ArrayLiteralItemGroup: Expression ArrayLiteralItemOpt /* Option */;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArrayLiteralItemGroupExpressionArrayLiteralItemOpt {
     pub expression: Box<Expression>,
     pub array_literal_item_opt: Option<ArrayLiteralItemOpt>,
@@ -3462,7 +3462,7 @@ pub struct ArrayLiteralItemGroupExpressionArrayLiteralItemOpt {
 /// `ArrayLiteralItemGroup: Defaul Colon Expression;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArrayLiteralItemGroupDefaulColonExpression {
     pub defaul: Box<Defaul>,
     pub colon: Box<Colon>,
@@ -3475,7 +3475,7 @@ pub struct ArrayLiteralItemGroupDefaulColonExpression {
 /// `SelectOperator: Colon;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SelectOperatorColon {
     pub colon: Box<Colon>,
 }
@@ -3486,7 +3486,7 @@ pub struct SelectOperatorColon {
 /// `SelectOperator: PlusColon;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SelectOperatorPlusColon {
     pub plus_colon: Box<PlusColon>,
 }
@@ -3497,7 +3497,7 @@ pub struct SelectOperatorPlusColon {
 /// `SelectOperator: MinusColon;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SelectOperatorMinusColon {
     pub minus_colon: Box<MinusColon>,
 }
@@ -3508,7 +3508,7 @@ pub struct SelectOperatorMinusColon {
 /// `SelectOperator: Step;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SelectOperatorStep {
     pub step: Box<Step>,
 }
@@ -3519,7 +3519,7 @@ pub struct SelectOperatorStep {
 /// `RangeOperator: DotDot;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RangeOperatorDotDot {
     pub dot_dot: Box<DotDot>,
 }
@@ -3530,7 +3530,7 @@ pub struct RangeOperatorDotDot {
 /// `RangeOperator: DotDotEqu;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RangeOperatorDotDotEqu {
     pub dot_dot_equ: Box<DotDotEqu>,
 }
@@ -3541,7 +3541,7 @@ pub struct RangeOperatorDotDotEqu {
 /// `FixedType: P8;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeP8 {
     pub p8: Box<P8>,
 }
@@ -3552,7 +3552,7 @@ pub struct FixedTypeP8 {
 /// `FixedType: P16;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeP16 {
     pub p16: Box<P16>,
 }
@@ -3563,7 +3563,7 @@ pub struct FixedTypeP16 {
 /// `FixedType: P32;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeP32 {
     pub p32: Box<P32>,
 }
@@ -3574,7 +3574,7 @@ pub struct FixedTypeP32 {
 /// `FixedType: P64;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeP64 {
     pub p64: Box<P64>,
 }
@@ -3585,7 +3585,7 @@ pub struct FixedTypeP64 {
 /// `FixedType: U8;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeU8 {
     pub u8: Box<U8>,
 }
@@ -3596,7 +3596,7 @@ pub struct FixedTypeU8 {
 /// `FixedType: U16;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeU16 {
     pub u16: Box<U16>,
 }
@@ -3607,7 +3607,7 @@ pub struct FixedTypeU16 {
 /// `FixedType: U32;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeU32 {
     pub u32: Box<U32>,
 }
@@ -3618,7 +3618,7 @@ pub struct FixedTypeU32 {
 /// `FixedType: U64;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeU64 {
     pub u64: Box<U64>,
 }
@@ -3629,7 +3629,7 @@ pub struct FixedTypeU64 {
 /// `FixedType: I8;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeI8 {
     pub i8: Box<I8>,
 }
@@ -3640,7 +3640,7 @@ pub struct FixedTypeI8 {
 /// `FixedType: I16;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeI16 {
     pub i16: Box<I16>,
 }
@@ -3651,7 +3651,7 @@ pub struct FixedTypeI16 {
 /// `FixedType: I32;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeI32 {
     pub i32: Box<I32>,
 }
@@ -3662,7 +3662,7 @@ pub struct FixedTypeI32 {
 /// `FixedType: I64;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeI64 {
     pub i64: Box<I64>,
 }
@@ -3673,7 +3673,7 @@ pub struct FixedTypeI64 {
 /// `FixedType: F32;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeF32 {
     pub f32: Box<F32>,
 }
@@ -3684,7 +3684,7 @@ pub struct FixedTypeF32 {
 /// `FixedType: F64;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeF64 {
     pub f64: Box<F64>,
 }
@@ -3695,7 +3695,7 @@ pub struct FixedTypeF64 {
 /// `FixedType: BBool;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeBBool {
     pub b_bool: Box<BBool>,
 }
@@ -3706,7 +3706,7 @@ pub struct FixedTypeBBool {
 /// `FixedType: LBool;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeLBool {
     pub l_bool: Box<LBool>,
 }
@@ -3717,7 +3717,7 @@ pub struct FixedTypeLBool {
 /// `FixedType: Strin;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedTypeStrin {
     pub strin: Box<Strin>,
 }
@@ -3728,7 +3728,7 @@ pub struct FixedTypeStrin {
 /// `VariableType: Clock;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VariableTypeClock {
     pub clock: Box<Clock>,
 }
@@ -3739,7 +3739,7 @@ pub struct VariableTypeClock {
 /// `VariableType: ClockPosedge;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VariableTypeClockPosedge {
     pub clock_posedge: Box<ClockPosedge>,
 }
@@ -3750,7 +3750,7 @@ pub struct VariableTypeClockPosedge {
 /// `VariableType: ClockNegedge;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VariableTypeClockNegedge {
     pub clock_negedge: Box<ClockNegedge>,
 }
@@ -3761,7 +3761,7 @@ pub struct VariableTypeClockNegedge {
 /// `VariableType: Reset;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VariableTypeReset {
     pub reset: Box<Reset>,
 }
@@ -3772,7 +3772,7 @@ pub struct VariableTypeReset {
 /// `VariableType: ResetAsyncHigh;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VariableTypeResetAsyncHigh {
     pub reset_async_high: Box<ResetAsyncHigh>,
 }
@@ -3783,7 +3783,7 @@ pub struct VariableTypeResetAsyncHigh {
 /// `VariableType: ResetAsyncLow;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VariableTypeResetAsyncLow {
     pub reset_async_low: Box<ResetAsyncLow>,
 }
@@ -3794,7 +3794,7 @@ pub struct VariableTypeResetAsyncLow {
 /// `VariableType: ResetSyncHigh;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VariableTypeResetSyncHigh {
     pub reset_sync_high: Box<ResetSyncHigh>,
 }
@@ -3805,7 +3805,7 @@ pub struct VariableTypeResetSyncHigh {
 /// `VariableType: ResetSyncLow;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VariableTypeResetSyncLow {
     pub reset_sync_low: Box<ResetSyncLow>,
 }
@@ -3816,7 +3816,7 @@ pub struct VariableTypeResetSyncLow {
 /// `VariableType: Logic;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VariableTypeLogic {
     pub logic: Box<Logic>,
 }
@@ -3827,7 +3827,7 @@ pub struct VariableTypeLogic {
 /// `VariableType: Bit;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VariableTypeBit {
     pub bit: Box<Bit>,
 }
@@ -3838,7 +3838,7 @@ pub struct VariableTypeBit {
 /// `TypeModifier: Tri;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TypeModifierTri {
     pub tri: Box<Tri>,
 }
@@ -3849,7 +3849,7 @@ pub struct TypeModifierTri {
 /// `TypeModifier: Signed;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TypeModifierSigned {
     pub signed: Box<Signed>,
 }
@@ -3860,7 +3860,7 @@ pub struct TypeModifierSigned {
 /// `TypeModifier: Defaul;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TypeModifierDefaul {
     pub defaul: Box<Defaul>,
 }
@@ -3871,7 +3871,7 @@ pub struct TypeModifierDefaul {
 /// `FactorTypeGroup: VariableType FactorTypeOpt /* Option */;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorTypeGroupVariableTypeFactorTypeOpt {
     pub variable_type: Box<VariableType>,
     pub factor_type_opt: Option<FactorTypeOpt>,
@@ -3883,7 +3883,7 @@ pub struct FactorTypeGroupVariableTypeFactorTypeOpt {
 /// `FactorTypeGroup: FixedType;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorTypeGroupFixedType {
     pub fixed_type: Box<FixedType>,
 }
@@ -3894,7 +3894,7 @@ pub struct FactorTypeGroupFixedType {
 /// `ScalarTypeGroup: UserDefinedType ScalarTypeOpt /* Option */;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScalarTypeGroupUserDefinedTypeScalarTypeOpt {
     pub user_defined_type: Box<UserDefinedType>,
     pub scalar_type_opt: Option<ScalarTypeOpt>,
@@ -3906,7 +3906,7 @@ pub struct ScalarTypeGroupUserDefinedTypeScalarTypeOpt {
 /// `ScalarTypeGroup: FactorType;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScalarTypeGroupFactorType {
     pub factor_type: Box<FactorType>,
 }
@@ -3917,7 +3917,7 @@ pub struct ScalarTypeGroupFactorType {
 /// `CastingType: U8;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeU8 {
     pub u8: Box<U8>,
 }
@@ -3928,7 +3928,7 @@ pub struct CastingTypeU8 {
 /// `CastingType: U16;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeU16 {
     pub u16: Box<U16>,
 }
@@ -3939,7 +3939,7 @@ pub struct CastingTypeU16 {
 /// `CastingType: U32;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeU32 {
     pub u32: Box<U32>,
 }
@@ -3950,7 +3950,7 @@ pub struct CastingTypeU32 {
 /// `CastingType: U64;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeU64 {
     pub u64: Box<U64>,
 }
@@ -3961,7 +3961,7 @@ pub struct CastingTypeU64 {
 /// `CastingType: P8;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeP8 {
     pub p8: Box<P8>,
 }
@@ -3972,7 +3972,7 @@ pub struct CastingTypeP8 {
 /// `CastingType: P16;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeP16 {
     pub p16: Box<P16>,
 }
@@ -3983,7 +3983,7 @@ pub struct CastingTypeP16 {
 /// `CastingType: P32;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeP32 {
     pub p32: Box<P32>,
 }
@@ -3994,7 +3994,7 @@ pub struct CastingTypeP32 {
 /// `CastingType: P64;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeP64 {
     pub p64: Box<P64>,
 }
@@ -4005,7 +4005,7 @@ pub struct CastingTypeP64 {
 /// `CastingType: I8;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeI8 {
     pub i8: Box<I8>,
 }
@@ -4016,7 +4016,7 @@ pub struct CastingTypeI8 {
 /// `CastingType: I16;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeI16 {
     pub i16: Box<I16>,
 }
@@ -4027,7 +4027,7 @@ pub struct CastingTypeI16 {
 /// `CastingType: I32;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeI32 {
     pub i32: Box<I32>,
 }
@@ -4038,7 +4038,7 @@ pub struct CastingTypeI32 {
 /// `CastingType: I64;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeI64 {
     pub i64: Box<I64>,
 }
@@ -4049,7 +4049,7 @@ pub struct CastingTypeI64 {
 /// `CastingType: F32;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeF32 {
     pub f32: Box<F32>,
 }
@@ -4060,7 +4060,7 @@ pub struct CastingTypeF32 {
 /// `CastingType: F64;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeF64 {
     pub f64: Box<F64>,
 }
@@ -4071,7 +4071,7 @@ pub struct CastingTypeF64 {
 /// `CastingType: BBool;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeBBool {
     pub b_bool: Box<BBool>,
 }
@@ -4082,7 +4082,7 @@ pub struct CastingTypeBBool {
 /// `CastingType: LBool;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeLBool {
     pub l_bool: Box<LBool>,
 }
@@ -4093,7 +4093,7 @@ pub struct CastingTypeLBool {
 /// `CastingType: Clock;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeClock {
     pub clock: Box<Clock>,
 }
@@ -4104,7 +4104,7 @@ pub struct CastingTypeClock {
 /// `CastingType: ClockPosedge;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeClockPosedge {
     pub clock_posedge: Box<ClockPosedge>,
 }
@@ -4115,7 +4115,7 @@ pub struct CastingTypeClockPosedge {
 /// `CastingType: ClockNegedge;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeClockNegedge {
     pub clock_negedge: Box<ClockNegedge>,
 }
@@ -4126,7 +4126,7 @@ pub struct CastingTypeClockNegedge {
 /// `CastingType: Reset;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeReset {
     pub reset: Box<Reset>,
 }
@@ -4137,7 +4137,7 @@ pub struct CastingTypeReset {
 /// `CastingType: ResetAsyncHigh;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeResetAsyncHigh {
     pub reset_async_high: Box<ResetAsyncHigh>,
 }
@@ -4148,7 +4148,7 @@ pub struct CastingTypeResetAsyncHigh {
 /// `CastingType: ResetAsyncLow;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeResetAsyncLow {
     pub reset_async_low: Box<ResetAsyncLow>,
 }
@@ -4159,7 +4159,7 @@ pub struct CastingTypeResetAsyncLow {
 /// `CastingType: ResetSyncHigh;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeResetSyncHigh {
     pub reset_sync_high: Box<ResetSyncHigh>,
 }
@@ -4170,7 +4170,7 @@ pub struct CastingTypeResetSyncHigh {
 /// `CastingType: ResetSyncLow;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeResetSyncLow {
     pub reset_sync_low: Box<ResetSyncLow>,
 }
@@ -4181,7 +4181,7 @@ pub struct CastingTypeResetSyncLow {
 /// `CastingType: UserDefinedType;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeUserDefinedType {
     pub user_defined_type: Box<UserDefinedType>,
 }
@@ -4192,7 +4192,7 @@ pub struct CastingTypeUserDefinedType {
 /// `CastingType: Based;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeBased {
     pub based: Box<Based>,
 }
@@ -4203,7 +4203,7 @@ pub struct CastingTypeBased {
 /// `CastingType: BaseLess;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CastingTypeBaseLess {
     pub base_less: Box<BaseLess>,
 }
@@ -4214,7 +4214,7 @@ pub struct CastingTypeBaseLess {
 /// `StatementBlockGroupGroup: Block LBrace StatementBlockGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockGroupGroupBlockLBraceStatementBlockGroupGroupListRBrace {
     pub block: Box<Block>,
     pub l_brace: Box<LBrace>,
@@ -4228,7 +4228,7 @@ pub struct StatementBlockGroupGroupBlockLBraceStatementBlockGroupGroupListRBrace
 /// `StatementBlockGroupGroup: StatementBlockItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockGroupGroupStatementBlockItem {
     pub statement_block_item: Box<StatementBlockItem>,
 }
@@ -4239,7 +4239,7 @@ pub struct StatementBlockGroupGroupStatementBlockItem {
 /// `StatementBlockItem: VarDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockItemVarDeclaration {
     pub var_declaration: Box<VarDeclaration>,
 }
@@ -4250,7 +4250,7 @@ pub struct StatementBlockItemVarDeclaration {
 /// `StatementBlockItem: LetStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockItemLetStatement {
     pub let_statement: Box<LetStatement>,
 }
@@ -4261,7 +4261,7 @@ pub struct StatementBlockItemLetStatement {
 /// `StatementBlockItem: ConstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockItemConstDeclaration {
     pub const_declaration: Box<ConstDeclaration>,
 }
@@ -4272,7 +4272,7 @@ pub struct StatementBlockItemConstDeclaration {
 /// `StatementBlockItem: GenDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockItemGenDeclaration {
     pub gen_declaration: Box<GenDeclaration>,
 }
@@ -4283,7 +4283,7 @@ pub struct StatementBlockItemGenDeclaration {
 /// `StatementBlockItem: Statement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockItemStatement {
     pub statement: Box<Statement>,
 }
@@ -4294,7 +4294,7 @@ pub struct StatementBlockItemStatement {
 /// `StatementBlockItem: ConcatenationAssignment;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockItemConcatenationAssignment {
     pub concatenation_assignment: Box<ConcatenationAssignment>,
 }
@@ -4305,7 +4305,7 @@ pub struct StatementBlockItemConcatenationAssignment {
 /// `Statement: IdentifierStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementIdentifierStatement {
     pub identifier_statement: Box<IdentifierStatement>,
 }
@@ -4316,7 +4316,7 @@ pub struct StatementIdentifierStatement {
 /// `Statement: IfStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementIfStatement {
     pub if_statement: Box<IfStatement>,
 }
@@ -4327,7 +4327,7 @@ pub struct StatementIfStatement {
 /// `Statement: IfResetStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementIfResetStatement {
     pub if_reset_statement: Box<IfResetStatement>,
 }
@@ -4338,7 +4338,7 @@ pub struct StatementIfResetStatement {
 /// `Statement: ReturnStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementReturnStatement {
     pub return_statement: Box<ReturnStatement>,
 }
@@ -4349,7 +4349,7 @@ pub struct StatementReturnStatement {
 /// `Statement: BreakStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBreakStatement {
     pub break_statement: Box<BreakStatement>,
 }
@@ -4360,7 +4360,7 @@ pub struct StatementBreakStatement {
 /// `Statement: ForStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementForStatement {
     pub for_statement: Box<ForStatement>,
 }
@@ -4371,7 +4371,7 @@ pub struct StatementForStatement {
 /// `Statement: CaseStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementCaseStatement {
     pub case_statement: Box<CaseStatement>,
 }
@@ -4382,7 +4382,7 @@ pub struct StatementCaseStatement {
 /// `Statement: SwitchStatement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementSwitchStatement {
     pub switch_statement: Box<SwitchStatement>,
 }
@@ -4393,7 +4393,7 @@ pub struct StatementSwitchStatement {
 /// `IdentifierStatementGroup: FunctionCall;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentifierStatementGroupFunctionCall {
     pub function_call: Box<FunctionCall>,
 }
@@ -4404,7 +4404,7 @@ pub struct IdentifierStatementGroupFunctionCall {
 /// `IdentifierStatementGroup: Assignment;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentifierStatementGroupAssignment {
     pub assignment: Box<Assignment>,
 }
@@ -4415,7 +4415,7 @@ pub struct IdentifierStatementGroupAssignment {
 /// `AssignmentGroup: Equ;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignmentGroupEqu {
     pub equ: Box<Equ>,
 }
@@ -4426,7 +4426,7 @@ pub struct AssignmentGroupEqu {
 /// `AssignmentGroup: AssignmentOperator;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignmentGroupAssignmentOperator {
     pub assignment_operator: Box<AssignmentOperator>,
 }
@@ -4437,7 +4437,7 @@ pub struct AssignmentGroupAssignmentOperator {
 /// `AssignmentGroup: DiamondOperator;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignmentGroupDiamondOperator {
     pub diamond_operator: Box<DiamondOperator>,
 }
@@ -4448,7 +4448,7 @@ pub struct AssignmentGroupDiamondOperator {
 /// `CaseItemGroup0: Statement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseItemGroup0Statement {
     pub statement: Box<Statement>,
 }
@@ -4459,7 +4459,7 @@ pub struct CaseItemGroup0Statement {
 /// `CaseItemGroup0: StatementBlock;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseItemGroup0StatementBlock {
     pub statement_block: Box<StatementBlock>,
 }
@@ -4470,7 +4470,7 @@ pub struct CaseItemGroup0StatementBlock {
 /// `CaseItemGroup: CaseCondition;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseItemGroupCaseCondition {
     pub case_condition: Box<CaseCondition>,
 }
@@ -4481,7 +4481,7 @@ pub struct CaseItemGroupCaseCondition {
 /// `CaseItemGroup: Defaul;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseItemGroupDefaul {
     pub defaul: Box<Defaul>,
 }
@@ -4492,7 +4492,7 @@ pub struct CaseItemGroupDefaul {
 /// `SwitchItemGroup0: Statement;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchItemGroup0Statement {
     pub statement: Box<Statement>,
 }
@@ -4503,7 +4503,7 @@ pub struct SwitchItemGroup0Statement {
 /// `SwitchItemGroup0: StatementBlock;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchItemGroup0StatementBlock {
     pub statement_block: Box<StatementBlock>,
 }
@@ -4514,7 +4514,7 @@ pub struct SwitchItemGroup0StatementBlock {
 /// `SwitchItemGroup: SwitchCondition;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchItemGroupSwitchCondition {
     pub switch_condition: Box<SwitchCondition>,
 }
@@ -4525,7 +4525,7 @@ pub struct SwitchItemGroupSwitchCondition {
 /// `SwitchItemGroup: Defaul;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchItemGroupDefaul {
     pub defaul: Box<Defaul>,
 }
@@ -4536,7 +4536,7 @@ pub struct SwitchItemGroupDefaul {
 /// `AttributeItem: Identifier;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AttributeItemIdentifier {
     pub identifier: Box<Identifier>,
 }
@@ -4547,7 +4547,7 @@ pub struct AttributeItemIdentifier {
 /// `AttributeItem: StringLiteral;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AttributeItemStringLiteral {
     pub string_literal: Box<StringLiteral>,
 }
@@ -4558,7 +4558,7 @@ pub struct AttributeItemStringLiteral {
 /// `ConstDeclarationOptGroup: ArrayType;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConstDeclarationOptGroupArrayType {
     pub array_type: Box<ArrayType>,
 }
@@ -4569,7 +4569,7 @@ pub struct ConstDeclarationOptGroupArrayType {
 /// `ConstDeclarationOptGroup: Type;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConstDeclarationOptGroupType {
     pub r#type: Box<Type>,
 }
@@ -4580,7 +4580,7 @@ pub struct ConstDeclarationOptGroupType {
 /// `GenDeclarationGroup: GenericProtoBound;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenDeclarationGroupGenericProtoBound {
     pub generic_proto_bound: Box<GenericProtoBound>,
 }
@@ -4591,7 +4591,7 @@ pub struct GenDeclarationGroupGenericProtoBound {
 /// `GenDeclarationGroup: Type;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenDeclarationGroupType {
     pub r#type: Box<Type>,
 }
@@ -4602,7 +4602,7 @@ pub struct GenDeclarationGroupType {
 /// `AssignDestination: HierarchicalIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignDestinationHierarchicalIdentifier {
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
 }
@@ -4613,7 +4613,7 @@ pub struct AssignDestinationHierarchicalIdentifier {
 /// `AssignDestination: LBrace AssignConcatenationList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignDestinationLBraceAssignConcatenationListRBrace {
     pub l_brace: Box<LBrace>,
     pub assign_concatenation_list: Box<AssignConcatenationList>,
@@ -4626,7 +4626,7 @@ pub struct AssignDestinationLBraceAssignConcatenationListRBrace {
 /// `ModportGroupGroup: LBrace ModportList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportGroupGroupLBraceModportListRBrace {
     pub l_brace: Box<LBrace>,
     pub modport_list: Box<ModportList>,
@@ -4639,7 +4639,7 @@ pub struct ModportGroupGroupLBraceModportListRBrace {
 /// `ModportGroupGroup: ModportItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportGroupGroupModportItem {
     pub modport_item: Box<ModportItem>,
 }
@@ -4650,7 +4650,7 @@ pub struct ModportGroupGroupModportItem {
 /// `ModportDefault: Input;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportDefaultInput {
     pub input: Box<Input>,
 }
@@ -4661,7 +4661,7 @@ pub struct ModportDefaultInput {
 /// `ModportDefault: Output;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportDefaultOutput {
     pub output: Box<Output>,
 }
@@ -4672,7 +4672,7 @@ pub struct ModportDefaultOutput {
 /// `ModportDefault: Same LParen ModportDefaultList RParen;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportDefaultSameLParenModportDefaultListRParen {
     pub same: Box<Same>,
     pub l_paren: Box<LParen>,
@@ -4686,7 +4686,7 @@ pub struct ModportDefaultSameLParenModportDefaultListRParen {
 /// `ModportDefault: Converse LParen ModportDefaultList RParen;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportDefaultConverseLParenModportDefaultListRParen {
     pub converse: Box<Converse>,
     pub l_paren: Box<LParen>,
@@ -4700,7 +4700,7 @@ pub struct ModportDefaultConverseLParenModportDefaultListRParen {
 /// `EnumGroupGroup: LBrace EnumList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumGroupGroupLBraceEnumListRBrace {
     pub l_brace: Box<LBrace>,
     pub enum_list: Box<EnumList>,
@@ -4713,7 +4713,7 @@ pub struct EnumGroupGroupLBraceEnumListRBrace {
 /// `EnumGroupGroup: EnumItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumGroupGroupEnumItem {
     pub enum_item: Box<EnumItem>,
 }
@@ -4724,7 +4724,7 @@ pub struct EnumGroupGroupEnumItem {
 /// `StructUnion: Struct;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionStruct {
     pub r#struct: Box<Struct>,
 }
@@ -4735,7 +4735,7 @@ pub struct StructUnionStruct {
 /// `StructUnion: Union;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionUnion {
     pub r#union: Box<Union>,
 }
@@ -4746,7 +4746,7 @@ pub struct StructUnionUnion {
 /// `StructUnionGroupGroup: LBrace StructUnionList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionGroupGroupLBraceStructUnionListRBrace {
     pub l_brace: Box<LBrace>,
     pub struct_union_list: Box<StructUnionList>,
@@ -4759,7 +4759,7 @@ pub struct StructUnionGroupGroupLBraceStructUnionListRBrace {
 /// `StructUnionGroupGroup: StructUnionItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionGroupGroupStructUnionItem {
     pub struct_union_item: Box<StructUnionItem>,
 }
@@ -4770,7 +4770,7 @@ pub struct StructUnionGroupGroupStructUnionItem {
 /// `InstParameterGroupGroup: LBrace InstParameterList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameterGroupGroupLBraceInstParameterListRBrace {
     pub l_brace: Box<LBrace>,
     pub inst_parameter_list: Box<InstParameterList>,
@@ -4783,7 +4783,7 @@ pub struct InstParameterGroupGroupLBraceInstParameterListRBrace {
 /// `InstParameterGroupGroup: InstParameterItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameterGroupGroupInstParameterItem {
     pub inst_parameter_item: Box<InstParameterItem>,
 }
@@ -4794,7 +4794,7 @@ pub struct InstParameterGroupGroupInstParameterItem {
 /// `InstPortGroupGroup: LBrace InstPortList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPortGroupGroupLBraceInstPortListRBrace {
     pub l_brace: Box<LBrace>,
     pub inst_port_list: Box<InstPortList>,
@@ -4807,7 +4807,7 @@ pub struct InstPortGroupGroupLBraceInstPortListRBrace {
 /// `InstPortGroupGroup: InstPortItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPortGroupGroupInstPortItem {
     pub inst_port_item: Box<InstPortItem>,
 }
@@ -4818,7 +4818,7 @@ pub struct InstPortGroupGroupInstPortItem {
 /// `WithParameterGroupGroup: LBrace WithParameterList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterGroupGroupLBraceWithParameterListRBrace {
     pub l_brace: Box<LBrace>,
     pub with_parameter_list: Box<WithParameterList>,
@@ -4831,7 +4831,7 @@ pub struct WithParameterGroupGroupLBraceWithParameterListRBrace {
 /// `WithParameterGroupGroup: WithParameterItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterGroupGroupWithParameterItem {
     pub with_parameter_item: Box<WithParameterItem>,
 }
@@ -4842,7 +4842,7 @@ pub struct WithParameterGroupGroupWithParameterItem {
 /// `WithParameterItemGroup0: ArrayType;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterItemGroup0ArrayType {
     pub array_type: Box<ArrayType>,
 }
@@ -4853,7 +4853,7 @@ pub struct WithParameterItemGroup0ArrayType {
 /// `WithParameterItemGroup0: Type;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterItemGroup0Type {
     pub r#type: Box<Type>,
 }
@@ -4864,7 +4864,7 @@ pub struct WithParameterItemGroup0Type {
 /// `WithParameterItemGroup: Param;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterItemGroupParam {
     pub param: Box<Param>,
 }
@@ -4875,7 +4875,7 @@ pub struct WithParameterItemGroupParam {
 /// `WithParameterItemGroup: Const;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterItemGroupConst {
     pub r#const: Box<Const>,
 }
@@ -4886,7 +4886,7 @@ pub struct WithParameterItemGroupConst {
 /// `GenericBound: Type;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenericBoundType {
     pub r#type: Box<Type>,
 }
@@ -4897,7 +4897,7 @@ pub struct GenericBoundType {
 /// `GenericBound: Inst ScopedIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenericBoundInstScopedIdentifier {
     pub inst: Box<Inst>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -4909,7 +4909,7 @@ pub struct GenericBoundInstScopedIdentifier {
 /// `GenericBound: GenericProtoBound;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenericBoundGenericProtoBound {
     pub generic_proto_bound: Box<GenericProtoBound>,
 }
@@ -4920,7 +4920,7 @@ pub struct GenericBoundGenericProtoBound {
 /// `GenericProtoBound: ScopedIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenericProtoBoundScopedIdentifier {
     pub scoped_identifier: Box<ScopedIdentifier>,
 }
@@ -4931,7 +4931,7 @@ pub struct GenericProtoBoundScopedIdentifier {
 /// `GenericProtoBound: FixedType;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenericProtoBoundFixedType {
     pub fixed_type: Box<FixedType>,
 }
@@ -4942,7 +4942,7 @@ pub struct GenericProtoBoundFixedType {
 /// `WithGenericArgumentItem: GenericArgIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericArgumentItemGenericArgIdentifier {
     pub generic_arg_identifier: Box<GenericArgIdentifier>,
 }
@@ -4953,7 +4953,7 @@ pub struct WithGenericArgumentItemGenericArgIdentifier {
 /// `WithGenericArgumentItem: FixedType;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericArgumentItemFixedType {
     pub fixed_type: Box<FixedType>,
 }
@@ -4964,7 +4964,7 @@ pub struct WithGenericArgumentItemFixedType {
 /// `WithGenericArgumentItem: Number;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericArgumentItemNumber {
     pub number: Box<Number>,
 }
@@ -4975,7 +4975,7 @@ pub struct WithGenericArgumentItemNumber {
 /// `WithGenericArgumentItem: BooleanLiteral;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericArgumentItemBooleanLiteral {
     pub boolean_literal: Box<BooleanLiteral>,
 }
@@ -4986,7 +4986,7 @@ pub struct WithGenericArgumentItemBooleanLiteral {
 /// `PortDeclarationGroupGroup: LBrace PortDeclarationList RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationGroupGroupLBracePortDeclarationListRBrace {
     pub l_brace: Box<LBrace>,
     pub port_declaration_list: Box<PortDeclarationList>,
@@ -4999,7 +4999,7 @@ pub struct PortDeclarationGroupGroupLBracePortDeclarationListRBrace {
 /// `PortDeclarationGroupGroup: PortDeclarationItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationGroupGroupPortDeclarationItem {
     pub port_declaration_item: Box<PortDeclarationItem>,
 }
@@ -5010,7 +5010,7 @@ pub struct PortDeclarationGroupGroupPortDeclarationItem {
 /// `PortDeclarationItemGroup: PortTypeConcrete;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationItemGroupPortTypeConcrete {
     pub port_type_concrete: Box<PortTypeConcrete>,
 }
@@ -5021,7 +5021,7 @@ pub struct PortDeclarationItemGroupPortTypeConcrete {
 /// `PortDeclarationItemGroup: PortTypeAbstract;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationItemGroupPortTypeAbstract {
     pub port_type_abstract: Box<PortTypeAbstract>,
 }
@@ -5032,7 +5032,7 @@ pub struct PortDeclarationItemGroupPortTypeAbstract {
 /// `Direction: Input;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DirectionInput {
     pub input: Box<Input>,
 }
@@ -5043,7 +5043,7 @@ pub struct DirectionInput {
 /// `Direction: Output;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DirectionOutput {
     pub output: Box<Output>,
 }
@@ -5054,7 +5054,7 @@ pub struct DirectionOutput {
 /// `Direction: Inout;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DirectionInout {
     pub inout: Box<Inout>,
 }
@@ -5065,7 +5065,7 @@ pub struct DirectionInout {
 /// `Direction: Modport;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DirectionModport {
     pub modport: Box<Modport>,
 }
@@ -5076,7 +5076,7 @@ pub struct DirectionModport {
 /// `Direction: Import;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DirectionImport {
     pub import: Box<Import>,
 }
@@ -5087,7 +5087,7 @@ pub struct DirectionImport {
 /// `ModuleGroupGroup: LBrace ModuleGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleGroupGroupLBraceModuleGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub module_group_group_list: Vec<ModuleGroupGroupList>,
@@ -5100,7 +5100,7 @@ pub struct ModuleGroupGroupLBraceModuleGroupGroupListRBrace {
 /// `ModuleGroupGroup: ModuleItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleGroupGroupModuleItem {
     pub module_item: Box<ModuleItem>,
 }
@@ -5111,7 +5111,7 @@ pub struct ModuleGroupGroupModuleItem {
 /// `InterfaceGroupGroup: LBrace InterfaceGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceGroupGroupLBraceInterfaceGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub interface_group_group_list: Vec<InterfaceGroupGroupList>,
@@ -5124,7 +5124,7 @@ pub struct InterfaceGroupGroupLBraceInterfaceGroupGroupListRBrace {
 /// `InterfaceGroupGroup: InterfaceItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceGroupGroupInterfaceItem {
     pub interface_item: Box<InterfaceItem>,
 }
@@ -5135,7 +5135,7 @@ pub struct InterfaceGroupGroupInterfaceItem {
 /// `InterfaceItem: GenerateItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceItemGenerateItem {
     pub generate_item: Box<GenerateItem>,
 }
@@ -5146,7 +5146,7 @@ pub struct InterfaceItemGenerateItem {
 /// `InterfaceItem: ModportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceItemModportDeclaration {
     pub modport_declaration: Box<ModportDeclaration>,
 }
@@ -5157,7 +5157,7 @@ pub struct InterfaceItemModportDeclaration {
 /// `GenerateGroupGroup: LBrace GenerateGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateGroupGroupLBraceGenerateGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub generate_group_group_list: Vec<GenerateGroupGroupList>,
@@ -5170,7 +5170,7 @@ pub struct GenerateGroupGroupLBraceGenerateGroupGroupListRBrace {
 /// `GenerateGroupGroup: GenerateItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateGroupGroupGenerateItem {
     pub generate_item: Box<GenerateItem>,
 }
@@ -5181,7 +5181,7 @@ pub struct GenerateGroupGroupGenerateItem {
 /// `GenerateItem: LetDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemLetDeclaration {
     pub let_declaration: Box<LetDeclaration>,
 }
@@ -5192,7 +5192,7 @@ pub struct GenerateItemLetDeclaration {
 /// `GenerateItem: VarDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemVarDeclaration {
     pub var_declaration: Box<VarDeclaration>,
 }
@@ -5203,7 +5203,7 @@ pub struct GenerateItemVarDeclaration {
 /// `GenerateItem: InstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemInstDeclaration {
     pub inst_declaration: Box<InstDeclaration>,
 }
@@ -5214,7 +5214,7 @@ pub struct GenerateItemInstDeclaration {
 /// `GenerateItem: BindDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemBindDeclaration {
     pub bind_declaration: Box<BindDeclaration>,
 }
@@ -5225,7 +5225,7 @@ pub struct GenerateItemBindDeclaration {
 /// `GenerateItem: ConstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemConstDeclaration {
     pub const_declaration: Box<ConstDeclaration>,
 }
@@ -5236,7 +5236,7 @@ pub struct GenerateItemConstDeclaration {
 /// `GenerateItem: GenDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemGenDeclaration {
     pub gen_declaration: Box<GenDeclaration>,
 }
@@ -5247,7 +5247,7 @@ pub struct GenerateItemGenDeclaration {
 /// `GenerateItem: AlwaysFfDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemAlwaysFfDeclaration {
     pub always_ff_declaration: Box<AlwaysFfDeclaration>,
 }
@@ -5258,7 +5258,7 @@ pub struct GenerateItemAlwaysFfDeclaration {
 /// `GenerateItem: AlwaysCombDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemAlwaysCombDeclaration {
     pub always_comb_declaration: Box<AlwaysCombDeclaration>,
 }
@@ -5269,7 +5269,7 @@ pub struct GenerateItemAlwaysCombDeclaration {
 /// `GenerateItem: AssignDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemAssignDeclaration {
     pub assign_declaration: Box<AssignDeclaration>,
 }
@@ -5280,7 +5280,7 @@ pub struct GenerateItemAssignDeclaration {
 /// `GenerateItem: ConnectDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemConnectDeclaration {
     pub connect_declaration: Box<ConnectDeclaration>,
 }
@@ -5291,7 +5291,7 @@ pub struct GenerateItemConnectDeclaration {
 /// `GenerateItem: FunctionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemFunctionDeclaration {
     pub function_declaration: Box<FunctionDeclaration>,
 }
@@ -5302,7 +5302,7 @@ pub struct GenerateItemFunctionDeclaration {
 /// `GenerateItem: GenerateIfDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemGenerateIfDeclaration {
     pub generate_if_declaration: Box<GenerateIfDeclaration>,
 }
@@ -5313,7 +5313,7 @@ pub struct GenerateItemGenerateIfDeclaration {
 /// `GenerateItem: GenerateForDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemGenerateForDeclaration {
     pub generate_for_declaration: Box<GenerateForDeclaration>,
 }
@@ -5324,7 +5324,7 @@ pub struct GenerateItemGenerateForDeclaration {
 /// `GenerateItem: GenerateBlockDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemGenerateBlockDeclaration {
     pub generate_block_declaration: Box<GenerateBlockDeclaration>,
 }
@@ -5335,7 +5335,7 @@ pub struct GenerateItemGenerateBlockDeclaration {
 /// `GenerateItem: TypeDefDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemTypeDefDeclaration {
     pub type_def_declaration: Box<TypeDefDeclaration>,
 }
@@ -5346,7 +5346,7 @@ pub struct GenerateItemTypeDefDeclaration {
 /// `GenerateItem: EnumDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemEnumDeclaration {
     pub enum_declaration: Box<EnumDeclaration>,
 }
@@ -5357,7 +5357,7 @@ pub struct GenerateItemEnumDeclaration {
 /// `GenerateItem: StructUnionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemStructUnionDeclaration {
     pub struct_union_declaration: Box<StructUnionDeclaration>,
 }
@@ -5368,7 +5368,7 @@ pub struct GenerateItemStructUnionDeclaration {
 /// `GenerateItem: ImportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
@@ -5379,7 +5379,7 @@ pub struct GenerateItemImportDeclaration {
 /// `GenerateItem: AliasDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemAliasDeclaration {
     pub alias_declaration: Box<AliasDeclaration>,
 }
@@ -5390,7 +5390,7 @@ pub struct GenerateItemAliasDeclaration {
 /// `GenerateItem: InitialDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemInitialDeclaration {
     pub initial_declaration: Box<InitialDeclaration>,
 }
@@ -5401,7 +5401,7 @@ pub struct GenerateItemInitialDeclaration {
 /// `GenerateItem: FinalDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemFinalDeclaration {
     pub final_declaration: Box<FinalDeclaration>,
 }
@@ -5412,7 +5412,7 @@ pub struct GenerateItemFinalDeclaration {
 /// `GenerateItem: UnsafeBlock;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemUnsafeBlock {
     pub unsafe_block: Box<UnsafeBlock>,
 }
@@ -5423,7 +5423,7 @@ pub struct GenerateItemUnsafeBlock {
 /// `GenerateItem: EmbedDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateItemEmbedDeclaration {
     pub embed_declaration: Box<EmbedDeclaration>,
 }
@@ -5434,7 +5434,7 @@ pub struct GenerateItemEmbedDeclaration {
 /// `PackageGroupGroup: LBrace PackageGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageGroupGroupLBracePackageGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub package_group_group_list: Vec<PackageGroupGroupList>,
@@ -5447,7 +5447,7 @@ pub struct PackageGroupGroupLBracePackageGroupGroupListRBrace {
 /// `PackageGroupGroup: PackageItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageGroupGroupPackageItem {
     pub package_item: Box<PackageItem>,
 }
@@ -5458,7 +5458,7 @@ pub struct PackageGroupGroupPackageItem {
 /// `PackageItem: ConstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItemConstDeclaration {
     pub const_declaration: Box<ConstDeclaration>,
 }
@@ -5469,7 +5469,7 @@ pub struct PackageItemConstDeclaration {
 /// `PackageItem: GenDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItemGenDeclaration {
     pub gen_declaration: Box<GenDeclaration>,
 }
@@ -5480,7 +5480,7 @@ pub struct PackageItemGenDeclaration {
 /// `PackageItem: TypeDefDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItemTypeDefDeclaration {
     pub type_def_declaration: Box<TypeDefDeclaration>,
 }
@@ -5491,7 +5491,7 @@ pub struct PackageItemTypeDefDeclaration {
 /// `PackageItem: EnumDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItemEnumDeclaration {
     pub enum_declaration: Box<EnumDeclaration>,
 }
@@ -5502,7 +5502,7 @@ pub struct PackageItemEnumDeclaration {
 /// `PackageItem: StructUnionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItemStructUnionDeclaration {
     pub struct_union_declaration: Box<StructUnionDeclaration>,
 }
@@ -5513,7 +5513,7 @@ pub struct PackageItemStructUnionDeclaration {
 /// `PackageItem: FunctionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItemFunctionDeclaration {
     pub function_declaration: Box<FunctionDeclaration>,
 }
@@ -5524,7 +5524,7 @@ pub struct PackageItemFunctionDeclaration {
 /// `PackageItem: ImportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
@@ -5535,7 +5535,7 @@ pub struct PackageItemImportDeclaration {
 /// `PackageItem: AliasDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItemAliasDeclaration {
     pub alias_declaration: Box<AliasDeclaration>,
 }
@@ -5546,7 +5546,7 @@ pub struct PackageItemAliasDeclaration {
 /// `PackageItem: EmbedDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItemEmbedDeclaration {
     pub embed_declaration: Box<EmbedDeclaration>,
 }
@@ -5557,7 +5557,7 @@ pub struct PackageItemEmbedDeclaration {
 /// `AliasDeclarationGroup: Module;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AliasDeclarationGroupModule {
     pub module: Box<Module>,
 }
@@ -5568,7 +5568,7 @@ pub struct AliasDeclarationGroupModule {
 /// `AliasDeclarationGroup: Interface;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AliasDeclarationGroupInterface {
     pub interface: Box<Interface>,
 }
@@ -5579,7 +5579,7 @@ pub struct AliasDeclarationGroupInterface {
 /// `AliasDeclarationGroup: Package;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AliasDeclarationGroupPackage {
     pub package: Box<Package>,
 }
@@ -5590,7 +5590,7 @@ pub struct AliasDeclarationGroupPackage {
 /// `ProtoDeclarationGroup: ProtoModuleDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoDeclarationGroupProtoModuleDeclaration {
     pub proto_module_declaration: Box<ProtoModuleDeclaration>,
 }
@@ -5601,7 +5601,7 @@ pub struct ProtoDeclarationGroupProtoModuleDeclaration {
 /// `ProtoDeclarationGroup: ProtoInterfaceDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoDeclarationGroupProtoInterfaceDeclaration {
     pub proto_interface_declaration: Box<ProtoInterfaceDeclaration>,
 }
@@ -5612,7 +5612,7 @@ pub struct ProtoDeclarationGroupProtoInterfaceDeclaration {
 /// `ProtoDeclarationGroup: ProtoPackageDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoDeclarationGroupProtoPackageDeclaration {
     pub proto_package_declaration: Box<ProtoPackageDeclaration>,
 }
@@ -5623,7 +5623,7 @@ pub struct ProtoDeclarationGroupProtoPackageDeclaration {
 /// `ProtoInterfaceItem: VarDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoInterfaceItemVarDeclaration {
     pub var_declaration: Box<VarDeclaration>,
 }
@@ -5634,7 +5634,7 @@ pub struct ProtoInterfaceItemVarDeclaration {
 /// `ProtoInterfaceItem: ProtoConstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoInterfaceItemProtoConstDeclaration {
     pub proto_const_declaration: Box<ProtoConstDeclaration>,
 }
@@ -5645,7 +5645,7 @@ pub struct ProtoInterfaceItemProtoConstDeclaration {
 /// `ProtoInterfaceItem: ProtoFunctionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoInterfaceItemProtoFunctionDeclaration {
     pub proto_function_declaration: Box<ProtoFunctionDeclaration>,
 }
@@ -5656,7 +5656,7 @@ pub struct ProtoInterfaceItemProtoFunctionDeclaration {
 /// `ProtoInterfaceItem: ProtoTypeDefDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoInterfaceItemProtoTypeDefDeclaration {
     pub proto_type_def_declaration: Box<ProtoTypeDefDeclaration>,
 }
@@ -5667,7 +5667,7 @@ pub struct ProtoInterfaceItemProtoTypeDefDeclaration {
 /// `ProtoInterfaceItem: ProtoAliasDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoInterfaceItemProtoAliasDeclaration {
     pub proto_alias_declaration: Box<ProtoAliasDeclaration>,
 }
@@ -5678,7 +5678,7 @@ pub struct ProtoInterfaceItemProtoAliasDeclaration {
 /// `ProtoInterfaceItem: ModportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoInterfaceItemModportDeclaration {
     pub modport_declaration: Box<ModportDeclaration>,
 }
@@ -5689,7 +5689,7 @@ pub struct ProtoInterfaceItemModportDeclaration {
 /// `ProtoInterfaceItem: ImportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoInterfaceItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
@@ -5700,7 +5700,7 @@ pub struct ProtoInterfaceItemImportDeclaration {
 /// `ProtoPacakgeItem: ProtoConstDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoPacakgeItemProtoConstDeclaration {
     pub proto_const_declaration: Box<ProtoConstDeclaration>,
 }
@@ -5711,7 +5711,7 @@ pub struct ProtoPacakgeItemProtoConstDeclaration {
 /// `ProtoPacakgeItem: ProtoTypeDefDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoPacakgeItemProtoTypeDefDeclaration {
     pub proto_type_def_declaration: Box<ProtoTypeDefDeclaration>,
 }
@@ -5722,7 +5722,7 @@ pub struct ProtoPacakgeItemProtoTypeDefDeclaration {
 /// `ProtoPacakgeItem: EnumDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoPacakgeItemEnumDeclaration {
     pub enum_declaration: Box<EnumDeclaration>,
 }
@@ -5733,7 +5733,7 @@ pub struct ProtoPacakgeItemEnumDeclaration {
 /// `ProtoPacakgeItem: StructUnionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoPacakgeItemStructUnionDeclaration {
     pub struct_union_declaration: Box<StructUnionDeclaration>,
 }
@@ -5744,7 +5744,7 @@ pub struct ProtoPacakgeItemStructUnionDeclaration {
 /// `ProtoPacakgeItem: ProtoFunctionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoPacakgeItemProtoFunctionDeclaration {
     pub proto_function_declaration: Box<ProtoFunctionDeclaration>,
 }
@@ -5755,7 +5755,7 @@ pub struct ProtoPacakgeItemProtoFunctionDeclaration {
 /// `ProtoPacakgeItem: ProtoAliasDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoPacakgeItemProtoAliasDeclaration {
     pub proto_alias_declaration: Box<ProtoAliasDeclaration>,
 }
@@ -5766,7 +5766,7 @@ pub struct ProtoPacakgeItemProtoAliasDeclaration {
 /// `ProtoPacakgeItem: ImportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoPacakgeItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
@@ -5777,7 +5777,7 @@ pub struct ProtoPacakgeItemImportDeclaration {
 /// `ProtoConstDeclarationGroup: ArrayType;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoConstDeclarationGroupArrayType {
     pub array_type: Box<ArrayType>,
 }
@@ -5788,7 +5788,7 @@ pub struct ProtoConstDeclarationGroupArrayType {
 /// `ProtoConstDeclarationGroup: Type;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoConstDeclarationGroupType {
     pub r#type: Box<Type>,
 }
@@ -5799,7 +5799,7 @@ pub struct ProtoConstDeclarationGroupType {
 /// `ProtoAliasDeclarationGroup: Module;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoAliasDeclarationGroupModule {
     pub module: Box<Module>,
 }
@@ -5810,7 +5810,7 @@ pub struct ProtoAliasDeclarationGroupModule {
 /// `ProtoAliasDeclarationGroup: Interface;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoAliasDeclarationGroupInterface {
     pub interface: Box<Interface>,
 }
@@ -5821,7 +5821,7 @@ pub struct ProtoAliasDeclarationGroupInterface {
 /// `ProtoAliasDeclarationGroup: Package;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoAliasDeclarationGroupPackage {
     pub package: Box<Package>,
 }
@@ -5832,7 +5832,7 @@ pub struct ProtoAliasDeclarationGroupPackage {
 /// `EmbedItem: EmbedLBrace EmbedItemList /* Vec */ EmbedRBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedItemEmbedLBraceEmbedItemListEmbedRBrace {
     pub embed_l_brace: Box<EmbedLBrace>,
     pub embed_item_list: Vec<EmbedItemList>,
@@ -5845,7 +5845,7 @@ pub struct EmbedItemEmbedLBraceEmbedItemListEmbedRBrace {
 /// `EmbedItem: EmbedScopedIdentifier;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedItemEmbedScopedIdentifier {
     pub embed_scoped_identifier: Box<EmbedScopedIdentifier>,
 }
@@ -5856,7 +5856,7 @@ pub struct EmbedItemEmbedScopedIdentifier {
 /// `EmbedItem: Any;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedItemAny {
     pub any: Box<Any>,
 }
@@ -5867,7 +5867,7 @@ pub struct EmbedItemAny {
 /// `DescriptionGroupGroup: LBrace DescriptionGroupGroupList /* Vec */ RBrace;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionGroupGroupLBraceDescriptionGroupGroupListRBrace {
     pub l_brace: Box<LBrace>,
     pub description_group_group_list: Vec<DescriptionGroupGroupList>,
@@ -5880,7 +5880,7 @@ pub struct DescriptionGroupGroupLBraceDescriptionGroupGroupListRBrace {
 /// `DescriptionGroupGroup: DescriptionItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionGroupGroupDescriptionItem {
     pub description_item: Box<DescriptionItem>,
 }
@@ -5891,7 +5891,7 @@ pub struct DescriptionGroupGroupDescriptionItem {
 /// `DescriptionItem: DescriptionItemOpt /* Option */ PublicDescriptionItem;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionItemDescriptionItemOptPublicDescriptionItem {
     pub description_item_opt: Option<DescriptionItemOpt>,
     pub public_description_item: Box<PublicDescriptionItem>,
@@ -5903,7 +5903,7 @@ pub struct DescriptionItemDescriptionItemOptPublicDescriptionItem {
 /// `DescriptionItem: ImportDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionItemImportDeclaration {
     pub import_declaration: Box<ImportDeclaration>,
 }
@@ -5914,7 +5914,7 @@ pub struct DescriptionItemImportDeclaration {
 /// `DescriptionItem: BindDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionItemBindDeclaration {
     pub bind_declaration: Box<BindDeclaration>,
 }
@@ -5925,7 +5925,7 @@ pub struct DescriptionItemBindDeclaration {
 /// `DescriptionItem: EmbedDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionItemEmbedDeclaration {
     pub embed_declaration: Box<EmbedDeclaration>,
 }
@@ -5936,7 +5936,7 @@ pub struct DescriptionItemEmbedDeclaration {
 /// `DescriptionItem: IncludeDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionItemIncludeDeclaration {
     pub include_declaration: Box<IncludeDeclaration>,
 }
@@ -5947,7 +5947,7 @@ pub struct DescriptionItemIncludeDeclaration {
 /// `PublicDescriptionItem: ModuleDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PublicDescriptionItemModuleDeclaration {
     pub module_declaration: Box<ModuleDeclaration>,
 }
@@ -5958,7 +5958,7 @@ pub struct PublicDescriptionItemModuleDeclaration {
 /// `PublicDescriptionItem: InterfaceDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PublicDescriptionItemInterfaceDeclaration {
     pub interface_declaration: Box<InterfaceDeclaration>,
 }
@@ -5969,7 +5969,7 @@ pub struct PublicDescriptionItemInterfaceDeclaration {
 /// `PublicDescriptionItem: PackageDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PublicDescriptionItemPackageDeclaration {
     pub package_declaration: Box<PackageDeclaration>,
 }
@@ -5980,7 +5980,7 @@ pub struct PublicDescriptionItemPackageDeclaration {
 /// `PublicDescriptionItem: AliasDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PublicDescriptionItemAliasDeclaration {
     pub alias_declaration: Box<AliasDeclaration>,
 }
@@ -5991,7 +5991,7 @@ pub struct PublicDescriptionItemAliasDeclaration {
 /// `PublicDescriptionItem: ProtoDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PublicDescriptionItemProtoDeclaration {
     pub proto_declaration: Box<ProtoDeclaration>,
 }
@@ -6002,7 +6002,7 @@ pub struct PublicDescriptionItemProtoDeclaration {
 /// `PublicDescriptionItem: FunctionDeclaration;`
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PublicDescriptionItemFunctionDeclaration {
     pub function_declaration: Box<FunctionDeclaration>,
 }
@@ -6016,7 +6016,7 @@ pub struct PublicDescriptionItemFunctionDeclaration {
 /// Type derived for non-terminal Alias
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Alias {
     pub alias_token: crate::veryl_token::VerylToken,
 }
@@ -6025,7 +6025,7 @@ pub struct Alias {
 /// Type derived for non-terminal AliasDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AliasDeclaration {
     pub alias: Box<Alias>,
     pub alias_declaration_group: Box<AliasDeclarationGroup>,
@@ -6039,7 +6039,7 @@ pub struct AliasDeclaration {
 /// Type derived for non-terminal AliasDeclarationGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AliasDeclarationGroup {
     Module(AliasDeclarationGroupModule),
     Interface(AliasDeclarationGroupInterface),
@@ -6050,7 +6050,7 @@ pub enum AliasDeclarationGroup {
 /// Type derived for non-terminal AliasTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AliasTerm {
     pub alias_term: crate::veryl_token::Token, /* alias */
 }
@@ -6059,7 +6059,7 @@ pub struct AliasTerm {
 /// Type derived for non-terminal AliasToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AliasToken {
     pub alias_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6069,7 +6069,7 @@ pub struct AliasToken {
 /// Type derived for non-terminal AllBit
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AllBit {
     pub all_bit_token: crate::veryl_token::VerylToken,
 }
@@ -6078,7 +6078,7 @@ pub struct AllBit {
 /// Type derived for non-terminal AllBitTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AllBitTerm {
     pub all_bit_term: crate::veryl_token::Token, /* (?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ] */
 }
@@ -6087,7 +6087,7 @@ pub struct AllBitTerm {
 /// Type derived for non-terminal AllBitToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AllBitToken {
     pub all_bit_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6097,7 +6097,7 @@ pub struct AllBitToken {
 /// Type derived for non-terminal AlwaysComb
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysComb {
     pub always_comb_token: crate::veryl_token::VerylToken,
 }
@@ -6106,7 +6106,7 @@ pub struct AlwaysComb {
 /// Type derived for non-terminal AlwaysCombDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysCombDeclaration {
     pub always_comb: Box<AlwaysComb>,
     pub statement_block: Box<StatementBlock>,
@@ -6116,7 +6116,7 @@ pub struct AlwaysCombDeclaration {
 /// Type derived for non-terminal AlwaysCombTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysCombTerm {
     pub always_comb_term: crate::veryl_token::Token, /* always_comb */
 }
@@ -6125,7 +6125,7 @@ pub struct AlwaysCombTerm {
 /// Type derived for non-terminal AlwaysCombToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysCombToken {
     pub always_comb_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6135,7 +6135,7 @@ pub struct AlwaysCombToken {
 /// Type derived for non-terminal AlwaysFf
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysFf {
     pub always_ff_token: crate::veryl_token::VerylToken,
 }
@@ -6144,7 +6144,7 @@ pub struct AlwaysFf {
 /// Type derived for non-terminal AlwaysFfClock
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysFfClock {
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
 }
@@ -6153,7 +6153,7 @@ pub struct AlwaysFfClock {
 /// Type derived for non-terminal AlwaysFfDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysFfDeclaration {
     pub always_ff: Box<AlwaysFf>,
     pub always_ff_declaration_opt: Option<AlwaysFfDeclarationOpt>,
@@ -6164,7 +6164,7 @@ pub struct AlwaysFfDeclaration {
 /// Type derived for non-terminal AlwaysFfDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysFfDeclarationOpt {
     pub always_ff_event_list: Box<AlwaysFfEventList>,
 }
@@ -6173,7 +6173,7 @@ pub struct AlwaysFfDeclarationOpt {
 /// Type derived for non-terminal AlwaysFfEventList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysFfEventList {
     pub l_paren: Box<LParen>,
     pub always_ff_clock: Box<AlwaysFfClock>,
@@ -6185,7 +6185,7 @@ pub struct AlwaysFfEventList {
 /// Type derived for non-terminal AlwaysFfEventListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysFfEventListOpt {
     pub comma: Box<Comma>,
     pub always_ff_reset: Box<AlwaysFfReset>,
@@ -6195,7 +6195,7 @@ pub struct AlwaysFfEventListOpt {
 /// Type derived for non-terminal AlwaysFfReset
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysFfReset {
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
 }
@@ -6204,7 +6204,7 @@ pub struct AlwaysFfReset {
 /// Type derived for non-terminal AlwaysFfTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysFfTerm {
     pub always_ff_term: crate::veryl_token::Token, /* always_ff */
 }
@@ -6213,7 +6213,7 @@ pub struct AlwaysFfTerm {
 /// Type derived for non-terminal AlwaysFfToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlwaysFfToken {
     pub always_ff_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6223,7 +6223,7 @@ pub struct AlwaysFfToken {
 /// Type derived for non-terminal Any
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Any {
     pub any_token: crate::veryl_token::VerylToken,
 }
@@ -6232,7 +6232,7 @@ pub struct Any {
 /// Type derived for non-terminal AnyTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AnyTerm {
     pub any_term: crate::veryl_token::Token, /* (?:[^{}\\]|\\[^{])+ */
 }
@@ -6241,7 +6241,7 @@ pub struct AnyTerm {
 /// Type derived for non-terminal AnyToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AnyToken {
     pub any_term: crate::veryl_token::Token,
 }
@@ -6250,7 +6250,7 @@ pub struct AnyToken {
 /// Type derived for non-terminal ArgumentExpression
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArgumentExpression {
     pub expression: Box<Expression>,
 }
@@ -6259,7 +6259,7 @@ pub struct ArgumentExpression {
 /// Type derived for non-terminal ArgumentItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArgumentItem {
     pub argument_expression: Box<ArgumentExpression>,
     pub argument_item_opt: Option<ArgumentItemOpt>,
@@ -6269,7 +6269,7 @@ pub struct ArgumentItem {
 /// Type derived for non-terminal ArgumentItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArgumentItemOpt {
     pub colon: Box<Colon>,
     pub expression: Box<Expression>,
@@ -6279,7 +6279,7 @@ pub struct ArgumentItemOpt {
 /// Type derived for non-terminal ArgumentList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArgumentList {
     pub argument_item: Box<ArgumentItem>,
     pub argument_list_list: Vec<ArgumentListList>,
@@ -6290,7 +6290,7 @@ pub struct ArgumentList {
 /// Type derived for non-terminal ArgumentListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArgumentListList {
     pub comma: Box<Comma>,
     pub argument_item: Box<ArgumentItem>,
@@ -6300,7 +6300,7 @@ pub struct ArgumentListList {
 /// Type derived for non-terminal ArgumentListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArgumentListOpt {
     pub comma: Box<Comma>,
 }
@@ -6309,7 +6309,7 @@ pub struct ArgumentListOpt {
 /// Type derived for non-terminal Array
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Array {
     pub l_bracket: Box<LBracket>,
     pub expression: Box<Expression>,
@@ -6321,7 +6321,7 @@ pub struct Array {
 /// Type derived for non-terminal ArrayList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArrayList {
     pub comma: Box<Comma>,
     pub expression: Box<Expression>,
@@ -6331,7 +6331,7 @@ pub struct ArrayList {
 /// Type derived for non-terminal ArrayLiteralItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArrayLiteralItem {
     pub array_literal_item_group: Box<ArrayLiteralItemGroup>,
 }
@@ -6340,7 +6340,7 @@ pub struct ArrayLiteralItem {
 /// Type derived for non-terminal ArrayLiteralItemGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ArrayLiteralItemGroup {
     ExpressionArrayLiteralItemOpt(ArrayLiteralItemGroupExpressionArrayLiteralItemOpt),
     DefaulColonExpression(ArrayLiteralItemGroupDefaulColonExpression),
@@ -6350,7 +6350,7 @@ pub enum ArrayLiteralItemGroup {
 /// Type derived for non-terminal ArrayLiteralItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArrayLiteralItemOpt {
     pub repeat: Box<Repeat>,
     pub expression: Box<Expression>,
@@ -6360,7 +6360,7 @@ pub struct ArrayLiteralItemOpt {
 /// Type derived for non-terminal ArrayLiteralList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArrayLiteralList {
     pub array_literal_item: Box<ArrayLiteralItem>,
     pub array_literal_list_list: Vec<ArrayLiteralListList>,
@@ -6371,7 +6371,7 @@ pub struct ArrayLiteralList {
 /// Type derived for non-terminal ArrayLiteralListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArrayLiteralListList {
     pub comma: Box<Comma>,
     pub array_literal_item: Box<ArrayLiteralItem>,
@@ -6381,7 +6381,7 @@ pub struct ArrayLiteralListList {
 /// Type derived for non-terminal ArrayLiteralListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArrayLiteralListOpt {
     pub comma: Box<Comma>,
 }
@@ -6390,7 +6390,7 @@ pub struct ArrayLiteralListOpt {
 /// Type derived for non-terminal ArrayType
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArrayType {
     pub scalar_type: Box<ScalarType>,
     pub array_type_opt: Option<ArrayTypeOpt>,
@@ -6400,7 +6400,7 @@ pub struct ArrayType {
 /// Type derived for non-terminal ArrayTypeOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArrayTypeOpt {
     pub array: Box<Array>,
 }
@@ -6409,7 +6409,7 @@ pub struct ArrayTypeOpt {
 /// Type derived for non-terminal As
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct As {
     pub as_token: crate::veryl_token::VerylToken,
 }
@@ -6418,7 +6418,7 @@ pub struct As {
 /// Type derived for non-terminal AsTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AsTerm {
     pub as_term: crate::veryl_token::Token, /* as */
 }
@@ -6427,7 +6427,7 @@ pub struct AsTerm {
 /// Type derived for non-terminal AsToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AsToken {
     pub as_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6437,7 +6437,7 @@ pub struct AsToken {
 /// Type derived for non-terminal Assign
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Assign {
     pub assign_token: crate::veryl_token::VerylToken,
 }
@@ -6446,7 +6446,7 @@ pub struct Assign {
 /// Type derived for non-terminal AssignConcatenationItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignConcatenationItem {
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
 }
@@ -6455,7 +6455,7 @@ pub struct AssignConcatenationItem {
 /// Type derived for non-terminal AssignConcatenationList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignConcatenationList {
     pub assign_concatenation_item: Box<AssignConcatenationItem>,
     pub assign_concatenation_list_list: Vec<AssignConcatenationListList>,
@@ -6466,7 +6466,7 @@ pub struct AssignConcatenationList {
 /// Type derived for non-terminal AssignConcatenationListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignConcatenationListList {
     pub comma: Box<Comma>,
     pub assign_concatenation_item: Box<AssignConcatenationItem>,
@@ -6476,7 +6476,7 @@ pub struct AssignConcatenationListList {
 /// Type derived for non-terminal AssignConcatenationListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignConcatenationListOpt {
     pub comma: Box<Comma>,
 }
@@ -6485,7 +6485,7 @@ pub struct AssignConcatenationListOpt {
 /// Type derived for non-terminal AssignDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignDeclaration {
     pub assign: Box<Assign>,
     pub assign_destination: Box<AssignDestination>,
@@ -6498,7 +6498,7 @@ pub struct AssignDeclaration {
 /// Type derived for non-terminal AssignDestination
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssignDestination {
     HierarchicalIdentifier(AssignDestinationHierarchicalIdentifier),
     LBraceAssignConcatenationListRBrace(AssignDestinationLBraceAssignConcatenationListRBrace),
@@ -6508,7 +6508,7 @@ pub enum AssignDestination {
 /// Type derived for non-terminal AssignTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignTerm {
     pub assign_term: crate::veryl_token::Token, /* assign */
 }
@@ -6517,7 +6517,7 @@ pub struct AssignTerm {
 /// Type derived for non-terminal AssignToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignToken {
     pub assign_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6527,7 +6527,7 @@ pub struct AssignToken {
 /// Type derived for non-terminal Assignment
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Assignment {
     pub assignment_group: Box<AssignmentGroup>,
     pub expression: Box<Expression>,
@@ -6537,7 +6537,7 @@ pub struct Assignment {
 /// Type derived for non-terminal AssignmentGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssignmentGroup {
     Equ(AssignmentGroupEqu),
     AssignmentOperator(AssignmentGroupAssignmentOperator),
@@ -6548,7 +6548,7 @@ pub enum AssignmentGroup {
 /// Type derived for non-terminal AssignmentOperator
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignmentOperator {
     pub assignment_operator_token: crate::veryl_token::VerylToken,
 }
@@ -6557,7 +6557,7 @@ pub struct AssignmentOperator {
 /// Type derived for non-terminal AssignmentOperatorTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignmentOperatorTerm {
     pub assignment_operator_term: crate::veryl_token::Token, /* \+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>= */
 }
@@ -6566,7 +6566,7 @@ pub struct AssignmentOperatorTerm {
 /// Type derived for non-terminal AssignmentOperatorToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignmentOperatorToken {
     pub assignment_operator_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6576,7 +6576,7 @@ pub struct AssignmentOperatorToken {
 /// Type derived for non-terminal Attribute
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Attribute {
     pub hash_l_bracket: Box<HashLBracket>,
     pub identifier: Box<Identifier>,
@@ -6588,7 +6588,7 @@ pub struct Attribute {
 /// Type derived for non-terminal AttributeItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AttributeItem {
     Identifier(AttributeItemIdentifier),
     StringLiteral(AttributeItemStringLiteral),
@@ -6598,7 +6598,7 @@ pub enum AttributeItem {
 /// Type derived for non-terminal AttributeList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AttributeList {
     pub attribute_item: Box<AttributeItem>,
     pub attribute_list_list: Vec<AttributeListList>,
@@ -6609,7 +6609,7 @@ pub struct AttributeList {
 /// Type derived for non-terminal AttributeListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AttributeListList {
     pub comma: Box<Comma>,
     pub attribute_item: Box<AttributeItem>,
@@ -6619,7 +6619,7 @@ pub struct AttributeListList {
 /// Type derived for non-terminal AttributeListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AttributeListOpt {
     pub comma: Box<Comma>,
 }
@@ -6628,7 +6628,7 @@ pub struct AttributeListOpt {
 /// Type derived for non-terminal AttributeOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AttributeOpt {
     pub l_paren: Box<LParen>,
     pub attribute_list: Box<AttributeList>,
@@ -6639,7 +6639,7 @@ pub struct AttributeOpt {
 /// Type derived for non-terminal BBool
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BBool {
     pub b_bool_token: crate::veryl_token::VerylToken,
 }
@@ -6648,7 +6648,7 @@ pub struct BBool {
 /// Type derived for non-terminal BBoolTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BBoolTerm {
     pub b_bool_term: crate::veryl_token::Token, /* bbool */
 }
@@ -6657,7 +6657,7 @@ pub struct BBoolTerm {
 /// Type derived for non-terminal BBoolToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BBoolToken {
     pub b_bool_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6667,7 +6667,7 @@ pub struct BBoolToken {
 /// Type derived for non-terminal BaseLess
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BaseLess {
     pub base_less_token: crate::veryl_token::VerylToken,
 }
@@ -6676,7 +6676,7 @@ pub struct BaseLess {
 /// Type derived for non-terminal BaseLessTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BaseLessTerm {
     pub base_less_term: crate::veryl_token::Token, /* [0-9]+(?:_[0-9]+)* */
 }
@@ -6685,7 +6685,7 @@ pub struct BaseLessTerm {
 /// Type derived for non-terminal BaseLessToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BaseLessToken {
     pub base_less_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6695,7 +6695,7 @@ pub struct BaseLessToken {
 /// Type derived for non-terminal Based
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Based {
     pub based_token: crate::veryl_token::VerylToken,
 }
@@ -6704,7 +6704,7 @@ pub struct Based {
 /// Type derived for non-terminal BasedTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BasedTerm {
     pub based_term: crate::veryl_token::Token, /* (?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)* */
 }
@@ -6713,7 +6713,7 @@ pub struct BasedTerm {
 /// Type derived for non-terminal BasedToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BasedToken {
     pub based_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6723,7 +6723,7 @@ pub struct BasedToken {
 /// Type derived for non-terminal Bind
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Bind {
     pub bind_token: crate::veryl_token::VerylToken,
 }
@@ -6732,7 +6732,7 @@ pub struct Bind {
 /// Type derived for non-terminal BindDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BindDeclaration {
     pub bind: Box<Bind>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -6745,7 +6745,7 @@ pub struct BindDeclaration {
 /// Type derived for non-terminal BindTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BindTerm {
     pub bind_term: crate::veryl_token::Token, /* bind */
 }
@@ -6754,7 +6754,7 @@ pub struct BindTerm {
 /// Type derived for non-terminal BindToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BindToken {
     pub bind_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6764,7 +6764,7 @@ pub struct BindToken {
 /// Type derived for non-terminal Bit
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Bit {
     pub bit_token: crate::veryl_token::VerylToken,
 }
@@ -6773,7 +6773,7 @@ pub struct Bit {
 /// Type derived for non-terminal BitTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BitTerm {
     pub bit_term: crate::veryl_token::Token, /* bit */
 }
@@ -6782,7 +6782,7 @@ pub struct BitTerm {
 /// Type derived for non-terminal BitToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BitToken {
     pub bit_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6792,7 +6792,7 @@ pub struct BitToken {
 /// Type derived for non-terminal Block
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Block {
     pub block_token: crate::veryl_token::VerylToken,
 }
@@ -6801,7 +6801,7 @@ pub struct Block {
 /// Type derived for non-terminal BlockTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockTerm {
     pub block_term: crate::veryl_token::Token, /* block */
 }
@@ -6810,7 +6810,7 @@ pub struct BlockTerm {
 /// Type derived for non-terminal BlockToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockToken {
     pub block_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6820,7 +6820,7 @@ pub struct BlockToken {
 /// Type derived for non-terminal BooleanLiteral
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BooleanLiteral {
     True(BooleanLiteralTrue),
     False(BooleanLiteralFalse),
@@ -6830,7 +6830,7 @@ pub enum BooleanLiteral {
 /// Type derived for non-terminal Break
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Break {
     pub break_token: crate::veryl_token::VerylToken,
 }
@@ -6839,7 +6839,7 @@ pub struct Break {
 /// Type derived for non-terminal BreakStatement
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BreakStatement {
     pub r#break: Box<Break>,
     pub semicolon: Box<Semicolon>,
@@ -6849,7 +6849,7 @@ pub struct BreakStatement {
 /// Type derived for non-terminal BreakTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BreakTerm {
     pub break_term: crate::veryl_token::Token, /* break */
 }
@@ -6858,7 +6858,7 @@ pub struct BreakTerm {
 /// Type derived for non-terminal BreakToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BreakToken {
     pub break_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -6868,7 +6868,7 @@ pub struct BreakToken {
 /// Type derived for non-terminal Case
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Case {
     pub case_token: crate::veryl_token::VerylToken,
 }
@@ -6877,7 +6877,7 @@ pub struct Case {
 /// Type derived for non-terminal CaseCondition
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseCondition {
     pub range_item: Box<RangeItem>,
     pub case_condition_list: Vec<CaseConditionList>,
@@ -6887,7 +6887,7 @@ pub struct CaseCondition {
 /// Type derived for non-terminal CaseConditionList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseConditionList {
     pub comma: Box<Comma>,
     pub range_item: Box<RangeItem>,
@@ -6897,7 +6897,7 @@ pub struct CaseConditionList {
 /// Type derived for non-terminal CaseExpression
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseExpression {
     pub case: Box<Case>,
     pub expression: Box<Expression>,
@@ -6918,7 +6918,7 @@ pub struct CaseExpression {
 /// Type derived for non-terminal CaseExpressionList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseExpressionList {
     pub case_condition: Box<CaseCondition>,
     pub colon: Box<Colon>,
@@ -6930,7 +6930,7 @@ pub struct CaseExpressionList {
 /// Type derived for non-terminal CaseExpressionOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseExpressionOpt {
     pub comma: Box<Comma>,
 }
@@ -6939,7 +6939,7 @@ pub struct CaseExpressionOpt {
 /// Type derived for non-terminal CaseItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseItem {
     pub case_item_group: Box<CaseItemGroup>,
     pub colon: Box<Colon>,
@@ -6950,7 +6950,7 @@ pub struct CaseItem {
 /// Type derived for non-terminal CaseItemGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CaseItemGroup {
     CaseCondition(CaseItemGroupCaseCondition),
     Defaul(CaseItemGroupDefaul),
@@ -6960,7 +6960,7 @@ pub enum CaseItemGroup {
 /// Type derived for non-terminal CaseItemGroup0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CaseItemGroup0 {
     Statement(CaseItemGroup0Statement),
     StatementBlock(CaseItemGroup0StatementBlock),
@@ -6970,7 +6970,7 @@ pub enum CaseItemGroup0 {
 /// Type derived for non-terminal CaseStatement
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseStatement {
     pub case: Box<Case>,
     pub expression: Box<Expression>,
@@ -6983,7 +6983,7 @@ pub struct CaseStatement {
 /// Type derived for non-terminal CaseStatementList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseStatementList {
     pub case_item: Box<CaseItem>,
 }
@@ -6992,7 +6992,7 @@ pub struct CaseStatementList {
 /// Type derived for non-terminal CaseTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseTerm {
     pub case_term: crate::veryl_token::Token, /* case */
 }
@@ -7001,7 +7001,7 @@ pub struct CaseTerm {
 /// Type derived for non-terminal CaseToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaseToken {
     pub case_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7011,7 +7011,7 @@ pub struct CaseToken {
 /// Type derived for non-terminal CastingType
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CastingType {
     U8(CastingTypeU8),
     U16(CastingTypeU16),
@@ -7046,7 +7046,7 @@ pub enum CastingType {
 /// Type derived for non-terminal Clock
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Clock {
     pub clock_token: crate::veryl_token::VerylToken,
 }
@@ -7055,7 +7055,7 @@ pub struct Clock {
 /// Type derived for non-terminal ClockDomain
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClockDomain {
     pub quote: Box<Quote>,
     pub identifier: Box<Identifier>,
@@ -7065,7 +7065,7 @@ pub struct ClockDomain {
 /// Type derived for non-terminal ClockNegedge
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClockNegedge {
     pub clock_negedge_token: crate::veryl_token::VerylToken,
 }
@@ -7074,7 +7074,7 @@ pub struct ClockNegedge {
 /// Type derived for non-terminal ClockNegedgeTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClockNegedgeTerm {
     pub clock_negedge_term: crate::veryl_token::Token, /* clock_negedge */
 }
@@ -7083,7 +7083,7 @@ pub struct ClockNegedgeTerm {
 /// Type derived for non-terminal ClockNegedgeToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClockNegedgeToken {
     pub clock_negedge_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7093,7 +7093,7 @@ pub struct ClockNegedgeToken {
 /// Type derived for non-terminal ClockPosedge
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClockPosedge {
     pub clock_posedge_token: crate::veryl_token::VerylToken,
 }
@@ -7102,7 +7102,7 @@ pub struct ClockPosedge {
 /// Type derived for non-terminal ClockPosedgeTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClockPosedgeTerm {
     pub clock_posedge_term: crate::veryl_token::Token, /* clock_posedge */
 }
@@ -7111,7 +7111,7 @@ pub struct ClockPosedgeTerm {
 /// Type derived for non-terminal ClockPosedgeToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClockPosedgeToken {
     pub clock_posedge_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7121,7 +7121,7 @@ pub struct ClockPosedgeToken {
 /// Type derived for non-terminal ClockTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClockTerm {
     pub clock_term: crate::veryl_token::Token, /* clock */
 }
@@ -7130,7 +7130,7 @@ pub struct ClockTerm {
 /// Type derived for non-terminal ClockToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClockToken {
     pub clock_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7140,7 +7140,7 @@ pub struct ClockToken {
 /// Type derived for non-terminal Colon
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Colon {
     pub colon_token: crate::veryl_token::VerylToken,
 }
@@ -7149,7 +7149,7 @@ pub struct Colon {
 /// Type derived for non-terminal ColonColon
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColonColon {
     pub colon_colon_token: crate::veryl_token::VerylToken,
 }
@@ -7158,7 +7158,7 @@ pub struct ColonColon {
 /// Type derived for non-terminal ColonColonLAngle
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColonColonLAngle {
     pub colon_colon_l_angle_token: crate::veryl_token::VerylToken,
 }
@@ -7167,7 +7167,7 @@ pub struct ColonColonLAngle {
 /// Type derived for non-terminal ColonColonLAngleTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColonColonLAngleTerm {
     pub colon_colon_l_angle_term: crate::veryl_token::Token, /* ::< */
 }
@@ -7176,7 +7176,7 @@ pub struct ColonColonLAngleTerm {
 /// Type derived for non-terminal ColonColonLAngleToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColonColonLAngleToken {
     pub colon_colon_l_angle_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7186,7 +7186,7 @@ pub struct ColonColonLAngleToken {
 /// Type derived for non-terminal ColonColonTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColonColonTerm {
     pub colon_colon_term: crate::veryl_token::Token, /* :: */
 }
@@ -7195,7 +7195,7 @@ pub struct ColonColonTerm {
 /// Type derived for non-terminal ColonColonToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColonColonToken {
     pub colon_colon_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7205,7 +7205,7 @@ pub struct ColonColonToken {
 /// Type derived for non-terminal ColonTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColonTerm {
     pub colon_term: crate::veryl_token::Token, /* : */
 }
@@ -7214,7 +7214,7 @@ pub struct ColonTerm {
 /// Type derived for non-terminal ColonToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColonToken {
     pub colon_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7224,7 +7224,7 @@ pub struct ColonToken {
 /// Type derived for non-terminal Comma
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Comma {
     pub comma_token: crate::veryl_token::VerylToken,
 }
@@ -7233,7 +7233,7 @@ pub struct Comma {
 /// Type derived for non-terminal CommaTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CommaTerm {
     pub comma_term: crate::veryl_token::Token, /* , */
 }
@@ -7242,7 +7242,7 @@ pub struct CommaTerm {
 /// Type derived for non-terminal CommaToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CommaToken {
     pub comma_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7252,7 +7252,7 @@ pub struct CommaToken {
 /// Type derived for non-terminal Comments
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Comments {
     pub comments_opt: Option<CommentsOpt>,
 }
@@ -7261,7 +7261,7 @@ pub struct Comments {
 /// Type derived for non-terminal CommentsOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CommentsOpt {
     pub comments_term: Box<CommentsTerm>,
 }
@@ -7270,7 +7270,7 @@ pub struct CommentsOpt {
 /// Type derived for non-terminal CommentsTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CommentsTerm {
     pub comments_term: crate::veryl_token::Token, /* (?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*\/?([^/]|[^*]/)*\*\/))\s*)+ */
 }
@@ -7279,7 +7279,7 @@ pub struct CommentsTerm {
 /// Type derived for non-terminal ComponentInstantiation
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComponentInstantiation {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -7294,7 +7294,7 @@ pub struct ComponentInstantiation {
 /// Type derived for non-terminal ComponentInstantiationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComponentInstantiationOpt {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -7303,7 +7303,7 @@ pub struct ComponentInstantiationOpt {
 /// Type derived for non-terminal ComponentInstantiationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComponentInstantiationOpt0 {
     pub array: Box<Array>,
 }
@@ -7312,7 +7312,7 @@ pub struct ComponentInstantiationOpt0 {
 /// Type derived for non-terminal ComponentInstantiationOpt1
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComponentInstantiationOpt1 {
     pub inst_parameter: Box<InstParameter>,
 }
@@ -7321,7 +7321,7 @@ pub struct ComponentInstantiationOpt1 {
 /// Type derived for non-terminal ComponentInstantiationOpt2
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComponentInstantiationOpt2 {
     pub inst_port: Box<InstPort>,
 }
@@ -7330,7 +7330,7 @@ pub struct ComponentInstantiationOpt2 {
 /// Type derived for non-terminal ConcatenationAssignment
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConcatenationAssignment {
     pub l_brace: Box<LBrace>,
     pub assign_concatenation_list: Box<AssignConcatenationList>,
@@ -7344,7 +7344,7 @@ pub struct ConcatenationAssignment {
 /// Type derived for non-terminal ConcatenationItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConcatenationItem {
     pub expression: Box<Expression>,
     pub concatenation_item_opt: Option<ConcatenationItemOpt>,
@@ -7354,7 +7354,7 @@ pub struct ConcatenationItem {
 /// Type derived for non-terminal ConcatenationItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConcatenationItemOpt {
     pub repeat: Box<Repeat>,
     pub expression: Box<Expression>,
@@ -7364,7 +7364,7 @@ pub struct ConcatenationItemOpt {
 /// Type derived for non-terminal ConcatenationList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConcatenationList {
     pub concatenation_item: Box<ConcatenationItem>,
     pub concatenation_list_list: Vec<ConcatenationListList>,
@@ -7375,7 +7375,7 @@ pub struct ConcatenationList {
 /// Type derived for non-terminal ConcatenationListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConcatenationListList {
     pub comma: Box<Comma>,
     pub concatenation_item: Box<ConcatenationItem>,
@@ -7385,7 +7385,7 @@ pub struct ConcatenationListList {
 /// Type derived for non-terminal ConcatenationListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConcatenationListOpt {
     pub comma: Box<Comma>,
 }
@@ -7394,7 +7394,7 @@ pub struct ConcatenationListOpt {
 /// Type derived for non-terminal Connect
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Connect {
     pub connect_token: crate::veryl_token::VerylToken,
 }
@@ -7403,7 +7403,7 @@ pub struct Connect {
 /// Type derived for non-terminal ConnectDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConnectDeclaration {
     pub connect: Box<Connect>,
     pub hierarchical_identifier: Box<HierarchicalIdentifier>,
@@ -7416,7 +7416,7 @@ pub struct ConnectDeclaration {
 /// Type derived for non-terminal ConnectTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConnectTerm {
     pub connect_term: crate::veryl_token::Token, /* connect */
 }
@@ -7425,7 +7425,7 @@ pub struct ConnectTerm {
 /// Type derived for non-terminal ConnectToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConnectToken {
     pub connect_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7435,7 +7435,7 @@ pub struct ConnectToken {
 /// Type derived for non-terminal Const
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Const {
     pub const_token: crate::veryl_token::VerylToken,
 }
@@ -7444,7 +7444,7 @@ pub struct Const {
 /// Type derived for non-terminal ConstDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConstDeclaration {
     pub r#const: Box<Const>,
     pub identifier: Box<Identifier>,
@@ -7458,7 +7458,7 @@ pub struct ConstDeclaration {
 /// Type derived for non-terminal ConstDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConstDeclarationOpt {
     pub colon: Box<Colon>,
     pub const_declaration_opt_group: Box<ConstDeclarationOptGroup>,
@@ -7468,7 +7468,7 @@ pub struct ConstDeclarationOpt {
 /// Type derived for non-terminal ConstDeclarationOptGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ConstDeclarationOptGroup {
     ArrayType(ConstDeclarationOptGroupArrayType),
     Type(ConstDeclarationOptGroupType),
@@ -7478,7 +7478,7 @@ pub enum ConstDeclarationOptGroup {
 /// Type derived for non-terminal ConstTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConstTerm {
     pub const_term: crate::veryl_token::Token, /* const */
 }
@@ -7487,7 +7487,7 @@ pub struct ConstTerm {
 /// Type derived for non-terminal ConstToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConstToken {
     pub const_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7497,7 +7497,7 @@ pub struct ConstToken {
 /// Type derived for non-terminal Converse
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Converse {
     pub converse_token: crate::veryl_token::VerylToken,
 }
@@ -7506,7 +7506,7 @@ pub struct Converse {
 /// Type derived for non-terminal ConverseTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConverseTerm {
     pub converse_term: crate::veryl_token::Token, /* converse */
 }
@@ -7515,7 +7515,7 @@ pub struct ConverseTerm {
 /// Type derived for non-terminal ConverseToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConverseToken {
     pub converse_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7525,7 +7525,7 @@ pub struct ConverseToken {
 /// Type derived for non-terminal Defaul
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Defaul {
     pub default_token: crate::veryl_token::VerylToken,
 }
@@ -7534,7 +7534,7 @@ pub struct Defaul {
 /// Type derived for non-terminal DefaultTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DefaultTerm {
     pub default_term: crate::veryl_token::Token, /* default */
 }
@@ -7543,7 +7543,7 @@ pub struct DefaultTerm {
 /// Type derived for non-terminal DefaultToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DefaultToken {
     pub default_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7553,7 +7553,7 @@ pub struct DefaultToken {
 /// Type derived for non-terminal DescriptionGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionGroup {
     pub description_group_list: Vec<DescriptionGroupList>,
     pub description_group_group: Box<DescriptionGroupGroup>,
@@ -7563,7 +7563,7 @@ pub struct DescriptionGroup {
 /// Type derived for non-terminal DescriptionGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum DescriptionGroupGroup {
     LBraceDescriptionGroupGroupListRBrace(
         DescriptionGroupGroupLBraceDescriptionGroupGroupListRBrace,
@@ -7575,7 +7575,7 @@ pub enum DescriptionGroupGroup {
 /// Type derived for non-terminal DescriptionGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionGroupGroupList {
     pub description_group: Box<DescriptionGroup>,
 }
@@ -7584,7 +7584,7 @@ pub struct DescriptionGroupGroupList {
 /// Type derived for non-terminal DescriptionGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -7593,7 +7593,7 @@ pub struct DescriptionGroupList {
 /// Type derived for non-terminal DescriptionItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum DescriptionItem {
     DescriptionItemOptPublicDescriptionItem(DescriptionItemDescriptionItemOptPublicDescriptionItem),
     ImportDeclaration(DescriptionItemImportDeclaration),
@@ -7606,7 +7606,7 @@ pub enum DescriptionItem {
 /// Type derived for non-terminal DescriptionItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DescriptionItemOpt {
     pub r#pub: Box<Pub>,
 }
@@ -7615,7 +7615,7 @@ pub struct DescriptionItemOpt {
 /// Type derived for non-terminal DiamondOperator
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DiamondOperator {
     pub diamond_operator_token: crate::veryl_token::VerylToken,
 }
@@ -7624,7 +7624,7 @@ pub struct DiamondOperator {
 /// Type derived for non-terminal DiamondOperatorTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DiamondOperatorTerm {
     pub diamond_operator_term: crate::veryl_token::Token, /* <> */
 }
@@ -7633,7 +7633,7 @@ pub struct DiamondOperatorTerm {
 /// Type derived for non-terminal DiamondOperatorToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DiamondOperatorToken {
     pub diamond_operator_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7643,7 +7643,7 @@ pub struct DiamondOperatorToken {
 /// Type derived for non-terminal Direction
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Direction {
     Input(DirectionInput),
     Output(DirectionOutput),
@@ -7656,7 +7656,7 @@ pub enum Direction {
 /// Type derived for non-terminal DollarIdentifier
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DollarIdentifier {
     pub dollar_identifier_token: crate::veryl_token::VerylToken,
 }
@@ -7665,7 +7665,7 @@ pub struct DollarIdentifier {
 /// Type derived for non-terminal DollarIdentifierTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DollarIdentifierTerm {
     pub dollar_identifier_term: crate::veryl_token::Token, /* \$[a-zA-Z_][0-9a-zA-Z_$]* */
 }
@@ -7674,7 +7674,7 @@ pub struct DollarIdentifierTerm {
 /// Type derived for non-terminal DollarIdentifierToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DollarIdentifierToken {
     pub dollar_identifier_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7684,7 +7684,7 @@ pub struct DollarIdentifierToken {
 /// Type derived for non-terminal Dot
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Dot {
     pub dot_token: crate::veryl_token::VerylToken,
 }
@@ -7693,7 +7693,7 @@ pub struct Dot {
 /// Type derived for non-terminal DotDot
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DotDot {
     pub dot_dot_token: crate::veryl_token::VerylToken,
 }
@@ -7702,7 +7702,7 @@ pub struct DotDot {
 /// Type derived for non-terminal DotDotEqu
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DotDotEqu {
     pub dot_dot_equ_token: crate::veryl_token::VerylToken,
 }
@@ -7711,7 +7711,7 @@ pub struct DotDotEqu {
 /// Type derived for non-terminal DotDotEquTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DotDotEquTerm {
     pub dot_dot_equ_term: crate::veryl_token::Token, /* ..= */
 }
@@ -7720,7 +7720,7 @@ pub struct DotDotEquTerm {
 /// Type derived for non-terminal DotDotEquToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DotDotEquToken {
     pub dot_dot_equ_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7730,7 +7730,7 @@ pub struct DotDotEquToken {
 /// Type derived for non-terminal DotDotTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DotDotTerm {
     pub dot_dot_term: crate::veryl_token::Token, /* .. */
 }
@@ -7739,7 +7739,7 @@ pub struct DotDotTerm {
 /// Type derived for non-terminal DotDotToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DotDotToken {
     pub dot_dot_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7749,7 +7749,7 @@ pub struct DotDotToken {
 /// Type derived for non-terminal DotTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DotTerm {
     pub dot_term: crate::veryl_token::Token, /* . */
 }
@@ -7758,7 +7758,7 @@ pub struct DotTerm {
 /// Type derived for non-terminal DotToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DotToken {
     pub dot_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7768,7 +7768,7 @@ pub struct DotToken {
 /// Type derived for non-terminal Else
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Else {
     pub else_token: crate::veryl_token::VerylToken,
 }
@@ -7777,7 +7777,7 @@ pub struct Else {
 /// Type derived for non-terminal ElseTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ElseTerm {
     pub else_term: crate::veryl_token::Token, /* else */
 }
@@ -7786,7 +7786,7 @@ pub struct ElseTerm {
 /// Type derived for non-terminal ElseToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ElseToken {
     pub else_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7796,7 +7796,7 @@ pub struct ElseToken {
 /// Type derived for non-terminal Embed
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Embed {
     pub embed_token: crate::veryl_token::VerylToken,
 }
@@ -7805,7 +7805,7 @@ pub struct Embed {
 /// Type derived for non-terminal EmbedContent
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedContent {
     pub triple_l_brace: Box<TripleLBrace>,
     pub embed_content_list: Vec<EmbedContentList>,
@@ -7816,7 +7816,7 @@ pub struct EmbedContent {
 /// Type derived for non-terminal EmbedContentList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedContentList {
     pub embed_item: Box<EmbedItem>,
 }
@@ -7825,7 +7825,7 @@ pub struct EmbedContentList {
 /// Type derived for non-terminal EmbedDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedDeclaration {
     pub embed: Box<Embed>,
     pub l_paren: Box<LParen>,
@@ -7839,7 +7839,7 @@ pub struct EmbedDeclaration {
 /// Type derived for non-terminal EmbedItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EmbedItem {
     EmbedLBraceEmbedItemListEmbedRBrace(EmbedItemEmbedLBraceEmbedItemListEmbedRBrace),
     EmbedScopedIdentifier(EmbedItemEmbedScopedIdentifier),
@@ -7850,7 +7850,7 @@ pub enum EmbedItem {
 /// Type derived for non-terminal EmbedItemList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedItemList {
     pub embed_item: Box<EmbedItem>,
 }
@@ -7859,7 +7859,7 @@ pub struct EmbedItemList {
 /// Type derived for non-terminal EmbedLBrace
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedLBrace {
     pub embed_l_brace_token: crate::veryl_token::VerylToken,
 }
@@ -7868,7 +7868,7 @@ pub struct EmbedLBrace {
 /// Type derived for non-terminal EmbedLBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedLBraceToken {
     pub l_brace_term: crate::veryl_token::Token,
 }
@@ -7877,7 +7877,7 @@ pub struct EmbedLBraceToken {
 /// Type derived for non-terminal EmbedRBrace
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedRBrace {
     pub embed_r_brace_token: crate::veryl_token::VerylToken,
 }
@@ -7886,7 +7886,7 @@ pub struct EmbedRBrace {
 /// Type derived for non-terminal EmbedRBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedRBraceToken {
     pub r_brace_term: crate::veryl_token::Token,
 }
@@ -7895,7 +7895,7 @@ pub struct EmbedRBraceToken {
 /// Type derived for non-terminal EmbedScopedIdentifier
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedScopedIdentifier {
     pub escaped_l_brace: Box<EscapedLBrace>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -7906,7 +7906,7 @@ pub struct EmbedScopedIdentifier {
 /// Type derived for non-terminal EmbedTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedTerm {
     pub embed_term: crate::veryl_token::Token, /* embed */
 }
@@ -7915,7 +7915,7 @@ pub struct EmbedTerm {
 /// Type derived for non-terminal EmbedToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmbedToken {
     pub embed_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -7925,7 +7925,7 @@ pub struct EmbedToken {
 /// Type derived for non-terminal Enum
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Enum {
     pub enum_token: crate::veryl_token::VerylToken,
 }
@@ -7934,7 +7934,7 @@ pub struct Enum {
 /// Type derived for non-terminal EnumDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumDeclaration {
     pub r#enum: Box<Enum>,
     pub identifier: Box<Identifier>,
@@ -7948,7 +7948,7 @@ pub struct EnumDeclaration {
 /// Type derived for non-terminal EnumDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumDeclarationOpt {
     pub colon: Box<Colon>,
     pub scalar_type: Box<ScalarType>,
@@ -7958,7 +7958,7 @@ pub struct EnumDeclarationOpt {
 /// Type derived for non-terminal EnumGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumGroup {
     pub enum_group_list: Vec<EnumGroupList>,
     pub enum_group_group: Box<EnumGroupGroup>,
@@ -7968,7 +7968,7 @@ pub struct EnumGroup {
 /// Type derived for non-terminal EnumGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EnumGroupGroup {
     LBraceEnumListRBrace(EnumGroupGroupLBraceEnumListRBrace),
     EnumItem(EnumGroupGroupEnumItem),
@@ -7978,7 +7978,7 @@ pub enum EnumGroupGroup {
 /// Type derived for non-terminal EnumGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -7987,7 +7987,7 @@ pub struct EnumGroupList {
 /// Type derived for non-terminal EnumItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumItem {
     pub identifier: Box<Identifier>,
     pub enum_item_opt: Option<EnumItemOpt>,
@@ -7997,7 +7997,7 @@ pub struct EnumItem {
 /// Type derived for non-terminal EnumItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumItemOpt {
     pub equ: Box<Equ>,
     pub expression: Box<Expression>,
@@ -8007,7 +8007,7 @@ pub struct EnumItemOpt {
 /// Type derived for non-terminal EnumList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumList {
     pub enum_group: Box<EnumGroup>,
     pub enum_list_list: Vec<EnumListList>,
@@ -8018,7 +8018,7 @@ pub struct EnumList {
 /// Type derived for non-terminal EnumListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumListList {
     pub comma: Box<Comma>,
     pub enum_group: Box<EnumGroup>,
@@ -8028,7 +8028,7 @@ pub struct EnumListList {
 /// Type derived for non-terminal EnumListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumListOpt {
     pub comma: Box<Comma>,
 }
@@ -8037,7 +8037,7 @@ pub struct EnumListOpt {
 /// Type derived for non-terminal EnumTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumTerm {
     pub enum_term: crate::veryl_token::Token, /* enum */
 }
@@ -8046,7 +8046,7 @@ pub struct EnumTerm {
 /// Type derived for non-terminal EnumToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnumToken {
     pub enum_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8056,7 +8056,7 @@ pub struct EnumToken {
 /// Type derived for non-terminal Equ
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Equ {
     pub equ_token: crate::veryl_token::VerylToken,
 }
@@ -8065,7 +8065,7 @@ pub struct Equ {
 /// Type derived for non-terminal EquTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EquTerm {
     pub equ_term: crate::veryl_token::Token, /* = */
 }
@@ -8074,7 +8074,7 @@ pub struct EquTerm {
 /// Type derived for non-terminal EquToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EquToken {
     pub equ_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8084,7 +8084,7 @@ pub struct EquToken {
 /// Type derived for non-terminal EscapedLBrace
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EscapedLBrace {
     pub escaped_l_brace_token: crate::veryl_token::VerylToken,
 }
@@ -8093,7 +8093,7 @@ pub struct EscapedLBrace {
 /// Type derived for non-terminal EscapedLBraceTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EscapedLBraceTerm {
     pub escaped_l_brace_term: crate::veryl_token::Token, /* \{ */
 }
@@ -8102,7 +8102,7 @@ pub struct EscapedLBraceTerm {
 /// Type derived for non-terminal EscapedLBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EscapedLBraceToken {
     pub escaped_l_brace_term: crate::veryl_token::Token,
 }
@@ -8111,7 +8111,7 @@ pub struct EscapedLBraceToken {
 /// Type derived for non-terminal EscapedRBrace
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EscapedRBrace {
     pub escaped_r_brace_token: crate::veryl_token::VerylToken,
 }
@@ -8120,7 +8120,7 @@ pub struct EscapedRBrace {
 /// Type derived for non-terminal EscapedRBraceTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EscapedRBraceTerm {
     pub escaped_r_brace_term: crate::veryl_token::Token, /* \} */
 }
@@ -8129,7 +8129,7 @@ pub struct EscapedRBraceTerm {
 /// Type derived for non-terminal EscapedRBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EscapedRBraceToken {
     pub escaped_r_brace_term: crate::veryl_token::Token,
 }
@@ -8138,7 +8138,7 @@ pub struct EscapedRBraceToken {
 /// Type derived for non-terminal Exponent
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Exponent {
     pub exponent_token: crate::veryl_token::VerylToken,
 }
@@ -8147,7 +8147,7 @@ pub struct Exponent {
 /// Type derived for non-terminal ExponentTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExponentTerm {
     pub exponent_term: crate::veryl_token::Token, /* [0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)* */
 }
@@ -8156,7 +8156,7 @@ pub struct ExponentTerm {
 /// Type derived for non-terminal ExponentToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExponentToken {
     pub exponent_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8166,7 +8166,7 @@ pub struct ExponentToken {
 /// Type derived for non-terminal Expression
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression {
     pub if_expression: Box<IfExpression>,
 }
@@ -8175,7 +8175,7 @@ pub struct Expression {
 /// Type derived for non-terminal Expression01
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01 {
     pub expression02: Box<Expression02>,
     pub expression01_list: Vec<Expression01List>,
@@ -8185,7 +8185,7 @@ pub struct Expression01 {
 /// Type derived for non-terminal Expression01List
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression01List {
     pub expression01_op: Box<Expression01Op>,
     pub expression02: Box<Expression02>,
@@ -8195,7 +8195,7 @@ pub struct Expression01List {
 /// Type derived for non-terminal Expression01Op
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Expression01Op {
     Operator01(Expression01OpOperator01),
     Operator02(Expression01OpOperator02),
@@ -8212,7 +8212,7 @@ pub enum Expression01Op {
 /// Type derived for non-terminal Expression02
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression02 {
     pub expression02_list: Vec<Expression02List>,
     pub factor: Box<Factor>,
@@ -8223,7 +8223,7 @@ pub struct Expression02 {
 /// Type derived for non-terminal Expression02List
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression02List {
     pub expression02_op: Box<Expression02Op>,
 }
@@ -8232,7 +8232,7 @@ pub struct Expression02List {
 /// Type derived for non-terminal Expression02Op
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Expression02Op {
     UnaryOperator(Expression02OpUnaryOperator),
     Operator06(Expression02OpOperator06),
@@ -8245,7 +8245,7 @@ pub enum Expression02Op {
 /// Type derived for non-terminal Expression02Opt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Expression02Opt {
     pub r#as: Box<As>,
     pub casting_type: Box<CastingType>,
@@ -8255,7 +8255,7 @@ pub struct Expression02Opt {
 /// Type derived for non-terminal ExpressionIdentifier
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExpressionIdentifier {
     pub scoped_identifier: Box<ScopedIdentifier>,
     pub expression_identifier_opt: Option<ExpressionIdentifierOpt>,
@@ -8267,7 +8267,7 @@ pub struct ExpressionIdentifier {
 /// Type derived for non-terminal ExpressionIdentifierList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExpressionIdentifierList {
     pub select: Box<Select>,
 }
@@ -8276,7 +8276,7 @@ pub struct ExpressionIdentifierList {
 /// Type derived for non-terminal ExpressionIdentifierList0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExpressionIdentifierList0 {
     pub dot: Box<Dot>,
     pub identifier: Box<Identifier>,
@@ -8287,7 +8287,7 @@ pub struct ExpressionIdentifierList0 {
 /// Type derived for non-terminal ExpressionIdentifierList0List
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExpressionIdentifierList0List {
     pub select: Box<Select>,
 }
@@ -8296,7 +8296,7 @@ pub struct ExpressionIdentifierList0List {
 /// Type derived for non-terminal ExpressionIdentifierOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExpressionIdentifierOpt {
     pub width: Box<Width>,
 }
@@ -8305,7 +8305,7 @@ pub struct ExpressionIdentifierOpt {
 /// Type derived for non-terminal F32
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct F32 {
     pub f32_token: crate::veryl_token::VerylToken,
 }
@@ -8314,7 +8314,7 @@ pub struct F32 {
 /// Type derived for non-terminal F32Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct F32Term {
     pub f32_term: crate::veryl_token::Token, /* f32 */
 }
@@ -8323,7 +8323,7 @@ pub struct F32Term {
 /// Type derived for non-terminal F32Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct F32Token {
     pub f32_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8333,7 +8333,7 @@ pub struct F32Token {
 /// Type derived for non-terminal F64
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct F64 {
     pub f64_token: crate::veryl_token::VerylToken,
 }
@@ -8342,7 +8342,7 @@ pub struct F64 {
 /// Type derived for non-terminal F64Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct F64Term {
     pub f64_term: crate::veryl_token::Token, /* f64 */
 }
@@ -8351,7 +8351,7 @@ pub struct F64Term {
 /// Type derived for non-terminal F64Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct F64Token {
     pub f64_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8361,7 +8361,7 @@ pub struct F64Token {
 /// Type derived for non-terminal Factor
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Factor {
     Number(FactorNumber),
     BooleanLiteral(FactorBooleanLiteral),
@@ -8383,7 +8383,7 @@ pub enum Factor {
 /// Type derived for non-terminal FactorGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum FactorGroup {
     Msb(FactorGroupMsb),
     Lsb(FactorGroupLsb),
@@ -8393,7 +8393,7 @@ pub enum FactorGroup {
 /// Type derived for non-terminal FactorType
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorType {
     pub factor_type_group: Box<FactorTypeGroup>,
 }
@@ -8402,7 +8402,7 @@ pub struct FactorType {
 /// Type derived for non-terminal FactorTypeFactor
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorTypeFactor {
     pub factor_type_factor_list: Vec<FactorTypeFactorList>,
     pub factor_type: Box<FactorType>,
@@ -8412,7 +8412,7 @@ pub struct FactorTypeFactor {
 /// Type derived for non-terminal FactorTypeFactorList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorTypeFactorList {
     pub type_modifier: Box<TypeModifier>,
 }
@@ -8421,7 +8421,7 @@ pub struct FactorTypeFactorList {
 /// Type derived for non-terminal FactorTypeGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum FactorTypeGroup {
     VariableTypeFactorTypeOpt(FactorTypeGroupVariableTypeFactorTypeOpt),
     FixedType(FactorTypeGroupFixedType),
@@ -8431,7 +8431,7 @@ pub enum FactorTypeGroup {
 /// Type derived for non-terminal FactorTypeOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FactorTypeOpt {
     pub width: Box<Width>,
 }
@@ -8440,7 +8440,7 @@ pub struct FactorTypeOpt {
 /// Type derived for non-terminal False
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct False {
     pub false_token: crate::veryl_token::VerylToken,
 }
@@ -8449,7 +8449,7 @@ pub struct False {
 /// Type derived for non-terminal FalseTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FalseTerm {
     pub false_term: crate::veryl_token::Token, /* false */
 }
@@ -8458,7 +8458,7 @@ pub struct FalseTerm {
 /// Type derived for non-terminal FalseToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FalseToken {
     pub false_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8468,7 +8468,7 @@ pub struct FalseToken {
 /// Type derived for non-terminal Final
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Final {
     pub final_token: crate::veryl_token::VerylToken,
 }
@@ -8477,7 +8477,7 @@ pub struct Final {
 /// Type derived for non-terminal FinalDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FinalDeclaration {
     pub r#final: Box<Final>,
     pub statement_block: Box<StatementBlock>,
@@ -8487,7 +8487,7 @@ pub struct FinalDeclaration {
 /// Type derived for non-terminal FinalTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FinalTerm {
     pub final_term: crate::veryl_token::Token, /* final */
 }
@@ -8496,7 +8496,7 @@ pub struct FinalTerm {
 /// Type derived for non-terminal FinalToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FinalToken {
     pub final_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8506,7 +8506,7 @@ pub struct FinalToken {
 /// Type derived for non-terminal FixedPoint
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedPoint {
     pub fixed_point_token: crate::veryl_token::VerylToken,
 }
@@ -8515,7 +8515,7 @@ pub struct FixedPoint {
 /// Type derived for non-terminal FixedPointTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedPointTerm {
     pub fixed_point_term: crate::veryl_token::Token, /* [0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)* */
 }
@@ -8524,7 +8524,7 @@ pub struct FixedPointTerm {
 /// Type derived for non-terminal FixedPointToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixedPointToken {
     pub fixed_point_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8534,7 +8534,7 @@ pub struct FixedPointToken {
 /// Type derived for non-terminal FixedType
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum FixedType {
     P8(FixedTypeP8),
     P16(FixedTypeP16),
@@ -8559,7 +8559,7 @@ pub enum FixedType {
 /// Type derived for non-terminal For
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct For {
     pub for_token: crate::veryl_token::VerylToken,
 }
@@ -8568,7 +8568,7 @@ pub struct For {
 /// Type derived for non-terminal ForStatement
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForStatement {
     pub r#for: Box<For>,
     pub identifier: Box<Identifier>,
@@ -8583,7 +8583,7 @@ pub struct ForStatement {
 /// Type derived for non-terminal ForStatementOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForStatementOpt {
     pub rev: Box<Rev>,
 }
@@ -8592,7 +8592,7 @@ pub struct ForStatementOpt {
 /// Type derived for non-terminal ForStatementOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForStatementOpt0 {
     pub step: Box<Step>,
     pub assignment_operator: Box<AssignmentOperator>,
@@ -8603,7 +8603,7 @@ pub struct ForStatementOpt0 {
 /// Type derived for non-terminal ForTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForTerm {
     pub for_term: crate::veryl_token::Token, /* for */
 }
@@ -8612,7 +8612,7 @@ pub struct ForTerm {
 /// Type derived for non-terminal ForToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForToken {
     pub for_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8622,7 +8622,7 @@ pub struct ForToken {
 /// Type derived for non-terminal Function
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Function {
     pub function_token: crate::veryl_token::VerylToken,
 }
@@ -8631,7 +8631,7 @@ pub struct Function {
 /// Type derived for non-terminal FunctionCall
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionCall {
     pub l_paren: Box<LParen>,
     pub function_call_opt: Option<FunctionCallOpt>,
@@ -8642,7 +8642,7 @@ pub struct FunctionCall {
 /// Type derived for non-terminal FunctionCallOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionCallOpt {
     pub argument_list: Box<ArgumentList>,
 }
@@ -8651,7 +8651,7 @@ pub struct FunctionCallOpt {
 /// Type derived for non-terminal FunctionDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionDeclaration {
     pub function: Box<Function>,
     pub identifier: Box<Identifier>,
@@ -8665,7 +8665,7 @@ pub struct FunctionDeclaration {
 /// Type derived for non-terminal FunctionDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -8674,7 +8674,7 @@ pub struct FunctionDeclarationOpt {
 /// Type derived for non-terminal FunctionDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionDeclarationOpt0 {
     pub port_declaration: Box<PortDeclaration>,
 }
@@ -8683,7 +8683,7 @@ pub struct FunctionDeclarationOpt0 {
 /// Type derived for non-terminal FunctionDeclarationOpt1
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionDeclarationOpt1 {
     pub minus_g_t: Box<MinusGT>,
     pub scalar_type: Box<ScalarType>,
@@ -8693,7 +8693,7 @@ pub struct FunctionDeclarationOpt1 {
 /// Type derived for non-terminal FunctionTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionTerm {
     pub function_term: crate::veryl_token::Token, /* function */
 }
@@ -8702,7 +8702,7 @@ pub struct FunctionTerm {
 /// Type derived for non-terminal FunctionToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionToken {
     pub function_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8712,7 +8712,7 @@ pub struct FunctionToken {
 /// Type derived for non-terminal Gen
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Gen {
     pub gen_token: crate::veryl_token::VerylToken,
 }
@@ -8721,7 +8721,7 @@ pub struct Gen {
 /// Type derived for non-terminal GenDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenDeclaration {
     pub r#gen: Box<Gen>,
     pub identifier: Box<Identifier>,
@@ -8736,7 +8736,7 @@ pub struct GenDeclaration {
 /// Type derived for non-terminal GenDeclarationGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum GenDeclarationGroup {
     GenericProtoBound(GenDeclarationGroupGenericProtoBound),
     Type(GenDeclarationGroupType),
@@ -8746,7 +8746,7 @@ pub enum GenDeclarationGroup {
 /// Type derived for non-terminal GenTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenTerm {
     pub gen_term: crate::veryl_token::Token, /* gen */
 }
@@ -8755,7 +8755,7 @@ pub struct GenTerm {
 /// Type derived for non-terminal GenToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenToken {
     pub gen_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -8765,7 +8765,7 @@ pub struct GenToken {
 /// Type derived for non-terminal GenerateBlockDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateBlockDeclaration {
     pub generate_named_block: Box<GenerateNamedBlock>,
 }
@@ -8774,7 +8774,7 @@ pub struct GenerateBlockDeclaration {
 /// Type derived for non-terminal GenerateForDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateForDeclaration {
     pub r#for: Box<For>,
     pub identifier: Box<Identifier>,
@@ -8789,7 +8789,7 @@ pub struct GenerateForDeclaration {
 /// Type derived for non-terminal GenerateForDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateForDeclarationOpt {
     pub rev: Box<Rev>,
 }
@@ -8798,7 +8798,7 @@ pub struct GenerateForDeclarationOpt {
 /// Type derived for non-terminal GenerateForDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateForDeclarationOpt0 {
     pub step: Box<Step>,
     pub assignment_operator: Box<AssignmentOperator>,
@@ -8809,7 +8809,7 @@ pub struct GenerateForDeclarationOpt0 {
 /// Type derived for non-terminal GenerateGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateGroup {
     pub generate_group_list: Vec<GenerateGroupList>,
     pub generate_group_group: Box<GenerateGroupGroup>,
@@ -8819,7 +8819,7 @@ pub struct GenerateGroup {
 /// Type derived for non-terminal GenerateGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum GenerateGroupGroup {
     LBraceGenerateGroupGroupListRBrace(GenerateGroupGroupLBraceGenerateGroupGroupListRBrace),
     GenerateItem(GenerateGroupGroupGenerateItem),
@@ -8829,7 +8829,7 @@ pub enum GenerateGroupGroup {
 /// Type derived for non-terminal GenerateGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateGroupGroupList {
     pub generate_group: Box<GenerateGroup>,
 }
@@ -8838,7 +8838,7 @@ pub struct GenerateGroupGroupList {
 /// Type derived for non-terminal GenerateGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -8847,7 +8847,7 @@ pub struct GenerateGroupList {
 /// Type derived for non-terminal GenerateIfDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateIfDeclaration {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
@@ -8860,7 +8860,7 @@ pub struct GenerateIfDeclaration {
 /// Type derived for non-terminal GenerateIfDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateIfDeclarationList {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
@@ -8872,7 +8872,7 @@ pub struct GenerateIfDeclarationList {
 /// Type derived for non-terminal GenerateIfDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateIfDeclarationOpt {
     pub r#else: Box<Else>,
     pub generate_optional_named_block: Box<GenerateOptionalNamedBlock>,
@@ -8882,7 +8882,7 @@ pub struct GenerateIfDeclarationOpt {
 /// Type derived for non-terminal GenerateItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum GenerateItem {
     LetDeclaration(GenerateItemLetDeclaration),
     VarDeclaration(GenerateItemVarDeclaration),
@@ -8913,7 +8913,7 @@ pub enum GenerateItem {
 /// Type derived for non-terminal GenerateNamedBlock
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateNamedBlock {
     pub colon: Box<Colon>,
     pub identifier: Box<Identifier>,
@@ -8926,7 +8926,7 @@ pub struct GenerateNamedBlock {
 /// Type derived for non-terminal GenerateNamedBlockList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateNamedBlockList {
     pub generate_group: Box<GenerateGroup>,
 }
@@ -8935,7 +8935,7 @@ pub struct GenerateNamedBlockList {
 /// Type derived for non-terminal GenerateOptionalNamedBlock
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateOptionalNamedBlock {
     pub generate_optional_named_block_opt: Option<GenerateOptionalNamedBlockOpt>,
     pub l_brace: Box<LBrace>,
@@ -8947,7 +8947,7 @@ pub struct GenerateOptionalNamedBlock {
 /// Type derived for non-terminal GenerateOptionalNamedBlockList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateOptionalNamedBlockList {
     pub generate_group: Box<GenerateGroup>,
 }
@@ -8956,7 +8956,7 @@ pub struct GenerateOptionalNamedBlockList {
 /// Type derived for non-terminal GenerateOptionalNamedBlockOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateOptionalNamedBlockOpt {
     pub colon: Box<Colon>,
     pub identifier: Box<Identifier>,
@@ -8966,7 +8966,7 @@ pub struct GenerateOptionalNamedBlockOpt {
 /// Type derived for non-terminal GenericArgIdentifier
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenericArgIdentifier {
     pub scoped_identifier: Box<ScopedIdentifier>,
     pub generic_arg_identifier_list: Vec<GenericArgIdentifierList>,
@@ -8976,7 +8976,7 @@ pub struct GenericArgIdentifier {
 /// Type derived for non-terminal GenericArgIdentifierList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenericArgIdentifierList {
     pub dot: Box<Dot>,
     pub identifier: Box<Identifier>,
@@ -8986,7 +8986,7 @@ pub struct GenericArgIdentifierList {
 /// Type derived for non-terminal GenericBound
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum GenericBound {
     Type(GenericBoundType),
     InstScopedIdentifier(GenericBoundInstScopedIdentifier),
@@ -8997,7 +8997,7 @@ pub enum GenericBound {
 /// Type derived for non-terminal GenericProtoBound
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum GenericProtoBound {
     ScopedIdentifier(GenericProtoBoundScopedIdentifier),
     FixedType(GenericProtoBoundFixedType),
@@ -9007,7 +9007,7 @@ pub enum GenericProtoBound {
 /// Type derived for non-terminal Hash
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Hash {
     pub hash_token: crate::veryl_token::VerylToken,
 }
@@ -9016,7 +9016,7 @@ pub struct Hash {
 /// Type derived for non-terminal HashLBracket
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HashLBracket {
     pub hash_l_bracket_token: crate::veryl_token::VerylToken,
 }
@@ -9025,7 +9025,7 @@ pub struct HashLBracket {
 /// Type derived for non-terminal HashLBracketTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HashLBracketTerm {
     pub hash_l_bracket_term: crate::veryl_token::Token, /* #[ */
 }
@@ -9034,7 +9034,7 @@ pub struct HashLBracketTerm {
 /// Type derived for non-terminal HashLBracketToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HashLBracketToken {
     pub hash_l_bracket_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9044,7 +9044,7 @@ pub struct HashLBracketToken {
 /// Type derived for non-terminal HashTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HashTerm {
     pub hash_term: crate::veryl_token::Token, /* # */
 }
@@ -9053,7 +9053,7 @@ pub struct HashTerm {
 /// Type derived for non-terminal HashToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HashToken {
     pub hash_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9063,7 +9063,7 @@ pub struct HashToken {
 /// Type derived for non-terminal HierarchicalIdentifier
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HierarchicalIdentifier {
     pub identifier: Box<Identifier>,
     pub hierarchical_identifier_list: Vec<HierarchicalIdentifierList>,
@@ -9074,7 +9074,7 @@ pub struct HierarchicalIdentifier {
 /// Type derived for non-terminal HierarchicalIdentifierList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HierarchicalIdentifierList {
     pub select: Box<Select>,
 }
@@ -9083,7 +9083,7 @@ pub struct HierarchicalIdentifierList {
 /// Type derived for non-terminal HierarchicalIdentifierList0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HierarchicalIdentifierList0 {
     pub dot: Box<Dot>,
     pub identifier: Box<Identifier>,
@@ -9094,7 +9094,7 @@ pub struct HierarchicalIdentifierList0 {
 /// Type derived for non-terminal HierarchicalIdentifierList0List
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HierarchicalIdentifierList0List {
     pub select: Box<Select>,
 }
@@ -9103,7 +9103,7 @@ pub struct HierarchicalIdentifierList0List {
 /// Type derived for non-terminal I16
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I16 {
     pub i16_token: crate::veryl_token::VerylToken,
 }
@@ -9112,7 +9112,7 @@ pub struct I16 {
 /// Type derived for non-terminal I16Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I16Term {
     pub i16_term: crate::veryl_token::Token, /* i16 */
 }
@@ -9121,7 +9121,7 @@ pub struct I16Term {
 /// Type derived for non-terminal I16Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I16Token {
     pub i16_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9131,7 +9131,7 @@ pub struct I16Token {
 /// Type derived for non-terminal I32
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I32 {
     pub i32_token: crate::veryl_token::VerylToken,
 }
@@ -9140,7 +9140,7 @@ pub struct I32 {
 /// Type derived for non-terminal I32Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I32Term {
     pub i32_term: crate::veryl_token::Token, /* i32 */
 }
@@ -9149,7 +9149,7 @@ pub struct I32Term {
 /// Type derived for non-terminal I32Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I32Token {
     pub i32_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9159,7 +9159,7 @@ pub struct I32Token {
 /// Type derived for non-terminal I64
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I64 {
     pub i64_token: crate::veryl_token::VerylToken,
 }
@@ -9168,7 +9168,7 @@ pub struct I64 {
 /// Type derived for non-terminal I64Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I64Term {
     pub i64_term: crate::veryl_token::Token, /* i64 */
 }
@@ -9177,7 +9177,7 @@ pub struct I64Term {
 /// Type derived for non-terminal I64Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I64Token {
     pub i64_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9187,7 +9187,7 @@ pub struct I64Token {
 /// Type derived for non-terminal I8
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I8 {
     pub i8_token: crate::veryl_token::VerylToken,
 }
@@ -9196,7 +9196,7 @@ pub struct I8 {
 /// Type derived for non-terminal I8Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I8Term {
     pub i8_term: crate::veryl_token::Token, /* i8 */
 }
@@ -9205,7 +9205,7 @@ pub struct I8Term {
 /// Type derived for non-terminal I8Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct I8Token {
     pub i8_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9215,7 +9215,7 @@ pub struct I8Token {
 /// Type derived for non-terminal Identifier
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Identifier {
     pub identifier_token: crate::veryl_token::VerylToken,
 }
@@ -9224,7 +9224,7 @@ pub struct Identifier {
 /// Type derived for non-terminal IdentifierFactor
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentifierFactor {
     pub expression_identifier: Box<ExpressionIdentifier>,
     pub identifier_factor_opt: Option<IdentifierFactorOpt>,
@@ -9234,7 +9234,7 @@ pub struct IdentifierFactor {
 /// Type derived for non-terminal IdentifierFactorOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentifierFactorOpt {
     pub identifier_factor_opt_group: Box<IdentifierFactorOptGroup>,
 }
@@ -9243,7 +9243,7 @@ pub struct IdentifierFactorOpt {
 /// Type derived for non-terminal IdentifierFactorOptGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum IdentifierFactorOptGroup {
     FunctionCall(IdentifierFactorOptGroupFunctionCall),
     StructConstructor(IdentifierFactorOptGroupStructConstructor),
@@ -9253,7 +9253,7 @@ pub enum IdentifierFactorOptGroup {
 /// Type derived for non-terminal IdentifierStatement
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentifierStatement {
     pub expression_identifier: Box<ExpressionIdentifier>,
     pub identifier_statement_group: Box<IdentifierStatementGroup>,
@@ -9264,7 +9264,7 @@ pub struct IdentifierStatement {
 /// Type derived for non-terminal IdentifierStatementGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum IdentifierStatementGroup {
     FunctionCall(IdentifierStatementGroupFunctionCall),
     Assignment(IdentifierStatementGroupAssignment),
@@ -9274,7 +9274,7 @@ pub enum IdentifierStatementGroup {
 /// Type derived for non-terminal IdentifierTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentifierTerm {
     pub identifier_term: crate::veryl_token::Token, /* (?:r#)?[a-zA-Z_][0-9a-zA-Z_$]* */
 }
@@ -9283,7 +9283,7 @@ pub struct IdentifierTerm {
 /// Type derived for non-terminal IdentifierToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentifierToken {
     pub identifier_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9293,7 +9293,7 @@ pub struct IdentifierToken {
 /// Type derived for non-terminal If
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct If {
     pub if_token: crate::veryl_token::VerylToken,
 }
@@ -9302,7 +9302,7 @@ pub struct If {
 /// Type derived for non-terminal IfExpression
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfExpression {
     pub if_expression_list: Vec<IfExpressionList>,
     pub expression01: Box<Expression01>,
@@ -9312,7 +9312,7 @@ pub struct IfExpression {
 /// Type derived for non-terminal IfExpressionList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfExpressionList {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
@@ -9325,7 +9325,7 @@ pub struct IfExpressionList {
 /// Type derived for non-terminal IfReset
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfReset {
     pub if_reset_token: crate::veryl_token::VerylToken,
 }
@@ -9334,7 +9334,7 @@ pub struct IfReset {
 /// Type derived for non-terminal IfResetStatement
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfResetStatement {
     pub if_reset: Box<IfReset>,
     pub statement_block: Box<StatementBlock>,
@@ -9346,7 +9346,7 @@ pub struct IfResetStatement {
 /// Type derived for non-terminal IfResetStatementList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfResetStatementList {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
@@ -9358,7 +9358,7 @@ pub struct IfResetStatementList {
 /// Type derived for non-terminal IfResetStatementOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfResetStatementOpt {
     pub r#else: Box<Else>,
     pub statement_block: Box<StatementBlock>,
@@ -9368,7 +9368,7 @@ pub struct IfResetStatementOpt {
 /// Type derived for non-terminal IfResetTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfResetTerm {
     pub if_reset_term: crate::veryl_token::Token, /* if_reset */
 }
@@ -9377,7 +9377,7 @@ pub struct IfResetTerm {
 /// Type derived for non-terminal IfResetToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfResetToken {
     pub if_reset_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9387,7 +9387,7 @@ pub struct IfResetToken {
 /// Type derived for non-terminal IfStatement
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfStatement {
     pub r#if: Box<If>,
     pub expression: Box<Expression>,
@@ -9400,7 +9400,7 @@ pub struct IfStatement {
 /// Type derived for non-terminal IfStatementList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfStatementList {
     pub r#else: Box<Else>,
     pub r#if: Box<If>,
@@ -9412,7 +9412,7 @@ pub struct IfStatementList {
 /// Type derived for non-terminal IfStatementOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfStatementOpt {
     pub r#else: Box<Else>,
     pub statement_block: Box<StatementBlock>,
@@ -9422,7 +9422,7 @@ pub struct IfStatementOpt {
 /// Type derived for non-terminal IfTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfTerm {
     pub if_term: crate::veryl_token::Token, /* if */
 }
@@ -9431,7 +9431,7 @@ pub struct IfTerm {
 /// Type derived for non-terminal IfToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IfToken {
     pub if_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9441,7 +9441,7 @@ pub struct IfToken {
 /// Type derived for non-terminal Import
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Import {
     pub import_token: crate::veryl_token::VerylToken,
 }
@@ -9450,7 +9450,7 @@ pub struct Import {
 /// Type derived for non-terminal ImportDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImportDeclaration {
     pub import: Box<Import>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -9462,7 +9462,7 @@ pub struct ImportDeclaration {
 /// Type derived for non-terminal ImportDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImportDeclarationOpt {
     pub colon_colon: Box<ColonColon>,
     pub star: Box<Star>,
@@ -9472,7 +9472,7 @@ pub struct ImportDeclarationOpt {
 /// Type derived for non-terminal ImportTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImportTerm {
     pub import_term: crate::veryl_token::Token, /* import */
 }
@@ -9481,7 +9481,7 @@ pub struct ImportTerm {
 /// Type derived for non-terminal ImportToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImportToken {
     pub import_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9491,7 +9491,7 @@ pub struct ImportToken {
 /// Type derived for non-terminal In
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct In {
     pub in_token: crate::veryl_token::VerylToken,
 }
@@ -9500,7 +9500,7 @@ pub struct In {
 /// Type derived for non-terminal InTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InTerm {
     pub in_term: crate::veryl_token::Token, /* in */
 }
@@ -9509,7 +9509,7 @@ pub struct InTerm {
 /// Type derived for non-terminal InToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InToken {
     pub in_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9519,7 +9519,7 @@ pub struct InToken {
 /// Type derived for non-terminal Include
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Include {
     pub include_token: crate::veryl_token::VerylToken,
 }
@@ -9528,7 +9528,7 @@ pub struct Include {
 /// Type derived for non-terminal IncludeDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IncludeDeclaration {
     pub include: Box<Include>,
     pub l_paren: Box<LParen>,
@@ -9543,7 +9543,7 @@ pub struct IncludeDeclaration {
 /// Type derived for non-terminal IncludeTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IncludeTerm {
     pub include_term: crate::veryl_token::Token, /* include */
 }
@@ -9552,7 +9552,7 @@ pub struct IncludeTerm {
 /// Type derived for non-terminal IncludeToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IncludeToken {
     pub include_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9562,7 +9562,7 @@ pub struct IncludeToken {
 /// Type derived for non-terminal Initial
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Initial {
     pub initial_token: crate::veryl_token::VerylToken,
 }
@@ -9571,7 +9571,7 @@ pub struct Initial {
 /// Type derived for non-terminal InitialDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InitialDeclaration {
     pub initial: Box<Initial>,
     pub statement_block: Box<StatementBlock>,
@@ -9581,7 +9581,7 @@ pub struct InitialDeclaration {
 /// Type derived for non-terminal InitialTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InitialTerm {
     pub initial_term: crate::veryl_token::Token, /* initial */
 }
@@ -9590,7 +9590,7 @@ pub struct InitialTerm {
 /// Type derived for non-terminal InitialToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InitialToken {
     pub initial_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9600,7 +9600,7 @@ pub struct InitialToken {
 /// Type derived for non-terminal Inout
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Inout {
     pub inout_token: crate::veryl_token::VerylToken,
 }
@@ -9609,7 +9609,7 @@ pub struct Inout {
 /// Type derived for non-terminal InoutTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InoutTerm {
     pub inout_term: crate::veryl_token::Token, /* inout */
 }
@@ -9618,7 +9618,7 @@ pub struct InoutTerm {
 /// Type derived for non-terminal InoutToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InoutToken {
     pub inout_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9628,7 +9628,7 @@ pub struct InoutToken {
 /// Type derived for non-terminal Input
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Input {
     pub input_token: crate::veryl_token::VerylToken,
 }
@@ -9637,7 +9637,7 @@ pub struct Input {
 /// Type derived for non-terminal InputTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InputTerm {
     pub input_term: crate::veryl_token::Token, /* input */
 }
@@ -9646,7 +9646,7 @@ pub struct InputTerm {
 /// Type derived for non-terminal InputToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InputToken {
     pub input_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9656,7 +9656,7 @@ pub struct InputToken {
 /// Type derived for non-terminal Inside
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Inside {
     pub inside_token: crate::veryl_token::VerylToken,
 }
@@ -9665,7 +9665,7 @@ pub struct Inside {
 /// Type derived for non-terminal InsideExpression
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InsideExpression {
     pub inside: Box<Inside>,
     pub expression: Box<Expression>,
@@ -9678,7 +9678,7 @@ pub struct InsideExpression {
 /// Type derived for non-terminal InsideTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InsideTerm {
     pub inside_term: crate::veryl_token::Token, /* inside */
 }
@@ -9687,7 +9687,7 @@ pub struct InsideTerm {
 /// Type derived for non-terminal InsideToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InsideToken {
     pub inside_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9697,7 +9697,7 @@ pub struct InsideToken {
 /// Type derived for non-terminal Inst
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Inst {
     pub inst_token: crate::veryl_token::VerylToken,
 }
@@ -9706,7 +9706,7 @@ pub struct Inst {
 /// Type derived for non-terminal InstDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstDeclaration {
     pub inst: Box<Inst>,
     pub component_instantiation: Box<ComponentInstantiation>,
@@ -9717,7 +9717,7 @@ pub struct InstDeclaration {
 /// Type derived for non-terminal InstParameter
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameter {
     pub hash: Box<Hash>,
     pub l_paren: Box<LParen>,
@@ -9729,7 +9729,7 @@ pub struct InstParameter {
 /// Type derived for non-terminal InstParameterGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameterGroup {
     pub inst_parameter_group_list: Vec<InstParameterGroupList>,
     pub inst_parameter_group_group: Box<InstParameterGroupGroup>,
@@ -9739,7 +9739,7 @@ pub struct InstParameterGroup {
 /// Type derived for non-terminal InstParameterGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InstParameterGroupGroup {
     LBraceInstParameterListRBrace(InstParameterGroupGroupLBraceInstParameterListRBrace),
     InstParameterItem(InstParameterGroupGroupInstParameterItem),
@@ -9749,7 +9749,7 @@ pub enum InstParameterGroupGroup {
 /// Type derived for non-terminal InstParameterGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameterGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -9758,7 +9758,7 @@ pub struct InstParameterGroupList {
 /// Type derived for non-terminal InstParameterItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameterItem {
     pub identifier: Box<Identifier>,
     pub inst_parameter_item_opt: Option<InstParameterItemOpt>,
@@ -9768,7 +9768,7 @@ pub struct InstParameterItem {
 /// Type derived for non-terminal InstParameterItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameterItemOpt {
     pub colon: Box<Colon>,
     pub expression: Box<Expression>,
@@ -9778,7 +9778,7 @@ pub struct InstParameterItemOpt {
 /// Type derived for non-terminal InstParameterList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameterList {
     pub inst_parameter_group: Box<InstParameterGroup>,
     pub inst_parameter_list_list: Vec<InstParameterListList>,
@@ -9789,7 +9789,7 @@ pub struct InstParameterList {
 /// Type derived for non-terminal InstParameterListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameterListList {
     pub comma: Box<Comma>,
     pub inst_parameter_group: Box<InstParameterGroup>,
@@ -9799,7 +9799,7 @@ pub struct InstParameterListList {
 /// Type derived for non-terminal InstParameterListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameterListOpt {
     pub comma: Box<Comma>,
 }
@@ -9808,7 +9808,7 @@ pub struct InstParameterListOpt {
 /// Type derived for non-terminal InstParameterOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstParameterOpt {
     pub inst_parameter_list: Box<InstParameterList>,
 }
@@ -9817,7 +9817,7 @@ pub struct InstParameterOpt {
 /// Type derived for non-terminal InstPort
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPort {
     pub l_paren: Box<LParen>,
     pub inst_port_opt: Option<InstPortOpt>,
@@ -9828,7 +9828,7 @@ pub struct InstPort {
 /// Type derived for non-terminal InstPortGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPortGroup {
     pub inst_port_group_list: Vec<InstPortGroupList>,
     pub inst_port_group_group: Box<InstPortGroupGroup>,
@@ -9838,7 +9838,7 @@ pub struct InstPortGroup {
 /// Type derived for non-terminal InstPortGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InstPortGroupGroup {
     LBraceInstPortListRBrace(InstPortGroupGroupLBraceInstPortListRBrace),
     InstPortItem(InstPortGroupGroupInstPortItem),
@@ -9848,7 +9848,7 @@ pub enum InstPortGroupGroup {
 /// Type derived for non-terminal InstPortGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPortGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -9857,7 +9857,7 @@ pub struct InstPortGroupList {
 /// Type derived for non-terminal InstPortItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPortItem {
     pub identifier: Box<Identifier>,
     pub inst_port_item_opt: Option<InstPortItemOpt>,
@@ -9867,7 +9867,7 @@ pub struct InstPortItem {
 /// Type derived for non-terminal InstPortItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPortItemOpt {
     pub colon: Box<Colon>,
     pub expression: Box<Expression>,
@@ -9877,7 +9877,7 @@ pub struct InstPortItemOpt {
 /// Type derived for non-terminal InstPortList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPortList {
     pub inst_port_group: Box<InstPortGroup>,
     pub inst_port_list_list: Vec<InstPortListList>,
@@ -9888,7 +9888,7 @@ pub struct InstPortList {
 /// Type derived for non-terminal InstPortListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPortListList {
     pub comma: Box<Comma>,
     pub inst_port_group: Box<InstPortGroup>,
@@ -9898,7 +9898,7 @@ pub struct InstPortListList {
 /// Type derived for non-terminal InstPortListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPortListOpt {
     pub comma: Box<Comma>,
 }
@@ -9907,7 +9907,7 @@ pub struct InstPortListOpt {
 /// Type derived for non-terminal InstPortOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstPortOpt {
     pub inst_port_list: Box<InstPortList>,
 }
@@ -9916,7 +9916,7 @@ pub struct InstPortOpt {
 /// Type derived for non-terminal InstTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstTerm {
     pub inst_term: crate::veryl_token::Token, /* inst */
 }
@@ -9925,7 +9925,7 @@ pub struct InstTerm {
 /// Type derived for non-terminal InstToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstToken {
     pub inst_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -9935,7 +9935,7 @@ pub struct InstToken {
 /// Type derived for non-terminal IntegralNumber
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum IntegralNumber {
     Based(IntegralNumberBased),
     BaseLess(IntegralNumberBaseLess),
@@ -9946,7 +9946,7 @@ pub enum IntegralNumber {
 /// Type derived for non-terminal Interface
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Interface {
     pub interface_token: crate::veryl_token::VerylToken,
 }
@@ -9955,7 +9955,7 @@ pub struct Interface {
 /// Type derived for non-terminal InterfaceDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceDeclaration {
     pub interface: Box<Interface>,
     pub identifier: Box<Identifier>,
@@ -9971,7 +9971,7 @@ pub struct InterfaceDeclaration {
 /// Type derived for non-terminal InterfaceDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceDeclarationList {
     pub interface_group: Box<InterfaceGroup>,
 }
@@ -9980,7 +9980,7 @@ pub struct InterfaceDeclarationList {
 /// Type derived for non-terminal InterfaceDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -9989,7 +9989,7 @@ pub struct InterfaceDeclarationOpt {
 /// Type derived for non-terminal InterfaceDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceDeclarationOpt0 {
     pub r#for: Box<For>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -9999,7 +9999,7 @@ pub struct InterfaceDeclarationOpt0 {
 /// Type derived for non-terminal InterfaceDeclarationOpt1
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceDeclarationOpt1 {
     pub with_parameter: Box<WithParameter>,
 }
@@ -10008,7 +10008,7 @@ pub struct InterfaceDeclarationOpt1 {
 /// Type derived for non-terminal InterfaceGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceGroup {
     pub interface_group_list: Vec<InterfaceGroupList>,
     pub interface_group_group: Box<InterfaceGroupGroup>,
@@ -10018,7 +10018,7 @@ pub struct InterfaceGroup {
 /// Type derived for non-terminal InterfaceGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InterfaceGroupGroup {
     LBraceInterfaceGroupGroupListRBrace(InterfaceGroupGroupLBraceInterfaceGroupGroupListRBrace),
     InterfaceItem(InterfaceGroupGroupInterfaceItem),
@@ -10028,7 +10028,7 @@ pub enum InterfaceGroupGroup {
 /// Type derived for non-terminal InterfaceGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceGroupGroupList {
     pub interface_group: Box<InterfaceGroup>,
 }
@@ -10037,7 +10037,7 @@ pub struct InterfaceGroupGroupList {
 /// Type derived for non-terminal InterfaceGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -10046,7 +10046,7 @@ pub struct InterfaceGroupList {
 /// Type derived for non-terminal InterfaceItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InterfaceItem {
     GenerateItem(InterfaceItemGenerateItem),
     ModportDeclaration(InterfaceItemModportDeclaration),
@@ -10056,7 +10056,7 @@ pub enum InterfaceItem {
 /// Type derived for non-terminal InterfaceTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceTerm {
     pub interface_term: crate::veryl_token::Token, /* interface */
 }
@@ -10065,7 +10065,7 @@ pub struct InterfaceTerm {
 /// Type derived for non-terminal InterfaceToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InterfaceToken {
     pub interface_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10075,7 +10075,7 @@ pub struct InterfaceToken {
 /// Type derived for non-terminal LAngle
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LAngle {
     pub l_angle_token: crate::veryl_token::VerylToken,
 }
@@ -10084,7 +10084,7 @@ pub struct LAngle {
 /// Type derived for non-terminal LAngleTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LAngleTerm {
     pub l_angle_term: crate::veryl_token::Token, /* < */
 }
@@ -10093,7 +10093,7 @@ pub struct LAngleTerm {
 /// Type derived for non-terminal LAngleToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LAngleToken {
     pub l_angle_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10103,7 +10103,7 @@ pub struct LAngleToken {
 /// Type derived for non-terminal LBool
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LBool {
     pub l_bool_token: crate::veryl_token::VerylToken,
 }
@@ -10112,7 +10112,7 @@ pub struct LBool {
 /// Type derived for non-terminal LBoolTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LBoolTerm {
     pub l_bool_term: crate::veryl_token::Token, /* lbool */
 }
@@ -10121,7 +10121,7 @@ pub struct LBoolTerm {
 /// Type derived for non-terminal LBoolToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LBoolToken {
     pub l_bool_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10131,7 +10131,7 @@ pub struct LBoolToken {
 /// Type derived for non-terminal LBrace
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LBrace {
     pub l_brace_token: crate::veryl_token::VerylToken,
 }
@@ -10140,7 +10140,7 @@ pub struct LBrace {
 /// Type derived for non-terminal LBraceTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LBraceTerm {
     pub l_brace_term: crate::veryl_token::Token, /* { */
 }
@@ -10149,7 +10149,7 @@ pub struct LBraceTerm {
 /// Type derived for non-terminal LBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LBraceToken {
     pub l_brace_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10159,7 +10159,7 @@ pub struct LBraceToken {
 /// Type derived for non-terminal LBracket
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LBracket {
     pub l_bracket_token: crate::veryl_token::VerylToken,
 }
@@ -10168,7 +10168,7 @@ pub struct LBracket {
 /// Type derived for non-terminal LBracketTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LBracketTerm {
     pub l_bracket_term: crate::veryl_token::Token, /* [ */
 }
@@ -10177,7 +10177,7 @@ pub struct LBracketTerm {
 /// Type derived for non-terminal LBracketToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LBracketToken {
     pub l_bracket_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10187,7 +10187,7 @@ pub struct LBracketToken {
 /// Type derived for non-terminal LParen
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LParen {
     pub l_paren_token: crate::veryl_token::VerylToken,
 }
@@ -10196,7 +10196,7 @@ pub struct LParen {
 /// Type derived for non-terminal LParenTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LParenTerm {
     pub l_paren_term: crate::veryl_token::Token, /* ( */
 }
@@ -10205,7 +10205,7 @@ pub struct LParenTerm {
 /// Type derived for non-terminal LParenToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LParenToken {
     pub l_paren_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10215,7 +10215,7 @@ pub struct LParenToken {
 /// Type derived for non-terminal LTMinus
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LTMinus {
     pub l_t_minus_token: crate::veryl_token::VerylToken,
 }
@@ -10224,7 +10224,7 @@ pub struct LTMinus {
 /// Type derived for non-terminal LTMinusTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LTMinusTerm {
     pub l_t_minus_term: crate::veryl_token::Token, /* <- */
 }
@@ -10233,7 +10233,7 @@ pub struct LTMinusTerm {
 /// Type derived for non-terminal LTMinusToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LTMinusToken {
     pub l_t_minus_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10243,7 +10243,7 @@ pub struct LTMinusToken {
 /// Type derived for non-terminal Let
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Let {
     pub let_token: crate::veryl_token::VerylToken,
 }
@@ -10252,7 +10252,7 @@ pub struct Let {
 /// Type derived for non-terminal LetDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LetDeclaration {
     pub r#let: Box<Let>,
     pub identifier: Box<Identifier>,
@@ -10266,7 +10266,7 @@ pub struct LetDeclaration {
 /// Type derived for non-terminal LetDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LetDeclarationOpt {
     pub colon: Box<Colon>,
     pub let_declaration_opt0: Option<LetDeclarationOpt0>,
@@ -10277,7 +10277,7 @@ pub struct LetDeclarationOpt {
 /// Type derived for non-terminal LetDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LetDeclarationOpt0 {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -10286,7 +10286,7 @@ pub struct LetDeclarationOpt0 {
 /// Type derived for non-terminal LetStatement
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LetStatement {
     pub r#let: Box<Let>,
     pub identifier: Box<Identifier>,
@@ -10300,7 +10300,7 @@ pub struct LetStatement {
 /// Type derived for non-terminal LetStatementOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LetStatementOpt {
     pub colon: Box<Colon>,
     pub let_statement_opt0: Option<LetStatementOpt0>,
@@ -10311,7 +10311,7 @@ pub struct LetStatementOpt {
 /// Type derived for non-terminal LetStatementOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LetStatementOpt0 {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -10320,7 +10320,7 @@ pub struct LetStatementOpt0 {
 /// Type derived for non-terminal LetTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LetTerm {
     pub let_term: crate::veryl_token::Token, /* let */
 }
@@ -10329,7 +10329,7 @@ pub struct LetTerm {
 /// Type derived for non-terminal LetToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LetToken {
     pub let_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10339,7 +10339,7 @@ pub struct LetToken {
 /// Type derived for non-terminal Logic
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Logic {
     pub logic_token: crate::veryl_token::VerylToken,
 }
@@ -10348,7 +10348,7 @@ pub struct Logic {
 /// Type derived for non-terminal LogicTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LogicTerm {
     pub logic_term: crate::veryl_token::Token, /* logic */
 }
@@ -10357,7 +10357,7 @@ pub struct LogicTerm {
 /// Type derived for non-terminal LogicToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LogicToken {
     pub logic_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10367,7 +10367,7 @@ pub struct LogicToken {
 /// Type derived for non-terminal Lsb
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Lsb {
     pub lsb_token: crate::veryl_token::VerylToken,
 }
@@ -10376,7 +10376,7 @@ pub struct Lsb {
 /// Type derived for non-terminal LsbTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LsbTerm {
     pub lsb_term: crate::veryl_token::Token, /* lsb */
 }
@@ -10385,7 +10385,7 @@ pub struct LsbTerm {
 /// Type derived for non-terminal LsbToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LsbToken {
     pub lsb_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10395,7 +10395,7 @@ pub struct LsbToken {
 /// Type derived for non-terminal MinusColon
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MinusColon {
     pub minus_colon_token: crate::veryl_token::VerylToken,
 }
@@ -10404,7 +10404,7 @@ pub struct MinusColon {
 /// Type derived for non-terminal MinusColonTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MinusColonTerm {
     pub minus_colon_term: crate::veryl_token::Token, /* -: */
 }
@@ -10413,7 +10413,7 @@ pub struct MinusColonTerm {
 /// Type derived for non-terminal MinusColonToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MinusColonToken {
     pub minus_colon_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10423,7 +10423,7 @@ pub struct MinusColonToken {
 /// Type derived for non-terminal MinusGT
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MinusGT {
     pub minus_g_t_token: crate::veryl_token::VerylToken,
 }
@@ -10432,7 +10432,7 @@ pub struct MinusGT {
 /// Type derived for non-terminal MinusGTTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MinusGTTerm {
     pub minus_g_t_term: crate::veryl_token::Token, /* -> */
 }
@@ -10441,7 +10441,7 @@ pub struct MinusGTTerm {
 /// Type derived for non-terminal MinusGTToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MinusGTToken {
     pub minus_g_t_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10451,7 +10451,7 @@ pub struct MinusGTToken {
 /// Type derived for non-terminal Modport
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Modport {
     pub modport_token: crate::veryl_token::VerylToken,
 }
@@ -10460,7 +10460,7 @@ pub struct Modport {
 /// Type derived for non-terminal ModportDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportDeclaration {
     pub modport: Box<Modport>,
     pub identifier: Box<Identifier>,
@@ -10474,7 +10474,7 @@ pub struct ModportDeclaration {
 /// Type derived for non-terminal ModportDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportDeclarationOpt {
     pub modport_list: Box<ModportList>,
 }
@@ -10483,7 +10483,7 @@ pub struct ModportDeclarationOpt {
 /// Type derived for non-terminal ModportDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportDeclarationOpt0 {
     pub dot_dot: Box<DotDot>,
     pub modport_default: Box<ModportDefault>,
@@ -10493,7 +10493,7 @@ pub struct ModportDeclarationOpt0 {
 /// Type derived for non-terminal ModportDefault
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ModportDefault {
     Input(ModportDefaultInput),
     Output(ModportDefaultOutput),
@@ -10505,7 +10505,7 @@ pub enum ModportDefault {
 /// Type derived for non-terminal ModportDefaultList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportDefaultList {
     pub identifier: Box<Identifier>,
     pub modport_default_list_list: Vec<ModportDefaultListList>,
@@ -10516,7 +10516,7 @@ pub struct ModportDefaultList {
 /// Type derived for non-terminal ModportDefaultListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportDefaultListList {
     pub comma: Box<Comma>,
     pub identifier: Box<Identifier>,
@@ -10526,7 +10526,7 @@ pub struct ModportDefaultListList {
 /// Type derived for non-terminal ModportDefaultListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportDefaultListOpt {
     pub comma: Box<Comma>,
 }
@@ -10535,7 +10535,7 @@ pub struct ModportDefaultListOpt {
 /// Type derived for non-terminal ModportGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportGroup {
     pub modport_group_list: Vec<ModportGroupList>,
     pub modport_group_group: Box<ModportGroupGroup>,
@@ -10545,7 +10545,7 @@ pub struct ModportGroup {
 /// Type derived for non-terminal ModportGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ModportGroupGroup {
     LBraceModportListRBrace(ModportGroupGroupLBraceModportListRBrace),
     ModportItem(ModportGroupGroupModportItem),
@@ -10555,7 +10555,7 @@ pub enum ModportGroupGroup {
 /// Type derived for non-terminal ModportGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -10564,7 +10564,7 @@ pub struct ModportGroupList {
 /// Type derived for non-terminal ModportItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -10575,7 +10575,7 @@ pub struct ModportItem {
 /// Type derived for non-terminal ModportList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportList {
     pub modport_group: Box<ModportGroup>,
     pub modport_list_list: Vec<ModportListList>,
@@ -10586,7 +10586,7 @@ pub struct ModportList {
 /// Type derived for non-terminal ModportListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportListList {
     pub comma: Box<Comma>,
     pub modport_group: Box<ModportGroup>,
@@ -10596,7 +10596,7 @@ pub struct ModportListList {
 /// Type derived for non-terminal ModportListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportListOpt {
     pub comma: Box<Comma>,
 }
@@ -10605,7 +10605,7 @@ pub struct ModportListOpt {
 /// Type derived for non-terminal ModportTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportTerm {
     pub modport_term: crate::veryl_token::Token, /* modport */
 }
@@ -10614,7 +10614,7 @@ pub struct ModportTerm {
 /// Type derived for non-terminal ModportToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModportToken {
     pub modport_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10624,7 +10624,7 @@ pub struct ModportToken {
 /// Type derived for non-terminal Module
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Module {
     pub module_token: crate::veryl_token::VerylToken,
 }
@@ -10633,7 +10633,7 @@ pub struct Module {
 /// Type derived for non-terminal ModuleDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleDeclaration {
     pub module: Box<Module>,
     pub identifier: Box<Identifier>,
@@ -10650,7 +10650,7 @@ pub struct ModuleDeclaration {
 /// Type derived for non-terminal ModuleDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleDeclarationList {
     pub module_group: Box<ModuleGroup>,
 }
@@ -10659,7 +10659,7 @@ pub struct ModuleDeclarationList {
 /// Type derived for non-terminal ModuleDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -10668,7 +10668,7 @@ pub struct ModuleDeclarationOpt {
 /// Type derived for non-terminal ModuleDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleDeclarationOpt0 {
     pub r#for: Box<For>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -10678,7 +10678,7 @@ pub struct ModuleDeclarationOpt0 {
 /// Type derived for non-terminal ModuleDeclarationOpt1
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleDeclarationOpt1 {
     pub with_parameter: Box<WithParameter>,
 }
@@ -10687,7 +10687,7 @@ pub struct ModuleDeclarationOpt1 {
 /// Type derived for non-terminal ModuleDeclarationOpt2
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleDeclarationOpt2 {
     pub port_declaration: Box<PortDeclaration>,
 }
@@ -10696,7 +10696,7 @@ pub struct ModuleDeclarationOpt2 {
 /// Type derived for non-terminal ModuleGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleGroup {
     pub module_group_list: Vec<ModuleGroupList>,
     pub module_group_group: Box<ModuleGroupGroup>,
@@ -10706,7 +10706,7 @@ pub struct ModuleGroup {
 /// Type derived for non-terminal ModuleGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ModuleGroupGroup {
     LBraceModuleGroupGroupListRBrace(ModuleGroupGroupLBraceModuleGroupGroupListRBrace),
     ModuleItem(ModuleGroupGroupModuleItem),
@@ -10716,7 +10716,7 @@ pub enum ModuleGroupGroup {
 /// Type derived for non-terminal ModuleGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleGroupGroupList {
     pub module_group: Box<ModuleGroup>,
 }
@@ -10725,7 +10725,7 @@ pub struct ModuleGroupGroupList {
 /// Type derived for non-terminal ModuleGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -10734,7 +10734,7 @@ pub struct ModuleGroupList {
 /// Type derived for non-terminal ModuleItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleItem {
     pub generate_item: Box<GenerateItem>,
 }
@@ -10743,7 +10743,7 @@ pub struct ModuleItem {
 /// Type derived for non-terminal ModuleTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleTerm {
     pub module_term: crate::veryl_token::Token, /* module */
 }
@@ -10752,7 +10752,7 @@ pub struct ModuleTerm {
 /// Type derived for non-terminal ModuleToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModuleToken {
     pub module_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10762,7 +10762,7 @@ pub struct ModuleToken {
 /// Type derived for non-terminal Msb
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Msb {
     pub msb_token: crate::veryl_token::VerylToken,
 }
@@ -10771,7 +10771,7 @@ pub struct Msb {
 /// Type derived for non-terminal MsbTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MsbTerm {
     pub msb_term: crate::veryl_token::Token, /* msb */
 }
@@ -10780,7 +10780,7 @@ pub struct MsbTerm {
 /// Type derived for non-terminal MsbToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MsbToken {
     pub msb_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10790,7 +10790,7 @@ pub struct MsbToken {
 /// Type derived for non-terminal Number
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Number {
     IntegralNumber(NumberIntegralNumber),
     RealNumber(NumberRealNumber),
@@ -10800,7 +10800,7 @@ pub enum Number {
 /// Type derived for non-terminal Operator01
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator01 {
     pub operator01_token: crate::veryl_token::VerylToken,
 }
@@ -10809,7 +10809,7 @@ pub struct Operator01 {
 /// Type derived for non-terminal Operator01Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator01Term {
     pub operator01_term: crate::veryl_token::Token, /* \|\||&& */
 }
@@ -10818,7 +10818,7 @@ pub struct Operator01Term {
 /// Type derived for non-terminal Operator01Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator01Token {
     pub operator01_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10828,7 +10828,7 @@ pub struct Operator01Token {
 /// Type derived for non-terminal Operator02
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator02 {
     pub operator02_token: crate::veryl_token::VerylToken,
 }
@@ -10837,7 +10837,7 @@ pub struct Operator02 {
 /// Type derived for non-terminal Operator02Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator02Term {
     pub operator02_term: crate::veryl_token::Token, /* <<<|>>>|<<|>>|==\?|!=\?|==|!=|<=|>=|<:|>: */
 }
@@ -10846,7 +10846,7 @@ pub struct Operator02Term {
 /// Type derived for non-terminal Operator02Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator02Token {
     pub operator02_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10856,7 +10856,7 @@ pub struct Operator02Token {
 /// Type derived for non-terminal Operator03
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator03 {
     pub operator03_token: crate::veryl_token::VerylToken,
 }
@@ -10865,7 +10865,7 @@ pub struct Operator03 {
 /// Type derived for non-terminal Operator03Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator03Term {
     pub operator03_term: crate::veryl_token::Token, /* \| */
 }
@@ -10874,7 +10874,7 @@ pub struct Operator03Term {
 /// Type derived for non-terminal Operator03Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator03Token {
     pub operator03_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10884,7 +10884,7 @@ pub struct Operator03Token {
 /// Type derived for non-terminal Operator04
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator04 {
     pub operator04_token: crate::veryl_token::VerylToken,
 }
@@ -10893,7 +10893,7 @@ pub struct Operator04 {
 /// Type derived for non-terminal Operator04Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator04Term {
     pub operator04_term: crate::veryl_token::Token, /* \^|~\^ */
 }
@@ -10902,7 +10902,7 @@ pub struct Operator04Term {
 /// Type derived for non-terminal Operator04Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator04Token {
     pub operator04_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10912,7 +10912,7 @@ pub struct Operator04Token {
 /// Type derived for non-terminal Operator05
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator05 {
     pub operator05_token: crate::veryl_token::VerylToken,
 }
@@ -10921,7 +10921,7 @@ pub struct Operator05 {
 /// Type derived for non-terminal Operator05Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator05Term {
     pub operator05_term: crate::veryl_token::Token, /* & */
 }
@@ -10930,7 +10930,7 @@ pub struct Operator05Term {
 /// Type derived for non-terminal Operator05Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator05Token {
     pub operator05_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10940,7 +10940,7 @@ pub struct Operator05Token {
 /// Type derived for non-terminal Operator06
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator06 {
     pub operator06_token: crate::veryl_token::VerylToken,
 }
@@ -10949,7 +10949,7 @@ pub struct Operator06 {
 /// Type derived for non-terminal Operator06Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator06Term {
     pub operator06_term: crate::veryl_token::Token, /* \+|- */
 }
@@ -10958,7 +10958,7 @@ pub struct Operator06Term {
 /// Type derived for non-terminal Operator06Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator06Token {
     pub operator06_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10968,7 +10968,7 @@ pub struct Operator06Token {
 /// Type derived for non-terminal Operator07
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator07 {
     pub operator07_token: crate::veryl_token::VerylToken,
 }
@@ -10977,7 +10977,7 @@ pub struct Operator07 {
 /// Type derived for non-terminal Operator07Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator07Term {
     pub operator07_term: crate::veryl_token::Token, /* /|% */
 }
@@ -10986,7 +10986,7 @@ pub struct Operator07Term {
 /// Type derived for non-terminal Operator07Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator07Token {
     pub operator07_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -10996,7 +10996,7 @@ pub struct Operator07Token {
 /// Type derived for non-terminal Operator08
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator08 {
     pub operator08_token: crate::veryl_token::VerylToken,
 }
@@ -11005,7 +11005,7 @@ pub struct Operator08 {
 /// Type derived for non-terminal Operator08Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator08Term {
     pub operator08_term: crate::veryl_token::Token, /* \*\* */
 }
@@ -11014,7 +11014,7 @@ pub struct Operator08Term {
 /// Type derived for non-terminal Operator08Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Operator08Token {
     pub operator08_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11024,7 +11024,7 @@ pub struct Operator08Token {
 /// Type derived for non-terminal Output
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Output {
     pub output_token: crate::veryl_token::VerylToken,
 }
@@ -11033,7 +11033,7 @@ pub struct Output {
 /// Type derived for non-terminal OutputTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OutputTerm {
     pub output_term: crate::veryl_token::Token, /* output */
 }
@@ -11042,7 +11042,7 @@ pub struct OutputTerm {
 /// Type derived for non-terminal OutputToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OutputToken {
     pub output_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11052,7 +11052,7 @@ pub struct OutputToken {
 /// Type derived for non-terminal Outside
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Outside {
     pub outside_token: crate::veryl_token::VerylToken,
 }
@@ -11061,7 +11061,7 @@ pub struct Outside {
 /// Type derived for non-terminal OutsideExpression
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OutsideExpression {
     pub outside: Box<Outside>,
     pub expression: Box<Expression>,
@@ -11074,7 +11074,7 @@ pub struct OutsideExpression {
 /// Type derived for non-terminal OutsideTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OutsideTerm {
     pub outside_term: crate::veryl_token::Token, /* outside */
 }
@@ -11083,7 +11083,7 @@ pub struct OutsideTerm {
 /// Type derived for non-terminal OutsideToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OutsideToken {
     pub outside_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11093,7 +11093,7 @@ pub struct OutsideToken {
 /// Type derived for non-terminal P16
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P16 {
     pub p16_token: crate::veryl_token::VerylToken,
 }
@@ -11102,7 +11102,7 @@ pub struct P16 {
 /// Type derived for non-terminal P16Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P16Term {
     pub p16_term: crate::veryl_token::Token, /* p16 */
 }
@@ -11111,7 +11111,7 @@ pub struct P16Term {
 /// Type derived for non-terminal P16Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P16Token {
     pub p16_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11121,7 +11121,7 @@ pub struct P16Token {
 /// Type derived for non-terminal P32
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P32 {
     pub p32_token: crate::veryl_token::VerylToken,
 }
@@ -11130,7 +11130,7 @@ pub struct P32 {
 /// Type derived for non-terminal P32Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P32Term {
     pub p32_term: crate::veryl_token::Token, /* p32 */
 }
@@ -11139,7 +11139,7 @@ pub struct P32Term {
 /// Type derived for non-terminal P32Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P32Token {
     pub p32_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11149,7 +11149,7 @@ pub struct P32Token {
 /// Type derived for non-terminal P64
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P64 {
     pub p64_token: crate::veryl_token::VerylToken,
 }
@@ -11158,7 +11158,7 @@ pub struct P64 {
 /// Type derived for non-terminal P64Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P64Term {
     pub p64_term: crate::veryl_token::Token, /* p64 */
 }
@@ -11167,7 +11167,7 @@ pub struct P64Term {
 /// Type derived for non-terminal P64Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P64Token {
     pub p64_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11177,7 +11177,7 @@ pub struct P64Token {
 /// Type derived for non-terminal P8
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P8 {
     pub p8_token: crate::veryl_token::VerylToken,
 }
@@ -11186,7 +11186,7 @@ pub struct P8 {
 /// Type derived for non-terminal P8Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P8Term {
     pub p8_term: crate::veryl_token::Token, /* p8 */
 }
@@ -11195,7 +11195,7 @@ pub struct P8Term {
 /// Type derived for non-terminal P8Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct P8Token {
     pub p8_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11205,7 +11205,7 @@ pub struct P8Token {
 /// Type derived for non-terminal Package
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Package {
     pub package_token: crate::veryl_token::VerylToken,
 }
@@ -11214,7 +11214,7 @@ pub struct Package {
 /// Type derived for non-terminal PackageDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageDeclaration {
     pub package: Box<Package>,
     pub identifier: Box<Identifier>,
@@ -11229,7 +11229,7 @@ pub struct PackageDeclaration {
 /// Type derived for non-terminal PackageDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageDeclarationList {
     pub package_group: Box<PackageGroup>,
 }
@@ -11238,7 +11238,7 @@ pub struct PackageDeclarationList {
 /// Type derived for non-terminal PackageDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -11247,7 +11247,7 @@ pub struct PackageDeclarationOpt {
 /// Type derived for non-terminal PackageDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageDeclarationOpt0 {
     pub r#for: Box<For>,
     pub scoped_identifier: Box<ScopedIdentifier>,
@@ -11257,7 +11257,7 @@ pub struct PackageDeclarationOpt0 {
 /// Type derived for non-terminal PackageGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageGroup {
     pub package_group_list: Vec<PackageGroupList>,
     pub package_group_group: Box<PackageGroupGroup>,
@@ -11267,7 +11267,7 @@ pub struct PackageGroup {
 /// Type derived for non-terminal PackageGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PackageGroupGroup {
     LBracePackageGroupGroupListRBrace(PackageGroupGroupLBracePackageGroupGroupListRBrace),
     PackageItem(PackageGroupGroupPackageItem),
@@ -11277,7 +11277,7 @@ pub enum PackageGroupGroup {
 /// Type derived for non-terminal PackageGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageGroupGroupList {
     pub package_group: Box<PackageGroup>,
 }
@@ -11286,7 +11286,7 @@ pub struct PackageGroupGroupList {
 /// Type derived for non-terminal PackageGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -11295,7 +11295,7 @@ pub struct PackageGroupList {
 /// Type derived for non-terminal PackageItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PackageItem {
     ConstDeclaration(PackageItemConstDeclaration),
     GenDeclaration(PackageItemGenDeclaration),
@@ -11312,7 +11312,7 @@ pub enum PackageItem {
 /// Type derived for non-terminal PackageTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageTerm {
     pub package_term: crate::veryl_token::Token, /* package */
 }
@@ -11321,7 +11321,7 @@ pub struct PackageTerm {
 /// Type derived for non-terminal PackageToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageToken {
     pub package_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11331,7 +11331,7 @@ pub struct PackageToken {
 /// Type derived for non-terminal Param
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Param {
     pub param_token: crate::veryl_token::VerylToken,
 }
@@ -11340,7 +11340,7 @@ pub struct Param {
 /// Type derived for non-terminal ParamTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParamTerm {
     pub param_term: crate::veryl_token::Token, /* param */
 }
@@ -11349,7 +11349,7 @@ pub struct ParamTerm {
 /// Type derived for non-terminal ParamToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParamToken {
     pub param_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11359,7 +11359,7 @@ pub struct ParamToken {
 /// Type derived for non-terminal PlusColon
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlusColon {
     pub plus_colon_token: crate::veryl_token::VerylToken,
 }
@@ -11368,7 +11368,7 @@ pub struct PlusColon {
 /// Type derived for non-terminal PlusColonTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlusColonTerm {
     pub plus_colon_term: crate::veryl_token::Token, /* +: */
 }
@@ -11377,7 +11377,7 @@ pub struct PlusColonTerm {
 /// Type derived for non-terminal PlusColonToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlusColonToken {
     pub plus_colon_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11387,7 +11387,7 @@ pub struct PlusColonToken {
 /// Type derived for non-terminal PortDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclaration {
     pub l_paren: Box<LParen>,
     pub port_declaration_opt: Option<PortDeclarationOpt>,
@@ -11398,7 +11398,7 @@ pub struct PortDeclaration {
 /// Type derived for non-terminal PortDeclarationGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationGroup {
     pub port_declaration_group_list: Vec<PortDeclarationGroupList>,
     pub port_declaration_group_group: Box<PortDeclarationGroupGroup>,
@@ -11408,7 +11408,7 @@ pub struct PortDeclarationGroup {
 /// Type derived for non-terminal PortDeclarationGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PortDeclarationGroupGroup {
     LBracePortDeclarationListRBrace(PortDeclarationGroupGroupLBracePortDeclarationListRBrace),
     PortDeclarationItem(PortDeclarationGroupGroupPortDeclarationItem),
@@ -11418,7 +11418,7 @@ pub enum PortDeclarationGroupGroup {
 /// Type derived for non-terminal PortDeclarationGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -11427,7 +11427,7 @@ pub struct PortDeclarationGroupList {
 /// Type derived for non-terminal PortDeclarationItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -11438,7 +11438,7 @@ pub struct PortDeclarationItem {
 /// Type derived for non-terminal PortDeclarationItemGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PortDeclarationItemGroup {
     PortTypeConcrete(PortDeclarationItemGroupPortTypeConcrete),
     PortTypeAbstract(PortDeclarationItemGroupPortTypeAbstract),
@@ -11448,7 +11448,7 @@ pub enum PortDeclarationItemGroup {
 /// Type derived for non-terminal PortDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationList {
     pub port_declaration_group: Box<PortDeclarationGroup>,
     pub port_declaration_list_list: Vec<PortDeclarationListList>,
@@ -11459,7 +11459,7 @@ pub struct PortDeclarationList {
 /// Type derived for non-terminal PortDeclarationListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationListList {
     pub comma: Box<Comma>,
     pub port_declaration_group: Box<PortDeclarationGroup>,
@@ -11469,7 +11469,7 @@ pub struct PortDeclarationListList {
 /// Type derived for non-terminal PortDeclarationListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationListOpt {
     pub comma: Box<Comma>,
 }
@@ -11478,7 +11478,7 @@ pub struct PortDeclarationListOpt {
 /// Type derived for non-terminal PortDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDeclarationOpt {
     pub port_declaration_list: Box<PortDeclarationList>,
 }
@@ -11487,7 +11487,7 @@ pub struct PortDeclarationOpt {
 /// Type derived for non-terminal PortDefaultValue
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortDefaultValue {
     pub expression: Box<Expression>,
 }
@@ -11496,7 +11496,7 @@ pub struct PortDefaultValue {
 /// Type derived for non-terminal PortTypeAbstract
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortTypeAbstract {
     pub port_type_abstract_opt: Option<PortTypeAbstractOpt>,
     pub interface: Box<Interface>,
@@ -11508,7 +11508,7 @@ pub struct PortTypeAbstract {
 /// Type derived for non-terminal PortTypeAbstractOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortTypeAbstractOpt {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -11517,7 +11517,7 @@ pub struct PortTypeAbstractOpt {
 /// Type derived for non-terminal PortTypeAbstractOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortTypeAbstractOpt0 {
     pub colon_colon: Box<ColonColon>,
     pub identifier: Box<Identifier>,
@@ -11527,7 +11527,7 @@ pub struct PortTypeAbstractOpt0 {
 /// Type derived for non-terminal PortTypeAbstractOpt1
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortTypeAbstractOpt1 {
     pub array: Box<Array>,
 }
@@ -11536,7 +11536,7 @@ pub struct PortTypeAbstractOpt1 {
 /// Type derived for non-terminal PortTypeConcrete
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortTypeConcrete {
     pub direction: Box<Direction>,
     pub port_type_concrete_opt: Option<PortTypeConcreteOpt>,
@@ -11548,7 +11548,7 @@ pub struct PortTypeConcrete {
 /// Type derived for non-terminal PortTypeConcreteOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortTypeConcreteOpt {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -11557,7 +11557,7 @@ pub struct PortTypeConcreteOpt {
 /// Type derived for non-terminal PortTypeConcreteOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortTypeConcreteOpt0 {
     pub equ: Box<Equ>,
     pub port_default_value: Box<PortDefaultValue>,
@@ -11567,7 +11567,7 @@ pub struct PortTypeConcreteOpt0 {
 /// Type derived for non-terminal Proto
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Proto {
     pub proto_token: crate::veryl_token::VerylToken,
 }
@@ -11576,7 +11576,7 @@ pub struct Proto {
 /// Type derived for non-terminal ProtoAliasDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoAliasDeclaration {
     pub alias: Box<Alias>,
     pub proto_alias_declaration_group: Box<ProtoAliasDeclarationGroup>,
@@ -11590,7 +11590,7 @@ pub struct ProtoAliasDeclaration {
 /// Type derived for non-terminal ProtoAliasDeclarationGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ProtoAliasDeclarationGroup {
     Module(ProtoAliasDeclarationGroupModule),
     Interface(ProtoAliasDeclarationGroupInterface),
@@ -11601,7 +11601,7 @@ pub enum ProtoAliasDeclarationGroup {
 /// Type derived for non-terminal ProtoConstDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoConstDeclaration {
     pub r#const: Box<Const>,
     pub identifier: Box<Identifier>,
@@ -11614,7 +11614,7 @@ pub struct ProtoConstDeclaration {
 /// Type derived for non-terminal ProtoConstDeclarationGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ProtoConstDeclarationGroup {
     ArrayType(ProtoConstDeclarationGroupArrayType),
     Type(ProtoConstDeclarationGroupType),
@@ -11624,7 +11624,7 @@ pub enum ProtoConstDeclarationGroup {
 /// Type derived for non-terminal ProtoDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoDeclaration {
     pub proto: Box<Proto>,
     pub proto_declaration_group: Box<ProtoDeclarationGroup>,
@@ -11634,7 +11634,7 @@ pub struct ProtoDeclaration {
 /// Type derived for non-terminal ProtoDeclarationGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ProtoDeclarationGroup {
     ProtoModuleDeclaration(ProtoDeclarationGroupProtoModuleDeclaration),
     ProtoInterfaceDeclaration(ProtoDeclarationGroupProtoInterfaceDeclaration),
@@ -11645,7 +11645,7 @@ pub enum ProtoDeclarationGroup {
 /// Type derived for non-terminal ProtoFunctionDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoFunctionDeclaration {
     pub function: Box<Function>,
     pub identifier: Box<Identifier>,
@@ -11659,7 +11659,7 @@ pub struct ProtoFunctionDeclaration {
 /// Type derived for non-terminal ProtoFunctionDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoFunctionDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -11668,7 +11668,7 @@ pub struct ProtoFunctionDeclarationOpt {
 /// Type derived for non-terminal ProtoFunctionDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoFunctionDeclarationOpt0 {
     pub port_declaration: Box<PortDeclaration>,
 }
@@ -11677,7 +11677,7 @@ pub struct ProtoFunctionDeclarationOpt0 {
 /// Type derived for non-terminal ProtoFunctionDeclarationOpt1
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoFunctionDeclarationOpt1 {
     pub minus_g_t: Box<MinusGT>,
     pub scalar_type: Box<ScalarType>,
@@ -11687,7 +11687,7 @@ pub struct ProtoFunctionDeclarationOpt1 {
 /// Type derived for non-terminal ProtoInterfaceDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoInterfaceDeclaration {
     pub interface: Box<Interface>,
     pub identifier: Box<Identifier>,
@@ -11701,7 +11701,7 @@ pub struct ProtoInterfaceDeclaration {
 /// Type derived for non-terminal ProtoInterfaceDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoInterfaceDeclarationList {
     pub proto_interface_item: Box<ProtoInterfaceItem>,
 }
@@ -11710,7 +11710,7 @@ pub struct ProtoInterfaceDeclarationList {
 /// Type derived for non-terminal ProtoInterfaceDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoInterfaceDeclarationOpt {
     pub with_parameter: Box<WithParameter>,
 }
@@ -11719,7 +11719,7 @@ pub struct ProtoInterfaceDeclarationOpt {
 /// Type derived for non-terminal ProtoInterfaceItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ProtoInterfaceItem {
     VarDeclaration(ProtoInterfaceItemVarDeclaration),
     ProtoConstDeclaration(ProtoInterfaceItemProtoConstDeclaration),
@@ -11734,7 +11734,7 @@ pub enum ProtoInterfaceItem {
 /// Type derived for non-terminal ProtoModuleDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoModuleDeclaration {
     pub module: Box<Module>,
     pub identifier: Box<Identifier>,
@@ -11747,7 +11747,7 @@ pub struct ProtoModuleDeclaration {
 /// Type derived for non-terminal ProtoModuleDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoModuleDeclarationOpt {
     pub with_parameter: Box<WithParameter>,
 }
@@ -11756,7 +11756,7 @@ pub struct ProtoModuleDeclarationOpt {
 /// Type derived for non-terminal ProtoModuleDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoModuleDeclarationOpt0 {
     pub port_declaration: Box<PortDeclaration>,
 }
@@ -11765,7 +11765,7 @@ pub struct ProtoModuleDeclarationOpt0 {
 /// Type derived for non-terminal ProtoPacakgeItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ProtoPacakgeItem {
     ProtoConstDeclaration(ProtoPacakgeItemProtoConstDeclaration),
     ProtoTypeDefDeclaration(ProtoPacakgeItemProtoTypeDefDeclaration),
@@ -11780,7 +11780,7 @@ pub enum ProtoPacakgeItem {
 /// Type derived for non-terminal ProtoPackageDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoPackageDeclaration {
     pub package: Box<Package>,
     pub identifier: Box<Identifier>,
@@ -11793,7 +11793,7 @@ pub struct ProtoPackageDeclaration {
 /// Type derived for non-terminal ProtoPackageDeclarationList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoPackageDeclarationList {
     pub proto_pacakge_item: Box<ProtoPacakgeItem>,
 }
@@ -11802,7 +11802,7 @@ pub struct ProtoPackageDeclarationList {
 /// Type derived for non-terminal ProtoTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoTerm {
     pub proto_term: crate::veryl_token::Token, /* proto */
 }
@@ -11811,7 +11811,7 @@ pub struct ProtoTerm {
 /// Type derived for non-terminal ProtoToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoToken {
     pub proto_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11821,7 +11821,7 @@ pub struct ProtoToken {
 /// Type derived for non-terminal ProtoTypeDefDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoTypeDefDeclaration {
     pub r#type: Box<Type>,
     pub identifier: Box<Identifier>,
@@ -11833,7 +11833,7 @@ pub struct ProtoTypeDefDeclaration {
 /// Type derived for non-terminal ProtoTypeDefDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtoTypeDefDeclarationOpt {
     pub equ: Box<Equ>,
     pub array_type: Box<ArrayType>,
@@ -11843,7 +11843,7 @@ pub struct ProtoTypeDefDeclarationOpt {
 /// Type derived for non-terminal Pub
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Pub {
     pub pub_token: crate::veryl_token::VerylToken,
 }
@@ -11852,7 +11852,7 @@ pub struct Pub {
 /// Type derived for non-terminal PubTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PubTerm {
     pub pub_term: crate::veryl_token::Token, /* pub */
 }
@@ -11861,7 +11861,7 @@ pub struct PubTerm {
 /// Type derived for non-terminal PubToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PubToken {
     pub pub_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11871,7 +11871,7 @@ pub struct PubToken {
 /// Type derived for non-terminal PublicDescriptionItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PublicDescriptionItem {
     ModuleDeclaration(PublicDescriptionItemModuleDeclaration),
     InterfaceDeclaration(PublicDescriptionItemInterfaceDeclaration),
@@ -11885,7 +11885,7 @@ pub enum PublicDescriptionItem {
 /// Type derived for non-terminal Question
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Question {
     pub question_token: crate::veryl_token::VerylToken,
 }
@@ -11894,7 +11894,7 @@ pub struct Question {
 /// Type derived for non-terminal QuestionTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuestionTerm {
     pub question_term: crate::veryl_token::Token, /* ? */
 }
@@ -11903,7 +11903,7 @@ pub struct QuestionTerm {
 /// Type derived for non-terminal QuestionToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuestionToken {
     pub question_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11913,7 +11913,7 @@ pub struct QuestionToken {
 /// Type derived for non-terminal Quote
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Quote {
     pub quote_token: crate::veryl_token::VerylToken,
 }
@@ -11922,7 +11922,7 @@ pub struct Quote {
 /// Type derived for non-terminal QuoteLBrace
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuoteLBrace {
     pub quote_l_brace_token: crate::veryl_token::VerylToken,
 }
@@ -11931,7 +11931,7 @@ pub struct QuoteLBrace {
 /// Type derived for non-terminal QuoteLBraceTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuoteLBraceTerm {
     pub quote_l_brace_term: crate::veryl_token::Token, /* '\{ */
 }
@@ -11940,7 +11940,7 @@ pub struct QuoteLBraceTerm {
 /// Type derived for non-terminal QuoteLBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuoteLBraceToken {
     pub quote_l_brace_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11950,7 +11950,7 @@ pub struct QuoteLBraceToken {
 /// Type derived for non-terminal QuoteTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuoteTerm {
     pub quote_term: crate::veryl_token::Token, /* ' */
 }
@@ -11959,7 +11959,7 @@ pub struct QuoteTerm {
 /// Type derived for non-terminal QuoteToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuoteToken {
     pub quote_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11969,7 +11969,7 @@ pub struct QuoteToken {
 /// Type derived for non-terminal RAngle
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RAngle {
     pub r_angle_token: crate::veryl_token::VerylToken,
 }
@@ -11978,7 +11978,7 @@ pub struct RAngle {
 /// Type derived for non-terminal RAngleTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RAngleTerm {
     pub r_angle_term: crate::veryl_token::Token, /* > */
 }
@@ -11987,7 +11987,7 @@ pub struct RAngleTerm {
 /// Type derived for non-terminal RAngleToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RAngleToken {
     pub r_angle_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -11997,7 +11997,7 @@ pub struct RAngleToken {
 /// Type derived for non-terminal RBrace
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RBrace {
     pub r_brace_token: crate::veryl_token::VerylToken,
 }
@@ -12006,7 +12006,7 @@ pub struct RBrace {
 /// Type derived for non-terminal RBraceTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RBraceTerm {
     pub r_brace_term: crate::veryl_token::Token, /* } */
 }
@@ -12015,7 +12015,7 @@ pub struct RBraceTerm {
 /// Type derived for non-terminal RBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RBraceToken {
     pub r_brace_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12025,7 +12025,7 @@ pub struct RBraceToken {
 /// Type derived for non-terminal RBracket
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RBracket {
     pub r_bracket_token: crate::veryl_token::VerylToken,
 }
@@ -12034,7 +12034,7 @@ pub struct RBracket {
 /// Type derived for non-terminal RBracketTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RBracketTerm {
     pub r_bracket_term: crate::veryl_token::Token, /* ] */
 }
@@ -12043,7 +12043,7 @@ pub struct RBracketTerm {
 /// Type derived for non-terminal RBracketToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RBracketToken {
     pub r_bracket_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12053,7 +12053,7 @@ pub struct RBracketToken {
 /// Type derived for non-terminal RParen
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RParen {
     pub r_paren_token: crate::veryl_token::VerylToken,
 }
@@ -12062,7 +12062,7 @@ pub struct RParen {
 /// Type derived for non-terminal RParenTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RParenTerm {
     pub r_paren_term: crate::veryl_token::Token, /* ) */
 }
@@ -12071,7 +12071,7 @@ pub struct RParenTerm {
 /// Type derived for non-terminal RParenToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RParenToken {
     pub r_paren_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12081,7 +12081,7 @@ pub struct RParenToken {
 /// Type derived for non-terminal Range
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Range {
     pub expression: Box<Expression>,
     pub range_opt: Option<RangeOpt>,
@@ -12091,7 +12091,7 @@ pub struct Range {
 /// Type derived for non-terminal RangeItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RangeItem {
     pub range: Box<Range>,
 }
@@ -12100,7 +12100,7 @@ pub struct RangeItem {
 /// Type derived for non-terminal RangeList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RangeList {
     pub range_item: Box<RangeItem>,
     pub range_list_list: Vec<RangeListList>,
@@ -12111,7 +12111,7 @@ pub struct RangeList {
 /// Type derived for non-terminal RangeListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RangeListList {
     pub comma: Box<Comma>,
     pub range_item: Box<RangeItem>,
@@ -12121,7 +12121,7 @@ pub struct RangeListList {
 /// Type derived for non-terminal RangeListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RangeListOpt {
     pub comma: Box<Comma>,
 }
@@ -12130,7 +12130,7 @@ pub struct RangeListOpt {
 /// Type derived for non-terminal RangeOperator
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum RangeOperator {
     DotDot(RangeOperatorDotDot),
     DotDotEqu(RangeOperatorDotDotEqu),
@@ -12140,7 +12140,7 @@ pub enum RangeOperator {
 /// Type derived for non-terminal RangeOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RangeOpt {
     pub range_operator: Box<RangeOperator>,
     pub expression: Box<Expression>,
@@ -12150,7 +12150,7 @@ pub struct RangeOpt {
 /// Type derived for non-terminal RealNumber
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum RealNumber {
     FixedPoint(RealNumberFixedPoint),
     Exponent(RealNumberExponent),
@@ -12160,7 +12160,7 @@ pub enum RealNumber {
 /// Type derived for non-terminal Repeat
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Repeat {
     pub repeat_token: crate::veryl_token::VerylToken,
 }
@@ -12169,7 +12169,7 @@ pub struct Repeat {
 /// Type derived for non-terminal RepeatTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RepeatTerm {
     pub repeat_term: crate::veryl_token::Token, /* repeat */
 }
@@ -12178,7 +12178,7 @@ pub struct RepeatTerm {
 /// Type derived for non-terminal RepeatToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RepeatToken {
     pub repeat_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12188,7 +12188,7 @@ pub struct RepeatToken {
 /// Type derived for non-terminal Reset
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Reset {
     pub reset_token: crate::veryl_token::VerylToken,
 }
@@ -12197,7 +12197,7 @@ pub struct Reset {
 /// Type derived for non-terminal ResetAsyncHigh
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetAsyncHigh {
     pub reset_async_high_token: crate::veryl_token::VerylToken,
 }
@@ -12206,7 +12206,7 @@ pub struct ResetAsyncHigh {
 /// Type derived for non-terminal ResetAsyncHighTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetAsyncHighTerm {
     pub reset_async_high_term: crate::veryl_token::Token, /* reset_async_high */
 }
@@ -12215,7 +12215,7 @@ pub struct ResetAsyncHighTerm {
 /// Type derived for non-terminal ResetAsyncHighToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetAsyncHighToken {
     pub reset_async_high_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12225,7 +12225,7 @@ pub struct ResetAsyncHighToken {
 /// Type derived for non-terminal ResetAsyncLow
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetAsyncLow {
     pub reset_async_low_token: crate::veryl_token::VerylToken,
 }
@@ -12234,7 +12234,7 @@ pub struct ResetAsyncLow {
 /// Type derived for non-terminal ResetAsyncLowTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetAsyncLowTerm {
     pub reset_async_low_term: crate::veryl_token::Token, /* reset_async_low */
 }
@@ -12243,7 +12243,7 @@ pub struct ResetAsyncLowTerm {
 /// Type derived for non-terminal ResetAsyncLowToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetAsyncLowToken {
     pub reset_async_low_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12253,7 +12253,7 @@ pub struct ResetAsyncLowToken {
 /// Type derived for non-terminal ResetSyncHigh
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetSyncHigh {
     pub reset_sync_high_token: crate::veryl_token::VerylToken,
 }
@@ -12262,7 +12262,7 @@ pub struct ResetSyncHigh {
 /// Type derived for non-terminal ResetSyncHighTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetSyncHighTerm {
     pub reset_sync_high_term: crate::veryl_token::Token, /* reset_sync_high */
 }
@@ -12271,7 +12271,7 @@ pub struct ResetSyncHighTerm {
 /// Type derived for non-terminal ResetSyncHighToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetSyncHighToken {
     pub reset_sync_high_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12281,7 +12281,7 @@ pub struct ResetSyncHighToken {
 /// Type derived for non-terminal ResetSyncLow
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetSyncLow {
     pub reset_sync_low_token: crate::veryl_token::VerylToken,
 }
@@ -12290,7 +12290,7 @@ pub struct ResetSyncLow {
 /// Type derived for non-terminal ResetSyncLowTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetSyncLowTerm {
     pub reset_sync_low_term: crate::veryl_token::Token, /* reset_sync_low */
 }
@@ -12299,7 +12299,7 @@ pub struct ResetSyncLowTerm {
 /// Type derived for non-terminal ResetSyncLowToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetSyncLowToken {
     pub reset_sync_low_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12309,7 +12309,7 @@ pub struct ResetSyncLowToken {
 /// Type derived for non-terminal ResetTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetTerm {
     pub reset_term: crate::veryl_token::Token, /* reset */
 }
@@ -12318,7 +12318,7 @@ pub struct ResetTerm {
 /// Type derived for non-terminal ResetToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResetToken {
     pub reset_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12328,7 +12328,7 @@ pub struct ResetToken {
 /// Type derived for non-terminal Return
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Return {
     pub return_token: crate::veryl_token::VerylToken,
 }
@@ -12337,7 +12337,7 @@ pub struct Return {
 /// Type derived for non-terminal ReturnStatement
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ReturnStatement {
     pub r#return: Box<Return>,
     pub expression: Box<Expression>,
@@ -12348,7 +12348,7 @@ pub struct ReturnStatement {
 /// Type derived for non-terminal ReturnTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ReturnTerm {
     pub return_term: crate::veryl_token::Token, /* return */
 }
@@ -12357,7 +12357,7 @@ pub struct ReturnTerm {
 /// Type derived for non-terminal ReturnToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ReturnToken {
     pub return_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12367,7 +12367,7 @@ pub struct ReturnToken {
 /// Type derived for non-terminal Rev
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Rev {
     pub rev_token: crate::veryl_token::VerylToken,
 }
@@ -12376,7 +12376,7 @@ pub struct Rev {
 /// Type derived for non-terminal RevTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RevTerm {
     pub rev_term: crate::veryl_token::Token, /* rev */
 }
@@ -12385,7 +12385,7 @@ pub struct RevTerm {
 /// Type derived for non-terminal RevToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RevToken {
     pub rev_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12395,7 +12395,7 @@ pub struct RevToken {
 /// Type derived for non-terminal Same
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Same {
     pub same_token: crate::veryl_token::VerylToken,
 }
@@ -12404,7 +12404,7 @@ pub struct Same {
 /// Type derived for non-terminal SameTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SameTerm {
     pub same_term: crate::veryl_token::Token, /* same */
 }
@@ -12413,7 +12413,7 @@ pub struct SameTerm {
 /// Type derived for non-terminal SameToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SameToken {
     pub same_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12423,7 +12423,7 @@ pub struct SameToken {
 /// Type derived for non-terminal ScalarType
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScalarType {
     pub scalar_type_list: Vec<ScalarTypeList>,
     pub scalar_type_group: Box<ScalarTypeGroup>,
@@ -12433,7 +12433,7 @@ pub struct ScalarType {
 /// Type derived for non-terminal ScalarTypeGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ScalarTypeGroup {
     UserDefinedTypeScalarTypeOpt(ScalarTypeGroupUserDefinedTypeScalarTypeOpt),
     FactorType(ScalarTypeGroupFactorType),
@@ -12443,7 +12443,7 @@ pub enum ScalarTypeGroup {
 /// Type derived for non-terminal ScalarTypeList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScalarTypeList {
     pub type_modifier: Box<TypeModifier>,
 }
@@ -12452,7 +12452,7 @@ pub struct ScalarTypeList {
 /// Type derived for non-terminal ScalarTypeOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScalarTypeOpt {
     pub width: Box<Width>,
 }
@@ -12461,7 +12461,7 @@ pub struct ScalarTypeOpt {
 /// Type derived for non-terminal ScopedIdentifier
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScopedIdentifier {
     pub scoped_identifier_group: Box<ScopedIdentifierGroup>,
     pub scoped_identifier_list: Vec<ScopedIdentifierList>,
@@ -12471,7 +12471,7 @@ pub struct ScopedIdentifier {
 /// Type derived for non-terminal ScopedIdentifierGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ScopedIdentifierGroup {
     DollarIdentifier(ScopedIdentifierGroupDollarIdentifier),
     IdentifierScopedIdentifierOpt(ScopedIdentifierGroupIdentifierScopedIdentifierOpt),
@@ -12481,7 +12481,7 @@ pub enum ScopedIdentifierGroup {
 /// Type derived for non-terminal ScopedIdentifierList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScopedIdentifierList {
     pub colon_colon: Box<ColonColon>,
     pub identifier: Box<Identifier>,
@@ -12492,7 +12492,7 @@ pub struct ScopedIdentifierList {
 /// Type derived for non-terminal ScopedIdentifierOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScopedIdentifierOpt {
     pub with_generic_argument: Box<WithGenericArgument>,
 }
@@ -12501,7 +12501,7 @@ pub struct ScopedIdentifierOpt {
 /// Type derived for non-terminal ScopedIdentifierOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScopedIdentifierOpt0 {
     pub with_generic_argument: Box<WithGenericArgument>,
 }
@@ -12510,7 +12510,7 @@ pub struct ScopedIdentifierOpt0 {
 /// Type derived for non-terminal Select
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Select {
     pub l_bracket: Box<LBracket>,
     pub expression: Box<Expression>,
@@ -12522,7 +12522,7 @@ pub struct Select {
 /// Type derived for non-terminal SelectOperator
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SelectOperator {
     Colon(SelectOperatorColon),
     PlusColon(SelectOperatorPlusColon),
@@ -12534,7 +12534,7 @@ pub enum SelectOperator {
 /// Type derived for non-terminal SelectOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SelectOpt {
     pub select_operator: Box<SelectOperator>,
     pub expression: Box<Expression>,
@@ -12544,7 +12544,7 @@ pub struct SelectOpt {
 /// Type derived for non-terminal Semicolon
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Semicolon {
     pub semicolon_token: crate::veryl_token::VerylToken,
 }
@@ -12553,7 +12553,7 @@ pub struct Semicolon {
 /// Type derived for non-terminal SemicolonTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SemicolonTerm {
     pub semicolon_term: crate::veryl_token::Token, /* ; */
 }
@@ -12562,7 +12562,7 @@ pub struct SemicolonTerm {
 /// Type derived for non-terminal SemicolonToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SemicolonToken {
     pub semicolon_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12572,7 +12572,7 @@ pub struct SemicolonToken {
 /// Type derived for non-terminal Signed
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Signed {
     pub signed_token: crate::veryl_token::VerylToken,
 }
@@ -12581,7 +12581,7 @@ pub struct Signed {
 /// Type derived for non-terminal SignedTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SignedTerm {
     pub signed_term: crate::veryl_token::Token, /* signed */
 }
@@ -12590,7 +12590,7 @@ pub struct SignedTerm {
 /// Type derived for non-terminal SignedToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SignedToken {
     pub signed_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12600,7 +12600,7 @@ pub struct SignedToken {
 /// Type derived for non-terminal Star
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Star {
     pub star_token: crate::veryl_token::VerylToken,
 }
@@ -12609,7 +12609,7 @@ pub struct Star {
 /// Type derived for non-terminal StarTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StarTerm {
     pub star_term: crate::veryl_token::Token, /* * */
 }
@@ -12618,7 +12618,7 @@ pub struct StarTerm {
 /// Type derived for non-terminal StarToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StarToken {
     pub star_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12628,7 +12628,7 @@ pub struct StarToken {
 /// Type derived for non-terminal Start
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Start {
     pub start_token: crate::veryl_token::VerylToken,
 }
@@ -12637,7 +12637,7 @@ pub struct Start {
 /// Type derived for non-terminal StartToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StartToken {
     pub comments: Box<Comments>,
 }
@@ -12646,7 +12646,7 @@ pub struct StartToken {
 /// Type derived for non-terminal Statement
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Statement {
     IdentifierStatement(StatementIdentifierStatement),
     IfStatement(StatementIfStatement),
@@ -12662,7 +12662,7 @@ pub enum Statement {
 /// Type derived for non-terminal StatementBlock
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlock {
     pub l_brace: Box<LBrace>,
     pub statement_block_list: Vec<StatementBlockList>,
@@ -12673,7 +12673,7 @@ pub struct StatementBlock {
 /// Type derived for non-terminal StatementBlockGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockGroup {
     pub statement_block_group_list: Vec<StatementBlockGroupList>,
     pub statement_block_group_group: Box<StatementBlockGroupGroup>,
@@ -12683,7 +12683,7 @@ pub struct StatementBlockGroup {
 /// Type derived for non-terminal StatementBlockGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum StatementBlockGroupGroup {
     BlockLBraceStatementBlockGroupGroupListRBrace(
         StatementBlockGroupGroupBlockLBraceStatementBlockGroupGroupListRBrace,
@@ -12695,7 +12695,7 @@ pub enum StatementBlockGroupGroup {
 /// Type derived for non-terminal StatementBlockGroupGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockGroupGroupList {
     pub statement_block_group: Box<StatementBlockGroup>,
 }
@@ -12704,7 +12704,7 @@ pub struct StatementBlockGroupGroupList {
 /// Type derived for non-terminal StatementBlockGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -12713,7 +12713,7 @@ pub struct StatementBlockGroupList {
 /// Type derived for non-terminal StatementBlockItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum StatementBlockItem {
     VarDeclaration(StatementBlockItemVarDeclaration),
     LetStatement(StatementBlockItemLetStatement),
@@ -12727,7 +12727,7 @@ pub enum StatementBlockItem {
 /// Type derived for non-terminal StatementBlockList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementBlockList {
     pub statement_block_group: Box<StatementBlockGroup>,
 }
@@ -12736,7 +12736,7 @@ pub struct StatementBlockList {
 /// Type derived for non-terminal Step
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Step {
     pub step_token: crate::veryl_token::VerylToken,
 }
@@ -12745,7 +12745,7 @@ pub struct Step {
 /// Type derived for non-terminal StepTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StepTerm {
     pub step_term: crate::veryl_token::Token, /* step */
 }
@@ -12754,7 +12754,7 @@ pub struct StepTerm {
 /// Type derived for non-terminal StepToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StepToken {
     pub step_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12764,7 +12764,7 @@ pub struct StepToken {
 /// Type derived for non-terminal Strin
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Strin {
     pub string_token: crate::veryl_token::VerylToken,
 }
@@ -12773,7 +12773,7 @@ pub struct Strin {
 /// Type derived for non-terminal StringLiteral
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StringLiteral {
     pub string_literal_token: crate::veryl_token::VerylToken,
 }
@@ -12782,7 +12782,7 @@ pub struct StringLiteral {
 /// Type derived for non-terminal StringLiteralTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StringLiteralTerm {
     pub string_literal_term: crate::veryl_token::Token, /* \u{0022}(?:\\[\u{0022}\\/bfnrt]|[^\u{0022}\\\u0000-\u001F])*\u{0022} */
 }
@@ -12791,7 +12791,7 @@ pub struct StringLiteralTerm {
 /// Type derived for non-terminal StringLiteralToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StringLiteralToken {
     pub string_literal_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12801,7 +12801,7 @@ pub struct StringLiteralToken {
 /// Type derived for non-terminal StringTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StringTerm {
     pub string_term: crate::veryl_token::Token, /* string */
 }
@@ -12810,7 +12810,7 @@ pub struct StringTerm {
 /// Type derived for non-terminal StringToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StringToken {
     pub string_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12820,7 +12820,7 @@ pub struct StringToken {
 /// Type derived for non-terminal Struct
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Struct {
     pub struct_token: crate::veryl_token::VerylToken,
 }
@@ -12829,7 +12829,7 @@ pub struct Struct {
 /// Type derived for non-terminal StructConstructor
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructConstructor {
     pub quote_l_brace: Box<QuoteLBrace>,
     pub struct_constructor_list: Box<StructConstructorList>,
@@ -12841,7 +12841,7 @@ pub struct StructConstructor {
 /// Type derived for non-terminal StructConstructorItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructConstructorItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -12852,7 +12852,7 @@ pub struct StructConstructorItem {
 /// Type derived for non-terminal StructConstructorList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructConstructorList {
     pub struct_constructor_item: Box<StructConstructorItem>,
     pub struct_constructor_list_list: Vec<StructConstructorListList>,
@@ -12863,7 +12863,7 @@ pub struct StructConstructorList {
 /// Type derived for non-terminal StructConstructorListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructConstructorListList {
     pub comma: Box<Comma>,
     pub struct_constructor_item: Box<StructConstructorItem>,
@@ -12873,7 +12873,7 @@ pub struct StructConstructorListList {
 /// Type derived for non-terminal StructConstructorListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructConstructorListOpt {
     pub comma: Box<Comma>,
 }
@@ -12882,7 +12882,7 @@ pub struct StructConstructorListOpt {
 /// Type derived for non-terminal StructConstructorOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructConstructorOpt {
     pub dot_dot: Box<DotDot>,
     pub defaul: Box<Defaul>,
@@ -12895,7 +12895,7 @@ pub struct StructConstructorOpt {
 /// Type derived for non-terminal StructTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructTerm {
     pub struct_term: crate::veryl_token::Token, /* struct */
 }
@@ -12904,7 +12904,7 @@ pub struct StructTerm {
 /// Type derived for non-terminal StructToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructToken {
     pub struct_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -12914,7 +12914,7 @@ pub struct StructToken {
 /// Type derived for non-terminal StructUnion
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum StructUnion {
     Struct(StructUnionStruct),
     Union(StructUnionUnion),
@@ -12924,7 +12924,7 @@ pub enum StructUnion {
 /// Type derived for non-terminal StructUnionDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionDeclaration {
     pub struct_union: Box<StructUnion>,
     pub identifier: Box<Identifier>,
@@ -12938,7 +12938,7 @@ pub struct StructUnionDeclaration {
 /// Type derived for non-terminal StructUnionDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionDeclarationOpt {
     pub with_generic_parameter: Box<WithGenericParameter>,
 }
@@ -12947,7 +12947,7 @@ pub struct StructUnionDeclarationOpt {
 /// Type derived for non-terminal StructUnionGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionGroup {
     pub struct_union_group_list: Vec<StructUnionGroupList>,
     pub struct_union_group_group: Box<StructUnionGroupGroup>,
@@ -12957,7 +12957,7 @@ pub struct StructUnionGroup {
 /// Type derived for non-terminal StructUnionGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum StructUnionGroupGroup {
     LBraceStructUnionListRBrace(StructUnionGroupGroupLBraceStructUnionListRBrace),
     StructUnionItem(StructUnionGroupGroupStructUnionItem),
@@ -12967,7 +12967,7 @@ pub enum StructUnionGroupGroup {
 /// Type derived for non-terminal StructUnionGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -12976,7 +12976,7 @@ pub struct StructUnionGroupList {
 /// Type derived for non-terminal StructUnionItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -12987,7 +12987,7 @@ pub struct StructUnionItem {
 /// Type derived for non-terminal StructUnionList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionList {
     pub struct_union_group: Box<StructUnionGroup>,
     pub struct_union_list_list: Vec<StructUnionListList>,
@@ -12998,7 +12998,7 @@ pub struct StructUnionList {
 /// Type derived for non-terminal StructUnionListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionListList {
     pub comma: Box<Comma>,
     pub struct_union_group: Box<StructUnionGroup>,
@@ -13008,7 +13008,7 @@ pub struct StructUnionListList {
 /// Type derived for non-terminal StructUnionListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructUnionListOpt {
     pub comma: Box<Comma>,
 }
@@ -13017,7 +13017,7 @@ pub struct StructUnionListOpt {
 /// Type derived for non-terminal Switch
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Switch {
     pub switch_token: crate::veryl_token::VerylToken,
 }
@@ -13026,7 +13026,7 @@ pub struct Switch {
 /// Type derived for non-terminal SwitchCondition
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchCondition {
     pub expression: Box<Expression>,
     pub switch_condition_list: Vec<SwitchConditionList>,
@@ -13036,7 +13036,7 @@ pub struct SwitchCondition {
 /// Type derived for non-terminal SwitchConditionList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchConditionList {
     pub comma: Box<Comma>,
     pub expression: Box<Expression>,
@@ -13046,7 +13046,7 @@ pub struct SwitchConditionList {
 /// Type derived for non-terminal SwitchExpression
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchExpression {
     pub switch: Box<Switch>,
     pub l_brace: Box<LBrace>,
@@ -13066,7 +13066,7 @@ pub struct SwitchExpression {
 /// Type derived for non-terminal SwitchExpressionList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchExpressionList {
     pub switch_condition: Box<SwitchCondition>,
     pub colon: Box<Colon>,
@@ -13078,7 +13078,7 @@ pub struct SwitchExpressionList {
 /// Type derived for non-terminal SwitchExpressionOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchExpressionOpt {
     pub comma: Box<Comma>,
 }
@@ -13087,7 +13087,7 @@ pub struct SwitchExpressionOpt {
 /// Type derived for non-terminal SwitchItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchItem {
     pub switch_item_group: Box<SwitchItemGroup>,
     pub colon: Box<Colon>,
@@ -13098,7 +13098,7 @@ pub struct SwitchItem {
 /// Type derived for non-terminal SwitchItemGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SwitchItemGroup {
     SwitchCondition(SwitchItemGroupSwitchCondition),
     Defaul(SwitchItemGroupDefaul),
@@ -13108,7 +13108,7 @@ pub enum SwitchItemGroup {
 /// Type derived for non-terminal SwitchItemGroup0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SwitchItemGroup0 {
     Statement(SwitchItemGroup0Statement),
     StatementBlock(SwitchItemGroup0StatementBlock),
@@ -13118,7 +13118,7 @@ pub enum SwitchItemGroup0 {
 /// Type derived for non-terminal SwitchStatement
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchStatement {
     pub switch: Box<Switch>,
     pub l_brace: Box<LBrace>,
@@ -13130,7 +13130,7 @@ pub struct SwitchStatement {
 /// Type derived for non-terminal SwitchStatementList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchStatementList {
     pub switch_item: Box<SwitchItem>,
 }
@@ -13139,7 +13139,7 @@ pub struct SwitchStatementList {
 /// Type derived for non-terminal SwitchTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchTerm {
     pub switch_term: crate::veryl_token::Token, /* switch */
 }
@@ -13148,7 +13148,7 @@ pub struct SwitchTerm {
 /// Type derived for non-terminal SwitchToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SwitchToken {
     pub switch_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13158,7 +13158,7 @@ pub struct SwitchToken {
 /// Type derived for non-terminal Tri
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Tri {
     pub tri_token: crate::veryl_token::VerylToken,
 }
@@ -13167,7 +13167,7 @@ pub struct Tri {
 /// Type derived for non-terminal TriTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TriTerm {
     pub tri_term: crate::veryl_token::Token, /* tri */
 }
@@ -13176,7 +13176,7 @@ pub struct TriTerm {
 /// Type derived for non-terminal TriToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TriToken {
     pub tri_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13186,7 +13186,7 @@ pub struct TriToken {
 /// Type derived for non-terminal TripleLBrace
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TripleLBrace {
     pub triple_l_brace_token: crate::veryl_token::VerylToken,
 }
@@ -13195,7 +13195,7 @@ pub struct TripleLBrace {
 /// Type derived for non-terminal TripleLBraceTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TripleLBraceTerm {
     pub triple_l_brace_term: crate::veryl_token::Token, /* {{{ */
 }
@@ -13204,7 +13204,7 @@ pub struct TripleLBraceTerm {
 /// Type derived for non-terminal TripleLBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TripleLBraceToken {
     pub triple_l_brace_term: crate::veryl_token::Token,
 }
@@ -13213,7 +13213,7 @@ pub struct TripleLBraceToken {
 /// Type derived for non-terminal TripleRBrace
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TripleRBrace {
     pub triple_r_brace_token: crate::veryl_token::VerylToken,
 }
@@ -13222,7 +13222,7 @@ pub struct TripleRBrace {
 /// Type derived for non-terminal TripleRBraceTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TripleRBraceTerm {
     pub triple_r_brace_term: crate::veryl_token::Token, /* }}} */
 }
@@ -13231,7 +13231,7 @@ pub struct TripleRBraceTerm {
 /// Type derived for non-terminal TripleRBraceToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TripleRBraceToken {
     pub triple_r_brace_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13241,7 +13241,7 @@ pub struct TripleRBraceToken {
 /// Type derived for non-terminal True
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct True {
     pub true_token: crate::veryl_token::VerylToken,
 }
@@ -13250,7 +13250,7 @@ pub struct True {
 /// Type derived for non-terminal TrueTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TrueTerm {
     pub true_term: crate::veryl_token::Token, /* true */
 }
@@ -13259,7 +13259,7 @@ pub struct TrueTerm {
 /// Type derived for non-terminal TrueToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TrueToken {
     pub true_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13269,7 +13269,7 @@ pub struct TrueToken {
 /// Type derived for non-terminal Type
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Type {
     pub type_token: crate::veryl_token::VerylToken,
 }
@@ -13278,7 +13278,7 @@ pub struct Type {
 /// Type derived for non-terminal TypeDefDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TypeDefDeclaration {
     pub r#type: Box<Type>,
     pub identifier: Box<Identifier>,
@@ -13291,7 +13291,7 @@ pub struct TypeDefDeclaration {
 /// Type derived for non-terminal TypeExpression
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TypeExpression {
     pub r#type: Box<Type>,
     pub l_paren: Box<LParen>,
@@ -13303,7 +13303,7 @@ pub struct TypeExpression {
 /// Type derived for non-terminal TypeModifier
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TypeModifier {
     Tri(TypeModifierTri),
     Signed(TypeModifierSigned),
@@ -13314,7 +13314,7 @@ pub enum TypeModifier {
 /// Type derived for non-terminal TypeTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TypeTerm {
     pub type_term: crate::veryl_token::Token, /* type */
 }
@@ -13323,7 +13323,7 @@ pub struct TypeTerm {
 /// Type derived for non-terminal TypeToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TypeToken {
     pub type_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13333,7 +13333,7 @@ pub struct TypeToken {
 /// Type derived for non-terminal U16
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U16 {
     pub u16_token: crate::veryl_token::VerylToken,
 }
@@ -13342,7 +13342,7 @@ pub struct U16 {
 /// Type derived for non-terminal U16Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U16Term {
     pub u16_term: crate::veryl_token::Token, /* u16 */
 }
@@ -13351,7 +13351,7 @@ pub struct U16Term {
 /// Type derived for non-terminal U16Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U16Token {
     pub u16_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13361,7 +13361,7 @@ pub struct U16Token {
 /// Type derived for non-terminal U32
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U32 {
     pub u32_token: crate::veryl_token::VerylToken,
 }
@@ -13370,7 +13370,7 @@ pub struct U32 {
 /// Type derived for non-terminal U32Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U32Term {
     pub u32_term: crate::veryl_token::Token, /* u32 */
 }
@@ -13379,7 +13379,7 @@ pub struct U32Term {
 /// Type derived for non-terminal U32Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U32Token {
     pub u32_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13389,7 +13389,7 @@ pub struct U32Token {
 /// Type derived for non-terminal U64
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U64 {
     pub u64_token: crate::veryl_token::VerylToken,
 }
@@ -13398,7 +13398,7 @@ pub struct U64 {
 /// Type derived for non-terminal U64Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U64Term {
     pub u64_term: crate::veryl_token::Token, /* u64 */
 }
@@ -13407,7 +13407,7 @@ pub struct U64Term {
 /// Type derived for non-terminal U64Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U64Token {
     pub u64_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13417,7 +13417,7 @@ pub struct U64Token {
 /// Type derived for non-terminal U8
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U8 {
     pub u8_token: crate::veryl_token::VerylToken,
 }
@@ -13426,7 +13426,7 @@ pub struct U8 {
 /// Type derived for non-terminal U8Term
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U8Term {
     pub u8_term: crate::veryl_token::Token, /* u8 */
 }
@@ -13435,7 +13435,7 @@ pub struct U8Term {
 /// Type derived for non-terminal U8Token
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct U8Token {
     pub u8_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13445,7 +13445,7 @@ pub struct U8Token {
 /// Type derived for non-terminal UnaryOperator
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnaryOperator {
     pub unary_operator_token: crate::veryl_token::VerylToken,
 }
@@ -13454,7 +13454,7 @@ pub struct UnaryOperator {
 /// Type derived for non-terminal UnaryOperatorTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnaryOperatorTerm {
     pub unary_operator_term: crate::veryl_token::Token, /* ~&|~\||!|~ */
 }
@@ -13463,7 +13463,7 @@ pub struct UnaryOperatorTerm {
 /// Type derived for non-terminal UnaryOperatorToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnaryOperatorToken {
     pub unary_operator_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13473,7 +13473,7 @@ pub struct UnaryOperatorToken {
 /// Type derived for non-terminal Union
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Union {
     pub union_token: crate::veryl_token::VerylToken,
 }
@@ -13482,7 +13482,7 @@ pub struct Union {
 /// Type derived for non-terminal UnionTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnionTerm {
     pub union_term: crate::veryl_token::Token, /* union */
 }
@@ -13491,7 +13491,7 @@ pub struct UnionTerm {
 /// Type derived for non-terminal UnionToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnionToken {
     pub union_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13501,7 +13501,7 @@ pub struct UnionToken {
 /// Type derived for non-terminal Unsafe
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Unsafe {
     pub unsafe_token: crate::veryl_token::VerylToken,
 }
@@ -13510,7 +13510,7 @@ pub struct Unsafe {
 /// Type derived for non-terminal UnsafeBlock
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnsafeBlock {
     pub r#unsafe: Box<Unsafe>,
     pub l_paren: Box<LParen>,
@@ -13525,7 +13525,7 @@ pub struct UnsafeBlock {
 /// Type derived for non-terminal UnsafeBlockList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnsafeBlockList {
     pub generate_group: Box<GenerateGroup>,
 }
@@ -13534,7 +13534,7 @@ pub struct UnsafeBlockList {
 /// Type derived for non-terminal UnsafeTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnsafeTerm {
     pub unsafe_term: crate::veryl_token::Token, /* unsafe */
 }
@@ -13543,7 +13543,7 @@ pub struct UnsafeTerm {
 /// Type derived for non-terminal UnsafeToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnsafeToken {
     pub unsafe_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13553,7 +13553,7 @@ pub struct UnsafeToken {
 /// Type derived for non-terminal UserDefinedType
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UserDefinedType {
     pub scoped_identifier: Box<ScopedIdentifier>,
 }
@@ -13562,7 +13562,7 @@ pub struct UserDefinedType {
 /// Type derived for non-terminal Var
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Var {
     pub var_token: crate::veryl_token::VerylToken,
 }
@@ -13571,7 +13571,7 @@ pub struct Var {
 /// Type derived for non-terminal VarDeclaration
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VarDeclaration {
     pub var: Box<Var>,
     pub identifier: Box<Identifier>,
@@ -13583,7 +13583,7 @@ pub struct VarDeclaration {
 /// Type derived for non-terminal VarDeclarationOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VarDeclarationOpt {
     pub colon: Box<Colon>,
     pub var_declaration_opt0: Option<VarDeclarationOpt0>,
@@ -13594,7 +13594,7 @@ pub struct VarDeclarationOpt {
 /// Type derived for non-terminal VarDeclarationOpt0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VarDeclarationOpt0 {
     pub clock_domain: Box<ClockDomain>,
 }
@@ -13603,7 +13603,7 @@ pub struct VarDeclarationOpt0 {
 /// Type derived for non-terminal VarTerm
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VarTerm {
     pub var_term: crate::veryl_token::Token, /* var */
 }
@@ -13612,7 +13612,7 @@ pub struct VarTerm {
 /// Type derived for non-terminal VarToken
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VarToken {
     pub var_term: crate::veryl_token::Token,
     pub comments: Box<Comments>,
@@ -13622,7 +13622,7 @@ pub struct VarToken {
 /// Type derived for non-terminal VariableType
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum VariableType {
     Clock(VariableTypeClock),
     ClockPosedge(VariableTypeClockPosedge),
@@ -13640,7 +13640,7 @@ pub enum VariableType {
 /// Type derived for non-terminal Veryl
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Veryl {
     pub start: Box<Start>,
     pub veryl_list: Vec<VerylList>,
@@ -13650,7 +13650,7 @@ pub struct Veryl {
 /// Type derived for non-terminal VerylList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VerylList {
     pub description_group: Box<DescriptionGroup>,
 }
@@ -13659,7 +13659,7 @@ pub struct VerylList {
 /// Type derived for non-terminal Width
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Width {
     pub l_angle: Box<LAngle>,
     pub expression: Box<Expression>,
@@ -13671,7 +13671,7 @@ pub struct Width {
 /// Type derived for non-terminal WidthList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WidthList {
     pub comma: Box<Comma>,
     pub expression: Box<Expression>,
@@ -13681,7 +13681,7 @@ pub struct WidthList {
 /// Type derived for non-terminal WithGenericArgument
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericArgument {
     pub colon_colon_l_angle: Box<ColonColonLAngle>,
     pub with_generic_argument_opt: Option<WithGenericArgumentOpt>,
@@ -13692,7 +13692,7 @@ pub struct WithGenericArgument {
 /// Type derived for non-terminal WithGenericArgumentItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum WithGenericArgumentItem {
     GenericArgIdentifier(WithGenericArgumentItemGenericArgIdentifier),
     FixedType(WithGenericArgumentItemFixedType),
@@ -13704,7 +13704,7 @@ pub enum WithGenericArgumentItem {
 /// Type derived for non-terminal WithGenericArgumentList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericArgumentList {
     pub with_generic_argument_item: Box<WithGenericArgumentItem>,
     pub with_generic_argument_list_list: Vec<WithGenericArgumentListList>,
@@ -13715,7 +13715,7 @@ pub struct WithGenericArgumentList {
 /// Type derived for non-terminal WithGenericArgumentListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericArgumentListList {
     pub comma: Box<Comma>,
     pub with_generic_argument_item: Box<WithGenericArgumentItem>,
@@ -13725,7 +13725,7 @@ pub struct WithGenericArgumentListList {
 /// Type derived for non-terminal WithGenericArgumentListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericArgumentListOpt {
     pub comma: Box<Comma>,
 }
@@ -13734,7 +13734,7 @@ pub struct WithGenericArgumentListOpt {
 /// Type derived for non-terminal WithGenericArgumentOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericArgumentOpt {
     pub with_generic_argument_list: Box<WithGenericArgumentList>,
 }
@@ -13743,7 +13743,7 @@ pub struct WithGenericArgumentOpt {
 /// Type derived for non-terminal WithGenericParameter
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericParameter {
     pub colon_colon_l_angle: Box<ColonColonLAngle>,
     pub with_generic_parameter_list: Box<WithGenericParameterList>,
@@ -13754,7 +13754,7 @@ pub struct WithGenericParameter {
 /// Type derived for non-terminal WithGenericParameterItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericParameterItem {
     pub identifier: Box<Identifier>,
     pub colon: Box<Colon>,
@@ -13766,7 +13766,7 @@ pub struct WithGenericParameterItem {
 /// Type derived for non-terminal WithGenericParameterItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericParameterItemOpt {
     pub equ: Box<Equ>,
     pub with_generic_argument_item: Box<WithGenericArgumentItem>,
@@ -13776,7 +13776,7 @@ pub struct WithGenericParameterItemOpt {
 /// Type derived for non-terminal WithGenericParameterList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericParameterList {
     pub with_generic_parameter_item: Box<WithGenericParameterItem>,
     pub with_generic_parameter_list_list: Vec<WithGenericParameterListList>,
@@ -13787,7 +13787,7 @@ pub struct WithGenericParameterList {
 /// Type derived for non-terminal WithGenericParameterListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericParameterListList {
     pub comma: Box<Comma>,
     pub with_generic_parameter_item: Box<WithGenericParameterItem>,
@@ -13797,7 +13797,7 @@ pub struct WithGenericParameterListList {
 /// Type derived for non-terminal WithGenericParameterListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithGenericParameterListOpt {
     pub comma: Box<Comma>,
 }
@@ -13806,7 +13806,7 @@ pub struct WithGenericParameterListOpt {
 /// Type derived for non-terminal WithParameter
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameter {
     pub hash: Box<Hash>,
     pub l_paren: Box<LParen>,
@@ -13818,7 +13818,7 @@ pub struct WithParameter {
 /// Type derived for non-terminal WithParameterGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterGroup {
     pub with_parameter_group_list: Vec<WithParameterGroupList>,
     pub with_parameter_group_group: Box<WithParameterGroupGroup>,
@@ -13828,7 +13828,7 @@ pub struct WithParameterGroup {
 /// Type derived for non-terminal WithParameterGroupGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum WithParameterGroupGroup {
     LBraceWithParameterListRBrace(WithParameterGroupGroupLBraceWithParameterListRBrace),
     WithParameterItem(WithParameterGroupGroupWithParameterItem),
@@ -13838,7 +13838,7 @@ pub enum WithParameterGroupGroup {
 /// Type derived for non-terminal WithParameterGroupList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterGroupList {
     pub attribute: Box<Attribute>,
 }
@@ -13847,7 +13847,7 @@ pub struct WithParameterGroupList {
 /// Type derived for non-terminal WithParameterItem
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterItem {
     pub with_parameter_item_group: Box<WithParameterItemGroup>,
     pub identifier: Box<Identifier>,
@@ -13860,7 +13860,7 @@ pub struct WithParameterItem {
 /// Type derived for non-terminal WithParameterItemGroup
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum WithParameterItemGroup {
     Param(WithParameterItemGroupParam),
     Const(WithParameterItemGroupConst),
@@ -13870,7 +13870,7 @@ pub enum WithParameterItemGroup {
 /// Type derived for non-terminal WithParameterItemGroup0
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum WithParameterItemGroup0 {
     ArrayType(WithParameterItemGroup0ArrayType),
     Type(WithParameterItemGroup0Type),
@@ -13880,7 +13880,7 @@ pub enum WithParameterItemGroup0 {
 /// Type derived for non-terminal WithParameterItemOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterItemOpt {
     pub equ: Box<Equ>,
     pub expression: Box<Expression>,
@@ -13890,7 +13890,7 @@ pub struct WithParameterItemOpt {
 /// Type derived for non-terminal WithParameterList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterList {
     pub with_parameter_group: Box<WithParameterGroup>,
     pub with_parameter_list_list: Vec<WithParameterListList>,
@@ -13901,7 +13901,7 @@ pub struct WithParameterList {
 /// Type derived for non-terminal WithParameterListList
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterListList {
     pub comma: Box<Comma>,
     pub with_parameter_group: Box<WithParameterGroup>,
@@ -13911,7 +13911,7 @@ pub struct WithParameterListList {
 /// Type derived for non-terminal WithParameterListOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterListOpt {
     pub comma: Box<Comma>,
 }
@@ -13920,7 +13920,7 @@ pub struct WithParameterListOpt {
 /// Type derived for non-terminal WithParameterOpt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithParameterOpt {
     pub with_parameter_list: Box<WithParameterList>,
 }
@@ -13931,7 +13931,7 @@ pub struct WithParameterOpt {
 /// Deduced ASTType of expanded grammar
 ///
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ASTType {
     Alias(Alias),
     AliasDeclaration(AliasDeclaration),

@@ -6,6 +6,8 @@ pub mod comb_loop_detect;
 pub mod connect_operation_table;
 pub mod conv;
 pub mod definition_table;
+pub mod fragment_cache;
+pub mod fragment_codec;
 pub mod generic_inference_table;
 pub mod handlers;
 pub mod ir;

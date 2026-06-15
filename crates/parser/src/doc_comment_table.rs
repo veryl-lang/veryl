@@ -16,6 +16,17 @@ impl DocCommentTable {
         self.table.get(&(path, line)).cloned()
     }
 
+    pub fn export_by_path(&self, path: PathId) -> Vec<(u32, StrId)> {
+        let mut ret: Vec<_> = self
+            .table
+            .iter()
+            .filter(|((p, _), _)| *p == path)
+            .map(|((_, line), text)| (*line, *text))
+            .collect();
+        ret.sort_unstable_by_key(|(line, _)| *line);
+        ret
+    }
+
     pub fn clear(&mut self) {
         self.table.clear();
     }
@@ -29,6 +40,12 @@ pub fn insert(path: PathId, line: u32, text: StrId) {
 
 pub fn get(path: PathId, line: u32) -> Option<StrId> {
     DOC_COMMENT_TABLE.with(|f| f.borrow().get(path, line))
+}
+
+/// Exports all doc comments belonging to one file, sorted by line.
+/// Used by fragment caching.
+pub fn export_by_path(path: PathId) -> Vec<(u32, StrId)> {
+    DOC_COMMENT_TABLE.with(|f| f.borrow().export_by_path(path))
 }
 
 pub fn clear() {

@@ -176,3 +176,20 @@ pub fn new_token_id() -> TokenId {
         TokenId(*ret)
     })
 }
+
+/// Returns the last issued token ID value. Used to delimit per-file ID
+/// windows for fragment caching.
+pub fn peek_token_id() -> usize {
+    TOKEN_ID.with(|f| *f.borrow())
+}
+
+/// Reserves `count` consecutive token IDs and returns the value the counter
+/// had before the reservation. The reserved IDs are `base+1..=base+count`.
+pub fn reserve_token_ids(count: usize) -> usize {
+    TOKEN_ID.with(|f| {
+        let mut ret = f.borrow_mut();
+        let base = *ret;
+        *ret += count;
+        base
+    })
+}

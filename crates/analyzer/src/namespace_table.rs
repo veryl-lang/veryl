@@ -29,6 +29,17 @@ impl NamespaceTable {
         self.table.retain(|_, x| x.1 != file_path);
     }
 
+    pub fn export_by_path(&self, file_path: PathId) -> Vec<(TokenId, Namespace)> {
+        let mut ret: Vec<_> = self
+            .table
+            .iter()
+            .filter(|(_, (_, p))| *p == file_path)
+            .map(|(id, (namespace, _))| (*id, namespace.clone()))
+            .collect();
+        ret.sort_unstable_by_key(|(id, _)| *id);
+        ret
+    }
+
     pub fn set_project(&mut self, project_name: StrId, is_root: bool) {
         if !self.project_names.contains(&project_name) {
             self.project_names.push(project_name);
@@ -120,6 +131,12 @@ pub fn dump() -> String {
 
 pub fn drop(file_path: PathId) {
     NAMESPACE_TABLE.with(|f| f.borrow_mut().drop(file_path))
+}
+
+/// Exports all entries belonging to one file, sorted by token ID.
+/// Used by fragment caching.
+pub fn export_by_path(file_path: PathId) -> Vec<(TokenId, Namespace)> {
+    NAMESPACE_TABLE.with(|f| f.borrow().export_by_path(file_path))
 }
 
 pub fn set_project(project_name: StrId, is_root: bool) {
