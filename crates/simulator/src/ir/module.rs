@@ -2609,6 +2609,53 @@ impl Conv<&air::Module> for ProtoModule {
             );
         }
 
+        // Chunk-local localization (VERYL_AOT_C_LOCALIZE): while events +
+        // derived-clock candidates are in scope, precompute the comb offsets the
+        // emitter must NOT localize — event-touched, in a runtime-indexed array
+        // range, or externally-visible (port / user-var / clock).
+        // LocalizeInfo = (blocklist offsets, array ranges).
+        type LocalizeInfo = (std::collections::HashSet<isize>, Vec<(isize, usize, isize)>);
+        #[cfg(not(target_family = "wasm"))]
+        let localize_info: Option<LocalizeInfo> = if std::env::var("VERYL_AOT_C_LOCALIZE")
+            .as_deref()
+            != Ok("0")
+        {
+            let event_slices: Vec<&[ProtoStatement]> = all_event_statements
+                .values()
+                .map(|v| v.as_slice())
+                .collect();
+            let (mut block_vo, ranges) =
+                crate::ir::opt::dead_var_dce::collect_localize_info(&pre_jit_stmts, &event_slices);
+            // Protect externally-visible comb offsets (mirrors the
+            // dead_var_dce protect set): a parent module's comb or a
+            // testbench reads these from comb_values, bypassing any local.
+            use veryl_analyzer::ir::VarKind;
+            for (vid, var) in &src.variables {
+                let is_let = matches!(var.kind, VarKind::Let);
+                let is_clock = var.r#type.is_clock();
+                if is_let && !is_clock {
+                    continue;
+                }
+                if let Some(meta) = variable_meta.get(vid) {
+                    for elem in &meta.elements {
+                        block_vo.insert(elem.current);
+                    }
+                }
+            }
+            for (_, off, _) in &nested_derived_clock_candidates {
+                block_vo.insert(*off);
+            }
+            let mut block: std::collections::HashSet<isize> = std::collections::HashSet::new();
+            for vo in &block_vo {
+                if !vo.is_ff() {
+                    block.insert(vo.raw());
+                }
+            }
+            Some((block, ranges))
+        } else {
+            None
+        };
+
         // Diag: count FF offsets with multiple write sites — the
         // "multi-RMW candidates" that require scratch/cache forwarding
         // to preserve NBA semantics under packed [current]-only layout.
@@ -2862,9 +2909,19 @@ impl Conv<&air::Module> for ProtoModule {
                 use_4state: context.config.use_4state,
                 contains_compiled_block: false,
             };
-            context
+            // Hand the precomputed localization blocklist + array ranges to the
+            // AOT-C emitter (no-op when VERYL_AOT_C_LOCALIZE is off), then clear
+            // it so it can't leak into a later module's emit.
+            #[cfg(not(target_family = "wasm"))]
+            if let Some((block, ranges)) = &localize_info {
+                crate::backend::aot_c::emit::set_localize_blocklist(block.clone(), ranges.clone());
+            }
+            let r = context
                 .backends
-                .try_compile_whole_comb(&ctx, &pre_jit_stmts)
+                .try_compile_whole_comb(&ctx, &pre_jit_stmts);
+            #[cfg(not(target_family = "wasm"))]
+            crate::backend::aot_c::emit::clear_localize_blocklist();
+            r
         };
 
         // A whole-comb bail silently drops the whole module to per-chunk

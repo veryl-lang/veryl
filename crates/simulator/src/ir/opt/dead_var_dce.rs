@@ -294,6 +294,44 @@ pub fn collect_dead_offsets(slices: &[&[ProtoStatement]]) -> HashSet<VarOffset> 
     dead
 }
 
+/// Offsets the AOT-C emitter must NOT localize (`VERYL_AOT_C_LOCALIZE`):
+/// `blocklist` = comb offsets an event reads/writes (load-bearing across the
+/// comb→event boundary); `ranges` = runtime-indexed array ranges `(base, num,
+/// stride)` whose elements may be read dynamically elsewhere.
+pub fn collect_localize_info(
+    comb: &[ProtoStatement],
+    event_slices: &[&[ProtoStatement]],
+) -> (HashSet<VarOffset>, Vec<(isize, usize, isize)>) {
+    let mut ev = Census::default();
+    for slice in event_slices {
+        for s in *slice {
+            walk_stmt_liveness(s, &mut ev);
+        }
+    }
+    // Any comb offset an event touches (read or write) is load-bearing across
+    // the comb→event boundary → block it.
+    let mut blocklist = HashSet::default();
+    for (off, l) in &ev.live {
+        if off.is_ff() {
+            continue;
+        }
+        if l.reads != 0 || l.full_writes != 0 || l.partial_writes != 0 || l.inherited_writes != 0 {
+            blocklist.insert(*off);
+        }
+    }
+    let mut comb_c = Census::default();
+    for s in comb {
+        walk_stmt_liveness(s, &mut comb_c);
+    }
+    let mut ranges = Vec::new();
+    for r in ev.ranges.iter().chain(comb_c.ranges.iter()) {
+        if !r.base.is_ff() {
+            ranges.push((r.base.raw(), r.num, r.stride));
+        }
+    }
+    (blocklist, ranges)
+}
+
 /// Filter out every `Assign` whose dst is in `dead`.  Recurses into
 /// `If` / `For` / `SequentialBlock`.  CompiledBlock is left intact —
 /// its `func` was pre-compiled with the original offsets and can't

@@ -58,7 +58,10 @@ impl Backend for AotCBackend {
             return None;
         }
         let cell = emit::prepare_comb(stmts, self.async_mode)?;
-        Some(Arc::new(AotCWhole { cell }))
+        // Localized comb byte ranges (intentionally-stale comb_values bytes) for
+        // the validate dual-run to skip; empty unless VERYL_AOT_C_LOCALIZE is on.
+        let localized = Arc::new(emit::take_last_localized_bytes());
+        Some(Arc::new(AotCWhole { cell, localized }))
     }
 
     fn compile_whole_event(
@@ -71,7 +74,10 @@ impl Backend for AotCBackend {
             return None;
         }
         let cell = emit::prepare_event(stmts, self.async_mode)?;
-        Some(Arc::new(AotCWhole { cell }))
+        Some(Arc::new(AotCWhole {
+            cell,
+            localized: Arc::new(Vec::new()),
+        }))
     }
 
     fn diagnose_whole_comb_fallback(&self, stmts: &[ProtoStatement]) -> Option<String> {
@@ -84,6 +90,10 @@ impl Backend for AotCBackend {
 
 struct AotCWhole {
     cell: emit::AotCell,
+    /// Localized comb byte ranges (offset, native_bytes) intentionally left
+    /// stale in comb_values; the validate dual-run skips these.  Empty for
+    /// events and when localization is off.
+    localized: Arc<Vec<(isize, usize)>>,
 }
 
 impl CompiledWhole for AotCWhole {
@@ -100,5 +110,9 @@ impl CompiledWhole for AotCWhole {
             }
             None => DispatchOutcome::NotReady,
         }
+    }
+
+    fn localized_comb_bytes(&self) -> &[(isize, usize)] {
+        &self.localized
     }
 }

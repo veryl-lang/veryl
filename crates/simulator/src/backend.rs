@@ -84,6 +84,14 @@ pub trait CompiledWhole: Send + Sync {
     /// `Done`: function ran.  `NotReady`: artifact unavailable (e.g.
     /// async compile pending) — caller must fall back.
     fn try_dispatch(&self, ff: *const u8, comb: *mut u8, log: *mut u8) -> DispatchOutcome;
+
+    /// Comb byte ranges `(offset, native_bytes)` this backend intentionally
+    /// leaves stale in `comb_values` (chunk-local intermediate localization).
+    /// The validate dual-run skips these when diffing against the full-buffer
+    /// reference backend.  Empty by default (no localization).
+    fn localized_comb_bytes(&self) -> &[(isize, usize)] {
+        &[]
+    }
 }
 
 #[must_use]

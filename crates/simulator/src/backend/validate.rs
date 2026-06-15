@@ -60,6 +60,19 @@ pub fn settle_comb(
     let comb_jit_out: &[u8] = &ir.comb_values;
     let count_jit_out: u64 = ir.write_log_buffer.count() as u64;
 
+    // Comb byte ranges the AOT-C backend intentionally leaves stale (chunk-local
+    // intermediate localization): they have no external reader, so the reference
+    // (Cranelift) writes them but the AOT-C side keeps them in registers.  Skip
+    // them in the diff — comparing dead bytes would be a phantom divergence.
+    let mut skip: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for &(off, nb) in whole.localized_comb_bytes() {
+        if off >= 0 {
+            for b in (off as usize)..(off as usize + nb) {
+                skip.insert(b);
+            }
+        }
+    }
+
     diff_or_panic(
         ir,
         comb_ptr,
@@ -70,6 +83,7 @@ pub fn settle_comb(
         ff_jit_out,
         count_aot_out,
         count_jit_out,
+        &skip,
     );
 }
 
@@ -84,13 +98,21 @@ fn diff_or_panic(
     ff_jit_out: &[u8],
     count_aot_out: u64,
     count_jit_out: u64,
+    skip: &std::collections::HashSet<usize>,
 ) {
     let mut diverged = false;
-    if comb_aot_out != comb_jit_out {
+    let comb_diff = |i: usize, a: &u8, b: &u8| a != b && !skip.contains(&i);
+    if comb_aot_out
+        .iter()
+        .zip(comb_jit_out.iter())
+        .enumerate()
+        .any(|(i, (a, b))| comb_diff(i, a, b))
+    {
         let off = comb_aot_out
             .iter()
             .zip(comb_jit_out.iter())
-            .position(|(a, b)| a != b)
+            .enumerate()
+            .position(|(i, (a, b))| comb_diff(i, a, b))
             .unwrap_or(usize::MAX);
         let var_info = lookup_comb_offset(&ir.module_variables, comb_ptr, off);
         let dump_word = |snap: &[u8], byte_off: isize, name: &str| {
@@ -133,7 +155,13 @@ fn diff_or_panic(
             .iter()
             .zip(comb_jit_out.iter())
             .enumerate()
-            .filter_map(|(i, (a, b))| if a != b { Some((i, *a, *b)) } else { None })
+            .filter_map(|(i, (a, b))| {
+                if comb_diff(i, a, b) {
+                    Some((i, *a, *b))
+                } else {
+                    None
+                }
+            })
             .collect();
         for (i, &(idx, _, _)) in pairs.iter().enumerate() {
             let is_contig = run_start.is_some() && i > 0 && pairs[i - 1].0 + 1 == idx;
