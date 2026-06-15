@@ -2,6 +2,7 @@
 members = [
     "crates/aligner",
     "crates/analyzer",
+    "crates/cache",
     "crates/cosim",
     "crates/emitter",
     "crates/formatter",
