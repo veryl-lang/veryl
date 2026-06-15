@@ -231,6 +231,10 @@ impl CmdTest {
                 .map(|n| n.get())
                 .unwrap_or(1)
                 .min(pending_native.len());
+            // Buffer `$display` output to keep concurrent tests from interleaving.
+            // A single worker can't interleave, so stream live; `--no-capture`
+            // forces streaming even in parallel.
+            let buffered = num_threads > 1 && !self.opt.no_capture;
             let pending_queue = std::sync::Mutex::new(pending_native.into_iter());
             let resource_snapshot = resource_table::export_tables();
             // `SimulatorError` snapshots source text from `text_table` eagerly
@@ -258,7 +262,9 @@ impl CmdTest {
                             loop {
                                 let pending = queue.lock().unwrap().next();
                                 let Some(pending) = pending else { break };
-                                output_buffer::enable();
+                                if buffered {
+                                    output_buffer::enable();
+                                }
                                 // With the `profile` feature, report the build
                                 // (IR build + conv/AOT/dlopen) vs run (Simulator::new
                                 // + hex + cycle sim) split.  The run boundary matches
@@ -285,6 +291,10 @@ impl CmdTest {
                                     Ok(job) => {
                                         let wave_path =
                                             job.dump.as_ref().and_then(|d| d.path().cloned());
+                                        // Stream live: marker before the test's output.
+                                        if !buffered {
+                                            info!("Executing test ({})", pending.test_name);
+                                        }
                                         let result = run_native_testbench(
                                             job.sim_ir,
                                             job.dump,
@@ -326,7 +336,10 @@ impl CmdTest {
                         failure += 1;
                     }
                     NativeOutcome::Ran { result, wave_path } => {
-                        info!("Executing test ({test_name})");
+                        // Streaming already logged this in the worker (`output` empty).
+                        if buffered {
+                            info!("Executing test ({test_name})");
+                        }
                         if !output.is_empty() {
                             print!("{output}");
                         }

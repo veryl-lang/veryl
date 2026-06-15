@@ -228,6 +228,12 @@ pub struct OptTest {
     /// Merged with `[test].defines` from Veryl.toml.
     #[arg(short = 'D', long = "define", value_name = "NAME")]
     pub define: Vec<String>,
+
+    /// Stream `$display`/`$write` output live instead of buffering it per test.
+    /// Output from concurrently-running tests may interleave. Buffering is also
+    /// skipped automatically when tests run on a single worker.
+    #[arg(long, alias = "nocapture")]
+    pub no_capture: bool,
 }
 
 /// Native-simulator code-generation backend selected by `veryl test --backend`.
