@@ -201,6 +201,15 @@ impl Store {
         }
     }
 
+    /// Drops a file's fragment (keeping its dependents/tests) so a warm run
+    /// misses it — for files with pass2/post diagnostics the pass1-only fragment
+    /// would hide. The orphaned blob is GC'd by `save`.
+    pub fn invalidate(&mut self, src: &str) {
+        if let Some(entry) = self.next_files.get_mut(src) {
+            entry.fragment = None;
+        }
+    }
+
     /// Sets the dependents of a file for the build in progress.
     pub fn set_dependents(&mut self, src: &str, dependents: Vec<String>) {
         if let Some(entry) = self.next_files.get_mut(src) {

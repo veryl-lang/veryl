@@ -1,12 +1,8 @@
 use crate::OptDump;
-use crate::context::Context;
-use log::info;
-use miette::{IntoDiagnostic, Result, WrapErr};
-use std::fs;
-use veryl_analyzer::Analyzer;
+use crate::pipeline::{self, AnalyzeOptions};
+use miette::Result;
 use veryl_analyzer::ir::Ir;
 use veryl_metadata::Metadata;
-use veryl_parser::Parser;
 
 pub struct CmdDump {
     opt: OptDump,
@@ -20,37 +16,15 @@ impl CmdDump {
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
-        let mut contexts = Vec::new();
-
-        for path in &paths {
-            info!("Processing file ({})", path.src.to_string_lossy());
-
-            let input = fs::read_to_string(&path.src)
-                .into_diagnostic()
-                .wrap_err("")?;
-            let parser = Parser::parse(&input, &path.src)?;
-            let analyzer = Analyzer::new(metadata);
-            analyzer.analyze_pass1(&path.prj, &parser.veryl);
-
-            let context = Context::new(path.clone(), input, parser, analyzer)?;
-            contexts.push(context);
-        }
-
-        Analyzer::analyze_post_pass1();
-
+        // Debug tool: analyze a broken tree best-effort (`fail_fast: false`).
+        let options = AnalyzeOptions {
+            defines: &[],
+            emit_mode: false,
+            incremental: false,
+            fail_fast: false,
+        };
         let mut ir = Ir::default();
-        let mut analyzer_context = veryl_analyzer::Context::default();
-        for context in &contexts {
-            let path = &context.path;
-            context.analyzer.analyze_pass2(
-                &path.prj,
-                &context.parser.veryl,
-                &mut analyzer_context,
-                Some(&mut ir),
-            );
-        }
-
-        Analyzer::analyze_post_pass2(&ir);
+        let _ = pipeline::analyze(metadata, &paths, options, Some(&mut ir), None)?;
 
         if self.opt.symbol_table {
             println!("{}", veryl_analyzer::symbol_table::dump());

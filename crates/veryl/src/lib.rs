@@ -20,6 +20,7 @@ pub mod context;
 pub mod diff;
 pub mod doc;
 pub mod incremental;
+pub mod pipeline;
 pub mod runner;
 pub mod stopwatch;
 pub mod utils;

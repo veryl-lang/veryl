@@ -2,9 +2,9 @@
 //! fragment instead of parse + pass1, and maintains the on-disk store.
 //!
 //! A file misses (needs full parse + pass1, maybe pass2/emit) if its hash
-//! changed, it produced diagnostics, its output is stale (`check_skip`'s
-//! predicate), or anything it depends on missed (transitive, from the
-//! previous build's dependency map). The miss set is a superset of the
+//! changed, it produced diagnostics, its output is stale (`dst_is_stale`, only
+//! when the caller emits), or anything it depends on missed (transitive, from
+//! the previous build's dependency map). The miss set is a superset of the
 //! files needing pass2/emit, so a restored file is never asked for its AST.
 
 use log::debug;
@@ -54,21 +54,22 @@ impl Incremental {
     /// `selected_tests`: `None` for a plain build, `Some(filter)` when the
     /// caller simulates the matching tests (`None` filter = all). Files with
     /// a selected test are forced to miss so their pass2 IR is available.
+    ///
+    /// `consider_output`: `true` for `build`/`test`, where a stale or missing
+    /// output forces a miss; `false` for `check`, which never emits.
     pub fn open(
         metadata: &Metadata,
         paths: &[PathSet],
         defines: &[String],
         selected_tests: Option<Option<&str>>,
+        consider_output: bool,
     ) -> Option<Incremental> {
         if !metadata.build.incremental {
             return None;
         }
 
-        // On a compiler version change every output must be re-emitted
-        // (`check_skip` is disabled then for the same reason), so nothing
-        // may be restored. Fragments are still captured for the next build.
-        let version_match = metadata.build_info.veryl_version_match();
-
+        // The global key hashes `binary_fingerprint()`, so a compiler/binary
+        // change discards every entry — no separate version check needed.
         let key = global_key(metadata, defines)?;
         let store = Store::open(&metadata.project_dot_build_path().join("cache"), &key);
 
@@ -92,9 +93,8 @@ impl Incremental {
                     .is_some_and(|x| x.tests.iter().any(|t| filter.is_none_or(|f| t.contains(f)))),
             };
 
-            let hit = version_match
-                && entry.is_some_and(|x| x.hash == hash && x.fragment.is_some())
-                && !Self::dst_is_stale(metadata, path)
+            let hit = entry.is_some_and(|x| x.hash == hash && x.fragment.is_some())
+                && (!consider_output || !Self::dst_is_stale(metadata, path))
                 && !has_selected_test;
             if !hit {
                 miss.insert(path.src.clone());
@@ -130,9 +130,8 @@ impl Incremental {
         })
     }
 
-    /// Same staleness predicate as `CmdBuild::check_skip` (plus an
-    /// existence check): the build output is missing or older than the
-    /// source.
+    /// Checked only when emitting and on a key-matched store, so
+    /// `generated_files` is always from the same build environment.
     fn dst_is_stale(metadata: &Metadata, path: &PathSet) -> bool {
         let Some(generated) = metadata.build_info.generated_files.get(&path.dst) else {
             return true;
@@ -224,9 +223,11 @@ impl Incremental {
         self.store.put(src, hash, blob.as_deref());
     }
 
-    /// Records the dependency map and per-file test names of this build
-    /// and persists the manifest. Call only after a successful build.
-    pub fn save(&mut self) {
+    /// Persists the manifest (dependents + per-file tests); call only after a
+    /// successful build. `diagnosed` files (warnings — errors abort earlier) have
+    /// their fragments invalidated so a warm run re-reports what the pass1-only
+    /// fragment would hide.
+    pub fn save(&mut self, diagnosed: &HashSet<PathBuf>) {
         let dependent_files = type_dag::dependent_files();
         for (path, dependents) in dependent_files {
             let Some(src) = resource_table::get_path_value(path) else {
@@ -250,6 +251,12 @@ impl Incremental {
         }
         for (src, names) in tests {
             self.store.set_tests(&src.to_string_lossy(), names);
+        }
+
+        // `invalidate` keeps the dependents/tests just recorded, which a `put`
+        // would wipe.
+        for src in diagnosed {
+            self.store.invalidate(&src.to_string_lossy());
         }
 
         self.store.save();

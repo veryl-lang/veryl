@@ -6,10 +6,9 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::SystemTime;
 
+// No `deny_unknown_fields`: tolerate fields from other versions of this cache.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct BuildInfo {
-    pub veryl_version: Option<String>,
     pub generated_files: BTreeMap<PathBuf, SystemTime>,
 }
 
@@ -30,13 +29,6 @@ impl BuildInfo {
         text.push_str(&toml::to_string(&self)?);
         fs::write(&path, text.as_bytes()).map_err(|x| MetadataError::file_io(x, path.as_ref()))?;
         Ok(())
-    }
-
-    pub fn veryl_version_match(&self) -> bool {
-        match &self.veryl_version {
-            Some(x) => x == crate::VERYL_VERSION,
-            None => false,
-        }
     }
 }
 

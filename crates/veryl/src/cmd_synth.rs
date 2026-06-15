@@ -1,13 +1,10 @@
 use crate::OptSynth;
-use crate::context::Context;
-use log::{info, warn};
-use miette::{IntoDiagnostic, Result, WrapErr};
+use crate::pipeline::{self, AnalyzeOptions};
+use log::warn;
+use miette::Result;
 use std::collections::HashSet;
-use std::fs;
 use veryl_analyzer::ir::{Component, Ir, Module};
-use veryl_analyzer::{Analyzer, Context as AnalyzerContext};
 use veryl_metadata::Metadata;
-use veryl_parser::Parser;
 use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::veryl_token::TokenSource;
 use veryl_synthesizer::{compute_power, compute_timing_top_n, library_for, port_label, synthesize};
@@ -24,38 +21,22 @@ impl CmdSynth {
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
-        let mut contexts = Vec::new();
-        let mut user_paths: HashSet<PathId> = HashSet::new();
-        for path in &paths {
-            info!("Processing file ({})", path.src.to_string_lossy());
-            let input = fs::read_to_string(&path.src)
-                .into_diagnostic()
-                .wrap_err("")?;
-            let parser = Parser::parse(&input, &path.src)?;
-            let analyzer = Analyzer::new(metadata);
-            analyzer.analyze_pass1(&path.prj, &parser.veryl);
-            if path.prj != "$std" {
-                user_paths.insert(resource_table::insert_path(&path.src));
-            }
-            let context = Context::new(path.clone(), input, parser, analyzer)?;
-            contexts.push(context);
-        }
+        // For the default-top heuristic below.
+        let user_paths: HashSet<PathId> = paths
+            .iter()
+            .filter(|path| path.prj != "$std")
+            .map(|path| resource_table::insert_path(&path.src))
+            .collect();
 
-        Analyzer::analyze_post_pass1();
-
+        // Abort on a fatal error: synthesizing a broken design is meaningless.
+        let options = AnalyzeOptions {
+            defines: &[],
+            emit_mode: false,
+            incremental: false,
+            fail_fast: true,
+        };
         let mut ir = Ir::default();
-        let mut analyzer_context = AnalyzerContext::default();
-        for context in &contexts {
-            let path = &context.path;
-            context.analyzer.analyze_pass2(
-                &path.prj,
-                &context.parser.veryl,
-                &mut analyzer_context,
-                Some(&mut ir),
-            );
-        }
-
-        Analyzer::analyze_post_pass2(&ir);
+        let _ = pipeline::analyze(metadata, &paths, options, Some(&mut ir), None)?;
 
         // CLI `--top` > toml default > first user module.
         let top_override = self.opt.top.as_ref().or(metadata.synth.top.as_ref());

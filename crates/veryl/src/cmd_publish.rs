@@ -1,12 +1,8 @@
 use crate::OptPublish;
-use crate::cmd_check::CheckError;
-use crate::context::Context;
-use log::{info, warn};
-use miette::{IntoDiagnostic, Result, WrapErr, bail};
-use std::fs;
-use veryl_analyzer::Analyzer;
+use crate::pipeline::{self, AnalyzeOptions, AnalyzeOutput};
+use log::warn;
+use miette::{IntoDiagnostic, Result, bail};
 use veryl_metadata::{LockSource, Metadata};
-use veryl_parser::Parser;
 
 pub struct CmdPublish {
     opt: OptPublish,
@@ -41,44 +37,22 @@ impl CmdPublish {
             }
         }
 
-        let mut check_error = CheckError::new(metadata.build.error_count_limit);
-        let mut contexts = Vec::new();
-
-        for path in &paths {
-            info!("Processing file ({})", path.src.to_string_lossy());
-
-            let input = fs::read_to_string(&path.src)
-                .into_diagnostic()
-                .wrap_err("")?;
-            let parser = Parser::parse(&input, &path.src)?;
-
-            let analyzer = Analyzer::new(metadata);
-            let mut errors = analyzer.analyze_pass1(&path.prj, &parser.veryl);
-            check_error = check_error.append(&mut errors).check_err()?;
-
-            let context = Context::new(path.clone(), input, parser, analyzer)?;
-            contexts.push(context);
+        // Same pipeline as check (no emit, fails on warnings). The symlink guard
+        // above keeps `paths` identical to build/check, so the cache is shared.
+        let options = AnalyzeOptions {
+            defines: &[],
+            emit_mode: false,
+            incremental: true,
+            fail_fast: true,
+        };
+        let AnalyzeOutput {
+            incremental,
+            check_error,
+            ..
+        } = pipeline::analyze(metadata, &paths, options, None, None)?;
+        if let Some(mut inc) = incremental {
+            inc.save(&pipeline::collect_diagnosed(&check_error));
         }
-
-        let mut errors = Analyzer::analyze_post_pass1();
-        check_error = check_error.append(&mut errors).check_err()?;
-
-        let mut analyzer_context = veryl_analyzer::Context::default();
-        let mut ir = veryl_analyzer::ir::Ir::default();
-        for context in &contexts {
-            let path = &context.path;
-            let mut errors = context.analyzer.analyze_pass2(
-                &path.prj,
-                &context.parser.veryl,
-                &mut analyzer_context,
-                Some(&mut ir),
-            );
-            check_error = check_error.append(&mut errors).check_err()?;
-        }
-
-        let mut errors = Analyzer::analyze_post_pass2(&ir);
-        check_error = check_error.append(&mut errors).check_err()?;
-
         let _ = check_error.check_all()?;
 
         if let Some(kind) = self.opt.bump {
