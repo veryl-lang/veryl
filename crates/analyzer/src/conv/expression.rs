@@ -1032,8 +1032,8 @@ mod tests {
         let x6 = x6.get_value().unwrap();
         let x7 = x7.get_value().unwrap();
 
-        assert_eq!(format!("{x0:x}"), "8'hf5");
-        assert_eq!(format!("{x1:x}"), "11'hXZZ");
+        assert_eq!(format!("{x0:x}"), "12'h0f5");
+        assert_eq!(format!("{x1:x}"), "12'hXZZ");
         assert_eq!(format!("{x2:x}"), "23'h438299");
         assert_eq!(format!("{x3:x}"), "22'h2ZZeXX");
         assert_eq!(format!("{x4:x}"), "27'h75bcd15");

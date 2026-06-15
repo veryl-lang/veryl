@@ -21,6 +21,7 @@ use veryl_analyzer::symbol::{
 };
 use veryl_analyzer::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
+use veryl_analyzer::value::calc_emitted_width;
 use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType, SourceMapTarget};
 use veryl_parser::Stringifier;
@@ -2546,35 +2547,6 @@ impl Emitter {
 
         self.token(&token.replace(&name));
     }
-}
-
-fn calc_emitted_width(number: &str, base: u32) -> Option<usize> {
-    // strnum_bitwidth panics on a decimal zero written with underscores (e.g.
-    // `'d0_0`); emit it unsized like a plain `'d0` instead of crashing.
-    if base == 10 && number.contains('_') && number.chars().all(|c| c == '0' || c == '_') {
-        return None;
-    }
-    let width = strnum_bitwidth::bitwidth(number, base)?;
-
-    let width_by_digits = if number.starts_with("0") {
-        // replace the 1st char with '1'
-        let number: String = number
-            .chars()
-            .enumerate()
-            .map(|(i, s)| if i == 0 { '1' } else { s })
-            .collect();
-        strnum_bitwidth::bitwidth(&number, base)?
-    } else {
-        width
-    };
-
-    let width = if width_by_digits > width {
-        width_by_digits
-    } else {
-        width
-    };
-
-    if width >= 1 { Some(width) } else { Some(0) }
 }
 
 impl VerylWalker for Emitter {
