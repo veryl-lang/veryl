@@ -1564,7 +1564,12 @@ pub fn calc_emitted_width(number: &str, base: u32) -> Option<usize> {
     if width >= 1 { Some(width) } else { Some(0) }
 }
 
-fn from_based_str(s: &str) -> Value {
+/// Parse a based literal into its value and the bit width its payload digits
+/// need.  The payload is truncated to the declared width so the `Value`
+/// variant matches `width()` (an oversized BigUint paired with a same-width
+/// U64 hits `unreachable!()` in pass2 eval).  x/z fill digits truncate
+/// legally (`2'hx` == `2'bxx`), so they don't count toward the needed width.
+pub(crate) fn parse_based(s: &str) -> (Value, usize) {
     let x = s.replace('_', "");
 
     let (width, rest) = x.split_once('\'').unwrap();
@@ -1623,7 +1628,19 @@ fn from_based_str(s: &str) -> Value {
 
     let mask_xz = &mask_x | &mask_z;
     let inv_mask = ValueBigUint::gen_mask(actual_width);
-    let payload = (payload & (&mask_xz ^ inv_mask)) | mask_z;
+    let mut payload = (payload & (&mask_xz ^ inv_mask)) | mask_z;
+    let mut mask_xz = mask_xz;
+    // Significant non-x/z bits only: the 1-bits that survive outside the
+    // mask are the ones a narrower declared width would lose.
+    let payload_width =
+        (&payload & (&mask_xz ^ ValueBigUint::gen_mask(actual_width))).bits() as usize;
+
+    // Truncate digits wider than the declared width (e.g. 8'hffff_ffff_ffff_ffff_ff).
+    if actual_width > width {
+        let m = ValueBigUint::gen_mask(width);
+        payload &= &m;
+        mask_xz &= &m;
+    }
 
     let ret = ValueBigUint {
         payload: Box::new(payload),
@@ -1632,11 +1649,16 @@ fn from_based_str(s: &str) -> Value {
         signed,
     };
 
-    if let Some(x) = ret.to_value_u64() {
+    let value = if let Some(x) = ret.to_value_u64() {
         Value::U64(x)
     } else {
         Value::BigUint(ret)
-    }
+    };
+    (value, payload_width)
+}
+
+fn from_based_str(s: &str) -> Value {
+    parse_based(s).0
 }
 
 fn from_base_less_str(s: &str) -> Value {

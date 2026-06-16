@@ -722,7 +722,7 @@ fn r#struct() {
         }
     }
     module ModuleA (
-        x: input PackageA::StructA = 2'b0101,
+        x: input PackageA::StructA = 4'b0101,
     ) {
         var a: PackageA::StructA;
         let b: PackageA::StructA = 1;
@@ -734,7 +734,7 @@ fn r#struct() {
     "#;
 
     let exp = r#"module ModuleA {
-  input var0(x): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 2'h5;
+  input var0(x): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 4'h5;
   var var1(a): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 4'hx;
   let var2(b): struct {x: logic<1>, y: logic<1>, z: struct {x: logic<1>, y: logic<1>}} = 4'hx;
 

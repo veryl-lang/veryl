@@ -14482,6 +14482,82 @@ fn no_panic_on_oversized_based_literal() {
 }
 
 #[test]
+fn sized_xz_literal_narrower_than_digits_accepted() {
+    // Regression: 2'hx was rejected as too_large_number (the x digit's
+    // 4-bit mask exceeded the declared width) while the identical 2'bxx
+    // passed.  x/z fill digits truncate legally; only lost 1-bits count.
+    for lit in ["2'hx", "2'bxx", "2'hz", "2'h0x"] {
+        let code = format!(
+            r#"
+            module Top {{
+                var a: logic<2>;
+                assign a = {lit};
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::TooLargeNumber { .. })),
+            "{lit}: {errors:?}"
+        );
+    }
+
+    // Lost 1-bits still error.
+    for lit in ["2'h7", "2'b1111111x"] {
+        let code = format!(
+            r#"
+            module Top {{
+                var a: logic<2>;
+                assign a = {lit};
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::TooLargeNumber { .. })),
+            "{lit}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn no_panic_on_oversized_literal_in_expression() {
+    // Regression: a based literal whose digits need >64 bits with a declared
+    // width <=64 stayed a BigUint while its operand partner expanded to U64,
+    // hitting `unreachable!()` in Op::eval_value_binary / Value::concat during
+    // pass2 (reachable via `veryl dump --ir` and the language server, which
+    // run pass2 regardless of pass1 errors).  Only too_large_number may fire.
+    for code in [
+        r#"
+        module Top {
+            const A: logic<8> = 8'hffff_ffff_ffff_ffff_ff + 8'h01;
+            var x: logic<8>;
+            assign x = A;
+        }
+        "#,
+        r#"
+        module Top {
+            const A: logic<2> = {1'h1ffffffffffffffff, 1'b0};
+            var x: logic<2>;
+            assign x = A;
+        }
+        "#,
+    ] {
+        let errors = analyze(code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::TooLargeNumber { .. })),
+            "{errors:?}"
+        );
+    }
+}
+
+#[test]
 fn no_panic_on_out_of_range_bit_select() {
     // Regression: a const/expression bit-select with index >= 64 on a <=64-bit
     // value previously panicked in ValueU64::select (u64 shift overflow) in
