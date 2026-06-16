@@ -5,7 +5,7 @@ use crate::pipeline::{self, AnalyzeOptions, AnalyzeOutput};
 use crate::utils;
 use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -60,6 +60,7 @@ impl CmdBuild {
             mut contexts,
             incremental,
             check_error,
+            filelist_excluded,
         } = pipeline::analyze(metadata, &paths, options, ir, test_filter)?;
 
         let mut stopwatch = StopWatch::new();
@@ -138,7 +139,13 @@ impl CmdBuild {
         debug!("Executed emit ({} milliseconds)", stopwatch.lap());
 
         if !self.opt.check {
-            self.gen_filelist(metadata, &paths, temp_dir, include_tests)?;
+            self.gen_filelist(
+                metadata,
+                &paths,
+                temp_dir,
+                include_tests,
+                &filelist_excluded,
+            )?;
         }
 
         debug!("Executed filelist ({} milliseconds)", stopwatch.lap());
@@ -176,11 +183,15 @@ impl CmdBuild {
         paths: &[PathSet],
         temp_dir: Option<TempDir>,
         include_tests: bool,
+        excluded: &HashSet<PathBuf>,
     ) -> Result<()> {
         let filelist_path = metadata.filelist_path();
         let base_path = metadata.output_dir();
 
-        let paths = Self::sort_filelist(metadata, paths, include_tests);
+        let mut paths = Self::sort_filelist(metadata, paths, include_tests);
+        // Drop entries that were intentionally not emitted (e.g. testbench
+        // files filtered out by `--test`); their .sv may not exist on disk.
+        paths.retain(|path| !excluded.contains(&path.src));
 
         let text = if let Target::Bundle { path } = &metadata.build.target {
             let temp_dir = temp_dir.unwrap();
@@ -793,5 +804,83 @@ incremental = true
         // Fixing it passes: no stale error state lingers from the aborted run.
         fs::write(project_path.join("src/bad.veryl"), FIXED_MODULE).unwrap();
         run_check(&mut metadata).expect("check passes after the fix");
+    }
+
+    const TF_DUT: &str = r#"
+    module Dut (
+        o: output logic,
+    ) {
+        assign o = 0;
+    }
+    "#;
+
+    const TF_TEST_A: &str = r#"
+    #[test(test_a)]
+    module test_a {
+        initial {
+            $display("a");
+        }
+    }
+    "#;
+
+    const TF_TEST_B: &str = r#"
+    #[test(test_b)]
+    module test_b {
+        initial {
+            $display("b");
+        }
+    }
+    "#;
+
+    // Regression for #2812: `veryl test --test <filter>` on a clean tree marks
+    // non-matching testbench files skip (never emitted), but the filelist
+    // generator used to canonicalize their dst .sv -> ENOENT.
+    #[test]
+    fn test_filter_on_clean_tree_excludes_unemitted_tests_from_filelist() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_project(tempdir.path(), "test_filter", FilelistType::Absolute);
+        let src = project_path.join("src");
+        fs::write(src.join("dut.veryl"), TF_DUT).unwrap();
+        fs::write(src.join("test_a.veryl"), TF_TEST_A).unwrap();
+        fs::write(src.join("test_b.veryl"), TF_TEST_B).unwrap();
+
+        // Emit into a fresh out_dir so no prior `.sv` exists (clean tree).
+        let out_dir = tempdir.path().join("clean-out");
+
+        Analyzer::new(&metadata).clear();
+        let build = CmdBuild::new(OptBuild {
+            files: Vec::new(),
+            check: false,
+            out_dir: Some(out_dir.clone()),
+        });
+        let mut ir = veryl_analyzer::ir::Ir::default();
+        build
+            .exec(
+                &mut metadata,
+                true,
+                true,
+                Some(&mut ir),
+                Some("test_a"),
+                &[],
+            )
+            .expect("filtered test build on a clean tree should succeed");
+        Analyzer::new(&metadata).clear();
+
+        let out_dir = out_dir.canonicalize().unwrap();
+        let filelist = fs::read_to_string(out_dir.join("test_filter.f")).unwrap();
+        assert!(
+            filelist.contains("test_a.sv"),
+            "matching testbench must be listed: {filelist}"
+        );
+        assert!(
+            filelist.contains("dut.sv"),
+            "DUT must be listed: {filelist}"
+        );
+        assert!(
+            !filelist.contains("test_b.sv"),
+            "filtered-out testbench (never emitted) must not be listed: {filelist}"
+        );
     }
 }
