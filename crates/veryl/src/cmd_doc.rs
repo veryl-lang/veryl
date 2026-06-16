@@ -1,14 +1,11 @@
 use crate::OptDoc;
-use crate::context::Context;
 use crate::doc::{DocBuilder, TopLevelItem};
-use log::info;
-use miette::{IntoDiagnostic, Result, WrapErr};
+use crate::pipeline::{self, AnalyzeOptions};
+use miette::Result;
 use std::collections::BTreeMap;
-use std::fs;
 use veryl_analyzer::symbol::{SymbolId, SymbolKind};
-use veryl_analyzer::{Analyzer, symbol_table};
+use veryl_analyzer::symbol_table;
 use veryl_metadata::Metadata;
-use veryl_parser::Parser;
 use veryl_parser::resource_table;
 
 pub struct CmdDoc {
@@ -23,37 +20,14 @@ impl CmdDoc {
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
-        let mut contexts = Vec::new();
-
-        for path in &paths {
-            info!("Processing file ({})", path.src.to_string_lossy());
-
-            let input = fs::read_to_string(&path.src)
-                .into_diagnostic()
-                .wrap_err("")?;
-            let parser = Parser::parse(&input, &path.src)?;
-            let analyzer = Analyzer::new(metadata);
-            analyzer.analyze_pass1(&path.prj, &parser.veryl);
-
-            let context = Context::new(path.clone(), input, parser, analyzer)?;
-            contexts.push(context);
-        }
-
-        Analyzer::analyze_post_pass1();
-
-        let mut analyzer_context = veryl_analyzer::Context::default();
-        let mut ir = veryl_analyzer::ir::Ir::default();
-        for context in &contexts {
-            let path = &context.path;
-            context.analyzer.analyze_pass2(
-                &path.prj,
-                &context.parser.veryl,
-                &mut analyzer_context,
-                Some(&mut ir),
-            );
-        }
-
-        Analyzer::analyze_post_pass2(&ir);
+        // Abort on a fatal error rather than document a half-analyzed tree.
+        let options = AnalyzeOptions {
+            defines: &[],
+            emit_mode: false,
+            incremental: false,
+            fail_fast: true,
+        };
+        let _ = pipeline::analyze(metadata, &paths, options, None, None)?;
 
         let mut modules = BTreeMap::new();
         let mut proto_modules = BTreeMap::new();

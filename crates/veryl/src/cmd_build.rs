@@ -1,23 +1,20 @@
 use crate::OptBuild;
 use crate::StopWatch;
-use crate::cmd_check::CheckError;
-use crate::context::Context;
 use crate::diff::print_diff;
-use crate::incremental::Incremental;
+use crate::pipeline::{self, AnalyzeOptions, AnalyzeOutput};
 use crate::utils;
 use log::{debug, info};
 use miette::{IntoDiagnostic, Result, WrapErr};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind;
-use veryl_analyzer::{Analyzer, symbol_table, type_dag};
+use veryl_analyzer::{symbol_table, type_dag};
 use veryl_emitter::Emitter;
 use veryl_metadata::{FilelistType, Metadata, SourceMapTarget, Target};
-use veryl_parser::resource_table::PathId;
-use veryl_parser::{Parser, resource_table, veryl_token::TokenSource};
+use veryl_parser::{resource_table, veryl_token::TokenSource};
 use veryl_path::PathSet;
 
 pub struct CmdBuild {
@@ -34,7 +31,7 @@ impl CmdBuild {
         metadata: &mut Metadata,
         include_tests: bool,
         quiet: bool,
-        mut ir: Option<&mut veryl_analyzer::ir::Ir>,
+        ir: Option<&mut veryl_analyzer::ir::Ir>,
         test_filter: Option<&str>,
         defines: &[String],
     ) -> Result<bool> {
@@ -53,155 +50,19 @@ impl CmdBuild {
 
         let paths = metadata.paths(&self.opt.files, true, true)?;
 
-        let mut check_error = CheckError::new(metadata.build.error_count_limit);
-        let mut contexts = Vec::new();
+        let options = AnalyzeOptions {
+            defines,
+            emit_mode: true,
+            incremental: true,
+            fail_fast: true,
+        };
+        let AnalyzeOutput {
+            mut contexts,
+            incremental,
+            check_error,
+        } = pipeline::analyze(metadata, &paths, options, ir, test_filter)?;
 
         let mut stopwatch = StopWatch::new();
-
-        // The fragment cache replaces parse + pass1 for unchanged files,
-        // which therefore never reach pass2/emit. When the caller needs
-        // the IR for simulation (`veryl test`), files containing selected
-        // tests are forced into the miss set: pass2 of a test file alone
-        // elaborates its whole instance tree from the definition_table,
-        // which restored fragments populate as well.
-        let ir_requested = ir.is_some();
-        let selected_tests = ir_requested.then_some(test_filter);
-        let mut incremental = Incremental::open(metadata, &paths, defines, selected_tests);
-
-        let analyzer = Analyzer::new(metadata);
-
-        for path in &paths {
-            info!("Processing file ({})", path.src.to_string_lossy());
-
-            if let Some(x) = incremental.as_mut()
-                && x.try_restore(path)
-            {
-                continue;
-            }
-
-            let input = match incremental.as_mut().and_then(|x| x.take_input(&path.src)) {
-                Some(x) => x,
-                None => fs::read_to_string(&path.src)
-                    .into_diagnostic()
-                    .wrap_err("")?,
-            };
-
-            let watermark = incremental
-                .as_ref()
-                .map(|_| veryl_analyzer::fragment_cache::watermark());
-            let parser = Parser::parse(&input, &path.src)?;
-
-            let mut errors = analyzer.analyze_pass1(&path.prj, &parser.veryl);
-            if let (Some(x), Some(watermark)) = (incremental.as_mut(), watermark.as_ref()) {
-                x.capture(path, &input, watermark, errors.is_empty());
-            }
-            check_error = check_error.append(&mut errors).check_err()?;
-
-            let context = Context::new(path.clone(), input, parser, analyzer.clone())?;
-            contexts.push(context);
-        }
-
-        if let Some(x) = incremental.as_ref() {
-            info!("Restored {}/{} files from cache", x.restored, paths.len());
-        }
-        debug!(
-            "Executed parse/analyze_pass1 ({} milliseconds, {} files)",
-            stopwatch.lap(),
-            paths.len(),
-        );
-
-        let mut errors = Analyzer::analyze_post_pass1();
-        check_error = check_error.append(&mut errors).check_err()?;
-
-        debug!(
-            "Executed analyze_post_pass1 ({} milliseconds)",
-            stopwatch.lap()
-        );
-
-        if metadata.build.incremental && metadata.build_info.veryl_version_match() {
-            Self::check_skip(metadata, &mut contexts);
-        }
-
-        // Testbench files whose tests don't match `--test` will never be
-        // simulated, so skip pass2/emit for them. Conversely, files whose
-        // tests WILL be simulated must not stay skipped (check_skip may
-        // have marked them unmodified): the simulator takes their top
-        // component from the IR, which only pass2 produces.
-        if ir_requested {
-            let tests = veryl_analyzer::symbol_table::get_tests(&metadata.project.name);
-            let mut test_file_ids: HashSet<PathId> = HashSet::new();
-            let mut matching_file_ids: HashSet<PathId> = HashSet::new();
-            for (name, prop) in &tests {
-                test_file_ids.insert(prop.path);
-                let name = name.to_string();
-                if test_filter.is_none_or(|filter| name.contains(filter)) {
-                    matching_file_ids.insert(prop.path);
-                }
-            }
-            let mut skipped = 0usize;
-            let mut unskipped = 0usize;
-            for context in contexts.iter_mut() {
-                let path_id = resource_table::insert_path(&context.path.src);
-                if matching_file_ids.contains(&path_id) {
-                    if context.skip {
-                        context.skip = false;
-                        unskipped += 1;
-                    }
-                } else if !context.skip && test_file_ids.contains(&path_id) {
-                    context.skip = true;
-                    skipped += 1;
-                }
-            }
-            debug!(
-                "test filter {:?}: skipped {} non-matching testbench files, unskipped {} matching ones",
-                test_filter, skipped, unskipped
-            );
-        }
-
-        let mut analyzer_context = veryl_analyzer::Context::default();
-
-        for name in defines {
-            analyzer_context
-                .config
-                .defines
-                .insert(resource_table::insert_str(name));
-        }
-        analyzer_context.enable_conv_profiler();
-
-        // Build a local IR when the caller didn't supply one, so the
-        // post-pass2 combinational-loop check has something to inspect.
-        // This is cheap relative to the rest of pass2 because most of
-        // the work is recomputing AssignTable / FfTable / per_decl_refs
-        // which we share with the IR build anyway.
-        let mut local_ir = veryl_analyzer::ir::Ir::default();
-        let ir_for_pass2: &mut veryl_analyzer::ir::Ir = match ir {
-            Some(ref mut x) => x,
-            None => &mut local_ir,
-        };
-        for context in &contexts {
-            if !context.skip {
-                let path = &context.path;
-                analyzer_context.set_project_name(&path.prj);
-                let mut errors = context.analyzer.analyze_pass2(
-                    &path.prj,
-                    &context.parser.veryl,
-                    &mut analyzer_context,
-                    Some(ir_for_pass2),
-                );
-                check_error = check_error.append(&mut errors).check_err()?;
-            }
-        }
-
-        debug!("Executed analyze_pass2 ({} milliseconds)", stopwatch.lap());
-        analyzer_context.finalize_conv_profiler()?;
-
-        let mut errors = Analyzer::analyze_post_pass2(ir_for_pass2);
-        check_error = check_error.append(&mut errors).check_err()?;
-
-        debug!(
-            "Executed analyze_post_pass2 ({} milliseconds)",
-            stopwatch.lap()
-        );
 
         let temp_dir = if let Target::Bundle { .. } = &metadata.build.target {
             Some(TempDir::new().into_diagnostic()?)
@@ -282,12 +143,13 @@ impl CmdBuild {
 
         debug!("Executed filelist ({} milliseconds)", stopwatch.lap());
 
-        let _ = check_error.check_err()?;
-
-        if let Some(x) = incremental.as_mut() {
-            x.save();
+        if let Some(mut inc) = incremental {
+            inc.save(&pipeline::collect_diagnosed(&check_error));
             debug!("Saved fragment cache ({} milliseconds)", stopwatch.lap());
         }
+
+        // No-op (analyze already returned Ok), kept for symmetry with check.
+        let _ = check_error.check_err()?;
 
         Ok(all_pass)
     }
@@ -427,46 +289,13 @@ impl CmdBuild {
 
         ret
     }
-
-    pub fn check_skip(metadata: &Metadata, contexts: &mut Vec<Context>) {
-        let mut updated_files = HashSet::new();
-        let dependent_files = veryl_analyzer::type_dag::dependent_files();
-        for context in contexts.iter() {
-            let updated = if let Some(generated) =
-                metadata.build_info.generated_files.get(&context.path.dst)
-            {
-                context.modified > *generated
-            } else {
-                true
-            };
-            if updated {
-                let path = resource_table::insert_path(&context.path.src);
-                updated_files.insert(path);
-
-                if let Some(dependents) = dependent_files.get(&path) {
-                    for x in dependents {
-                        updated_files.insert(*x);
-                    }
-                }
-            }
-        }
-        for context in contexts {
-            let path = resource_table::insert_path(&context.path.src);
-            if !updated_files.contains(&path) {
-                context.skip = true;
-                debug!(
-                    "Skipping unmodified file ({})",
-                    context.path.src.to_string_lossy()
-                );
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    use veryl_analyzer::Analyzer;
 
     static BUILD_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -629,7 +458,11 @@ exclude_std = true
     }
     "#;
 
-    fn create_incremental_project(root: &Path, name: &str) -> (Metadata, PathBuf) {
+    fn write_incremental_project(
+        root: &Path,
+        name: &str,
+        files: &[(&str, &str)],
+    ) -> (Metadata, PathBuf) {
         let project_path = root.join(name);
         let src_path = project_path.join("src");
         fs::create_dir_all(&src_path).unwrap();
@@ -651,13 +484,63 @@ incremental = true
             ),
         )
         .unwrap();
-        fs::write(src_path.join("a.veryl"), INC_FILE_A).unwrap();
-        fs::write(src_path.join("b.veryl"), INC_FILE_B).unwrap();
+        for (file_name, content) in files {
+            fs::write(src_path.join(file_name), content).unwrap();
+        }
 
-        let mut metadata = Metadata::load(project_path.join("Veryl.toml")).unwrap();
-        // What main.rs records after a build; required for any restore.
-        metadata.build_info.veryl_version = Some(veryl_metadata::VERYL_VERSION.to_string());
+        // The cache is keyed on the binary, and the in-memory metadata carries
+        // generated_files across runs — so these tests need no info.toml.
+        let metadata = Metadata::load(project_path.join("Veryl.toml")).unwrap();
         (metadata, project_path)
+    }
+
+    fn create_incremental_project(root: &Path, name: &str) -> (Metadata, PathBuf) {
+        write_incremental_project(
+            root,
+            name,
+            &[("a.veryl", INC_FILE_A), ("b.veryl", INC_FILE_B)],
+        )
+    }
+
+    const CLEAN_MODULE: &str = r#"
+    module Clean (
+        o_dat: output logic,
+    ) {
+        assign o_dat = 0;
+    }
+    "#;
+
+    // Pass1-clean, but warns (`unused_var`) only in post-pass2 — which a
+    // pass1-only fragment restore would hide.
+    const WARNING_MODULE: &str = r#"
+    module Warn {
+        let unused_var: logic = 1;
+    }
+    "#;
+
+    const ERROR_MODULE: &str = r#"
+    module Bad {
+        let broken: logic = undefined_signal;
+    }
+    "#;
+
+    // Distinct module name from CLEAN_MODULE to avoid a duplicate definition.
+    const FIXED_MODULE: &str = r#"
+    module Fixed (
+        o_dat: output logic,
+    ) {
+        assign o_dat = 0;
+    }
+    "#;
+
+    fn run_check(metadata: &mut Metadata) -> Result<bool> {
+        Analyzer::new(metadata).clear();
+
+        let check = crate::cmd_check::CmdCheck::new(crate::OptCheck { files: Vec::new() });
+        let ret = check.exec(metadata);
+
+        Analyzer::new(metadata).clear();
+        ret
     }
 
     #[test]
@@ -814,5 +697,101 @@ incremental = true
             fs::read_to_string(project_path.join("target/b.sv")).unwrap(),
             cold_b
         );
+    }
+
+    #[test]
+    fn incremental_check_restores_on_warm_run() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, _project_path) =
+            create_incremental_project(tempdir.path(), "inc_check_warm");
+
+        run_check(&mut metadata).expect("clean check passes");
+        assert_eq!(crate::incremental::last_restored_count(), 0);
+
+        // Warm: both clean files restore even though check emits nothing.
+        run_check(&mut metadata).expect("clean check passes");
+        assert_eq!(crate::incremental::last_restored_count(), 2);
+    }
+
+    #[test]
+    fn build_and_check_share_cache() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, _project_path) =
+            create_incremental_project(tempdir.path(), "build_check_share");
+
+        run_build(&mut metadata, None);
+        assert_eq!(crate::incremental::last_restored_count(), 0);
+
+        // Check reuses the build's clean fragments (consider_output is false,
+        // so output freshness never blocks the hit).
+        run_check(&mut metadata).expect("clean check passes");
+        assert!(crate::incremental::last_restored_count() > 0);
+    }
+
+    #[test]
+    fn incremental_check_does_not_restore_warning_file() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, _project_path) = write_incremental_project(
+            tempdir.path(),
+            "inc_check_warn",
+            &[
+                ("clean.veryl", CLEAN_MODULE),
+                ("warn.veryl", WARNING_MODULE),
+            ],
+        );
+
+        // Cold check fails on the warning; the clean file is cached, the
+        // warning file invalidated.
+        assert!(run_check(&mut metadata).is_err());
+
+        // Warm: only the clean file restores. Were the warning file restored,
+        // its warning would vanish and check would wrongly pass — the
+        // regression this guards.
+        assert!(run_check(&mut metadata).is_err());
+        assert_eq!(crate::incremental::last_restored_count(), 1);
+    }
+
+    #[test]
+    fn incremental_build_warning_file_invalidated() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, _project_path) = write_incremental_project(
+            tempdir.path(),
+            "inc_build_warn",
+            &[
+                ("clean.veryl", CLEAN_MODULE),
+                ("warn.veryl", WARNING_MODULE),
+            ],
+        );
+
+        // Build caches the clean file but invalidates the warning file
+        // (warnings don't fail a build).
+        run_build(&mut metadata, None);
+        assert_eq!(crate::incremental::last_restored_count(), 0);
+
+        // Warm build restores only the clean file.
+        run_build(&mut metadata, None);
+        assert_eq!(crate::incremental::last_restored_count(), 1);
+    }
+
+    #[test]
+    fn incremental_check_error_file_not_cached() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) = write_incremental_project(
+            tempdir.path(),
+            "inc_check_err",
+            &[("clean.veryl", CLEAN_MODULE), ("bad.veryl", ERROR_MODULE)],
+        );
+
+        // A fatal error aborts before save; must error without panicking.
+        assert!(run_check(&mut metadata).is_err());
+
+        // Fixing it passes: no stale error state lingers from the aborted run.
+        fs::write(project_path.join("src/bad.veryl"), FIXED_MODULE).unwrap();
+        run_check(&mut metadata).expect("check passes after the fix");
     }
 }
