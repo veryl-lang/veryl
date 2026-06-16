@@ -54,6 +54,18 @@ fn string_literal_no_unicode_escape() {
 }
 
 #[test]
+fn string_literal_rejects_non_sv_escapes() {
+    // `\b`, `\r`, and `\/` are JSON escapes with no IEEE 1800 equivalent (like
+    // `\u` above), so they are rejected at lex time rather than emitted as bytes
+    // SV tools would decode differently from the simulator.
+    failure(r#"initial { $display("a\bc"); }"#);
+    failure(r#"initial { $display("a\rc"); }"#);
+    failure(r#"initial { $display("a\/c"); }"#);
+    // The SV-valid escapes still lex.
+    success(r#"initial { $display("a\nb\tc\fd\"e\\f"); }"#);
+}
+
+#[test]
 fn number() {
     // integer
     success("let a: u32 = 0123456789;");

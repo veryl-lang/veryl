@@ -167,7 +167,7 @@ scanner! {
             token r"\r\n|\r|\n" => 1; // "Newline"
             token r"[\s--\r\n]+" => 2; // "Whitespace"
             token r"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
-            token r"\u{0022}(?:\\[\u{0022}\\/bfnrt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}" => 6; // "StringLiteralTerm"
+            token r"\u{0022}(?:\\[\u{0022}\\fnt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}" => 6; // "StringLiteralTerm"
             token r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*" => 7; // "ExponentTerm"
             token r"[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*" => 8; // "FixedPointTerm"
             token r"(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*" => 9; // "BasedTerm"
@@ -445,7 +445,7 @@ scanner! {
             token r"\r\n|\r|\n" => 1; // "Newline"
             token r"[\s--\r\n]+" => 2; // "Whitespace"
             token r"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" => 5; // "CommentsTerm"
-            token r"\u{0022}(?:\\[\u{0022}\\/bfnrt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}" => 6; // "StringLiteralTerm"
+            token r"\u{0022}(?:\\[\u{0022}\\fnt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}" => 6; // "StringLiteralTerm"
             token r"," => 30; // "CommaTerm"
             token r"\{" => 43; // "LBraceTerm"
             token r"\[" => 44; // "LBracketTerm"
@@ -33343,7 +33343,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
         lhs: 125,
         production: &[ParseType::T(5)],
     },
-    // 1 - StringLiteralTerm: "\u{0022}(?:\\[\u{0022}\\/bfnrt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}";
+    // 1 - StringLiteralTerm: "\u{0022}(?:\\[\u{0022}\\fnt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}";
     Production {
         lhs: 677,
         production: &[ParseType::T(6)],

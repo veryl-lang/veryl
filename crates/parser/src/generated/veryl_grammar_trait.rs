@@ -12784,7 +12784,7 @@ pub struct StringLiteral {
 #[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StringLiteralTerm {
-    pub string_literal_term: crate::veryl_token::Token, /* \u{0022}(?:\\[\u{0022}\\/bfnrt]|[^\u{0022}\\\u0000-\u001F])*\u{0022} */
+    pub string_literal_term: crate::veryl_token::Token, /* \u{0022}(?:\\[\u{0022}\\fnt]|[^\u{0022}\\\u0000-\u001F])*\u{0022} */
 }
 
 ///
@@ -14810,7 +14810,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 1:
     ///
-    /// `StringLiteralTerm: <INITIAL, Attr>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;`
+    /// `StringLiteralTerm: <INITIAL, Attr>"\u{0022}(?:\\[\u{0022}\\fnt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}" : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn string_literal_term(&mut self, string_literal_term: &ParseTreeType<'t>) -> Result<()> {
