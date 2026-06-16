@@ -15998,3 +15998,54 @@ fn narrow_shift_count_at_least_64_yields_zero_or_sign_fill() {
         assert_eq!(sim.get("e").unwrap().payload_u128(), 0xc0, "{config:?}");
     }
 }
+
+#[test]
+fn struct_member_dynamic_part_select() {
+    // Regression: a member part-select was rebased onto the whole struct as
+    // a `[beg:end]` Colon select; the simulator's dynamic-select folding
+    // skips Colon, so `p.hi[s*2+:2]` read 1 bit at the HIGH bound instead
+    // of 2 bits from the low bound (writes were misplaced the same way).
+    let code = r#"
+    module Top (
+        s   : input  logic<3>,
+        w   : input  logic<2>,
+        o   : output logic<2>,
+        oc  : output logic<2>,
+        p_o : output logic<16>,
+    ) {
+        struct P {
+            hi: logic<8>,
+            lo: logic<8>,
+        }
+        var p: P;
+        var q: P;
+        assign p.hi = 8'b10110100;
+        assign p.lo = 8'h00;
+        assign o  = p.hi[s * 2+:2];
+        assign oc = p.hi[4+:2];
+        always_comb {
+            q.hi = 0;
+            q.lo = 0;
+            q.hi[s * 2+:2] = w;
+        }
+        assign p_o = {q.hi, q.lo};
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("s", Value::new(2, 3, false));
+        sim.set("w", Value::new(0b11, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // bits 5:4 of 8'b10110100 = 0b11
+        assert_eq!(sim.get("o").unwrap().payload_u128(), 0b11, "o {config:?}");
+        assert_eq!(sim.get("oc").unwrap().payload_u128(), 0b11, "oc {config:?}");
+        // q.hi[5:4] = 0b11 -> q.hi = 8'b00110000, q.lo = 0
+        assert_eq!(
+            sim.get("p_o").unwrap().payload_u128(),
+            0b0011_0000_0000_0000,
+            "p_o {config:?}"
+        );
+    }
+}
