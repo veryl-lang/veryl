@@ -16,6 +16,62 @@ use cranelift::prelude::types::{I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
 use veryl_analyzer::value::ValueU64;
 
+/// Marshal one wide-binary operand into an `op_nb`-sized buffer.
+/// `is_pointer` mirrors `returns_wide_pointer()`.  Pass-through is only safe
+/// when the source allocation already spans `op_nb` and no sign extension is
+/// needed; otherwise the value is copied into a fresh slot via
+/// `wide_ops::wide_resize` (zero- or sign-extending).
+#[allow(clippy::too_many_arguments)]
+fn marshal_wide_operand(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    is_pointer: bool,
+    payload: CraneliftValue,
+    value_width: usize,
+    op_nb: usize,
+    signed: bool,
+) -> CraneliftValue {
+    if is_pointer {
+        let src_nb = calc_native_bytes(value_width);
+        let needs_resize =
+            value_width > 0 && (src_nb != op_nb || (signed && value_width < op_nb * 8));
+        if !needs_resize {
+            return payload;
+        }
+        let slot = alloc_wide_zero(builder, op_nb);
+        let info = wide_ops::pack_nb_width(src_nb, value_width) as u64 | ((signed as u64) << 32);
+        let info_val = builder.ins().iconst(I64, info as i64);
+        let nb_val = builder.ins().iconst(I32, op_nb as i64);
+        call_helper_void(
+            context,
+            builder,
+            HelperSig::BinaryOp,
+            wide_fn_addrs::resize(),
+            &[slot, payload, info_val, nb_val],
+        );
+        slot
+    } else {
+        let slot = alloc_wide_zero(builder, op_nb);
+        builder.ins().store(MemFlags::trusted(), payload, slot, 0);
+        if signed && value_width > 0 && value_width < op_nb * 8 {
+            // Sign-extend in place: wide_resize reads the sign bit first and
+            // only reads words covered by value_width, so dst == src is fine.
+            let src_nb = calc_native_bytes(value_width).max(8);
+            let info = wide_ops::pack_nb_width(src_nb, value_width) as u64 | (1u64 << 32);
+            let info_val = builder.ins().iconst(I64, info as i64);
+            let nb_val = builder.ins().iconst(I32, op_nb as i64);
+            call_helper_void(
+                context,
+                builder,
+                HelperSig::BinaryOp,
+                wide_fn_addrs::resize(),
+                &[slot, slot, info_val, nb_val],
+            );
+        }
+        slot
+    }
+}
+
 impl ProtoExpression {
     pub fn can_build_binary(&self) -> bool {
         match self {
@@ -2239,29 +2295,36 @@ impl ProtoExpression {
         // Determine the native byte size for the operation
         let op_nb = calc_native_bytes(width.max(x_width).max(y_width));
 
-        // Ensure both operands are wide pointers of the right size.  Decide
-        // pointer-vs-register by `builds_wide_pointer()` (build_binary's actual
-        // representation choice), NOT `is_wide_ptr(width())`: a node whose
+        // Marshal each operand into an op_nb buffer.  Pick pointer-vs-register
+        // by `returns_wide_pointer()`, NOT `is_wide_ptr(width())`: a node whose
         // `width` field exceeds its evaluation width builds a scalar register,
         // and treating that scalar as a pointer dereferences garbage (the v4
-        // OoO-core wide_shl SIGSEGV).  When it's a register, force-store into a
-        // fresh slot (bypassing ensure_wide_ptr_val's own width-based guard,
-        // which would also be fooled by the inflated width field).
-        let x_ptr = if returns_wide_pointer(x) {
-            x_payload
-        } else {
-            let slot = alloc_wide_zero(builder, op_nb);
-            builder.ins().store(MemFlags::trusted(), x_payload, slot, 0);
-            slot
-        };
-        let y_ptr = if returns_wide_pointer(y) {
-            y_payload
-        } else {
-            let slot = alloc_wide_zero(builder, op_nb);
-            builder.ins().store(MemFlags::trusted(), y_payload, slot, 0);
-            slot
-        };
-        let _ = (x_width, y_width); // widths no longer gate representation
+        // OoO-core wide_shl SIGSEGV).  Marshaling also resizes a narrower wide
+        // operand up to op_nb — the op helpers read op_nb bytes and would else
+        // over-read the adjacent variable's storage — and sign-extends in a
+        // signed context (a shift count never does).
+        let y_is_count = matches!(
+            op,
+            Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR
+        );
+        let x_ptr = marshal_wide_operand(
+            context,
+            builder,
+            returns_wide_pointer(x),
+            x_payload,
+            x_width,
+            op_nb,
+            expr_context.signed,
+        );
+        let y_ptr = marshal_wide_operand(
+            context,
+            builder,
+            returns_wide_pointer(y),
+            y_payload,
+            y_width,
+            op_nb,
+            expr_context.signed && !y_is_count,
+        );
 
         // Result is comparison (1-bit I64)?
         // EqWildcard/NeWildcard are only treated as plain Eq/Ne here in
@@ -2541,14 +2604,14 @@ impl ProtoExpression {
         }
         let x_mask_ptr = x_mask_xz.map(|m| {
             if is_wide_ptr(x_width) {
-                m
+                marshal_wide_operand(context, builder, true, m, x_width, op_nb, false)
             } else {
                 ensure_wide_ptr_val(builder, m, x_width, op_nb)
             }
         });
         let y_mask_ptr = y_mask_xz.map(|m| {
             if is_wide_ptr(y_width) {
-                m
+                marshal_wide_operand(context, builder, true, m, y_width, op_nb, false)
             } else {
                 ensure_wide_ptr_val(builder, m, y_width, op_nb)
             }

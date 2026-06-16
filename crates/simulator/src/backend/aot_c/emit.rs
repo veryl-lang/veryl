@@ -93,6 +93,11 @@ static inline void vw_negate(uint8_t* d,const uint8_t* a,uint32_t nb){
     VW_WR(d,i,s); carry=c; } }
 static inline void vw_copy(uint8_t* d,const uint8_t* s,uint32_t nb){
   unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(s,i)); }
+static inline uint64_t vw_sext_word(const uint8_t* p,unsigned i,uint32_t w,int sign);
+static inline void vw_sext_copy(uint8_t* d,const uint8_t* s,uint32_t sw,uint32_t dnb){
+  unsigned n=dnb/8; if(sw==0){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
+  int sign=(int)((VW_RD(s,(sw-1)/64)>>((sw-1)%64))&1);
+  for(unsigned i=0;i<n;i++) VW_WR(d,i, vw_sext_word(s,i,sw,sign)); }
 static inline int64_t vw_eq(const uint8_t* a,const uint8_t* b,uint32_t nb){
   unsigned n=nb/8; for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 0; } return 1; }
 static inline int64_t vw_ne(const uint8_t* a,const uint8_t* b,uint32_t nb){
@@ -767,7 +772,7 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             y,
             expr_context,
             ..
-        } => emit_wide_binary(x, *op, y, expr_context.width, pre),
+        } => emit_wide_binary(x, *op, y, expr_context, pre),
         ProtoExpression::Unary {
             op,
             x,
@@ -894,6 +899,32 @@ fn emit_wide_operand(
     })
 }
 
+/// `emit_wide_operand`, then sign-extend the value to the operation width
+/// when the context is signed (mirrors Cranelift's wide_resize marshaling).
+fn emit_wide_operand_signed(
+    expr: &ProtoExpression,
+    target_nb: usize,
+    signed: bool,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let r = emit_wide_operand(expr, target_nb, pre)?;
+    let w = expr.width();
+    if signed && w > 0 && w < target_nb * 8 {
+        let t = next_wide_tmp();
+        let tnw = target_nb / 8;
+        pre.push_str(&format!(
+            "uint64_t _w{t}[{tnw}]; vw_sext_copy((uint8_t*)_w{t}, {src}, {w}u, {target_nb}u); ",
+            src = r.addr,
+        ));
+        return Some(WideRef {
+            addr: format!("((uint8_t*)_w{t})"),
+            nb: target_nb,
+            width: r.width,
+        });
+    }
+    Some(r)
+}
+
 /// Shift amount: the low 64 bits of `y` (Cranelift loads word 0 of the
 /// promoted operand).  A narrow scalar IS that low word; a wide `y` reads
 /// word 0 of its buffer.
@@ -981,17 +1012,18 @@ fn emit_wide_binary(
     x: &ProtoExpression,
     op: Op,
     y: &ProtoExpression,
-    width: usize,
+    expr_context: &ExpressionContext,
     pre: &mut String,
 ) -> Option<WideRef> {
+    let width = expr_context.width;
     let result_nb = native_bytes(width);
     let op_nb = native_bytes(width.max(x.width()).max(y.width()));
     let nw = op_nb / 8;
     let mask_pack = wpack(op_nb, width);
     match op {
         Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor | Op::Add | Op::Sub | Op::Mul => {
-            let x_ref = emit_wide_operand(x, op_nb, pre)?;
-            let y_ref = emit_wide_operand(y, op_nb, pre)?;
+            let x_ref = emit_wide_operand_signed(x, op_nb, expr_context.signed, pre)?;
+            let y_ref = emit_wide_operand_signed(y, op_nb, expr_context.signed, pre)?;
             let fname = match op {
                 Op::BitAnd => "band",
                 Op::BitOr => "bor",

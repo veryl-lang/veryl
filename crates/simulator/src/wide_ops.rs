@@ -42,6 +42,31 @@ unsafe fn wr(ptr: *mut u8, i: usize, v: u64) {
     unsafe { (ptr.add(i * 8) as *mut u64).write_unaligned(v) }
 }
 
+/// Copy `src` into `dst` (`dst_nb` bytes), zero- or sign-extending from the
+/// source's `pack_nb_width` info.  `src_info` packs (nb, width) in the low
+/// 32 bits and the signed flag in bit 32.  Reads only words covered by the
+/// source width, so a narrower operand never over-reads its allocation.
+pub unsafe extern "C" fn wide_resize(dst: *mut u8, src: *const u8, src_info: u64, dst_nb: u32) {
+    let (_, src_w) = unpack_nb_width(src_info as u32);
+    let signed = (src_info >> 32) & 1 == 1;
+    unsafe {
+        if src_w == 0 {
+            for i in 0..nw(dst_nb) {
+                wr(dst, i, 0);
+            }
+            return;
+        }
+        let sign = if signed {
+            (rd(src, (src_w as usize - 1) / 64) >> ((src_w as usize - 1) % 64)) & 1
+        } else {
+            0
+        };
+        for i in 0..nw(dst_nb) {
+            wr(dst, i, sext_word(src, i, src_w, sign));
+        }
+    }
+}
+
 // ── Bitwise binary ops ─────────────────────────────────────────────
 
 pub unsafe extern "C" fn wide_band(dst: *mut u8, a: *const u8, b: *const u8, nb: u32) {
