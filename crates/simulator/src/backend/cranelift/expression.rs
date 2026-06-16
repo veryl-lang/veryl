@@ -652,7 +652,7 @@ impl ProtoExpression {
                     }
                     Op::Sub => {
                         if let Some(x_mask_xz) = x_mask_xz {
-                            let mask = iconst_for_width(builder, 0xffffffff, wide);
+                            let mask = iconst_for_width(builder, gen_mask_for_width(width), wide);
                             let is_xz = icmp_const(builder, IntCC::NotEqual, x_mask_xz, 0, wide);
                             let z = zero_for_width(context, builder, width);
 
@@ -1359,7 +1359,11 @@ impl ProtoExpression {
                             let mask = if is_cmp {
                                 builder.ins().iconst(I64, 1)
                             } else {
-                                iconst_for_width(builder, 0xffffffff, needs_wide)
+                                iconst_for_width(
+                                    builder,
+                                    gen_mask_for_width(expr_context.width),
+                                    needs_wide,
+                                )
                             };
 
                             let z = if is_cmp {

@@ -15908,3 +15908,39 @@ fn aot_c_wide_scalar_unary_and_carry_mask() {
         assert_eq!(sim.get("y").unwrap(), Value::new(1, 1, false), "{config:?}");
     }
 }
+
+#[test]
+fn four_state_x_propagation_masks_full_width() {
+    // Regression: the 4-state JIT built the all-X result mask for
+    // arithmetic (and unary negate) as a literal 0xffffffff, so bits
+    // 32..width-1 of a 64-bit result read back as solid 0 instead of X.
+    let code = r#"
+    module Top (
+        a: input  logic<64>,
+        b: input  logic<64>,
+        c: output logic<64>,
+        n: output logic<64>,
+    ) {
+        assign c = a + b;
+        assign n = -b;
+    }
+    "#;
+    for use_jit in [false, true] {
+        let config = Config {
+            use_4state: true,
+            use_jit,
+            ..Default::default()
+        };
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(5, 64, false));
+        sim.set("b", "64'hx".parse().unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let c = sim.get("c").unwrap();
+        let n = sim.get("n").unwrap();
+        let all_x = num_bigint::BigUint::from(u64::MAX);
+        assert_eq!(*c.mask_xz(), all_x, "c use_jit={use_jit}");
+        assert_eq!(*n.mask_xz(), all_x, "n use_jit={use_jit}");
+    }
+}
