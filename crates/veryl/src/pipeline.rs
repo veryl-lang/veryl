@@ -81,6 +81,8 @@ pub struct AnalyzeOutput {
     pub contexts: Vec<Context>,
     pub incremental: Option<Incremental>,
     pub check_error: CheckError,
+    /// Files skipped from emit by the `--test` filter; the filelist omits them.
+    pub filelist_excluded: HashSet<PathBuf>,
 }
 
 pub struct AnalyzeOptions<'a> {
@@ -181,6 +183,8 @@ pub fn analyze(
 
     // Skip pass2/emit for testbench files whose tests don't match `--test`;
     // they are never simulated. Matching ones stay unskipped for their IR.
+    // Skipped files are collected so the filelist can omit their unemitted .sv.
+    let mut filelist_excluded: HashSet<PathBuf> = HashSet::new();
     if ir_requested {
         let tests = veryl_analyzer::symbol_table::get_tests(&metadata.project.name);
         let mut test_file_ids: HashSet<PathId> = HashSet::new();
@@ -195,12 +199,12 @@ pub fn analyze(
         let mut skipped = 0usize;
         for context in contexts.iter_mut() {
             let path_id = resource_table::insert_path(&context.path.src);
-            if test_file_ids.contains(&path_id)
-                && !matching_file_ids.contains(&path_id)
-                && !context.skip
-            {
-                context.skip = true;
-                skipped += 1;
+            if test_file_ids.contains(&path_id) && !matching_file_ids.contains(&path_id) {
+                if !context.skip {
+                    context.skip = true;
+                    skipped += 1;
+                }
+                filelist_excluded.insert(context.path.src.clone());
             }
         }
         debug!(
@@ -259,6 +263,7 @@ pub fn analyze(
         contexts,
         incremental,
         check_error,
+        filelist_excluded,
     })
 }
 
