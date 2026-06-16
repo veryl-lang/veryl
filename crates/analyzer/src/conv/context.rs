@@ -2,9 +2,9 @@ use crate::analyzer_error::{AnalyzerError, ExceedLimitKind};
 use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
 use crate::ir::{
-    Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function, Interface,
-    IrResult, ShapeRef, Signature, Type, VarId, VarIndex, VarKind, VarPath, VarSelect, Variable,
-    VariableInfo,
+    self, Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function,
+    Interface, IrResult, ShapeRef, Signature, Type, VarId, VarIndex, VarKind, VarPath, VarSelect,
+    Variable, VariableInfo,
 };
 use crate::namespace::Namespace;
 use crate::namespace_table;
@@ -62,6 +62,7 @@ pub struct Context {
     pub inst_signatures: HashMap<StrId, Signature>,
     pub modport_signatures: Vec<HashMap<StrId, Signature>>,
     pub instance_history: InstanceHistory,
+    pub types: HashMap<Signature, ir::Type>,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
@@ -99,6 +100,7 @@ impl Context {
         std::mem::swap(&mut self.generic_maps, &mut tgt.generic_maps);
         std::mem::swap(&mut self.modport_signatures, &mut tgt.modport_signatures);
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
+        std::mem::swap(&mut self.types, &mut tgt.types);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
         self.disalbe_const_opt = tgt.disalbe_const_opt;

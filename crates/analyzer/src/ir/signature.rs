@@ -41,6 +41,10 @@ impl Signature {
     }
 
     pub fn from_path(context: &mut Context, mut path: GenericSymbolPath) -> Option<Self> {
+        if !path.is_resolvable() {
+            return None;
+        }
+
         let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
         path.resolve_imported(&namespace, None);
         path.unalias(None);
@@ -53,9 +57,13 @@ impl Signature {
             | SymbolKind::Interface(_)
             | SymbolKind::Modport(_)
             | SymbolKind::Function(_)
+            | SymbolKind::Struct(_)
+            | SymbolKind::Union(_)
+            | SymbolKind::TypeDef(_)
+            | SymbolKind::Enum(_)
             | SymbolKind::SystemVerilog => Self::new(symbol.found.id),
             SymbolKind::ModportFunctionMember(x) => Self::new(x.function),
-            SymbolKind::GenericParameter(_) => {
+            SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_) => {
                 let path = context.resolve_path(path.clone());
                 let symbol = symbol_table::resolve(&path).ok()?;
                 if let SymbolKind::GenericParameter(x) = &symbol.found.kind {
@@ -88,6 +96,12 @@ impl Signature {
             }
             _ => return None,
         };
+
+        if matches!(symbol.found.kind, SymbolKind::SystemVerilog)
+            && symbol_table::get(symbol.found.id).is_none()
+        {
+            symbol_table::update((*symbol.found).clone());
+        }
 
         if !context.in_generic {
             // Apply default value

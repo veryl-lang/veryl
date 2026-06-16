@@ -1002,6 +1002,7 @@ pub fn eval_type(
     path: &GenericSymbolPath,
     pos: TypePosition,
 ) -> IrResult<ir::Type> {
+    let mut cache_key = None;
     let mut width = Shape::default();
     let mut array = Shape::default();
     let mut signed = false;
@@ -1032,8 +1033,18 @@ pub fn eval_type(
         let mut path = context.resolve_path(path.clone());
         check_generic_refereence(context, &path);
 
-        let map = path.to_generic_maps();
         if let Ok(symbol) = symbol_table::resolve(&path) {
+            if !context.in_generic
+                && let Some(mut sig) = Signature::from_path(context, path.clone())
+            {
+                sig.normalize();
+                if let Some(r#type) = context.types.get(&sig).cloned() {
+                    return Ok(r#type);
+                }
+
+                cache_key = Some(sig);
+            }
+
             let type_error = match pos {
                 TypePosition::Variable => !symbol.found.is_variable_type(),
                 TypePosition::Cast => !symbol.found.is_casting_type(),
@@ -1052,6 +1063,7 @@ pub fn eval_type(
                 ));
             }
 
+            let map = path.to_generic_maps();
             match &symbol.found.kind {
                 SymbolKind::Struct(x) => {
                     context.push_generic_map(map.clone());
@@ -1344,6 +1356,11 @@ pub fn eval_type(
     } else {
         r#type.set_concrete_width(width);
     }
+
+    if let Some(key) = cache_key {
+        context.types.insert(key, r#type.clone());
+    }
+
     Ok(r#type)
 }
 
