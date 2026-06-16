@@ -2548,18 +2548,44 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
         let mut remaining = src.width.unwrap();
 
         for dst in &src.dst {
-            let scope = context.scope();
             let id = dst.id;
-            let meta = scope.variable_meta.get(&id).unwrap();
+            let (select, need_dynamic, const_index, width_shape, kind_width) = {
+                let scope = context.scope();
+                let meta = scope.variable_meta.get(&id).unwrap();
 
-            let select = if !dst.select.is_empty() {
-                dst.select
-                    .eval_value(&mut scope.analyzer_context, &dst.comptime.r#type, false)
+                let select = if !dst.select.is_empty() {
+                    dst.select
+                        .eval_value(&mut scope.analyzer_context, &dst.comptime.r#type, false)
+                } else {
+                    None
+                };
+                // A runtime (non-constant) bit-select destination uses the
+                // dynamic-select path, which writes only the selected window.
+                let need_dynamic = !dst.select.is_empty() && !dst.select.is_const();
+                let const_index = if dst.index.is_const() {
+                    dst.index.eval_value(&mut scope.analyzer_context)
+                } else {
+                    None
+                };
+                let width_shape = meta.r#type.width().clone();
+                let kind_width = meta.r#type.kind.width().unwrap_or(1);
+                (select, need_dynamic, const_index, width_shape, kind_width)
+            };
+
+            let dynamic_select = if need_dynamic {
+                Some(build_dynamic_bit_select(
+                    context,
+                    &width_shape,
+                    &dst.select,
+                    kind_width,
+                )?)
             } else {
                 None
             };
 
-            let dst_elem_width = if let Some((beg, end)) = select {
+            let dst_elem_width = if let Some(d) = &dynamic_select {
+                d.window
+            } else if let Some((beg, end)) = select {
                 beg - end + 1
             } else {
                 dst.comptime.r#type.total_width().unwrap()
@@ -2567,12 +2593,8 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
 
             let rhs_select = Some(msb_first_window(&mut remaining, dst_elem_width));
 
-            let const_index = if dst.index.is_const() {
-                dst.index.eval_value(&mut scope.analyzer_context)
-            } else {
-                None
-            };
-
+            let scope = context.scope();
+            let meta = scope.variable_meta.get(&id).unwrap();
             if let Some(idx_vals) = const_index {
                 let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
                 let element = &meta.elements[index];
@@ -2593,7 +2615,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     dst: dst_var,
                     dst_width,
                     select,
-                    dynamic_select: None,
+                    dynamic_select,
                     rhs_select,
                     expr: expr.clone(),
                     dst_ff_current_offset: element.current_offset(),
@@ -2625,7 +2647,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     dst_index_expr: index_proto,
                     dst_width,
                     select,
-                    dynamic_select: None,
+                    dynamic_select,
                     rhs_select,
                     expr: expr.clone(),
                     dst_ff_current_base_offset: base_current,
