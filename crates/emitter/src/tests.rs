@@ -3782,3 +3782,19 @@ fn all_bit_underscore_width_expands() {
     let ret = emit(&metadata, code);
     assert!(ret.contains("10'b1111111111"), "{ret}");
 }
+
+#[test]
+fn widthless_signed_based_literal_does_not_panic() {
+    // Regression: `'sd3` hit `unreachable!()` in Emitter::based because the
+    // signed marker was not skipped before extracting the base character.
+    let code = r#"module ModuleA (
+    a: output logic<8>,
+) {
+    assign a = 'sd3 as 8;
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(ret.contains("2'sd3"), "sized signed literal: {ret}");
+}
