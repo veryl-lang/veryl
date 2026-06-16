@@ -11190,6 +11190,52 @@ fn clock_domain_function_call() {
 }
 
 #[test]
+fn clock_domain_select_index() {
+    // Regression: a bit/array-select index expression's clock domain was
+    // neither checked nor merged, so `dat_'b[sel_'a]` passed CDC silently
+    // while `o_b = i_sel` was flagged.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_sel  : input  'a logic,
+        i_dat  : input  'b logic<2>,
+        o_b    : output 'b logic,
+    ) {
+        assign o_b = i_dat[i_sel];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Same-domain (and constant) indices stay accepted.
+    let code = r#"
+    module ModuleA (
+        i_clk_b: input  'b clock,
+        i_sel  : input  'b logic,
+        i_dat  : input  'b logic<2>,
+        o_b    : output 'b logic,
+    ) {
+        var t: 'b logic;
+        assign t   = i_dat[i_sel];
+        assign o_b = t & i_dat[0];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn clock_domain() {
     let code = r#"
     module ModuleA (
