@@ -15856,3 +15856,55 @@ fn wide_compare_does_not_overread_narrower_operand() {
         assert_eq!(sim.get("c").unwrap(), Value::new(1, 1, false), "{config:?}");
     }
 }
+
+#[test]
+fn aot_c_wide_scalar_unary_and_carry_mask() {
+    // Regression (cc backend): 65..128-bit `~`/`-` were computed after a
+    // (uint64_t) truncation, zeroing the upper words; and the result-width
+    // mask was elided for 65..128-bit Add feeding a comparison, so a real
+    // carry at bit 100 made `(a + b) == c` evaluate false.
+    let code = r#"
+    module Top (
+        a: input  logic<100>,
+        b: input  logic<100>,
+        c: input  logic<100>,
+        n: output logic<100>,
+        m: output logic<100>,
+        y: output logic,
+    ) {
+        assign n = ~a;
+        assign m = -a;
+        assign y = (a + b) == c;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let a: Value = "100'h8000000000000000".parse().unwrap();
+        let all_f: Value = "100'hfffffffffffffffffffffffff".parse().unwrap();
+        sim.set("a", a);
+        sim.set("b", Value::new(0, 100, false));
+        sim.set("c", Value::new(0, 100, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let expect_n: Value = "100'hfffffffff7fffffffffffffff".parse().unwrap();
+        let expect_m: Value = "100'hfffffffff8000000000000000".parse().unwrap();
+        assert_eq!(
+            sim.get("n").unwrap().payload(),
+            expect_n.payload(),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("m").unwrap().payload(),
+            expect_m.payload(),
+            "{config:?}"
+        );
+
+        // (all-ones + 1) mod 2^100 == 0
+        sim.set("a", all_f);
+        sim.set("b", Value::new(1, 100, false));
+        sim.set("c", Value::new(0, 100, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("y").unwrap(), Value::new(1, 1, false), "{config:?}");
+    }
+}

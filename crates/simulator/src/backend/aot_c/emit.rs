@@ -1300,6 +1300,15 @@ fn emit_wide_select_read_at(base_ptr: &str, lo: usize, nbits: usize) -> String {
     e
 }
 
+/// Mask a `__uint128_t` C expression to `width` (1..127) bits with a
+/// hi/lo-split constant (matching the wide-store path's masking).
+fn mask_u128(s: &str, width: usize) -> String {
+    let m: u128 = (1u128 << width) - 1;
+    let hi = (m >> 64) as u64;
+    let lo = m as u64;
+    format!("(({s}) & (((__uint128_t)0x{hi:x}ULL << 64) | (__uint128_t)0x{lo:x}ULL))")
+}
+
 /// Emit one or more `WriteLogWideEntry` pushes covering `nb` payload bytes
 /// from `src_ptr` (a `uint8_t*` C expression) at FF byte offset `base_off`
 /// (a C expression).  Each entry holds ≤56 bytes; larger values chunk.
@@ -3290,6 +3299,20 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 // LogicNot yields 0/1 regardless of signedness.
                 Op::LogicNot => Some(format!("(!({}))", xs)),
                 Op::BitNot | Op::Sub => {
+                    if xw > 64 {
+                        // 65..128-bit operand: compute in __uint128_t — the
+                        // (uint64_t) rebuild below would drop bits 64..127.
+                        let inner = if matches!(op, Op::BitNot) {
+                            format!("(~((__uint128_t)({xs})))")
+                        } else {
+                            format!("((__uint128_t)0 - ((__uint128_t)({xs})))")
+                        };
+                        let w = expr_context.width;
+                        if needs_clean && w > 0 && w < 128 {
+                            return Some(mask_u128(&inner, w));
+                        }
+                        return Some(inner);
+                    }
                     let inner = if matches!(op, Op::BitNot) {
                         format!("(~({}))", xv)
                     } else {
@@ -3526,13 +3549,11 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 // it off the critical path; the `volatile` asm stops gcc from
                 // if-converting it back to an unconditional `& mask`.
                 let wmask = |s: String| -> String {
-                    if needs_clean
-                        && expr_context.width < 64
-                        && matches!(
-                            op,
-                            Op::Add | Op::Sub | Op::Mul | Op::LogicShiftL | Op::ArithShiftL
-                        )
-                    {
+                    let growing = matches!(
+                        op,
+                        Op::Add | Op::Sub | Op::Mul | Op::LogicShiftL | Op::ArithShiftL
+                    );
+                    if needs_clean && expr_context.width < 64 && growing {
                         let mask = (1u64 << expr_context.width) - 1;
                         match &overflow_cond {
                             Some(cond) => format!(
@@ -3542,6 +3563,15 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                             ),
                             None => format!("(({s}) & 0x{mask:x}ULL)"),
                         }
+                    } else if needs_clean
+                        && expr_context.width > 64
+                        && expr_context.width < 128
+                        && growing
+                    {
+                        // The op is computed in __uint128_t, so e.g. a 100-bit
+                        // add keeps a real carry at bit 100 that corrupts an
+                        // inlined comparison.
+                        mask_u128(&s, expr_context.width)
                     } else {
                         s
                     }
