@@ -14845,6 +14845,19 @@ fn no_panic_on_out_of_range_bit_select() {
 }
 
 #[test]
+fn no_panic_on_huge_biguint_left_shift() {
+    // Regression: the BigUint left-shift arms shifted by the raw constant
+    // amount before masking, so `128'd1 << 64'h4000...` made num-bigint
+    // try a ~5.8e17-byte allocation and abort.
+    for code in [
+        "module Top { const A: logic<128> = 128'd1 << 64'h4000000000000000; let _x: logic<128> = A; }",
+        "module Top { const A: logic<128> = 128'd1 <<< 64'h4000000000000000; let _x: logic<128> = A; }",
+    ] {
+        let _ = analyze(code);
+    }
+}
+
+#[test]
 fn no_panic_on_large_shift_amount() {
     // Regression: a const shift by an amount >= the operand width previously
     // panicked in debug/test builds (native u64 shift overflow and a

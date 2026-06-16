@@ -1478,6 +1478,8 @@ impl Op {
                     }
                     Value::BigUint(x) => {
                         if let Some(y) = y {
+                            // Result is masked to `width`; clamp first so a huge amount can't OOM num-bigint.
+                            let y = y.min(width);
                             let mask = mask_cache.get(width);
                             let mut ret = x.clone();
                             ret.signed = false;
@@ -1581,6 +1583,8 @@ impl Op {
                     Value::BigUint(x) => {
                         if let Some(y) = y {
                             let mask = mask_cache.get(width);
+                            // Clamp first (see LogicShiftL): result is masked to `width` anyway.
+                            let y = y.min(width);
                             let mut ret = x.clone();
                             *ret.payload <<= y;
                             *ret.mask_xz <<= y;
