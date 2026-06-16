@@ -15944,3 +15944,57 @@ fn four_state_x_propagation_masks_full_width() {
         assert_eq!(*n.mask_xz(), all_x, "n use_jit={use_jit}");
     }
 }
+
+#[test]
+fn narrow_shift_count_at_least_64_yields_zero_or_sign_fill() {
+    // Regression: native I64 shifts (and C shifts in the cc backend) take
+    // the count modulo 64, so a runtime count of 64/65 returned the operand
+    // unshifted.  SystemVerilog: shift by >= width is 0; signed `>>>`
+    // sign-fills.
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        s: input  i8,
+        b: input  logic<8>,
+        c: output logic<8>,
+        d: output logic<8>,
+        e: output i8,
+    ) {
+        assign c = a << b;
+        assign d = a >> b;
+        assign e = s >>> b;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for count in [64u64, 65, 192] {
+            sim.set("a", Value::new(0x81, 8, false));
+            sim.set("s", Value::new(0x81, 8, true)); // -127
+            sim.set("b", Value::new(count, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("c").unwrap().payload_u128(),
+                0,
+                "shl count={count} {config:?}"
+            );
+            assert_eq!(
+                sim.get("d").unwrap().payload_u128(),
+                0,
+                "shr count={count} {config:?}"
+            );
+            assert_eq!(
+                sim.get("e").unwrap().payload_u128(),
+                0xff,
+                "asr count={count} {config:?}"
+            );
+        }
+        // In-range counts still shift normally.
+        sim.set("b", Value::new(1, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("c").unwrap().payload_u128(), 0x02, "{config:?}");
+        assert_eq!(sim.get("d").unwrap().payload_u128(), 0x40, "{config:?}");
+        assert_eq!(sim.get("e").unwrap().payload_u128(), 0xc0, "{config:?}");
+    }
+}
