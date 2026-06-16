@@ -11236,6 +11236,52 @@ fn clock_domain_select_index() {
 }
 
 #[test]
+fn clock_domain_array_literal_compound_element() {
+    // Regression: an array-literal element wrapped in any operator was left
+    // unevaluated at gather time (clock_domain None), so the crossing that is
+    // flagged for a bare-identifier element was silently laundered.
+    for element in ["i_dat & 1'b1", "~i_dat", "i_dat"] {
+        let code = format!(
+            r#"
+            module ModuleA (
+                i_clk_a: input  'a clock,
+                i_clk_b: input  'b clock,
+                i_dat  : input  'a logic,
+                o_dat  : output 'b logic [2],
+            ) {{
+                assign o_dat = '{{{element}, 1'b0}};
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+            "element {element}: {errors:?}"
+        );
+    }
+
+    // Same-domain compound elements stay accepted.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_dat  : input  'a logic,
+        o_dat  : output 'a logic [2],
+    ) {
+        assign o_dat = '{i_dat & 1'b1, 1'b0};
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn clock_domain() {
     let code = r#"
     module ModuleA (
