@@ -11030,6 +11030,85 @@ fn invalid_range_assign() {
 }
 
 #[test]
+fn out_of_range_lhs_select_rejected() {
+    // Regression: a constant out-of-range index/bit-select on an assignment
+    // LHS was never validated; it wrapped modulo the array shape (emitting
+    // out-of-bounds SV, suppressing unassigned warnings, and producing a
+    // bogus multiple_assignment against the aliased element).
+    for code in [
+        // array index out of range
+        r#"
+        module Top (o: output logic<8>) {
+            var f: logic<8> [2];
+            assign f[5] = 1;
+            assign f[0] = 3;
+            assign o = f[0] + f[1];
+        }
+        "#,
+        // bit-select out of range
+        r#"
+        module Top (o: output logic) {
+            var g: logic<8>;
+            assign g[12] = 1;
+            assign o = g[0];
+        }
+        "#,
+        // out-of-range bit-select on a struct member: it would otherwise
+        // remap past the member into an adjacent field via to_base_select.
+        r#"
+        module Top (o: output logic<12>) {
+            struct S { a: logic<4>, b: logic<8> }
+            var s: S;
+            always_comb { s.a[10] = 1; o = s; }
+        }
+        "#,
+        // out-of-range bit-select range on a struct member
+        r#"
+        module Top (o: output logic<12>) {
+            struct S { a: logic<4>, b: logic<8> }
+            var s: S;
+            always_comb { s.a = 0; s.a[11:8] = 0; o = s; }
+        }
+        "#,
+    ] {
+        let errors = analyze(code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidSelect { .. })),
+            "{errors:?}"
+        );
+    }
+
+    // In-range LHS selects stay accepted, including struct-member selects.
+    for code in [
+        r#"
+        module Top (o: output logic<8>) {
+            var f: logic<8> [2];
+            assign f[0] = 3;
+            assign f[1] = 1;
+            assign o = f[0] + f[1];
+        }
+        "#,
+        r#"
+        module Top (o: output logic<12>) {
+            struct S { a: logic<4>, b: logic<8> }
+            var s: S;
+            always_comb { s.a = 0; s.b = 0; s.a[3] = 1; s.b[7:4] = 0; o = s; }
+        }
+        "#,
+    ] {
+        let errors = analyze(code);
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidSelect { .. })),
+            "{errors:?}"
+        );
+    }
+}
+
+#[test]
 fn clock_domain() {
     let code = r#"
     module ModuleA (

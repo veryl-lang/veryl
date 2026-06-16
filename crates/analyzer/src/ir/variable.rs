@@ -54,10 +54,16 @@ impl VarPathSelect {
             }
 
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
-            if array_select.is_range() {
-                // Report a wrong-order / out-of-range slice (e.g. `o[2:0]`); it can't
-                // lower to valid SystemVerilog on an ascending unpacked array.
-                array_select.eval_comptime(context, &comptime.r#type, true);
+            // Validate LHS array selects: a wrong-order/out-of-range slice
+            // can't lower to valid SV, and an out-of-range index wraps modulo
+            // the shape in VarIndex::from_index, emitting out-of-bounds SV and
+            // corrupting the assign-table.
+            array_select.eval_comptime(context, &comptime.r#type, true);
+            if comptime.part_select.is_none() {
+                // With part_select the width select is member-relative, so it
+                // can't be checked against the base type here; to_base_select
+                // bounds-checks it against the member instead.
+                width_select.eval_comptime(context, &comptime.r#type, false);
             }
             comptime.r#type.array.drain(0..array_select.dimension());
 
@@ -77,8 +83,6 @@ impl VarPathSelect {
             } else {
                 eval_width_select(context, &path, &comptime.r#type, width_select)?
             };
-
-            // TODO invalid_select
 
             if array_select.is_range() {
                 // Range selects are expanded by `to_assign_destinations`.
