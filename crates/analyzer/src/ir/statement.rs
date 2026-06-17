@@ -115,7 +115,7 @@ impl ForRange {
             } => {
                 let start = start.eval_value(context)?;
                 let end = end.eval_value(context)?;
-                let end = if *inclusive { end + 1 } else { end };
+                let end = if *inclusive { end.checked_add(1)? } else { end };
                 if end.saturating_sub(start) > limit {
                     return None;
                 }
@@ -129,7 +129,7 @@ impl ForRange {
                     let mut i = start;
                     while i < end {
                         ret.push(i);
-                        i += step;
+                        i = i.saturating_add(*step);
                     }
                     Some(ret)
                 }
@@ -182,7 +182,7 @@ impl ForRange {
             } => {
                 let start = start.eval_value(context)?;
                 let end = end.eval_value(context)?;
-                let end = if *inclusive { end + 1 } else { end };
+                let end = if *inclusive { end.checked_add(1)? } else { end };
                 let mut ret = vec![];
                 let mut i = start;
                 while i < end {

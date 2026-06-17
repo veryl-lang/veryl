@@ -292,7 +292,7 @@ impl Statement {
                 let start = r.start.eval(mask_cache);
                 let mut end = r.end.eval(mask_cache);
                 if r.inclusive {
-                    end += 1;
+                    end = end.saturating_add(1);
                 }
                 let mut step_body = |i: u64| -> ControlFlow {
                     let val = Value::new(i, x.var_width, x.var_signed);
