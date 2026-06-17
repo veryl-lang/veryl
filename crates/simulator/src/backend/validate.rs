@@ -116,8 +116,13 @@ fn diff_or_panic(
             .unwrap_or(usize::MAX);
         let var_info = lookup_comb_offset(&ir.module_variables, comb_ptr, off);
         let dump_word = |snap: &[u8], byte_off: isize, name: &str| {
-            let abs = (off as isize + byte_off) as usize;
-            if abs + 4 <= snap.len() {
+            // Signed-checked bounds: a diverge byte within 64 bytes of the
+            // buffer start would wrap the cast and panic mid-report.
+            let abs = off as isize + byte_off;
+            if abs >= 0
+                && let abs = abs as usize
+                && abs + 4 <= snap.len()
+            {
                 let w = u32::from_le_bytes(snap[abs..abs + 4].try_into().unwrap_or([0; 4]));
                 eprintln!("  snap[{:+}] ({}) = 0x{:08x} (u32)", byte_off, name, w);
             }
@@ -141,10 +146,15 @@ fn diff_or_panic(
         }
         eprintln!("  JIT output around diverge byte:");
         for delta in (-64..=64).step_by(4) {
-            let w = comb_jit_out
-                .get(((off as isize + delta) as usize)..((off as isize + delta + 4) as usize))
-                .map(|s| u32::from_le_bytes(s.try_into().unwrap_or([0; 4])))
-                .unwrap_or(0);
+            let abs = off as isize + delta;
+            let w = if abs >= 0 {
+                comb_jit_out
+                    .get((abs as usize)..(abs as usize + 4))
+                    .map(|s| u32::from_le_bytes(s.try_into().unwrap_or([0; 4])))
+                    .unwrap_or(0)
+            } else {
+                0
+            };
             eprintln!("  out[{:+}] (jit) = 0x{:08x} (u32)", delta, w);
         }
         eprintln!("  ALL diverging byte ranges:");
