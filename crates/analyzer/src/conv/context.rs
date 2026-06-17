@@ -76,6 +76,7 @@ pub struct Context {
     /// `check_compatibility` to pick the clock/reset diagnostic.
     pub in_inst_port: bool,
     pub expr_depth: usize,
+    pub stmt_depth: usize,
     pub current_clock: Option<Comptime>,
     pub mask_cache: MaskCache,
     pub tb_reset_cycles: HashMap<StrId, Expression>,
