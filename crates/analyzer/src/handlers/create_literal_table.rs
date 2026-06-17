@@ -11,6 +11,13 @@ const BINARY_CHARS: [char; 6] = ['0', '1', 'x', 'z', 'X', 'Z'];
 const OCTAL_CHARS: [char; 12] = ['0', '1', '2', '3', '4', '5', '6', '7', 'x', 'z', 'X', 'Z'];
 const DECIMAL_CHARS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
+fn is_zero_width_literal(text: &str) -> bool {
+    let Some((width, _)) = text.split_once('\'') else {
+        return false;
+    };
+    !width.is_empty() && width.replace('_', "").parse::<usize>() == Ok(0)
+}
+
 #[derive(Default)]
 pub struct CreateLiteralTable {
     pub errors: Vec<AnalyzerError>,
@@ -83,7 +90,13 @@ impl VerylGrammarTrait for CreateLiteralTable {
             let id = token.id;
             // The value's payload is truncated to the declared width, so the
             // digits' needed width comes from the parser, not the value.
-            let (value, needed_width) = crate::value::parse_based(&token.to_string());
+            let text = token.to_string();
+            let (value, needed_width) = crate::value::parse_based(&text);
+
+            if is_zero_width_literal(&text) {
+                self.errors
+                    .push(AnalyzerError::zero_width_number(&token.into()));
+            }
 
             if needed_width > value.width() {
                 self.errors.push(AnalyzerError::too_large_number(
@@ -151,7 +164,12 @@ impl VerylGrammarTrait for CreateLiteralTable {
 
     fn all_bit(&mut self, arg: &AllBit) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            let id = arg.all_bit_token.token.id;
+            let token = &arg.all_bit_token.token;
+            let id = token.id;
+            if is_zero_width_literal(&token.to_string()) {
+                self.errors
+                    .push(AnalyzerError::zero_width_number(&token.into()));
+            }
             let value: Value = arg.into();
             let literal = Literal::Value(value);
             literal_table::insert(id, literal);

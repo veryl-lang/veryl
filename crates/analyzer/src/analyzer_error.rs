@@ -1407,6 +1407,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(zero_width_number),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("number can't have zero width")]
+    ZeroWidthNumber {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(too_much_enum_variant),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1894,6 +1909,7 @@ impl AnalyzerError {
             AnalyzerError::SvWithImplicitReset { token_source, .. } => *token_source,
             AnalyzerError::TooLargeEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::TooLargeNumber { token_source, .. } => *token_source,
+            AnalyzerError::ZeroWidthNumber { token_source, .. } => *token_source,
             AnalyzerError::TooMuchEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::UnassignVariable { token_source, .. } => *token_source,
             AnalyzerError::UnassignableOutput { token_source, .. } => *token_source,
@@ -2692,6 +2708,13 @@ impl AnalyzerError {
     pub fn too_large_number(width: usize, token: &TokenRange) -> Self {
         AnalyzerError::TooLargeNumber {
             width,
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn zero_width_number(token: &TokenRange) -> Self {
+        AnalyzerError::ZeroWidthNumber {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

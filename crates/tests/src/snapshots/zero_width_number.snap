@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+zero_width_number (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#zero_width_number)
+
+  × number can't have zero width
+   ╭─[../../testcases/error/zero_width_number.veryl:2:20]
+ 1 │ module zero_width_number {
+ 2 │     const a: u32 = 0'd0;
+   ·                    ──┬─
+   ·                      ╰── Error location
+ 3 │ }
+   ╰────
+  help:
