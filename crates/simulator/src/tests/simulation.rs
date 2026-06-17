@@ -16114,3 +16114,33 @@ fn enum_member_concat_width_not_squared() {
         assert_eq!(sim.get("y").unwrap().payload_u128(), 0x002001, "{config:?}");
     }
 }
+
+#[test]
+fn array_range_read_declines_gracefully() {
+    // Regression: an RHS array range read lowers to Factor::Unknown, and the
+    // assign conv unwrapped calc_index on it and panicked.  The native sim must
+    // return an Unsupported error instead.  `veryl build`/`check` still accept
+    // it (a valid SV unpacked-array slice); only native simulation declines.
+    for select in ["arr[0:1]", "arr[1+:2]"] {
+        let code = format!(
+            r#"
+            module Top (
+                o: output logic<8> [2],
+            ) {{
+                var arr: logic<8> [4];
+                assign arr = '{{8'h11, 8'h22, 8'h33, 8'h44}};
+                assign o = {select};
+            }}
+            "#
+        );
+        for config in Config::all() {
+            assert!(
+                matches!(
+                    analyze_top(&code, &config, "Top"),
+                    Err(SimulatorError::UnsupportedDescription { .. })
+                ),
+                "{select} {config:?}"
+            );
+        }
+    }
+}

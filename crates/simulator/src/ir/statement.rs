@@ -2864,7 +2864,11 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
         if let Some(idx_vals) = const_index {
             let scope = context.scope();
             let meta = scope.variable_meta.get(&id).unwrap();
-            let index = meta.r#type.array.calc_index(&idx_vals).unwrap();
+            let index = meta
+                .r#type
+                .array
+                .calc_index(&idx_vals)
+                .ok_or_else(|| SimulatorError::unsupported_description(&dst.token))?;
             let element = &meta.elements[index];
             let is_ff = element.is_ff();
             let current_offset = element.current_offset();
