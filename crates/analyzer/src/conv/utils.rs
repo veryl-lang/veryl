@@ -1002,6 +1002,13 @@ pub fn eval_type(
     path: &GenericSymbolPath,
     pos: TypePosition,
 ) -> IrResult<ir::Type> {
+    // `_` is not a type; without this the decl emits an empty type keyword (invalid SV).
+    if path.is_anonymous() {
+        let token: TokenRange = path.range;
+        context.insert_error(AnalyzerError::anonymous_identifier_usage(&token));
+        return Err(ir_error!(token));
+    }
+
     let mut width = Shape::default();
     let mut array = Shape::default();
     let mut signed = false;

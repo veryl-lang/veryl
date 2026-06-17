@@ -11038,6 +11038,31 @@ fn multiple_driver_detection_is_order_independent() {
 }
 
 #[test]
+fn anonymous_identifier_in_type_position_rejected() {
+    // Regression: `var v: _;` passed check/build and emitted a declaration
+    // with an empty type keyword (invalid SystemVerilog).
+    let code = r#"
+    module Top (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        var v: _;
+        always_comb {
+            v   = i_a;
+            o_x = v;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::AnonymousIdentifierUsage { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn non_constant_select_width_on_struct_member() {
     // Regression: the member-access select loops skipped
     // check_part_select_width, so `p.data[0+:i_w]` with a runtime width
