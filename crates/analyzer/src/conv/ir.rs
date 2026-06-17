@@ -2,7 +2,7 @@ use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_bound;
 use crate::conv::checker::proto::check_proto;
-use crate::conv::utils::check_module_with_unevaluable_generic_parameters;
+use crate::conv::utils::{check_module_with_unevaluable_generic_parameters, get_component};
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{self, IrResult, VarPath};
 use crate::symbol::SymbolKind;
@@ -10,6 +10,21 @@ use crate::symbol_table;
 use crate::{HashMap, ir_error};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
+
+/// Memo key for a top-level component's direct conversion, or `None` when
+/// sharing must not apply: a non-`veryl test` run (instantiation clears bodies)
+/// or a generic template.
+fn top_level_memo_sig(context: &Context, identifier: &Identifier) -> Option<ir::Signature> {
+    if context.config.retain_component_body && !context.in_generic {
+        symbol_table::resolve(identifier).ok().map(|s| {
+            let mut sig = ir::Signature::new(s.found.id);
+            sig.normalize();
+            sig
+        })
+    } else {
+        None
+    }
+}
 
 impl Conv<&Veryl> for ir::Ir {
     fn conv(context: &mut Context, value: &Veryl) -> IrResult<Self> {
@@ -28,23 +43,45 @@ impl Conv<&Veryl> for ir::Ir {
                     DescriptionItem::DescriptionItemOptPublicDescriptionItem(x) => {
                         match x.public_description_item.as_ref() {
                             PublicDescriptionItem::ModuleDeclaration(x) => {
-                                let ret: IrResult<ir::Module> =
-                                    Conv::conv(context, x.module_declaration.as_ref());
-
-                                if let Ok(mut component) = ret {
-                                    // suppress unassigned check for modules with unevaluable generic parameters
-                                    if check_module_with_unevaluable_generic_parameters(
-                                        &x.module_declaration.identifier,
-                                    ) {
-                                        component.suppress_unassigned = true;
+                                let decl = x.module_declaration.as_ref();
+                                if let Some(sig) =
+                                    top_level_memo_sig(context, decl.identifier.as_ref())
+                                {
+                                    let token: TokenRange = decl.identifier.as_ref().into();
+                                    if let Ok(component) = get_component(context, &sig, token)
+                                        && let ir::Component::Module(m) = component.as_ref()
+                                    {
+                                        let mut component = m.clone();
+                                        if check_module_with_unevaluable_generic_parameters(
+                                            &decl.identifier,
+                                        ) {
+                                            component.suppress_unassigned = true;
+                                        }
+                                        components.push(ir::Component::Module(component));
                                     }
-
-                                    components.push(ir::Component::Module(component));
+                                } else {
+                                    let ret: IrResult<ir::Module> = Conv::conv(context, decl);
+                                    if let Ok(mut component) = ret {
+                                        // suppress unassigned check for modules with unevaluable generic parameters
+                                        if check_module_with_unevaluable_generic_parameters(
+                                            &decl.identifier,
+                                        ) {
+                                            component.suppress_unassigned = true;
+                                        }
+                                        components.push(ir::Component::Module(component));
+                                    }
                                 }
                             }
                             PublicDescriptionItem::InterfaceDeclaration(x) => {
-                                let _: IrResult<ir::Interface> =
-                                    Conv::conv(context, x.interface_declaration.as_ref());
+                                let decl = x.interface_declaration.as_ref();
+                                if let Some(sig) =
+                                    top_level_memo_sig(context, decl.identifier.as_ref())
+                                {
+                                    let token: TokenRange = decl.identifier.as_ref().into();
+                                    let _ = get_component(context, &sig, token);
+                                } else {
+                                    let _: IrResult<ir::Interface> = Conv::conv(context, decl);
+                                }
                             }
                             PublicDescriptionItem::PackageDeclaration(x) => {
                                 let _: IrResult<()> =
