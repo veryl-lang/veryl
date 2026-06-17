@@ -37,6 +37,8 @@ impl AssignContext {
 #[derive(Clone, Debug)]
 pub struct AssignTableEntry {
     pub mask: Vec<BigUint>,
+    /// Const-index writes only; conflicts check this, not `mask`, since `maybe` is sticky.
+    pub definite_mask: Vec<BigUint>,
     pub path: VarPath,
     pub width: Option<usize>,
     pub array: Shape,
@@ -67,8 +69,14 @@ impl AssignTableEntry {
             }
         }
 
+        let definite_mask = if maybe {
+            masks.iter().map(|_| BigUint::from(0u32)).collect()
+        } else {
+            masks.clone()
+        };
         Self {
             mask: masks,
+            definite_mask,
             path: variable.path.clone(),
             width: variable.total_width(),
             array: array.to_owned(),
@@ -87,12 +95,15 @@ impl AssignTableEntry {
     ) -> Option<Vec<TokenRange>> {
         let i = self.array.calc_index(index)?;
 
-        let fail = &self.mask[i] & mask != 0u32.into();
+        let fail = !maybe && &self.definite_mask[i] & mask != 0u32.into();
         self.mask[i] |= mask;
+        if !maybe {
+            self.definite_mask[i] |= mask;
+        }
         self.maybe |= maybe;
         self.tokens.push(token);
 
-        if fail & !self.maybe {
+        if fail {
             Some(self.tokens.clone())
         } else {
             None
@@ -109,6 +120,9 @@ impl AssignTableEntry {
     pub fn merge_by_or(&mut self, value: &AssignTableEntry) {
         for (i, val) in self.mask.iter_mut().enumerate() {
             *val |= &value.mask[i];
+        }
+        for (i, val) in self.definite_mask.iter_mut().enumerate() {
+            *val |= &value.definite_mask[i];
         }
         self.maybe |= value.maybe;
     }
@@ -286,8 +300,7 @@ impl AssignTable {
 
                 if let Some(array) = val.array.total() {
                     for i in 0..array {
-                        if (!x.maybe && !val.maybe)
-                            && (&x.mask[i] & &val.mask[i] != 0u32.into())
+                        if (&x.definite_mask[i] & &val.definite_mask[i] != 0u32.into())
                             && check_conflict
                         {
                             context.insert_error(AnalyzerError::multiple_assignment(
