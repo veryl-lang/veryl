@@ -344,7 +344,11 @@ fn convert_stmts(
 
 pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestResult {
     assert_buffer::reset();
+    crate::file_table::reset();
     let result: TestResult = exec(sim, stmts).into();
+    // Flush and close any files opened via `$fopen` so buffered output is
+    // not lost when a testbench forgets to `$fclose` (or ends via `$finish`).
+    crate::file_table::finalize();
     match (result, assert_buffer::take_failure()) {
         (TestResult::Fail(msg), _) => TestResult::Fail(msg),
         (TestResult::Pass, Some(msg)) => TestResult::Fail(msg),

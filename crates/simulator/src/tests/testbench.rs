@@ -300,6 +300,51 @@ fn tb_integration_counter() {
     }
 }
 
+#[test]
+fn tb_fwrite_native() {
+    // Full native-testbench path: run_testbench resets/finalizes the file
+    // table. Omits `$fclose` on purpose so the assertion proves finalize flushes.
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_tb_fwrite_native.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    #[test(test_fwrite)]
+    module test_fwrite {{
+        initial {{
+            let fd: u32 = $fopen("{}", "w");
+            $fdisplay(fd, "hello native");
+            $finish();
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    for config in Config::all() {
+        let _ = std::fs::remove_file(&out_path);
+        let ir = match analyze_top(&code, &config, "test_fwrite") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let mut sim = Simulator::new(ir, None);
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+        let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
+        if let Some(stmts) = initial_stmts {
+            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+            let result = run_testbench(&mut sim, &tb_stmts);
+            assert_eq!(result, TestResult::Pass);
+        } else {
+            panic!("No initial block found");
+        }
+        let content = std::fs::read_to_string(&out_path).unwrap();
+        assert_eq!(content, "hello native\n");
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
 // Regression: `clk.next(0)` ran one cycle instead of zero (the count was
 // clamped with `.max(1)`); SV `repeat(0)` advances zero cycles.
 #[test]

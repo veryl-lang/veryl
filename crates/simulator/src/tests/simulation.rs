@@ -11863,6 +11863,245 @@ fn write_and_display_mixed() {
     }
 }
 
+#[test]
+fn fwrite_to_file() {
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_fwrite_to_file.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+    ) {{
+        initial {{
+            let fd: u32 = $fopen("{}", "w");
+            $fwrite(fd, "hex=%h dec=%d", 8'hAB, 8'd42);
+            $fdisplay(fd, " done");
+            $fclose(fd);
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    for config in Config::all() {
+        crate::file_table::reset();
+        let _ = std::fs::remove_file(&out_path);
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        crate::file_table::finalize();
+        let content = std::fs::read_to_string(&out_path).unwrap();
+        assert_eq!(content, "hex=ab dec=42 done\n");
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
+#[test]
+fn fwrite_stdout() {
+    // fd 1 routes to STDOUT (the output buffer), matching $write/$display.
+    let code = r#"
+    module Top (
+        i_clk: input clock,
+    ) {
+        initial {
+            $fwrite(1, "to stdout %d", 8'd7);
+            $fdisplay(1, "!");
+        }
+    }
+    "#;
+    for config in Config::all() {
+        crate::file_table::reset();
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        crate::file_table::finalize();
+        let output = output_buffer::take();
+        assert_eq!(output, "to stdout 7!\n");
+    }
+}
+
+#[test]
+fn fwrite_append() {
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_fwrite_append.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+    ) {{
+        initial {{
+            let fd1: u32 = $fopen("{p}", "w");
+            $fwrite(fd1, "first\n");
+            $fclose(fd1);
+            let fd2: u32 = $fopen("{p}", "a");
+            $fwrite(fd2, "second\n");
+            $fclose(fd2);
+        }}
+    }}
+    "#,
+        p = out_str
+    );
+
+    for config in Config::all() {
+        crate::file_table::reset();
+        let _ = std::fs::remove_file(&out_path);
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        crate::file_table::finalize();
+        let content = std::fs::read_to_string(&out_path).unwrap();
+        assert_eq!(content, "first\nsecond\n");
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
+#[test]
+fn fwrite_finalize_without_close() {
+    // A testbench that forgets `$fclose` still gets its buffered output
+    // flushed by `file_table::finalize()` at the end of the run.
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_fwrite_finalize.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+    ) {{
+        initial {{
+            let fd: u32 = $fopen("{}", "w");
+            $fwrite(fd, "no close here\n");
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    for config in Config::all() {
+        crate::file_table::reset();
+        let _ = std::fs::remove_file(&out_path);
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        crate::file_table::finalize();
+        let content = std::fs::read_to_string(&out_path).unwrap();
+        assert_eq!(content, "no close here\n");
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
+#[test]
+fn fopen_read_mode_does_not_truncate() {
+    // A read mode ("r") must not create or truncate the file: open returns
+    // the invalid descriptor 0 and the writes are dropped.
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_fopen_read_mode.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+    ) {{
+        initial {{
+            let fd: u32 = $fopen("{}", "r");
+            $fwrite(fd, "should not appear");
+            $fclose(fd);
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    for config in Config::all() {
+        crate::file_table::reset();
+        std::fs::write(&out_path, "preexisting\n").unwrap();
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        crate::file_table::finalize();
+        let content = std::fs::read_to_string(&out_path).unwrap();
+        assert_eq!(content, "preexisting\n");
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
+#[test]
+fn fopen_wide_fd_type() {
+    // fd declared wider than u32 (a logic<64>, 8-byte slot) must still
+    // round-trip the descriptor correctly between $fopen and $fwrite.
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_fopen_wide_fd.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+    ) {{
+        initial {{
+            let fd: logic<64> = $fopen("{}", "w");
+            $fwrite(fd, "wide fd works");
+            $fclose(fd);
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    for config in Config::all() {
+        crate::file_table::reset();
+        let _ = std::fs::remove_file(&out_path);
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        crate::file_table::finalize();
+        let content = std::fs::read_to_string(&out_path).unwrap();
+        assert_eq!(content, "wide fd works");
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
+#[test]
+fn fopen_failure_returns_zero() {
+    // Opening under a non-existent parent directory fails; $fopen returns 0,
+    // the file is never created, and the dropped writes do not panic.
+    let dir = std::env::temp_dir();
+    let bad_path = dir
+        .join("veryl_test_nonexistent_sub_dir")
+        .join("cannot_create.txt");
+    let bad_str = bad_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+    ) {{
+        initial {{
+            let fd: u32 = $fopen("{}", "w");
+            $fwrite(fd, "dropped");
+            $fclose(fd);
+        }}
+    }}
+    "#,
+        bad_str
+    );
+
+    for config in Config::all() {
+        crate::file_table::reset();
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        crate::file_table::finalize();
+        assert!(!bad_path.exists());
+    }
+}
+
 // Regression: concatenation in case condition was compiled with wrong element
 // widths in JIT because eval_comptime was not called on the case target
 // expression, leaving bit-select widths unresolved (full variable width).

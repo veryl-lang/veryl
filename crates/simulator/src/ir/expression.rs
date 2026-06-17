@@ -1632,9 +1632,11 @@ impl Conv<&air::Expression> for ProtoExpression {
                         ctx.signed = signed;
                         Ok(inner)
                     }
-                    _ => {
-                        unreachable!("system function calls are resolved by the analyzer")
-                    }
+                    // $fopen lowers to a statement in Conv; any system function
+                    // reaching here as a sub-expression is unsupported (not a panic).
+                    _ => Err(SimulatorError::unsupported_description(
+                        &call.comptime.token,
+                    )),
                 },
                 air::Factor::Anonymous(comptime) | air::Factor::Unknown(comptime) => {
                     Err(SimulatorError::unsupported_description(&comptime.token))

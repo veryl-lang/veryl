@@ -1,5 +1,6 @@
 pub mod assert_buffer;
 pub mod backend;
+pub mod file_table;
 pub mod ir;
 pub mod output_buffer;
 pub mod simulator;

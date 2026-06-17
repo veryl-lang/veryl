@@ -5,7 +5,7 @@ use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 use veryl_simulator::ir::Event;
 use veryl_simulator::ir::{self, Ir};
-use veryl_simulator::{Config, Simulator};
+use veryl_simulator::{Config, Simulator, file_table};
 
 #[derive(clap::Parser)]
 pub struct Opt {
@@ -98,6 +98,9 @@ fn main() {
     for _ in 0..cycle {
         sim.step(&clk);
     }
+
+    // This driver bypasses run_testbench, so flush $fopen files here.
+    file_table::finalize();
 
     println!("{}", sim.ir.dump_variables());
 

@@ -245,6 +245,21 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
                 }
             }
             ProtoSystemFunctionCall::Finish => {}
+            ProtoSystemFunctionCall::Fopen { .. } => {}
+            ProtoSystemFunctionCall::Fwrite { fd, args, .. } => {
+                walk_expr_reads(fd, c);
+                for a in args {
+                    walk_expr_reads(a, c);
+                }
+            }
+            ProtoSystemFunctionCall::Fclose { fd } => {
+                walk_expr_reads(fd, c);
+            }
+            ProtoSystemFunctionCall::Fflush { fd } => {
+                if let Some(fd) = fd {
+                    walk_expr_reads(fd, c);
+                }
+            }
         },
         ProtoStatement::CompiledBlock(x) => {
             for s in &x.original_stmts {

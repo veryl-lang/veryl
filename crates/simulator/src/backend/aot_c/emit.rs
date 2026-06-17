@@ -616,6 +616,21 @@ impl LocalAnalysis {
                     }
                 }
                 ProtoSystemFunctionCall::Readmemh { .. } | ProtoSystemFunctionCall::Finish => {}
+                ProtoSystemFunctionCall::Fopen { .. } => {}
+                ProtoSystemFunctionCall::Fwrite { fd, args, .. } => {
+                    self.walk_reads(fd, i);
+                    for a in args {
+                        self.walk_reads(a, i);
+                    }
+                }
+                ProtoSystemFunctionCall::Fclose { fd } => {
+                    self.walk_reads(fd, i);
+                }
+                ProtoSystemFunctionCall::Fflush { fd } => {
+                    if let Some(fd) = fd {
+                        self.walk_reads(fd, i);
+                    }
+                }
             },
             ProtoStatement::CompiledBlock(_) => {
                 self.poison(s);

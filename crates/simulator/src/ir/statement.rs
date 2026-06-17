@@ -1,6 +1,7 @@
 use crate::HashSet;
 use crate::assert_buffer;
 use crate::backend::ChunkArtifact;
+use crate::file_table;
 use crate::ir::context::{Context, Conv};
 use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
@@ -101,6 +102,26 @@ pub enum SystemFunctionCall {
         args: Vec<Expression>,
     },
     Finish,
+    Fopen {
+        filename: String,
+        mode: String,
+        /// Resolved fd destination: (current_ptr, next_ptr, native_bytes, use_4state).
+        fd_dst: (*mut u8, Option<*mut u8>, usize, bool),
+        /// Bit width of the fd variable, from its declaration.
+        width: usize,
+    },
+    Fwrite {
+        fd: Expression,
+        format_str: String,
+        args: Vec<Expression>,
+        newline: bool,
+    },
+    Fclose {
+        fd: Expression,
+    },
+    Fflush {
+        fd: Option<Expression>,
+    },
 }
 
 #[derive(Clone)]
@@ -482,6 +503,22 @@ fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
     result
 }
 
+/// Format a `$display`/`$write`/`$fwrite` argument list. Shared so all four
+/// call sites (including the AOT-C callback) stay byte-identical.
+fn format_output(format_str: &str, values: &[AnalyzerValue]) -> String {
+    if format_str.is_empty() {
+        values
+            .iter()
+            .map(|v| v.format_hex())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else if values.is_empty() {
+        format_str.to_string()
+    } else {
+        format_display_string(format_str, values)
+    }
+}
+
 /// Callback invoked by AOT-C event `.so` code for `$display` / `$write`.
 /// Mirrors `SystemFunctionCall::{Display,Write}::eval_step` so emitted output is
 /// byte-identical and flows through the same thread-local `output_buffer` (which
@@ -527,17 +564,7 @@ pub unsafe extern "C" fn veryl_aot_sysfn_print(
             .collect()
     };
     // Mirror eval_step's Display/Write formatting precisely.
-    let output = if fmt.is_empty() {
-        values
-            .iter()
-            .map(|v| v.format_hex())
-            .collect::<Vec<_>>()
-            .join(" ")
-    } else if values.is_empty() {
-        fmt.to_string()
-    } else {
-        format_display_string(fmt, &values)
-    };
+    let output = format_output(fmt, &values);
     if newline != 0 {
         output_buffer::println(&output);
     } else {
@@ -550,27 +577,11 @@ impl SystemFunctionCall {
         match self {
             SystemFunctionCall::Display { format_str, args } => {
                 let values: Vec<_> = args.iter().map(|e| e.eval(mask_cache)).collect();
-                if format_str.is_empty() {
-                    let parts: Vec<String> = values.iter().map(|v| v.format_hex()).collect();
-                    output_buffer::println(&parts.join(" "));
-                } else if values.is_empty() {
-                    output_buffer::println(format_str);
-                } else {
-                    let output = format_display_string(format_str, &values);
-                    output_buffer::println(&output);
-                }
+                output_buffer::println(&format_output(format_str, &values));
             }
             SystemFunctionCall::Write { format_str, args } => {
                 let values: Vec<_> = args.iter().map(|e| e.eval(mask_cache)).collect();
-                if format_str.is_empty() {
-                    let parts: Vec<String> = values.iter().map(|v| v.format_hex()).collect();
-                    output_buffer::print(&parts.join(" "));
-                } else if values.is_empty() {
-                    output_buffer::print(format_str);
-                } else {
-                    let output = format_display_string(format_str, &values);
-                    output_buffer::print(&output);
-                }
+                output_buffer::print(&format_output(format_str, &values));
             }
             SystemFunctionCall::Readmemh {
                 filename,
@@ -605,6 +616,42 @@ impl SystemFunctionCall {
             SystemFunctionCall::Finish => {
                 // Handled by testbench driver
             }
+            SystemFunctionCall::Fopen {
+                filename,
+                mode,
+                fd_dst,
+                width,
+            } => {
+                let fd = file_table::open(filename, mode);
+                let (current, next, nb, use_4state) = *fd_dst;
+                let val = Value::new(fd as u64, *width, false);
+                unsafe { write_native_value(current, nb, use_4state, &val) };
+                if let Some(next) = next {
+                    unsafe { write_native_value(next, nb, use_4state, &val) };
+                }
+            }
+            SystemFunctionCall::Fwrite {
+                fd,
+                format_str,
+                args,
+                newline,
+            } => {
+                let fd_val = fd.eval(mask_cache).payload_u64() as i32;
+                let values: Vec<_> = args.iter().map(|e| e.eval(mask_cache)).collect();
+                let mut s = format_output(format_str, &values);
+                if *newline {
+                    s.push('\n');
+                }
+                file_table::write(fd_val, &s);
+            }
+            SystemFunctionCall::Fclose { fd } => {
+                let fd_val = fd.eval(mask_cache).payload_u64() as i32;
+                file_table::close(fd_val);
+            }
+            SystemFunctionCall::Fflush { fd } => {
+                let fd_val = fd.as_ref().map(|e| e.eval(mask_cache).payload_u64() as i32);
+                file_table::flush(fd_val);
+            }
         }
     }
 
@@ -622,6 +669,25 @@ impl SystemFunctionCall {
                 condition.gather_variable(inputs, &mut dummy_outputs);
             }
             SystemFunctionCall::Finish => {}
+            SystemFunctionCall::Fopen { .. } => {}
+            SystemFunctionCall::Fwrite { fd, args, .. } => {
+                let mut dummy_outputs = vec![];
+                fd.gather_variable(inputs, &mut dummy_outputs);
+                for e in args {
+                    let mut dummy_outputs = vec![];
+                    e.gather_variable(inputs, &mut dummy_outputs);
+                }
+            }
+            SystemFunctionCall::Fclose { fd } => {
+                let mut dummy_outputs = vec![];
+                fd.gather_variable(inputs, &mut dummy_outputs);
+            }
+            SystemFunctionCall::Fflush { fd } => {
+                if let Some(fd) = fd {
+                    let mut dummy_outputs = vec![];
+                    fd.gather_variable(inputs, &mut dummy_outputs);
+                }
+            }
         }
     }
 }
@@ -648,6 +714,24 @@ pub enum ProtoSystemFunctionCall {
         args: Vec<ProtoExpression>,
     },
     Finish,
+    Fopen {
+        filename: String,
+        mode: String,
+        fd_dst: ReadmemhElement,
+        width: usize,
+    },
+    Fwrite {
+        fd: ProtoExpression,
+        format_str: String,
+        args: Vec<ProtoExpression>,
+        newline: bool,
+    },
+    Fclose {
+        fd: ProtoExpression,
+    },
+    Fflush {
+        fd: Option<ProtoExpression>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -841,6 +925,30 @@ impl ProtoStatement {
                     }
                 }
                 ProtoSystemFunctionCall::Finish => {}
+                ProtoSystemFunctionCall::Fopen { fd_dst, .. } => {
+                    fd_dst.current = fd_dst.current.adjust(ff_delta, comb_delta);
+                    if let Some(next) = &mut fd_dst.next_offset {
+                        *next += if fd_dst.current.is_ff() {
+                            ff_delta
+                        } else {
+                            comb_delta
+                        };
+                    }
+                }
+                ProtoSystemFunctionCall::Fwrite { fd, args, .. } => {
+                    fd.adjust_offsets(ff_delta, comb_delta);
+                    for arg in args {
+                        arg.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+                ProtoSystemFunctionCall::Fclose { fd } => {
+                    fd.adjust_offsets(ff_delta, comb_delta);
+                }
+                ProtoSystemFunctionCall::Fflush { fd } => {
+                    if let Some(fd) = fd {
+                        fd.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
             },
             ProtoStatement::CompiledBlock(_) => {
                 // CompiledBlocks use ff_delta_bytes/comb_delta_bytes at runtime.
@@ -967,6 +1075,21 @@ impl ProtoStatement {
                     }
                 }
                 ProtoSystemFunctionCall::Finish => {}
+                ProtoSystemFunctionCall::Fopen { .. } => {}
+                ProtoSystemFunctionCall::Fwrite { fd, args, .. } => {
+                    fd.gather_variable_offsets(inputs);
+                    for arg in args {
+                        arg.gather_variable_offsets(inputs);
+                    }
+                }
+                ProtoSystemFunctionCall::Fclose { fd } => {
+                    fd.gather_variable_offsets(inputs);
+                }
+                ProtoSystemFunctionCall::Fflush { fd } => {
+                    if let Some(fd) = fd {
+                        fd.gather_variable_offsets(inputs);
+                    }
+                }
             },
             ProtoStatement::CompiledBlock(x) => {
                 // Only include comb (non-FF) offsets for dependency analysis.
@@ -1081,6 +1204,21 @@ impl ProtoStatement {
                     }
                 }
                 ProtoSystemFunctionCall::Finish => {}
+                ProtoSystemFunctionCall::Fopen { .. } => {}
+                ProtoSystemFunctionCall::Fwrite { fd, args, .. } => {
+                    fd.gather_reads_with_ranges(out);
+                    for arg in args {
+                        arg.gather_reads_with_ranges(out);
+                    }
+                }
+                ProtoSystemFunctionCall::Fclose { fd } => {
+                    fd.gather_reads_with_ranges(out);
+                }
+                ProtoSystemFunctionCall::Fflush { fd } => {
+                    if let Some(fd) = fd {
+                        fd.gather_reads_with_ranges(out);
+                    }
+                }
             },
             ProtoStatement::CompiledBlock(x) => {
                 if !x.stmt_deps.is_empty() {
@@ -1189,6 +1327,21 @@ impl ProtoStatement {
                     }
                 }
                 ProtoSystemFunctionCall::Finish => {}
+                ProtoSystemFunctionCall::Fopen { .. } => {}
+                ProtoSystemFunctionCall::Fwrite { fd, args, .. } => {
+                    fd.gather_variable_offsets_expanded(inputs);
+                    for arg in args {
+                        arg.gather_variable_offsets_expanded(inputs);
+                    }
+                }
+                ProtoSystemFunctionCall::Fclose { fd } => {
+                    fd.gather_variable_offsets_expanded(inputs);
+                }
+                ProtoSystemFunctionCall::Fflush { fd } => {
+                    if let Some(fd) = fd {
+                        fd.gather_variable_offsets_expanded(inputs);
+                    }
+                }
             },
             ProtoStatement::CompiledBlock(x) => {
                 // Prefer walking the original statements so AssignDynamic /
@@ -1288,6 +1441,21 @@ impl ProtoStatement {
                     }
                 }
                 ProtoSystemFunctionCall::Finish => {}
+                ProtoSystemFunctionCall::Fopen { .. } => {}
+                ProtoSystemFunctionCall::Fwrite { fd, args, .. } => {
+                    fd.gather_dynamic_read_ranges(ranges);
+                    for arg in args {
+                        arg.gather_dynamic_read_ranges(ranges);
+                    }
+                }
+                ProtoSystemFunctionCall::Fclose { fd } => {
+                    fd.gather_dynamic_read_ranges(ranges);
+                }
+                ProtoSystemFunctionCall::Fflush { fd } => {
+                    if let Some(fd) = fd {
+                        fd.gather_dynamic_read_ranges(ranges);
+                    }
+                }
             },
             ProtoStatement::CompiledBlock(x) => {
                 // Prefer the originals so their DynamicVariable reads register
@@ -1553,6 +1721,80 @@ impl ProtoStatement {
                     }
                     ProtoSystemFunctionCall::Finish => {
                         Statement::SystemFunctionCall(SystemFunctionCall::Finish)
+                    }
+                    ProtoSystemFunctionCall::Fopen {
+                        filename,
+                        mode,
+                        fd_dst,
+                        width,
+                    } => {
+                        let nb = calc_native_bytes(*width);
+                        let current = if fd_dst.current.is_ff() {
+                            ff_values_ptr.offset(fd_dst.current.raw())
+                        } else {
+                            comb_values_ptr.offset(fd_dst.current.raw())
+                        };
+                        let next = fd_dst.next_offset.map(|off| ff_values_ptr.offset(off));
+                        Statement::SystemFunctionCall(SystemFunctionCall::Fopen {
+                            filename: filename.clone(),
+                            mode: mode.clone(),
+                            fd_dst: (current, next, nb, use_4state),
+                            width: *width,
+                        })
+                    }
+                    ProtoSystemFunctionCall::Fwrite {
+                        fd,
+                        format_str,
+                        args,
+                        newline,
+                    } => {
+                        let fd = fd.apply_values_ptr(
+                            ff_values_ptr,
+                            ff_len,
+                            comb_values_ptr,
+                            comb_len,
+                            use_4state,
+                        );
+                        let args = args
+                            .iter()
+                            .map(|a| {
+                                a.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
+                            })
+                            .collect();
+                        Statement::SystemFunctionCall(SystemFunctionCall::Fwrite {
+                            fd,
+                            format_str: format_str.clone(),
+                            args,
+                            newline: *newline,
+                        })
+                    }
+                    ProtoSystemFunctionCall::Fclose { fd } => {
+                        let fd = fd.apply_values_ptr(
+                            ff_values_ptr,
+                            ff_len,
+                            comb_values_ptr,
+                            comb_len,
+                            use_4state,
+                        );
+                        Statement::SystemFunctionCall(SystemFunctionCall::Fclose { fd })
+                    }
+                    ProtoSystemFunctionCall::Fflush { fd } => {
+                        let fd = fd.as_ref().map(|fd| {
+                            fd.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            )
+                        });
+                        Statement::SystemFunctionCall(SystemFunctionCall::Fflush { fd })
                     }
                 },
                 ProtoStatement::CompiledBlock(x) => {
@@ -2217,10 +2459,76 @@ fn extract_string_value(expr: &air::Expression) -> Option<String> {
     None
 }
 
+/// Match a `$fopen(filename[, mode])` assignment RHS so `let fd = $fopen(...)`
+/// can lower to a `Fopen` statement. Returns (filename, mode); mode defaults to "w".
+fn try_match_fopen(expr: &air::Expression) -> Option<(String, String)> {
+    let air::Expression::Term(factor) = expr else {
+        return None;
+    };
+    let air::Factor::SystemFunctionCall(call) = factor.as_ref() else {
+        return None;
+    };
+    let SystemFunctionKind::Fopen { filename, mode } = &call.kind else {
+        return None;
+    };
+    let filename = extract_string_value(&filename.0)?
+        .trim_matches('"')
+        .to_string();
+    let mode = match mode {
+        Some(mode) => extract_string_value(&mode.0)?.trim_matches('"').to_string(),
+        None => "w".to_string(),
+    };
+    Some((filename, mode))
+}
+
+/// Resolve a `let fd = $fopen(...)` destination to its (offsets, width), but
+/// only for a single whole-variable scalar. Returns None for indexed,
+/// bit-selected, or non-scalar targets so the caller falls back to a normal
+/// assign instead of mis-writing the descriptor or indexing out of bounds.
+fn fopen_dst(context: &mut Context, x: &air::AssignStatement) -> Option<(ReadmemhElement, usize)> {
+    if x.dst.len() != 1 {
+        return None;
+    }
+    let dst = &x.dst[0];
+    // fd must be a plain whole variable: reject array-index and bit-select.
+    if !dst.index.0.is_empty() || !dst.select.0.is_empty() || dst.select.1.is_some() {
+        return None;
+    }
+    let meta = context.scope().variable_meta.get(&dst.id)?;
+    if meta.elements.len() != 1 {
+        return None;
+    }
+    let elem = &meta.elements[0];
+    let fd_dst = ReadmemhElement {
+        current: elem.current,
+        next_offset: if elem.is_ff() {
+            Some(elem.next_offset)
+        } else {
+            None
+        },
+    };
+    Some((fd_dst, meta.width))
+}
+
 impl Conv<&air::Statement> for Vec<ProtoStatement> {
     fn conv(context: &mut Context, src: &air::Statement) -> Result<Self, SimulatorError> {
         let mut result = match src {
-            air::Statement::Assign(x) => Conv::conv(context, x)?,
+            air::Statement::Assign(x) => {
+                if let Some((filename, mode)) = try_match_fopen(&x.expr)
+                    && let Some((fd_dst, width)) = fopen_dst(context, x)
+                {
+                    vec![ProtoStatement::SystemFunctionCall(
+                        ProtoSystemFunctionCall::Fopen {
+                            filename,
+                            mode,
+                            fd_dst,
+                            width,
+                        },
+                    )]
+                } else {
+                    Conv::conv(context, x)?
+                }
+            }
             air::Statement::FunctionCall(x) => Conv::conv(context, x.as_ref())?,
             air::Statement::If(x) => {
                 let x: ProtoIfStatement = Conv::conv(context, x)?;
@@ -2301,6 +2609,33 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                 SystemFunctionKind::Finish => {
                     vec![ProtoStatement::SystemFunctionCall(
                         ProtoSystemFunctionCall::Finish,
+                    )]
+                }
+                SystemFunctionKind::Fwrite { fd, args, newline } => {
+                    let fd_expr: ProtoExpression = Conv::conv(context, &fd.0)?;
+                    let (format_str, exprs) = extract_display_args(context, args).unwrap();
+                    vec![ProtoStatement::SystemFunctionCall(
+                        ProtoSystemFunctionCall::Fwrite {
+                            fd: fd_expr,
+                            format_str,
+                            args: exprs,
+                            newline: *newline,
+                        },
+                    )]
+                }
+                SystemFunctionKind::Fclose(fd) => {
+                    let fd_expr: ProtoExpression = Conv::conv(context, &fd.0)?;
+                    vec![ProtoStatement::SystemFunctionCall(
+                        ProtoSystemFunctionCall::Fclose { fd: fd_expr },
+                    )]
+                }
+                SystemFunctionKind::Fflush(fd) => {
+                    let fd_expr: Option<ProtoExpression> = match fd {
+                        Some(fd) => Some(Conv::conv(context, &fd.0)?),
+                        None => None,
+                    };
+                    vec![ProtoStatement::SystemFunctionCall(
+                        ProtoSystemFunctionCall::Fflush { fd: fd_expr },
                     )]
                 }
                 _ => {

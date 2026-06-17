@@ -81,6 +81,20 @@ pub enum SystemFunctionKind {
     Finish,
     Signed(Input),
     Unsigned(Input),
+    /// `$fopen(filename[, mode])` — returns a u32 file descriptor.
+    Fopen {
+        filename: Input,
+        mode: Option<Input>,
+    },
+    /// `$fwrite(fd, ...)` (`newline=false`) / `$fdisplay(fd, ...)` (`newline=true`).
+    Fwrite {
+        fd: Input,
+        args: Vec<Input>,
+        newline: bool,
+    },
+    Fclose(Input),
+    /// `$fflush([fd])` — flush one descriptor, or all when `None`.
+    Fflush(Option<Input>),
 }
 
 fn create_input(
@@ -308,6 +322,96 @@ impl SystemFunctionCall {
                     comptime,
                 })
             }
+            "$fopen" => {
+                if args.is_empty() || args.len() > 2 {
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        "$fopen",
+                        2,
+                        args.len(),
+                        &token,
+                    ));
+                    return Err(ir_error!(token));
+                }
+                let filename = create_input(context, name, None, args.remove(0));
+                let mode = if args.is_empty() {
+                    None
+                } else {
+                    Some(create_input(context, name, None, args.remove(0)))
+                };
+                // `$fopen` returns a u32 file descriptor evaluated at runtime.
+                comptime.is_const = false;
+                comptime.r#type = {
+                    // u32 fd: ir collapses u32 to Bit; Type::new defaults to unsigned.
+                    let mut t = Type::new(TypeKind::Bit);
+                    t.set_concrete_width(Shape::new(vec![Some(32)]));
+                    t
+                };
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Fopen { filename, mode },
+                    comptime,
+                })
+            }
+            "$fwrite" | "$fdisplay" => {
+                if args.is_empty() {
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        &name.to_string(),
+                        1,
+                        0,
+                        &token,
+                    ));
+                    return Err(ir_error!(token));
+                }
+                let newline = name.to_string() == "$fdisplay";
+                let fd = create_input(context, name, None, args.remove(0));
+                let rest: Vec<Input> = args
+                    .into_iter()
+                    .map(|arg| create_input(context, name, None, arg))
+                    .collect();
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Fwrite {
+                        fd,
+                        args: rest,
+                        newline,
+                    },
+                    comptime,
+                })
+            }
+            "$fclose" => {
+                if args.len() != 1 {
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        "$fclose",
+                        1,
+                        args.len(),
+                        &token,
+                    ));
+                    return Err(ir_error!(token));
+                }
+                let fd = create_input(context, name, None, args.remove(0));
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Fclose(fd),
+                    comptime,
+                })
+            }
+            "$fflush" => {
+                if args.len() > 1 {
+                    context.insert_error(AnalyzerError::mismatch_function_arity(
+                        "$fflush",
+                        1,
+                        args.len(),
+                        &token,
+                    ));
+                    return Err(ir_error!(token));
+                }
+                let fd = if args.is_empty() {
+                    None
+                } else {
+                    Some(create_input(context, name, None, args.remove(0)))
+                };
+                Ok(SystemFunctionCall {
+                    kind: SystemFunctionKind::Fflush(fd),
+                    comptime,
+                })
+            }
             "$signed" => {
                 if args.len() != 1 {
                     return Err(ir_error!(token));
@@ -394,6 +498,10 @@ impl SystemFunctionCall {
             SystemFunctionKind::Write(_) => None,
             SystemFunctionKind::Assert { .. } => None,
             SystemFunctionKind::Finish => None,
+            SystemFunctionKind::Fopen { .. }
+            | SystemFunctionKind::Fwrite { .. }
+            | SystemFunctionKind::Fclose(_)
+            | SystemFunctionKind::Fflush(_) => None,
             SystemFunctionKind::Signed(x) | SystemFunctionKind::Unsigned(x) => {
                 x.0.eval_value(context)
             }
@@ -418,6 +526,10 @@ impl SystemFunctionCall {
             SystemFunctionKind::Write(_) => self.comptime.clone(),
             SystemFunctionKind::Assert { .. } => self.comptime.clone(),
             SystemFunctionKind::Finish => self.comptime.clone(),
+            SystemFunctionKind::Fopen { .. }
+            | SystemFunctionKind::Fwrite { .. }
+            | SystemFunctionKind::Fclose(_)
+            | SystemFunctionKind::Fflush(_) => self.comptime.clone(),
             SystemFunctionKind::Signed(_) | SystemFunctionKind::Unsigned(_) => {
                 let mut ret = self.comptime.clone();
                 if let Some(x) = value {
@@ -470,6 +582,24 @@ impl fmt::Display for SystemFunctionCall {
             SystemFunctionKind::Finish => "$finish()".fmt(f),
             SystemFunctionKind::Signed(x) => format!("$signed({x})").fmt(f),
             SystemFunctionKind::Unsigned(x) => format!("$unsigned({x})").fmt(f),
+            SystemFunctionKind::Fopen { filename, mode } => match mode {
+                Some(mode) => format!("$fopen({filename}, {mode})").fmt(f),
+                None => format!("$fopen({filename})").fmt(f),
+            },
+            SystemFunctionKind::Fwrite { fd, args, newline } => {
+                let name = if *newline { "$fdisplay" } else { "$fwrite" };
+                if args.is_empty() {
+                    format!("{name}({fd})").fmt(f)
+                } else {
+                    let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
+                    format!("{name}({fd}, {})", args_str.join(", ")).fmt(f)
+                }
+            }
+            SystemFunctionKind::Fclose(fd) => format!("$fclose({fd})").fmt(f),
+            SystemFunctionKind::Fflush(fd) => match fd {
+                Some(fd) => format!("$fflush({fd})").fmt(f),
+                None => "$fflush()".fmt(f),
+            },
         }
     }
 }
@@ -510,6 +640,23 @@ impl SystemFunctionCall {
                 }
             }
             SystemFunctionKind::Finish => {}
+            SystemFunctionKind::Fopen { .. } => {
+                // fd is bound by the enclosing assignment; filename/mode are const.
+            }
+            SystemFunctionKind::Fwrite { fd, args, .. } => {
+                process_input(fd, context, table);
+                for arg in args {
+                    process_input(arg, context, table);
+                }
+            }
+            SystemFunctionKind::Fclose(fd) => {
+                process_input(fd, context, table);
+            }
+            SystemFunctionKind::Fflush(fd) => {
+                if let Some(fd) = fd {
+                    process_input(fd, context, table);
+                }
+            }
         }
     }
 }

@@ -75,8 +75,8 @@ module Module49 {
         a = $exp();
         a = $falling_gclk();
         a = $fatal();
-        a = $fclose();
-        a = $fdisplay();
+        a = $fclose(a);
+        a = $fdisplay(a);
         a = $fdisplayb();
         a = $fdisplayh();
         a = $fdisplayo();
@@ -93,7 +93,7 @@ module Module49 {
         a = $fmonitorb();
         a = $fmonitorh();
         a = $fmonitoro();
-        a = $fopen();
+        a = $fopen("file");
         a = $fread();
         a = $fscanf();
         a = $fseek();
@@ -103,7 +103,7 @@ module Module49 {
         a = $fstrobeo();
         a = $ftell();
         a = $future_gclk();
-        a = $fwrite();
+        a = $fwrite(a);
         a = $fwriteb();
         a = $fwriteh();
         a = $fwriteo();
