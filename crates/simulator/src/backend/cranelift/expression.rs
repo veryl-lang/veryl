@@ -2909,39 +2909,36 @@ impl ProtoExpression {
         };
         let cond_nz = icmp_const(builder, IntCC::NotEqual, effective_cond, 0, cond_wide);
 
-        // Ensure both branches are wide pointers
-        let true_ptr = if is_wide_ptr(true_expr.width()) {
-            true_payload
-        } else {
-            ensure_wide_ptr_val(builder, true_payload, true_expr.width(), nb)
-        };
-        let false_ptr = if is_wide_ptr(false_expr.width()) {
-            false_payload
-        } else {
-            ensure_wide_ptr_val(builder, false_payload, false_expr.width(), nb)
-        };
+        // Materialize a branch as a wide pointer for `emit_wide_select`, deciding
+        // pointer-vs-scalar by the ACTUAL value (`returns_wide_pointer`), not
+        // `is_wide_ptr(width())`: a Binary whose `width` FIELD exceeds its
+        // evaluation width (a narrowing `as`/slice keeps an operand in wide
+        // storage) builds a SCALAR despite `width() > 128`. Trusting the field
+        // would deref that scalar as a pointer → SIGSEGV. Force-store a scalar
+        // into a fresh zeroed slot.
+        let to_wide_ptr =
+            |builder: &mut FunctionBuilder, expr: &ProtoExpression, val: CraneliftValue| {
+                if returns_wide_pointer(expr) {
+                    val
+                } else {
+                    let slot = alloc_wide_zero(builder, nb);
+                    builder.ins().store(MemFlagsData::trusted(), val, slot, 0);
+                    slot
+                }
+            };
+
+        let true_ptr = to_wide_ptr(builder, true_expr, true_payload);
+        let false_ptr = to_wide_ptr(builder, false_expr, false_payload);
 
         let payload = emit_wide_select(builder, cond_nz, true_ptr, false_ptr, nb);
 
         // 4-state
         let mask_xz = if context.use_4state {
             let t_xz = true_mask_xz
-                .map(|m| {
-                    if is_wide_ptr(true_expr.width()) {
-                        m
-                    } else {
-                        ensure_wide_ptr_val(builder, m, true_expr.width(), nb)
-                    }
-                })
+                .map(|m| to_wide_ptr(builder, true_expr, m))
                 .unwrap_or_else(|| alloc_wide_zero(builder, nb));
             let f_xz = false_mask_xz
-                .map(|m| {
-                    if is_wide_ptr(false_expr.width()) {
-                        m
-                    } else {
-                        ensure_wide_ptr_val(builder, m, false_expr.width(), nb)
-                    }
-                })
+                .map(|m| to_wide_ptr(builder, false_expr, m))
                 .unwrap_or_else(|| alloc_wide_zero(builder, nb));
             Some(emit_wide_select(builder, cond_nz, t_xz, f_xz, nb))
         } else {
