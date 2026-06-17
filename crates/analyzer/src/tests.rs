@@ -1899,6 +1899,67 @@ fn invalid_statement() {
 }
 
 #[test]
+fn invalid_for_range() {
+    let code = r#"
+    module ModuleA {
+        always_comb {
+            for i in 4 {
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidForRange { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        for i in 4 :blk {
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidForRange { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            var acc: logic<32>;
+            acc = 0;
+            for i in 0..4 {
+                acc += i;
+            }
+            for j in 0..=4 {
+                acc += j;
+            }
+            o = acc;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidForRange { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn invalid_modport_item() {
     let code = r#"
     interface InterfaceA {
