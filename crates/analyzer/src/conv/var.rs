@@ -148,6 +148,7 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
                     let op = Conv::conv(context, x.select_operator.as_ref())?;
                     let mut expr = Conv::conv(context, x.expression.as_ref())?;
                     check_select_type(context, &mut expr, &x.expression);
+                    check_part_select_width(context, &op, &expr, &x.expression);
                     end = Some((op, expr));
                 }
                 context.inc_select_dim();
@@ -221,6 +222,7 @@ impl Conv<&HierarchicalIdentifier> for VarPathSelect {
                     let op = Conv::conv(context, x.select_operator.as_ref())?;
                     let mut expr = Conv::conv(context, x.expression.as_ref())?;
                     check_select_type(context, &mut expr, &x.expression);
+                    check_part_select_width(context, &op, &expr, &x.expression);
                     end = Some((op, expr));
                 }
             }

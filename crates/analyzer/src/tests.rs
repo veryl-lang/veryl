@@ -10992,6 +10992,86 @@ fn invalid_select() {
 }
 
 #[test]
+fn non_constant_select_width_on_struct_member() {
+    // Regression: the member-access select loops skipped
+    // check_part_select_width, so `p.data[0+:i_w]` with a runtime width
+    // passed the build and emitted illegal SystemVerilog.
+    let code = r#"
+    module ModuleA (
+        i_w: input  logic<3>,
+        i_d: input  logic<8>,
+        o_d: output logic<4>,
+    ) {
+        struct Pair {
+            data: logic<8>,
+        }
+        var p: Pair;
+        always_comb {
+            p.data = i_d;
+            o_d = p.data[0+:i_w] as 4;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. })),
+        "{errors:?}"
+    );
+
+    // LHS variant.
+    let code = r#"
+    module ModuleA (
+        i_w: input  logic<3>,
+        i_d: input  logic<8>,
+        o_d: output logic<8>,
+    ) {
+        struct Pair {
+            data: logic<8>,
+        }
+        var p: Pair;
+        always_comb {
+            p.data = 0;
+            p.data[0+:i_w] = i_d as 8;
+            o_d = p.data;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. })),
+        "{errors:?}"
+    );
+
+    // Constant widths on member selects stay accepted.
+    let code = r#"
+    module ModuleA (
+        i_d: input  logic<8>,
+        o_d: output logic<4>,
+    ) {
+        struct Pair {
+            data: logic<8>,
+        }
+        var p: Pair;
+        always_comb {
+            p.data = i_d;
+            o_d = p.data[0+:4];
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn deeply_nested_statements_report_exceed_limit() {
     // Regression: deeply nested `if` statements overflowed the stack (the
     // expression-depth limit covered expressions only).  200 levels is past
