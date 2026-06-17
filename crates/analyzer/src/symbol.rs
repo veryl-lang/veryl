@@ -2627,6 +2627,7 @@ pub struct EnumProperty {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EnumMemberValue {
+    Unresolved,
     ImplicitValue(BigUint),
     ExplicitValue(syntax_tree::Expression, Option<BigUint>),
     UnevaluableValue,
@@ -2635,6 +2636,7 @@ pub enum EnumMemberValue {
 impl EnumMemberValue {
     pub fn value(&self) -> Option<&BigUint> {
         match self {
+            EnumMemberValue::Unresolved => None,
             EnumMemberValue::ImplicitValue(value) => Some(value),
             EnumMemberValue::ExplicitValue(_expression, evaluated) => evaluated.as_ref(),
             EnumMemberValue::UnevaluableValue => None,

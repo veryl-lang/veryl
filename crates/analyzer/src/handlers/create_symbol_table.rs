@@ -1,4 +1,3 @@
-use crate::BigUint;
 use crate::analyzer_error::{
     AnalyzerError, DuplicatedIdentifierKind, InvalidModifierKind, InvalidTestKind,
     MultipleDefaultKind,
@@ -1413,7 +1412,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let value = if let Some(x) = &arg.enum_item_opt {
                 EnumMemberValue::ExplicitValue(x.expression.as_ref().clone(), None)
             } else {
-                EnumMemberValue::ImplicitValue(BigUint::from(0u32))
+                EnumMemberValue::Unresolved
             };
 
             let prefix = self.enum_member_prefix.clone().unwrap();

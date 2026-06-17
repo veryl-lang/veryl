@@ -11072,6 +11072,94 @@ fn non_constant_select_width_on_struct_member() {
 }
 
 #[test]
+fn enum_xz_variant_checks() {
+    // Regression: a variant value containing any x/z bit bypassed the
+    // too-large and width-inference checks (8'b1111111x in a 2-bit enum was
+    // silently truncated).
+    let code = r#"
+    module Top {
+        enum Foo: logic<2> {
+            A = 8'b1111111x,
+        }
+        var _v: Foo;
+        assign _v = Foo::A;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::TooLargeEnumVariant { .. })),
+        "{errors:?}"
+    );
+
+    // Fitting x values stay accepted.
+    let code = r#"
+    module Top {
+        enum Foo: logic<2> {
+            A = 2'b1x,
+            B = 2'b00,
+        }
+        var _v: Foo;
+        assign _v = Foo::B;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::TooLargeEnumVariant { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn enum_forward_reference_rejected() {
+    // Regression: a bare-name forward reference between variants read the
+    // stale ImplicitValue(0) placeholder, baking inconsistent values into
+    // the checks (false duplicate against the phantom value) and emitting
+    // SV with a forward reference.
+    let code = r#"
+    module Top {
+        enum Foo: logic<8> {
+            A = B + 1,
+            B,
+            C = 1,
+        }
+        var _v: logic<8>;
+        assign _v = Foo::C;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ReferringBeforeDefinition { .. })),
+        "{errors:?}"
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicateEnumVariant { .. })),
+        "no false duplicate: {errors:?}"
+    );
+
+    // Backward references stay accepted.
+    let code = r#"
+    module Top {
+        enum Foo: logic<8> {
+            A,
+            B = A + 4,
+        }
+        var _v: logic<8>;
+        assign _v = Foo::B;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn deeply_nested_statements_report_exceed_limit() {
     // Regression: deeply nested `if` statements overflowed the stack (the
     // expression-depth limit covered expressions only).  200 levels is past
