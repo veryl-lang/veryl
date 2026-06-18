@@ -659,6 +659,23 @@ impl Conv<&VarDeclaration> for ir::Declaration {
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
             let clock_domain = x.clock_domain;
 
+            // A `$tb::file` handle is never assigned (its descriptor lives in
+            // the simulator's file table), so suppress the unassigned lint as
+            // the `inst` $tb forms do.
+            if let crate::symbol::TypeKind::UserDefined(ref ud) = x.r#type.kind
+                && let Ok(ty_symbol) =
+                    symbol_table::resolve((&ud.path.mangled_path(), &symbol.found.namespace))
+                && matches!(
+                    &ty_symbol.found.kind,
+                    SymbolKind::TbComponent(c) if matches!(c.kind, TbComponentKind::File)
+                )
+            {
+                attribute_table::insert(
+                    variable_token,
+                    Attribute::Allow(AllowItem::UnassignVariable),
+                );
+            }
+
             eval_variable(context, &path, kind, &r#type, clock_domain, variable_token);
             Ok(ir::Declaration::Null)
         } else {
@@ -1285,6 +1302,17 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 return Ok(ir::Declaration::Null);
             }
 
+            // `$tb::file` is declared with `var`, not `inst`.
+            if matches!(tb_prop.kind, TbComponentKind::File) {
+                let token: TokenRange = value
+                    .component_instantiation
+                    .scoped_identifier
+                    .as_ref()
+                    .into();
+                context.insert_error(AnalyzerError::invalid_tb_usage(&token));
+                return Ok(ir::Declaration::Null);
+            }
+
             // Generate clock/reset variable for $tb component instances
             let inst_token: TokenRange = value.component_instantiation.identifier.as_ref().into();
             let inst_name = value
@@ -1297,6 +1325,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
             let type_kind = match tb_prop.kind {
                 TbComponentKind::ClockGen => ir::TypeKind::Clock,
                 TbComponentKind::ResetGen => ir::TypeKind::Reset,
+                // Rejected above: `$tb::file` cannot be instantiated with `inst`.
+                TbComponentKind::File => unreachable!(),
             };
             let ir_type = {
                 let mut t = ir::Type::new(type_kind);
@@ -1366,6 +1396,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             let type_name = match tb_prop.kind {
                                 TbComponentKind::ClockGen => "$tb::clock_gen",
                                 TbComponentKind::ResetGen => "$tb::reset_gen",
+                                // Rejected above: `$tb::file` is not an `inst`.
+                                TbComponentKind::File => unreachable!(),
                             };
                             context.insert_error(AnalyzerError::unknown_tb_port(
                                 type_name,

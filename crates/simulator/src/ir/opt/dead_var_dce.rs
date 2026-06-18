@@ -28,7 +28,9 @@
 //! Default ON; opt out via `VERYL_DEAD_VAR_DCE=0`.
 
 use crate::HashSet;
-use crate::ir::statement::{ProtoForBound, ProtoForRange, ProtoSystemFunctionCall};
+use crate::ir::statement::{
+    ProtoForBound, ProtoForRange, ProtoSystemFunctionCall, ProtoTbMethodKind,
+};
 use crate::ir::{ProtoExpression, ProtoStatement, VarOffset};
 use std::sync::OnceLock;
 
@@ -251,7 +253,33 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
                 walk_stmt_liveness(s, c);
             }
         }
-        ProtoStatement::TbMethodCall { .. } => {}
+        ProtoStatement::TbMethodCall { method, .. } => match method {
+            // `f.write(fmt, args...)` reads its argument signals, exactly like
+            // `$display`/`$write`. Without this, a comb value read only by a
+            // file write is seen as unread and its writer is dropped, so the
+            // file records a stale value.
+            ProtoTbMethodKind::FileWrite { args, .. } => {
+                for a in args {
+                    walk_expr_reads(a, c);
+                }
+            }
+            ProtoTbMethodKind::ClockNext { count, period } => {
+                if let Some(e) = count {
+                    walk_expr_reads(e, c);
+                }
+                if let Some(e) = period {
+                    walk_expr_reads(e, c);
+                }
+            }
+            ProtoTbMethodKind::ResetAssert { duration, .. } => {
+                if let Some(e) = duration {
+                    walk_expr_reads(e, c);
+                }
+            }
+            ProtoTbMethodKind::FileOpen { .. }
+            | ProtoTbMethodKind::FileClose
+            | ProtoTbMethodKind::FileFlush => {}
+        },
         ProtoStatement::Break => {}
     }
 }

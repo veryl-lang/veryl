@@ -1869,3 +1869,276 @@ fn wavedrom_wide_output_high_bit_mismatch_fails() {
         );
     }
 }
+
+#[test]
+fn tb_file_analyze() {
+    // `var f: $tb::file` and its methods must pass the analyzer in a test module.
+    symbol_table::clear();
+    let code = r#"
+    #[test(test_file)]
+    module test_file {
+        var f: $tb::file;
+        initial {
+            f.open("out.txt");
+            f.write("x=%d", 8'd1);
+            f.flush();
+            f.close();
+            f.append("out.txt");
+            f.write("more");
+            f.close();
+            $finish();
+        }
+    }
+    "#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+
+    let mut errors = vec![];
+    let mut ir = air::Ir::default();
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+
+    let errors: Vec<_> = errors
+        .drain(0..)
+        .filter(|x| !matches!(x, AnalyzerError::InvalidLogicalOperand { .. }))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "Expected no analyzer errors, got: {errors:?}"
+    );
+}
+
+#[test]
+fn tb_file_requires_test_module() {
+    // `$tb::file` is testbench-only: declaring it outside a `#[test]` module
+    // must raise invalid_tb_usage.
+    symbol_table::clear();
+    let code = r#"
+    module Plain {
+        var f: $tb::file;
+    }
+    "#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+
+    let mut errors = vec![];
+    let mut ir = air::Ir::default();
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidTbUsage { .. })),
+        "Expected InvalidTbUsage, got: {errors:?}"
+    );
+}
+
+#[test]
+fn tb_file_native() {
+    // Full native-testbench path for the `$tb::file` handle: open/write/close
+    // plus append + flush, checking the file's exact contents.
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_tb_file_native.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    #[test(test_file)]
+    module test_file {{
+        var f: $tb::file;
+        initial {{
+            f.open("{0}");
+            f.write("hex=%h dec=%d\n", 8'hAB, 8'd42);
+            f.write("plain\n");
+            f.close();
+            f.append("{0}");
+            f.write("appended\n");
+            f.flush();
+            f.close();
+            $finish();
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    for config in Config::all() {
+        let _ = std::fs::remove_file(&out_path);
+        let ir = match analyze_top(&code, &config, "test_file") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let mut sim = Simulator::new(ir, None);
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+        let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
+        if let Some(stmts) = initial_stmts {
+            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+            let result = run_testbench(&mut sim, &tb_stmts);
+            assert_eq!(result, TestResult::Pass);
+        } else {
+            panic!("No initial block found");
+        }
+        let content = std::fs::read_to_string(&out_path).unwrap();
+        assert_eq!(content, "hex=ab dec=42\nplain\nappended\n");
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
+#[test]
+fn tb_file_write_without_open_is_dropped() {
+    // write/flush/close on a handle that was never opened are silent no-ops
+    // (no panic), matching SystemVerilog's write to an invalid descriptor.
+    let code = r#"
+    #[test(test_file)]
+    module test_file {
+        var f: $tb::file;
+        initial {
+            f.write("dropped %d\n", 8'd1);
+            f.flush();
+            f.close();
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_file") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let mut sim = Simulator::new(ir, None);
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+        let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
+        if let Some(stmts) = initial_stmts {
+            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+            // The run completes without panicking; the write is dropped.
+            let result = run_testbench(&mut sim, &tb_stmts);
+            assert_eq!(result, TestResult::Pass);
+        } else {
+            panic!("No initial block found");
+        }
+    }
+}
+
+#[test]
+fn tb_file_write_keeps_comb_read_only_by_write() {
+    // Regression: a value read ONLY by `f.write` must survive dead-variable DCE
+    // (default ON). Before the fix, the write's arg signals were not counted as
+    // reads, so `cnt`'s driver was dropped and the file recorded a stale value.
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_tb_file_dce.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module DceDut (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<8>,
+    ) {{
+        always_ff {{
+            if_reset {{ cnt = 0; }}
+            else {{ cnt += 1; }}
+        }}
+    }}
+
+    #[test(test_dce)]
+    module test_dce {{
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+        var f: $tb::file;
+        var cnt: logic<8>;
+        inst dut: DceDut (clk, rst, cnt);
+        // `dbg` is a `let`-bound local (DCE candidate) read ONLY by `f.write` —
+        // the exact shape DCE drops if the write's args are not counted as reads.
+        let dbg: logic<8> = cnt + 1;
+        initial {{
+            rst.assert();
+            clk.next(5);
+            f.open("{0}");
+            f.write("%d", dbg);
+            f.close();
+            $finish();
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    for config in Config::all() {
+        let _ = std::fs::remove_file(&out_path);
+        let ir = match analyze_top(&code, &config, "test_dce") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let mut sim = Simulator::new(ir, None);
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+        let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
+        if let Some(stmts) = initial_stmts {
+            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+            let result = run_testbench(&mut sim, &tb_stmts);
+            assert_eq!(result, TestResult::Pass);
+        } else {
+            panic!("No initial block found");
+        }
+        // `dbg` (= cnt + 1) is read only by `f.write`; it must survive DCE.
+        // cnt = 5 after 5 cycles, so dbg = 6.
+        let content = std::fs::read_to_string(&out_path).unwrap();
+        assert_eq!(content.trim(), "6", "config {config:?}");
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
+#[test]
+fn tb_file_misuse_diagnostics() {
+    // `x as $tb::file` is a type error (not a cast target), and `f.open()` with
+    // no filename is an arity error — both must be clean diagnostics.
+    symbol_table::clear();
+    let code = r#"
+    #[test(test_misuse)]
+    module test_misuse {
+        var f: $tb::file;
+        let y: bit<32> = 1 as $tb::file;
+        initial {
+            f.open();
+            $finish();
+        }
+    }
+    "#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+
+    let mut errors = vec![];
+    let mut ir = air::Ir::default();
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchType { .. })),
+        "expected a type error for `as $tb::file`, got: {errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchFunctionArity { .. })),
+        "expected an arity error for `f.open()`, got: {errors:?}"
+    );
+}
