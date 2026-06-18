@@ -587,14 +587,14 @@ mod tests {
 
         let mask = ValueBigUint::gen_mask_range(10, 1);
         let ret = table.insert_assign(&variable, vec![], mask, false, TokenRange::default());
-        assert_eq!(ret.0, true);
+        assert!(ret.0);
 
         let mask = ValueBigUint::gen_mask_range(20, 11);
         let ret = table.insert_assign(&variable, vec![], mask, false, TokenRange::default());
-        assert_eq!(ret.0, true);
+        assert!(ret.0);
 
         let mask = ValueBigUint::gen_mask_range(14, 8);
         let ret = table.insert_assign(&variable, vec![], mask, false, TokenRange::default());
-        assert_eq!(ret.0, false);
+        assert!(!ret.0);
     }
 }

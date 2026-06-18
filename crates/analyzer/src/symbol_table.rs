@@ -2371,9 +2371,9 @@ mod tests {
 
     fn parse() {
         let metadata = Metadata::create_default("prj").unwrap();
-        let parser = Parser::parse(&CODE, &"").unwrap();
+        let parser = Parser::parse(CODE, &"").unwrap();
         let analyzer = Analyzer::new(&metadata);
-        analyzer.analyze_pass1(&"prj", &parser.veryl);
+        analyzer.analyze_pass1("prj", &parser.veryl);
     }
 
     #[track_caller]

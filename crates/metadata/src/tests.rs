@@ -5,11 +5,11 @@ use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
-const GIT_IGNORE: &'static str = r#"
+const GIT_IGNORE: &str = r#"
 Veryl.lock
 "#;
 
-const TEST_TOML: &'static str = r#"
+const TEST_TOML: &str = r#"
 [project]
 name = "test"
 version = "0.1.0"
@@ -25,7 +25,7 @@ target = {type = "source"}
 indent_width = 4
 "#;
 
-const MAIN_TOML: &'static str = r#"
+const MAIN_TOML: &str = r#"
 [project]
 name = "main"
 version = "0.1.0"
@@ -39,7 +39,7 @@ sub4   = {path = "../sub4"}
 sub6   = {path = "../sub6"}
 "#;
 
-const SUB1_TOML: &'static str = r#"
+const SUB1_TOML: &str = r#"
 [project]
 name = "sub1"
 version = "0.1.0"
@@ -52,7 +52,7 @@ publish_commit = true
 sub2 = {git = "file://{}/sub2", version = "1.0.0"}
 "#;
 
-const SUB2_TOML: &'static str = r#"
+const SUB2_TOML: &str = r#"
 [project]
 name = "sub2"
 version = "0.1.0"
@@ -62,7 +62,7 @@ bump_commit = true
 publish_commit = true
 "#;
 
-const SUB3_TOML: &'static str = r#"
+const SUB3_TOML: &str = r#"
 [project]
 name = "sub3"
 version = "0.1.0"
@@ -75,7 +75,7 @@ publish_commit = true
 sub1 = {git = "file://{}/sub1", version = "0.1.0"}
 "#;
 
-const SUB4_TOML: &'static str = r#"
+const SUB4_TOML: &str = r#"
 [project]
 name = "sub4"
 version = "0.4.0"
@@ -89,7 +89,7 @@ sub5 = {path = "./sub5"}
 sub6 = {path = "../sub6"}
 "#;
 
-const SUB5_TOML: &'static str = r#"
+const SUB5_TOML: &str = r#"
 [project]
 name = "sub5"
 version = "0.5.0"
@@ -99,7 +99,7 @@ bump_commit = true
 publish_commit = true
 "#;
 
-const SUB6_TOML: &'static str = r#"
+const SUB6_TOML: &str = r#"
 [project]
 name = "sub6"
 version = "0.6.0"
@@ -129,7 +129,7 @@ fn create_metadata_multi() -> (Metadata, TempDir) {
     (metadata, tempdir)
 }
 
-const INNER_A_TOML: &'static str = r#"
+const INNER_A_TOML: &str = r#"
 [project]
 name = "inner_a"
 version = "0.1.0"
@@ -139,7 +139,7 @@ bump_commit = true
 publish_commit = true
 "#;
 
-const INNER_B_TOML: &'static str = r#"
+const INNER_B_TOML: &str = r#"
 [project]
 name = "inner_b"
 version = "0.1.0"
@@ -178,7 +178,7 @@ fn create_metadata_inner_repo() -> (Metadata, TempDir) {
     git.add(&gitignore_path).unwrap();
     git.add(&a_toml_path).unwrap();
     git.add(&b_toml_path).unwrap();
-    git.commit(&"Add inner projects").unwrap();
+    git.commit("Add inner projects").unwrap();
 
     let mut a_metadata = Metadata::load(&a_toml_path).unwrap();
     a_metadata.publish().unwrap();
@@ -215,7 +215,7 @@ fn create_project(root: &Path, name: &str, toml: &str, publish: bool) -> Metadat
     let toml_path = path.join("Veryl.toml");
     fs::write(
         &toml_path,
-        &toml.replace("{}", &root.to_string_lossy().replace("\\", "/")),
+        toml.replace("{}", &root.to_string_lossy().replace("\\", "/")),
     )
     .unwrap();
     let git_ignore_path = path.join(".gitignore");
@@ -223,7 +223,7 @@ fn create_project(root: &Path, name: &str, toml: &str, publish: bool) -> Metadat
     let git = Git::init(&path).unwrap();
     git.add(&toml_path).unwrap();
     git.add(&git_ignore_path).unwrap();
-    git.commit(&"Add Veryl.toml").unwrap();
+    git.commit("Add Veryl.toml").unwrap();
     let mut metadata = Metadata::load(&toml_path).unwrap();
     if publish {
         metadata.publish().unwrap();

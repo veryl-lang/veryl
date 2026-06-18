@@ -5,13 +5,13 @@ use veryl_parser::Parser;
 
 #[track_caller]
 fn format(metadata: &Metadata, code: &str) -> String {
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(metadata);
     let mut context = Context::default();
 
-    analyzer.analyze_pass1(&"prj", &parser.veryl);
+    analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None);
+    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, None);
 
     let mut formatter = Formatter::new(metadata);
     formatter.format(&parser.veryl, code);
@@ -31,7 +31,7 @@ fn empty_body_with_comment() {
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = format(&metadata, &code);
+    let ret = format(&metadata, code);
     assert_eq!(ret, expect);
 
     let code = r#"module ModuleA {
@@ -47,7 +47,7 @@ fn empty_body_with_comment() {
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = format(&metadata, &code);
+    let ret = format(&metadata, code);
     assert_eq!(ret, expect);
 
     let code = r#"module ModuleA {
@@ -63,7 +63,7 @@ fn empty_body_with_comment() {
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = format(&metadata, &code);
+    let ret = format(&metadata, code);
     assert_eq!(ret, expect);
 }
 
@@ -111,7 +111,7 @@ module ModuleB {
 
     let metadata = Metadata::create_default("prj").unwrap();
 
-    let ret = format(&metadata, &code);
+    let ret = format(&metadata, code);
 
     println!("ret\n{}\nexp\n{}", ret, expect);
     assert_eq!(ret, expect);
@@ -150,7 +150,7 @@ package PackageA {
 
     metadata.format.indent_width = 2;
 
-    let ret = format(&metadata, &code);
+    let ret = format(&metadata, code);
 
     println!("ret\n{}\nexp\n{}", ret, code);
     assert_eq!(ret, code);
@@ -169,7 +169,7 @@ module ModuleB () {
 
     metadata.format.indent_width = 2;
 
-    let ret = format(&metadata, &code);
+    let ret = format(&metadata, code);
 
     println!("ret\n{}\nexp\n{}", ret, code);
     assert_eq!(ret, code);
@@ -222,7 +222,7 @@ fn format_generic_list() {
 "#;
     let expect = r#"module ModuleA::<A: a_type, AA: u32> {}
 "#;
-    let ret = format(&metadata, &code);
+    let ret = format(&metadata, code);
     assert_eq!(ret, expect);
 
     // Same content laid out multi-line in the source still collapses to
@@ -234,14 +234,14 @@ fn format_generic_list() {
 "#;
     let expect = r#"module ModuleA::<A: a_type, AA: u32> {}
 "#;
-    let ret = format(&metadata, &code);
+    let ret = format(&metadata, code);
     assert_eq!(ret, expect);
 
     let code = r#"alias module ModuleA = ModuleB::<8, 16,>;
 "#;
     let expect = r#"alias module ModuleA = ModuleB::<8, 16>;
 "#;
-    let ret = format(&metadata, &code);
+    let ret = format(&metadata, code);
     assert_eq!(ret, expect);
 
     let code = r#"alias module ModuleB = ModuleC::<
@@ -251,7 +251,7 @@ fn format_generic_list() {
 "#;
     let expect = r#"alias module ModuleB = ModuleC::<8, 16>;
 "#;
-    let ret = format(&metadata, &code);
+    let ret = format(&metadata, code);
     assert_eq!(ret, expect);
 }
 

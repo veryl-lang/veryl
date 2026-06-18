@@ -272,9 +272,9 @@ async fn progress() {
         let res = server.recv_notification().await;
         dbg!(&res);
         if res.method() == "$/progress" {
-            if res.params().unwrap()["value"]["kind"] == Value::from("end") {
+            if res.params().unwrap()["value"]["kind"] == "end" {
                 progress_finish = true;
-            } else if res.params().unwrap()["value"]["kind"] == Value::from("report") {
+            } else if res.params().unwrap()["value"]["kind"] == "report" {
                 percentage = res.params().unwrap()["value"]["percentage"]
                     .as_i64()
                     .unwrap();

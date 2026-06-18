@@ -24,15 +24,15 @@ fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorEr
     symbol_table::clear();
 
     let metadata = Metadata::create_default("prj").unwrap();
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
 
     let mut errors = vec![];
     let mut ir = air::Ir::default();
-    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     dbg!(&errors);
@@ -215,33 +215,6 @@ impl DualSimulator {
         }
     }
 
-    #[track_caller]
-    fn new_with_top(code: &str, use_4state: bool, top: &str) -> Self {
-        let jit_config = Config {
-            use_4state,
-            use_jit: true,
-            ..Default::default()
-        };
-        let interp_config = Config {
-            use_4state,
-            use_jit: false,
-            ..Default::default()
-        };
-
-        let jit_ir = analyze_top(code, &jit_config, top).unwrap();
-        let interp_ir = analyze_top(code, &interp_config, top).unwrap();
-
-        let jit = Simulator::new(jit_ir, None);
-        let interp = Simulator::new(interp_ir, None);
-
-        DualSimulator {
-            jit,
-            interp,
-            use_4state,
-            cycle: 0,
-        }
-    }
-
     fn set(&mut self, port: &str, value: Value) {
         self.jit.set(port, value.clone());
         self.interp.set(port, value);
@@ -357,11 +330,6 @@ impl DualSimulator {
     /// Get a port value from the JIT simulator.
     fn get(&mut self, port: &str) -> Option<Value> {
         self.jit.get(port)
-    }
-
-    /// Get a variable value by hierarchical path from the JIT simulator.
-    fn get_var(&mut self, path: &str) -> Option<Value> {
-        self.jit.get_var(path)
     }
 }
 

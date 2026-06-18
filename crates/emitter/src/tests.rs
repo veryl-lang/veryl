@@ -9,13 +9,13 @@ fn emit(metadata: &Metadata, code: &str) -> String {
     symbol_table::clear();
     attribute_table::clear();
 
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(metadata);
     let mut context = Context::default();
 
-    analyzer.analyze_pass1(&"prj", &parser.veryl);
+    analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, None);
+    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, None);
 
     let mut emitter = Emitter::new(
         metadata,
@@ -23,7 +23,7 @@ fn emit(metadata: &Metadata, code: &str) -> String {
         &PathBuf::from("test.sv"),
         &PathBuf::from("test.sv.map"),
     );
-    emitter.emit(&"prj", &parser.veryl, code);
+    emitter.emit("prj", &parser.veryl, code);
     emitter.as_str().to_string()
 }
 

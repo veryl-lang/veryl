@@ -19,7 +19,7 @@ fn failure(code: &str) {
 
 #[track_caller]
 fn help_message(code: &str) -> String {
-    let parser = Parser::parse(&code, &"");
+    let parser = Parser::parse(code, &"");
     let err = parser.err().unwrap();
     err.help().unwrap().to_string()
 }

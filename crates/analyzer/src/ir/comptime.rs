@@ -1249,7 +1249,7 @@ mod tests {
 
     fn create_struct(members: &[(&'static str, Type)], width: usize) -> Type {
         let members = members
-            .into_iter()
+            .iter()
             .map(|(n, t)| TypeKindMember {
                 name: resource_table::insert_str(n),
                 r#type: t.clone(),
@@ -1271,7 +1271,7 @@ mod tests {
 
     fn create_union(members: &[(&'static str, Type)], width: usize) -> Type {
         let members = members
-            .into_iter()
+            .iter()
             .map(|(n, t)| TypeKindMember {
                 name: resource_table::insert_str(n),
                 r#type: t.clone(),
@@ -1306,14 +1306,12 @@ mod tests {
                 token,
             ));
         }
-        let end = if let Some(end) = end {
-            Some((
+        let end = end.map(|end| {
+            (
                 VarSelectOp::Colon,
                 Expression::create_value(Value::new(end as u64, 32, false), token),
-            ))
-        } else {
-            None
-        };
+            )
+        });
         let select = VarSelect(expr, end);
 
         let mut context = Context::default();

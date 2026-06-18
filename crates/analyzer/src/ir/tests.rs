@@ -11,16 +11,16 @@ fn check_ir(code: &str, exp: &str) {
     attribute_table::clear();
 
     let metadata = Metadata::create_default("prj").unwrap();
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
 
     let mut ir = Ir::default();
 
     let mut errors = vec![];
-    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     dbg!(&errors);
@@ -29,7 +29,7 @@ fn check_ir(code: &str, exp: &str) {
     let diff = TextDiff::from_lines(ir.as_str(), exp);
     for change in diff.iter_all_changes() {
         if matches!(change.tag(), ChangeTag::Insert | ChangeTag::Delete) {
-            let text = &format!("{}{}", change.tag().to_string(), change);
+            let text = &format!("{}{}", change.tag(), change);
             dbg!(text);
         }
     }
@@ -272,9 +272,9 @@ fn large_case_no_stack_overflow_on_clone() {
     let mut ir = Ir::default();
 
     let mut errors = vec![];
-    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     assert!(
         errors.is_empty(),
@@ -630,13 +630,13 @@ fn const_function_with_static_for() {
     symbol_table::clear();
     attribute_table::clear();
     let metadata = Metadata::create_default("prj").unwrap();
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
     let mut ir = Ir::default();
-    analyzer.analyze_pass1(&"prj", &parser.veryl);
+    analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir));
+    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
     Analyzer::analyze_post_pass2(&ir);
     let ir = ir.to_string();
     // sum() = 0+1+2+3+4 = 10 = 0xa
@@ -663,13 +663,13 @@ fn const_function_with_static_for() {
     symbol_table::clear();
     attribute_table::clear();
     let metadata = Metadata::create_default("prj").unwrap();
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
     let mut ir = Ir::default();
-    analyzer.analyze_pass1(&"prj", &parser.veryl);
+    analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir));
+    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
     Analyzer::analyze_post_pass2(&ir);
     let ir = ir.to_string();
     // sum(5) = 0+1+2+3+4 = 10 = 0xa
@@ -3006,7 +3006,7 @@ fn build_ir_with_defines(code: &str, defines: &[&str]) -> String {
     symbol_table::clear();
     attribute_table::clear();
     let metadata = Metadata::create_default("prj").unwrap();
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
     for name in defines {
@@ -3016,9 +3016,9 @@ fn build_ir_with_defines(code: &str, defines: &[&str]) -> String {
             .insert(resource_table::insert_str(name));
     }
     let mut ir = Ir::default();
-    analyzer.analyze_pass1(&"prj", &parser.veryl);
+    analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir));
+    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
     Analyzer::analyze_post_pass2(&ir);
     ir.to_string()
 }
