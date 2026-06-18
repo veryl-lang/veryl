@@ -21,6 +21,45 @@ cargo clippy -- -D warnings  # Lint
 
 Please ensure `cargo test` passes locally before submitting a pull request.
 
+## Tests
+
+Alongside the ordinary `#[test]` unit tests in each crate, much of the suite is
+file-based: a build script generates one test per `.veryl` file under `testcases/`.
+Adding a file-based test is usually just adding a source file and its expected output.
+
+### Positive tests (`testcases/veryl/`)
+
+Code that should compile. The expected SystemVerilog (`testcases/sv/`) and source map
+(`testcases/map/`) are committed reference files compared verbatim.
+
+1. Add `testcases/veryl/NN_name.veryl` (follow the existing numbered naming).
+2. Regenerate the reference files from the repo root:
+
+   ```bash
+   cargo run --bin veryl -- build
+   ```
+
+   This writes `testcases/sv/NN_name.sv` and `testcases/map/NN_name.sv.map`.
+3. Review the generated output, run `cargo test -p veryl-tests`, then commit the
+   `.veryl`, `.sv`, and `.sv.map` files together.
+
+### Error tests (`testcases/error/`)
+
+Code that must fail. The snapshot is the rendered diagnostic, managed with
+[`insta`](https://insta.rs/). Only the first reported error is captured, so keep the
+case minimal so the target error comes first.
+
+1. Add `testcases/error/my_error.veryl` with minimal code that triggers the error
+   (name the module after the file, matching the existing cases).
+2. Generate and review the snapshot:
+
+   ```bash
+   cargo insta test -p veryl-tests --review   # or: cargo test, then cargo insta review
+   ```
+
+3. After accepting, commit both `testcases/error/my_error.veryl` and the generated
+   `crates/tests/src/snapshots/my_error.snap`.
+
 ## Submitting Changes
 
 1. For non-trivial changes, open an issue first to discuss the approach.
