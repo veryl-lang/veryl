@@ -583,9 +583,9 @@ mod tests {
         assert_eq!(buf.narrow_count, 5000);
         assert!(buf.narrow_capacity() >= 5000);
         let entries = buf.narrow_entries_slice();
-        for i in 0..5000usize {
-            assert_eq!(entries[i].offset, i as u32 * 8);
-            assert_eq!(entries[i].payload, i as u64);
+        for (i, entry) in entries.iter().enumerate().take(5000) {
+            assert_eq!(entry.offset, i as u32 * 8);
+            assert_eq!(entry.payload, i as u64);
         }
     }
 
@@ -603,10 +603,10 @@ mod tests {
         assert_eq!(buf.wide_count, 70);
         assert!(buf.wide_capacity() >= 70);
         let entries = buf.wide_entries_slice();
-        for i in 0..70usize {
-            assert_eq!(entries[i].offset, i as u32 * 16);
-            assert_eq!(entries[i].native_bytes, 16);
-            assert_eq!(&entries[i].payload[..16], &[i as u8; 16]);
+        for (i, entry) in entries.iter().enumerate().take(70) {
+            assert_eq!(entry.offset, i as u32 * 16);
+            assert_eq!(entry.native_bytes, 16);
+            assert_eq!(&entry.payload[..16], &[i as u8; 16]);
         }
     }
 

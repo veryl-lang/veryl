@@ -20,7 +20,7 @@ mod parser {
         let input = fs::read_to_string(&file).unwrap();
         let ret = Parser::parse(&input, &file);
         match ret {
-            Ok(_) => assert!(true),
+            Ok(_) => {}
             Err(err) => println!("{}", err),
         }
     }
@@ -36,10 +36,9 @@ mod analyzer {
     use veryl_parser::Parser;
 
     fn test(name: &str) {
-        if crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name {
-            return;
-        } else if crate::PACKAGE_SELF_REF_TESTS.contains(&name)
-            && crate::PACKAGE_SELF_REF_TESTS[0] == name
+        if (crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name)
+            || (crate::PACKAGE_SELF_REF_TESTS.contains(&name)
+                && crate::PACKAGE_SELF_REF_TESTS[0] == name)
         {
             return;
         }
@@ -85,7 +84,7 @@ mod analyzer {
             let ret = Parser::parse(&input, &file).unwrap();
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&metadata);
-            let errors = analyzer.analyze_pass1(&prj, &ret.veryl);
+            let errors = analyzer.analyze_pass1(prj, &ret.veryl);
             dbg!(&errors);
             assert!(errors.is_empty());
 
@@ -216,10 +215,9 @@ mod emitter {
     use veryl_parser::Parser;
 
     fn test(name: &str) {
-        if crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name {
-            return;
-        } else if crate::PACKAGE_SELF_REF_TESTS.contains(&name)
-            && crate::PACKAGE_SELF_REF_TESTS[0] == name
+        if (crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name)
+            || (crate::PACKAGE_SELF_REF_TESTS.contains(&name)
+                && crate::PACKAGE_SELF_REF_TESTS[0] == name)
         {
             return;
         }
@@ -270,7 +268,7 @@ mod emitter {
         let parse_results: Vec<_> = file_paths
             .iter()
             .map(|(src, _, _)| {
-                let input = fs::read_to_string(&src).unwrap();
+                let input = fs::read_to_string(src).unwrap();
                 let parsed = Parser::parse(&input, &src).unwrap();
                 (input, parsed)
             })
@@ -280,13 +278,13 @@ mod emitter {
         for (_, result) in &parse_results {
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&metadata);
-            let _ = analyzer.analyze_pass1(&prj, &result.veryl);
+            let _ = analyzer.analyze_pass1(prj, &result.veryl);
         }
         let _ = Analyzer::analyze_post_pass1();
         for (_, result) in &parse_results {
             let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&metadata);
-            let _ = analyzer.analyze_pass2(&prj, &result.veryl, &mut context, None);
+            let _ = analyzer.analyze_pass2(prj, &result.veryl, &mut context, None);
         }
 
         for (i, (input, result)) in parse_results.iter().enumerate() {
@@ -294,7 +292,7 @@ mod emitter {
             let prj = &metadata.project.name;
 
             let mut emitter = Emitter::new(&metadata, src, dst, map);
-            emitter.emit(&prj, &result.veryl, input);
+            emitter.emit(prj, &result.veryl, input);
 
             let out_code = emitter.as_str();
             let ref_code = fs::read_to_string(dst).unwrap();
@@ -366,10 +364,10 @@ mod error {
                         let mut errors = vec![];
                         let mut ir = Ir::default();
 
-                        errors.append(&mut analyzer.analyze_pass1(&prj, &ret.veryl));
+                        errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
                         errors.append(&mut Analyzer::analyze_post_pass1());
                         errors.append(&mut analyzer.analyze_pass2(
-                            &prj,
+                            prj,
                             &ret.veryl,
                             &mut context,
                             Some(&mut ir),
@@ -612,7 +610,7 @@ mod filelist {
     fn check_list(paths: &[String], expected: &[&str]) {
         let paths: Vec<_> = paths.iter().map(|x| x.as_str()).collect();
         for x in &paths {
-            assert!(expected.contains(&x));
+            assert!(expected.contains(x));
         }
         for x in expected {
             assert!(paths.contains(x));

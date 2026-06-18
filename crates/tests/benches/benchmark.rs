@@ -46,7 +46,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         analyzer.clear();
         if !errors.is_empty() {
             dbg!(errors);
-            assert!(false);
+            panic!("analyzer reported errors");
         }
     }
 

@@ -218,15 +218,15 @@ fn tb_clock_reset_analyze() {
     }
     "#;
     let metadata = Metadata::create_default("prj").unwrap();
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
 
     let mut errors = vec![];
     let mut ir = air::Ir::default();
-    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     let errors: Vec<_> = errors

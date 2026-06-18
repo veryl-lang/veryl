@@ -13,15 +13,15 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     doc_comment_table::clear();
 
     let metadata = Metadata::create_default("prj").unwrap();
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
     let mut ir = Ir::default();
 
     let mut errors = vec![];
-    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
@@ -35,15 +35,15 @@ fn analyze_with_lint(code: &str, lint: Lint) -> Vec<AnalyzerError> {
 
     let mut metadata = Metadata::create_default("prj").unwrap();
     metadata.lint = lint;
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
     let mut ir = Ir::default();
 
     let mut errors = vec![];
-    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
@@ -60,12 +60,12 @@ fn analyze_multiple_inputs(inputs: &[&str]) -> Vec<AnalyzerError> {
 
     let mut contexts = vec![];
     let mut errors = vec![];
-    for i in 0..inputs.len() {
+    for (i, input) in inputs.iter().enumerate() {
         let path = format!("test_{}.veryl", i);
 
-        let parser = Parser::parse(inputs[i], &path).unwrap();
+        let parser = Parser::parse(input, &path).unwrap();
         let analyzer = Analyzer::new(&metadata);
-        errors.append(&mut analyzer.analyze_pass1(&prj_name, &parser.veryl));
+        errors.append(&mut analyzer.analyze_pass1(prj_name, &parser.veryl));
 
         contexts.push((parser, analyzer));
     }
@@ -76,7 +76,7 @@ fn analyze_multiple_inputs(inputs: &[&str]) -> Vec<AnalyzerError> {
     let mut ir = Ir::default();
     for (parser, analyzer) in &contexts {
         errors.append(&mut analyzer.analyze_pass2(
-            &prj_name,
+            prj_name,
             &parser.veryl,
             &mut analyzer_context,
             Some(&mut ir),
@@ -96,15 +96,15 @@ fn analyze_with_ir(code: &str) -> Vec<AnalyzerError> {
     doc_comment_table::clear();
 
     let metadata = Metadata::create_default("prj").unwrap();
-    let parser = Parser::parse(&code, &"").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
     let mut ir = Ir::default();
 
     let mut errors = vec![];
-    errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
@@ -130,10 +130,10 @@ fn analyze_with_large_stack(code: &str) -> Vec<AnalyzerError> {
             let mut ir = Ir::default();
 
             let mut errors = vec![];
-            errors.append(&mut analyzer.analyze_pass1(&"prj", &parser.veryl));
+            errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
             errors.append(&mut Analyzer::analyze_post_pass1());
             errors.append(&mut analyzer.analyze_pass2(
-                &"prj",
+                "prj",
                 &parser.veryl,
                 &mut context,
                 Some(&mut ir),
@@ -1056,13 +1056,10 @@ fn cyclic_type_dependency() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
-    let mut inputs = vec![];
-    inputs.push(
+    let inputs = vec![
         r#"
         alias package d = d_pkg::<b_pkg::c::d::D0, 3>;
         "#,
-    );
-    inputs.push(
         r#"
         package d_pkg::<d0: u32, d1: u32> {
             const D0: u32 = d0;
@@ -1075,7 +1072,7 @@ fn cyclic_type_dependency() {
             alias package c = c_pkg::<1, 2>;
         }
         "#,
-    );
+    ];
 
     let errors = analyze_multiple_inputs(&inputs);
     assert!(errors.is_empty());

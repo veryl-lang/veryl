@@ -4695,7 +4695,7 @@ fn optimize_comb_no_cascade_inline() {
         };
         assert!(val > 0, "result stuck at 0 — child comb DCE'd");
         assert!(
-            val >= 36 && val <= 38,
+            (36..=38).contains(&val),
             "expected ~36-38, got {} — child comb incorrect",
             val
         );
@@ -4785,7 +4785,7 @@ fn optimize_comb_no_cascade_inline_multi_level() {
         };
         assert!(val > 0, "result stuck at 0 — child comb DCE'd");
         assert!(
-            val >= 503 && val <= 504,
+            (503..=504).contains(&val),
             "expected ~503-504, got {} — child comb incorrect",
             val
         );
@@ -7929,7 +7929,7 @@ fn bit_select_ternary_wide_var() {
         }
         sim.ensure_comb_updated();
         let result = sim.get("result").unwrap().payload_u64();
-        let r0 = (result >> 0) & 0xFFFF;
+        let r0 = result & 0xFFFF;
         let r1 = (result >> 16) & 0xFFFF;
         let r2 = (result >> 32) & 0xFFFF;
         // pc=0: pc[1]=0 → lower=0xAAAA. pc=2: pc[1]=1 → upper=0xBBBB. pc=4: pc[1]=0 → lower=0xAAAA
@@ -8010,7 +8010,7 @@ fn bit_select_child_output() {
         }
         sim.ensure_comb_updated();
         let result = sim.get("result").unwrap().payload_u64();
-        let r0 = (result >> 0) & 0xFFFF;
+        let r0 = result & 0xFFFF;
         let r1 = (result >> 16) & 0xFFFF;
         let r2 = (result >> 32) & 0xFFFF;
         assert_eq!(
@@ -8139,7 +8139,7 @@ fn cache_halfword_select_with_stall() {
         }
         sim.ensure_comb_updated();
         let result = sim.get("result").unwrap().payload_u64();
-        let r0 = (result >> 0) & 0xFFFF;
+        let r0 = result & 0xFFFF;
         let r1 = (result >> 16) & 0xFFFF;
         let r2 = (result >> 32) & 0xFFFF;
         let r3 = (result >> 48) & 0xFFFF;
@@ -9633,7 +9633,7 @@ fn ordering_conditional_dependency() {
 
     verify_jit_interpreter_equivalence(code, |dual| {
         for i in 0u64..20 {
-            let sel_val = (i % 2) as u64;
+            let sel_val = i % 2;
             dual.set("sel", Value::new(sel_val, 1, false));
             dual.set("a", Value::new(i, 32, false));
             dual.step_synthetic();
@@ -9894,7 +9894,7 @@ fn lhs_concatenation_in_always_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
         sim.step(&rst);
-        sim.set("x", Value::new(0xABCDE_123, 32, false));
+        sim.set("x", Value::new(0xABCD_E123, 32, false));
         sim.step(&clk);
 
         let hi = sim.get("hi").unwrap();
@@ -10853,7 +10853,7 @@ fn nba_three_variable_chain() {
 
         for i in 1u64..=10 {
             dual.step(&jclk, &iclk);
-            let expected = if i <= 1 { 0 } else { i - 1 };
+            let expected = i.saturating_sub(1);
             assert_eq!(
                 dual.get("c_out").unwrap(),
                 Value::new(expected, 32, false),

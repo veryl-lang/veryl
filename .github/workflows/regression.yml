@@ -121,7 +121,7 @@ jobs:
           s3_endpoint: ${{ secrets.R2_CACHE_S3_ENDPOINT }}
           bucket: ${{ secrets.R2_CACHE_BUCKET }}
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
   # Build the release-verylup veryl binary once and share it via an artifact;
   # std / heliodor / cocotb consume it instead of each rebuilding (less redundant

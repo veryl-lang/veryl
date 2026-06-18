@@ -39,19 +39,21 @@ const DESIGNS: &[BenchDesign] = &[
 
 fn build(code: &str, top: &str) -> Ir {
     let metadata = Metadata::create_default("prj").unwrap();
-    let parser = Parser::parse(black_box(&code), &"").unwrap();
+    let parser = Parser::parse(black_box(code), &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
 
     let mut ir = air::Ir::default();
-    analyzer.analyze_pass1(&"prj", &parser.veryl);
+    analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&"prj", &parser.veryl, &mut context, Some(&mut ir));
+    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
 
     analyzer.clear();
 
-    let mut config = Config::default();
-    config.use_jit = true;
+    let config = Config {
+        use_jit: true,
+        ..Default::default()
+    };
 
     ir::build_ir(&ir, top.into(), &config).expect("Failed to build IR")
 }
