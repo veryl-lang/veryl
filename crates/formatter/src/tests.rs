@@ -1107,3 +1107,22 @@ fn idempotent_wrapped_case_arm_keeps_align_group() {
     assert_eq!(pass1, pass2, "fixed point after one format");
     assert_eq!(pass2, pass3, "stays fixed");
 }
+
+#[test]
+fn fmt_skip_with_non_ascii_text() {
+    // Regression: reconstructing a #[fmt(skip)] item used the token's BYTE
+    // length for its end column while columns count characters, so a
+    // multi-byte comment/string made the column delta underflow (a
+    // ~4-billion-space loop in release, subtract-overflow panic in debug).
+    let code = "#[fmt(skip)]\nmodule ModuleA {\n    var x: logic; /* \u{3042}\u{3044}\u{3046} */ var y: logic;\n    always_comb {\n        x = 1;\n        y = x;\n    }\n}\n"
+        .to_string();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = format(&metadata, &code);
+    // The skipped item must round-trip verbatim.
+    assert_eq!(ret, code);
+
+    let code = "#[fmt(skip)]\nmodule ModuleB {\n    initial {\n        $display(\"\u{3042}\u{3044}\u{3046}\");\n        $display(\"x\");\n    }\n}\n".to_string();
+    let ret = format(&metadata, &code);
+    assert_eq!(ret, code);
+}
