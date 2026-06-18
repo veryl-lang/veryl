@@ -47,6 +47,8 @@ pub struct Formatter {
     in_attribute: bool,
     /// Per-`function_call` stack of "uses named arguments" flags.
     in_named_argument: Vec<bool>,
+    /// Set for insts whose ports use explicit `port: value` form.
+    inst_force_break: bool,
 }
 
 impl Default for Formatter {
@@ -71,6 +73,7 @@ impl Default for Formatter {
             in_expression: Vec::new(),
             in_attribute: false,
             in_named_argument: Vec::new(),
+            inst_force_break: false,
         }
     }
 }
@@ -514,6 +517,16 @@ impl Formatter {
         );
         let wrap_in_group = has_params || has_ports;
 
+        // Explicit `port: value` breaks both the param and port lists.
+        let should_break = !compact
+            && arg
+                .component_instantiation_opt2
+                .as_ref()
+                .and_then(|x| x.inst_port.inst_port_opt.as_ref())
+                .map(|y| Self::inst_port_list_has_named(&y.inst_port_list))
+                .unwrap_or(false);
+        self.inst_force_break = should_break;
+
         if compact {
             self.buf_begin();
         } else if wrap_in_group {
@@ -550,11 +563,9 @@ impl Formatter {
         {
             self.space(1);
             self.token_will_push(&x.inst_port.l_paren.l_paren_token);
-            self.group_nest_begin();
-            self.soft_line();
+            self.inst_list_begin();
             self.inst_port_list(&y.inst_port_list);
-            self.group_nest_end();
-            self.soft_line();
+            self.inst_list_end();
             self.r_paren(&x.inst_port.r_paren);
         }
 
@@ -567,7 +578,63 @@ impl Formatter {
         } else if wrap_in_group {
             self.group_end();
         }
+        self.inst_force_break = false;
         self.semicolon(semicolon);
+    }
+
+    /// True if any port uses explicit `port: value` (recurses into `{...}`).
+    fn inst_port_list_has_named(arg: &InstPortList) -> bool {
+        Self::inst_port_group_has_named(&arg.inst_port_group)
+            || arg
+                .inst_port_list_list
+                .iter()
+                .any(|x| Self::inst_port_group_has_named(&x.inst_port_group))
+    }
+
+    fn inst_port_group_has_named(arg: &InstPortGroup) -> bool {
+        match &*arg.inst_port_group_group {
+            InstPortGroupGroup::LBraceInstPortListRBrace(x) => {
+                Self::inst_port_list_has_named(&x.inst_port_list)
+            }
+            InstPortGroupGroup::InstPortItem(x) => x.inst_port_item.inst_port_item_opt.is_some(),
+        }
+    }
+
+    /// `Mode::Align` always takes the soft path so alignment columns are
+    /// computed identically whether or not the list ends up broken.
+    fn inst_list_begin(&mut self) {
+        // Scope INST_ITEM alignment to this list; otherwise consecutive
+        // single-line insts share a group and the forced break emits
+        // cross-inst padding (non-idempotent).
+        if self.mode == Mode::Align {
+            self.aligner
+                .finish_group_for(align_kind::INST_ITEM_IDENTIFIER);
+            self.aligner
+                .finish_group_for(align_kind::INST_ITEM_EXPRESSION);
+        }
+        if self.inst_force_break && matches!(self.mode, Mode::Emit) {
+            self.newline_push();
+        } else {
+            self.group_nest_begin();
+            self.soft_line();
+        }
+    }
+
+    fn inst_list_end(&mut self) {
+        if self.inst_force_break && matches!(self.mode, Mode::Emit) {
+            self.newline_pop();
+        } else {
+            self.group_nest_end();
+            self.soft_line();
+        }
+    }
+
+    fn inst_sep(&mut self) {
+        if self.inst_force_break && matches!(self.mode, Mode::Emit) {
+            self.newline();
+        } else {
+            self.soft_line();
+        }
     }
 
     /// Emit `embed` body tokens as one raw text node, preserving the
@@ -2195,11 +2262,9 @@ impl VerylWalker for Formatter {
         if let Some(ref x) = arg.inst_parameter_opt {
             self.hash(&arg.hash);
             self.token_will_push(&arg.l_paren.l_paren_token);
-            self.group_nest_begin();
-            self.soft_line();
+            self.inst_list_begin();
             self.inst_parameter_list(&x.inst_parameter_list);
-            self.group_nest_end();
-            self.soft_line();
+            self.inst_list_end();
             self.r_paren(&arg.r_paren);
         }
     }
@@ -2212,7 +2277,7 @@ impl VerylWalker for Formatter {
         self.inst_parameter_group(&arg.inst_parameter_group);
         for x in &arg.inst_parameter_list_list {
             self.comma(&x.comma);
-            self.soft_line();
+            self.inst_sep();
             self.inst_parameter_group(&x.inst_parameter_group);
         }
         self.emit_doc(doc::if_break(","));
@@ -2255,7 +2320,7 @@ impl VerylWalker for Formatter {
         self.inst_port_group(&arg.inst_port_group);
         for x in &arg.inst_port_list_list {
             self.comma(&x.comma);
-            self.soft_line();
+            self.inst_sep();
             self.inst_port_group(&x.inst_port_group);
         }
         self.emit_doc(doc::if_break(","));

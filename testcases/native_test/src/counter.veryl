@@ -19,7 +19,11 @@ module test_counter {
 
     var cnt: logic<32>;
 
-    inst dut: Counter ( clk: clk, rst: rst, cnt: cnt );
+    inst dut: Counter (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
 
     initial {
         rst.assert();

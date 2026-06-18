@@ -306,6 +306,13 @@ impl Aligner {
         }
     }
 
+    /// Close one kind's group, to scope it per-call (e.g. per inst list)
+    /// instead of by source-line gaps — needed for idempotency.
+    pub fn finish_group_for(&mut self, kind: usize) {
+        self.aligns[kind].finish_item();
+        self.aligns[kind].finish_group();
+    }
+
     /// Clear every kind's statement-participation flag. The auto-finish
     /// path inside `finish_item` deliberately leaves the flag set —
     /// only explicit alignment-context discards should call this.

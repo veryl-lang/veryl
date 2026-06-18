@@ -25,9 +25,13 @@ module DualClock (
 #[test(test_dual_clock)]
 module test_dual_clock {
     inst clk_a: $tb::clock_gen;
-    inst rst_a: $tb::reset_gen ( clk: clk_a );
+    inst rst_a: $tb::reset_gen (
+        clk: clk_a,
+    );
     inst clk_b: $tb::clock_gen;
-    inst rst_b: $tb::reset_gen ( clk: clk_b );
+    inst rst_b: $tb::reset_gen (
+        clk: clk_b,
+    );
 
     var cnt_a: logic<32>;
     var cnt_b: logic<32>;

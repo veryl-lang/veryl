@@ -1156,3 +1156,111 @@ fn port_wide_generic_type_isolated_from_alignment() {
     // Re-formatting the output must be stable.
     assert_eq!(format(&metadata, &ret), expect);
 }
+
+#[test]
+fn inst_named_port_forces_break() {
+    // A port list with an explicit `port: value` connection is forced
+    // onto separate lines, and the parameter list breaks with it.
+    let metadata = Metadata::create_default("prj").unwrap();
+    let code = r#"module M {
+    inst u: Sub #(W: 8, D: 16) (clk: i_clk, rst: i_rst);
+}
+"#;
+    let expect = r#"module M {
+    inst u: Sub #(
+        W: 8 ,
+        D: 16,
+    ) (
+        clk: i_clk,
+        rst: i_rst,
+    );
+}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+    assert_eq!(format(&metadata, &ret), expect);
+}
+
+#[test]
+fn inst_shorthand_ports_stay_flat() {
+    // Pure-shorthand port lists (and port-less insts with params) are
+    // width-driven, so they stay on one line under the default width.
+    let metadata = Metadata::create_default("prj").unwrap();
+    let code = r#"module M {
+    inst u0: InterfaceA #(N: 10);
+    inst u1: Sub #(W: 8, D: 16) (a, b, c);
+    inst u2: Sub;
+}
+"#;
+    let expect = r#"module M {
+    inst u0: InterfaceA #( N: 10 );
+    inst u1: Sub #( W: 8, D: 16 ) ( a, b, c );
+    inst u2: Sub;
+}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+    assert_eq!(format(&metadata, &ret), expect);
+}
+
+#[test]
+fn inst_single_named_port_breaks() {
+    // Even a single explicit `port: value` breaks (1-port modules are
+    // effectively nonexistent, so no flat exception is made).
+    let metadata = Metadata::create_default("prj").unwrap();
+    let code = r#"module M {
+    inst u: Sub (clk: i_clk);
+}
+"#;
+    let expect = r#"module M {
+    inst u: Sub (
+        clk: i_clk,
+    );
+}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+    assert_eq!(format(&metadata, &ret), expect);
+}
+
+#[test]
+fn inst_mixed_ports_break_and_align() {
+    // A mix of shorthand and explicit connections breaks; the shorthand
+    // entry's identifier column aligns with the explicit ones.
+    let metadata = Metadata::create_default("prj").unwrap();
+    let code = r#"module M {
+    inst u: Sub (a, clk: i_clk);
+}
+"#;
+    let expect = r#"module M {
+    inst u: Sub (
+        a         ,
+        clk: i_clk,
+    );
+}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+    assert_eq!(format(&metadata, &ret), expect);
+}
+
+#[test]
+fn inst_named_port_break_is_idempotent_across_insts() {
+    // Consecutive single-line insts must not share an INST_ITEM
+    // alignment group: forcing the break would otherwise emit padding
+    // computed across insts and diverge on the second pass.
+    let metadata = Metadata::create_default("prj").unwrap();
+    let code = r#"module M {
+    inst u0: Sub (clk: i_clk);
+    inst u1: Sub (data_in: x, en: yy, addr: some_long_addr_signal);
+}
+"#;
+    let first = format(&metadata, code);
+    let second = format(&metadata, &first);
+    assert_eq!(first, second, "not idempotent:\n{first}");
+    // The single-port inst must not be padded to the wide inst's column.
+    assert!(
+        first.contains("        clk: i_clk,\n"),
+        "expected unpadded single port in:\n{first}"
+    );
+}
