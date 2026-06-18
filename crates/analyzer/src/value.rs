@@ -1717,7 +1717,7 @@ fn from_all_bit_str(s: &str) -> Value {
 }
 
 fn from_fixed_point_str(s: &str) -> Value {
-    if let Ok(x) = str::parse::<f64>(s) {
+    if let Ok(x) = str::parse::<f64>(&s.replace('_', "")) {
         Value::new(x.to_bits(), 64, false)
     } else {
         Value::new(0, 64, false)
@@ -1725,7 +1725,7 @@ fn from_fixed_point_str(s: &str) -> Value {
 }
 
 fn from_exponent_str(s: &str) -> Value {
-    if let Ok(x) = str::parse::<f64>(s) {
+    if let Ok(x) = str::parse::<f64>(&s.replace('_', "")) {
         Value::new(x.to_bits(), 64, false)
     } else {
         Value::new(0, 64, false)

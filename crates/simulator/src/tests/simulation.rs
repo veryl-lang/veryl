@@ -16144,3 +16144,25 @@ fn array_range_read_declines_gracefully() {
         }
     }
 }
+
+#[test]
+fn float_literal_with_underscores_const_evals() {
+    // Regression: `1_000.5` / `1_5.0e1_0` silently const-evaluated to 0.0
+    // (str::parse::<f64> rejects digit-group underscores) while the emitted
+    // SV kept the real value.
+    let code = r#"
+    module Top (
+        o: output logic,
+    ) {
+        const A: f64 = 1_000.5;
+        const B: f64 = 1_5.0e1_0;
+        assign o = (A == 1000.5) && (B == 15.0e10);
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(1, 1, false), "{config:?}");
+    }
+}
