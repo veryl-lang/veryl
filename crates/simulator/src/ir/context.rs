@@ -11,11 +11,42 @@ use crate::ir::variable::VarOffset;
 use crate::simulator_error::SimulatorError;
 use std::sync::Arc;
 use veryl_analyzer::ir as air;
+use veryl_analyzer::symbol::Affiliation;
 
 pub struct ScopeContext {
     pub variable_meta: HashMap<VarId, VariableMeta>,
     pub analyzer_context: veryl_analyzer::conv::Context,
     pub ff_table: air::FfTable,
+    /// Lazily-built reverse index `comb byte offset -> owning VarId` for
+    /// variables affiliated with a function body.  Used to relocate the
+    /// inlined-function storage per call-site (see the `FunctionCall`
+    /// factor in `expression.rs`).  `None` until first queried.
+    pub func_offset_index: Option<HashMap<isize, VarId>>,
+}
+
+impl ScopeContext {
+    /// Map a comb byte offset to the function-affiliated variable that owns
+    /// it, or `None` if the offset belongs to a non-function (module /
+    /// always-block) variable.  Builds the index on first call.
+    pub fn func_offset_varid(&mut self, off: isize) -> Option<VarId> {
+        if self.func_offset_index.is_none() {
+            let mut idx: HashMap<isize, VarId> = HashMap::default();
+            for (vid, var) in &self.analyzer_context.variables {
+                if var.affiliation != Affiliation::Function {
+                    continue;
+                }
+                if let Some(meta) = self.variable_meta.get(vid) {
+                    for e in &meta.elements {
+                        if let VarOffset::Comb(o) = e.current {
+                            idx.insert(o, *vid);
+                        }
+                    }
+                }
+            }
+            self.func_offset_index = Some(idx);
+        }
+        self.func_offset_index.as_ref().unwrap().get(&off).copied()
+    }
 }
 
 /// Cached compiled chunk + variable offsets it reads/writes (for

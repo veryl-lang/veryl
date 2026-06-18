@@ -937,6 +937,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             variable_meta: child_variable_meta.clone(),
             analyzer_context: child_analyzer_context,
             ff_table: child_ff_table.clone(),
+            func_offset_index: None,
         };
         context.scope_contexts.push(child_scope);
 

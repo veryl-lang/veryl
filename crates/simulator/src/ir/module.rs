@@ -2388,6 +2388,7 @@ impl Conv<&air::Module> for ProtoModule {
             variable_meta: variable_meta.clone(),
             analyzer_context,
             ff_table: ff_table.clone(),
+            func_offset_index: None,
         };
         context.scope_contexts.push(scope);
 

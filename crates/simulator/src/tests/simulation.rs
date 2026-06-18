@@ -1961,6 +1961,56 @@ b00000000000000000000000001000110 #
 }
 
 #[test]
+fn inlined_function_per_callsite_scratch_in_continuous_assign() {
+    // Regression: a user function inlined more than once in a SINGLE
+    // continuous-assign expression shared its body's combinational scratch
+    // (args, locals, return slot) across every call site, so the compiled
+    // (cc / cranelift) backends collapsed the shared offsets and returned ONE
+    // call's result for all of them -- `{clz32(x), clz32(y)}` yielded
+    // `{clz32(y), clz32(y)}`.  The fix relocates each call site's WRITTEN
+    // function storage to fresh comb slots.  Read-only storage must stay put:
+    // an unrolled loop's per-iteration index constants are held as variable
+    // initial values (never assigned), so `clz32`'s loop exercises that too.
+    // (The interpreter was unaffected -- it runs each call to completion before
+    // the next.)
+    let code = r#"
+    module Top (
+        x: input  logic<32>,
+        y: input  logic<32>,
+        o: output logic<12>,
+    ) {
+        function clz32 (
+            val: input logic<32>,
+        ) -> logic<6> {
+            var ret: logic<6>;
+            ret = 6'd32;
+            for i in 0..32 {
+                if val[31 - i] == 1'b1 && ret == 6'd32 {
+                    ret = i as 6;
+                }
+            }
+            return ret;
+        }
+        assign o = {clz32(x), clz32(y)};
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("x", Value::new(0x0080_0000, 32, false)); // 8 leading zeros
+        sim.set("y", Value::new(0x0000_0010, 32, false)); // 27 leading zeros
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // {clz32(x)=8, clz32(y)=27} = (8 << 6) | 27 = 512 + 27 = 539.
+        // The shared-scratch bug returned {27, 27} = (27 << 6) | 27 = 1755.
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(539, 12, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
 fn dump_vcd_generic_function() {
     let code = r#"
     module Top (

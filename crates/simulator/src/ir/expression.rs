@@ -1,5 +1,8 @@
+use crate::HashMap;
 use crate::ir::context::{Context, Conv};
-use crate::ir::variable::{VarOffset, native_bytes as calc_native_bytes, read_native_value};
+use crate::ir::variable::{
+    VarOffset, native_bytes as calc_native_bytes, read_native_value, value_size,
+};
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
 use num_bigint::BigUint;
@@ -665,6 +668,60 @@ impl ProtoExpression {
             ProtoExpression::Concatenation { elements, .. } => {
                 for (expr, _, _) in elements {
                     expr.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
+            ProtoExpression::Value { .. } => {}
+        }
+    }
+
+    /// Replace every referenced byte offset present in `map`.  Companion to
+    /// `ProtoStatement::remap_offsets`.
+    pub fn remap_offsets(&mut self, map: &HashMap<VarOffset, VarOffset>) {
+        match self {
+            ProtoExpression::Variable {
+                var_offset,
+                dynamic_select,
+                ..
+            } => {
+                if let Some(&n) = map.get(var_offset) {
+                    *var_offset = n;
+                }
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.remap_offsets(map);
+                }
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                if let Some(&n) = map.get(base_offset) {
+                    *base_offset = n;
+                }
+                index_expr.remap_offsets(map);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.remap_offsets(map);
+                }
+            }
+            ProtoExpression::Unary { x, .. } => x.remap_offsets(map),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.remap_offsets(map);
+                y.remap_offsets(map);
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.remap_offsets(map);
+                true_expr.remap_offsets(map);
+                false_expr.remap_offsets(map);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.remap_offsets(map);
                 }
             }
             ProtoExpression::Value { .. } => {}
@@ -1578,10 +1635,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                     })
                 }
                 air::Factor::FunctionCall(call) => {
-                    let stmts: Vec<ProtoStatement> = Conv::conv(context, call)?;
-                    context.pending_statements.extend(stmts);
+                    let mut stmts: Vec<ProtoStatement> = Conv::conv(context, call)?;
 
-                    // Return a reference to the return value variable
+                    // Locate the function body and its return variable.
                     let func = context
                         .scope()
                         .analyzer_context
@@ -1596,15 +1652,75 @@ impl Conv<&air::Expression> for ProtoExpression {
                     };
                     let ret_id = body.ret.unwrap();
 
-                    let scope = context.scope();
-                    let meta = scope.variable_meta.get(&ret_id).unwrap();
-                    let element = &meta.elements[0];
+                    let mut ret_offset = {
+                        let scope = context.scope();
+                        let meta = scope.variable_meta.get(&ret_id).unwrap();
+                        meta.elements[0].current
+                    };
                     let width = call.comptime.r#type.total_width().unwrap();
                     let var_full_width = width;
                     let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
 
+                    // Give this call site its own copy of the function body's
+                    // comb scratch. Without it, two inlines in independent comb
+                    // blocks share the same offsets and the compiled backends
+                    // collapse them, returning one call's result for both.
+                    //
+                    // Relocate only function-affiliated WRITTEN variables: a
+                    // read-only var keeps its value in its initial-value slot
+                    // (e.g. an unrolled loop's per-iteration index constants),
+                    // which fresh zero-init storage would drop. Whole variables
+                    // move together so array stride survives dynamic indexing.
+                    let mut written = Vec::new();
+                    for s in &stmts {
+                        s.collect_written_offsets(&mut written);
+                    }
+
+                    let mut relocate_vids: Vec<air::VarId> = Vec::new();
+                    {
+                        let mut seen = crate::HashSet::default();
+                        for off in &written {
+                            if off.is_ff() {
+                                continue;
+                            }
+                            if let Some(vid) = context.scope().func_offset_varid(off.raw())
+                                && seen.insert(vid)
+                            {
+                                relocate_vids.push(vid);
+                            }
+                        }
+                    }
+
+                    if !relocate_vids.is_empty() {
+                        let use_4state = context.config.use_4state;
+                        let mut map: HashMap<VarOffset, VarOffset> = HashMap::default();
+                        for vid in relocate_vids {
+                            let elems: Vec<(VarOffset, usize)> = {
+                                let scope = context.scope();
+                                let meta = scope.variable_meta.get(&vid).unwrap();
+                                meta.elements
+                                    .iter()
+                                    .map(|e| (e.current, value_size(e.native_bytes, use_4state)))
+                                    .collect()
+                            };
+                            for (old, vs) in elems {
+                                let new_off = context.comb_total_bytes as isize;
+                                context.comb_total_bytes += vs;
+                                map.insert(old, VarOffset::Comb(new_off));
+                            }
+                        }
+                        for s in &mut stmts {
+                            s.remap_offsets(&map);
+                        }
+                        if let Some(&n) = map.get(&ret_offset) {
+                            ret_offset = n;
+                        }
+                    }
+
+                    context.pending_statements.extend(stmts);
+
                     Ok(ProtoExpression::Variable {
-                        var_offset: element.current,
+                        var_offset: ret_offset,
                         select: None,
                         dynamic_select: None,
                         width,
