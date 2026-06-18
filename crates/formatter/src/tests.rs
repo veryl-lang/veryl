@@ -1050,3 +1050,60 @@ fn preserves_trailing_line_comment_after_trailing_comma() {
     let ret = format(&metadata, code);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn idempotent_isolation_estimate_ignores_source_spacing() {
+    // Regression: the case-arm isolation estimate read inter-token gaps
+    // from SOURCE columns, so the formatter's own spacing changes flipped
+    // the decision between passes (format(format(x)) != format(x)).
+    let code = r#"module Repro {
+    var aaaaaaaaaa: logic<32>;
+    var y: logic<32>;
+    always_comb {
+        y = 0;
+        case aaaaaaaaaa {
+            aaaaaaaaaa+aaaaaaaaaa+aaaaaaaaaa+aaaaaaaaaa+aaaaaaaaaa+aaaaaaaaaa+aaaaaaaaaa+aaaaaaaaaa+aaaaaa: y = 1;
+            aaaaaaaaaa: y = 2;
+            default: y = 0;
+        }
+    }
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let pass1 = format(&metadata, code);
+    let pass2 = format(&metadata, &pass1);
+    assert_eq!(pass1, pass2, "fixed point after one format");
+}
+
+#[test]
+fn idempotent_wrapped_case_arm_keeps_align_group() {
+    // Regression: a padded case-arm LHS wrapping its RHS was misread as an
+    // alignment-group split on the next run, oscillating between two
+    // outputs forever.
+    let code = r#"module A {
+    var x: logic<8>;
+    var a: logic<32>;
+    var bb: logic<32>;
+    var c1: logic<32>;
+    var c2: logic<32>;
+    var c3: logic<32>;
+    var c4: logic<32>;
+    always_comb {
+        a = 0;
+        bb = 0;
+        case x {
+            8'd0: a = c1 + c2 + c3 + c4 + c1 + c2 + c3 + c4 + c1 + c2 + c3 + c4 + c1 + c2 + c3 + c4 + c1 + c2 + c3 + c4;
+            8'd1: bb = 1;
+        }
+    }
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let pass1 = format(&metadata, code);
+    let pass2 = format(&metadata, &pass1);
+    let pass3 = format(&metadata, &pass2);
+    assert_eq!(pass1, pass2, "fixed point after one format");
+    assert_eq!(pass2, pass3, "stays fixed");
+}
