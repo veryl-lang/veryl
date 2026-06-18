@@ -165,25 +165,6 @@ fn generate_token_type() {
     fs::write(&out_path, code).expect("Failed to write generated file");
 }
 
-/// Adds serde derives to the parol-generated AST types so they can be
-/// serialized for the fragment cache. Idempotent: regeneration emits plain
-/// `#[derive(Debug, Clone)]` which is rewritten here.
-#[cfg(feature = "build")]
-fn inject_serde_derives() {
-    use std::fs;
-    use std::path::PathBuf;
-
-    let path = PathBuf::from("src/generated/veryl_grammar_trait.rs");
-    let content = fs::read_to_string(&path).expect("Failed to read veryl_grammar_trait.rs");
-    let injected = content.replace(
-        "#[derive(Debug, Clone)]",
-        "#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]",
-    );
-    if injected != content {
-        fs::write(&path, injected).expect("Failed to write veryl_grammar_trait.rs");
-    }
-}
-
 #[cfg(feature = "build")]
 fn main() {
     use parol::parol_runtime::Report;
@@ -228,6 +209,10 @@ fn main() {
             .actions_output_file("veryl_grammar_trait.rs")
             .user_type_name("VerylGrammar")
             .user_trait_module_name("veryl_grammar")
+            .add_derives(vec![
+                "serde::Serialize".to_string(),
+                "serde::Deserialize".to_string(),
+            ])
             .trim_parse_tree()
             .generate_parser()
         {
@@ -236,8 +221,6 @@ fn main() {
                 process::exit(1);
             }
         }
-
-        inject_serde_derives();
 
         let elapsed_time = now.elapsed();
         println!(
