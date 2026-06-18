@@ -2588,6 +2588,14 @@ impl VerylWalker for Formatter {
                     self.align_dummy_token(align_kind::CLOCK_DOMAIN, token);
                     self.align_finish(align_kind::CLOCK_DOMAIN);
                 }
+                // The aligner sizes the TYPE column from flat token
+                // lengths, blind to the render-time wrap, so a wide
+                // type would drag short siblings into a huge column.
+                let isolate =
+                    estimated_array_type_width(&x.array_type) > self.wrap_isolation_threshold();
+                if isolate {
+                    self.align_reset();
+                }
                 self.array_type(&x.array_type);
                 self.align_start(align_kind::EXPRESSION);
                 if let Some(ref x) = x.port_type_concrete_opt0 {
@@ -2600,6 +2608,9 @@ impl VerylWalker for Formatter {
                     self.align_dummy_location(align_kind::EXPRESSION, loc);
                 }
                 self.align_finish(align_kind::EXPRESSION);
+                if isolate {
+                    self.align_reset();
+                }
             }
             PortDeclarationItemGroup::PortTypeAbstract(x) => {
                 let x = x.port_type_abstract.as_ref();
@@ -3305,6 +3316,14 @@ fn estimated_switch_condition_width(arg: &SwitchCondition) -> u32 {
 fn estimated_expression_width(arg: &Expression) -> u32 {
     let mut collector = TokenCollector::new(false);
     collector.expression(arg);
+    estimated_token_width(&collector.tokens)
+}
+
+/// Flat (unwrapped) width of a type, for the isolation decision in
+/// `port_declaration_item`.
+fn estimated_array_type_width(arg: &ArrayType) -> u32 {
+    let mut collector = TokenCollector::new(false);
+    collector.array_type(arg);
     estimated_token_width(&collector.tokens)
 }
 

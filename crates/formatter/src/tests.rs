@@ -1126,3 +1126,33 @@ fn fmt_skip_with_non_ascii_text() {
     let ret = format(&metadata, &code);
     assert_eq!(ret, code);
 }
+
+#[test]
+fn port_wide_generic_type_isolated_from_alignment() {
+    // A port type wide enough to wrap must not drag short sibling ports
+    // into a huge TYPE column.
+    let metadata = Metadata::create_default("prj").unwrap();
+    let code = r#"module ModuleA (
+    a: input logic,
+    bus: input SomeVeryLongInterfaceTypeName::<ParameterOne, ParameterTwo, ParameterThree, ParameterFour, ParameterFive, ParameterSix> = 0,
+    c: output logic,
+) {}
+"#;
+    let expect = r#"module ModuleA (
+    a  : input logic,
+    bus: input SomeVeryLongInterfaceTypeName::<
+        ParameterOne  ,
+        ParameterTwo  ,
+        ParameterThree,
+        ParameterFour ,
+        ParameterFive ,
+        ParameterSix  ,
+    > = 0,
+    c: output logic,
+) {}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+    // Re-formatting the output must be stable.
+    assert_eq!(format(&metadata, &ret), expect);
+}
