@@ -2,7 +2,7 @@ use crate::HashMap;
 use crate::assert_buffer;
 use crate::ir::{
     Event, Expression, Ir, ModuleVariables, RuntimeForRange, Statement, SystemFunctionCall,
-    TbMethodKind, Value, VarId, VarPath, format_assert_message, write_native_value,
+    TbMethodKind, Value, VarId, VarPath, format_assert_message, format_output, write_native_value,
 };
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
@@ -36,6 +36,23 @@ pub enum TestbenchStatement {
         format_str: String,
         args: Vec<Expression>,
     },
+    /// `f.open(name)` / `f.append(name)` — `handle` is the `$tb::file`
+    /// variable's name, used as the file-table key.
+    FileOpen {
+        handle: StrId,
+        path: String,
+        append: bool,
+    },
+    /// `f.write(format, ...)`.
+    FileWrite {
+        handle: StrId,
+        format_str: String,
+        args: Vec<Expression>,
+    },
+    /// `f.close()`.
+    FileClose { handle: StrId },
+    /// `f.flush()`.
+    FileFlush { handle: StrId },
     /// if-else (may contain next inside)
     If {
         condition: Expression,
@@ -126,6 +143,11 @@ fn collect_tb_insts(
                         reset_insts.push(*inst);
                     }
                 }
+                // File handles drive no clock/reset event.
+                TbMethodKind::FileOpen { .. }
+                | TbMethodKind::FileWrite { .. }
+                | TbMethodKind::FileClose
+                | TbMethodKind::FileFlush => {}
             },
             Statement::For(for_stmt) => {
                 collect_tb_insts(&for_stmt.body, clock_insts, reset_insts);
@@ -270,6 +292,18 @@ fn convert_stmt(
                     low_time,
                 }
             }
+            TbMethodKind::FileOpen { path, append } => TestbenchStatement::FileOpen {
+                handle: *inst,
+                path: path.clone(),
+                append: *append,
+            },
+            TbMethodKind::FileWrite { format_str, args } => TestbenchStatement::FileWrite {
+                handle: *inst,
+                format_str: format_str.clone(),
+                args: args.clone(),
+            },
+            TbMethodKind::FileClose => TestbenchStatement::FileClose { handle: *inst },
+            TbMethodKind::FileFlush => TestbenchStatement::FileFlush { handle: *inst },
         },
         Statement::SystemFunctionCall(SystemFunctionCall::Assert {
             kind,
@@ -344,7 +378,9 @@ fn convert_stmts(
 
 pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestResult {
     assert_buffer::reset();
+    crate::file_table::reset();
     let result: TestResult = exec(sim, stmts).into();
+    crate::file_table::finalize();
     match (result, assert_buffer::take_failure()) {
         (TestResult::Fail(msg), _) => TestResult::Fail(msg),
         (TestResult::Pass, Some(msg)) => TestResult::Fail(msg),
@@ -648,6 +684,33 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                     }
                 }
             }
+            ExecResult::Continue
+        }
+        TestbenchStatement::FileOpen {
+            handle,
+            path,
+            append,
+        } => {
+            crate::file_table::open_handle(*handle, path, *append);
+            ExecResult::Continue
+        }
+        TestbenchStatement::FileWrite {
+            handle,
+            format_str,
+            args,
+        } => {
+            sim.ensure_comb_updated();
+            let values: Vec<_> = args.iter().map(|e| e.eval(&mut sim.mask_cache)).collect();
+            let s = format_output(format_str, &values);
+            crate::file_table::write_handle(*handle, &s);
+            ExecResult::Continue
+        }
+        TestbenchStatement::FileClose { handle } => {
+            crate::file_table::close_handle(*handle);
+            ExecResult::Continue
+        }
+        TestbenchStatement::FileFlush { handle } => {
+            crate::file_table::flush_handle(*handle);
             ExecResult::Continue
         }
         TestbenchStatement::Finish => ExecResult::Finished,

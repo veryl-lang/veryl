@@ -887,6 +887,8 @@ impl Symbol {
             SymbolKind::GenericInstance(x) => symbol_table::get(x.base)
                 .map(|x| x.is_variable_type())
                 .unwrap_or(false),
+            // `$tb::file` is a passive testbench resource declared as `var`.
+            SymbolKind::TbComponent(x) => matches!(x.kind, TbComponentKind::File),
             _ => false,
         }
     }
@@ -909,6 +911,9 @@ impl Symbol {
                     return matches!(x.bound, GenericBoundKind::Type);
                 }
             }
+            // `$tb::file` is a variable type but not a cast target: `x as
+            // $tb::file` is meaningless and must be a type error.
+            SymbolKind::TbComponent(_) => return false,
             _ => return self.is_variable_type(),
         };
         matches!(
@@ -2823,6 +2828,7 @@ pub struct TestProperty {
 pub enum TbComponentKind {
     ClockGen,
     ResetGen,
+    File,
 }
 
 impl std::fmt::Display for TbComponentKind {
@@ -2830,6 +2836,7 @@ impl std::fmt::Display for TbComponentKind {
         match self {
             TbComponentKind::ClockGen => write!(f, "clock_gen"),
             TbComponentKind::ResetGen => write!(f, "reset_gen"),
+            TbComponentKind::File => write!(f, "file"),
         }
     }
 }

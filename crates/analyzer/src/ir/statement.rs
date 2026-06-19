@@ -4,8 +4,8 @@ use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::utils::{allow_missing_reset_statement, has_cond_type};
 use crate::ir::{
-    Comptime, Expression, FfTable, FunctionCall, Op, SystemFunctionCall, Type, VarId, VarIndex,
-    VarPath, VarSelect,
+    Comptime, Expression, FfTable, FunctionCall, Op, SystemFunctionCall, SystemFunctionInput, Type,
+    VarId, VarIndex, VarPath, VarSelect,
 };
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
@@ -221,6 +221,15 @@ pub enum TbMethod {
         clock: StrId,
         duration: Option<Expression>,
     },
+    FileOpen {
+        name: SystemFunctionInput,
+        append: bool,
+    },
+    FileWrite {
+        args: Vec<SystemFunctionInput>,
+    },
+    FileClose,
+    FileFlush,
 }
 
 impl Statement {
@@ -394,6 +403,16 @@ impl fmt::Display for Statement {
                         write!(f, "{}.assert({clock});", x.inst)
                     }
                 }
+                TbMethod::FileOpen { name, append } => {
+                    let method = if *append { "append" } else { "open" };
+                    write!(f, "{}.{method}({name});", x.inst)
+                }
+                TbMethod::FileWrite { args } => {
+                    let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
+                    write!(f, "{}.write({});", x.inst, args_str.join(", "))
+                }
+                TbMethod::FileClose => write!(f, "{}.close();", x.inst),
+                TbMethod::FileFlush => write!(f, "{}.flush();", x.inst),
             },
             Statement::For(x) => {
                 let range_op = if let ForRange::Reverse { .. } = &x.range {

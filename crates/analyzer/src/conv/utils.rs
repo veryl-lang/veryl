@@ -10,8 +10,8 @@ use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
 use crate::ir::{
     self, Arguments, Comptime, FuncPath, FuncProto, IrResult, Op, PartSelectPath, Shape, ShapeRef,
-    Signature, TbMethod, TbMethodCall, ValueVariant, VarIndex, VarKind, VarPath, VarPathSelect,
-    VarSelect, Variable,
+    Signature, SystemFunctionInput, TbMethod, TbMethodCall, ValueVariant, VarIndex, VarKind,
+    VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::symbol::{
     self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, ProtoBound, Symbol,
@@ -1263,6 +1263,17 @@ pub fn eval_type(
                         let token: TokenRange = symbol.found.token.into();
                         return Err(ir_error!(token));
                     }
+                }
+                SymbolKind::TbComponent(x) if matches!(x.kind, TbComponentKind::File) => {
+                    // The descriptor lives in the simulator's StrId-keyed file
+                    // table, so this slot is never read; back it with a
+                    // throwaway 32-bit width.
+                    if !context.in_test_module {
+                        let token: TokenRange = path.paths[0].base.into();
+                        context.insert_error(AnalyzerError::invalid_tb_usage(&token));
+                    }
+                    width.push(Some(32));
+                    ir::TypeKind::Bit
                 }
                 _ => {
                     let token: TokenRange = symbol.found.token.into();
@@ -3339,13 +3350,20 @@ pub fn tb_method_call(
         Err(_) => return Ok(None),
     };
 
-    let type_name = match &inst_symbol.found.kind {
-        SymbolKind::Instance(x) => &x.type_name,
+    // `$tb` methods are called on either an `inst` (clock_gen/reset_gen) or a
+    // `var` (file). Pull the component type path from whichever form it is.
+    let type_path = match &inst_symbol.found.kind {
+        SymbolKind::Instance(x) => x.type_name.mangled_path(),
+        SymbolKind::Variable(x) => {
+            if let TypeKind::UserDefined(ref ud) = x.r#type.kind {
+                ud.path.mangled_path()
+            } else {
+                return Ok(None);
+            }
+        }
         _ => return Ok(None),
     };
 
-    // Resolve the instance's type to check if it's a TbComponent
-    let type_path = type_name.mangled_path();
     let type_symbol = match symbol_table::resolve((&type_path, &inst_symbol.found.namespace)) {
         Ok(s) => s,
         Err(_) => return Ok(None),
@@ -3393,6 +3411,43 @@ pub fn tb_method_call(
             };
             TbMethod::ResetAssert { clock, duration }
         }
+        (TbComponentKind::File, "open") | (TbComponentKind::File, "append") => {
+            let name = if let Some(ir::Arguments::Positional(ref positional)) = args
+                && let Some(arg) = positional.first()
+            {
+                SystemFunctionInput(arg.0.clone())
+            } else {
+                let actual = if let Some(ir::Arguments::Positional(ref positional)) = args {
+                    positional.len()
+                } else {
+                    0
+                };
+                context.insert_error(AnalyzerError::mismatch_function_arity(
+                    method_name,
+                    1,
+                    actual,
+                    &token,
+                ));
+                return Err(ir_error!(token));
+            };
+            TbMethod::FileOpen {
+                name,
+                append: method_name == "append",
+            }
+        }
+        (TbComponentKind::File, "write") => {
+            let args = if let Some(ir::Arguments::Positional(ref positional)) = args {
+                positional
+                    .iter()
+                    .map(|arg| SystemFunctionInput(arg.0.clone()))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            TbMethod::FileWrite { args }
+        }
+        (TbComponentKind::File, "close") => TbMethod::FileClose,
+        (TbComponentKind::File, "flush") => TbMethod::FileFlush,
         _ => return Err(ir_error!(token)),
     };
 

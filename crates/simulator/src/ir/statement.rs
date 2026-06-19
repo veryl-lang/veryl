@@ -134,6 +134,16 @@ pub enum ProtoTbMethodKind {
         clock: StrId,
         duration: Option<ProtoExpression>,
     },
+    FileOpen {
+        path: String,
+        append: bool,
+    },
+    FileWrite {
+        format_str: String,
+        args: Vec<ProtoExpression>,
+    },
+    FileClose,
+    FileFlush,
 }
 
 #[derive(Clone)]
@@ -146,6 +156,16 @@ pub enum TbMethodKind {
         clock: StrId,
         duration: Option<Expression>,
     },
+    FileOpen {
+        path: String,
+        append: bool,
+    },
+    FileWrite {
+        format_str: String,
+        args: Vec<Expression>,
+    },
+    FileClose,
+    FileFlush,
 }
 
 #[derive(Clone)]
@@ -480,6 +500,22 @@ fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
         }
     }
     result
+}
+
+/// Format a `$display`/`$write`-style argument list, shared with the
+/// `$tb::file` write path so its output matches `$display`.
+pub fn format_output(format_str: &str, values: &[AnalyzerValue]) -> String {
+    if format_str.is_empty() {
+        values
+            .iter()
+            .map(|v| v.format_hex())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else if values.is_empty() {
+        format_str.to_string()
+    } else {
+        format_display_string(format_str, values)
+    }
 }
 
 /// Callback invoked by AOT-C event `.so` code for `$display` / `$write`.
@@ -884,6 +920,14 @@ impl ProtoStatement {
                         d.adjust_offsets(ff_delta, comb_delta);
                     }
                 }
+                ProtoTbMethodKind::FileWrite { args, .. } => {
+                    for a in args {
+                        a.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+                ProtoTbMethodKind::FileOpen { .. }
+                | ProtoTbMethodKind::FileClose
+                | ProtoTbMethodKind::FileFlush => {}
             },
             ProtoStatement::Break => {}
         }
@@ -1710,6 +1754,30 @@ impl ProtoStatement {
                                 duration,
                             }
                         }
+                        ProtoTbMethodKind::FileOpen { path, append } => TbMethodKind::FileOpen {
+                            path: path.clone(),
+                            append: *append,
+                        },
+                        ProtoTbMethodKind::FileWrite { format_str, args } => {
+                            let args = args
+                                .iter()
+                                .map(|e| {
+                                    e.apply_values_ptr(
+                                        ff_values_ptr,
+                                        ff_len,
+                                        comb_values_ptr,
+                                        comb_len,
+                                        use_4state,
+                                    )
+                                })
+                                .collect();
+                            TbMethodKind::FileWrite {
+                                format_str: format_str.clone(),
+                                args,
+                            }
+                        }
+                        ProtoTbMethodKind::FileClose => TbMethodKind::FileClose,
+                        ProtoTbMethodKind::FileFlush => TbMethodKind::FileFlush,
                     };
                     Statement::TbMethodCall {
                         inst: *inst,
@@ -2333,6 +2401,32 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                             duration,
                         }
                     }
+                    air::TbMethod::FileOpen { name, append } => {
+                        let path = extract_string_value(&name.0)
+                            .ok_or_else(|| {
+                                SimulatorError::unsupported_description(&name.0.token_range())
+                            })?
+                            .trim_matches('"')
+                            .to_string();
+                        ProtoTbMethodKind::FileOpen {
+                            path,
+                            append: *append,
+                        }
+                    }
+                    air::TbMethod::FileWrite { args } => {
+                        let (format_str, exprs) =
+                            extract_display_args(context, args).ok_or_else(|| {
+                                let token =
+                                    args.first().map(|a| a.0.token_range()).unwrap_or_default();
+                                SimulatorError::unsupported_description(&token)
+                            })?;
+                        ProtoTbMethodKind::FileWrite {
+                            format_str,
+                            args: exprs,
+                        }
+                    }
+                    air::TbMethod::FileClose => ProtoTbMethodKind::FileClose,
+                    air::TbMethod::FileFlush => ProtoTbMethodKind::FileFlush,
                 };
                 vec![ProtoStatement::TbMethodCall {
                     inst: x.inst,

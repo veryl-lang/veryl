@@ -131,5 +131,40 @@ pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
         );
     }
 
+    // $tb::file
+    let file_token = Token::new("file", 0, 0, 0, 0, TokenSource::Builtin);
+    let file_symbol = Symbol::new(
+        &file_token,
+        SymbolKind::TbComponent(TbComponentProperty {
+            kind: TbComponentKind::File,
+        }),
+        &ns,
+        true,
+        DocComment::default(),
+    );
+    let _ = symbol_table.insert(&file_token, file_symbol);
+
+    {
+        let mut file_ns = ns.clone();
+        file_ns.push(file_token.text);
+        // `write` is variadic, so it is registered port-less; `tb_method_call`
+        // intercepts the call and handles its arguments.
+        insert_method(
+            symbol_table,
+            &file_ns,
+            "open",
+            &[("name", Direction::Input)],
+        );
+        insert_method(
+            symbol_table,
+            &file_ns,
+            "append",
+            &[("name", Direction::Input)],
+        );
+        insert_method(symbol_table, &file_ns, "write", &[]);
+        insert_method(symbol_table, &file_ns, "close", &[]);
+        insert_method(symbol_table, &file_ns, "flush", &[]);
+    }
+
     ns.pop();
 }
