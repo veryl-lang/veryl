@@ -20,7 +20,11 @@ module test_ignored_counter {
 
     var cnt: logic<32>;
 
-    inst dut: IgnoredCounter ( clk: clk, rst: rst, cnt: cnt );
+    inst dut: IgnoredCounter (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
 
     initial {
         rst.assert();

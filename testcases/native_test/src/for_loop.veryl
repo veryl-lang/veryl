@@ -19,7 +19,11 @@ module test_for_loop {
 
     var cnt: logic<32>;
 
-    inst dut: CounterForLoop ( clk: clk, rst: rst, cnt: cnt );
+    inst dut: CounterForLoop (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
 
     initial {
         rst.assert();
@@ -40,7 +44,11 @@ module test_for_loop_step {
 
     var cnt: logic<32>;
 
-    inst dut: CounterForLoop ( clk: clk, rst: rst, cnt: cnt );
+    inst dut: CounterForLoop (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
 
     initial {
         rst.assert();
@@ -61,7 +69,11 @@ module test_for_loop_rev {
 
     var cnt: logic<32>;
 
-    inst dut: CounterForLoop ( clk: clk, rst: rst, cnt: cnt );
+    inst dut: CounterForLoop (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
 
     initial {
         rst.assert();

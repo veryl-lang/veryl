@@ -19,7 +19,11 @@ module test_function_call {
 
     var cnt: logic<32>;
 
-    inst dut: Counter2 ( clk: clk, rst: rst, cnt: cnt );
+    inst dut: Counter2 (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
 
     function step_n (
         n: input logic<32>,

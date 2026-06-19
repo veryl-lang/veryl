@@ -19,7 +19,11 @@ module test_reset_explicit_duration {
 
     var cnt: logic<32>;
 
-    inst dut: Counter3 ( clk: clk, rst: rst, cnt: cnt );
+    inst dut: Counter3 (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
 
     initial {
         rst.assert(5);
@@ -36,7 +40,11 @@ module test_reset_cycles_param {
 
     var cnt: logic<32>;
 
-    inst dut: Counter3 ( clk: clk, rst: rst, cnt: cnt );
+    inst dut: Counter3 (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
 
     initial {
         rst.assert();

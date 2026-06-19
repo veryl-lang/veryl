@@ -16,7 +16,13 @@ pub module binary_encoder #(
 ) {
     let unary_masked: logic<UNARY_WIDTH> = if i_en ? i_unary : {1'b0 repeat (UNARY_WIDTH - 1), 1'b1};
 
-    inst u_binary_encoder: _binary_encoder #( UNARY_WIDTH: UNARY_WIDTH ) ( i_unary: unary_masked, o_bin, o_valid: _ );
+    inst u_binary_encoder: _binary_encoder #(
+        UNARY_WIDTH: UNARY_WIDTH,
+    ) (
+        i_unary: unary_masked,
+        o_bin                ,
+        o_valid: _           ,
+    );
 }
 
 module _binary_encoder #(
