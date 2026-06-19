@@ -150,7 +150,7 @@ mod formatter {
     fn regenerate_format_testcases() {
         let dirs = [
             "../../testcases/error",
-            "../../testcases/filelist/src",
+            "../../testcases/filelist/a/src",
             "../../testcases/native_test/src",
             "../../testcases/sample/src",
         ];
@@ -185,7 +185,7 @@ mod formatter {
 
     mod filelist {
         fn test(name: &str) {
-            super::run(&format!("../../testcases/filelist/src/{}.veryl", name));
+            super::run(&format!("../../testcases/filelist/a/src/{}.veryl", name));
         }
         include!(concat!(env!("OUT_DIR"), "/filelist_test.rs"));
     }
@@ -632,7 +632,7 @@ mod filelist {
     #[test]
     fn test() {
         let path = std::env::current_dir().unwrap();
-        let path = path.join("../../testcases/filelist");
+        let path = path.join("../../testcases/filelist/a");
         let metadata_path = Metadata::search_from(path).unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
         let paths = metadata.paths::<PathBuf>(&[], false, true).unwrap();
@@ -706,8 +706,11 @@ mod filelist {
             "19_package_o.veryl",
             "20_module_p.veryl",
             "21_alias_q.veryl",
+            "22_dependency_r.veryl",
             "ram.veryl",
             "axi_pkg.veryl",
+            "b_pkg.veryl",
+            "c_pkg.veryl",
         ];
         check_list(&paths, all);
 
@@ -726,6 +729,8 @@ mod filelist {
         check_order(&paths, "18_package_n.veryl", "19_package_o.veryl");
         check_order(&paths, "19_package_o.veryl", "20_module_p.veryl");
         check_order(&paths, "20_module_p.veryl", "21_alias_q.veryl");
+        check_order(&paths, "c_pkg.veryl", "b_pkg.veryl");
+        check_order(&paths, "b_pkg.veryl", "22_dependency_r.veryl");
     }
 }
 

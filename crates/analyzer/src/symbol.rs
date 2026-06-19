@@ -317,6 +317,7 @@ impl Symbol {
                     None
                 }
             }
+            SymbolKind::Function(_) | SymbolKind::ProtoFunction(_) => symbol.get_parent_component(),
             _ => None,
         }
     }

@@ -1,0 +1,9 @@
+[project]
+name = "filelist_b"
+version = "0.1.0"
+
+[build]
+sourcemap_target = {type = "none"}
+
+[dependencies]
+c = {path = "../c"}

@@ -1,0 +1,6 @@
+package r_pkg {
+    function func () -> u32 {
+        const B: u32 = b::b_pkg::func();
+        return B;
+    }
+}

@@ -1,0 +1,5 @@
+package c_pkg {
+    function func () -> u32 {
+        return 8;
+    }
+}
