@@ -16,9 +16,12 @@ pub enum MetadataError {
         path: PathBuf,
     },
 
-    #[diagnostic(code(MetadataError::FileNotFound), help(""))]
-    #[error("Veryl.toml is not found")]
-    FileNotFound,
+    #[diagnostic(
+        code(MetadataError::FileNotFound),
+        help("Veryl.toml is searched from the given path toward the root directory")
+    )]
+    #[error("Veryl.toml is not found from \"{0}\"")]
+    FileNotFound(PathBuf),
 
     #[diagnostic(code(MetadataError::Deserialize), help(""))]
     #[error("toml load failed")]
