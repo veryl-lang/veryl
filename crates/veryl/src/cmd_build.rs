@@ -742,7 +742,7 @@ incremental = true
     }
 
     #[test]
-    fn incremental_check_does_not_restore_warning_file() {
+    fn incremental_check_restores_warning_file_and_re_reports() {
         let _lock = BUILD_TEST_LOCK.lock().unwrap();
         let tempdir = tempfile::tempdir().unwrap();
         let (mut metadata, _project_path) = write_incremental_project(
@@ -754,19 +754,17 @@ incremental = true
             ],
         );
 
-        // Cold check fails on the warning; the clean file is cached, the
-        // warning file invalidated.
+        // Cold check fails on the warning; both files are cached.
         assert!(run_check(&mut metadata).is_err());
 
-        // Warm: only the clean file restores. Were the warning file restored,
-        // its warning would vanish and check would wrongly pass — the
-        // regression this guards.
+        // Warm: both files restore, yet check still fails — the warning is
+        // replayed from the cache, not hidden. The regression this guards.
         assert!(run_check(&mut metadata).is_err());
-        assert_eq!(crate::incremental::last_restored_count(), 1);
+        assert_eq!(crate::incremental::last_restored_count(), 2);
     }
 
     #[test]
-    fn incremental_build_warning_file_invalidated() {
+    fn incremental_build_restores_warning_file() {
         let _lock = BUILD_TEST_LOCK.lock().unwrap();
         let tempdir = tempfile::tempdir().unwrap();
         let (mut metadata, _project_path) = write_incremental_project(
@@ -778,14 +776,13 @@ incremental = true
             ],
         );
 
-        // Build caches the clean file but invalidates the warning file
-        // (warnings don't fail a build).
+        // Cold build caches both files (warnings don't fail a build).
         run_build(&mut metadata, None);
         assert_eq!(crate::incremental::last_restored_count(), 0);
 
-        // Warm build restores only the clean file.
+        // Warm build restores both, including the warning file.
         run_build(&mut metadata, None);
-        assert_eq!(crate::incremental::last_restored_count(), 1);
+        assert_eq!(crate::incremental::last_restored_count(), 2);
     }
 
     #[test]

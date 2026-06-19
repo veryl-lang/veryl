@@ -10,22 +10,98 @@ use crate::StopWatch;
 use crate::context::Context;
 use crate::incremental::Incremental;
 use log::{debug, info};
-use miette::{self, Diagnostic, IntoDiagnostic, Result, WrapErr};
-use std::collections::HashSet;
+use miette::{
+    self, Diagnostic, IntoDiagnostic, LabeledSpan, Result, Severity, SourceCode, WrapErr,
+};
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
-use veryl_analyzer::{Analyzer, AnalyzerError};
+use veryl_analyzer::{Analyzer, AnalyzerError, CachedDiagnostic};
 use veryl_metadata::Metadata;
 use veryl_parser::resource_table::PathId;
 use veryl_parser::{Parser, resource_table};
 use veryl_path::PathSet;
 
+/// A diagnostic in [`CheckError`]: freshly produced this build (`Analyzer`),
+/// or restored from the cache (`Cached`) and re-reported on a warm run.
+#[derive(Debug)]
+pub enum Diag {
+    Analyzer(AnalyzerError),
+    Cached(CachedDiagnostic),
+}
+
+impl Diag {
+    fn is_error(&self) -> bool {
+        match self {
+            Diag::Analyzer(x) => x.is_error(),
+            Diag::Cached(x) => x.is_error(),
+        }
+    }
+
+    /// The source file owning this diagnostic, for cache attribution.
+    fn path(&self) -> Option<PathBuf> {
+        match self {
+            Diag::Analyzer(x) => x
+                .token_source()
+                .get_path()
+                .and_then(resource_table::get_path_value),
+            Diag::Cached(x) => x.token_path().map(PathBuf::from),
+        }
+    }
+
+    fn as_diagnostic(&self) -> &dyn Diagnostic {
+        match self {
+            Diag::Analyzer(x) => x,
+            Diag::Cached(x) => x,
+        }
+    }
+}
+
+impl fmt::Display for Diag {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Diag::Analyzer(x) => write!(f, "{x}"),
+            Diag::Cached(x) => write!(f, "{x}"),
+        }
+    }
+}
+
+impl std::error::Error for Diag {}
+
+impl Diagnostic for Diag {
+    fn code(&self) -> Option<Box<dyn fmt::Display + '_>> {
+        self.as_diagnostic().code()
+    }
+    fn severity(&self) -> Option<Severity> {
+        self.as_diagnostic().severity()
+    }
+    fn help(&self) -> Option<Box<dyn fmt::Display + '_>> {
+        self.as_diagnostic().help()
+    }
+    fn url(&self) -> Option<Box<dyn fmt::Display + '_>> {
+        self.as_diagnostic().url()
+    }
+    fn source_code(&self) -> Option<&dyn SourceCode> {
+        self.as_diagnostic().source_code()
+    }
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
+        self.as_diagnostic().labels()
+    }
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        self.as_diagnostic().related()
+    }
+    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
+        self.as_diagnostic().diagnostic_source()
+    }
+}
+
 #[derive(Error, Diagnostic, Debug)]
 #[error("veryl check failed")]
 pub struct CheckError {
     #[related]
-    pub related: Vec<AnalyzerError>,
+    pub related: Vec<Diag>,
     error_count: u32,
     error_count_limit: u32,
 }
@@ -42,13 +118,21 @@ impl CheckError {
     pub fn append(mut self, x: &mut Vec<AnalyzerError>) -> Self {
         for x in x.drain(0..) {
             if !x.is_error() || self.error_count_limit == 0 {
-                self.related.push(x);
+                self.related.push(Diag::Analyzer(x));
             } else if self.error_count < self.error_count_limit {
-                self.related.push(x);
+                self.related.push(Diag::Analyzer(x));
                 self.error_count += 1;
             }
         }
         self
+    }
+
+    /// Appends diagnostics restored from the incremental cache. These are
+    /// always warnings (files with errors are never cached), so they bypass
+    /// the error-count limit.
+    pub fn append_cached(&mut self, diagnostics: Vec<CachedDiagnostic>) {
+        self.related
+            .extend(diagnostics.into_iter().map(Diag::Cached));
     }
 
     pub fn check_err(self) -> Result<Self> {
@@ -162,6 +246,11 @@ pub fn analyze(
         contexts.push(context);
     }
 
+    // Re-report warnings cached for restored files (their pass2 didn't run).
+    if let Some(x) = incremental.as_mut() {
+        check_error.append_cached(x.take_restored_diagnostics());
+    }
+
     if let Some(x) = incremental.as_ref() {
         info!("Restored {}/{} files from cache", x.restored, paths.len());
     }
@@ -267,21 +356,29 @@ pub fn analyze(
     })
 }
 
-/// Source files owning any diagnostic, whose fragments are then invalidated so a
-/// warm run re-analyzes them (re-reporting a warning the pass1-only fragment
-/// would hide).
+/// Freshly produced diagnostics grouped by the source file that owns them,
+/// each flattened to a [`CachedDiagnostic`] for storage. A warm run reloads
+/// these and re-reports the warning instead of re-running pass2.
 ///
-/// Relies on every diagnostic being file-attributable: today all warnings carry
-/// a `File`/`Generated` token. One on a `Builtin`/`External` token would be
-/// dropped here and could be hidden on a warm run — anchor new warnings on user
-/// tokens.
-pub fn collect_diagnosed(check_error: &CheckError) -> HashSet<PathBuf> {
-    let mut ret = HashSet::new();
-    for error in &check_error.related {
-        if let Some(path) = error.token_source().get_path()
-            && let Some(path) = resource_table::get_path_value(path)
-        {
-            ret.insert(path);
+/// `Cached` diagnostics are skipped: `Store::keep` already preserves a
+/// restored file's blob.
+///
+/// A warning whose token resolves to no file (`Builtin`/`External`) can't be
+/// cached, so it would vanish on a warm restore rather than be re-reported.
+/// None exist today; one is logged at `debug` to surface the violation, so
+/// anchor new warnings on user tokens.
+pub fn collect_diagnosed(check_error: &CheckError) -> HashMap<PathBuf, Vec<CachedDiagnostic>> {
+    let mut ret: HashMap<PathBuf, Vec<CachedDiagnostic>> = HashMap::new();
+    for diag in &check_error.related {
+        let Diag::Analyzer(error) = diag else {
+            continue;
+        };
+        if let Some(path) = diag.path() {
+            ret.entry(path)
+                .or_default()
+                .push(CachedDiagnostic::from_error(error));
+        } else {
+            debug!("diagnostic without a source path, not cached for warm restore: {error}");
         }
     }
     ret

@@ -1,5 +1,6 @@
 use crate::multi_sources::{MultiSources, Source};
 use miette::{self, Diagnostic, Severity, SourceSpan};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
 use veryl_parser::resource_table::StrId;
@@ -1818,9 +1819,250 @@ fn source_with_context(
     (sources, ranges)
 }
 
+/// `miette::Severity`, in a form the diagnostic cache can serialize.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CachedSeverity {
+    Advice,
+    Warning,
+    Error,
+}
+
+impl From<Severity> for CachedSeverity {
+    fn from(value: Severity) -> Self {
+        match value {
+            Severity::Advice => CachedSeverity::Advice,
+            Severity::Warning => CachedSeverity::Warning,
+            Severity::Error => CachedSeverity::Error,
+        }
+    }
+}
+
+impl From<CachedSeverity> for Severity {
+    fn from(value: CachedSeverity) -> Self {
+        match value {
+            CachedSeverity::Advice => Severity::Advice,
+            CachedSeverity::Warning => Severity::Warning,
+            CachedSeverity::Error => Severity::Error,
+        }
+    }
+}
+
+/// An `AnalyzerError` flattened to its rendered parts, so a warm build can
+/// re-report a warning without re-running pass2. `sources` carry their own
+/// text and `labels` offsets are relative to it, so a restored diagnostic
+/// needs no global-table fixup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CachedDiagnostic {
+    severity: Option<CachedSeverity>,
+    code: Option<String>,
+    url: Option<String>,
+    help: Option<String>,
+    message: String,
+    sources: MultiSources,
+    /// (label text, span offset, span length)
+    labels: Vec<(Option<String>, usize, usize)>,
+    /// Path of the file that owns the diagnostic, for attribution.
+    token_path: Option<String>,
+}
+
+impl CachedDiagnostic {
+    /// Flattens `error` for caching, reading its parts through the
+    /// `Diagnostic` trait.
+    pub fn from_error(error: &AnalyzerError) -> Self {
+        let labels = error
+            .labels()
+            .map(|labels| {
+                labels
+                    .map(|x| (x.label().map(|s| s.to_string()), x.offset(), x.len()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let token_path = error
+            .token_source()
+            .get_path()
+            .and_then(veryl_parser::resource_table::get_path_value)
+            .map(|x| x.to_string_lossy().to_string());
+        CachedDiagnostic {
+            severity: error.severity().map(CachedSeverity::from),
+            code: error.code().map(|x| x.to_string()),
+            url: error.url().map(|x| x.to_string()),
+            help: error.help().map(|x| x.to_string()),
+            message: error.to_string(),
+            sources: error.input_sources().clone(),
+            labels,
+            token_path,
+        }
+    }
+
+    pub fn is_error(&self) -> bool {
+        matches!(self.severity, Some(CachedSeverity::Error) | None)
+    }
+
+    pub fn token_path(&self) -> Option<&str> {
+        self.token_path.as_deref()
+    }
+}
+
+impl fmt::Display for CachedDiagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for CachedDiagnostic {}
+
+impl Diagnostic for CachedDiagnostic {
+    fn severity(&self) -> Option<Severity> {
+        self.severity.map(Severity::from)
+    }
+
+    fn code(&self) -> Option<Box<dyn fmt::Display + '_>> {
+        self.code
+            .as_ref()
+            .map(|x| Box::new(x.clone()) as Box<dyn fmt::Display>)
+    }
+
+    fn url(&self) -> Option<Box<dyn fmt::Display + '_>> {
+        self.url
+            .as_ref()
+            .map(|x| Box::new(x.clone()) as Box<dyn fmt::Display>)
+    }
+
+    fn help(&self) -> Option<Box<dyn fmt::Display + '_>> {
+        self.help
+            .as_ref()
+            .map(|x| Box::new(x.clone()) as Box<dyn fmt::Display>)
+    }
+
+    fn source_code(&self) -> Option<&dyn miette::SourceCode> {
+        Some(&self.sources)
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan> + '_>> {
+        let labels = self.labels.clone();
+        Some(Box::new(labels.into_iter().map(|(label, offset, len)| {
+            miette::LabeledSpan::new(label, offset, len)
+        })))
+    }
+}
+
 impl AnalyzerError {
     pub fn is_error(&self) -> bool {
         matches!(self.severity(), Some(Severity::Error) | None)
+    }
+
+    /// The `#[source_code]` (`input: MultiSources`) carried by every variant.
+    /// Exposed so `CachedDiagnostic` can capture the source snippet.
+    pub fn input_sources(&self) -> &MultiSources {
+        match self {
+            AnalyzerError::AmbiguousElsif { input, .. } => input,
+            AnalyzerError::AmbiguousIdentifier { input, .. } => input,
+            AnalyzerError::AnonymousIdentifierUsage { input, .. } => input,
+            AnalyzerError::CallNonFunction { input, .. } => input,
+            AnalyzerError::CombinationalLoop { input, .. } => input,
+            AnalyzerError::CyclicTypeDependency { input, .. } => input,
+            AnalyzerError::DuplicateArgument { input, .. } => input,
+            AnalyzerError::DuplicatedIdentifier { input, .. } => input,
+            AnalyzerError::DuplicateEnumVariant { input, .. } => input,
+            AnalyzerError::ExceedLimit { input, .. } => input,
+            AnalyzerError::FixedTypeWithSignedModifier { input, .. } => input,
+            AnalyzerError::GenericInferenceFailed { input, .. } => input,
+            AnalyzerError::ImplicitClockConversion { input, .. } => input,
+            AnalyzerError::IncludeFailure { input, .. } => input,
+            AnalyzerError::IncompatProto { input, .. } => input,
+            AnalyzerError::InfiniteRecursion { input, .. } => input,
+            AnalyzerError::InvalidAssignment { input, .. } => input,
+            AnalyzerError::InvalidCast { input, .. } => input,
+            AnalyzerError::InvalidClock { input, .. } => input,
+            AnalyzerError::InvalidClockAssignment { input, .. } => input,
+            AnalyzerError::InvalidClockDomain { input, .. } => input,
+            AnalyzerError::InvalidConnectOperand { input, .. } => input,
+            AnalyzerError::InvalidDirection { input, .. } => input,
+            AnalyzerError::InvalidEmbed { input, .. } => input,
+            AnalyzerError::InvalidEmbedIdentifier { input, .. } => input,
+            AnalyzerError::InvalidEnumVariant { input, .. } => input,
+            AnalyzerError::InvalidFactor { input, .. } => input,
+            AnalyzerError::InvalidForStep { input, .. } => input,
+            AnalyzerError::InvalidIdentifier { input, .. } => input,
+            AnalyzerError::InvalidImport { input, .. } => input,
+            AnalyzerError::InvalidLogicalOperand { input, .. } => input,
+            AnalyzerError::InvalidLsb { input, .. } => input,
+            AnalyzerError::InvalidModifier { input, .. } => input,
+            AnalyzerError::InvalidModportItem { input, .. } => input,
+            AnalyzerError::InvalidMsb { input, .. } => input,
+            AnalyzerError::InvalidNumberCharacter { input, .. } => input,
+            AnalyzerError::InvalidOperand { input, .. } => input,
+            AnalyzerError::InvalidPortDefaultValue { input, .. } => input,
+            AnalyzerError::InvalidRange { input, .. } => input,
+            AnalyzerError::InvalidRangeAssign { input, .. } => input,
+            AnalyzerError::InvalidReset { input, .. } => input,
+            AnalyzerError::InvalidSelect { input, .. } => input,
+            AnalyzerError::InvalidStatement { input, .. } => input,
+            AnalyzerError::InvalidTbUsage { input, .. } => input,
+            AnalyzerError::InvalidTest { input, .. } => input,
+            AnalyzerError::InvalidTypeDeclaration { input, .. } => input,
+            AnalyzerError::InvalidUnsizedLiteral { input, .. } => input,
+            AnalyzerError::InvalidWavedrom { input, .. } => input,
+            AnalyzerError::InvisibleIndentifier { input, .. } => input,
+            AnalyzerError::LastItemWithDefine { input, .. } => input,
+            AnalyzerError::MemberAccessOnArray { input, .. } => input,
+            AnalyzerError::MismatchAssignment { input, .. } => input,
+            AnalyzerError::MismatchAttributeArgs { input, .. } => input,
+            AnalyzerError::MismatchClockDomain { input, .. } => input,
+            AnalyzerError::MismatchFunctionArg { input, .. } => input,
+            AnalyzerError::MismatchFunctionArity { input, .. } => input,
+            AnalyzerError::MismatchGenericsArity { input, .. } => input,
+            AnalyzerError::MismatchType { input, .. } => input,
+            AnalyzerError::MissingClockDomain { input, .. } => input,
+            AnalyzerError::MissingClockSignal { input, .. } => input,
+            AnalyzerError::MissingDefaultArgument { input, .. } => input,
+            AnalyzerError::MissingIfReset { input, .. } => input,
+            AnalyzerError::MissingPort { input, .. } => input,
+            AnalyzerError::MissingResetSignal { input, .. } => input,
+            AnalyzerError::MissingResetStatement { input, .. } => input,
+            AnalyzerError::MissingTbPort { input, .. } => input,
+            AnalyzerError::MissingTri { input, .. } => input,
+            AnalyzerError::MixedFunctionArgument { input, .. } => input,
+            AnalyzerError::MixedStructUnionMember { input, .. } => input,
+            AnalyzerError::MultipleAssignment { input, .. } => input,
+            AnalyzerError::MultipleDefault { input, .. } => input,
+            AnalyzerError::NonConstantSelectWidth { input, .. } => input,
+            AnalyzerError::NonPositiveValue { input, .. } => input,
+            AnalyzerError::PrivateMember { input, .. } => input,
+            AnalyzerError::PrivateNamespace { input, .. } => input,
+            AnalyzerError::ReferringBeforeDefinition { input, .. } => input,
+            AnalyzerError::ReservedIdentifier { input, .. } => input,
+            AnalyzerError::SvKeywordUsage { input, .. } => input,
+            AnalyzerError::SvWithImplicitReset { input, .. } => input,
+            AnalyzerError::TooLargeEnumVariant { input, .. } => input,
+            AnalyzerError::TooLargeNumber { input, .. } => input,
+            AnalyzerError::TooMuchEnumVariant { input, .. } => input,
+            AnalyzerError::TypeInferenceConflict { input, .. } => input,
+            AnalyzerError::TypeInferenceNotSupported { input, .. } => input,
+            AnalyzerError::UnassignableOutput { input, .. } => input,
+            AnalyzerError::UnassignVariable { input, .. } => input,
+            AnalyzerError::UncoveredBranch { input, .. } => input,
+            AnalyzerError::UndefinedIdentifier { input, .. } => input,
+            AnalyzerError::UnenclosedInnerIfExpression { input, .. } => input,
+            AnalyzerError::UnevaluableValue { input, .. } => input,
+            AnalyzerError::UnexpandableModport { input, .. } => input,
+            AnalyzerError::UnknownAttribute { input, .. } => input,
+            AnalyzerError::UnknownEmbedLang { input, .. } => input,
+            AnalyzerError::UnknownEmbedWay { input, .. } => input,
+            AnalyzerError::UnknownIncludeWay { input, .. } => input,
+            AnalyzerError::UnknownMember { input, .. } => input,
+            AnalyzerError::UnknownMsb { input, .. } => input,
+            AnalyzerError::UnknownParam { input, .. } => input,
+            AnalyzerError::UnknownPort { input, .. } => input,
+            AnalyzerError::UnknownTbPort { input, .. } => input,
+            AnalyzerError::UnknownUnsafe { input, .. } => input,
+            AnalyzerError::UnresolvableGenericExpression { input, .. } => input,
+            AnalyzerError::UnsignedArithShift { input, .. } => input,
+            AnalyzerError::UnusedReturn { input, .. } => input,
+            AnalyzerError::UnusedVariable { input, .. } => input,
+            AnalyzerError::WrongSeparator { input, .. } => input,
+            AnalyzerError::ZeroWidthNumber { input, .. } => input,
+        }
     }
 
     pub fn token_source(&self) -> TokenSource {

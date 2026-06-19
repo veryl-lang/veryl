@@ -9,6 +9,7 @@
 //! outside its own window (e.g. a clock domain in another file) is
 //! non-cacheable.
 
+use crate::analyzer_error::CachedDiagnostic;
 use crate::attribute::Attribute;
 use crate::definition_table::{self, Definition, DefinitionId};
 use crate::fragment_codec;
@@ -101,6 +102,17 @@ impl Fragment {
     pub fn from_bytes(bytes: &[u8]) -> Result<Fragment, FragmentError> {
         postcard::from_bytes(bytes).map_err(|x| FragmentError::Restore(x.to_string()))
     }
+}
+
+/// Serializes one file's cached diagnostics. They are self-contained, so
+/// unlike a fragment they need no ID codec session.
+pub fn capture_diagnostics(diagnostics: &[CachedDiagnostic]) -> Result<Vec<u8>, FragmentError> {
+    postcard::to_allocvec(diagnostics).map_err(|x| FragmentError::NonCacheable(x.to_string()))
+}
+
+/// Deserializes diagnostics serialized by [`capture_diagnostics`].
+pub fn restore_diagnostics(bytes: &[u8]) -> Result<Vec<CachedDiagnostic>, FragmentError> {
+    postcard::from_bytes(bytes).map_err(|x| FragmentError::Restore(x.to_string()))
 }
 
 #[derive(Debug)]
