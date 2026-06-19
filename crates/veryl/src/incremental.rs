@@ -15,7 +15,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use veryl_analyzer::fragment_cache::{self, Fragment, FragmentWatermark};
 use veryl_analyzer::{
-    attribute_table, definition_table, namespace_table, symbol_table, type_dag, unsafe_table,
+    CachedDiagnostic, attribute_table, definition_table, namespace_table, symbol_table, type_dag,
+    unsafe_table,
 };
 use veryl_cache::Store;
 use veryl_metadata::Metadata;
@@ -39,6 +40,8 @@ pub struct Incremental {
     hashes: HashMap<PathBuf, String>,
     root_project: String,
     pub restored: usize,
+    /// Cached diagnostics of restored files, to re-report on a warm run.
+    restored_diagnostics: Vec<CachedDiagnostic>,
 }
 
 impl Drop for Incremental {
@@ -127,6 +130,7 @@ impl Incremental {
             hashes,
             root_project: metadata.project.name.clone(),
             restored: 0,
+            restored_diagnostics: Vec::new(),
         })
     }
 
@@ -167,6 +171,8 @@ impl Incremental {
             self.miss.insert(path.src.clone());
             return false;
         };
+        // Loaded now while `entry` is borrowed; replayed only on success.
+        let diag_bytes = self.store.load_diagnostics(entry);
         let Ok(fragment) = Fragment::from_bytes(&bytes) else {
             debug!("Failed to decode fragment ({src})");
             self.miss.insert(path.src.clone());
@@ -182,6 +188,12 @@ impl Incremental {
                 self.store.keep(&src);
                 self.restored += 1;
                 self.inputs.remove(&path.src);
+                if let Some(diag_bytes) = diag_bytes {
+                    match fragment_cache::restore_diagnostics(&diag_bytes) {
+                        Ok(diags) => self.restored_diagnostics.extend(diags),
+                        Err(x) => debug!("Failed to restore diagnostics ({src}): {x}"),
+                    }
+                }
                 true
             }
             Err(x) => {
@@ -223,11 +235,16 @@ impl Incremental {
         self.store.put(src, hash, blob.as_deref());
     }
 
+    /// Drains the diagnostics of files restored this build, for the caller to
+    /// re-report. Call once, after the restore pass.
+    pub fn take_restored_diagnostics(&mut self) -> Vec<CachedDiagnostic> {
+        std::mem::take(&mut self.restored_diagnostics)
+    }
+
     /// Persists the manifest (dependents + per-file tests); call only after a
-    /// successful build. `diagnosed` files (warnings — errors abort earlier) have
-    /// their fragments invalidated so a warm run re-reports what the pass1-only
-    /// fragment would hide.
-    pub fn save(&mut self, diagnosed: &HashSet<PathBuf>) {
+    /// successful build. `diagnosed` maps each warning file (errors abort
+    /// earlier) to its diagnostics, cached so a warm run re-reports them.
+    pub fn save(&mut self, diagnosed: &HashMap<PathBuf, Vec<CachedDiagnostic>>) {
         let dependent_files = type_dag::dependent_files();
         for (path, dependents) in dependent_files {
             let Some(src) = resource_table::get_path_value(path) else {
@@ -253,10 +270,13 @@ impl Incremental {
             self.store.set_tests(&src.to_string_lossy(), names);
         }
 
-        // `invalidate` keeps the dependents/tests just recorded, which a `put`
-        // would wipe.
-        for src in diagnosed {
-            self.store.invalidate(&src.to_string_lossy());
+        // Restored files' diagnostics are already preserved by `Store::keep`,
+        // so only freshly analyzed files appear here.
+        for (src, diagnostics) in diagnosed {
+            match fragment_cache::capture_diagnostics(diagnostics) {
+                Ok(blob) => self.store.set_diagnostics(&src.to_string_lossy(), &blob),
+                Err(x) => debug!("Failed to capture diagnostics ({}): {x}", src.display()),
+            }
         }
 
         self.store.save();

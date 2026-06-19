@@ -16,7 +16,7 @@ const MANIFEST: &str = "manifest.toml";
 const FRAGMENT_DIR: &str = "fragments";
 const FRAGMENT_EXT: &str = "frag";
 /// Bump on any incompatible change to the blob or manifest layout.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 const BLOB_MAGIC: &[u8; 4] = b"VFRG";
 
 /// Returns the BLAKE3 hash of `data` as a hex string.
@@ -59,6 +59,11 @@ pub struct FileEntry {
     /// simulated), so they must not be restored from a fragment.
     #[serde(default)]
     pub tests: Vec<String>,
+    /// Blob path of this file's cached diagnostics, replayed on a warm restore
+    /// so a file with warnings stays cacheable instead of being invalidated;
+    /// `None` if it produced none.
+    #[serde(default)]
+    pub diagnostics: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -148,8 +153,36 @@ impl Store {
 
     /// Loads and verifies the blob behind an entry. Any failure is a miss.
     pub fn load(&self, entry: &FileEntry) -> Option<Vec<u8>> {
-        let fragment = entry.fragment.as_ref()?;
-        let data = fs::read(self.root.join(fragment)).ok()?;
+        self.read_blob(entry.fragment.as_ref()?)
+    }
+
+    /// Writes `payload` as a content-addressed blob under `fragments/` and
+    /// returns its store-relative path; an identical existing blob is
+    /// reused. `None` on write failure.
+    fn write_blob(&self, payload: &[u8]) -> Option<String> {
+        let mut data = Vec::with_capacity(payload.len() + 8);
+        data.extend_from_slice(BLOB_MAGIC);
+        data.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
+        data.extend_from_slice(payload);
+
+        let name = content_hash(&data);
+        let rel = format!("{FRAGMENT_DIR}/{}/{}.{FRAGMENT_EXT}", &name[..2], name);
+        let path = self.root.join(&rel);
+        if !path.exists() {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Err(x) = veryl_path::atomic_write(&path, &data) {
+                log::debug!("cache: failed to write blob {}: {x}", path.display());
+                return None;
+            }
+        }
+        Some(rel)
+    }
+
+    /// Reads and verifies a content-addressed blob, returning its payload.
+    fn read_blob(&self, rel: &str) -> Option<Vec<u8>> {
+        let data = fs::read(self.root.join(rel)).ok()?;
         let payload = data.strip_prefix(BLOB_MAGIC.as_slice())?;
         let (version, payload) = payload.split_first_chunk::<4>()?;
         if u32::from_le_bytes(*version) != SCHEMA_VERSION {
@@ -161,26 +194,7 @@ impl Store {
     /// Records an entry for the build in progress. When `blob` is given it
     /// is written content-addressed; an identical existing blob is reused.
     pub fn put(&mut self, src: String, hash: String, blob: Option<&[u8]>) {
-        let fragment = blob.and_then(|payload| {
-            let mut data = Vec::with_capacity(payload.len() + 8);
-            data.extend_from_slice(BLOB_MAGIC);
-            data.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
-            data.extend_from_slice(payload);
-
-            let name = content_hash(&data);
-            let rel = format!("{FRAGMENT_DIR}/{}/{}.{FRAGMENT_EXT}", &name[..2], name);
-            let path = self.root.join(&rel);
-            if !path.exists() {
-                if let Some(parent) = path.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                if let Err(x) = veryl_path::atomic_write(&path, &data) {
-                    log::debug!("cache: failed to write blob {}: {x}", path.display());
-                    return None;
-                }
-            }
-            Some(rel)
-        });
+        let fragment = blob.and_then(|payload| self.write_blob(payload));
 
         self.next_files.insert(
             src,
@@ -189,8 +203,32 @@ impl Store {
                 fragment,
                 dependents: Vec::new(),
                 tests: Vec::new(),
+                diagnostics: None,
             },
         );
+    }
+
+    /// Attaches a diagnostics blob to the in-progress entry for `src`. Skips
+    /// files without a fragment: they always miss and re-report fresh, so the
+    /// blob would never be read.
+    pub fn set_diagnostics(&mut self, src: &str, blob: &[u8]) {
+        if self
+            .next_files
+            .get(src)
+            .is_none_or(|x| x.fragment.is_none())
+        {
+            return;
+        }
+        let rel = self.write_blob(blob);
+        if let Some(entry) = self.next_files.get_mut(src) {
+            entry.diagnostics = rel;
+        }
+    }
+
+    /// Loads and verifies the cached-diagnostics blob behind an entry. Any
+    /// failure is treated as absent.
+    pub fn load_diagnostics(&self, entry: &FileEntry) -> Option<Vec<u8>> {
+        self.read_blob(entry.diagnostics.as_ref()?)
     }
 
     /// Marks the file as analyzed this build but keeps its existing blob
@@ -258,7 +296,7 @@ impl Store {
             .manifest
             .files
             .values()
-            .filter_map(|x| x.fragment.as_ref())
+            .flat_map(|x| x.fragment.iter().chain(x.diagnostics.iter()))
             .map(|x| self.root.join(x))
             .collect();
 

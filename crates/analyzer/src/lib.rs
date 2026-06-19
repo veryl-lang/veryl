@@ -32,7 +32,7 @@ pub mod unsafe_table;
 pub mod value;
 pub mod wavedrom;
 pub use analyzer::Analyzer;
-pub use analyzer_error::AnalyzerError;
+pub use analyzer_error::{AnalyzerError, CachedDiagnostic};
 pub use conv::Context;
 #[cfg(test)]
 mod tests;

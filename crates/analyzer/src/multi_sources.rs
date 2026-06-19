@@ -1,10 +1,12 @@
-#[derive(Debug, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct Source {
     pub path: String,
     pub text: String,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct MultiSources {
     pub sources: Vec<Source>,
 }
