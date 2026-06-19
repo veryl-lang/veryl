@@ -601,9 +601,11 @@ impl Lockfile {
             LockSource::Path(x) => Some(x.clone()),
             LockSource::Repository(x) => x.r#override.clone(),
         };
+        let mut searched_path = None;
         let path_metadata = if let Some(x) = path {
             let path = self.metadata_path.parent().unwrap().join(x);
             let path = path.join("Veryl.toml");
+            searched_path = Some(path.clone());
             if path.exists() {
                 Some(Metadata::load(path)?)
             } else {
@@ -618,7 +620,9 @@ impl Lockfile {
                 if let Some(x) = path_metadata {
                     Ok(x)
                 } else {
-                    Err(MetadataError::FileNotFound)
+                    Err(MetadataError::FileNotFound(
+                        searched_path.unwrap_or_default(),
+                    ))
                 }
             }
             LockSource::Repository(x) => {

@@ -120,7 +120,7 @@ impl Metadata {
             }
         }
 
-        Err(MetadataError::FileNotFound)
+        Err(MetadataError::FileNotFound(from.as_ref().to_path_buf()))
     }
 
     pub fn load<T: AsRef<Path>>(path: T) -> Result<Self, MetadataError> {
