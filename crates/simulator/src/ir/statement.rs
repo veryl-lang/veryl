@@ -3140,6 +3140,13 @@ impl Conv<&air::IfStatement> for ProtoIfStatement {
     fn conv(context: &mut Context, src: &air::IfStatement) -> Result<Self, SimulatorError> {
         let cond: ProtoExpression = Conv::conv(context, &src.cond)?;
 
+        // A function call in the condition inlined its body into
+        // `pending_statements` (these compute the condition). Capture it so the
+        // per-statement drain below can't pull it into a branch, past the
+        // condition read — `if f(x) {…}` would then read an uninitialised return
+        // slot and never take. Restored before the `if`.
+        let cond_pending = std::mem::take(&mut context.pending_statements);
+
         let mut true_side = vec![];
         for x in &src.true_side {
             let stmts: Vec<ProtoStatement> = Conv::conv(context, x)?;
@@ -3151,6 +3158,12 @@ impl Conv<&air::IfStatement> for ProtoIfStatement {
             let stmts: Vec<ProtoStatement> = Conv::conv(context, x)?;
             false_side.extend(stmts);
         }
+
+        // Branch conversions drain their own per-statement pending, so anything
+        // left now belongs after the condition's: keep condition-pending first.
+        let mut pending = cond_pending;
+        pending.append(&mut context.pending_statements);
+        context.pending_statements = pending;
 
         Ok(ProtoIfStatement {
             cond: Some(cond),
