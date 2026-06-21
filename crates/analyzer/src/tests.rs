@@ -1076,6 +1076,24 @@ fn cyclic_type_dependency() {
 
     let errors = analyze_multiple_inputs(&inputs);
     assert!(errors.is_empty());
+
+    // A const in a function body initialized by a call to a sibling function in
+    // the same package must not be reported as a cyclic dependency of the
+    // package with itself (regression of #2865, issue #2867).
+    let code = r#"
+    package a_pkg {
+        function f0() -> u32 {
+            return 1;
+        }
+        function f1() -> u32 {
+            const C: u32 = f0();
+            return C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

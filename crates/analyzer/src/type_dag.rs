@@ -220,6 +220,16 @@ impl TypeDag {
                     } else {
                         base_symbol
                     };
+                    // When the parent and the base resolve to the same enclosing
+                    // component, the dependency is purely intra-component (e.g. a
+                    // const in a function body referencing a sibling function in
+                    // the same package). Bubbling both sides up to that component
+                    // would otherwise create a spurious self-edge and report a
+                    // false `cyclic_type_dependency` (see issue #2867, a
+                    // regression of #2865).
+                    if parent_symbol.id == base_symbol.id {
+                        continue;
+                    }
                     let recursive_ref = namespace.included(&base_symbol.inner_namespace());
                     self.insert_path_symbols(
                         &parent_symbol,
