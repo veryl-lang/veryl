@@ -49,7 +49,7 @@ fn build(code: &str, top: &str) -> Ir {
     let mut ir = air::Ir::default();
     analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
 
     analyzer.clear();
 

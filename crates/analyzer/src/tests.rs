@@ -21,7 +21,7 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     let mut errors = vec![];
     errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
@@ -43,7 +43,7 @@ fn analyze_with_lint(code: &str, lint: Lint) -> Vec<AnalyzerError> {
     let mut errors = vec![];
     errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
@@ -76,7 +76,6 @@ fn analyze_multiple_inputs(inputs: &[&str]) -> Vec<AnalyzerError> {
     let mut ir = Ir::default();
     for (parser, analyzer) in &contexts {
         errors.append(&mut analyzer.analyze_pass2(
-            prj_name,
             &parser.veryl,
             &mut analyzer_context,
             Some(&mut ir),
@@ -104,7 +103,7 @@ fn analyze_with_ir(code: &str) -> Vec<AnalyzerError> {
     let mut errors = vec![];
     errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
@@ -132,12 +131,7 @@ fn analyze_with_large_stack(code: &str) -> Vec<AnalyzerError> {
             let mut errors = vec![];
             errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
             errors.append(&mut Analyzer::analyze_post_pass1());
-            errors.append(&mut analyzer.analyze_pass2(
-                "prj",
-                &parser.veryl,
-                &mut context,
-                Some(&mut ir),
-            ));
+            errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
             errors.append(&mut Analyzer::analyze_post_pass2(&ir));
             dbg!(&errors);
             errors
@@ -15859,6 +15853,29 @@ fn no_stack_overflow_on_cyclic_alias() {
 }
 
 #[test]
+fn no_stack_overflow_on_cyclic_typedef() {
+    // Regression: a cyclic typedef chain recursed forever while evaluating its
+    // IR type (eval_type / Type::to_ir_type), overflowing the stack and
+    // aborting (reachable via `veryl dump`, which runs pass2 best-effort even
+    // after type_dag reports the cycle). Every case must report
+    // CyclicTypeDependency rather than crash.
+    for code in [
+        "module M { type A = B; type B = A; var x: A; always_comb { let _y: logic = x; } }",
+        "module M { type A = B; type B = C; type C = A; var x: A; always_comb { let _y: logic = x; } }",
+        // a chain that loops back to a middle link, not the start
+        "module M { type A = B; type B = C; type C = B; var x: A; always_comb { let _y: logic = x; } }",
+    ] {
+        let errors = analyze(code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::CyclicTypeDependency { .. })),
+            "expected CyclicTypeDependency for: {code}"
+        );
+    }
+}
+
+#[test]
 fn no_panic_on_for_step_shift_overflow() {
     // Regression: a for-loop whose step shifts by >= the usize bit width
     // (`step <<= 64`) overflowed the native shift in Op::eval and panicked the
@@ -16084,4 +16101,149 @@ fn cast_to_proto_typedef_is_not_unevaluable_reset_value() {
     "#;
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[track_caller]
+fn analyze_pass1_only(code: &str) {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let _ = analyzer.analyze_pass1("prj", &parser.veryl);
+}
+
+#[test]
+fn scope_tree_matches_namespace() {
+    use crate::scope;
+    use crate::symbol::SymbolKind;
+
+    let code = r#"
+    package Pkg {
+        const W: u32 = 8;
+        struct Foo {
+            a: logic,
+            b: logic,
+        }
+        enum State: logic<2> {
+            Idle,
+            Run,
+        }
+        function add (x: input logic, y: input logic) -> logic {
+            return x + y;
+        }
+    }
+
+    interface If {
+        var v: logic;
+        modport mp {
+            v: input,
+        }
+    }
+
+    module Top {
+        import Pkg::*;
+        var x: logic<W>;
+        inst u: If;
+        always_comb {
+            var t: logic;
+            t = x;
+        }
+        for i in 0..2 :g {
+            var y: logic;
+        }
+    }
+    "#;
+
+    analyze_pass1_only(code);
+
+    let symbols = symbol_table::get_all();
+    assert!(!symbols.is_empty());
+
+    // Every symbol's scope must reconstruct exactly its namespace path.
+    for symbol in &symbols {
+        let path = scope::name_path(symbol.scope);
+        let expected: Vec<_> = symbol.namespace.paths.iter().copied().collect();
+        assert_eq!(
+            path, expected,
+            "scope path mismatch for symbol `{}` (id {:?}): scope={:?} namespace={}",
+            symbol.token.text, symbol.id, symbol.scope, symbol.namespace
+        );
+    }
+
+    // Locals integrity: every name bound in a scope must point back to a
+    // symbol whose own scope is that scope and whose canonical name matches.
+    for i in 0..scope::count() {
+        let scope = scope::get(scope::ScopeId(i as u32)).unwrap();
+        for (name, ids) in &scope.locals {
+            for id in ids {
+                let symbol = symbol_table::get(*id).unwrap();
+                assert_eq!(
+                    symbol.scope, scope.id,
+                    "local `{}` (id {:?}) is bound in {:?} but its scope is {:?}",
+                    symbol.token.text, id, scope.id, symbol.scope
+                );
+                assert_eq!(
+                    veryl_parser::resource_table::canonical_str_id(symbol.token.text),
+                    *name,
+                    "local name key mismatch for `{}`",
+                    symbol.token.text
+                );
+            }
+        }
+    }
+
+    // Each scope-owning declaration must own the inner scope, and that scope's
+    // path must equal the owner's inner namespace. Builtin symbols ($sv/$tb)
+    // are registered without an owner, so restrict this to source declarations.
+    for symbol in &symbols {
+        if !matches!(
+            symbol.token.source,
+            veryl_parser::veryl_token::TokenSource::File { .. }
+        ) {
+            continue;
+        }
+        let owns = matches!(
+            symbol.kind,
+            SymbolKind::Module(_)
+                | SymbolKind::Interface(_)
+                | SymbolKind::Package(_)
+                | SymbolKind::Function(_)
+                | SymbolKind::Struct(_)
+                | SymbolKind::Union(_)
+                | SymbolKind::Enum(_)
+                | SymbolKind::Modport(_)
+                | SymbolKind::Block
+        );
+        if !owns {
+            continue;
+        }
+        let owned = scope::intern_child(symbol.scope, symbol.token.text, scope::ScopeKind::Unknown);
+        let owned_scope = scope::get(owned).unwrap();
+        assert_eq!(
+            owned_scope.owner,
+            Some(symbol.id),
+            "scope owned by `{}` has owner {:?}",
+            symbol.token.text,
+            owned_scope.owner
+        );
+        let owned_path = scope::name_path(owned);
+        let expected: Vec<_> = symbol.inner_namespace().paths.iter().copied().collect();
+        assert_eq!(
+            owned_path, expected,
+            "owned scope path mismatch for `{}`",
+            symbol.token.text
+        );
+    }
+
+    // The enter/exit hooks that track `current` (used to stamp references with
+    // their scope) must be balanced: after the walk `current` is back at the
+    // project scope, which is also where every top-level module is declared.
+    let top = symbols
+        .iter()
+        .find(|s| matches!(s.kind, SymbolKind::Module(_)))
+        .unwrap();
+    assert_eq!(scope::current(), top.scope);
 }
