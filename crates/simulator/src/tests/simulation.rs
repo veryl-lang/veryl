@@ -15160,6 +15160,42 @@ fn as_cast_samewidth_sign_reinterpretation() {
 }
 
 #[test]
+fn as_cast_to_value_generic_parameter_uses_its_width() {
+    // Regression: `expr as W` where W is a VALUE generic parameter must size the
+    // cast to W bits, not 1.  eval_type resolved a value-parameter cast target to
+    // an UNKNOWN type (total_width 1), masking the operand to a single bit.  The
+    // SystemVerilog emitter sized it `W'(...)`, so only the native simulator was
+    // affected (it reads the cast width from the analyzed comptime type).  With
+    // W=32, `(W - 1) as W` is 31, so `0xFF & 31` = 31 — the bug computed
+    // `0xFF & ((31) as 1)` = `0xFF & 1` = 1.  A signal operand is required:
+    // an all-constant expression folds at compile time and hides the width.
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        c: output logic<32>,
+    ) {
+        function mask_low::<W: u32> (
+            x: input logic<W>,
+        ) -> logic<W> {
+            return x & ((W - 1) as W);
+        }
+        assign c = mask_low::<32>(a);
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0xff, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("c").unwrap(),
+            Value::new(31, 32, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
 fn as_cast_is_width_context_boundary() {
     // Regression: the cast width was ignored in self-determined contexts
     // (`{(e as 16) * (f as 16)}` multiplied at 8 bits), the outer width

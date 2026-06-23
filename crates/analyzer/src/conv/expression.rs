@@ -342,7 +342,10 @@ impl Conv<&CastingType> for ir::Factor {
             let symbol_path: GenericSymbolPath = identifier.into();
 
             let r#type = eval_type(context, &symbol_path, TypePosition::Cast);
-            if r#type.is_ok() {
+            // `as W` with a value generic parameter (`W: u32`) resolves to an
+            // UNKNOWN type (width 1), masking the cast to 1 bit. Fall back to the
+            // factor path so the width is W's value, like `as 32`.
+            if matches!(&r#type, Ok(t) if !t.is_unknown()) {
                 r#type?
             } else {
                 let var_path: VarPathSelect = Conv::conv(context, identifier)?;
