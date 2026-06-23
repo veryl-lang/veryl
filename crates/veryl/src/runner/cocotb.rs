@@ -168,11 +168,24 @@ impl Runner for Cocotb {
 
         let module = format!("{}_{}", metadata.project.name, top.unwrap());
 
-        let (py_waves, args) = match wave.then_some(metadata.test.waveform_format) {
-            Some(WaveFormFormat::Vcd) => ("True", "['--trace']"),
-            Some(WaveFormFormat::Fst) => ("True", "['--trace-fst', '--trace-structs']"),
-            None => ("False", "[]"),
+        let (py_waves, wave_args) = match wave.then_some(metadata.test.waveform_format) {
+            Some(WaveFormFormat::Vcd) => ("True", ["--trace"].as_slice()),
+            Some(WaveFormFormat::Fst) => ("True", ["--trace-fst", "--trace-structs"].as_slice()),
+            None => ("False", [].as_slice()),
         };
+
+        let build_args = format_py_str_array(
+            metadata
+                .test
+                .verilator
+                .compile_args
+                .iter()
+                .map(|s| s.as_str())
+                .chain(wave_args.iter().copied()),
+        );
+
+        let test_args = format_py_str_array(metadata.test.verilator.simulate_args.iter());
+
         let runner_path = temp_dir.path().join("runner.py");
         let runner_text = format!(
             r#"
@@ -197,13 +210,14 @@ if cocotb_version.startswith("2."):
         hdl_toplevel="{module}",
         always=True,
         waves={py_waves},
-        build_args={args},
+        build_args={build_args},
     )
 
     runner.test(
         hdl_toplevel="{module}",
         test_module="{test},",
         waves={py_waves},
+        test_args={test_args},
     )
 elif cocotb_version.startswith("1.9."):
     import cocotb.runner
@@ -216,13 +230,14 @@ elif cocotb_version.startswith("1.9."):
         hdl_toplevel="{module}",
         always=True,
         waves={py_waves},
-        build_args={args},
+        build_args={build_args},
     )
 
     runner.test(
         hdl_toplevel="{module}",
         test_module="{test},",
         waves={py_waves},
+        test_args={test_args},
     )
 else:
     raise RuntimeError("unsupported cocotb version")
@@ -308,4 +323,14 @@ fn process_embed_item(embed_item: &syntax_tree::EmbedItem) -> String {
         syntax_tree::EmbedItem::Any(x) => x.any.any_token.to_string(),
         _ => unreachable!(),
     }
+}
+
+fn format_py_str_array<S: AsRef<str>>(items: impl Iterator<Item = S>) -> String {
+    format!(
+        "[{}]",
+        items
+            .map(|arg| format!("'{}'", arg.as_ref()))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
 }
