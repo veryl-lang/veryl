@@ -5,7 +5,7 @@ use crate::ir::{self, Comptime, IrResult, Type, VarPathSelect};
 use crate::namespace::Namespace;
 use crate::symbol::{GenericBoundKind, ProtoBound, Symbol, SymbolKind};
 use crate::symbol_path::GenericSymbolPath;
-use crate::{AnalyzerError, namespace_table, symbol_table};
+use crate::{AnalyzerError, symbol_table};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
@@ -133,7 +133,6 @@ fn check_referable_path(
 fn is_referable_symbol(symbol: &Symbol, base: Option<&Symbol>) -> bool {
     match &symbol.kind {
         SymbolKind::Package(_)
-        | SymbolKind::ProtoPackage(_)
         | SymbolKind::GenericParameter(_)
         | SymbolKind::GenericConst(_)
         | SymbolKind::SystemFunction(_)
@@ -149,7 +148,7 @@ fn is_referable_symbol(symbol: &Symbol, base: Option<&Symbol>) -> bool {
             if symbol.is_variable_type()
                 || matches!(
                     symbol.kind,
-                    SymbolKind::Parameter(_) | SymbolKind::ProtoConst(_) | SymbolKind::Instance(_)
+                    SymbolKind::Parameter(_) | SymbolKind::Instance(_)
                 )
             {
                 if let Some(base) = base
@@ -333,10 +332,9 @@ fn eval_generic_arg(context: &mut Context, path: &GenericSymbolPath) -> Option<C
 }
 
 pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath) {
-    let namespace = namespace_table::get(path.paths[0].base.id).unwrap_or_default();
+    let token = path.paths[0].base.id;
     for i in 0..path.len() {
-        let base_path = path.base_path(i);
-        if let Ok(symbol) = symbol_table::resolve((&base_path, &namespace)) {
+        if let Ok(symbol) = symbol_table::resolve_base_path(path, i, token) {
             let params = symbol.found.generic_parameters();
             let args = &path.paths[i].arguments;
 

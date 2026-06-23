@@ -1,6 +1,5 @@
 use crate::AnalyzerError;
 use crate::namespace::Namespace;
-use crate::namespace_table;
 use crate::symbol::{ParameterKind, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamespace, SymbolPath};
 use crate::symbol_table;
@@ -19,13 +18,11 @@ pub enum TypeDagCandidate {
     Path {
         path: Box<GenericSymbolPath>,
         namespace: Namespace,
-        project_namespace: Namespace,
         parent: Option<(SymbolId, Context)>,
     },
     Symbol {
         id: SymbolId,
         context: Context,
-        project_namespace: Namespace,
         parent: Option<(SymbolId, Context)>,
         import: Vec<GenericSymbolPathNamespace>,
     },
@@ -134,7 +131,6 @@ impl TypeDag {
             if let TypeDagCandidate::Symbol {
                 id,
                 context,
-                project_namespace,
                 parent,
                 import,
             } = cand
@@ -155,7 +151,6 @@ impl TypeDag {
                         self.insert_path(
                             arg_path.clone(),
                             &symbol.namespace,
-                            project_namespace,
                             &Some((*id, *context)),
                         );
                     }
@@ -168,11 +163,10 @@ impl TypeDag {
             if let TypeDagCandidate::Path {
                 path,
                 namespace,
-                project_namespace,
                 parent,
             } = cand
             {
-                self.insert_path(*path, &namespace, &project_namespace, &parent);
+                self.insert_path(*path, &namespace, &parent);
             }
         }
 
@@ -184,12 +178,13 @@ impl TypeDag {
         &mut self,
         mut path: GenericSymbolPath,
         namespace: &Namespace,
-        project_namespace: &Namespace,
         parent: &Option<(SymbolId, Context)>,
     ) {
-        namespace_table::set_default(&project_namespace.paths);
-
-        path.resolve_imported(namespace, None);
+        path.resolve_imported(
+            crate::scope::intern_namespace(namespace),
+            &namespace.define_context,
+            None,
+        );
 
         for i in 0..path.len() {
             let Some(base_symbol) =
@@ -299,21 +294,21 @@ impl TypeDag {
 
     fn insert_symbol(&mut self, symbol: &Symbol) -> Option<u32> {
         let is_dag_symbol = match symbol.kind {
-            SymbolKind::Module(_)
-            | SymbolKind::AliasModule(_)
-            | SymbolKind::Interface(_)
+            SymbolKind::AliasModule(_)
             | SymbolKind::AliasInterface(_)
             | SymbolKind::Modport(_)
-            | SymbolKind::Package(_)
             | SymbolKind::AliasPackage(_)
             | SymbolKind::Enum(_)
-            | SymbolKind::TypeDef(_)
             | SymbolKind::Struct(_)
             | SymbolKind::Union(_)
-            | SymbolKind::Function(_)
             | SymbolKind::Test(_)
             | SymbolKind::Embed => true,
-            SymbolKind::Parameter(ref x) => matches!(x.kind, ParameterKind::Const),
+            SymbolKind::TypeDef(ref x) if !x.is_proto => true,
+            SymbolKind::Module(ref x) if !x.is_proto => true,
+            SymbolKind::Interface(ref x) if !x.is_proto => true,
+            SymbolKind::Function(ref x) if !x.is_proto => true,
+            SymbolKind::Package(ref x) if !x.is_proto => true,
+            SymbolKind::Parameter(ref x) if !x.is_proto => matches!(x.kind, ParameterKind::Const),
             _ => false,
         };
         if !is_dag_symbol {

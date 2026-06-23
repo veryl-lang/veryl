@@ -66,7 +66,6 @@ fn is_unexpandable_modport(context: &mut Context, symbol: &Symbol) -> bool {
 fn is_function_defined_in_interface(symbol: &Symbol) -> bool {
     match &symbol.kind {
         SymbolKind::Function(x) => x.affiliation == Affiliation::Interface,
-        SymbolKind::ProtoFunction(x) => x.affiliation == Affiliation::Interface,
         _ => false,
     }
 }

@@ -34,11 +34,11 @@ fn resolve_inst_type_inner(arg: &InstTypeSource, visited: &mut Vec<SymbolId>) ->
     visited.push(symbol.id);
 
     match &symbol.kind {
-        SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
+        SymbolKind::AliasModule(x) => {
             let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
             return resolve_inst_type_inner(&InstTypeSource::Path(path), visited);
         }
-        SymbolKind::AliasInterface(x) | SymbolKind::ProtoAliasInterface(x) => {
+        SymbolKind::AliasInterface(x) => {
             let path: SymbolPathNamespace = (&x.target.generic_path(), &symbol.namespace).into();
             return resolve_inst_type_inner(&InstTypeSource::Path(path), visited);
         }
@@ -60,7 +60,7 @@ fn resolve_inst_type_inner(arg: &InstTypeSource, visited: &mut Vec<SymbolId>) ->
 fn get_inst_type_kind(inst_symbol: &Symbol) -> Option<SymbolKind> {
     if let SymbolKind::Instance(ref x) = inst_symbol.kind
         && let Ok(type_symbol) =
-            symbol_table::resolve((&x.type_name.mangled_path(), &inst_symbol.namespace))
+            symbol_table::resolve_generic_structural(&x.type_name, &inst_symbol.namespace)
     {
         match &type_symbol.found.kind {
             SymbolKind::Module(_)
@@ -138,18 +138,7 @@ pub fn check_inst(
                 check_port_connection = true;
                 None
             }
-            SymbolKind::ProtoModule(ref x) if in_module => {
-                params.append(&mut x.parameters.clone());
-                ports.append(&mut x.ports.clone());
-                check_port_connection = true;
-                None
-            }
             SymbolKind::Interface(ref x) => {
-                params.append(&mut x.parameters.clone());
-                check_port_connection = true;
-                None
-            }
-            SymbolKind::ProtoInterface(ref x) => {
                 params.append(&mut x.parameters.clone());
                 check_port_connection = true;
                 None

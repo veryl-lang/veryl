@@ -7,7 +7,7 @@ use crate::ir::{
     VariableInfo,
 };
 use crate::namespace::Namespace;
-use crate::namespace_table;
+use crate::scope;
 use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, SymbolId};
 use crate::symbol_path::GenericSymbolPath;
 use crate::value::MaskCache;
@@ -93,6 +93,10 @@ pub struct Context {
     affiliation: Vec<Affiliation>,
     overrides: Vec<HashMap<VarPath, (Comptime, Expression)>>,
     generic_maps: Vec<Vec<GenericMap>>,
+    /// Typedefs currently being expanded into an IR type, to break cyclic
+    /// `type A = B; type B = A` chains that `eval_type` would otherwise follow
+    /// forever (type_dag reports the cycle, but `dump` evaluates anyway).
+    typedef_visiting: Vec<SymbolId>,
     errors: Vec<AnalyzerError>,
     profiler: Option<Arc<Mutex<ConvProfile>>>,
     project_name: Option<String>,
@@ -154,10 +158,10 @@ impl Context {
     }
 
     pub fn resolve_path(&self, mut path: GenericSymbolPath) -> GenericSymbolPath {
-        let Some(namespace) = namespace_table::get(path.paths[0].base.id) else {
+        let Some((scope, define_context)) = scope::token_scope(path.paths[0].base.id) else {
             return path;
         };
-        path.resolve_imported(&namespace, None);
+        path.resolve_imported(scope, &define_context, None);
         for map in self.generic_maps.iter().rev() {
             path.apply_map(map);
         }
@@ -568,6 +572,20 @@ impl Context {
 
     pub fn pop_generic_map(&mut self) {
         self.generic_maps.pop();
+    }
+
+    /// Marks `id` as being expanded; returns false if it already is (a cycle).
+    pub fn push_typedef_visiting(&mut self, id: SymbolId) -> bool {
+        if self.typedef_visiting.contains(&id) {
+            false
+        } else {
+            self.typedef_visiting.push(id);
+            true
+        }
+    }
+
+    pub fn pop_typedef_visiting(&mut self) {
+        self.typedef_visiting.pop();
     }
 
     pub fn is_affiliated(&self, value: Affiliation) -> bool {

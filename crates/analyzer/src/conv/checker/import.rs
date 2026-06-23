@@ -29,7 +29,8 @@ pub fn check_import(context: &mut Context, value: &ImportDeclaration) {
             true
         } else if is_wildcard {
             symbol.found.is_package(false)
-                || matches!(symbol.found.kind, SymbolKind::ProtoAliasPackage(_)) && symbol.imported
+                || matches!(&symbol.found.kind, SymbolKind::AliasPackage(x) if x.is_proto)
+                    && symbol.imported
                 || matches!(symbol.found.kind, SymbolKind::Enum(_))
                 // `pkg` resolved to a same-named member; the wildcard still
                 // targets the package.
@@ -43,7 +44,7 @@ pub fn check_import(context: &mut Context, value: &ImportDeclaration) {
                 .get(symbol.full_path.len() - 2)
                 .map(|x| symbol_table::get(*x).unwrap())
                 .unwrap();
-            if matches!(parent_symbol.kind, SymbolKind::ProtoAliasPackage(_)) {
+            if matches!(&parent_symbol.kind, SymbolKind::AliasPackage(x) if x.is_proto) {
                 let parent_path = path.slice(path.len() - 2);
                 symbol_table::resolve(&parent_path)
                     .map(|parent| parent.imported && symbol.found.is_importable(true))
