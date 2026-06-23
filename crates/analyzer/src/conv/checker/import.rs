@@ -31,6 +31,12 @@ pub fn check_import(context: &mut Context, value: &ImportDeclaration) {
             symbol.found.is_package(false)
                 || matches!(symbol.found.kind, SymbolKind::ProtoAliasPackage(_)) && symbol.imported
                 || matches!(symbol.found.kind, SymbolKind::Enum(_))
+                // `pkg` resolved to a same-named member; the wildcard still
+                // targets the package.
+                || symbol
+                    .found
+                    .get_parent_package()
+                    .is_some_and(|pkg| pkg.token.text == symbol.found.token.text)
         } else if symbol.full_path.len() >= 2 {
             let parent_symbol = symbol
                 .full_path

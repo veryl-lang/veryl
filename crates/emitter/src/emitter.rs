@@ -1223,7 +1223,30 @@ impl Emitter {
         self.in_import = true;
         self.import(&arg.import);
         self.space(1);
-        self.scoped_identifier(&arg.scoped_identifier);
+        // A wildcard targets a package, but a same-named member shadows it and
+        // would emit an invalid `pkg::member::*`. Emit the package as `pkg::*`.
+        let shadowing_package = is_wildcard
+            .then(|| symbol_table::resolve(&*arg.scoped_identifier).ok())
+            .flatten()
+            .filter(|x| !x.found.is_package(true))
+            .and_then(|x| x.found.get_parent_package());
+        if let Some(package) = shadowing_package {
+            let context: SymbolContext = self.into();
+            let text = symbol_string(
+                arg.scoped_identifier.identifier(),
+                &package,
+                &package.namespace,
+                &[package.id],
+                &GenericTables::default(),
+                &context,
+                1,
+            );
+            self.identifier(&Identifier {
+                identifier_token: arg.scoped_identifier.identifier().replace(&text),
+            });
+        } else {
+            self.scoped_identifier(&arg.scoped_identifier);
+        }
         if let Some(ref x) = arg.import_declaration_opt {
             self.colon_colon(&x.colon_colon);
             self.star(&x.star);

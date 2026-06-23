@@ -3798,3 +3798,24 @@ fn widthless_signed_based_literal_does_not_panic() {
     let ret = emit(&metadata, code);
     assert!(ret.contains("2'sd3"), "sized signed literal: {ret}");
 }
+
+#[test]
+fn wildcard_import_of_package_with_same_named_member() {
+    // `import abcd::*` must emit `pkg::*`, not the invalid `pkg::abcd::*`, even
+    // though the head resolves to the same-named imported member.
+    let code = r#"package abcd {
+    function abcd () -> logic {
+        return 1;
+    }
+}
+package wild {
+    import abcd::*;
+    const C: logic = abcd();
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(ret.contains("import prj_abcd::*;"), "{ret}");
+    assert!(!ret.contains("prj_abcd::abcd::*"), "{ret}");
+}
