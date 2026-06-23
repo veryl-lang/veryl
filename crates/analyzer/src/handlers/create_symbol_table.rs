@@ -7,9 +7,9 @@ use crate::attribute::{AllowItem, EnumEncodingItem};
 use crate::attribute_table;
 use crate::definition_table::{self, Definition};
 use crate::generic_inference_table::{self, PendingEntry};
-use crate::namespace::Namespace;
-use crate::namespace_table;
+use crate::namespace::{DefineContext, Namespace};
 use crate::reference_table::{self, ReferenceCandidate};
+use crate::scope;
 use crate::symbol::ClockDomain as SymClockDomain;
 use crate::symbol::Direction as SymDirection;
 use crate::symbol::ModportDefault as SymModportDefault;
@@ -20,11 +20,9 @@ use crate::symbol::{
     EnumProperty, FunctionProperty, GenericBoundKind, GenericConstProperty,
     GenericParameterProperty, InstanceProperty, InterfaceProperty, ModportFunctionMemberProperty,
     ModportProperty, ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter,
-    ParameterKind, ParameterProperty, Port, PortProperty, ProtoConstProperty,
-    ProtoInterfaceProperty, ProtoModuleProperty, ProtoPackageProperty, ProtoTypeDefProperty,
-    StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind, TestProperty, TestType,
-    TypeDefProperty, TypeKind, TypeModifierKind, UnionMemberProperty, UnionProperty,
-    VariableProperty,
+    ParameterKind, ParameterProperty, Port, PortProperty, StructMemberProperty, StructProperty,
+    Symbol, SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty, TypeKind,
+    TypeModifierKind, UnionMemberProperty, UnionProperty, VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamespace, SymbolPathNamespace};
 use crate::symbol_table;
@@ -74,8 +72,6 @@ pub struct CreateSymbolTable {
     pub errors: Vec<AnalyzerError>,
     build_opt: Build,
     point: HandlerPoint,
-    namespace: Namespace,
-    project_namespace: Namespace,
     module_namspace_depth: usize,
     default_block: Option<StrId>,
     for_identifier: Option<Token>,
@@ -127,18 +123,32 @@ enum StructOrUnion {
 }
 
 impl CreateSymbolTable {
-    pub fn new(build_opt: &Build) -> Self {
+    pub fn new(build_opt: &Build, project_name: StrId) -> Self {
+        // Anchor the scope tree and the initial namespace at the project root
+        // before the walk begins, so file-scope references resolve from the same
+        // scope as pass1 without consulting a mutable global default.
+        let mut namespace = Namespace::new();
+        namespace.push(project_name);
+        scope::set_current(scope::intern_namespace(&namespace));
         Self {
             build_opt: build_opt.clone(),
-            project_namespace: namespace_table::get_default(),
             ..Default::default()
         }
     }
 
+    fn push_namespace(&mut self, name: StrId) {
+        scope::enter(name);
+    }
+
+    fn pop_namespace(&mut self) {
+        scope::exit();
+    }
+
     fn insert_namespace(&self, token: &Token) {
         if let TokenSource::File { path, .. } = token.source {
-            let namespace = self.get_namespace(token);
-            namespace_table::insert(token.id, path, &namespace);
+            let attrs = attribute_table::get(token);
+            let define_context: DefineContext = attrs.as_slice().into();
+            scope::insert_token_scope(token.id, path, scope::current(), &define_context);
         }
     }
 
@@ -182,26 +192,38 @@ impl CreateSymbolTable {
 
     fn get_namespace(&self, token: &Token) -> Namespace {
         let attrs = attribute_table::get(token);
-        let mut ret = self.namespace.clone();
-        ret.define_context = attrs.as_slice().into();
-        ret
+        let define_context: DefineContext = attrs.as_slice().into();
+        scope::namespace(scope::current(), &define_context)
+    }
+
+    /// The current scope's namespace value with the default ifdef context,
+    /// reconstructed from the scope cursor. `scope::current()` is the single pass1
+    /// cursor authority; registration-time namespace seeds are derived from it.
+    fn current_namespace(&self) -> Namespace {
+        scope::namespace(scope::current(), &DefineContext::default())
     }
 
     fn insert_symbol(&mut self, token: &Token, kind: SymbolKind, public: bool) -> Option<SymbolId> {
         let doc_comment = self.create_doc_comment(token);
+        let owned_scope_kind = scope::scope_kind_of(&kind);
         let mut symbol = Symbol::new(token, kind, &self.get_namespace(token), public, doc_comment);
+        let scope = symbol.scope;
 
         if attribute_table::contains(token, Attr::Allow(AllowItem::UnusedVariable)) {
             symbol.allow_unused = true;
         }
 
         let id = symbol_table::insert(token, symbol);
-        if id.is_some() {
-            // Some symbols (e.g. module declaration) are inserted at Hander::After phase.
-            // For such symbols, namespace assosiated with the symbol and namespace included in
-            // namespace_table are different.
+        if let Some(id) = id {
+            // Some symbols (e.g. module declaration) are inserted at HandlerPoint::After.
+            // For such symbols, namespace associated with the symbol and the namespace recorded in
+            // the token scope table are different.
             // Need to insert the namespace again to resolve this namespace mismatch.
             self.insert_namespace(token);
+            if let Some(kind) = owned_scope_kind {
+                let owned = scope::intern_child(scope, token.text, kind);
+                scope::set_kind_owner(owned, kind, id);
+            }
         } else {
             let canonical = resource_table::canonical_str_id(token.text);
             let kind = if canonical != token.text {
@@ -316,7 +338,7 @@ impl CreateSymbolTable {
         let can_be_default_clock = r#type.can_be_default_clock();
         let can_be_default_reset = r#type.can_be_default_reset();
         let in_module_top_hierarchy = *self.affiliation.last().unwrap() == Affiliation::Module
-            && self.namespace.depth() == self.module_namspace_depth;
+            && scope::depth(scope::current()) == self.module_namspace_depth;
 
         if let Some(default_modifier) = r#type.find_modifier(&TypeModifierKind::Default) {
             let error_reason = if !in_module_top_hierarchy {
@@ -377,7 +399,7 @@ impl CreateSymbolTable {
         for x in &self.file_scope_import_item {
             let import = SymImport {
                 path: x.clone(),
-                namespace: self.namespace.clone(),
+                namespace: self.current_namespace(),
                 wildcard: false,
             };
             symbol_table::add_import(import);
@@ -386,7 +408,7 @@ impl CreateSymbolTable {
         for x in &self.file_scope_import_wildcard {
             let import = SymImport {
                 path: x.clone(),
-                namespace: self.namespace.clone(),
+                namespace: self.current_namespace(),
                 wildcard: true,
             };
             symbol_table::add_import(import);
@@ -507,7 +529,7 @@ impl CreateSymbolTable {
 
                 let path = mp.token.source.get_path().unwrap();
                 let token = Token::generate(*text, path);
-                namespace_table::insert(token.id, path, &namespace);
+                scope::insert_token(token.id, path, &namespace);
                 symbol_table::add_reference(*id, &token);
 
                 let kind = if matches!(direction, SymDirection::Import) {
@@ -604,7 +626,6 @@ impl CreateSymbolTable {
             let cand = TypeDagCandidate::Symbol {
                 id: symbol.0,
                 context: symbol.1,
-                project_namespace: self.project_namespace.clone(),
                 parent: None,
                 import,
             };
@@ -693,7 +714,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     .unwrap()
                     .0
                     .push(arg.identifier_token.token.text);
-                self.identifier_path.last_mut().unwrap().1 = self.namespace.clone();
+                self.identifier_path.last_mut().unwrap().1 = self.current_namespace();
             }
         }
         Ok(())
@@ -747,7 +768,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let cand = TypeDagCandidate::Path {
                     path: Box::new(path),
                     namespace,
-                    project_namespace: self.project_namespace.clone(),
                     parent: None,
                 };
 
@@ -788,7 +808,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             }
             HandlerPoint::After => {
                 // This should be `After` not `Before`.
-                // because namespace_table insertion of identifiers
+                // because token scope insertion of identifiers
                 // in the expression_identifier should be done until `arg.into()`.
                 self.connect_target_identifiers.push(arg.into());
 
@@ -847,7 +867,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                             .scoped_identifier
                             .identifier()
                             .token;
-                        let namespace = self.namespace.clone();
+                        let namespace = self.current_namespace();
                         generic_inference_table::push_pending(PendingEntry {
                             call_token_id: call_token.id,
                             call_token,
@@ -912,11 +932,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
         match self.point {
             HandlerPoint::Before => {
                 let (_, name) = self.get_anonymous_block_name(None);
-                self.namespace.push(name);
+                self.push_namespace(name);
                 self.affiliation.push(Affiliation::StatementBlock);
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
                 self.affiliation.pop();
             }
         }
@@ -1016,7 +1036,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                             .scoped_identifier
                             .identifier()
                             .token;
-                        let namespace = self.namespace.clone();
+                        let namespace = self.current_namespace();
                         generic_inference_table::push_pending(PendingEntry {
                             call_token_id: call_token.id,
                             call_token,
@@ -1038,7 +1058,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
         match self.point {
             HandlerPoint::Before => {
                 let (_, name) = self.get_anonymous_block_name(None);
-                self.namespace.push(name);
+                self.push_namespace(name);
 
                 let r#type = SymType {
                     modifier: Vec::new(),
@@ -1063,7 +1083,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.insert_symbol(&arg.identifier.identifier_token.token, kind, false);
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
             }
         }
         Ok(())
@@ -1190,6 +1210,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 };
                 let property = ParameterProperty {
                     token,
+                    is_proto: false,
                     r#type,
                     kind: ParameterKind::Const,
                     value,
@@ -1241,7 +1262,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn modport_declaration(&mut self, arg: &ModportDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(arg.identifier.text());
+                self.push_namespace(arg.identifier.text());
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
@@ -1282,7 +1303,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     }
                 }
 
-                self.namespace.pop();
+                self.pop_namespace();
 
                 let default = if let Some(ref x) = arg.modport_declaration_opt0 {
                     match x.modport_default.as_ref() {
@@ -1345,7 +1366,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
         match self.point {
             HandlerPoint::Before => {
                 let name = arg.identifier.text();
-                self.namespace.push(name);
+                self.push_namespace(name);
 
                 self.enum_member_prefix = Some(arg.identifier.identifier_token.to_string());
                 for attr in attribute_table::get(&arg.r#enum.enum_token.token) {
@@ -1358,7 +1379,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
                 self.enum_member_prefix = None;
 
                 let enum_type: Option<SymType> = arg
@@ -1435,11 +1456,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let kind = SymbolKind::EnumMemberMangled;
 
             // namespace of EnumMemberMangled is outside of enum
-            let namespace = self.namespace.pop();
+            let enum_scope = scope::exit();
             self.insert_symbol(&mangled_token, kind, false);
-            if let Some(namespace) = namespace {
-                self.namespace.push(namespace);
-            }
+            scope::set_current(enum_scope);
         }
         Ok(())
     }
@@ -1457,12 +1476,12 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 if arg.struct_union_declaration_opt.is_some() {
                     self.generic_context.push();
                 }
-                self.namespace.push(name);
+                self.push_namespace(name);
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 self.struct_or_union = None;
-                self.namespace.pop();
+                self.pop_namespace();
 
                 let generic_parameters = if arg.struct_union_declaration_opt.is_some() {
                     self.generic_context.pop().0
@@ -1514,7 +1533,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     return Ok(());
                 }
 
-                let property = TypeDefProperty { r#type };
+                let property = TypeDefProperty {
+                    is_proto: false,
+                    r#type: Some(r#type),
+                };
                 let kind = SymbolKind::TypeDef(property);
                 if let Some(id) =
                     self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
@@ -1628,7 +1650,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             let doc_comment = self.create_doc_comment(&inst.identifier.identifier_token.token);
             let target = GenericSymbolPathNamespace(
                 arg.scoped_identifier.as_ref().into(),
-                self.namespace.clone(),
+                self.current_namespace(),
             );
             let bind = SymBind {
                 token: inst.identifier.identifier_token.token,
@@ -1722,6 +1744,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                     ParameterProperty {
                         token,
+                        is_proto: false,
                         r#type,
                         kind,
                         value,
@@ -1739,6 +1762,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     };
                     ParameterProperty {
                         token,
+                        is_proto: false,
                         r#type,
                         kind,
                         value,
@@ -1922,7 +1946,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
         let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(name);
+                self.push_namespace(name);
                 self.generic_context.push();
                 self.ports.push(Vec::new());
                 self.reference_paths.push(Vec::new());
@@ -1930,7 +1954,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
                 self.affiliation.pop();
 
                 let (generic_parameters, generic_consts) = self.generic_context.pop();
@@ -1962,6 +1986,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let definition = definition_table::insert(Definition::Function(arg.clone()));
                 let property = FunctionProperty {
                     affiliation,
+                    is_proto: false,
                     range,
                     generic_parameters,
                     generic_consts,
@@ -2028,19 +2053,19 @@ impl VerylGrammarTrait for CreateSymbolTable {
         let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(name);
+                self.push_namespace(name);
                 self.generic_context.push();
                 self.parameters.push(Vec::new());
                 self.ports.push(Vec::new());
                 self.affiliation.push(Affiliation::Module);
-                self.module_namspace_depth = self.namespace.depth();
+                self.module_namspace_depth = scope::depth(scope::current());
                 self.exist_clock_without_domain = false;
 
                 self.apply_file_scope_import();
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
                 self.affiliation.pop();
                 self.module_namspace_depth = 0;
 
@@ -2114,6 +2139,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 let property = ModuleProperty {
                     range: arg.into(),
+                    is_proto: false,
                     proto,
                     generic_parameters,
                     generic_consts,
@@ -2159,7 +2185,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 let name = arg.identifier.text();
                 self.default_block = Some(name);
-                self.namespace.push(name);
+                self.push_namespace(name);
 
                 if let Some(x) = self.for_identifier {
                     self.insert_symbol(&x, SymbolKind::Genvar, false);
@@ -2167,7 +2193,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 }
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
             }
         }
         Ok(())
@@ -2191,10 +2217,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     name
                 };
 
-                self.namespace.push(name)
+                self.push_namespace(name)
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
             }
         }
         Ok(())
@@ -2204,7 +2230,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
         let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(name);
+                self.push_namespace(name);
                 self.generic_context.push();
                 self.parameters.push(Vec::new());
                 self.affiliation.push(Affiliation::Interface);
@@ -2216,7 +2242,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
                 self.affiliation.pop();
 
                 let (generic_parameters, generic_consts) = self.generic_context.pop();
@@ -2236,13 +2262,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let definition = definition_table::insert(Definition::Interface(arg.clone()));
                 let property = InterfaceProperty {
                     range: arg.into(),
+                    is_proto: false,
                     proto,
                     generic_parameters,
                     generic_consts,
                     generic_references: vec![],
                     parameters,
                     members: self.declaration_items.drain(..).collect(),
-                    definition,
+                    definition: Some(definition),
                 };
                 if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
@@ -2266,14 +2293,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
         let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(name);
+                self.push_namespace(name);
                 self.generic_context.push();
                 self.affiliation.push(Affiliation::Package);
                 self.apply_file_scope_import();
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
                 self.affiliation.pop();
 
                 let (generic_parameters, generic_consts) = self.generic_context.pop();
@@ -2293,6 +2320,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 let property = PackageProperty {
                     range,
+                    is_proto: false,
                     proto,
                     generic_parameters,
                     generic_consts,
@@ -2329,15 +2357,24 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 let kind = match &*arg.alias_declaration_group {
                     AliasDeclarationGroup::Module(_) => {
-                        let property = AliasModuleProperty { target };
+                        let property = AliasModuleProperty {
+                            target,
+                            is_proto: false,
+                        };
                         SymbolKind::AliasModule(property)
                     }
                     AliasDeclarationGroup::Interface(_) => {
-                        let property = AliasInterfaceProperty { target };
+                        let property = AliasInterfaceProperty {
+                            target,
+                            is_proto: false,
+                        };
                         SymbolKind::AliasInterface(property)
                     }
                     AliasDeclarationGroup::Package(_) => {
-                        let property = AliasPackageProperty { target };
+                        let property = AliasPackageProperty {
+                            target,
+                            is_proto: false,
+                        };
                         SymbolKind::AliasPackage(property)
                     }
                 };
@@ -2357,14 +2394,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn proto_module_declaration(&mut self, arg: &ProtoModuleDeclaration) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(arg.identifier.text());
+                self.push_namespace(arg.identifier.text());
                 self.affiliation.push(Affiliation::Module);
                 self.in_proto = true;
                 self.parameters.push(Vec::new());
                 self.ports.push(Vec::new());
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
                 self.affiliation.pop();
                 self.in_proto = false;
 
@@ -2372,15 +2409,23 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let ports: Vec<_> = self.ports.pop().unwrap();
                 let definition = definition_table::insert(Definition::ProtoModule(arg.clone()));
 
-                let property = ProtoModuleProperty {
+                let property = ModuleProperty {
                     range: arg.into(),
+                    is_proto: true,
+                    proto: None,
+                    generic_parameters: vec![],
+                    generic_consts: vec![],
+                    generic_references: vec![],
                     parameters,
                     ports,
+                    default_clock: None,
+                    default_reset: None,
                     definition,
+                    test: None,
                 };
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
-                    SymbolKind::ProtoModule(property),
+                    SymbolKind::Module(property),
                     self.is_public,
                 );
             }
@@ -2394,24 +2439,30 @@ impl VerylGrammarTrait for CreateSymbolTable {
     ) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(arg.identifier.text());
+                self.push_namespace(arg.identifier.text());
                 self.affiliation.push(Affiliation::Interface);
                 self.parameters.push(Vec::new());
                 self.apply_file_scope_import();
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
                 self.affiliation.pop();
 
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
-                let property = ProtoInterfaceProperty {
+                let property = InterfaceProperty {
                     range: arg.into(),
+                    is_proto: true,
+                    proto: None,
+                    generic_parameters: vec![],
+                    generic_consts: vec![],
+                    generic_references: vec![],
                     parameters,
                     members: self.declaration_items.drain(..).collect(),
+                    definition: None,
                 };
                 if let Some(interface_id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
-                    SymbolKind::ProtoInterface(property),
+                    SymbolKind::Interface(property),
                     self.is_public,
                 ) {
                     self.link_modport_members();
@@ -2428,21 +2479,26 @@ impl VerylGrammarTrait for CreateSymbolTable {
     ) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                self.namespace.push(arg.identifier.text());
+                self.push_namespace(arg.identifier.text());
                 self.affiliation.push(Affiliation::Package);
                 self.apply_file_scope_import();
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
                 self.affiliation.pop();
 
-                let property = ProtoPackageProperty {
+                let property = PackageProperty {
                     range: arg.into(),
+                    is_proto: true,
+                    proto: None,
+                    generic_parameters: vec![],
+                    generic_consts: vec![],
+                    generic_references: vec![],
                     members: self.declaration_items.drain(..).collect(),
                 };
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
-                    SymbolKind::ProtoPackage(property),
+                    SymbolKind::Package(property),
                     self.is_public,
                 );
             }
@@ -2470,8 +2526,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 return Ok(());
             }
 
-            let property = ProtoConstProperty { token, r#type };
-            let kind = SymbolKind::ProtoConst(property);
+            let property = ParameterProperty {
+                token,
+                is_proto: true,
+                r#type,
+                kind: ParameterKind::Const,
+                value: None,
+            };
+            let kind = SymbolKind::Parameter(property);
             if let Some(id) = self.insert_symbol(&token, kind, false) {
                 self.push_declaration_item(id);
             }
@@ -2491,13 +2553,17 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.pop_type_dag_cand(None);
                     return Ok(());
                 }
-                ProtoTypeDefProperty {
+                TypeDefProperty {
+                    is_proto: true,
                     r#type: Some(r#type),
                 }
             } else {
-                ProtoTypeDefProperty { r#type: None }
+                TypeDefProperty {
+                    is_proto: true,
+                    r#type: None,
+                }
             };
-            let kind = SymbolKind::ProtoTypeDef(proprety);
+            let kind = SymbolKind::TypeDef(proprety);
             if let Some(id) = self.insert_symbol(&token, kind, false) {
                 self.push_declaration_item(id);
             }
@@ -2512,13 +2578,13 @@ impl VerylGrammarTrait for CreateSymbolTable {
         match self.point {
             HandlerPoint::Before => {
                 let name = arg.identifier.text();
-                self.namespace.push(name);
+                self.push_namespace(name);
                 self.generic_context.push();
                 self.ports.push(Vec::new());
                 self.affiliation.push(Affiliation::Function);
             }
             HandlerPoint::After => {
-                self.namespace.pop();
+                self.pop_namespace();
                 self.affiliation.pop();
 
                 let (generic_parameters, generic_consts) = self.generic_context.pop();
@@ -2542,6 +2608,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let definition = definition_table::insert(Definition::ProtoFunction(arg.clone()));
                 let property = FunctionProperty {
                     affiliation,
+                    is_proto: true,
                     range,
                     generic_parameters,
                     generic_consts,
@@ -2555,7 +2622,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
-                    SymbolKind::ProtoFunction(property),
+                    SymbolKind::Function(property),
                     false,
                 ) {
                     self.push_interface_member(&arg.identifier, id);
@@ -2575,16 +2642,25 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
             let kind = match &*arg.proto_alias_declaration_group {
                 ProtoAliasDeclarationGroup::Module(_) => {
-                    let property = AliasModuleProperty { target };
-                    SymbolKind::ProtoAliasModule(property)
+                    let property = AliasModuleProperty {
+                        target,
+                        is_proto: true,
+                    };
+                    SymbolKind::AliasModule(property)
                 }
                 ProtoAliasDeclarationGroup::Interface(_) => {
-                    let property = AliasInterfaceProperty { target };
-                    SymbolKind::ProtoAliasInterface(property)
+                    let property = AliasInterfaceProperty {
+                        target,
+                        is_proto: true,
+                    };
+                    SymbolKind::AliasInterface(property)
                 }
                 ProtoAliasDeclarationGroup::Package(_) => {
-                    let property = AliasPackageProperty { target };
-                    SymbolKind::ProtoAliasPackage(property)
+                    let property = AliasPackageProperty {
+                        target,
+                        is_proto: true,
+                    };
+                    SymbolKind::AliasPackage(property)
                 }
             };
             if let Some(id) =

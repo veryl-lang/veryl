@@ -1,11 +1,6 @@
 use crate::attribute::Attribute;
 use crate::attribute_table;
-use crate::namespace_table;
-use crate::symbol::Symbol;
-use crate::symbol::SymbolKind;
-use crate::symbol_path::SymbolPath;
-use crate::symbol_table;
-use crate::{HashMap, HashSet, SVec, svec};
+use crate::{HashSet, SVec};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -95,7 +90,7 @@ impl fmt::Display for DefineContext {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Namespace {
     pub paths: SVec<StrId>,
     pub define_context: DefineContext,
@@ -143,70 +138,8 @@ impl Namespace {
         }
     }
 
-    pub fn replace(&self, table: &HashMap<StrId, StrId>) -> Self {
-        let mut paths = SVec::new();
-        for x in &self.paths {
-            if let Some(x) = table.get(x) {
-                paths.push(*x);
-            } else {
-                paths.push(*x);
-            }
-        }
-        Self {
-            paths,
-            define_context: self.define_context.clone(),
-        }
-    }
-
-    pub fn strip_prefix(&mut self, x: &Namespace) {
-        let mut paths = svec![];
-        for (i, p) in self.paths.iter().enumerate() {
-            if x.paths.get(i) != Some(p) {
-                paths.push(*p);
-            }
-        }
-        self.paths = paths;
-    }
-
     pub fn strip_anonymous_path(&mut self) {
         self.paths.retain(|x| x.to_string().find('@').is_none());
-    }
-
-    pub fn get_symbol(&self) -> Option<Symbol> {
-        let mut namespace = self.clone();
-        namespace.strip_anonymous_path();
-
-        if let Some(path) = namespace.pop()
-            && namespace.depth() >= 1
-        {
-            symbol_table::resolve((path, &namespace))
-                .map(|x| (*x.found).clone())
-                .ok()
-        } else {
-            None
-        }
-    }
-
-    pub fn generic_namespace(&self) -> Self {
-        let mut ret = Namespace::new();
-        for i in 0..self.depth() {
-            let path = self.paths[i];
-            if i == 0 || !path.to_string().starts_with("__") {
-                ret.push(path);
-            } else if let Ok(symbol) = symbol_table::resolve((path, &ret))
-                && let SymbolKind::GenericInstance(inst) = &symbol.found.kind
-            {
-                let base = inst.base_symbol();
-                ret.push(base.token.text);
-            }
-        }
-        ret
-    }
-}
-
-impl Default for Namespace {
-    fn default() -> Self {
-        namespace_table::get_default()
     }
 }
 
@@ -221,41 +154,6 @@ impl fmt::Display for Namespace {
         }
         text.push_str(&self.define_context.to_string());
         text.fmt(f)
-    }
-}
-
-impl From<&SymbolPath> for Namespace {
-    fn from(value: &SymbolPath) -> Self {
-        let mut paths = SVec::new();
-        for x in value.as_slice() {
-            paths.push(*x);
-        }
-        Namespace {
-            paths,
-            define_context: DefineContext::default(),
-        }
-    }
-}
-
-impl From<&[StrId]> for Namespace {
-    fn from(value: &[StrId]) -> Self {
-        Namespace {
-            paths: value.into(),
-            define_context: DefineContext::default(),
-        }
-    }
-}
-
-impl From<&str> for Namespace {
-    fn from(value: &str) -> Self {
-        let mut paths = SVec::new();
-        for x in value.split("::") {
-            paths.push(x.into());
-        }
-        Namespace {
-            paths,
-            define_context: DefineContext::default(),
-        }
     }
 }
 

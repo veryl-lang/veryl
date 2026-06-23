@@ -7,9 +7,9 @@ use crate::handlers::*;
 use crate::ir::{Ir, IrResult};
 use crate::msb_table;
 use crate::namespace::Namespace;
-use crate::namespace_table;
 use crate::reference_table;
 use crate::resolved_type_table;
+use crate::scope;
 use crate::symbol::{DocComment, Symbol, SymbolKind};
 use crate::symbol_table;
 use crate::type_dag;
@@ -25,9 +25,14 @@ pub struct AnalyzerPass1 {
 }
 
 impl AnalyzerPass1 {
-    pub fn new(build_opt: &Build, lint_opt: &Lint, is_dependency: bool) -> Self {
+    pub fn new(
+        build_opt: &Build,
+        lint_opt: &Lint,
+        is_dependency: bool,
+        project_name: StrId,
+    ) -> Self {
         AnalyzerPass1 {
-            handlers: Pass1Handlers::new(build_opt, lint_opt, is_dependency),
+            handlers: Pass1Handlers::new(build_opt, lint_opt, is_dependency, project_name),
         }
     }
 }
@@ -89,8 +94,14 @@ impl Analyzer {
         let mut ret = Vec::new();
 
         let is_dependency = project_name != self.project_name;
-        namespace_table::set_project(project_name.into(), !is_dependency);
-        let mut pass1 = AnalyzerPass1::new(&self.build_opt, &self.lint_opt, is_dependency);
+        let project_name_id: StrId = project_name.into();
+        scope::set_project(project_name_id, !is_dependency);
+        let mut pass1 = AnalyzerPass1::new(
+            &self.build_opt,
+            &self.lint_opt,
+            is_dependency,
+            project_name_id,
+        );
         pass1.veryl(input);
         ret.append(&mut pass1.handlers.get_errors());
 
@@ -129,7 +140,6 @@ impl Analyzer {
 
     pub fn analyze_pass2(
         &self,
-        project_name: &str,
         input: &Veryl,
         context: &mut Context,
         ir: Option<&mut Ir>,
@@ -142,7 +152,6 @@ impl Analyzer {
         context.config.evaluate_size_limit = self.build_opt.evaluate_size_limit;
         context.config.evaluate_array_limit = self.build_opt.evaluate_array_limit;
 
-        namespace_table::set_default(&[project_name.into()]);
         let mut ir_result = Self::create_ir(context, input);
         if let Some(x) = ir {
             x.append(&mut ir_result.0);
@@ -165,7 +174,8 @@ impl Analyzer {
     pub fn clear(&self) {
         attribute_table::clear();
         msb_table::clear();
-        namespace_table::clear();
+        // `symbol_table::clear` also resets the scope arena (it re-registers
+        // builtins that intern their scopes), keeping the two tables in sync.
         symbol_table::clear();
         type_dag::clear();
         resolved_type_table::clear();
