@@ -1,8 +1,8 @@
 use crate::ir::VarPath;
 use crate::literal::Literal;
 use crate::literal_table;
-use crate::namespace::Namespace;
-use crate::namespace_table;
+use crate::namespace::{DefineContext, Namespace};
+use crate::scope;
 use crate::symbol::{
     DocComment, GenericInstanceProperty, GenericMap, Symbol, SymbolId, SymbolKind,
 };
@@ -11,7 +11,7 @@ use crate::{SVec, svec};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
-use veryl_parser::resource_table::{self, PathId, StrId};
+use veryl_parser::resource_table::{self, PathId, StrId, TokenId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait as syntax_tree;
 use veryl_parser::veryl_token::{Token, TokenSource, is_anonymous_token};
@@ -141,28 +141,72 @@ impl From<&str> for SymbolPath {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SymbolPathNamespace(pub SymbolPath, pub Namespace);
+/// A path plus the scope to resolve it from. The third field is a runtime-only
+/// scope hint carried by token-derived paths so resolution skips reconstructing
+/// the namespace; persisted/explicit paths leave it `None` and resolution
+/// interns the namespace.
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SymbolPathNamespace(
+    pub SymbolPath,
+    pub Namespace,
+    #[serde(skip)] pub Option<scope::ScopeId>,
+);
 
 impl SymbolPathNamespace {
     pub fn pop_namespace(&mut self) -> Option<StrId> {
+        if let Some(scope) = self.2.as_mut() {
+            *scope = scope::parent(*scope).unwrap_or_default();
+        }
         self.1.pop()
+    }
+
+    /// Builds a path rooted at a token's scope without materializing its
+    /// namespace path; the resolution start is carried as a scope hint and the
+    /// namespace holds only the token's ifdef context.
+    pub(crate) fn from_token(path: SymbolPath, token: TokenId) -> Self {
+        match scope::token_scope(token) {
+            Some((scope, define_context)) => SymbolPathNamespace(
+                path,
+                Namespace {
+                    paths: SVec::new(),
+                    define_context,
+                },
+                Some(scope),
+            ),
+            None => SymbolPathNamespace(path, Namespace::default(), None),
+        }
+    }
+
+    /// Builds a path rooted at an explicit scope without materializing its
+    /// namespace path; the resolution start is carried as a scope hint and the
+    /// namespace holds only the given ifdef context.
+    pub fn from_scope(
+        path: SymbolPath,
+        scope: scope::ScopeId,
+        define_context: DefineContext,
+    ) -> Self {
+        SymbolPathNamespace(
+            path,
+            Namespace {
+                paths: SVec::new(),
+                define_context,
+            },
+            Some(scope),
+        )
     }
 }
 
 impl From<&Token> for SymbolPathNamespace {
     fn from(value: &Token) -> Self {
-        let namespace = namespace_table::get(value.id).unwrap_or_default();
-        SymbolPathNamespace(value.into(), namespace)
+        SymbolPathNamespace::from_token(value.into(), value.id)
     }
 }
 
 impl From<&Vec<Token>> for SymbolPathNamespace {
     fn from(value: &Vec<Token>) -> Self {
-        let namespace = namespace_table::get(value[0].id).unwrap_or_default();
         let path: Vec<_> = value.iter().map(|x| x.text).collect();
         let path = SymbolPath::new(&path);
-        SymbolPathNamespace(path, namespace)
+        SymbolPathNamespace::from_token(path, value[0].id)
     }
 }
 
@@ -174,57 +218,41 @@ impl From<&SymbolPathNamespace> for SymbolPathNamespace {
 
 impl From<(&SymbolPath, &Namespace)> for SymbolPathNamespace {
     fn from(value: (&SymbolPath, &Namespace)) -> Self {
-        SymbolPathNamespace(value.0.clone(), value.1.clone())
+        SymbolPathNamespace(value.0.clone(), value.1.clone(), None)
     }
 }
 
 impl From<(&Token, &Namespace)> for SymbolPathNamespace {
     fn from(value: (&Token, &Namespace)) -> Self {
         let path = SymbolPath::new(&[value.0.text]);
-        SymbolPathNamespace(path, value.1.clone())
-    }
-}
-
-impl From<(&Vec<Token>, &Namespace)> for SymbolPathNamespace {
-    fn from(value: (&Vec<Token>, &Namespace)) -> Self {
-        let path: Vec<_> = value.0.iter().map(|x| x.text).collect();
-        let path = SymbolPath::new(&path);
-        SymbolPathNamespace(path, value.1.clone())
+        SymbolPathNamespace(path, value.1.clone(), None)
     }
 }
 
 impl From<(&Vec<StrId>, &Namespace)> for SymbolPathNamespace {
     fn from(value: (&Vec<StrId>, &Namespace)) -> Self {
         let path = SymbolPath::new(value.0);
-        SymbolPathNamespace(path, value.1.clone())
-    }
-}
-
-impl From<(&SVec<StrId>, &Namespace)> for SymbolPathNamespace {
-    fn from(value: (&SVec<StrId>, &Namespace)) -> Self {
-        let path = SymbolPath::new(value.0);
-        SymbolPathNamespace(path, value.1.clone())
+        SymbolPathNamespace(path, value.1.clone(), None)
     }
 }
 
 impl From<(StrId, &Namespace)> for SymbolPathNamespace {
     fn from(value: (StrId, &Namespace)) -> Self {
         let path = SymbolPath::new(&[value.0]);
-        SymbolPathNamespace(path, value.1.clone())
+        SymbolPathNamespace(path, value.1.clone(), None)
     }
 }
 
 impl From<&syntax_tree::Identifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::Identifier) -> Self {
-        let namespace = namespace_table::get(value.identifier_token.token.id).unwrap_or_default();
-        SymbolPathNamespace(value.into(), namespace)
+        SymbolPathNamespace::from_token(value.into(), value.identifier_token.token.id)
     }
 }
 
 impl From<(&syntax_tree::Identifier, &Namespace)> for SymbolPathNamespace {
     fn from(value: (&syntax_tree::Identifier, &Namespace)) -> Self {
         let (identifier, namespace) = value;
-        SymbolPathNamespace(identifier.into(), namespace.clone())
+        SymbolPathNamespace(identifier.into(), namespace.clone(), None)
     }
 }
 
@@ -239,46 +267,33 @@ impl From<(&syntax_tree::Identifier, Option<&Namespace>)> for SymbolPathNamespac
     }
 }
 
-impl From<&[syntax_tree::Identifier]> for SymbolPathNamespace {
-    fn from(value: &[syntax_tree::Identifier]) -> Self {
-        let namespace =
-            namespace_table::get(value[0].identifier_token.token.id).unwrap_or_default();
-        SymbolPathNamespace(value.into(), namespace)
-    }
-}
-
 impl From<&syntax_tree::HierarchicalIdentifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::HierarchicalIdentifier) -> Self {
-        let namespace =
-            namespace_table::get(value.identifier.identifier_token.token.id).unwrap_or_default();
-        SymbolPathNamespace(value.into(), namespace)
+        SymbolPathNamespace::from_token(value.into(), value.identifier.identifier_token.token.id)
     }
 }
 
 impl From<&syntax_tree::ScopedIdentifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::ScopedIdentifier) -> Self {
-        let namespace = namespace_table::get(value.identifier().token.id).unwrap_or_default();
-        SymbolPathNamespace(value.into(), namespace)
+        SymbolPathNamespace::from_token(value.into(), value.identifier().token.id)
     }
 }
 
 impl From<&syntax_tree::ExpressionIdentifier> for SymbolPathNamespace {
     fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
-        let namespace = namespace_table::get(value.identifier().token.id).unwrap_or_default();
-        SymbolPathNamespace(value.into(), namespace)
+        SymbolPathNamespace::from_token(value.into(), value.identifier().token.id)
     }
 }
 
 impl From<&GenericSymbolPathNamespace> for SymbolPathNamespace {
     fn from(value: &GenericSymbolPathNamespace) -> Self {
-        SymbolPathNamespace(value.0.generic_path(), value.1.clone())
+        SymbolPathNamespace(value.0.generic_path(), value.1.clone(), None)
     }
 }
 
 impl From<&GenericSymbolPath> for SymbolPathNamespace {
     fn from(value: &GenericSymbolPath) -> Self {
-        let namespace = namespace_table::get(value.paths[0].base.id).unwrap_or_default();
-        SymbolPathNamespace(value.generic_path(), namespace)
+        SymbolPathNamespace::from_token(value.generic_path(), value.paths[0].base.id)
     }
 }
 
@@ -483,13 +498,16 @@ impl GenericSymbolPath {
             return;
         }
 
-        let Some(namespace) = namespace_table::get(self.paths[0].base.id) else {
+        let Some((scope, define_context)) = scope::token_scope(self.paths[0].base.id) else {
             return;
         };
 
         let mut generic_maps = generic_maps.cloned().unwrap_or_default();
         for i in 0..self.len() {
-            let symbol = symbol_table::resolve((&self.slice(i).mangled_path(), &namespace));
+            let symbol = symbol_table::resolve_generic_structural(
+                &self.slice(i),
+                (scope, define_context.clone()),
+            );
 
             if let Ok(ref symbol) = symbol
                 && let Some(mut alias_target) = symbol.found.alias_target(false)
@@ -500,7 +518,7 @@ impl GenericSymbolPath {
                 }
                 visited.push(symbol.found.id);
 
-                alias_target.resolve_imported(&namespace, Some(&generic_maps));
+                alias_target.resolve_imported(scope, &define_context, Some(&generic_maps));
                 alias_target.apply_map(&generic_maps);
                 if (i + 1) < self.len() {
                     for j in (i + 1)..self.len() {
@@ -598,15 +616,14 @@ impl GenericSymbolPath {
         if let Ok(symbol) = symbol_table::resolve(&head.base) {
             let is_generic = matches!(
                 symbol.found.kind,
-                SymbolKind::GenericParameter(_)
-                    | SymbolKind::GenericConst(_)
-                    | SymbolKind::ProtoPackage(_)
-            ) || (symbol.imported
-                && symbol
-                    .found
-                    .get_parent_package()
-                    .map(|x| matches!(x.kind, SymbolKind::ProtoPackage(_)))
-                    .unwrap_or(false));
+                SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_)
+            ) || matches!(symbol.found.kind, SymbolKind::Package(ref x) if x.is_proto)
+                || (symbol.imported
+                    && symbol
+                        .found
+                        .get_parent_package()
+                        .map(|x| matches!(x.kind, SymbolKind::Package(ref y) if y.is_proto))
+                        .unwrap_or(false));
             if is_generic {
                 return true;
             }
@@ -646,7 +663,8 @@ impl GenericSymbolPath {
     /// Resolve and expand path if the path is imported at declaration
     pub fn resolve_imported(
         &mut self,
-        namespace: &Namespace,
+        scope: scope::ScopeId,
+        define_context: &DefineContext,
         generic_maps: Option<&Vec<GenericMap>>,
     ) {
         if !self.is_resolvable() {
@@ -657,63 +675,79 @@ impl GenericSymbolPath {
         // prefix, so it must resolve as the enclosing package, not a same-named
         // imported item that would re-qualify this already-qualified path.
         let head = self.slice(0).generic_path();
-        let head_imported = if self.paths.len() == 1 {
-            symbol_table::resolve((&head, namespace))
-                .map(|x| x.imported)
-                .unwrap_or(false)
-        } else {
-            // Resolve the whole path so the head is treated as a prefix; fall back
-            // to the head alone if unresolvable.
-            match symbol_table::resolve((&self.generic_path(), namespace)) {
-                Ok(resolved) => resolved
-                    .full_path
-                    .first()
-                    .copied()
-                    .and_then(symbol_table::get)
-                    .is_some_and(|x| x.imported.iter().any(|i| namespace.included(&i.namespace))),
-                Err(_) => symbol_table::resolve((&head, namespace))
-                    .map(|x| x.imported)
-                    .unwrap_or(false),
-            }
+        let head_alone_imported = || {
+            symbol_table::resolve(SymbolPathNamespace::from_scope(
+                head.clone(),
+                scope,
+                define_context.clone(),
+            ))
+            .map(|x| x.imported)
+            .unwrap_or(false)
         };
-        if head_imported {
-            let self_namespace = namespace_table::get(self.range.beg.id).unwrap();
+        // A multi-segment path whose head resolves (as a prefix, container
+        // preferred) to a package reached without import is already qualified and
+        // must not be re-qualified — otherwise an item imported under its
+        // package's name would re-qualify it endlessly. Any other head uses the
+        // head-alone import test.
+        let head_already_qualified = self.paths.len() >= 2
+            && symbol_table::resolve(SymbolPathNamespace::from_scope(
+                self.generic_path(),
+                scope,
+                define_context.clone(),
+            ))
+            .ok()
+            .and_then(|r| r.full_path.first().copied())
+            .and_then(symbol_table::get)
+            .is_some_and(|head| {
+                head.is_package(false)
+                    && !scope::is_imported(
+                        &scope::namespace(scope, define_context),
+                        head.id,
+                        head.token.text,
+                        &head.namespace.define_context,
+                    )
+            });
+        if !head_already_qualified && head_alone_imported() {
+            let (self_scope, self_define_context) = scope::token_scope(self.range.beg.id).unwrap();
             let Some(self_file_path) = self.file_path() else {
                 return;
             };
 
-            if let Ok(head_symbol) = symbol_table::resolve((&head, &self_namespace))
-                && head_symbol.found.get_parent_package().is_some()
-                && let Some(import) = head_symbol
-                    .found
-                    .imported
-                    .iter()
-                    .find(|x| namespace.included(&x.namespace))
+            if let Ok(head_symbol) = symbol_table::resolve(SymbolPathNamespace::from_scope(
+                head.clone(),
+                self_scope,
+                self_define_context.clone(),
+            )) && head_symbol.found.get_parent_package().is_some()
+                && let Some(mut package_path) = scope::import_package_path(
+                    scope,
+                    head_symbol.found.id,
+                    head_symbol.found.token.text,
+                )
             {
-                let mut package_path = import.path.0.clone();
-                if !import.wildcard {
-                    package_path.paths.pop();
-                }
                 if let Some(maps) = generic_maps {
                     package_path.apply_map(maps);
                 }
                 package_path.unalias(None);
 
-                if let Ok(package_symbol) =
-                    symbol_table::resolve((&package_path.generic_path(), namespace))
-                    && package_symbol.imported
-                    && matches!(
-                        package_symbol.found.kind,
-                        SymbolKind::AliasPackage(_) | SymbolKind::ProtoAliasPackage(_)
-                    )
+                if let Ok(package_symbol) = symbol_table::resolve(SymbolPathNamespace::from_scope(
+                    package_path.generic_path(),
+                    scope,
+                    define_context.clone(),
+                )) && package_symbol.imported
+                    && matches!(package_symbol.found.kind, SymbolKind::AliasPackage(_))
                 {
                     // 'package_path' points imported alias package or proto alias package.
-                    package_path.resolve_imported(namespace, generic_maps);
+                    package_path.resolve_imported(scope, define_context, generic_maps);
                 }
 
                 for (i, path) in package_path.paths.iter().enumerate() {
                     let token = Token::generate(path.base.text, self_file_path);
-                    namespace_table::insert(token.id, self_file_path, &self_namespace);
+                    scope::insert_token_scope(
+                        token.id,
+                        self_file_path,
+                        self_scope,
+                        &self_define_context,
+                    );
 
                     let mut path = path.clone();
                     path.base = token;
@@ -724,7 +758,7 @@ impl GenericSymbolPath {
 
         for path in &mut self.paths {
             for arg in &mut path.arguments {
-                arg.resolve_imported(namespace, generic_maps);
+                arg.resolve_imported(scope, define_context, generic_maps);
             }
         }
     }
@@ -739,27 +773,27 @@ impl GenericSymbolPath {
                 return false;
             }
 
-            symbol
-                .namespace
-                .get_symbol()
+            symbol_table::get_namespace_symbol(&symbol.namespace)
                 .map(|x| x.is_package(true))
                 .unwrap_or(false)
         }
 
         fn start_with_project_name(namespace: &Namespace) -> bool {
-            namespace.depth() >= 1 && namespace_table::match_project_name(namespace.paths[0])
+            namespace.depth() >= 1 && scope::match_project_name(namespace.paths[0])
         }
 
         fn add_root_project_name(namespace: &Namespace) -> Namespace {
             let mut ret = namespace.clone();
             if !start_with_project_name(&ret) {
-                ret.paths.insert(0, namespace_table::root_project_name());
+                ret.paths.insert(0, scope::root_project_name());
             }
             ret
         }
 
-        if let Ok(head_symbol) =
-            symbol_table::resolve((&self.base_path(0), &namespace.generic_namespace()))
+        // The head resolves directly from the (possibly mangled) namespace:
+        // delegation-aware lexical lookup descends into the base template, so no
+        // demangling is needed.
+        if let Ok(head_symbol) = symbol_table::resolve((&self.base_path(0), namespace))
             && let Some(file_path) = self.file_path()
         {
             let head_symbol = &head_symbol.found;
@@ -779,7 +813,7 @@ impl GenericSymbolPath {
                 // but it is not visible because it has no package paths.
                 for i in 1..namespace.depth() {
                     let token = Token::generate(namespace.paths[i], file_path);
-                    namespace_table::insert(token.id, file_path, &namespace);
+                    scope::insert_token(token.id, file_path, &namespace);
 
                     let symbol_path = GenericSymbol {
                         base: token,
@@ -792,7 +826,7 @@ impl GenericSymbolPath {
             if namespace.paths[0] != target_namespace.paths[0] && head_symbol.is_component(true) {
                 // Append the project prefix to the path.
                 let token = Token::generate(namespace.paths[0], file_path);
-                namespace_table::insert(token.id, file_path, &namespace);
+                scope::insert_token(token.id, file_path, &namespace);
 
                 let symbol_path = GenericSymbol {
                     base: token,
@@ -1063,5 +1097,82 @@ impl fmt::Display for GenericSymbolPath {
         }
 
         text.fmt(f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use veryl_parser::veryl_token::{Token, TokenSource};
+
+    fn tok(name: &str) -> Token {
+        Token::new(name, 0, 0, 0, 0, TokenSource::External)
+    }
+
+    fn seg(name: &str, arguments: Vec<GenericSymbolPath>) -> GenericSymbol {
+        GenericSymbol {
+            base: tok(name),
+            arguments,
+        }
+    }
+
+    fn gpath(paths: Vec<GenericSymbol>) -> GenericSymbolPath {
+        let range = TokenRange {
+            beg: paths.first().unwrap().base,
+            end: paths.last().unwrap().base,
+        };
+        GenericSymbolPath {
+            paths,
+            kind: GenericSymbolPathKind::Identifier,
+            range,
+        }
+    }
+
+    fn names(path: &SymbolPath) -> Vec<String> {
+        path.0.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn generic_path_drops_arguments() {
+        // `A::<1>::B` reduces to the base names `[A, B]` (arguments stripped).
+        let one = gpath(vec![seg("1", vec![])]);
+        let path = gpath(vec![seg("A", vec![one]), seg("B", vec![])]);
+        assert_eq!(names(&path.generic_path()), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn slice_is_inclusive_prefix() {
+        let path = gpath(vec![seg("A", vec![]), seg("B", vec![]), seg("c", vec![])]);
+        assert_eq!(path.slice(0).len(), 1);
+        assert_eq!(path.slice(1).len(), 2);
+        assert_eq!(names(&path.slice(1).generic_path()), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn base_path_keeps_non_generic_prefix_and_drops_suffix() {
+        // No generic arguments: prefix segments pass through unmangled, segment `i`
+        // is the base, trailing segments are dropped.
+        let path = gpath(vec![seg("A", vec![]), seg("B", vec![]), seg("c", vec![])]);
+        assert_eq!(names(&path.base_path(0)), vec!["A"]);
+        assert_eq!(names(&path.base_path(1)), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn base_path_mangles_generic_prefix() {
+        // A fresh table makes the literal argument unresolvable, so `mangled()`
+        // takes the structural (non-parameter) branch deterministically.
+        crate::symbol_table::clear();
+        // `A::<1>::B::c` at i=1: prefix `A::<1>` is mangled, `B` is the base, `c`
+        // is dropped.
+        let one = gpath(vec![seg("1", vec![])]);
+        let path = gpath(vec![
+            seg("A", vec![one]),
+            seg("B", vec![]),
+            seg("c", vec![]),
+        ]);
+        let base_path = names(&path.base_path(1));
+        assert_eq!(base_path.len(), 2);
+        assert_eq!(base_path[0], "__A__1");
+        assert_eq!(base_path[1], "B");
     }
 }
