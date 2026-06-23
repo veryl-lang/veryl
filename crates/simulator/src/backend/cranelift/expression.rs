@@ -13,7 +13,7 @@ use crate::wide_ops;
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Value as CraneliftValue;
 use cranelift::prelude::types::{I32, I64, I128};
-use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
+use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::value::ValueU64;
 
 /// Marshal one wide-binary operand into an `op_nb`-sized buffer.
@@ -52,7 +52,9 @@ fn marshal_wide_operand(
         slot
     } else {
         let slot = alloc_wide_zero(builder, op_nb);
-        builder.ins().store(MemFlags::trusted(), payload, slot, 0);
+        builder
+            .ins()
+            .store(MemFlagsData::trusted(), payload, slot, 0);
         if signed && value_width > 0 && value_width < op_nb * 8 {
             // Sign-extend in place: wide_resize reads the sign bit first and
             // only reads words covered by value_width, so dst == src is fine.
@@ -310,7 +312,7 @@ impl ProtoExpression {
                     // load, which also leaves upper 32 bits = 0.
                     (p, m)
                 } else {
-                    let load_mem_flag = MemFlags::trusted();
+                    let load_mem_flag = MemFlagsData::trusted();
 
                     let base_addr = if var_offset.is_ff() {
                         context.ff_values
@@ -2038,7 +2040,7 @@ impl ProtoExpression {
                     return None;
                 }
 
-                let load_mem_flag = MemFlags::trusted();
+                let load_mem_flag = MemFlagsData::trusted();
 
                 let load_native_to_i64 =
                     |builder: &mut FunctionBuilder, addr: cranelift::prelude::Value, off: i32| {
@@ -2491,7 +2493,7 @@ impl ProtoExpression {
             ),
             Op::LogicShiftL | Op::ArithShiftL => {
                 // Shift amount: extract from y_ptr as u64
-                let amount = builder.ins().load(I64, MemFlags::trusted(), y_ptr, 0);
+                let amount = builder.ins().load(I64, MemFlagsData::trusted(), y_ptr, 0);
                 let dst = alloc_wide_slot(builder, op_nb);
                 call_helper_void(
                     context,
@@ -2503,7 +2505,7 @@ impl ProtoExpression {
                 dst
             }
             Op::LogicShiftR => {
-                let amount = builder.ins().load(I64, MemFlags::trusted(), y_ptr, 0);
+                let amount = builder.ins().load(I64, MemFlagsData::trusted(), y_ptr, 0);
                 let dst = alloc_wide_slot(builder, op_nb);
                 call_helper_void(
                     context,
@@ -2515,7 +2517,7 @@ impl ProtoExpression {
                 dst
             }
             Op::ArithShiftR => {
-                let amount = builder.ins().load(I64, MemFlags::trusted(), y_ptr, 0);
+                let amount = builder.ins().load(I64, MemFlagsData::trusted(), y_ptr, 0);
                 let dst = alloc_wide_slot(builder, op_nb);
                 let packed = wide_ops::pack_nb_width(op_nb, x_width);
                 let packed_val = builder.ins().iconst(I32, packed as i64);
@@ -2567,11 +2569,11 @@ impl ProtoExpression {
             let wide = width > 64;
             let load_scalar = |builder: &mut FunctionBuilder, ptr: CraneliftValue| {
                 if wide {
-                    let lo = builder.ins().load(I64, MemFlags::trusted(), ptr, 0);
-                    let hi = builder.ins().load(I64, MemFlags::trusted(), ptr, 8);
+                    let lo = builder.ins().load(I64, MemFlagsData::trusted(), ptr, 0);
+                    let hi = builder.ins().load(I64, MemFlagsData::trusted(), ptr, 8);
                     builder.ins().iconcat(lo, hi)
                 } else {
-                    builder.ins().load(I64, MemFlags::trusted(), ptr, 0)
+                    builder.ins().load(I64, MemFlagsData::trusted(), ptr, 0)
                 }
             };
             let width_mask = gen_mask_for_width(width);

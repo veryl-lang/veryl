@@ -12,7 +12,7 @@ use crate::ir::{
 };
 use cranelift::prelude::Value as CraneliftValue;
 use cranelift::prelude::types::{I32, I64, I128};
-use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
+use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::ValueU64;
 
@@ -119,8 +119,8 @@ impl ProtoAssignDynamicStatement {
             None
         };
 
-        let load_mem_flag = MemFlags::trusted();
-        let store_mem_flag = MemFlags::trusted();
+        let load_mem_flag = MemFlagsData::trusted();
+        let store_mem_flag = MemFlagsData::trusted();
 
         // Helpers covering the nb ∈ {1, 2, 4, 8} storage widths.
         // Use uload8/uload16/uload32 (fused load-and-zero-extend) for narrow
@@ -337,7 +337,7 @@ impl ProtoAssignDynamicStatement {
         }
         let nb = calc_native_bytes(self.dst_width);
         let n_words = nb / 8;
-        let flags = MemFlags::trusted();
+        let flags = MemFlagsData::trusted();
 
         // Narrow-field (≤64-bit) bit-select: scalar 1-2 word RMW at the runtime
         // element address (the helper clamps the field to `dst_width`).
@@ -348,7 +348,7 @@ impl ProtoAssignDynamicStatement {
             // A `builds_wide_pointer` expr returns a pointer; the field is its
             // low word. A scalar IS that word. (cf. `wide_shift_amount`.)
             let sv = if returns_wide_pointer(&self.expr) {
-                builder.ins().load(I64, MemFlags::trusted(), raw, 0)
+                builder.ins().load(I64, MemFlagsData::trusted(), raw, 0)
             } else {
                 raw
             };
@@ -374,14 +374,18 @@ impl ProtoAssignDynamicStatement {
                 let copy_words = src_nb.min(nb) / 8;
                 for i in 0..copy_words {
                     let off = (i * 8) as i32;
-                    let w = builder.ins().load(I64, MemFlags::trusted(), payload, off);
-                    builder.ins().store(MemFlags::trusted(), w, slot, off);
+                    let w = builder
+                        .ins()
+                        .load(I64, MemFlagsData::trusted(), payload, off);
+                    builder.ins().store(MemFlagsData::trusted(), w, slot, off);
                 }
                 slot
             }
         } else {
             let slot = alloc_wide_zero(builder, nb);
-            builder.ins().store(MemFlags::trusted(), payload, slot, 0);
+            builder
+                .ins()
+                .store(MemFlagsData::trusted(), payload, slot, 0);
             slot
         };
 
@@ -566,15 +570,15 @@ impl ProtoForStatement {
         if nb <= 4 {
             builder
                 .ins()
-                .uload32(MemFlags::trusted(), base_addr, offset)
+                .uload32(MemFlagsData::trusted(), base_addr, offset)
         } else if nb <= 8 {
             builder
                 .ins()
-                .load(I64, MemFlags::trusted(), base_addr, offset)
+                .load(I64, MemFlagsData::trusted(), base_addr, offset)
         } else {
             let v = builder
                 .ins()
-                .load(I128, MemFlags::trusted(), base_addr, offset);
+                .load(I128, MemFlagsData::trusted(), base_addr, offset);
             builder.ins().ireduce(I64, v)
         }
     }
@@ -591,31 +595,31 @@ impl ProtoForStatement {
             let v32 = builder.ins().ireduce(I32, val_i64);
             builder
                 .ins()
-                .store(MemFlags::trusted(), v32, base_addr, offset);
+                .store(MemFlagsData::trusted(), v32, base_addr, offset);
             if context.use_4state {
                 let zero = builder.ins().iconst(I32, 0);
                 builder
                     .ins()
-                    .store(MemFlags::trusted(), zero, base_addr, offset + nb as i32);
+                    .store(MemFlagsData::trusted(), zero, base_addr, offset + nb as i32);
             }
         } else if nb <= 8 {
             builder
                 .ins()
-                .store(MemFlags::trusted(), val_i64, base_addr, offset);
+                .store(MemFlagsData::trusted(), val_i64, base_addr, offset);
             if context.use_4state {
                 let zero = builder.ins().iconst(I64, 0);
                 builder
                     .ins()
-                    .store(MemFlags::trusted(), zero, base_addr, offset + nb as i32);
+                    .store(MemFlagsData::trusted(), zero, base_addr, offset + nb as i32);
             }
         } else {
             let v128 = builder.ins().uextend(I128, val_i64);
             builder
                 .ins()
-                .store(MemFlags::trusted(), v128, base_addr, offset);
+                .store(MemFlagsData::trusted(), v128, base_addr, offset);
             if context.use_4state {
                 builder.ins().store(
-                    MemFlags::trusted(),
+                    MemFlagsData::trusted(),
                     context.zero_128,
                     base_addr,
                     offset + nb as i32,
@@ -809,8 +813,8 @@ impl ProtoAssignStatement {
             }
         }
 
-        let load_mem_flag = MemFlags::trusted();
-        let store_mem_flag = MemFlags::trusted();
+        let load_mem_flag = MemFlagsData::trusted();
+        let store_mem_flag = MemFlagsData::trusted();
 
         let base_addr = if self.dst.is_ff() {
             context.ff_values
@@ -1311,7 +1315,7 @@ impl ProtoAssignStatement {
             // A `builds_wide_pointer` expr returns a pointer; the field is its
             // low word. A scalar IS that word. (cf. `wide_shift_amount`.)
             let sv = if returns_wide_pointer(&self.expr) {
-                builder.ins().load(I64, MemFlags::trusted(), raw, 0)
+                builder.ins().load(I64, MemFlagsData::trusted(), raw, 0)
             } else {
                 raw
             };
@@ -1331,7 +1335,7 @@ impl ProtoAssignStatement {
         let (payload, mask_xz) = self.expr.build_binary(context, builder)?;
         let nb = calc_native_bytes(self.dst_width);
         let n_words = nb / 8;
-        let flags = MemFlags::trusted();
+        let flags = MemFlagsData::trusted();
 
         let base_addr = if self.dst.is_ff() {
             context.ff_values
@@ -1373,7 +1377,9 @@ impl ProtoAssignStatement {
             // build is actually a scalar) and would pass the register straight
             // through unstored, to be dereferenced as a pointer (SIGSEGV).
             let slot = alloc_wide_zero(builder, nb);
-            builder.ins().store(MemFlags::trusted(), payload, slot, 0);
+            builder
+                .ins()
+                .store(MemFlagsData::trusted(), payload, slot, 0);
             slot
         };
         let _ = expr_width; // no longer gates representation (builds_wide_pointer does)
@@ -1399,8 +1405,8 @@ impl ProtoAssignStatement {
                 let slot = alloc_wide_zero(builder, nb);
                 for i in 0..(src_nb / 8) {
                     let off = (i * 8) as i32;
-                    let w = builder.ins().load(I64, MemFlags::trusted(), ptr, off);
-                    builder.ins().store(MemFlags::trusted(), w, slot, off);
+                    let w = builder.ins().load(I64, MemFlagsData::trusted(), ptr, off);
+                    builder.ins().store(MemFlagsData::trusted(), w, slot, off);
                 }
                 (slot, nb)
             } else {
@@ -1458,7 +1464,9 @@ impl ProtoAssignStatement {
                 // Force-store (see the payload src_ptr note above): the
                 // width-field guard in ensure_wide_ptr_val is unreliable here.
                 let slot = alloc_wide_zero(builder, nb);
-                builder.ins().store(MemFlags::trusted(), mask_xz, slot, 0);
+                builder
+                    .ins()
+                    .store(MemFlagsData::trusted(), mask_xz, slot, 0);
                 slot
             };
             // rhs_select shifts the mask half in parallel with the payload
@@ -1601,7 +1609,7 @@ fn emit_wide_narrow_field_store(
     }
     let hi = hi.min(dst_width - 1);
     let nbits = hi - lo + 1; // ≤ 64
-    let flags = MemFlags::trusted();
+    let flags = MemFlagsData::trusted();
     let k0 = lo / 64;
     let k1 = hi / 64;
     let b = (lo % 64) as i64;
