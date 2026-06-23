@@ -168,7 +168,7 @@ pub fn emit_inline_write_log_push(
         WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR, WRITE_LOG_OFFSET_GROW_PUSH_NARROW,
     };
     let log_buf = context.log_buf;
-    let flags = MemFlags::trusted();
+    let flags = MemFlagsData::trusted();
 
     let count = builder
         .ins()
@@ -255,7 +255,7 @@ pub fn emit_inline_write_log_push_wide(
     };
     debug_assert!(nb > 0 && nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES);
     let log_buf = context.log_buf;
-    let flags = MemFlags::trusted();
+    let flags = MemFlagsData::trusted();
 
     let count = builder
         .ins()

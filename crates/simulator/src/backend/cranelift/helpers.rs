@@ -8,7 +8,7 @@ use crate::ir::{ProtoDynamicBitSelect, ProtoExpression, native_bytes as calc_nat
 use crate::wide_ops;
 use cranelift::prelude::Value as CraneliftValue;
 use cranelift::prelude::types::{I32, I64, I128};
-use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags};
+use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::ir::Op;
 
 /// `iconst` only accepts Imm64, so build I128 via `iconcat(lo, hi)`.
@@ -176,7 +176,7 @@ pub(crate) fn alloc_wide_zero(builder: &mut FunctionBuilder, nb: usize) -> Crane
     for i in 0..(nb / 8) {
         builder
             .ins()
-            .store(MemFlags::trusted(), zero, ptr, (i * 8) as i32);
+            .store(MemFlagsData::trusted(), zero, ptr, (i * 8) as i32);
     }
     ptr
 }
@@ -193,7 +193,7 @@ pub(crate) fn ensure_wide_ptr_val(
         return val;
     }
     let ptr = alloc_wide_zero(builder, dst_nb);
-    builder.ins().store(MemFlags::trusted(), val, ptr, 0);
+    builder.ins().store(MemFlagsData::trusted(), val, ptr, 0);
     ptr
 }
 
@@ -338,7 +338,7 @@ pub(crate) fn emit_wide_const(
         let v = builder.ins().iconst(I64, val as i64);
         builder
             .ins()
-            .store(MemFlags::trusted(), v, ptr, (i * 8) as i32);
+            .store(MemFlagsData::trusted(), v, ptr, (i * 8) as i32);
     }
     ptr
 }
@@ -415,7 +415,7 @@ pub(crate) fn emit_wide_bit_select_read_narrow(
     width: usize,
 ) -> CraneliftValue {
     debug_assert!(beg >= end && width <= 64 && width > 0);
-    let flags = MemFlags::trusted();
+    let flags = MemFlagsData::trusted();
     let word = end / 64;
     let bit = (end % 64) as i64;
     let lo = builder.ins().load(I64, flags, ptr, (word * 8) as i32);
@@ -531,7 +531,7 @@ pub(crate) fn emit_wide_select(
 ) -> CraneliftValue {
     let dst = alloc_wide_slot(builder, nb);
     let n_words = nb / 8;
-    let flags = MemFlags::trusted();
+    let flags = MemFlagsData::trusted();
     for i in 0..n_words {
         let off = (i * 8) as i32;
         let t = builder.ins().load(I64, flags, true_ptr, off);
