@@ -652,11 +652,30 @@ impl GenericSymbolPath {
             return;
         }
 
-        // Import process is performed against the head symbol of the given path.
+        // Qualification targets the head. For a multi-segment path the head is a
+        // prefix, so it must resolve as the enclosing package, not a same-named
+        // imported item that would re-qualify this already-qualified path.
         let head = self.slice(0).generic_path();
-        if let Ok(head_symbol) = symbol_table::resolve((&head, namespace))
-            && head_symbol.imported
-        {
+        let head_imported = if self.paths.len() == 1 {
+            symbol_table::resolve((&head, namespace))
+                .map(|x| x.imported)
+                .unwrap_or(false)
+        } else {
+            // Resolve the whole path so the head is treated as a prefix; fall back
+            // to the head alone if unresolvable.
+            match symbol_table::resolve((&self.generic_path(), namespace)) {
+                Ok(resolved) => resolved
+                    .full_path
+                    .first()
+                    .copied()
+                    .and_then(symbol_table::get)
+                    .is_some_and(|x| x.imported.iter().any(|i| namespace.included(&i.namespace))),
+                Err(_) => symbol_table::resolve((&head, namespace))
+                    .map(|x| x.imported)
+                    .unwrap_or(false),
+            }
+        };
+        if head_imported {
             let self_namespace = namespace_table::get(self.range.beg.id).unwrap();
             let Some(self_file_path) = self.file_path() else {
                 return;
@@ -682,6 +701,10 @@ impl GenericSymbolPath {
                 if let Ok(package_symbol) =
                     symbol_table::resolve((&package_path.generic_path(), namespace))
                     && package_symbol.imported
+                    && matches!(
+                        package_symbol.found.kind,
+                        SymbolKind::AliasPackage(_) | SymbolKind::ProtoAliasPackage(_)
+                    )
                 {
                     // 'package_path' points imported alias package or proto alias package.
                     package_path.resolve_imported(namespace, generic_maps);

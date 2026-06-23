@@ -663,7 +663,12 @@ impl SymbolTable {
             self.get_namespace_generic_map(&project_namespace)
         };
         for (i, name) in path.as_slice().iter().enumerate() {
-            let mut max_depth = 0;
+            let is_last = (i + 1) == path.len();
+            // For a non-final segment prefer a container over a same-named leaf
+            // even if the leaf is deeper, so an item imported under its package's
+            // name can't shadow the package as a prefix. Final segment ranks by
+            // depth alone.
+            let mut best: Option<(u8, usize)> = None;
             context.found = None;
 
             let mut generic_argument = if self.skip_generic_args {
@@ -731,10 +736,18 @@ impl SymbolTable {
                     };
                     if included {
                         included_count += 1;
-                        if symbol.namespace.depth() >= max_depth {
+                        let container_pref =
+                            u8::from(is_last || symbol.kind.can_have_path_member());
+                        let depth = symbol.namespace.depth();
+                        let key = (container_pref, depth);
+                        let better = match best {
+                            None => true,
+                            Some(b) => key >= b,
+                        };
+                        if better {
                             context.found = Some(symbol);
                             context.imported = imported;
-                            max_depth = symbol.namespace.depth();
+                            best = Some(key);
                         }
                     }
                 }

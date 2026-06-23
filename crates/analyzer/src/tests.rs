@@ -15538,3 +15538,78 @@ fn no_panic_on_resolving_symbol_path_including_alias() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 }
+
+#[test]
+fn no_stack_overflow_on_importing_item_named_as_its_package() {
+    // Importing an item whose name matches its parent package name used to
+    // overflow the stack in `GenericSymbolPath::resolve_imported`.
+
+    // Function: the head binds to the package, the bare name calls the function.
+    let code = r#"
+    package abcd {
+        function abcd () -> logic {
+            return 1;
+        }
+    }
+    package xyz {
+        import abcd::abcd;
+        const C: logic = abcd();
+    }
+    "#;
+    assert!(analyze(code).is_empty());
+
+    // Struct: also a leaf with respect to `::` paths.
+    let code = r#"
+    package p {
+        struct p {
+            a: logic,
+        }
+    }
+    package q {
+        import p::p;
+    }
+    "#;
+    assert!(analyze(code).is_empty());
+
+    // Enum: can be a `::` prefix, so the name is genuinely ambiguous (package vs
+    // imported enum); it currently errors, but must not overflow the stack.
+    let code = r#"
+    package e {
+        enum e {
+            A,
+        }
+    }
+    package f {
+        import e::e;
+    }
+    "#;
+    let _ = analyze(code);
+
+    // Wildcard import of a package with a same-named member must be accepted.
+    let code = r#"
+    package abcd {
+        function abcd () -> logic {
+            return 1;
+        }
+    }
+    package wild {
+        import abcd::*;
+        const C: logic = abcd();
+    }
+    "#;
+    assert!(analyze(code).is_empty());
+
+    let code = r#"
+    package p {
+        struct p {
+            a: logic,
+        }
+    }
+    module top {
+        import p::*;
+        var v: p;
+        assign v.a = 1;
+    }
+    "#;
+    assert!(analyze(code).is_empty());
+}

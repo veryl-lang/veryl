@@ -1025,6 +1025,29 @@ pub enum SymbolKind {
 }
 
 impl SymbolKind {
+    /// Whether a `::member` segment can be traced into this kind. Complement of
+    /// the "don't trace inner item" arm in `resolve`; keep in sync.
+    pub fn can_have_path_member(&self) -> bool {
+        !matches!(
+            self,
+            SymbolKind::Function(_)
+                | SymbolKind::ProtoFunction(_)
+                | SymbolKind::ProtoModule(_)
+                | SymbolKind::Struct(_)
+                | SymbolKind::Union(_)
+                | SymbolKind::Modport(_)
+                | SymbolKind::ModportFunctionMember(_)
+                | SymbolKind::EnumMember(_)
+                | SymbolKind::EnumMemberMangled
+                | SymbolKind::Block
+                | SymbolKind::SystemFunction(_)
+                | SymbolKind::Genvar
+                | SymbolKind::ClockDomain
+                | SymbolKind::Test(_)
+                | SymbolKind::Embed
+        )
+    }
+
     pub fn to_kind_name(&self) -> String {
         match self {
             SymbolKind::Port(x) => match x.direction {
