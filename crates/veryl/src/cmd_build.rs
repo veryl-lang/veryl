@@ -89,7 +89,7 @@ impl CmdBuild {
                 };
 
                 let mut emitter = Emitter::new(metadata, &path.src, &dst, &map);
-                emitter.emit(&path.prj, &context.parser.veryl, &context.input);
+                emitter.emit(&context.parser.veryl, &context.input);
 
                 let dst_dir = dst.parent().unwrap();
                 if !dst_dir.exists() {
@@ -577,8 +577,9 @@ incremental = true
     }
     "#;
 
-    // Pass1-clean, but warns (`unused_var`) only in post-pass2 — which a
-    // pass1-only fragment restore would hide.
+    // Pass1-clean, but warns (`unused_var`) in post-pass2. That pass runs every
+    // build over the restored symbol table, so a warm run re-derives the warning
+    // and also replays the cached copy — the dedup keeps it to one.
     const WARNING_MODULE: &str = r#"
     module Warn {
         let unused_var: logic = 1;
@@ -919,9 +920,62 @@ exclude_std = true
         assert!(run_check(&mut metadata).is_err());
 
         // Warm: both files restore, yet check still fails — the warning is
-        // replayed from the cache, not hidden. The regression this guards.
+        // re-reported (post-pass2 re-derives it; the cached copy is deduped).
         assert!(run_check(&mut metadata).is_err());
         assert_eq!(crate::incremental::last_restored_count(), 2);
+    }
+
+    /// One analyze pass through the same pipeline `veryl check` uses, persisting
+    /// the cache for the next call. Returns (diagnostic count, restored count).
+    fn analyze_diagnostic_count(metadata: &mut Metadata) -> (usize, usize) {
+        Analyzer::new(metadata).clear();
+        let paths = metadata
+            .paths(&Vec::<PathBuf>::new(), true, true)
+            .expect("paths");
+        let options = AnalyzeOptions {
+            defines: &[],
+            emit_mode: false,
+            incremental: true,
+            fail_fast: true,
+        };
+        let AnalyzeOutput {
+            incremental,
+            check_error,
+            ..
+        } = pipeline::analyze(metadata, &paths, options, None, None).expect("analyze");
+        let restored = incremental.as_ref().map_or(0, |x| x.restored);
+        let count = check_error.related.len();
+        if let Some(mut inc) = incremental {
+            inc.save(&pipeline::collect_diagnosed(&check_error));
+        }
+        Analyzer::new(metadata).clear();
+        (count, restored)
+    }
+
+    #[test]
+    fn incremental_warm_run_reports_each_warning_once() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, _project_path) = write_incremental_project(
+            tempdir.path(),
+            "inc_warn_once",
+            &[
+                ("clean.veryl", CLEAN_MODULE),
+                ("warn.veryl", WARNING_MODULE),
+            ],
+        );
+
+        // Cold: the single `unused_var` warning is produced once.
+        let (cold, cold_restored) = analyze_diagnostic_count(&mut metadata);
+        assert_eq!(cold_restored, 0);
+        assert_eq!(cold, 1);
+
+        // Warm: both files restore. post-pass2 re-derives the warning from the
+        // restored symbol table while the cache also replays it; the dedup must
+        // collapse them so the warning is reported exactly once, not twice.
+        let (warm, warm_restored) = analyze_diagnostic_count(&mut metadata);
+        assert_eq!(warm_restored, 2);
+        assert_eq!(warm, cold);
     }
 
     #[test]

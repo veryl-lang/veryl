@@ -17,7 +17,7 @@ fn build_ir(code: &str, top: &str, config: &Config) -> sir::Ir {
     let mut ir = air::Ir::default();
     analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
 
     sir::build_ir(&ir, top.into(), config).expect("Failed to build IR")
 }

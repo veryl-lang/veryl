@@ -537,7 +537,12 @@ fn resolve_interface(
     let mut path = user_defined.get_user_defined()?.path.clone();
     path.paths.pop(); // remove modport path
 
-    let (result, _) = resolve_generic_path(&path, namespace, Some(&generic_map.to_vec()));
+    let (result, _) = resolve_generic_path(
+        &path,
+        veryl_analyzer::scope::intern_namespace(namespace),
+        &namespace.define_context,
+        Some(&generic_map.to_vec()),
+    );
     result.ok().map(|x| {
         (
             (*x.found).clone(),

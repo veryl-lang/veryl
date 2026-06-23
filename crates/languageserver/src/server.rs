@@ -13,10 +13,10 @@ use tower_lsp_server::ls_types::*;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
 use veryl_analyzer::symbol::{Symbol, TypeKind};
-use veryl_analyzer::symbol_path::SymbolPath;
+use veryl_analyzer::symbol_path::{SymbolPath, SymbolPathNamespace};
 use veryl_analyzer::{
-    Analyzer, AnalyzerError, Context, attribute_table, definition_table, fragment_cache,
-    namespace_table, symbol_table, unsafe_table,
+    Analyzer, AnalyzerError, Context, attribute_table, definition_table, fragment_cache, scope,
+    symbol_table, unsafe_table,
 };
 use veryl_formatter::Formatter;
 use veryl_metadata::Metadata;
@@ -376,14 +376,18 @@ impl Server {
             finder.veryl(&parser.veryl);
 
             if let Some(token) = finder.token
-                && let Some(namespace) = namespace_table::get(token.id)
+                && let Some((scope, define_context)) = scope::token_scope(token.id)
             {
                 let path = if finder.token_group.is_empty() {
                     SymbolPath::new(&[token.text])
                 } else {
                     SymbolPath::from(finder.token_group.as_slice())
                 };
-                if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                if let Ok(symbol) = symbol_table::resolve(SymbolPathNamespace::from_scope(
+                    path,
+                    scope,
+                    define_context,
+                )) {
                     let location = to_location(&symbol.found.token);
                     self.snd
                         .send_blocking(MsgFromServer::GotoDefinition(location))
@@ -407,23 +411,15 @@ impl Server {
                     VerylSymbolKind::Port(_) => SymbolKind::VARIABLE,
                     VerylSymbolKind::Variable(_) => SymbolKind::VARIABLE,
                     VerylSymbolKind::Module(_) => SymbolKind::MODULE,
-                    VerylSymbolKind::ProtoModule(_) => SymbolKind::MODULE,
                     VerylSymbolKind::AliasModule(_) => SymbolKind::MODULE,
-                    VerylSymbolKind::ProtoAliasModule(_) => SymbolKind::MODULE,
                     VerylSymbolKind::Interface(_) => SymbolKind::INTERFACE,
-                    VerylSymbolKind::ProtoInterface(_) => SymbolKind::INTERFACE,
                     VerylSymbolKind::AliasInterface(_) => SymbolKind::INTERFACE,
-                    VerylSymbolKind::ProtoAliasInterface(_) => SymbolKind::INTERFACE,
                     VerylSymbolKind::Function(_) => SymbolKind::FUNCTION,
-                    VerylSymbolKind::ProtoFunction(_) => SymbolKind::FUNCTION,
                     VerylSymbolKind::Parameter(_) => SymbolKind::CONSTANT,
-                    VerylSymbolKind::ProtoConst(_) => SymbolKind::CONSTANT,
                     VerylSymbolKind::Instance(_) => SymbolKind::OBJECT,
                     VerylSymbolKind::Block => SymbolKind::NAMESPACE,
                     VerylSymbolKind::Package(_) => SymbolKind::PACKAGE,
-                    VerylSymbolKind::ProtoPackage(_) => SymbolKind::PACKAGE,
                     VerylSymbolKind::AliasPackage(_) => SymbolKind::PACKAGE,
-                    VerylSymbolKind::ProtoAliasPackage(_) => SymbolKind::PACKAGE,
                     VerylSymbolKind::Struct(_) => SymbolKind::STRUCT,
                     VerylSymbolKind::StructMember(_) => SymbolKind::VARIABLE,
                     VerylSymbolKind::Union(_) => SymbolKind::STRUCT,
@@ -434,7 +430,6 @@ impl Server {
                     VerylSymbolKind::Modport(_) => SymbolKind::INTERFACE,
                     VerylSymbolKind::Genvar => SymbolKind::VARIABLE,
                     VerylSymbolKind::TypeDef(_) => SymbolKind::TYPE_PARAMETER,
-                    VerylSymbolKind::ProtoTypeDef(_) => SymbolKind::TYPE_PARAMETER,
                     VerylSymbolKind::ModportVariableMember(_) => SymbolKind::VARIABLE,
                     VerylSymbolKind::ModportFunctionMember(_) => SymbolKind::FUNCTION,
                     VerylSymbolKind::SystemVerilog => SymbolKind::NAMESPACE,
@@ -474,14 +469,18 @@ impl Server {
             finder.column = column as u32;
             finder.veryl(&parser.veryl);
             if let Some(token) = finder.token
-                && let Some(namespace) = namespace_table::get(token.id)
+                && let Some((scope, define_context)) = scope::token_scope(token.id)
             {
                 let path = if finder.token_group.is_empty() {
                     SymbolPath::new(&[token.text])
                 } else {
                     SymbolPath::from(finder.token_group.as_slice())
                 };
-                if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                if let Ok(symbol) = symbol_table::resolve(SymbolPathNamespace::from_scope(
+                    path,
+                    scope,
+                    define_context,
+                )) {
                     let text = symbol.found.kind.to_string();
                     let hover = Hover {
                         contents: HoverContents::Scalar(MarkedString::String(text)),
@@ -507,14 +506,18 @@ impl Server {
             finder.column = column as u32;
             finder.veryl(&parser.veryl);
             if let Some(token) = finder.token
-                && let Some(namespace) = namespace_table::get(token.id)
+                && let Some((scope, define_context)) = scope::token_scope(token.id)
             {
                 let path = if finder.token_group.is_empty() {
                     SymbolPath::new(&[token.text])
                 } else {
                     SymbolPath::from(finder.token_group.as_slice())
                 };
-                if let Ok(symbol) = symbol_table::resolve((&path, &namespace)) {
+                if let Ok(symbol) = symbol_table::resolve(SymbolPathNamespace::from_scope(
+                    path,
+                    scope,
+                    define_context,
+                )) {
                     let refs = symbol_table::get_references(symbol.found.id).unwrap_or_default();
                     for reference in &refs {
                         if let Some(location) = to_location(reference) {
@@ -781,7 +784,6 @@ impl Server {
                         let mut errors = analyzer.analyze_pass1(prj, &x.veryl);
                         errors.append(&mut Analyzer::analyze_post_pass1());
                         errors.append(&mut analyzer.analyze_pass2(
-                            prj,
                             &x.veryl,
                             &mut context,
                             Some(&mut ir),
@@ -1159,7 +1161,7 @@ fn completion_symbol(
                 format!("{}::", symbol.namespace.paths[0])
             };
             let (new_text, kind) = match symbol.kind {
-                VerylSymbolKind::Module(ref x) => {
+                VerylSymbolKind::Module(ref x) if !x.is_proto => {
                     let mut ports = String::new();
                     for port in &x.ports {
                         ports.push_str(&format!("{}, ", port.name()));
@@ -1167,11 +1169,11 @@ fn completion_symbol(
                     let text = format!("{}{} ({});", prefix, symbol.token.text, ports);
                     (text, Some(CompletionItemKind::CLASS))
                 }
-                VerylSymbolKind::Interface(_) => {
+                VerylSymbolKind::Interface(ref x) if !x.is_proto => {
                     let text = format!("{}{} ();", prefix, symbol.token.text);
                     (text, Some(CompletionItemKind::INTERFACE))
                 }
-                VerylSymbolKind::Package(_) => {
+                VerylSymbolKind::Package(ref x) if !x.is_proto => {
                     let text = format!("{}{}::", prefix, symbol.token.text);
                     (text, Some(CompletionItemKind::MODULE))
                 }
@@ -1181,7 +1183,11 @@ fn completion_symbol(
                     let text = format!("{}{}", prefix, symbol.token.text);
                     (text, Some(CompletionItemKind::VARIABLE))
                 }
-                VerylSymbolKind::Function(_) | VerylSymbolKind::SystemFunction(_) => {
+                VerylSymbolKind::Function(ref x) if !x.is_proto => {
+                    let text = format!("{}{}", prefix, symbol.token.text);
+                    (text, Some(CompletionItemKind::FUNCTION))
+                }
+                VerylSymbolKind::SystemFunction(_) => {
                     let text = format!("{}{}", prefix, symbol.token.text);
                     (text, Some(CompletionItemKind::FUNCTION))
                 }
@@ -1226,22 +1232,30 @@ fn current_namespace(url: &Url, line: usize, column: usize) -> Option<Namespace>
     let mut ret_func = None;
     for symbol in symbol_table::get_all() {
         match symbol.kind {
-            VerylSymbolKind::Module(x) if x.range.include(url, line as u32, column as u32) => {
+            VerylSymbolKind::Module(x)
+                if !x.is_proto && x.range.include(url, line as u32, column as u32) =>
+            {
                 let mut namespace = symbol.namespace;
                 namespace.push(symbol.token.text);
                 ret = Some(namespace);
             }
-            VerylSymbolKind::Function(x) if x.range.include(url, line as u32, column as u32) => {
+            VerylSymbolKind::Function(x)
+                if !x.is_proto && x.range.include(url, line as u32, column as u32) =>
+            {
                 let mut namespace = symbol.namespace;
                 namespace.push(symbol.token.text);
                 ret_func = Some(namespace);
             }
-            VerylSymbolKind::Interface(x) if x.range.include(url, line as u32, column as u32) => {
+            VerylSymbolKind::Interface(x)
+                if !x.is_proto && x.range.include(url, line as u32, column as u32) =>
+            {
                 let mut namespace = symbol.namespace;
                 namespace.push(symbol.token.text);
                 ret = Some(namespace);
             }
-            VerylSymbolKind::Package(x) if x.range.include(url, line as u32, column as u32) => {
+            VerylSymbolKind::Package(x)
+                if !x.is_proto && x.range.include(url, line as u32, column as u32) =>
+            {
                 let mut namespace = symbol.namespace;
                 namespace.push(symbol.token.text);
                 ret = Some(namespace);
@@ -1255,7 +1269,7 @@ fn current_namespace(url: &Url, line: usize, column: usize) -> Option<Namespace>
 
 fn drop_tables(path: PathId) {
     symbol_table::drop(path);
-    namespace_table::drop(path);
+    scope::drop_tokens(path);
     text_table::drop(path);
     attribute_table::drop(path);
     unsafe_table::drop(path);

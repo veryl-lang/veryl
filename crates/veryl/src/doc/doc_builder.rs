@@ -653,7 +653,9 @@ impl DocBuilder {
     }
 
     fn build_module(&self, name: &str, symbol: &Symbol) -> String {
-        if let SymbolKind::Module(property) = &symbol.kind {
+        if let SymbolKind::Module(property) = &symbol.kind
+            && !property.is_proto
+        {
             let generic_parameters: Vec<_> = property
                 .generic_parameters
                 .iter()
@@ -732,7 +734,9 @@ impl DocBuilder {
     }
 
     fn build_proto_module(&self, name: &str, symbol: &Symbol) -> String {
-        if let SymbolKind::ProtoModule(property) = &symbol.kind {
+        if let SymbolKind::Module(property) = &symbol.kind
+            && property.is_proto
+        {
             let parameters: Vec<_> = property
                 .parameters
                 .iter()
@@ -796,7 +800,9 @@ impl DocBuilder {
     }
 
     fn build_interface(&self, name: &str, symbol: &Symbol) -> String {
-        if let SymbolKind::Interface(property) = &symbol.kind {
+        if let SymbolKind::Interface(property) = &symbol.kind
+            && !property.is_proto
+        {
             let parameters: Vec<_> = property
                 .parameters
                 .iter()
@@ -823,7 +829,9 @@ impl DocBuilder {
     }
 
     fn build_package(&self, name: &str, symbol: &Symbol) -> String {
-        if let SymbolKind::Package(_) = &symbol.kind {
+        if let SymbolKind::Package(x) = &symbol.kind
+            && !x.is_proto
+        {
             let data = PackageData {
                 name: name.to_string(),
                 description: symbol.doc_comment.format(false),
