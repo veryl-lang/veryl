@@ -16202,3 +16202,80 @@ fn float_literal_with_underscores_const_evals() {
         assert_eq!(sim.get("o").unwrap(), Value::new(1, 1, false), "{config:?}");
     }
 }
+
+#[test]
+fn function_call_in_if_condition_runs_before_the_branch() {
+    // Regression: a function called directly in an `if` condition inlines its
+    // body into the pending-statement queue (it computes the condition). The
+    // per-statement drain let the first branch statement pull that body into the
+    // branch, past the condition read — so the condition saw the uninitialised
+    // return slot (0), the branch was never taken, and the function appeared to
+    // always return 0. A signal argument is required: an all-constant call folds
+    // at compile time. Fault is in the IR conversion, so every backend was hit.
+    let code = r#"
+    module Top (
+        v  : input  logic<64>,
+        hit: output logic    ,
+        els: output logic    ,
+    ) {
+        function inexact24 (
+            x: input logic<64>,
+        ) -> logic {
+            if x == 64'd0 {
+                return 1'b0;
+            }
+            var lz: logic<7>;
+            lz = 7'd64;
+            for i in 0..64 {
+                if x[63 - i] == 1'b1 && lz == 7'd64 {
+                    lz = i[6:0];
+                }
+            }
+            var norm: logic<64>;
+            norm = x << lz;
+            return norm[39:0] != 40'd0;
+        }
+        always_comb {
+            hit = 1'b0;
+            els = 1'b0;
+            if inexact24(v) {
+                hit = 1'b1;
+            } else {
+                els = 1'b1;
+            }
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        // 2^24 + 1 rounds inexactly to 24 bits -> condition true.
+        sim.set("v", Value::new(16_777_217, 64, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("hit").unwrap(),
+            Value::new(1, 1, false),
+            "hit {config:?}"
+        );
+        assert_eq!(
+            sim.get("els").unwrap(),
+            Value::new(0, 1, false),
+            "els {config:?}"
+        );
+
+        // 5 is exact in 24 bits -> condition false.
+        sim.set("v", Value::new(5, 64, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("hit").unwrap(),
+            Value::new(0, 1, false),
+            "hit2 {config:?}"
+        );
+        assert_eq!(
+            sim.get("els").unwrap(),
+            Value::new(1, 1, false),
+            "els2 {config:?}"
+        );
+    }
+}
