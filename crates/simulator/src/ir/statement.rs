@@ -1,3 +1,4 @@
+use crate::HashMap;
 use crate::HashSet;
 use crate::assert_buffer;
 use crate::backend::ChunkArtifact;
@@ -923,6 +924,158 @@ impl ProtoStatement {
                 ProtoTbMethodKind::FileWrite { args, .. } => {
                     for a in args {
                         a.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+                ProtoTbMethodKind::FileOpen { .. }
+                | ProtoTbMethodKind::FileClose
+                | ProtoTbMethodKind::FileFlush => {}
+            },
+            ProtoStatement::Break => {}
+        }
+    }
+
+    /// Byte offsets this statement WRITES, recursing into `If`/`For`/block
+    /// bodies. Read-only references are intentionally excluded — see the
+    /// per-call-site relocation in expression.rs for why.
+    pub fn collect_written_offsets(&self, out: &mut Vec<VarOffset>) {
+        match self {
+            ProtoStatement::Assign(x) => out.push(x.dst),
+            ProtoStatement::AssignDynamic(x) => out.push(x.dst_base),
+            ProtoStatement::If(x) => {
+                for s in &x.true_side {
+                    s.collect_written_offsets(out);
+                }
+                for s in &x.false_side {
+                    s.collect_written_offsets(out);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => {
+                if let ProtoSystemFunctionCall::Readmemh { elements, .. } = x {
+                    for elem in elements {
+                        out.push(elem.current);
+                    }
+                }
+            }
+            ProtoStatement::CompiledBlock(_) => {}
+            ProtoStatement::For(x) => {
+                // The loop counter is written by the loop driver each iteration.
+                out.push(x.var_offset);
+                for s in &x.body {
+                    s.collect_written_offsets(out);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    s.collect_written_offsets(out);
+                }
+            }
+            ProtoStatement::TbMethodCall { .. } => {}
+            ProtoStatement::Break => {}
+        }
+    }
+
+    /// Replace embedded byte offsets present in `map`. Mirrors `adjust_offsets`'s
+    /// walk; `map` holds only comb offsets, so FF offsets are never affected.
+    pub fn remap_offsets(&mut self, map: &HashMap<VarOffset, VarOffset>) {
+        match self {
+            ProtoStatement::Assign(x) => {
+                if let Some(&n) = map.get(&x.dst) {
+                    x.dst = n;
+                }
+                x.expr.remap_offsets(map);
+                if let Some(dyn_sel) = &mut x.dynamic_select {
+                    dyn_sel.index_expr.remap_offsets(map);
+                }
+            }
+            ProtoStatement::AssignDynamic(x) => {
+                if let Some(&n) = map.get(&x.dst_base) {
+                    x.dst_base = n;
+                }
+                x.dst_index_expr.remap_offsets(map);
+                x.expr.remap_offsets(map);
+                if let Some(dyn_sel) = &mut x.dynamic_select {
+                    dyn_sel.index_expr.remap_offsets(map);
+                }
+            }
+            ProtoStatement::If(x) => {
+                if let Some(cond) = &mut x.cond {
+                    cond.remap_offsets(map);
+                }
+                for s in &mut x.true_side {
+                    s.remap_offsets(map);
+                }
+                for s in &mut x.false_side {
+                    s.remap_offsets(map);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => match x {
+                ProtoSystemFunctionCall::Display { args, .. }
+                | ProtoSystemFunctionCall::Write { args, .. } => {
+                    for arg in args {
+                        arg.remap_offsets(map);
+                    }
+                }
+                ProtoSystemFunctionCall::Readmemh { elements, .. } => {
+                    for elem in elements {
+                        if let Some(&n) = map.get(&elem.current) {
+                            elem.current = n;
+                        }
+                    }
+                }
+                ProtoSystemFunctionCall::Assert {
+                    condition, args, ..
+                } => {
+                    condition.remap_offsets(map);
+                    for arg in args {
+                        arg.remap_offsets(map);
+                    }
+                }
+                ProtoSystemFunctionCall::Finish => {}
+            },
+            ProtoStatement::CompiledBlock(_) => {}
+            ProtoStatement::For(x) => {
+                if let Some(&n) = map.get(&x.var_offset) {
+                    x.var_offset = n;
+                }
+                let remap_bound = |b: &mut ProtoForBound| {
+                    if let ProtoForBound::Dynamic(expr) = b {
+                        expr.remap_offsets(map);
+                    }
+                };
+                match &mut x.range {
+                    ProtoForRange::Forward { start, end, .. }
+                    | ProtoForRange::Reverse { start, end, .. }
+                    | ProtoForRange::Stepped { start, end, .. } => {
+                        remap_bound(start);
+                        remap_bound(end);
+                    }
+                }
+                for s in &mut x.body {
+                    s.remap_offsets(map);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    s.remap_offsets(map);
+                }
+            }
+            ProtoStatement::TbMethodCall { method, .. } => match method {
+                ProtoTbMethodKind::ClockNext { count, period } => {
+                    if let Some(c) = count {
+                        c.remap_offsets(map);
+                    }
+                    if let Some(p) = period {
+                        p.remap_offsets(map);
+                    }
+                }
+                ProtoTbMethodKind::ResetAssert { duration, .. } => {
+                    if let Some(d) = duration {
+                        d.remap_offsets(map);
+                    }
+                }
+                ProtoTbMethodKind::FileWrite { args, .. } => {
+                    for a in args {
+                        a.remap_offsets(map);
                     }
                 }
                 ProtoTbMethodKind::FileOpen { .. }
