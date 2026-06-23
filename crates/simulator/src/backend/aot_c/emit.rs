@@ -2407,28 +2407,42 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     let so_path = cache_dir.join(format!("veryl_aot_{hash}.so"));
 
     if !so_path.exists() {
-        // Write source next to .so so cache hits never need it; placing
-        // it in the same dir makes manual debugging (`cc -E`) trivial.
+        // Identical sources hash to the same `so_path`, so a `cc -o so_path`
+        // from one thread can be dlopened half-written by another. Compile to a
+        // unique temp, then `rename` (atomic within the dir) to publish.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TMP_CTR: AtomicU64 = AtomicU64::new(0);
+        let uniq = format!(
+            "{}.{}",
+            std::process::id(),
+            TMP_CTR.fetch_add(1, Ordering::Relaxed)
+        );
         let c_path = cache_dir.join(format!("veryl_aot_{hash}.c"));
-        std::fs::write(&c_path, src).map_err(|e| format!("write {}: {}", c_path.display(), e))?;
+        let tmp_c = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.c"));
+        let tmp_so = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.so"));
+        std::fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
 
         let mut cmd = Command::new(&cc_name);
-        cmd.args(&flags).arg("-o").arg(&so_path).arg(&c_path);
+        cmd.args(&flags).arg("-o").arg(&tmp_so).arg(&tmp_c);
 
         let out = cmd
             .output()
             .map_err(|e| format!("spawn cc: {e} (set VERYL_AOT_CC to override)"))?;
         if !out.status.success() {
-            // Leak the .c on failure so the user can inspect it; remove
-            // any stale .so to keep the cache consistent.
-            let _ = std::fs::remove_file(&so_path);
+            let _ = std::fs::remove_file(&tmp_so);
+            // Leave the temp .c for inspection.
             return Err(format!(
                 "cc {} failed: {}\n{}",
-                c_path.display(),
+                tmp_c.display(),
                 out.status,
                 String::from_utf8_lossy(&out.stderr),
             ));
         }
+        // A racing peer publishes an equally valid file (same source), so an
+        // overwrite either way is fine.
+        let _ = std::fs::rename(&tmp_c, &c_path);
+        std::fs::rename(&tmp_so, &so_path)
+            .map_err(|e| format!("rename {}: {}", tmp_so.display(), e))?;
     }
 
     // SAFETY: the .so was just compiled by us (or previously cached) and
