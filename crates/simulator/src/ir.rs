@@ -97,6 +97,9 @@ pub struct Ir {
     /// Snapshotted from `Config::aot_c_validate`: when set, `settle_comb` /
     /// `step` dual-run the AOT-C and Cranelift paths and panic on divergence.
     pub aot_c_validate: bool,
+    /// Snapshotted from `Config::aot_c_validate_stride`: dual-run only every
+    /// Nth settle (0/1 = every cycle).
+    pub aot_c_validate_stride: u64,
     /// Per-event whole-event dispatch handles.  When the current
     /// event's `try_dispatch` succeeds, `step()` invokes it instead of
     /// the per-stmt Cranelift dispatch.  Built in `ProtoModule::conv`
@@ -132,6 +135,7 @@ impl Ir {
             nontrivial_comb_scc: module.nontrivial_comb_scc,
             whole_comb: module.whole_comb,
             aot_c_validate: config.aot_c_validate,
+            aot_c_validate_stride: config.aot_c_validate_stride,
             whole_events: module.whole_events,
         };
         // Bake the WriteLogBuffer's heap-stable address into every
@@ -598,6 +602,11 @@ pub struct Config {
     /// Dual-run `cc` and Cranelift every cycle, panicking on the first
     /// divergence (correctness check).  Implies a synchronous compile.
     pub aot_c_validate: bool,
+    /// Stride for `aot_c_validate`: dual-run + diff only every Nth comb/event
+    /// settle (off-stride cycles run Cranelift only — the ground truth that
+    /// drives the sim).  0 or 1 = every cycle (full coverage); larger trades
+    /// coverage for speed on long tests.
+    pub aot_c_validate_stride: u64,
     /// Minimum module statement count (comb + event) before `cc` is attempted;
     /// below it the module stays on per-chunk Cranelift.  Default 0 (no floor)
     /// now that the compile pool caps concurrency; set `VERYL_AOT_C_MIN_STMTS=N`
