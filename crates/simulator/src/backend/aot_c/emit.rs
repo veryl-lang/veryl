@@ -1980,9 +1980,12 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
         ev_diag("dyn FF: dynsel");
         return None;
     }
-    if a.dst_width == 0 || a.dst_width > 64 {
-        ev_diag(&format!("dyn FF: width={}", a.dst_width));
+    if a.dst_width == 0 {
+        ev_diag("dyn FF: width=0");
         return None;
+    }
+    if a.dst_width > 64 {
+        return emit_event_ff_assign_dynamic_wide(a);
     }
     if a.dst_num_elements == 0 {
         return None;
@@ -2043,6 +2046,68 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
         wbase = dst_base_raw,
         stride = a.dst_stride,
         cbase = cur_base,
+        push = push,
+    ))
+}
+
+/// Wide (>64-bit) analogue of `emit_event_ff_assign_dynamic`, routing through
+/// the wide write-log pool.  Full-element 2-state only; select / dynamic-select
+/// / rhs_select bail (rare; the dcache line-write path has none).
+fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<String> {
+    if a.select.is_some() || a.rhs_select.is_some() {
+        ev_diag(&format!(
+            "dyn FF wide: select={:?} rhssel={:?} width={}",
+            a.select, a.rhs_select, a.dst_width
+        ));
+        return None;
+    }
+    if a.dst_num_elements == 0 {
+        return None;
+    }
+    let dst_base_raw = match a.dst_base {
+        VarOffset::Ff(o) => o,
+        VarOffset::Comb(_) => return None,
+    };
+    let cur_base = a.dst_ff_current_base_offset;
+    if cur_base < 0 || dst_base_raw < 0 {
+        return None;
+    }
+    let nb = native_bytes(a.dst_width);
+    let nw = nb / 8;
+    let max_idx = a.dst_num_elements.saturating_sub(1);
+    let idx = emit_expr(&a.dst_index_expr)?;
+    let mut pre = String::new();
+    // Mask into a fresh scratch — the source may alias a flat read, and the FF
+    // slot must not be clobbered before commit.
+    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+    let d = next_wide_tmp();
+    pre.push_str(&format!(
+        "uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
+         vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
+        src = r.addr,
+        p = wpack(nb, a.dst_width),
+    ));
+    // Always store into `dst_base`, matching the dynamic interpret path; for a
+    // packed FF this is idempotent with the log push to the same slot.
+    let store = format!(
+        "vw_copy((uint8_t*)(ff_values + {wbase:#x} + (intptr_t){stride} * (intptr_t)_idx), \
+                 (const uint8_t*)_w{d}, {nb}u); ",
+        wbase = dst_base_raw,
+        stride = a.dst_stride,
+    );
+    let push = emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), "_woff", nb);
+    Some(format!(
+        "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
+            uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+            {pre}{store}\
+            unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
+            {push} }}",
+        idx = idx,
+        max = max_idx,
+        pre = pre,
+        store = store,
+        cbase = cur_base,
+        stride = a.dst_stride,
         push = push,
     ))
 }

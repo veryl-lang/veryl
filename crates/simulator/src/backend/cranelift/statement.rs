@@ -34,8 +34,19 @@ impl ProtoAssignDynamicStatement {
             return false;
         }
         // Wide (>128-bit) comb-base dynamic-indexed store: see
-        // `build_binary_dynamic_wide`. FF-base / 65..=128 bail (AOT-C parity).
+        // `build_binary_dynamic_wide`.
         if self.dst_width > 128 && !self.dst_base.is_ff() && self.rhs_select.is_none() {
+            return true;
+        }
+        // Wide (>64-bit) FF-base full-element dynamic store:
+        // `build_binary_dynamic_wide_ff`.  A 4-state dst bails there (→ module
+        // falls back), so the gate here is optimistic.
+        if self.dst_width > 64
+            && self.dst_base.is_ff()
+            && self.select.is_none()
+            && self.rhs_select.is_none()
+            && self.dynamic_select.is_none()
+        {
             return true;
         }
         self.dst_width <= 64
@@ -50,6 +61,16 @@ impl ProtoAssignDynamicStatement {
         // wide (>128-bit) comb-base case to its own emitter.
         if self.dst_width > 128 && !self.dst_base.is_ff() {
             return self.build_binary_dynamic_wide(context, builder);
+        }
+        // Wide (>64-bit) FF-base full-element dynamic write: see
+        // `build_binary_dynamic_wide_ff`.
+        if self.dst_width > 64
+            && self.dst_base.is_ff()
+            && self.select.is_none()
+            && self.rhs_select.is_none()
+            && self.dynamic_select.is_none()
+        {
+            return self.build_binary_dynamic_wide_ff(context, builder);
         }
         // Plain store re-masks the payload to dst_width (istoreN truncation
         // or the non-native band below), so the producer-side root mask is
@@ -406,6 +427,91 @@ impl ProtoAssignDynamicStatement {
             builder.ins().store(flags, val, addr, off);
         }
         emit_wide_apply_mask(context, builder, addr, nb, self.dst_width);
+
+        Some(())
+    }
+
+    /// Wide (>64-bit) FF-base full-element dynamic-indexed write (dcache
+    /// line-wide RAM RMW) — the FF analogue of `build_binary_dynamic_wide`.
+    /// Pushes a wide write-log entry at the element's current slot to commit,
+    /// and (matching the dynamic interpret path) also stores into `dst_base` so
+    /// in-event readers forward.  Full-element 2-state only; select /
+    /// dynamic_select / rhs_select / 4-state bail.
+    fn build_binary_dynamic_wide_ff(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<()> {
+        if context.use_4state
+            || self.select.is_some()
+            || self.rhs_select.is_some()
+            || self.dynamic_select.is_some()
+        {
+            return None;
+        }
+        if !self.dst_base.is_ff() || self.dst_num_elements == 0 {
+            return None;
+        }
+        let nb = calc_native_bytes(self.dst_width);
+        let n_words = nb / 8;
+        let flags = MemFlagsData::trusted();
+
+        // Materialize the RHS into an nb-sized slot, zero-extending a narrower
+        // wide source.
+        let (payload, _mask_xz) = self.expr.build_binary(context, builder)?;
+        let src_ptr = if returns_wide_pointer(&self.expr) {
+            let src_nb = calc_native_bytes(self.expr.width());
+            if src_nb == nb {
+                payload
+            } else {
+                let slot = alloc_wide_zero(builder, nb);
+                let copy_words = src_nb.min(nb) / 8;
+                for i in 0..copy_words {
+                    let off = (i * 8) as i32;
+                    let w = builder.ins().load(I64, flags, payload, off);
+                    builder.ins().store(flags, w, slot, off);
+                }
+                slot
+            }
+        } else {
+            let slot = alloc_wide_zero(builder, nb);
+            builder.ins().store(flags, payload, slot, 0);
+            slot
+        };
+        // Mask the source to dst_width (the source may alias a flat read).
+        emit_wide_apply_mask(context, builder, src_ptr, nb, self.dst_width);
+
+        let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
+        let max_idx = builder
+            .ins()
+            .iconst(I64, (self.dst_num_elements as i64).saturating_sub(1));
+        let in_bounds = builder
+            .ins()
+            .icmp(IntCC::UnsignedLessThan, idx_payload, max_idx);
+        let clamped = builder.ins().select(in_bounds, idx_payload, max_idx);
+        let stride_val = builder.ins().iconst(I64, self.dst_stride as i64);
+        let byte_offset = builder.ins().imul(clamped, stride_val);
+
+        // Always store into `dst_base`, matching the dynamic interpret path;
+        // for a packed FF this is idempotent with the log push to the same slot.
+        {
+            let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
+            let addr = builder.ins().iadd(context.ff_values, base);
+            let addr = builder.ins().iadd(addr, byte_offset);
+            for i in 0..n_words {
+                let off = (i * 8) as i32;
+                let val = builder.ins().load(I64, flags, src_ptr, off);
+                builder.ins().store(flags, val, addr, off);
+            }
+        }
+
+        // Wide log push at the element's current slot.
+        let cur_base = builder
+            .ins()
+            .iconst(I64, self.dst_ff_current_base_offset as i64);
+        let log_base = builder.ins().iadd(cur_base, byte_offset);
+        let log_base_i32 = builder.ins().ireduce(I32, log_base);
+        emit_wide_log_chunks_dyn(context, builder, src_ptr, log_base_i32, nb);
 
         Some(())
     }
@@ -1681,6 +1787,34 @@ fn emit_wide_log_chunks(
         let entry_offset_val = builder
             .ins()
             .iconst(I32, (base_offset as i64) + written as i64);
+        let chunk_ptr = if written == 0 {
+            src_ptr
+        } else {
+            builder.ins().iadd_imm(src_ptr, written as i64)
+        };
+        emit_inline_write_log_push_wide(context, builder, entry_offset_val, chunk_ptr, chunk);
+        written += chunk;
+    }
+}
+
+/// Like `emit_wide_log_chunks` but the entry base offset is a runtime I32
+/// `Value` (a dynamic-indexed FF element's current-slot offset), not a const.
+fn emit_wide_log_chunks_dyn(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    src_ptr: cranelift::prelude::Value,
+    base_offset_val: cranelift::prelude::Value,
+    nb: usize,
+) {
+    use crate::ir::write_log::WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES;
+    let mut written: usize = 0;
+    while written < nb {
+        let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
+        let entry_offset_val = if written == 0 {
+            base_offset_val
+        } else {
+            builder.ins().iadd_imm(base_offset_val, written as i64)
+        };
         let chunk_ptr = if written == 0 {
             src_ptr
         } else {

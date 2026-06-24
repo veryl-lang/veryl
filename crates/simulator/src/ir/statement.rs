@@ -1601,7 +1601,11 @@ impl ProtoStatement {
                     // in `dst_ff_current_base_offset` is correct in both
                     // packed and unpacked layouts.
                     let _ = nb;
-                    let ff_log_base_current_offset = if x.dst_base.is_ff() && x.dst_width <= 64 {
+                    // No width cap: `eval_step` logs via `emit_ff_log`, which
+                    // splits wide elements into wide entries.  (Was gated
+                    // `<= 64` when the push was hand-rolled narrow-only and
+                    // silently dropped wider writes.)
+                    let ff_log_base_current_offset = if x.dst_base.is_ff() {
                         Some(x.dst_ff_current_base_offset as u32)
                     } else {
                         None
@@ -2096,19 +2100,13 @@ impl AssignDynamicStatement {
             let runtime = base as isize + self.dst_stride * idx as isize;
             runtime as u32
         });
-        let nb_u16 = self.dst_native_bytes as u16;
-        let nb_u32 = self.dst_native_bytes as u32;
         let use_4state = self.dst_use_4state;
+        // `emit_ff_log` covers wide elements; the prior hand-rolled push tagged
+        // the narrow entry `width_class = nb`, which `ff_commit_from_log` drops
+        // for nb ∉ {1,2,4,8} — losing every wide dynamic-index FF write.
         let push_log = |current: &Value| {
             if let Some(offset) = log_offset {
-                let payload = current.to_u64().unwrap_or(0);
-                unsafe {
-                    event_write_log_push_static(offset, payload, nb_u16);
-                    if use_4state {
-                        let mask = current.mask_xz_u128() as u64;
-                        event_write_log_push_static(offset + nb_u32, mask, nb_u16);
-                    }
-                }
+                emit_ff_log(current, offset, self.dst_native_bytes, use_4state);
             }
         };
         if let Some(dyn_sel) = &self.dynamic_select {
