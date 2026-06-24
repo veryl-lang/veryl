@@ -15613,3 +15613,45 @@ fn no_stack_overflow_on_importing_item_named_as_its_package() {
     "#;
     assert!(analyze(code).is_empty());
 }
+
+#[test]
+fn cast_width_unevaluable_const_is_not_invalid_operand() {
+    // A cast width that is a const unevaluable during analysis (here, reached
+    // through an alias to a generic package instance) is not an invalid operand.
+    let code = r#"
+    package real_bus::<W: u32> {
+        struct config_t {
+            data_width: u32,
+        }
+        const BUS_CONFIG: config_t = config_t'{ data_width: W };
+    }
+    package real_dma::<W: u32> {
+        alias package BUS_PKG = real_bus::<W>;
+    }
+    package top_pkg {
+        alias package DMA_PKG = real_dma::<64>;
+    }
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        const DATA_WIDTH      : u32 = top_pkg::DMA_PKG::BUS_PKG::BUS_CONFIG.data_width;
+        const DATA_POS_WIDTH  : u32 = $clog2(DATA_WIDTH / 8);
+        const ENTRY_BYTE_WIDTH: u32 = 4;
+        function f () -> logic<DATA_POS_WIDTH> {
+            var start_pos: logic<DATA_POS_WIDTH>;
+            var end_pos  : logic<DATA_POS_WIDTH>;
+            start_pos = 0;
+            end_pos   = 0;
+            for i in 0..4 {
+                end_pos = start_pos + (ENTRY_BYTE_WIDTH * (2 ** i) - 1) as DATA_POS_WIDTH;
+            }
+            return {start_pos, end_pos};
+        }
+        always_comb {
+            o = f();
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
