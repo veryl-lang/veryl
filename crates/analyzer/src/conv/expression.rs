@@ -342,10 +342,18 @@ impl Conv<&CastingType> for ir::Factor {
             let symbol_path: GenericSymbolPath = identifier.into();
 
             let r#type = eval_type(context, &symbol_path, TypePosition::Cast);
-            // `as W` with a value generic parameter (`W: u32`) resolves to an
-            // UNKNOWN type (width 1), masking the cast to 1 bit. Fall back to the
-            // factor path so the width is W's value, like `as 32`.
-            if matches!(&r#type, Ok(t) if !t.is_unknown()) {
+            // An unknown result is ambiguous: a value generic parameter (`as W`)
+            // wants the factor path so the width is W's value, but a proto/generic
+            // typedef whose concrete type only arrives at instantiation is still a
+            // type cast — the factor path would turn its name into a non-evaluable
+            // value.
+            let use_type_path = match &r#type {
+                Ok(t) if !t.is_unknown() => true,
+                Ok(_) => symbol_table::resolve(&context.resolve_path(symbol_path.clone()))
+                    .is_ok_and(|s| s.found.is_variable_type()),
+                Err(_) => false,
+            };
+            if use_type_path {
                 r#type?
             } else {
                 let var_path: VarPathSelect = Conv::conv(context, identifier)?;
