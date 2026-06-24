@@ -1300,6 +1300,45 @@ fn emit_wide_select_read_at(base_ptr: &str, lo: usize, nbits: usize) -> String {
     e
 }
 
+/// As `emit_wide_select_read_at`, but for a 65..128-bit window → a
+/// `__uint128_t`.  Funnel-shifts the little-endian u64 words at `base + lo/64`:
+/// at most two words when `lo` is word-aligned, otherwise up to three (a third
+/// word is read only when the window genuinely straddles into it, so the deref
+/// stays in bounds).  `nbits` must be in 65..=128.
+fn emit_wide_select_read_wide_at(base_ptr: &str, lo: usize, nbits: usize) -> String {
+    let word = lo / 64;
+    let bit = lo % 64;
+    let base = format!("((const veryl_u64_ua*)({base_ptr}))");
+    let mut e = if bit == 0 {
+        format!(
+            "(((__uint128_t)({base}[{w0}])) | (((__uint128_t)({base}[{w1}])) << 64))",
+            w0 = word,
+            w1 = word + 1,
+        )
+    } else {
+        let mut s = format!(
+            "((((__uint128_t)({base}[{w0}])) >> {bit}) \
+              | (((__uint128_t)({base}[{w1}])) << {sh1}))",
+            w0 = word,
+            w1 = word + 1,
+            sh1 = 64 - bit,
+        );
+        // The window reaches a third word only when bit + nbits > 128.
+        if bit + nbits > 128 {
+            s = format!(
+                "({s} | (((__uint128_t)({base}[{w2}])) << {sh2}))",
+                w2 = word + 2,
+                sh2 = 128 - bit,
+            );
+        }
+        s
+    };
+    if nbits < 128 {
+        e = mask_u128(&e, nbits);
+    }
+    e
+}
+
 /// Mask a `__uint128_t` C expression to `width` (1..127) bits with a
 /// hi/lo-split constant (matching the wide-store path's masking).
 fn mask_u128(s: &str, width: usize) -> String {
@@ -2750,6 +2789,36 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             // Bit-select store is read-modify-write.
             if let Some((hi, lo)) = a.select {
                 let nbits = hi.checked_sub(lo)?.checked_add(1)?;
+                // Wide (65..128-bit) destination: the single-u64 RMW path
+                // below can't reach a field at lo ≥ 64.
+                if a.dst_width > 64 && a.dst_width <= 128 {
+                    if nbits == 0 || lo + nbits > 128 {
+                        return None;
+                    }
+                    let fmask: u128 = if nbits >= 128 {
+                        !0u128
+                    } else {
+                        (1u128 << nbits) - 1
+                    };
+                    let pos: u128 = fmask << lo;
+                    return Some(format!(
+                        "{{ __uint128_t _v = ((__uint128_t)({rhs})) \
+                              & (((__uint128_t)0x{fmhi:x}ULL << 64) | (__uint128_t)0x{fmlo:x}ULL); \
+                            __uint128_t _o = *(({ct}*)({b} + {o:#x})); \
+                            *(({ct}*)({b} + {o:#x})) = ({ct})((_o \
+                              & ~(((__uint128_t)0x{phi:x}ULL << 64) | (__uint128_t)0x{plo:x}ULL)) \
+                              | (_v << {lo})); }}",
+                        rhs = rhs_str,
+                        ct = cty,
+                        b = buf,
+                        o = store_off,
+                        fmhi = (fmask >> 64) as u64,
+                        fmlo = fmask as u64,
+                        phi = (pos >> 64) as u64,
+                        plo = pos as u64,
+                        lo = lo,
+                    ));
+                }
                 // The masked-store math below works in a single u64, so the
                 // selected field must fit there.  Wide (>64-bit) selects — e.g.
                 // the high chunks of a reversed wide bus, where `lo` itself is
@@ -3230,7 +3299,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             if *var_full_width > 128 {
                 if let Some((hi, lo)) = select {
                     let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
-                    if nbits <= 64 {
+                    if nbits <= 128 {
                         let (buf, off) = match var_offset {
                             VarOffset::Ff(o) => ("ff_values", *o),
                             VarOffset::Comb(o) => ("comb_values", *o),
@@ -3238,7 +3307,15 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         if off < 0 {
                             return None;
                         }
-                        return Some(emit_wide_var_select_read(buf, off, *lo, nbits));
+                        if nbits <= 64 {
+                            return Some(emit_wide_var_select_read(buf, off, *lo, nbits));
+                        }
+                        // 65..128-bit window → __uint128_t.
+                        return Some(emit_wide_select_read_wide_at(
+                            &format!("{buf} + {off:#x}"),
+                            *lo,
+                            nbits,
+                        ));
                     }
                 }
                 return None;
@@ -3256,8 +3333,18 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             let load = emit_var_load(var_offset, load_width)?;
             if let Some((hi, lo)) = select {
                 let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
+                if nbits > 128 {
+                    return None; // > 128-bit select → wide pointer, not a scalar
+                }
                 if nbits > 64 {
-                    return None; // wider-than-64 select → wide result, not a scalar
+                    // 65..128-bit window from a ≤128-bit var (loaded as
+                    // __uint128_t since load_width = hi+1 ≥ 65): shift down and
+                    // mask to nbits.
+                    let shifted = format!("(((__uint128_t)({load})) >> {lo})");
+                    if nbits < 128 {
+                        return Some(mask_u128(&shifted, nbits));
+                    }
+                    return Some(shifted);
                 }
                 if nbits == 64 {
                     // Exactly 64 bits: no mask (`1u64 << 64` overflows); the
@@ -3340,6 +3427,70 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         Some(format!("(({}) & 0x{:x}ULL)", inner, mask))
                     } else {
                         Some(inner)
+                    }
+                }
+                // Unary reductions over a ≤128-bit operand → a 1-bit result;
+                // a >128-bit operand is handled by emit_wide_reduce_unary above.
+                // OR = any-bit-set, AND = all-bits-set, XOR = parity; mirrors
+                // expression.rs build_binary_wide_unary's reduction arm.
+                Op::BitOr | Op::BitNor | Op::BitAnd | Op::BitNand | Op::BitXor | Op::BitXnor => {
+                    if xw == 0 {
+                        return None;
+                    }
+                    if xw <= 64 {
+                        let mask = if xw >= 64 { u64::MAX } else { (1u64 << xw) - 1 };
+                        let m = format!("(((uint64_t)({xs})) & 0x{mask:x}ULL)");
+                        Some(match op {
+                            Op::BitOr => format!("((uint64_t)(({m}) != 0))"),
+                            Op::BitNor => format!("((uint64_t)(({m}) == 0))"),
+                            Op::BitAnd => format!("((uint64_t)(({m}) == 0x{mask:x}ULL))"),
+                            Op::BitNand => format!("((uint64_t)(({m}) != 0x{mask:x}ULL))"),
+                            Op::BitXor => format!("((uint64_t)__builtin_parityll({m}))"),
+                            Op::BitXnor => {
+                                format!("((uint64_t)(__builtin_parityll({m}) ^ 1))")
+                            }
+                            _ => unreachable!(),
+                        })
+                    } else {
+                        // 65..128-bit operand in __uint128_t.
+                        let masked = if xw < 128 {
+                            mask_u128(&format!("((__uint128_t)({xs}))"), xw)
+                        } else {
+                            format!("((__uint128_t)({xs}))")
+                        };
+                        let allones = if xw < 128 {
+                            let m: u128 = (1u128 << xw) - 1;
+                            format!(
+                                "((((__uint128_t)0x{hi:x}ULL) << 64) | (__uint128_t)0x{lo:x}ULL)",
+                                hi = (m >> 64) as u64,
+                                lo = m as u64,
+                            )
+                        } else {
+                            "(~(__uint128_t)0)".to_string()
+                        };
+                        let parity = "(__builtin_parityll((uint64_t)_m) \
+                                      ^ __builtin_parityll((uint64_t)(_m >> 64)))";
+                        Some(match op {
+                            Op::BitOr => {
+                                format!("({{ __uint128_t _m = {masked}; (uint64_t)(_m != 0); }})")
+                            }
+                            Op::BitNor => {
+                                format!("({{ __uint128_t _m = {masked}; (uint64_t)(_m == 0); }})")
+                            }
+                            Op::BitAnd => format!(
+                                "({{ __uint128_t _m = {masked}; (uint64_t)(_m == {allones}); }})"
+                            ),
+                            Op::BitNand => format!(
+                                "({{ __uint128_t _m = {masked}; (uint64_t)(_m != {allones}); }})"
+                            ),
+                            Op::BitXor => {
+                                format!("({{ __uint128_t _m = {masked}; (uint64_t){parity}; }})")
+                            }
+                            Op::BitXnor => format!(
+                                "({{ __uint128_t _m = {masked}; (uint64_t)({parity} ^ 1); }})"
+                            ),
+                            _ => unreachable!(),
+                        })
                     }
                 }
                 _ => None, // unsupported
@@ -3655,8 +3806,34 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     // zero and `>>` produces 0, not the sign-extended value
                     // (mirrors expression.rs shift_mask_xz).
                     let x_w = x.width();
-                    if x_w == 0 || x_w > 64 {
-                        return None; // wide / zero-width signed shift
+                    if x_w == 0 {
+                        return None; // zero-width signed shift
+                    }
+                    if x_w > 64 {
+                        // 65..128-bit operand in __uint128_t.  Count >= width
+                        // yields all-sign (signed) / 0 (unsigned); C `>>` is UB
+                        // past 127, so clamp.
+                        if !expr_context.signed {
+                            // `>>>` on an unsigned operand is a logical shift.
+                            return Some(format!(
+                                "(((uint64_t)({ys})) >= {x_w} ? (__uint128_t)0 : (((__uint128_t)({xs})) >> ((uint64_t)({ys}))))"
+                            ));
+                        }
+                        // Signed: sign-extend from x_w to 128 (shift the sign bit
+                        // to bit 127, arithmetic-shift back), then arithmetic-
+                        // shift right, clamping the count to x_w-1.
+                        let lshift = 128 - x_w;
+                        let sx = if lshift == 0 {
+                            format!("((__int128_t)((__uint128_t)({xs})))")
+                        } else {
+                            format!(
+                                "(((__int128_t)(((__uint128_t)({xs})) << {lshift})) >> {lshift})"
+                            )
+                        };
+                        return Some(format!(
+                            "((__uint128_t)(({sx}) >> (((uint64_t)({ys})) >= {x_w} ? {clamp} : ((uint64_t)({ys})))))",
+                            clamp = x_w - 1,
+                        ));
                     }
                     if !expr_context.signed {
                         // `>>>` on an *unsigned* operand is a logical
@@ -3877,10 +4054,29 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             }
             for (sub, repeat, _elem_width) in elements {
                 let sub_width = sub.width();
-                if sub_width == 0 || sub_width > 64 {
+                if sub_width == 0 || sub_width > 128 {
                     return None;
                 }
                 let sub_str = emit_expr(sub)?;
+                if sub_width > 64 {
+                    // Wide (65..128-bit) element: total width > 64 ⇒ `acc` is
+                    // __uint128_t.  A full-128-bit shift is UB, so it clears
+                    // `acc` (every prior bit moves past bit 127).
+                    let masked = if sub_width < 128 {
+                        mask_u128(&format!("((__uint128_t)({sub_str}))"), sub_width)
+                    } else {
+                        format!("((__uint128_t)({sub_str}))")
+                    };
+                    for _ in 0..*repeat {
+                        let shifted = if sub_width >= 128 {
+                            "((__uint128_t)0)".to_string()
+                        } else {
+                            format!("(({acc}) << {sub_width})")
+                        };
+                        acc = format!("({shifted} | ({masked}))");
+                    }
+                    continue;
+                }
                 let mask = if sub_width >= 64 {
                     u64::MAX
                 } else {
@@ -4001,6 +4197,35 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     }
                 }
                 return None;
+            }
+            // No-select read of a 65..128-bit array element as `__uint128_t`.
+            // The >16-byte (>128-bit) element case is handled above; a
+            // bit-select on a 65..128-bit element falls through to the narrow
+            // path / Cranelift.
+            if select.is_none() && *width > 64 && *width <= 128 {
+                if *num_elements == 0 {
+                    return None;
+                }
+                let (buf, base_off) = match base_offset {
+                    VarOffset::Ff(o) => ("ff_values", *o),
+                    VarOffset::Comb(o) => ("comb_values", *o),
+                };
+                let idx_str = emit_expr(index_expr)?;
+                let max_idx = num_elements.saturating_sub(1);
+                let load = format!(
+                    "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
+                        uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+                        (__uint128_t)*((const veryl_u128_ua*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); }})",
+                    idx = idx_str,
+                    max = max_idx,
+                    b = buf,
+                    off = base_off,
+                    stride = stride,
+                );
+                if needs_clean && *width < 128 {
+                    return Some(mask_u128(&load, *width));
+                }
+                return Some(load);
             }
             if *num_elements == 0 || *width == 0 || *width > 64 {
                 return None;
@@ -4147,7 +4372,35 @@ fn emit_value(value: &Value, width: usize) -> Option<String> {
                 Some(format!("0x{:x}ULL", masked as u64))
             }
         }
-        Value::BigUint(_) => None, // BigUint constant > 64 bits
+        Value::BigUint(v) => {
+            // 65..128-bit constant (num-bigint payload, little-endian u64
+            // words).  2-state: the X/Z mask is ignored, mirroring
+            // emit_wide_const and the rest of the AOT-C path.  width > 128 is
+            // rejected by the guard above.
+            if width == 0 {
+                return Some("0ULL".to_string());
+            }
+            let digits = v.payload.to_u64_digits();
+            let lo = digits.first().copied().unwrap_or(0);
+            let hi = digits.get(1).copied().unwrap_or(0);
+            if width <= 64 {
+                let masked = if width >= 64 {
+                    lo
+                } else {
+                    lo & ((1u64 << width) - 1)
+                };
+                return Some(format!("0x{masked:x}ULL"));
+            }
+            let mut val: u128 = ((hi as u128) << 64) | (lo as u128);
+            if width < 128 {
+                val &= (1u128 << width) - 1;
+            }
+            Some(format!(
+                "(((__uint128_t)0x{hi:x}ULL << 64) | (__uint128_t)0x{lo:x}ULL)",
+                hi = (val >> 64) as u64,
+                lo = val as u64,
+            ))
+        }
     }
 }
 
@@ -4815,6 +5068,180 @@ mod tests {
             expr_context: ctx(32, false),
         };
         assert!(emit_expr(&e).is_none());
+    }
+
+    // ---- 65..128-bit `__uint128_t` scalar coverage ----
+    // One __uint128_t per value; the >128-bit wide-pointer path is separate.
+
+    #[test]
+    fn emit_expr_unary_reduction_65_to_128() {
+        let red = |op| ProtoExpression::Unary {
+            op,
+            x: Box::new(var_expr(VarOffset::Comb(0), 96)),
+            width: 1,
+            expr_context: ctx(1, false),
+        };
+        let s = emit_expr(&red(Op::BitOr)).unwrap();
+        assert!(s.contains("__uint128_t _m"));
+        assert!(s.contains("_m != 0"));
+        // 96-bit all-ones split constant: hi word is 32 bits (0xffffffff).
+        let s = emit_expr(&red(Op::BitAnd)).unwrap();
+        assert!(s.contains("_m =="));
+        assert!(s.contains("0xffffffffULL"));
+        let s = emit_expr(&red(Op::BitXor)).unwrap();
+        assert!(s.contains("__builtin_parityll"));
+        assert!(s.contains("_m >> 64"));
+    }
+
+    #[test]
+    fn emit_value_biguint_65_to_128() {
+        use num_bigint::BigUint;
+        use veryl_analyzer::value::ValueBigUint;
+        let val: u128 = 0x1234_5678_9abc_def0_fedc_ba98_7654_3210;
+        let v = Value::BigUint(ValueBigUint::new_biguint(BigUint::from(val), 128, false));
+        let s = emit_value(&v, 128).unwrap();
+        assert!(s.contains("__uint128_t"));
+        assert!(s.contains("0x123456789abcdef0ULL"));
+        assert!(s.contains("0xfedcba9876543210ULL"));
+        assert!(s.contains("<< 64"));
+        // 72-bit mask: hi word keeps only its low 8 bits (0xf0).
+        let s = emit_value(&v, 72).unwrap();
+        assert!(s.contains("0xf0ULL << 64"));
+        assert!(s.contains("0xfedcba9876543210ULL"));
+    }
+
+    #[test]
+    fn emit_expr_arith_shift_right_65_to_128() {
+        let ashr = |signed| ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0), 96)),
+            op: Op::ArithShiftR,
+            y: Box::new(const_expr(4, 32)),
+            width: 96,
+            expr_context: ctx(96, signed),
+        };
+        // sign-extend 96→128 shifts by 128-96=32; count clamps to width-1=95.
+        let s = emit_expr(&ashr(true)).unwrap();
+        assert!(s.contains("__int128_t"));
+        assert!(s.contains("<< 32"));
+        assert!(s.contains(">> 32"));
+        assert!(s.contains(">= 96 ? 95"));
+        let s = emit_expr(&ashr(false)).unwrap();
+        assert!(s.contains(">= 96 ? (__uint128_t)0"));
+    }
+
+    #[test]
+    fn emit_expr_dynamic_variable_128bit_element() {
+        let elem = |width| ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(0x300),
+            stride: 16,
+            element_native_bytes: 16,
+            index_expr: Box::new(const_expr(5, 8)),
+            num_elements: 32,
+            select: None,
+            dynamic_select: None,
+            width,
+            expr_context: ctx(width, false),
+        };
+        let s = emit_expr(&elem(128)).unwrap();
+        assert!(s.contains("veryl_u128_ua"));
+        assert!(s.contains("_idx_raw < 31 ?"));
+        assert!(s.contains("comb_values + 0x300"));
+        assert!(s.contains("(intptr_t)16 * (intptr_t)_idx"));
+        // width < 128 masks to the declared width.
+        let s = emit_expr(&elem(100)).unwrap();
+        assert!(s.contains("& (((__uint128_t)"));
+    }
+
+    #[test]
+    fn emit_expr_variable_select_65_to_128_from_narrow_var() {
+        let e = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x10),
+            select: Some((103, 8)),
+            dynamic_select: None,
+            width: 96,
+            var_full_width: 128,
+            expr_context: ctx(96, false),
+        };
+        let s = emit_expr(&e).unwrap();
+        assert!(s.contains("veryl_u128_ua"));
+        assert!(s.contains(">> 8"));
+        assert!(s.contains("& (((__uint128_t)"));
+    }
+
+    #[test]
+    fn emit_expr_variable_select_65_to_128_from_wide_var() {
+        // >128-bit var → funnel-shift `emit_wide_select_read_wide_at`.
+        let e = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x20),
+            select: Some((200, 100)),
+            dynamic_select: None,
+            width: 101,
+            var_full_width: 256,
+            expr_context: ctx(101, false),
+        };
+        let s = emit_expr(&e).unwrap();
+        assert!(s.contains("veryl_u64_ua"));
+        // lo=100 → bit 36, window straddles into word 3.
+        assert!(s.contains(">> 36"));
+        assert!(s.contains("[3]"));
+    }
+
+    #[test]
+    fn emit_wide_select_read_wide_at_funnel_cases() {
+        // word-aligned (lo=128 → word 2): two words, no third.
+        let s = emit_wide_select_read_wide_at("comb_values + 0x10", 128, 100);
+        assert!(s.contains("veryl_u64_ua"));
+        assert!(s.contains("[2]"));
+        assert!(s.contains("[3]"));
+        assert!(s.contains("<< 64"));
+        assert!(!s.contains("[4]"));
+        // unaligned, 2 words (bit+nbits = 110 ≤ 128).
+        let s = emit_wide_select_read_wide_at("comb_values + 0x0", 10, 100);
+        assert!(s.contains(">> 10"));
+        assert!(s.contains("<< 54")); // 64 - 10
+        assert!(!s.contains("[2]"));
+        // unaligned, third word (bit+nbits = 140 > 128).
+        let s = emit_wide_select_read_wide_at("comb_values + 0x0", 40, 100);
+        assert!(s.contains(">> 40"));
+        assert!(s.contains("<< 24")); // 64 - 40
+        assert!(s.contains("<< 88")); // 128 - 40
+        assert!(s.contains("[2]"));
+    }
+
+    #[test]
+    fn emit_expr_concatenation_wide_element_65_to_128() {
+        // 96-bit element exercises the wide (sub_width > 64) arm.
+        let a = const_expr(0xa, 8);
+        let b = var_expr(VarOffset::Comb(0), 96);
+        let e = ProtoExpression::Concatenation {
+            elements: vec![(Box::new(a), 1, 8), (Box::new(b), 1, 96)],
+            width: 104,
+            expr_context: ctx(104, false),
+        };
+        let s = emit_expr(&e).unwrap();
+        assert!(s.contains("__uint128_t"));
+        assert!(s.contains("<< 96"));
+        assert!(s.contains("comb_values + 0x0"));
+    }
+
+    #[test]
+    fn emit_stmt_wide_bit_select_store_65_to_128() {
+        // lo ≥ 64 is unreachable by the single-u64 RMW path → __uint128_t branch.
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Comb(0x40),
+            dst_width: 128,
+            select: Some((71, 64)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0xab, 8),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
+        assert!(s.contains("veryl_u128_ua"));
+        assert!(s.contains("__uint128_t _o"));
+        assert!(s.contains("_v << 64"));
+        assert!(s.contains("comb_values + 0x40"));
     }
 
     #[test]
