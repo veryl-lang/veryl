@@ -426,9 +426,10 @@ impl Op {
                     }
 
                     dst.r#type = y_value.clone();
-                } else if !context.in_generic {
-                    // RHS expressions may not be evaluted in generic components.
-                    // No error is reported for this case.
+                } else if !context.in_generic && !y.value.is_unknown() {
+                    // A generic component's RHS is unevaluated, and a cast width can
+                    // be unevaluable elsewhere too (e.g. a const reached through a
+                    // generic package instance); neither is an invalid operand.
                     dst.r#type = self.invalid_operand(context, y);
                 }
             }
