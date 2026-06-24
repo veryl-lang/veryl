@@ -15655,3 +15655,48 @@ fn cast_width_unevaluable_const_is_not_invalid_operand() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn cast_to_proto_typedef_is_not_unevaluable_reset_value() {
+    // `0 as PKG::T` where T is a typedef of a proto-bounded generic package
+    // parameter resolves, in the generic body, to the proto's bodyless type
+    // (an unknown type). That is still a type cast, so it must stay on the
+    // type-cast path; routing it to the value path turns the cast target into a
+    // non-evaluable value and wrongly reports an unevaluable reset value.
+    let code = r#"
+    pub proto package proto_pkg {
+        type maddr_t;
+    }
+    pub package impl_pkg::<W: u32> for proto_pkg {
+        type maddr_t = logic<W>;
+    }
+    pub module Adapter::<PKG: proto_pkg> (
+        i_clk : input  clock    ,
+        i_rst : input  reset    ,
+        o_addr: output logic<8> ,
+    ) {
+        var maddr: PKG::maddr_t;
+        always_ff {
+            if_reset {
+                maddr = 0 as PKG::maddr_t;
+            } else {
+                maddr = maddr;
+            }
+        }
+        assign o_addr = maddr as 8;
+    }
+    pub module Top (
+        i_clk : input  clock    ,
+        i_rst : input  reset    ,
+        o_addr: output logic<8> ,
+    ) {
+        inst u: Adapter::<impl_pkg::<8>> (
+            i_clk,
+            i_rst,
+            o_addr,
+        );
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
