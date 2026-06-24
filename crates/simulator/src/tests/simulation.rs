@@ -1035,6 +1035,69 @@ fn wide_v4_repro_dyn_array_232() {
 }
 
 #[test]
+fn wide_dual_slot_dyn_array_rmw_writeloss() {
+    // Regression: a wide (>64-bit) FF array element written at a dynamic index
+    // from TWO sites — the multi-write analysis then classifies it dual-slot, so
+    // the write must push a write-log entry at the `current` slot to commit (the
+    // direct `next`-slot store alone does not persist).  That push was gated
+    // `dst_width <= 64` and otherwise a narrow push (`width_class = nb`) that
+    // `ff_commit_from_log` drops for nb ∉ {1,2,4,8} — so every wide dual-slot
+    // write committed nothing and `dout` read back 0.  Single-site wide dynamic
+    // arrays are PACKED and persist via the direct store, so
+    // `wide_v4_repro_dyn_array_232` missed this.  512-bit (nb = 64) also
+    // exercises the 56 + 8 wide-entry split.
+    let code = r#"
+    module Top (
+        clk:  input  clock,
+        we:   input  logic,
+        we2:  input  logic,
+        idx:  input  logic<4>,
+        din:  input  logic<512>,
+        dout: output logic<512>,
+    ) {
+        var arr: logic<512> [16];
+        always_ff {
+            if we {
+                arr[idx] = din;
+            }
+            // Second write site → array is multi-RMW (dual-slot). Never fires
+            // at runtime, but the static analysis still counts the write.
+            if we2 {
+                arr[idx] = arr[idx];
+            }
+        }
+        assign dout = arr[idx];
+    }
+    "#;
+    // 2-state only: the 4-state path under-allocates comb storage for a wide
+    // ARRAY (same pre-existing limitation noted in wide_v4_repro_dyn_array_232).
+    for config in Config::all().into_iter().filter(|c| !c.use_4state) {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("idx", Value::new(5, 4, false));
+        sim.set("we", Value::new(1, 1, false));
+        sim.set("we2", Value::new(0, 1, false));
+        // A value that spans the full 512 bits (top + middle + bottom words).
+        let d: num_bigint::BigUint = (num_bigint::BigUint::from(0xABCDu32) << 480usize)
+            | (num_bigint::BigUint::from(1u8) << 200usize)
+            | num_bigint::BigUint::from(0xDEADBEEFu32);
+        sim.set("din", Value::new_biguint(d.clone(), 512, false));
+        sim.step(&clk);
+        // Stop driving the write and read back on the following cycle: the
+        // value must have committed to the `current` slot.
+        sim.set("we", Value::new(0, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("dout").unwrap(),
+            Value::new_biguint(d, 512, false),
+            "wide dual-slot dynamic FF write lost across cycle ({config:?})"
+        );
+    }
+}
+
+#[test]
 fn nested_array_index_const_array() {
     // Regression for a nested array index `mem[A[idx]]` with a const array
     // `A`: the const-symbol read `A[idx]` was wrongly flagged as a compile-time
