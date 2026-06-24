@@ -174,7 +174,8 @@ impl CmdTest {
         // `cc` keeps use_jit=true so Cranelift covers stmts it can't emit;
         // --backend-validate forces the synchronous dual-run.
         use crate::Backend;
-        let validate = self.opt.backend_validate;
+        let validate = self.opt.backend_validate.is_some();
+        let validate_stride = self.opt.backend_validate.unwrap_or(0);
         let (use_jit, aot_c) = match self.opt.backend {
             Backend::Interpret => (false, false),
             Backend::Cranelift => (true, false),
@@ -187,6 +188,7 @@ impl CmdTest {
             aot_c_event: aot_c,
             aot_c_async: aot_c && !validate,
             aot_c_validate: aot_c && validate,
+            aot_c_validate_stride: validate_stride,
             // No size floor: the compile pool (emit.rs) now caps concurrent
             // `cc`, so the old 256 flood workaround is obsolete — and a small
             // module that runs long benefits from `cc` too.  Override with

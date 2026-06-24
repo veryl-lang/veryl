@@ -769,6 +769,22 @@ impl Simulator {
         whole: &dyn CompiledWhole,
         stmts_ptr: *const Vec<Statement>,
     ) -> bool {
+        // On off-stride cycles return false (skipping the AOT-C compare) so the
+        // caller runs the per-stmt Cranelift dispatch — the ground truth.
+        let stride = self.ir.aot_c_validate_stride;
+        if stride > 1 {
+            thread_local! {
+                static EV_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+            }
+            let sample = EV_COUNT.with(|c| {
+                let v = c.get();
+                c.set(v.wrapping_add(1));
+                v % stride == 0
+            });
+            if !sample {
+                return false;
+            }
+        }
         let ff_ptr = self.ir.ff_values.as_ptr();
         let comb_ptr = self.ir.comb_values.as_ptr() as *mut u8;
         let log_ptr = (&*self.ir.write_log_buffer) as *const _ as *mut u8;

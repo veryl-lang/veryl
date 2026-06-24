@@ -11,6 +11,13 @@ use crate::ir::{Ir, ModuleVariables};
 use crate::simulator::SimProfile;
 use veryl_analyzer::value::MaskCache;
 
+thread_local! {
+    /// Comb-settle counter for stride sampling (see `Config::aot_c_validate_stride`).
+    /// Per-thread (each testbench runs on its own thread); the exact phase is
+    /// irrelevant for 1-in-N sampling.
+    static SETTLE_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Dispatch `whole` on a snapshot, restore inputs, run Cranelift, diff
 /// results, panic on divergence.  On success the buffers reflect the
 /// Cranelift output (the ground truth).  `NotReady` from `whole` skips
@@ -22,6 +29,21 @@ pub fn settle_comb(
     mask_cache: &mut MaskCache,
     profile: &mut SimProfile,
 ) {
+    // Off-stride cycles run only the Cranelift ground truth; the `> 1` guard
+    // keeps stride 0/1 at every-cycle and counter-free.
+    let stride = ir.aot_c_validate_stride;
+    if stride > 1 {
+        let sample = SETTLE_COUNT.with(|c| {
+            let v = c.get();
+            c.set(v.wrapping_add(1));
+            v % stride == 0
+        });
+        if !sample {
+            ir.run_chunked_settle(mask_cache, profile);
+            return;
+        }
+    }
+
     let ff_ptr = ir.ff_values.as_ptr();
     let comb_ptr = ir.comb_values.as_ptr() as *mut u8;
     let log_ptr = (&*ir.write_log_buffer as *const _ as *const u8) as *mut u8;

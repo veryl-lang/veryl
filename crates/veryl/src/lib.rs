@@ -209,9 +209,11 @@ pub struct OptTest {
     #[arg(long, value_enum, default_value = "cc")]
     pub backend: Backend,
 
-    /// Dual-run the `cc` backend against Cranelift and panic on divergence
-    #[arg(long)]
-    pub backend_validate: bool,
+    /// Dual-run the `cc` backend against Cranelift and panic on divergence.
+    /// Takes an optional stride: dual-run + diff only every Nth cycle (default
+    /// 64 when given with no value); `--backend-validate 1` = every cycle.
+    #[arg(long, num_args = 0..=1, default_missing_value = "64", value_name = "STRIDE")]
+    pub backend_validate: Option<u64>,
 
     /// Disable FF classification optimization (force all always_ff variables to FF)
     #[arg(long)]
