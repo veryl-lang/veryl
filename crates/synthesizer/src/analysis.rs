@@ -24,23 +24,29 @@ pub struct AreaReport {
     pub total: f64,
     pub combinational: f64,
     pub sequential: f64,
+    /// Inferred RAM macro area (um²). Zero unless RAM inference fired.
+    pub memory: f64,
     pub by_kind: Vec<(CellKind, usize, f64)>,
     pub ff_count: usize,
+    /// Total stored bits across all inferred RAM blocks.
+    pub ram_bits: usize,
 }
 
 impl fmt::Display for AreaReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "area: {:.2} um²  (comb {:.2}, seq {:.2})",
-            self.total, self.combinational, self.sequential
+            "area: {:.2} um²  (comb {:.2}, seq {:.2}, mem {:.2})",
+            self.total, self.combinational, self.sequential, self.memory
         )?;
         let kind_counts = self.by_kind.iter().map(|(_, c, _)| *c);
         let kind_areas = self.by_kind.iter().map(|(_, _, a)| *a);
         let ff_count = (self.ff_count > 0).then_some(self.ff_count);
         let ff_area = (self.ff_count > 0).then_some(self.sequential);
-        let count_w = max_int_width(kind_counts.chain(ff_count));
-        let area_w = max_float_width(kind_areas.chain(ff_area), 2);
+        let mem_count = (self.ram_bits > 0).then_some(self.ram_bits);
+        let mem_area = (self.ram_bits > 0).then_some(self.memory);
+        let count_w = max_int_width(kind_counts.chain(ff_count).chain(mem_count));
+        let area_w = max_float_width(kind_areas.chain(ff_area).chain(mem_area), 2);
         for (kind, count, area) in &self.by_kind {
             writeln!(
                 f,
@@ -59,6 +65,17 @@ impl fmt::Display for AreaReport {
                 "FF",
                 self.ff_count,
                 self.sequential,
+                cw = count_w,
+                aw = area_w
+            )?;
+        }
+        if self.ram_bits > 0 {
+            writeln!(
+                f,
+                "  {:<6} ×{:>cw$} {:>aw$.2}",
+                "RAMbit",
+                self.ram_bits,
+                self.memory,
                 cw = count_w,
                 aw = area_w
             )?;
@@ -83,12 +100,18 @@ pub fn compute_area(module: &GateModule, library: &dyn CellLibrary) -> AreaRepor
     let ff_count = module.ffs.len();
     let seq_total = ff_count as f64 * library.ff_area();
 
+    let sram = library.sram_model();
+    let ram_bits: usize = module.ram_blocks.iter().map(|r| r.bits()).sum();
+    let mem_total = ram_bits as f64 * sram.bit_area;
+
     AreaReport {
-        total: comb_total + seq_total,
+        total: comb_total + seq_total + mem_total,
         combinational: comb_total,
         sequential: seq_total,
+        memory: mem_total,
         by_kind,
         ff_count,
+        ram_bits,
     }
 }
 
@@ -110,6 +133,9 @@ pub struct PowerReport {
     pub ff_count: usize,
     pub ff_leakage_nw: f64,
     pub ff_dynamic_uw: f64,
+    pub ram_bits: usize,
+    pub ram_leakage_nw: f64,
+    pub ram_dynamic_uw: f64,
     pub clock_freq_mhz: f64,
     pub activity: f64,
 }
@@ -169,6 +195,18 @@ impl fmt::Display for PowerReport {
                 dw = dyn_w,
             )?;
         }
+        if self.ram_bits > 0 {
+            writeln!(
+                f,
+                "  RAMbit ×{:>cw$}  leak {:>lw$.3} nW  dyn {:>dw$.3} uW",
+                self.ram_bits,
+                self.ram_leakage_nw,
+                self.ram_dynamic_uw,
+                cw = count_w,
+                lw = leak_w,
+                dw = dyn_w,
+            )?;
+        }
         Ok(())
     }
 }
@@ -208,8 +246,23 @@ pub fn compute_power(
     let ff_leakage_nw = ff_count as f64 * library.ff_leakage();
     let ff_dynamic_uw = ff_count as f64 * library.ff_internal_energy() * clock_freq_mhz;
 
-    let total_leak_nw = comb_leak_nw + ff_leakage_nw;
-    let total_dyn_uw = comb_dyn_uw + ff_dynamic_uw;
+    // RAM: leakage scales with stored bits; dynamic charges one access worth of
+    // data-bit energy per port per cycle, weighted by `activity` as a stand-in
+    // for access probability (a port isn't exercised every cycle).
+    let sram = library.sram_model();
+    let mut ram_bits = 0usize;
+    let mut ram_leakage_nw = 0.0_f64;
+    let mut ram_dynamic_uw = 0.0_f64;
+    for ram in &module.ram_blocks {
+        ram_bits += ram.bits();
+        ram_leakage_nw += ram.bits() as f64 * sram.bit_leakage;
+        let read_e = ram.read_ports.len() as f64 * ram.width as f64 * sram.read_energy_per_bit;
+        let write_e = ram.write_ports.len() as f64 * ram.width as f64 * sram.write_energy_per_bit;
+        ram_dynamic_uw += (read_e + write_e) * activity * clock_freq_mhz;
+    }
+
+    let total_leak_nw = comb_leak_nw + ff_leakage_nw + ram_leakage_nw;
+    let total_dyn_uw = comb_dyn_uw + ff_dynamic_uw + ram_dynamic_uw;
 
     PowerReport {
         total_mw: total_leak_nw / 1e6 + total_dyn_uw / 1e3,
@@ -219,6 +272,9 @@ pub fn compute_power(
         ff_count,
         ff_leakage_nw,
         ff_dynamic_uw,
+        ram_bits,
+        ram_leakage_nw,
+        ram_dynamic_uw,
         clock_freq_mhz,
         activity,
     }
@@ -260,14 +316,19 @@ pub enum StepKind {
     StartPoint,
     FfOutput(usize),
     CellOutput(usize, CellKind),
+    /// Asynchronous RAM read data output: `(ram_block_idx)`.
+    RamReadOutput(usize),
     FfInput(usize),
     PortOutput,
+    /// Path terminates at a RAM write port input: `(ram_block_idx)`.
+    RamWriteInput(usize),
 }
 
 #[derive(Clone, Debug)]
 pub enum Endpoint {
     Ff(usize),
     Port,
+    RamWrite(usize),
 }
 
 impl TimingReport {
@@ -312,6 +373,12 @@ impl TimingReport {
                     (StepKind::FfInput(_), _, _) => {
                         origin_tag.clone().unwrap_or_else(|| "FF D".to_string())
                     }
+                    (StepKind::RamWriteInput(_), _, _) => {
+                        origin_tag.clone().unwrap_or_else(|| "RAM D".to_string())
+                    }
+                    (StepKind::RamReadOutput(_), _, _) => {
+                        origin_tag.clone().unwrap_or_else(|| "RAM Q".to_string())
+                    }
                     (StepKind::CellOutput(_, kind), _, _) => kind.symbol().to_string(),
                     _ => "start".to_string(),
                 };
@@ -319,11 +386,13 @@ impl TimingReport {
                 let tail = if is_first {
                     match &step.kind {
                         StepKind::FfOutput(_) => "(FF Q)".to_string(),
+                        StepKind::RamReadOutput(_) => "(RAM read)".to_string(),
                         _ => "(input)".to_string(),
                     }
                 } else if is_last {
                     match &step.kind {
                         StepKind::FfInput(_) => "(FF D)".to_string(),
+                        StepKind::RamWriteInput(_) => "(RAM write)".to_string(),
                         _ => "(output)".to_string(),
                     }
                 } else {
@@ -396,6 +465,7 @@ pub fn compute_timing_top_n(
 
     // Cells are roughly topological but branch-merging MUXes can land out of
     // order; iterate to a fixed point rather than pre-sort.
+    let sram = library.sram_model();
     let mut changed = true;
     while changed {
         changed = false;
@@ -424,6 +494,41 @@ pub fn compute_timing_top_n(
                 changed = true;
             }
         }
+        // Asynchronous RAM read: data valid `access_delay` after the address
+        // settles, so propagate addr → data like a multi-input cell. Sync read
+        // ports leave their data nets at arrival 0 (registered start points).
+        for ram in &module.ram_blocks {
+            let access = sram.access_delay(ram.depth);
+            for rp in &ram.read_ports {
+                if rp.sync {
+                    continue;
+                }
+                let mut max_addr_arr = 0.0_f64;
+                let mut max_addr_depth = 0_usize;
+                let mut arg_net = None;
+                for &a in &rp.addr {
+                    let i = a as usize;
+                    if arrival[i] > max_addr_arr || arg_net.is_none() {
+                        max_addr_arr = arrival[i];
+                        arg_net = Some(a);
+                    }
+                    if depth[i] > max_addr_depth {
+                        max_addr_depth = depth[i];
+                    }
+                }
+                let new_arr = max_addr_arr + access;
+                let new_depth = max_addr_depth + 1;
+                for &d in &rp.data {
+                    let o = d as usize;
+                    if new_arr > arrival[o] + 1e-12 || new_depth > depth[o] {
+                        arrival[o] = new_arr;
+                        depth[o] = new_depth;
+                        predecessor[o] = arg_net;
+                        changed = true;
+                    }
+                }
+            }
+        }
     }
 
     // Report the longest combinational arrival at each endpoint. Matches
@@ -441,6 +546,25 @@ pub fn compute_timing_top_n(
             for &net in &port.nets {
                 let t = arrival[net as usize];
                 endpoints.push((t, depth[net as usize], Endpoint::Port, net));
+            }
+        }
+    }
+    // RAM write-port inputs (address / data / write-enable) are captured on the
+    // clock edge, so each is a timing endpoint like a flip-flop D pin.
+    for (ri, ram) in module.ram_blocks.iter().enumerate() {
+        for wp in &ram.write_ports {
+            let inputs = wp
+                .addr
+                .iter()
+                .chain(wp.data.iter())
+                .chain(std::iter::once(&wp.enable));
+            for &net in inputs {
+                endpoints.push((
+                    arrival[net as usize],
+                    depth[net as usize],
+                    Endpoint::RamWrite(ri),
+                    net,
+                ));
             }
         }
     }
@@ -484,6 +608,7 @@ pub fn compute_timing_top_n(
             let tail_kind = match &endpoint {
                 Endpoint::Ff(i) => StepKind::FfInput(*i),
                 Endpoint::Port => StepKind::PortOutput,
+                Endpoint::RamWrite(i) => StepKind::RamWriteInput(*i),
             };
             let mut trace = Vec::new();
             while let Some(net) = cur {
@@ -496,6 +621,7 @@ pub fn compute_timing_top_n(
                     NetDriver::PortInput => StepKind::StartPoint,
                     NetDriver::FfQ(i) => StepKind::FfOutput(*i),
                     NetDriver::Cell(i) => StepKind::CellOutput(*i, module.cells[*i].kind),
+                    NetDriver::RamRead(i, _, _) => StepKind::RamReadOutput(*i),
                     NetDriver::Undriven => StepKind::StartPoint,
                 };
                 // Prefer explicit boundary label; fall back to net origin.
@@ -510,7 +636,9 @@ pub fn compute_timing_top_n(
                     origin,
                 });
                 match &module.nets[idx].driver {
-                    NetDriver::Cell(_) => cur = predecessor[idx],
+                    // Async RAM read continues back through its address; a sync
+                    // read has no predecessor and stops here (start point).
+                    NetDriver::Cell(_) | NetDriver::RamRead(..) => cur = predecessor[idx],
                     _ => break,
                 }
             }

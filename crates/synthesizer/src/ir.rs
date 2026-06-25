@@ -28,6 +28,10 @@ pub struct GateModule {
     pub nets: Vec<NetInfo>,
     pub cells: Vec<Cell>,
     pub ffs: Vec<FfCell>,
+    /// Memory arrays inferred as RAM macros instead of expanded to per-bit
+    /// flip-flops plus address mux/decode logic. Empty unless RAM inference
+    /// fires (large, single-write-port arrays — see `conv::ram`).
+    pub ram_blocks: Vec<RamBlock>,
 }
 
 #[derive(Clone)]
@@ -67,6 +71,8 @@ pub enum NetDriver {
     Cell(usize),
     /// Index into `module.ffs`.
     FfQ(usize),
+    /// A RAM read-port data output: `(ram_block_idx, read_port_idx, bit)`.
+    RamRead(usize, usize, usize),
     Undriven,
 }
 
@@ -230,6 +236,88 @@ pub struct FfCell {
     pub origin: Option<(StrId, usize)>,
 }
 
+/// One synchronous write port of a [`RamBlock`]. `data`/`addr`/`enable` are
+/// driven by surrounding logic; the write commits on the RAM's clock edge when
+/// `enable` is high. `addr`/`data` are LSB-first.
+#[derive(Clone)]
+pub struct RamWritePort {
+    pub addr: Vec<NetId>,
+    pub data: Vec<NetId>,
+    pub enable: NetId,
+}
+
+/// One read port of a [`RamBlock`]. `data` nets are *outputs* — the RAM drives
+/// them (their `NetDriver` is `RamRead`). `sync = false` models an
+/// asynchronous (combinational) read whose delay is the access time; `true`
+/// models a registered read (data valid the cycle after the address).
+#[derive(Clone)]
+pub struct RamReadPort {
+    pub addr: Vec<NetId>,
+    pub data: Vec<NetId>,
+    pub sync: bool,
+}
+
+/// A memory array represented as a single RAM macro rather than expanded into
+/// `depth × width` flip-flops plus address decode/mux trees. Inferred for
+/// large, memory-like arrays (see `conv::ram`). Area / timing / power are
+/// modelled analytically via [`crate::library::SramModel`].
+#[derive(Clone)]
+pub struct RamBlock {
+    pub name: StrId,
+    pub depth: usize,
+    pub width: usize,
+    pub clock: NetId,
+    pub clock_edge: ClockEdge,
+    pub read_ports: Vec<RamReadPort>,
+    pub write_ports: Vec<RamWritePort>,
+}
+
+impl RamBlock {
+    /// Total stored bits — the basis for area and leakage.
+    pub fn bits(&self) -> usize {
+        self.depth * self.width
+    }
+}
+
+impl GateModule {
+    /// Nets the RAM blocks *consume* — clock, write addr/data/enable, read addr.
+    /// These are DCE roots, fusion consumers, and alias-remap targets; the clock
+    /// is handled like an FF clock so a Buf-aliased/gated RAM clock is resolved,
+    /// not left dangling. Read-data nets are RAM *outputs* and excluded. The
+    /// mutable counterpart visits the same nets in the same order, so
+    /// collect-then-reapply stays aligned.
+    pub fn for_each_ram_input_net(&self, mut f: impl FnMut(NetId)) {
+        for ram in &self.ram_blocks {
+            f(ram.clock);
+            for wp in &ram.write_ports {
+                wp.addr.iter().for_each(|&n| f(n));
+                wp.data.iter().for_each(|&n| f(n));
+                f(wp.enable);
+            }
+            for rp in &ram.read_ports {
+                rp.addr.iter().for_each(|&n| f(n));
+            }
+        }
+    }
+
+    /// Mutable counterpart of [`Self::for_each_ram_input_net`], for rewriting
+    /// consumed nets when a simplify pass aliases them away. Visits nets in the
+    /// identical order to the shared (immutable) iterator.
+    pub fn for_each_ram_input_net_mut(&mut self, mut f: impl FnMut(&mut NetId)) {
+        for ram in &mut self.ram_blocks {
+            f(&mut ram.clock);
+            for wp in &mut ram.write_ports {
+                wp.addr.iter_mut().for_each(&mut f);
+                wp.data.iter_mut().for_each(&mut f);
+                f(&mut wp.enable);
+            }
+            for rp in &mut ram.read_ports {
+                rp.addr.iter_mut().for_each(&mut f);
+            }
+        }
+    }
+}
+
 impl fmt::Display for GateModule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut ret = String::new();
@@ -289,6 +377,49 @@ impl fmt::Display for GateModule {
                     i, origin, ff.q, ff.clock_edge, ff.clock, reset, ff.d, ff.reset_value as u8,
                 ),
             ));
+        }
+        if !self.ffs.is_empty() && !self.ram_blocks.is_empty() {
+            ret.push('\n');
+        }
+
+        for (i, ram) in self.ram_blocks.iter().enumerate() {
+            ret.push_str(&indent_all_by(
+                2,
+                format!(
+                    "ram{} ({}) : {}×{}b, {} ({} write, {} read):\n",
+                    i,
+                    ram.name,
+                    ram.depth,
+                    ram.width,
+                    ram.clock_edge,
+                    ram.write_ports.len(),
+                    ram.read_ports.len(),
+                ),
+            ));
+            for (w, wp) in ram.write_ports.iter().enumerate() {
+                ret.push_str(&indent_all_by(
+                    4,
+                    format!(
+                        "w{}: addr[{}] data[{}] we=n{}\n",
+                        w,
+                        wp.addr.len(),
+                        wp.data.len(),
+                        wp.enable,
+                    ),
+                ));
+            }
+            for (r, rp) in ram.read_ports.iter().enumerate() {
+                ret.push_str(&indent_all_by(
+                    4,
+                    format!(
+                        "r{}: addr[{}] data[{}] {}\n",
+                        r,
+                        rp.addr.len(),
+                        rp.data.len(),
+                        if rp.sync { "sync" } else { "async" },
+                    ),
+                ));
+            }
         }
 
         ret.push('}');
