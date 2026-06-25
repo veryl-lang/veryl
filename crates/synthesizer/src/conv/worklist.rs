@@ -469,6 +469,10 @@ fn simpl_ao_family(iv: &[Option<bool>], nets: &[NetId], is_ao: bool) -> Option<S
     None
 }
 
+/// Fanout above which a consumer list is treated as append-only — see the skip
+/// in `worklist_simplify`.
+const CONSUMER_PRUNE_LIMIT: usize = 64;
+
 /// Combined single-sweep simplification: const-propagation, algebraic
 /// rewrites, and CSE. Cells are driven by a worklist — the first pass
 /// visits everything, subsequent iterations only revisit cells whose inputs
@@ -615,10 +619,18 @@ pub(super) fn worklist_simplify(module: &mut GateModule) {
         }
 
         for &n in &cell_inputs {
-            if let Some(list) = consumers.get_mut(n as usize)
-                && let Some(pos) = list.iter().position(|&c| c == cell_idx)
-            {
-                list.swap_remove(pos);
+            if let Some(list) = consumers.get_mut(n as usize) {
+                // Pruning a cell from its old input's consumer list is an
+                // O(fanout) scan; on a flattened netlist the constant rails reach
+                // millions of consumers, making it O(N²). Above a small fanout,
+                // skip it — such lists never hit the only exact-count check
+                // (`len() == 1` in `algebraic_fuse`), and stale entries are
+                // filtered on use (the `contains` guard in the buf-rewire).
+                if list.len() <= CONSUMER_PRUNE_LIMIT
+                    && let Some(pos) = list.iter().position(|&c| c == cell_idx)
+                {
+                    list.swap_remove(pos);
+                }
             }
         }
         for &n in &new_inputs {
@@ -645,8 +657,14 @@ pub(super) fn worklist_simplify(module: &mut GateModule) {
                 if consumer_idx == cell_idx {
                     continue;
                 }
-                // Consumer's CSE key may change once its input is rewired.
+                // Stale entry (pruning was skipped on a high-fanout list): this
+                // cell no longer reads cell_output, so there is nothing to
+                // rewire and it must not be re-added downstream.
                 let consumer = &module.cells[consumer_idx as usize];
+                if !consumer.inputs.contains(&cell_output) {
+                    continue;
+                }
+                // Consumer's CSE key may change once its input is rewired.
                 if let Some(ck) = cse_key(consumer.kind, &consumer.inputs)
                     && seen.get(&ck) == Some(&consumer_idx)
                 {
