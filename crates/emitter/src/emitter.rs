@@ -4039,9 +4039,17 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("=");
         self.space(1);
-        self.expression(beg);
         if !ascending_order && !include_end {
-            self.str(" - 1");
+            if beg.unwrap_factor().is_none() {
+                self.str("(");
+                self.expression(beg);
+                self.str(") - 1");
+            } else {
+                self.expression(beg);
+                self.str(" - 1");
+            }
+        } else {
+            self.expression(beg);
         }
         self.str(";");
         self.space(1);
@@ -5853,9 +5861,17 @@ impl VerylWalker for Emitter {
         self.space(1);
         self.str("=");
         self.space(1);
-        self.expression(beg);
         if !ascending_order && !include_end {
-            self.str(" - 1");
+            if beg.unwrap_factor().is_none() {
+                self.str("(");
+                self.expression(beg);
+                self.str(") - 1");
+            } else {
+                self.expression(beg);
+                self.str(" - 1");
+            }
+        } else {
+            self.expression(beg);
         }
         self.str(";");
         self.space(1);

@@ -3855,3 +3855,46 @@ fn step_select_parenthesizes_base_index() {
         "single-factor base needs no parentheses: {ret}"
     );
 }
+
+#[test]
+fn reverse_range_bound_is_parenthesized() {
+    // Regression: `for j in rev 0..W << 1` emitted `int j = W << 1 - 1`,
+    // which SV parses as `W << (1 - 1)`. A single factor needs no parentheses.
+    let code = r#"module ModuleA (
+    o: output logic<32>,
+) {
+    const W: u32 = 4;
+    always_comb {
+        o = 0;
+        for j in rev 0..W << 1 {
+            o += j;
+        }
+    }
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("(W << 1) - 1"),
+        "non-atomic bound must be parenthesized: {ret}"
+    );
+
+    let code = r#"module ModuleB (
+    o: output logic<32>,
+) {
+    const W: u32 = 4;
+    always_comb {
+        o = 0;
+        for j in rev 0..W {
+            o += j;
+        }
+    }
+}
+"#;
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("j = W - 1") && !ret.contains("(W) - 1"),
+        "single-factor bound needs no parentheses: {ret}"
+    );
+}
