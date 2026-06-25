@@ -2562,3 +2562,914 @@ fn power_ff_dynamic_uses_full_clock() {
         ratio
     );
 }
+
+#[test]
+fn param_used_as_constant_bit_select() {
+    // A parameter used as a bit-select index is compile-time constant but the
+    // analyzer leaves it as a parameter reference inside the select (it only
+    // const-folds whole-constant expressions). The synthesizer must resolve it
+    // to a fixed bit instead of rejecting `d[W]` as a dynamic select.
+    let code = r#"
+        module Top #(
+            param W: u32 = 3,
+        ) (
+            d: input  logic<W + 1>,
+            y: output logic,
+        ) {
+            always_comb {
+                y = d[W];
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    // The bug surfaced as Err(DynamicSelect); a fixed bit select is just wire.
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    assert_eq!(result.gate_ir.module.ffs.len(), 0);
+}
+
+#[test]
+fn param_used_as_constant_array_index() {
+    // Same as above for an array element index (`arr[W]`).
+    let code = r#"
+        module Top #(
+            param W: u32 = 2,
+        ) (
+            d: input  logic    [4],
+            y: output logic       ,
+        ) {
+            always_comb {
+                y = d[W];
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let _ = synthesize(&ir, top, Library::default()).expect("synthesize");
+}
+
+#[test]
+fn single_port_memory_infers_ram() {
+    // A 64×32 array with one dynamic write port and one dynamic read port must
+    // become a RAM macro — no per-bit flip-flops, no element mux/decode.
+    let code = r#"
+        module Mem (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = wdata;
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Mem");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+
+    assert_eq!(m.ram_blocks.len(), 1, "expected one inferred RAM block");
+    let ram = &m.ram_blocks[0];
+    assert_eq!(ram.depth, 64);
+    assert_eq!(ram.width, 32);
+    assert_eq!(ram.write_ports.len(), 1);
+    assert_eq!(ram.read_ports.len(), 1);
+    // The 64×32 array became a macro, not 2048 flip-flops.
+    assert_eq!(m.ffs.len(), 0, "RAM array must not expand to flip-flops");
+    assert_eq!(result.area.ram_bits, 64 * 32);
+    assert!(result.area.memory > 0.0);
+}
+
+#[test]
+fn reset_array_stays_flip_flops_by_default() {
+    // Real SRAM has no reset, so a reset array is always kept as flip-flops; an
+    // array meant to be SRAM is written reset-less in the RTL.
+    let code = r#"
+        module RegArray (
+            clk:   input  clock     ,
+            rst:   input  reset     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var arr: logic<32> [64];
+            always_ff (clk, rst) {
+                if_reset {
+                    for i in 0..64 {
+                        arr[i] = 0;
+                    }
+                } else {
+                    if we {
+                        arr[waddr] = wdata;
+                    }
+                }
+            }
+            assign rdata = arr[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "RegArray");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    assert!(
+        result.gate_ir.module.ram_blocks.is_empty(),
+        "reset array must stay flip-flops by default, not RAM"
+    );
+    assert!(
+        result.gate_ir.module.ffs.len() >= 2048,
+        "reset array should remain flip-flops, got {} FFs",
+        result.gate_ir.module.ffs.len()
+    );
+}
+
+#[test]
+fn small_reset_array_stays_flip_flops() {
+    // Below the RAM bit floor (here 8×4 = 32 bits) a reset array — cache `valid`
+    // style — stays as flip-flops; the macro periphery wouldn't pay off.
+    let code = r#"
+        module Small (
+            clk:   input  clock    ,
+            rst:   input  reset    ,
+            we:    input  logic    ,
+            waddr: input  logic<3> ,
+            wdata: input  logic<4> ,
+            raddr: input  logic<3> ,
+            rdata: output logic<4> ,
+        ) {
+            var arr: logic<4> [8];
+            always_ff (clk, rst) {
+                if_reset {
+                    for i in 0..8 {
+                        arr[i] = 0;
+                    }
+                } else {
+                    if we {
+                        arr[waddr] = wdata;
+                    }
+                }
+            }
+            assign rdata = arr[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Small");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    assert!(
+        result.gate_ir.module.ram_blocks.is_empty(),
+        "small array should stay flip-flops, not RAM"
+    );
+    assert!(result.gate_ir.module.ffs.len() >= 32);
+}
+
+#[test]
+fn multi_write_port_memory_infers_ram() {
+    // Two distinct dynamic write sites (e.g. a cache line filled two words per
+    // beat) become a two-write-port RAM, not flip-flops.
+    let code = r#"
+        module Dual (
+            clk:    input  clock     ,
+            we:     input  logic     ,
+            waddr0: input  logic<6>  ,
+            wdata0: input  logic<32> ,
+            waddr1: input  logic<6>  ,
+            wdata1: input  logic<32> ,
+            raddr:  input  logic<6>  ,
+            rdata:  output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if we {
+                    mem[waddr0] = wdata0;
+                    mem[waddr1] = wdata1;
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Dual");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(m.ram_blocks.len(), 1, "expected one RAM block");
+    assert_eq!(
+        m.ram_blocks[0].write_ports.len(),
+        2,
+        "two write sites should give two write ports"
+    );
+    assert_eq!(m.ffs.len(), 0);
+}
+
+#[test]
+fn inferred_ram_propagates_through_instance_flattening() {
+    // A RAM inferred inside a child module must survive instance flattening:
+    // the parent gets the child's RAM block (re-based), not a dropped macro or
+    // a reverted flip-flop bank.
+    let code = r#"
+        module Mem (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = wdata;
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+        module Top (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            inst u_mem: Mem (
+                clk    ,
+                we     ,
+                waddr  ,
+                wdata  ,
+                raddr  ,
+                rdata  ,
+            );
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(
+        m.ram_blocks.len(),
+        1,
+        "child RAM block must propagate to the flattened parent"
+    );
+    assert_eq!(m.ram_blocks[0].depth, 64);
+    assert_eq!(m.ffs.len(), 0, "no flip-flops should survive flattening");
+    // The propagated read-data nets must be RAM-driven, not undriven.
+    assert!(
+        m.nets
+            .iter()
+            .any(|n| matches!(n.driver, veryl_synthesizer::ir::NetDriver::RamRead(..))),
+        "flattened parent should have RamRead-driven read data nets"
+    );
+}
+
+#[test]
+fn ram_block_area_timing_power_and_dump() {
+    // A hand-built RAM macro must contribute memory area, an async read access
+    // path, and RAM leakage — none of which the FF/cell models would account for.
+    use veryl_synthesizer::ir::{
+        ClockEdge, GateModule, GatePort, NetInfo, PortDir, RamBlock, RamReadPort, RamWritePort,
+    };
+
+    const DEPTH: usize = 256;
+    const WIDTH: usize = 32;
+    const ADDR_W: usize = 8; // log2(DEPTH)
+
+    // nets 0/1 are the reserved const rails.
+    let mut nets = vec![
+        NetInfo {
+            driver: NetDriver::Const(false),
+            origin: None,
+        },
+        NetInfo {
+            driver: NetDriver::Const(true),
+            origin: None,
+        },
+    ];
+    let mem = resource_table::insert_str("mem");
+
+    // Read address: a primary input.
+    let raddr: Vec<u32> = (0..ADDR_W)
+        .map(|b| {
+            nets.push(NetInfo {
+                driver: NetDriver::PortInput,
+                origin: Some((resource_table::insert_str("raddr"), b)),
+            });
+            (nets.len() - 1) as u32
+        })
+        .collect();
+    // Read data: driven by the RAM read port, exposed as an output port.
+    let rdata: Vec<u32> = (0..WIDTH)
+        .map(|b| {
+            nets.push(NetInfo {
+                driver: NetDriver::RamRead(0, 0, b),
+                origin: Some((mem, b)),
+            });
+            (nets.len() - 1) as u32
+        })
+        .collect();
+
+    let module = GateModule {
+        name: Some(resource_table::insert_str("Top")),
+        ports: vec![
+            GatePort {
+                name: resource_table::insert_str("raddr"),
+                path: vec![resource_table::insert_str("raddr")],
+                dir: PortDir::Input,
+                nets: raddr.clone(),
+            },
+            GatePort {
+                name: resource_table::insert_str("rdata"),
+                path: vec![resource_table::insert_str("rdata")],
+                dir: PortDir::Output,
+                nets: rdata.clone(),
+            },
+        ],
+        nets,
+        cells: Vec::new(),
+        ffs: Vec::new(),
+        ram_blocks: vec![RamBlock {
+            name: mem,
+            depth: DEPTH,
+            width: WIDTH,
+            clock: 0,
+            clock_edge: ClockEdge::Posedge,
+            read_ports: vec![RamReadPort {
+                addr: raddr,
+                data: rdata,
+                sync: false,
+            }],
+            // A tied-off write port (we = const0); exercises the area/leakage
+            // and write-endpoint paths without extra driver logic.
+            write_ports: vec![RamWritePort {
+                addr: vec![0; ADDR_W],
+                data: vec![0; WIDTH],
+                enable: 0,
+            }],
+        }],
+    };
+
+    let lib = library_for(Library::default());
+
+    // Area: memory term equals stored bits × per-bit area; nothing in comb/seq.
+    let area = veryl_synthesizer::analysis::compute_area(&module, lib);
+    assert_eq!(area.ram_bits, DEPTH * WIDTH);
+    assert!(area.memory > 0.0, "memory area should be positive");
+    assert_eq!(area.combinational, 0.0);
+    assert_eq!(area.sequential, 0.0);
+    assert!((area.total - area.memory).abs() < 1e-9);
+
+    // Timing: the read data arrives `access_delay(DEPTH)` after the address.
+    let timing = veryl_synthesizer::analysis::compute_timing(&module, lib);
+    let expect = lib.sram_model().access_delay(DEPTH);
+    assert!(
+        (timing.critical_path_delay - expect).abs() < 1e-9,
+        "async read path should be {expect} ns, got {}",
+        timing.critical_path_delay
+    );
+
+    // Power: RAM leakage scales with stored bits and must be nonzero.
+    let power = compute_power(&module, lib, 100.0, 0.1);
+    assert_eq!(power.ram_bits, DEPTH * WIDTH);
+    assert!(power.ram_leakage_nw > 0.0);
+    assert!(power.leakage_mw > 0.0);
+
+    // Dump mentions the RAM block.
+    let dump = format!("{}", module);
+    assert!(
+        dump.contains("ram0"),
+        "dump should list the RAM block:\n{dump}"
+    );
+}
+
+#[test]
+fn if_reset_followed_by_trailing_statement() {
+    // Veryl permits clocked logic after the `if_reset`/else gate in an
+    // always_ff (`always_ff { if_reset {..} else {..}  <more>; }`). On a clock
+    // edge SV runs the else branch then those trailing statements, so the
+    // synthesizer must fold them into the clocked path rather than meet the
+    // `if_reset` again as a (rejected) nested reset.
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            rst: input  reset,
+            we:  input  logic,
+            d:   input  logic,
+            set: input  logic,
+            q:   output logic,
+            f:   output logic,
+        ) {
+            var flag: logic;
+            always_ff (clk, rst) {
+                if_reset {
+                    q = 0;
+                } else {
+                    if we {
+                        q = d;
+                    }
+                }
+                if set {
+                    flag = 1;
+                }
+            }
+            assign f = flag;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    // Previously failed with "nested if_reset reached synthesizer".
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    // `q` (reset gated) and `flag` (trailing) are both clocked.
+    assert!(
+        result.gate_ir.module.ffs.len() >= 2,
+        "expected at least 2 FFs (q and flag), got {}",
+        result.gate_ir.module.ffs.len()
+    );
+}
+
+#[test]
+fn multi_dim_array_is_not_silently_ram_inferred() {
+    // A multi-dim array written through a single dynamic row index must NOT be
+    // RAM-inferred (the single-index depth/width split only models 1-D, so it
+    // would truncate the row to the element width). With the `dims() == 1` guard
+    // it falls back to the flip-flop path's honest "unsupported" error; without
+    // the guard, `synthesize` returns Ok with a mis-shaped 512×32 RAM.
+    let code = r#"
+        module MultiDim (
+            clk:   input  clock          ,
+            we:    input  logic          ,
+            waddr: input  logic<6>       ,
+            wrow:  input  logic<32> [8]  ,
+            raddr: input  logic<6>       ,
+            rrow:  output logic<32> [8]  ,
+        ) {
+            var mem: logic<32> [64, 8];
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = wrow;
+                }
+            }
+            assign rrow = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "MultiDim");
+    let result = synthesize(&ir, top, Library::default());
+    assert!(
+        result.is_err(),
+        "multi-dim dynamic-index array must not be silently RAM-inferred; \
+         expected the honest unsupported error, got Ok"
+    );
+}
+
+#[test]
+fn reads_sharing_an_address_share_one_port() {
+    // Two reads of `mem[raddr]` at different source sites are the same address
+    // and must collapse to a single read port. The dedup keys on a structural
+    // signature (token-independent), not `format!("{:?}", expr)` which embeds
+    // the source location and would allocate two ports for one address.
+    let code = r#"
+        module SameAddr (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            a:     output logic<32> ,
+            b:     output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = wdata;
+                }
+            }
+            assign a = mem[raddr];
+            assign b = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "SameAddr");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(m.ram_blocks.len(), 1, "expected one RAM block");
+    assert_eq!(
+        m.ram_blocks[0].read_ports.len(),
+        1,
+        "two reads of the same address must share one read port"
+    );
+}
+
+#[test]
+fn ram_write_enable_reflects_if_condition() {
+    // `if we { mem[a] = d }` must wire `we` to the write port's enable, not tie
+    // it high — otherwise the write would be modelled as every-cycle.
+    let code = r#"
+        module WE (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = wdata;
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "WE");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    let en = m.ram_blocks[0].write_ports[0].enable;
+    assert!(
+        !matches!(m.nets[en as usize].driver, NetDriver::Const(_)),
+        "write enable must not be a tied-high constant"
+    );
+    assert!(
+        matches!(m.nets[en as usize].driver, NetDriver::PortInput),
+        "write enable should trace to the `we` input port"
+    );
+}
+
+#[test]
+fn ram_write_enable_ands_nested_conditions() {
+    // Nested `if en { if we { … } }` gives the write port enable `en & we`.
+    let code = r#"
+        module WE2 (
+            clk:   input  clock     ,
+            en:    input  logic     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if en {
+                    if we {
+                        mem[waddr] = wdata;
+                    }
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "WE2");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    let en = m.ram_blocks[0].write_ports[0].enable;
+    match m.nets[en as usize].driver {
+        NetDriver::Cell(idx) => {
+            assert_eq!(
+                m.cells[idx].kind,
+                CellKind::And2,
+                "nested conditions should AND into the write enable"
+            );
+        }
+        _ => panic!("write enable should be gate-driven (en & we), not a port/constant"),
+    }
+}
+
+#[test]
+fn unconditional_ram_write_enable_is_high() {
+    // An always_ff write with no enclosing condition is genuinely every-cycle,
+    // so its enable is tied high.
+    let code = r#"
+        module WE3 (
+            clk:   input  clock     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                mem[waddr] = wdata;
+            }
+            assign rdata = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "WE3");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    let en = m.ram_blocks[0].write_ports[0].enable;
+    assert!(
+        matches!(m.nets[en as usize].driver, NetDriver::Const(true)),
+        "unconditional write should be tied high"
+    );
+}
+
+#[test]
+fn ram_write_inside_case_gets_arm_condition_enable() {
+    // A RAM write inside a `case` arm must take the arm condition as its
+    // write-enable. The SOP case-fold processes arm bodies without a condition
+    // stack, so `synth_case_chain` bails to the nested-if lowering (which
+    // threads the condition) whenever an arm writes a RAM — verified here by a
+    // gate-driven (non-constant) enable.
+    let code = r#"
+        module CaseWE (
+            clk:   input  clock     ,
+            sel:   input  logic<3>  ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+            flag:  output logic     ,
+        ) {
+            var mem: logic<32> [64];
+            var f:   logic;
+            always_ff (clk) {
+                case sel {
+                    0:       f = 0;
+                    1:       mem[waddr] = wdata;
+                    2:       f = 1;
+                    default: f = 0;
+                }
+            }
+            assign rdata = mem[raddr];
+            assign flag  = f;
+        }
+    "#;
+    let (ir, top) = analyze(code, "CaseWE");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(m.ram_blocks.len(), 1, "expected one RAM block");
+    assert_eq!(m.ram_blocks[0].write_ports.len(), 1);
+    let en = m.ram_blocks[0].write_ports[0].enable;
+    assert!(
+        matches!(m.nets[en as usize].driver, NetDriver::Cell(_)),
+        "case-arm RAM write enable should be gated by the arm condition, \
+         not tied high"
+    );
+}
+
+#[test]
+fn own_and_flattened_child_rams_rebase_consistently() {
+    // The highest-risk re-basing path: a parent that owns a RAM *and* flattens
+    // a child that owns a RAM. The flattened child block must re-base to the
+    // parent's next ram_idx (= number of own RAMs) and land at exactly that
+    // vec position, so every read-data net's `RamRead(idx, …)` equals its
+    // block's index.
+    let code = r#"
+        module Mem (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = wdata;
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+        module Top (
+            clk:    input  clock     ,
+            we:     input  logic     ,
+            waddr:  input  logic<6>  ,
+            wdata:  input  logic<32> ,
+            raddr:  input  logic<6>  ,
+            prdata: output logic<32> ,
+            crdata: output logic<32> ,
+        ) {
+            var pmem: logic<32> [64];
+            always_ff (clk) {
+                if we {
+                    pmem[waddr] = wdata;
+                }
+            }
+            assign prdata = pmem[raddr];
+            inst u_mem: Mem (
+                clk    ,
+                we     ,
+                waddr  ,
+                wdata  ,
+                raddr  ,
+                crdata ,
+            );
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(
+        m.ram_blocks.len(),
+        2,
+        "parent own RAM + flattened child RAM = 2 blocks"
+    );
+    assert_eq!(m.ffs.len(), 0, "both arrays are RAMs, no flip-flops");
+    // Every read-data net must reference the index of the block it belongs to —
+    // the invariant that re-basing keeps the flattened block's ram_idx equal to
+    // its final vec position.
+    for (i, ram) in m.ram_blocks.iter().enumerate() {
+        for rp in &ram.read_ports {
+            for &n in &rp.data {
+                match &m.nets[n as usize].driver {
+                    NetDriver::RamRead(idx, _, _) => assert_eq!(
+                        *idx, i,
+                        "read-data net references ram {idx} but lives in block {i}"
+                    ),
+                    other => panic!("read-data net should be RamRead-driven, got {other:?}"),
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn two_cached_instances_get_disjoint_ram_nets() {
+    // Two instances of the same elaborated child share one cached GateModule
+    // template, but each must be remapped into its own parent net range — the
+    // two flattened RAM blocks must not share any read-data net.
+    let code = r#"
+        module Mem (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = wdata;
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+        module Top (
+            clk:    input  clock     ,
+            we:     input  logic     ,
+            waddr:  input  logic<6>  ,
+            wdata:  input  logic<32> ,
+            raddr0: input  logic<6>  ,
+            raddr1: input  logic<6>  ,
+            rdata0: output logic<32> ,
+            rdata1: output logic<32> ,
+        ) {
+            inst u0: Mem ( clk, we, waddr, wdata, raddr0, rdata0 );
+            inst u1: Mem ( clk, we, waddr, wdata, raddr1, rdata1 );
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(m.ram_blocks.len(), 2, "two instances → two RAM blocks");
+    let nets0: std::collections::BTreeSet<_> = m.ram_blocks[0]
+        .read_ports
+        .iter()
+        .flat_map(|p| p.data.iter().copied())
+        .collect();
+    let nets1: std::collections::BTreeSet<_> = m.ram_blocks[1]
+        .read_ports
+        .iter()
+        .flat_map(|p| p.data.iter().copied())
+        .collect();
+    assert!(
+        nets0.is_disjoint(&nets1),
+        "the two cached instances must not share read-data nets"
+    );
+}
+
+#[test]
+fn distinct_read_addresses_allocate_distinct_ports() {
+    // Three reads at three different addresses → three read ports.
+    let code = r#"
+        module Multi (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            ra0:   input  logic<6>  ,
+            ra1:   input  logic<6>  ,
+            ra2:   input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = wdata;
+                }
+            }
+            assign rdata = mem[ra0] ^ mem[ra1] ^ mem[ra2];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Multi");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(m.ram_blocks.len(), 1);
+    assert_eq!(
+        m.ram_blocks[0].read_ports.len(),
+        3,
+        "three distinct addresses must give three read ports"
+    );
+}
+
+#[test]
+fn write_sites_over_limit_stay_flip_flops() {
+    // 9 distinct clocked write sites exceed RAM_MAX_WRITE_PORTS (8): the array
+    // stays flip-flops rather than modelling a 9-write-port memory.
+    let writes: String = (0..9)
+        .map(|k| format!("                    mem[waddr + {k}] = wdata;\n"))
+        .collect();
+    let code = format!(
+        r#"
+        module ManyWrite (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {{
+            var mem: logic<32> [64];
+            always_ff (clk) {{
+                if we {{
+{writes}                }}
+            }}
+            assign rdata = mem[raddr];
+        }}
+    "#
+    );
+    let (ir, top) = analyze(&code, "ManyWrite");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert!(
+        m.ram_blocks.is_empty(),
+        "9 write sites exceed the 8-port limit; array must stay flip-flops"
+    );
+    assert!(!m.ffs.is_empty(), "rejected array should remain flip-flops");
+}
+
+#[test]
+fn read_addresses_over_limit_stay_flip_flops() {
+    // 17 distinct read addresses exceed RAM_MAX_READ_PORTS (16): the array stays
+    // flip-flops rather than modelling a 17-read-port memory.
+    let reads: String = (0..17)
+        .map(|k| format!("mem[raddr + {k}]"))
+        .collect::<Vec<_>>()
+        .join(" ^ ");
+    let code = format!(
+        r#"
+        module ManyRead (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {{
+            var mem: logic<32> [64];
+            always_ff (clk) {{
+                if we {{
+                    mem[waddr] = wdata;
+                }}
+            }}
+            assign rdata = {reads};
+        }}
+    "#
+    );
+    let (ir, top) = analyze(&code, "ManyRead");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert!(
+        m.ram_blocks.is_empty(),
+        "17 read addresses exceed the 16-port limit; array must stay flip-flops"
+    );
+    assert!(!m.ffs.is_empty(), "rejected array should remain flip-flops");
+}
+
+#[test]
+fn combinationally_driven_array_is_not_ram() {
+    // An array driven by always_comb is combinational logic (a wire/lookup),
+    // not a clocked memory — it must never be inferred as a RAM, however large.
+    // Fully driven (whole-array default + dynamic override) so there is no latch.
+    let code = r#"
+        module CombArr (
+            init:  input  logic<32> [64] ,
+            idx:   input  logic<6>       ,
+            d:     input  logic<32>      ,
+            raddr: input  logic<6>       ,
+            rdata: output logic<32>      ,
+        ) {
+            var mem: logic<32> [64];
+            always_comb {
+                mem      = init;
+                mem[idx] = d;
+            }
+            assign rdata = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "CombArr");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert!(
+        m.ram_blocks.is_empty(),
+        "a combinationally-driven array must not be inferred as a RAM"
+    );
+}

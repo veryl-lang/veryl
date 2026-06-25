@@ -27,6 +27,36 @@ pub struct CellInfo {
     pub internal_energy: f64,
 }
 
+/// Analytical SRAM macro model for inferred RAM blocks. A bit-array macro is
+/// far denser and faster than the equivalent flip-flops plus an address
+/// decode/mux tree, so modelling it directly keeps area/timing realistic for
+/// memory-heavy designs (caches, register files). All figures are per-PDK
+/// scaled and intentionally coarse — relative cost, not signoff.
+#[derive(Clone, Copy, Debug)]
+pub struct SramModel {
+    /// Silicon area per stored bit (um²), amortising the bit cell plus its
+    /// share of row/column periphery.
+    pub bit_area: f64,
+    /// Static leakage per stored bit (nW).
+    pub bit_leakage: f64,
+    /// Fixed access-time floor (ns) before the depth-dependent term.
+    pub access_base: f64,
+    /// Added access time per doubling of depth (ns × log2(depth)).
+    pub access_per_log2_depth: f64,
+    /// Dynamic energy per accessed data bit, per read (pJ).
+    pub read_energy_per_bit: f64,
+    /// Dynamic energy per accessed data bit, per write (pJ).
+    pub write_energy_per_bit: f64,
+}
+
+impl SramModel {
+    /// Access time for a `depth`-entry macro: `base + slope · log2(depth)`.
+    pub fn access_delay(&self, depth: usize) -> f64 {
+        let log2 = (depth.max(2) as f64).log2();
+        self.access_base + self.access_per_log2_depth * log2
+    }
+}
+
 /// The per-technology data a synthesis estimation needs: cell-kind
 /// metrics, FF primitive parameters, and a banner line for reports.
 /// One implementation per PDK, dispatched via [`library_for`].
@@ -37,6 +67,26 @@ pub trait CellLibrary {
     fn ff_area(&self) -> f64;
     fn ff_leakage(&self) -> f64;
     fn ff_internal_energy(&self) -> f64;
+
+    /// SRAM macro figures. The default derives them from this PDK's flip-flop
+    /// metrics so every library gets a self-consistent model without separate
+    /// memory characterization: a 6T bit cell is roughly a fifth of a DFF and
+    /// leaks far less, and an access is a couple of FF setup times plus a
+    /// shallow depth term. PDKs with real macro data can override this.
+    fn sram_model(&self) -> SramModel {
+        let ff_area = self.ff_area();
+        let ff_leak = self.ff_leakage();
+        let ff_setup = self.ff_setup().max(0.02);
+        let ff_energy = self.ff_internal_energy();
+        SramModel {
+            bit_area: ff_area * 0.18,
+            bit_leakage: ff_leak * 0.08,
+            access_base: ff_setup * 2.0,
+            access_per_log2_depth: ff_setup * 0.25,
+            read_energy_per_bit: ff_energy * 0.04,
+            write_energy_per_bit: ff_energy * 0.06,
+        }
+    }
 }
 
 /// Static dispatcher: map a [`Library`] config enum to its concrete

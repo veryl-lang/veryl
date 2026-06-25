@@ -2,13 +2,14 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use veryl_analyzer::ir::{self as air, Statement};
 
-use crate::conv::ConvContext;
 use crate::conv::arith;
 use crate::conv::expression::{
     emit_cube, emit_sop_bit, minimize_sop_cubes, reduce_and, reduce_or, synth_function_call_stmt,
     synthesize_expr, try_constant,
 };
-use crate::ir::{CellKind, NET_CONST0, NET_CONST1, NetId};
+use crate::conv::ram;
+use crate::conv::{CondTerm, ConvContext};
+use crate::ir::{CellKind, NET_CONST0, NET_CONST1, NetId, RamWritePort};
 use crate::synthesizer_error::{SynthesizerError, UnsupportedKind};
 
 pub(crate) fn process_statements(
@@ -67,9 +68,17 @@ fn process_statement(
             }
             let cond = synthesize_expr(ctx, &ifst.cond, current, 1)?[0];
             let mut true_branch = current.clone();
-            process_statements(ctx, &ifst.true_side, &mut true_branch)?;
+            // Thread the condition so a RAM write inside takes it as its
+            // write-enable; pop before `?` to keep the stack balanced on error.
+            ctx.cond_stack.push(CondTerm::Pos(cond));
+            let r = process_statements(ctx, &ifst.true_side, &mut true_branch);
+            ctx.cond_stack.pop();
+            r?;
             let mut false_branch = current.clone();
-            process_statements(ctx, &ifst.false_side, &mut false_branch)?;
+            ctx.cond_stack.push(CondTerm::Neg(cond));
+            let r = process_statements(ctx, &ifst.false_side, &mut false_branch);
+            ctx.cond_stack.pop();
+            r?;
             merge_branches(ctx, cond, current, &true_branch, &false_branch);
             Ok(())
         }
@@ -104,11 +113,68 @@ fn process_statement(
     }
 }
 
+/// Records a dynamic RAM write as a macro write port: `addr` from the index,
+/// `data` from the synthesized source, `enable` from the branch path (see
+/// [`current_write_enable`]).
+fn record_ram_write(
+    ctx: &mut ConvContext,
+    dst: &air::AssignDestination,
+    src: &[NetId],
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+) -> Result<(), SynthesizerError> {
+    let cand = ctx.ram_vars[&dst.id];
+    let idx_expr =
+        dst.index.0.first().ok_or_else(|| {
+            SynthesizerError::internal(format!("RAM write {} has no index", dst.id))
+        })?;
+    let idx_bits = arith::index_bits_for(cand.depth);
+    let addr = synthesize_expr(ctx, idx_expr, current, idx_bits)?;
+    let mut data = src.to_vec();
+    data.resize(cand.width, NET_CONST0);
+    let enable = current_write_enable(ctx);
+    if let Some(builder) = ctx.ram_builders.get_mut(&dst.id) {
+        builder.writes.push(RamWritePort { addr, data, enable });
+    }
+    Ok(())
+}
+
+/// AND of every enclosing branch condition (`Neg` negated). Constants fold, so
+/// an unconditional write stays tied high with no gate.
+fn current_write_enable(ctx: &mut ConvContext) -> NetId {
+    let terms = ctx.cond_stack.clone();
+    let mut acc = NET_CONST1;
+    for term in terms {
+        let net = match term {
+            CondTerm::Pos(n) => n,
+            CondTerm::Neg(n) => match n {
+                NET_CONST1 => NET_CONST0,
+                NET_CONST0 => NET_CONST1,
+                _ => ctx.add_cell(CellKind::Not, vec![n]),
+            },
+        };
+        acc = and_nets(ctx, acc, net);
+    }
+    acc
+}
+
+/// `a & b` with constant folding (so a single-condition enable adds no gate).
+fn and_nets(ctx: &mut ConvContext, a: NetId, b: NetId) -> NetId {
+    if a == NET_CONST0 || b == NET_CONST0 {
+        NET_CONST0
+    } else if a == NET_CONST1 {
+        b
+    } else if b == NET_CONST1 {
+        a
+    } else {
+        ctx.add_cell(CellKind::And2, vec![a, b])
+    }
+}
+
 /// Computes how many source bits an `AssignDestination` consumes. Purely
 /// structural — doesn't allocate any cells. `write_to_dst` produces the
 /// dynamic-index/select nets later.
 pub(crate) fn dst_slice_width(
-    ctx: &ConvContext,
+    ctx: &mut ConvContext,
     dst: &air::AssignDestination,
 ) -> Result<usize, SynthesizerError> {
     let scalar_width = ctx
@@ -128,10 +194,9 @@ pub(crate) fn dst_slice_width(
     if dst.select.is_empty() {
         Ok(member_width)
     } else if dst.select.is_const() {
-        let mut eval_ctx = veryl_analyzer::Context::default();
         let (hi, lo) = dst
             .select
-            .eval_value(&mut eval_ctx, &dst.comptime.r#type, false)
+            .eval_value(&mut ctx.eval_ctx, &dst.comptime.r#type, false)
             .ok_or_else(|| {
                 SynthesizerError::dynamic_select(format!("dst {}", dst.id), &dst.token)
             })?;
@@ -161,6 +226,11 @@ pub(crate) fn write_to_dst(
     src: &[NetId],
     current: &mut HashMap<air::VarId, Vec<NetId>>,
 ) -> Result<(), SynthesizerError> {
+    // RAM-inferred arrays don't materialise per-element decode/mux. The single
+    // dynamic write `mem[addr] = data` becomes the macro's write port instead.
+    if ctx.ram_vars.contains_key(&dst.id) {
+        return record_ram_write(ctx, dst, src, current);
+    }
     let (total_width, scalar_width, shape) = {
         let slot = ctx.variables.get(&dst.id).ok_or_else(|| {
             SynthesizerError::internal(format!("unknown assign target {}", dst.id))
@@ -194,10 +264,9 @@ pub(crate) fn write_to_dst(
             hi: member_width - 1,
         }
     } else if dst.select.is_const() && !dst.select.is_range() {
-        let mut eval_ctx = veryl_analyzer::Context::default();
         let (hi, lo) = dst
             .select
-            .eval_value(&mut eval_ctx, &dst.comptime.r#type, false)
+            .eval_value(&mut ctx.eval_ctx, &dst.comptime.r#type, false)
             .ok_or_else(|| {
                 SynthesizerError::dynamic_select(format!("dst {}", dst.id), &dst.token)
             })?;
@@ -221,10 +290,9 @@ pub(crate) fn write_to_dst(
                 &dst.token,
             ));
         }
-        let mut eval_ctx = veryl_analyzer::Context::default();
         let (hi, lo) = dst
             .select
-            .eval_value(&mut eval_ctx, &dst.comptime.r#type, false)
+            .eval_value(&mut ctx.eval_ctx, &dst.comptime.r#type, false)
             .ok_or_else(|| {
                 SynthesizerError::dynamic_select(format!("dst {}", dst.id), &dst.token)
             })?;
@@ -259,8 +327,7 @@ pub(crate) fn write_to_dst(
     let index_kind = if dst.index.0.is_empty() {
         IndexKind::Static(0)
     } else if dst.index.is_const() {
-        let mut eval_ctx = veryl_analyzer::Context::default();
-        let indices = dst.index.eval_value(&mut eval_ctx).ok_or_else(|| {
+        let indices = dst.index.eval_value(&mut ctx.eval_ctx).ok_or_else(|| {
             SynthesizerError::dynamic_select(format!("dst index {}", dst.id), &dst.token)
         })?;
         let flat = shape.calc_index(&indices).ok_or_else(|| {
@@ -478,6 +545,18 @@ fn synth_case_chain(
     const MIN_ARMS: usize = 3;
 
     if chain.arms.len() < MIN_ARMS {
+        return Ok(false);
+    }
+
+    // This fold processes arm bodies without pushing onto `cond_stack`, so a RAM
+    // write inside would lose its arm condition. Fall back to nested-if lowering.
+    if !ctx.ram_vars.is_empty()
+        && (ram::stmts_write_ram(&ctx.ram_vars, chain.default_body)
+            || chain
+                .arms
+                .iter()
+                .any(|a| ram::stmts_write_ram(&ctx.ram_vars, a.body)))
+    {
         return Ok(false);
     }
 

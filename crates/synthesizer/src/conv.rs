@@ -1,43 +1,121 @@
 pub(crate) mod arith;
 pub(crate) mod expression;
 mod postpass;
+pub(crate) mod ram;
 pub(crate) mod statement;
 mod worklist;
 
+use std::cell;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::mem;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use veryl_analyzer::ir::{self as air, Declaration, Function, Shape, Statement, VarKind};
 use veryl_parser::resource_table::StrId;
 
 use crate::conv::expression::synthesize_expr;
 use crate::conv::postpass::complex_gate_replacement;
+use crate::conv::ram::RamCandidate;
 use crate::conv::worklist::{dead_cell_elimination, worklist_simplify};
 use crate::ir::{
     Cell, CellKind, ClockEdge, FfCell, GateModule, GatePort, NET_CONST0, NET_CONST1, NetDriver,
-    NetId, NetInfo, PortDir, RESERVED_NETS, ResetPolarity, ResetSpec,
+    NetId, NetInfo, PortDir, RESERVED_NETS, RamBlock, RamReadPort, RamWritePort, ResetPolarity,
+    ResetSpec,
 };
 use crate::synthesizer_error::{SynthesizerError, UnsupportedKind};
 
 pub(crate) use statement::process_statements;
 
+/// Accumulates wall time spent converting flattened child instances, so the top
+/// module's profile can separate flatten cost from its own logic build. Only
+/// read for the `VERYL_SYNTH_TIME` breakdown; single-threaded so plain
+/// Relaxed ordering is fine.
+static FLATTEN_NANOS: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    /// `convert_module` recursion depth. `flatten_inst` only accounts a child's
+    /// conversion time at depth 1 (direct children of the top) so nested
+    /// flattening isn't double-counted in [`FLATTEN_NANOS`].
+    static CONV_DEPTH: cell::Cell<u32> = const { cell::Cell::new(0) };
+
+    /// Memoizes a child's converted gate by elaborated `Component` address, so
+    /// repeated instances of the same module (e.g. `pmp_check` ×6) convert once;
+    /// `flatten_inst` only reads it, remapping nets per instance. Cleared when the
+    /// outermost `convert_module` returns (see `DepthGuard`).
+    static CHILD_CACHE: cell::RefCell<HashMap<*const (), Rc<GateModule>>> =
+        cell::RefCell::new(HashMap::new());
+}
+
 pub fn convert_module(module: &air::Module) -> Result<GateModule, SynthesizerError> {
+    struct DepthGuard;
+    impl Drop for DepthGuard {
+        fn drop(&mut self) {
+            CONV_DEPTH.with(|d| {
+                let nd = d.get() - 1;
+                d.set(nd);
+                if nd == 0 {
+                    CHILD_CACHE.with(|c| c.borrow_mut().clear());
+                }
+            });
+        }
+    }
+    CONV_DEPTH.with(|d| d.set(d.get() + 1));
+    let _depth_guard = DepthGuard;
+
+    let timed = module.declarations.len() > 600 && env::var_os("VERYL_SYNTH_TIME").is_some();
+    macro_rules! phase {
+        ($label:expr, $e:expr) => {{
+            let t = Instant::now();
+            let r = $e;
+            if timed {
+                eprintln!(
+                    "[synth-time]   {}: {:.3}s",
+                    $label,
+                    t.elapsed().as_secs_f64()
+                );
+            }
+            r
+        }};
+    }
+
     let functions: HashMap<air::VarId, Function> = module
         .functions
         .iter()
         .map(|(k, v)| (*k, v.clone()))
         .collect();
     let mut ctx = ConvContext::new(functions);
-    ctx.allocate_variables(module)?;
-    ctx.classify_drivers(module)?;
+    // Detect RAMs before FF banks are allocated, so qualifying arrays skip the
+    // per-bit flip-flop + address decode/mux expansion. Opt-out: VERYL_SYNTH_NO_RAM.
+    if env::var_os("VERYL_SYNTH_NO_RAM").is_none() {
+        ctx.ram_vars = phase!("infer_ram_vars", ram::infer_ram_vars(module));
+    }
+    phase!("allocate_variables", ctx.allocate_variables(module)?);
+    phase!("classify_drivers", ctx.classify_drivers(module)?);
 
     // FF cells must be built before any declaration processes expressions,
     // so references to FF-driven variables from comb blocks can resolve to
     // the Q net.
-    ctx.preallocate_ff_cells(module)?;
+    phase!("preallocate_ff_cells", ctx.preallocate_ff_cells(module)?);
 
+    let flatten_before = FLATTEN_NANOS.load(Ordering::Relaxed);
+    let t_proc = Instant::now();
     for (idx, decl) in module.declarations.iter().enumerate() {
         ctx.process_declaration(idx, decl, &module.token)?;
+    }
+    if timed {
+        let flatten = (FLATTEN_NANOS.load(Ordering::Relaxed) - flatten_before) as f64 / 1e9;
+        let total = t_proc.elapsed().as_secs_f64();
+        eprintln!(
+            "[synth-time]   process_declaration: {:.3}s (flatten {:.3}s, own {:.3}s, {} cells pre-opt)",
+            total,
+            flatten,
+            total - flatten,
+            ctx.cells.len(),
+        );
     }
 
     ctx.finalize(module)
@@ -68,17 +146,55 @@ pub(crate) struct PreFf {
     pub ff_indices: Vec<usize>,
 }
 
+/// Accumulates a RAM block's ports as the converter walks the writes/reads of
+/// an inferred memory variable. Assembled into a [`RamBlock`] in `finalize`.
+pub(crate) struct RamBuilder {
+    pub ram_idx: usize,
+    pub depth: usize,
+    pub width: usize,
+    pub clock: NetId,
+    pub clock_edge: ClockEdge,
+    /// One entry per dynamic write site `mem[addr] = data` (multi-write arrays
+    /// such as cache data or a superscalar register file produce several).
+    pub writes: Vec<RamWritePort>,
+    /// Read ports keyed by a structural address signature so repeated reads of
+    /// the same address share one port.
+    pub reads: Vec<(String, RamReadPort)>,
+}
+
 pub(crate) struct ConvContext {
     pub cells: Vec<Cell>,
     pub ffs: Vec<FfCell>,
     pub nets: Vec<NetInfo>,
     pub variables: HashMap<air::VarId, VarSlot>,
     pub ff_allocation: HashMap<air::VarId, PreFf>,
-    /// User-defined functions available for inline expansion at call sites.
-    /// Cloned from `Module.functions` because expression synthesis needs
-    /// access during `Factor::FunctionCall` handling and the module borrow
-    /// wouldn't survive the recursive convert_module calls for child insts.
+    /// User functions, for inline expansion at call sites. Cloned (not borrowed)
+    /// because the module borrow wouldn't survive recursive child conversion.
     pub functions: HashMap<air::VarId, Function>,
+    /// Scalar params/consts, so `eval_value` can fold a param used as a constant
+    /// index (`count[FIFO_W]`). Seeded in `allocate_variables`.
+    pub eval_ctx: veryl_analyzer::Context,
+    /// Array variables inferred as RAM (see `conv::ram`). Their writes/reads are
+    /// turned into RAM ports instead of FF banks and address mux/decode trees.
+    pub ram_vars: HashMap<air::VarId, RamCandidate>,
+    /// Per-RAM-variable port accumulators, finalised into `GateModule.ram_blocks`.
+    pub ram_builders: HashMap<air::VarId, RamBuilder>,
+    /// RAM blocks pulled in from flattened child instances (already built,
+    /// nets remapped). Appended after this module's own inferred blocks.
+    pub flattened_rams: Vec<RamBlock>,
+    /// Enclosing branch conditions for the current statement, outermost first.
+    /// Read only by `record_ram_write` (AND'd into a write-enable); balanced
+    /// push/pop leaves it empty at statement-stream boundaries.
+    pub cond_stack: Vec<CondTerm>,
+}
+
+/// One enclosing branch condition. `Neg` (the `else` side) materialises its NOT
+/// gate lazily — only when a RAM write consumes it — so a RAM-free `if/else`
+/// adds no cells.
+#[derive(Clone, Copy)]
+pub(crate) enum CondTerm {
+    Pos(NetId),
+    Neg(NetId),
 }
 
 impl ConvContext {
@@ -100,6 +216,11 @@ impl ConvContext {
             variables: HashMap::new(),
             ff_allocation: HashMap::new(),
             functions,
+            eval_ctx: veryl_analyzer::Context::default(),
+            ram_vars: HashMap::new(),
+            ram_builders: HashMap::new(),
+            flattened_rams: Vec::new(),
+            cond_stack: Vec::new(),
         }
     }
 
@@ -130,6 +251,16 @@ impl ConvContext {
         // Deterministic net numbering simplifies diffing dump output.
         let mut vars: Vec<&air::Variable> = module.variables.values().collect();
         vars.sort_by_key(|v| v.id);
+        // Seed scalar params/consts so a param-indexed select (`count[FIFO_W]`)
+        // folds. Only genuine constants — a signal's undriven `x` init would
+        // otherwise be read as one. Arrays skipped: a select index is scalar.
+        for v in &vars {
+            if matches!(v.kind, VarKind::Param | VarKind::Const)
+                && v.r#type.total_array() == Some(1)
+            {
+                self.eval_ctx.variables.insert(v.id, (*v).clone());
+            }
+        }
         for v in vars {
             let meta_type_name = match &v.r#type.kind {
                 air::TypeKind::Module(_) => Some("module"),
@@ -329,6 +460,20 @@ impl ConvContext {
                     });
                 }
                 for vid in assigned {
+                    // RAM-inferred arrays carry no FF bank; record the driving
+                    // clock for the macro and skip per-bit flip-flop allocation.
+                    if let Some(cand) = self.ram_vars.get(&vid) {
+                        self.ram_builders.entry(vid).or_insert_with(|| RamBuilder {
+                            ram_idx: cand.ram_idx,
+                            depth: cand.depth,
+                            width: cand.width,
+                            clock: clock_net,
+                            clock_edge,
+                            writes: Vec::new(),
+                            reads: Vec::new(),
+                        });
+                        continue;
+                    }
                     // First block touching the var owns its FF bank;
                     // later blocks writing disjoint bits share it.
                     if self.ff_allocation.contains_key(&vid) {
@@ -515,7 +660,24 @@ impl ConvContext {
             }
         };
 
-        let child_gate = convert_module(child_module)?;
+        // Account a child's conversion time only when this is a direct child of
+        // the top (depth 1 here, child runs at depth 2) so nesting isn't
+        // double-counted in the flatten/own split.
+        let account = CONV_DEPTH.with(|d| d.get()) == 1;
+        let t_child = Instant::now();
+        let cache_key = Arc::as_ptr(&inst.component) as *const ();
+        let child_gate: Rc<GateModule> =
+            match CHILD_CACHE.with(|c| c.borrow().get(&cache_key).cloned()) {
+                Some(g) => g,
+                None => {
+                    let g = Rc::new(convert_module(child_module)?);
+                    CHILD_CACHE.with(|c| c.borrow_mut().insert(cache_key, g.clone()));
+                    g
+                }
+            };
+        if account {
+            FLATTEN_NANOS.fetch_add(t_child.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         let mut net_map: Vec<NetId> = Vec::with_capacity(child_gate.nets.len());
         net_map.push(NET_CONST0);
         net_map.push(NET_CONST1);
@@ -595,6 +757,45 @@ impl ConvContext {
             }
         }
 
+        // Pull up the child's RAM blocks, remapping nets and re-basing indices
+        // after this module's own and any already-flattened blocks. Without this
+        // a child's macro storage and read-data drivers vanish on flattening.
+        let ram_base = self.ram_vars.len() + self.flattened_rams.len();
+        for (ci, ram) in child_gate.ram_blocks.iter().enumerate() {
+            let remap = |n: NetId| net_map[n as usize];
+            let new_ram = RamBlock {
+                name: ram.name,
+                depth: ram.depth,
+                width: ram.width,
+                clock: remap(ram.clock),
+                clock_edge: ram.clock_edge,
+                read_ports: ram
+                    .read_ports
+                    .iter()
+                    .map(|rp| RamReadPort {
+                        addr: rp.addr.iter().map(|&n| remap(n)).collect(),
+                        data: rp.data.iter().map(|&n| remap(n)).collect(),
+                        sync: rp.sync,
+                    })
+                    .collect(),
+                write_ports: ram
+                    .write_ports
+                    .iter()
+                    .map(|wp| RamWritePort {
+                        addr: wp.addr.iter().map(|&n| remap(n)).collect(),
+                        data: wp.data.iter().map(|&n| remap(n)).collect(),
+                        enable: remap(wp.enable),
+                    })
+                    .collect(),
+            };
+            for (pi, rp) in new_ram.read_ports.iter().enumerate() {
+                for (bi, &dn) in rp.data.iter().enumerate() {
+                    self.nets[dn as usize].driver = NetDriver::RamRead(ram_base + ci, pi, bi);
+                }
+            }
+            self.flattened_rams.push(new_ram);
+        }
+
         for output in &inst.outputs {
             if output.dst.is_empty() {
                 // `y: _` — unconnected, child's output nets are discarded.
@@ -663,20 +864,64 @@ impl ConvContext {
                 }
             }
         }
+        // Own blocks land at indices 0..M in ram_idx order, matching the
+        // `RamRead` drivers set during processing; flattened child blocks (re-based
+        // to `ram_vars.len()+..`) follow. That re-basing assumes every ram_var
+        // produced exactly one builder — assert it so a future write path that
+        // bypasses builder creation fails loudly rather than mis-indexing.
+        let mut builders: Vec<(air::VarId, RamBuilder)> = self.ram_builders.drain().collect();
+        builders.sort_by_key(|(_, b)| b.ram_idx);
+        debug_assert_eq!(builders.len(), self.ram_vars.len());
+        debug_assert!(
+            builders
+                .iter()
+                .enumerate()
+                .all(|(i, (_, b))| b.ram_idx == i)
+        );
+        let mut ram_blocks: Vec<RamBlock> = builders
+            .into_iter()
+            .map(|(vid, b)| RamBlock {
+                name: self.variables[&vid].name,
+                depth: b.depth,
+                width: b.width,
+                clock: b.clock,
+                clock_edge: b.clock_edge,
+                read_ports: b.reads.into_iter().map(|(_, p)| p).collect(),
+                write_ports: b.writes,
+            })
+            .collect();
+        ram_blocks.append(&mut self.flattened_rams);
+
         let mut gate = GateModule {
             name: Some(module.name),
             ports,
             nets: self.nets,
             cells: self.cells,
             ffs: self.ffs,
+            ram_blocks,
         };
         // Worklist-based convergence. Each cell is revisited only when one
         // of its inputs has been rewritten since the last visit, instead of
         // scanning the whole cell list every outer iteration. Drops outer
         // iteration count from ~1000 to a small handful for designs with
         // long alias chains (carry rings, Kogge-Stone prefix networks).
-        converge_simplify(&mut gate);
-        dead_cell_elimination(&mut gate);
+        let ftimed = gate.cells.len() > 500_000 && env::var_os("VERYL_SYNTH_TIME").is_some();
+        macro_rules! fphase {
+            ($label:expr, $e:expr) => {{
+                let t = Instant::now();
+                $e;
+                if ftimed {
+                    eprintln!(
+                        "[synth-time]     finalize/{}: {:.3}s ({} cells)",
+                        $label,
+                        t.elapsed().as_secs_f64(),
+                        gate.cells.len()
+                    );
+                }
+            }};
+        }
+        fphase!("converge_simplify", converge_simplify(&mut gate));
+        fphase!("dead_cell_elimination", dead_cell_elimination(&mut gate));
 
         // Opt-in AIG structural rewrite (see `crate::aig`). Off by default
         // because it regresses on some designs; `VERYL_AIG_ROUNDTRIP=1`
@@ -684,7 +929,7 @@ impl ConvContext {
         #[cfg(feature = "aig")]
         {
             use crate::aig::{convert, rewrite, techmap};
-            let roundtrip_only = std::env::var("VERYL_AIG_ROUNDTRIP").is_ok();
+            let roundtrip_only = env::var("VERYL_AIG_ROUNDTRIP").is_ok();
             let mut aig = convert::aigify(&gate);
             if roundtrip_only {
                 gate = convert::aig_to_cells(&aig, &gate);
@@ -701,8 +946,11 @@ impl ConvContext {
         // Runs after DCE so the consumer counts are clean (no stale dead
         // cells inflating the check). A final DCE sweep removes the orphan
         // upstream cells produced by each fusion.
-        complex_gate_replacement(&mut gate);
-        dead_cell_elimination(&mut gate);
+        fphase!(
+            "complex_gate_replacement",
+            complex_gate_replacement(&mut gate)
+        );
+        fphase!("final_dce", dead_cell_elimination(&mut gate));
         Ok(gate)
     }
 }
@@ -774,6 +1022,11 @@ fn eliminate_dq_ffs(module: &mut GateModule) {
             }
         }
     }
+    module.for_each_ram_input_net_mut(|n| {
+        if let Some(&new) = alias.get(n) {
+            *n = new;
+        }
+    });
 
     let old_ffs = mem::take(&mut module.ffs);
     let mut index_map: Vec<Option<usize>> = vec![None; old_ffs.len()];
@@ -857,6 +1110,9 @@ pub(crate) fn collect_assigned(stmt: &Statement, f: &mut impl FnMut(air::VarId))
 fn init_current_comb(ctx: &ConvContext, decl_idx: usize) -> HashMap<air::VarId, Vec<NetId>> {
     let mut map = HashMap::new();
     for (vid, slot) in &ctx.variables {
+        if ctx.ram_vars.contains_key(vid) {
+            continue;
+        }
         if slot.driver == VarDriverKind::Comb(decl_idx) {
             let nets = vec![NET_CONST0; slot.width];
             map.insert(*vid, nets);
@@ -879,6 +1135,9 @@ fn init_current_ff(ctx: &ConvContext, ff: &air::FfDeclaration) -> HashMap<air::V
         });
     }
     for vid in assigned {
+        if ctx.ram_vars.contains_key(&vid) {
+            continue;
+        }
         if let Some(slot) = ctx.variables.get(&vid) {
             map.insert(vid, slot.nets.clone());
         }
@@ -886,20 +1145,21 @@ fn init_current_ff(ctx: &ConvContext, ff: &air::FfDeclaration) -> HashMap<air::V
     map
 }
 
-/// If the FF body is a single top-level `if_reset`, return the constant
-/// reset values and the "normal clocked" statements from the else branch.
+/// If the FF body begins with a top-level `if_reset`, return its constant reset
+/// values and the clocked path (the else branch plus any statements trailing the
+/// `if_reset`, which Veryl allows and SV runs after the else on a clock edge).
 /// Otherwise return the body as-is with no reset values.
 fn split_if_reset(stmts: &[Statement]) -> (Option<HashMap<air::VarId, Vec<bool>>>, Vec<Statement>) {
-    if stmts.len() == 1
-        && let Statement::IfReset(ifreset) = &stmts[0]
-    {
+    if let Some(Statement::IfReset(ifreset)) = stmts.first() {
+        let mut main_stmts = ifreset.false_side.clone();
+        main_stmts.extend_from_slice(&stmts[1..]);
         let mut reset_map: HashMap<air::VarId, Vec<bool>> = HashMap::new();
         if extract_constant_assigns(&ifreset.true_side, &mut reset_map).is_ok() {
-            return (Some(reset_map), ifreset.false_side.clone());
+            return (Some(reset_map), main_stmts);
         }
         // Non-constant reset expression: drop the reset branch; FFs keep
         // reset_value = 0.
-        return (None, ifreset.false_side.clone());
+        return (None, main_stmts);
     }
     (None, stmts.to_vec())
 }

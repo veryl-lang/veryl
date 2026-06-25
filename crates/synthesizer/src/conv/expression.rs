@@ -6,8 +6,9 @@ use veryl_analyzer::ir::{
 
 use crate::conv::ConvContext;
 use crate::conv::arith;
+use crate::conv::ram;
 use crate::conv::statement::{dst_slice_width, process_statements, write_to_dst};
-use crate::ir::{CellKind, NET_CONST0, NET_CONST1, NetId};
+use crate::ir::{CellKind, NET_CONST0, NET_CONST1, NetDriver, NetId, RamReadPort};
 use crate::synthesizer_error::{SynthesizerError, UnsupportedKind};
 
 /// Returns `target_width` nets in LSB-first order. Narrower results are
@@ -166,7 +167,7 @@ fn synth_raw(
                 let mut bits = synthesize_expr(ctx, e, current, w)?;
                 if let Some(rep) = repeat {
                     let rep_v = rep
-                        .eval_value(&mut veryl_analyzer::Context::default())
+                        .eval_value(&mut ctx.eval_ctx)
                         .and_then(|v| v.to_usize())
                         .ok_or_else(|| {
                             SynthesizerError::internal(
@@ -209,61 +210,71 @@ fn synth_factor(
             Ok(value_to_nets(value, width))
         }
         Factor::Variable(id, index, select, ct) => {
-            // The `current` map shadows the persistent nets within a block
-            // so that `a = a + 1`-style reads pick up the previous value.
-            let src_nets = current
-                .get(id)
-                .cloned()
-                .or_else(|| ctx.variables.get(id).map(|s| s.nets.clone()))
-                .ok_or_else(|| {
-                    SynthesizerError::internal(format!("reference to unknown variable {}", id))
-                })?;
-
-            let (scalar_width, shape) = {
-                let slot = ctx.variables.get(id).ok_or_else(|| {
-                    SynthesizerError::internal(format!("reference to unknown variable {}", id))
-                })?;
-                (slot.scalar_width, slot.shape.clone())
-            };
-
-            let element_nets: Vec<NetId> = if index.0.is_empty() {
-                src_nets
-            } else if index.is_const() {
-                let mut eval_ctx = veryl_analyzer::Context::default();
-                let indices = index.eval_value(&mut eval_ctx).ok_or_else(|| {
-                    SynthesizerError::dynamic_select(format!("array index on {}", id), &ct.token)
-                })?;
-                let flat = shape.calc_index(&indices).ok_or_else(|| {
-                    SynthesizerError::internal(format!(
-                        "array index out of range for {} (dims {})",
-                        id,
-                        shape.dims()
-                    ))
-                })?;
-                let start = flat * scalar_width;
-                src_nets[start..start + scalar_width].to_vec()
+            // RAM-inferred arrays resolve `mem[addr]` to a macro read port
+            // (allocated once per distinct address) instead of an element mux
+            // tree. The port yields the whole word; any bit/part `select` below
+            // is applied to the read data, exactly as for a flip-flop array.
+            let element_nets: Vec<NetId> = if ctx.ram_vars.contains_key(id) {
+                read_ram(ctx, id, index, current)?
             } else {
-                if shape.dims() != 1 {
-                    return Err(SynthesizerError::unsupported(
-                        UnsupportedKind::DynamicMultiDimIndex {
-                            what: format!("variable {}", id),
-                        },
-                        &ct.token,
-                    ));
+                // The `current` map shadows the persistent nets within a block
+                // so that `a = a + 1`-style reads pick up the previous value.
+                let src_nets = current
+                    .get(id)
+                    .cloned()
+                    .or_else(|| ctx.variables.get(id).map(|s| s.nets.clone()))
+                    .ok_or_else(|| {
+                        SynthesizerError::internal(format!("reference to unknown variable {}", id))
+                    })?;
+
+                let (scalar_width, shape) = {
+                    let slot = ctx.variables.get(id).ok_or_else(|| {
+                        SynthesizerError::internal(format!("reference to unknown variable {}", id))
+                    })?;
+                    (slot.scalar_width, slot.shape.clone())
+                };
+
+                if index.0.is_empty() {
+                    src_nets
+                } else if index.is_const() {
+                    let indices = index.eval_value(&mut ctx.eval_ctx).ok_or_else(|| {
+                        SynthesizerError::dynamic_select(
+                            format!("array index on {}", id),
+                            &ct.token,
+                        )
+                    })?;
+                    let flat = shape.calc_index(&indices).ok_or_else(|| {
+                        SynthesizerError::internal(format!(
+                            "array index out of range for {} (dims {})",
+                            id,
+                            shape.dims()
+                        ))
+                    })?;
+                    let start = flat * scalar_width;
+                    src_nets[start..start + scalar_width].to_vec()
+                } else {
+                    if shape.dims() != 1 {
+                        return Err(SynthesizerError::unsupported(
+                            UnsupportedKind::DynamicMultiDimIndex {
+                                what: format!("variable {}", id),
+                            },
+                            &ct.token,
+                        ));
+                    }
+                    let num_elements = shape.total().unwrap_or(0);
+                    if num_elements == 0 {
+                        return Err(SynthesizerError::internal(format!(
+                            "{} has zero elements",
+                            id
+                        )));
+                    }
+                    let idx_bits = arith::index_bits_for(num_elements);
+                    let idx_nets = synthesize_expr(ctx, &index.0[0], current, idx_bits)?;
+                    let elements: Vec<Vec<NetId>> = (0..num_elements)
+                        .map(|k| src_nets[k * scalar_width..(k + 1) * scalar_width].to_vec())
+                        .collect();
+                    arith::dynamic_mux_tree(ctx, &elements, &idx_nets)
                 }
-                let num_elements = shape.total().unwrap_or(0);
-                if num_elements == 0 {
-                    return Err(SynthesizerError::internal(format!(
-                        "{} has zero elements",
-                        id
-                    )));
-                }
-                let idx_bits = arith::index_bits_for(num_elements);
-                let idx_nets = synthesize_expr(ctx, &index.0[0], current, idx_bits)?;
-                let elements: Vec<Vec<NetId>> = (0..num_elements)
-                    .map(|k| src_nets[k * scalar_width..(k + 1) * scalar_width].to_vec())
-                    .collect();
-                arith::dynamic_mux_tree(ctx, &elements, &idx_nets)
             };
 
             // For struct/union members, the analyzer encodes the member range
@@ -274,9 +285,8 @@ fn synth_factor(
                 return apply_part_select(&element_nets, ct, id);
             }
             if select.is_const() && !select.is_range() {
-                let mut eval_ctx = veryl_analyzer::Context::default();
                 let (high, low) = select
-                    .eval_value(&mut eval_ctx, &ct.r#type, false)
+                    .eval_value(&mut ctx.eval_ctx, &ct.r#type, false)
                     .ok_or_else(|| {
                         SynthesizerError::dynamic_select(format!("variable {}", id), &ct.token)
                     })?;
@@ -309,9 +319,8 @@ fn synth_factor(
                         &ct.token,
                     ));
                 }
-                let mut eval_ctx = veryl_analyzer::Context::default();
                 let (high, low) = select
-                    .eval_value(&mut eval_ctx, &ct.r#type, false)
+                    .eval_value(&mut ctx.eval_ctx, &ct.r#type, false)
                     .ok_or_else(|| {
                         SynthesizerError::dynamic_select(format!("variable {}", id), &ct.token)
                     })?;
@@ -350,6 +359,53 @@ fn synth_factor(
             &ct.token,
         )),
     }
+}
+
+/// Resolve a `mem[addr]` read of a RAM-inferred array to its macro read port.
+/// Reads sharing an address (by structural signature) reuse one port; a new
+/// address allocates fresh `RamRead`-driven data nets that downstream logic
+/// consumes like any other source.
+fn read_ram(
+    ctx: &mut ConvContext,
+    id: &air::VarId,
+    index: &air::VarIndex,
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+) -> Result<Vec<NetId>, SynthesizerError> {
+    let cand = ctx.ram_vars[id];
+    let idx_expr = index
+        .0
+        .first()
+        .ok_or_else(|| SynthesizerError::internal(format!("RAM read {} has no index", id)))?;
+    // Same signature `read_pattern_ok` uses to count distinct read ports, so
+    // inference's port count and the ports actually allocated here agree.
+    let key = ram::addr_signature(idx_expr);
+
+    if let Some(builder) = ctx.ram_builders.get(id)
+        && let Some((_, port)) = builder.reads.iter().find(|(k, _)| *k == key)
+    {
+        return Ok(port.data.clone());
+    }
+
+    let idx_bits = arith::index_bits_for(cand.depth);
+    let addr = synthesize_expr(ctx, idx_expr, current, idx_bits)?;
+    let port_idx = ctx.ram_builders.get(id).map(|b| b.reads.len()).unwrap_or(0);
+    let data: Vec<NetId> = (0..cand.width)
+        .map(|bit| {
+            let n = ctx.alloc_net(None);
+            ctx.nets[n as usize].driver = NetDriver::RamRead(cand.ram_idx, port_idx, bit);
+            n
+        })
+        .collect();
+
+    let port = RamReadPort {
+        addr,
+        data: data.clone(),
+        sync: false,
+    };
+    if let Some(builder) = ctx.ram_builders.get_mut(id) {
+        builder.reads.push((key, port));
+    }
+    Ok(data)
 }
 
 fn synth_unary(

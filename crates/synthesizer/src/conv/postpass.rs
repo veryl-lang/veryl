@@ -100,6 +100,9 @@ impl<'a> PostPassCtx<'a> {
                 consumer_count[n as usize] += 1;
             }
         }
+        // RAM port inputs consume nets too; without counting them a fused cell
+        // could drop a net the RAM still reads.
+        module.for_each_ram_input_net(|n| consumer_count[n as usize] += 1);
 
         // Seed the `!sel` cache from existing Not cells so later phases
         // reuse them instead of cloning. The Or / And caches start empty —

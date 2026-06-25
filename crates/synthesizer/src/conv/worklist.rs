@@ -702,6 +702,16 @@ pub(super) fn worklist_simplify(module: &mut GateModule) {
     for (i, nets) in port_resolved {
         module.ports[i].nets = nets;
     }
+    // RAM blocks consume address/data/enable nets too — follow the same alias
+    // chains so a removed Buf doesn't leave a dangling RAM port reference.
+    let mut ram_resolved: Vec<NetId> = Vec::new();
+    module.for_each_ram_input_net(|n| ram_resolved.push(resolve_alias(module, n)));
+    let mut it = ram_resolved.into_iter();
+    module.for_each_ram_input_net_mut(|n| {
+        if let Some(r) = it.next() {
+            *n = r;
+        }
+    });
 
     let old_cells = mem::take(&mut module.cells);
     let mut index_map: Vec<Option<u32>> = vec![None; old_cells.len()];
@@ -744,6 +754,9 @@ pub(super) fn dead_cell_elimination(module: &mut GateModule) {
     for port in &module.ports {
         queue.extend(port.nets.iter().copied());
     }
+    // RAM port inputs (write addr/data/enable, read addr) are live sinks: the
+    // logic feeding them must survive even if nothing else consumes it.
+    module.for_each_ram_input_net(|n| queue.push(n));
     while let Some(net) = queue.pop() {
         if let NetDriver::Cell(idx) = module.nets[net as usize].driver {
             if alive[idx] {

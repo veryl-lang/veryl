@@ -2,7 +2,10 @@ use crate::OptSynth;
 use crate::pipeline::{self, AnalyzeOptions};
 use log::warn;
 use miette::Result;
-use std::collections::HashSet;
+use std::cmp::Reverse;
+use std::collections::{HashMap, HashSet};
+use std::env;
+use std::time::Instant;
 use veryl_analyzer::ir::{Component, Ir, Module};
 use veryl_metadata::Metadata;
 use veryl_parser::resource_table::{self, PathId};
@@ -36,7 +39,15 @@ impl CmdSynth {
             fail_fast: true,
         };
         let mut ir = Ir::default();
+        let timed = env::var_os("VERYL_SYNTH_TIME").is_some();
+        let t_analyze = Instant::now();
         let _ = pipeline::analyze(metadata, &paths, options, Some(&mut ir), None)?;
+        if timed {
+            eprintln!(
+                "[synth-time] analyze (parse+pass1/2): {:.3}s",
+                t_analyze.elapsed().as_secs_f64()
+            );
+        }
 
         // CLI `--top` > toml default > first user module.
         let top_override = self.opt.top.as_ref().or(metadata.synth.top.as_ref());
@@ -109,8 +120,12 @@ impl CmdSynth {
             println!("summary:");
             // Width 11 fits up to ~10 M um² / 1 W without breaking alignment.
             println!(
-                "  {:<8}{:>11.2} um²  (comb {:.2}, seq {:.2})",
-                "area:", result.area.total, result.area.combinational, result.area.sequential,
+                "  {:<8}{:>11.2} um²  (comb {:.2}, seq {:.2}, mem {:.2})",
+                "area:",
+                result.area.total,
+                result.area.combinational,
+                result.area.sequential,
+                result.area.memory,
             );
             println!(
                 "  {:<8}{:>11.3} ns   {:>5} levels  {} → {}",
@@ -138,6 +153,38 @@ impl CmdSynth {
             let full = format!("{}", result.area);
             for line in full.lines().skip(1) {
                 println!("{}", line);
+            }
+        }
+        // Inferred-RAM breakdown: only with explicit --dump-area, grouped by
+        // shape (depth × width) and port count.
+        if self.opt.dump_area {
+            let rams = &result.gate_ir.module.ram_blocks;
+            if !rams.is_empty() {
+                let bit_area = library.sram_model().bit_area;
+                let mut groups: HashMap<(usize, usize, usize, usize), usize> = HashMap::new();
+                for r in rams {
+                    *groups
+                        .entry((r.depth, r.width, r.read_ports.len(), r.write_ports.len()))
+                        .or_insert(0) += 1;
+                }
+                let mut rows: Vec<_> = groups.into_iter().collect();
+                // Largest stored-bit groups first.
+                rows.sort_by_key(|&((d, w, _, _), c)| Reverse(d * w * c));
+                println!();
+                println!("ram: {} blocks", rams.len());
+                for ((depth, width, reads, writes), count) in rows {
+                    let bits = depth * width * count;
+                    println!(
+                        "  {:>6}×{:<4} {}R{}W  ×{:<3} {:>9} bits  {:>12.2} um²",
+                        depth,
+                        width,
+                        reads,
+                        writes,
+                        count,
+                        bits,
+                        bits as f64 * bit_area,
+                    );
+                }
             }
         }
         if show_timing {
