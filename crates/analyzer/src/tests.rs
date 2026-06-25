@@ -12269,6 +12269,49 @@ fn non_constant_range_part_select_bounds() {
 }
 
 #[test]
+fn enum_xz_duplicate_variant() {
+    // Regression: x/z variants have no numeric value(), so they bypassed the
+    // duplicate-variant check; identical x/z literals were silently accepted.
+    let code = r#"
+    module Top {
+        enum Foo: logic<4> {
+            A = 4'b1x0z,
+            B = 4'b1x0z,
+            C = 4'b1x0z,
+        }
+        var _v: Foo;
+        assign _v = Foo::A;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicateEnumVariant { .. })),
+        "{errors:?}"
+    );
+
+    // x and z at the same position are distinct (z stores payload 1).
+    let code = r#"
+    module Top {
+        enum Foo: logic<4> {
+            A = 4'b1x,
+            B = 4'b1z,
+        }
+        var _v: Foo;
+        assign _v = Foo::A;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicateEnumVariant { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn enum_xz_variant_checks() {
     // Regression: a variant value containing any x/z bit bypassed the
     // too-large and width-inference checks (8'b1111111x in a 2-bit enum was
