@@ -52,6 +52,10 @@ pub struct Context {
     pub var_id: VarId,
     pub var_paths: HashMap<VarPath, (VarId, Comptime)>,
     pub func_paths: HashMap<FuncPath, VarId>,
+    /// Symbols whose function bodies are mid-conversion. Carried (via `inherit`)
+    /// across the fresh per-call contexts that mutual recursion creates, so
+    /// re-entry is detected and the IR conversion doesn't overflow.
+    pub converting_funcs: Vec<SymbolId>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,
@@ -100,6 +104,7 @@ impl Context {
         std::mem::swap(&mut self.generic_maps, &mut tgt.generic_maps);
         std::mem::swap(&mut self.modport_signatures, &mut tgt.modport_signatures);
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
+        std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
         self.disalbe_const_opt = tgt.disalbe_const_opt;

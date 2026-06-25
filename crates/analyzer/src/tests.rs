@@ -1079,7 +1079,7 @@ fn cyclic_type_dependency() {
 
     // A const in a function body initialized by a call to a sibling function in
     // the same package must not be reported as a cyclic dependency of the
-    // package with itself (regression of #2865, issue #2867).
+    // package with itself.
     let code = r#"
     package a_pkg {
         function f0() -> u32 {
@@ -1094,6 +1094,26 @@ fn cyclic_type_dependency() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    // Mutual recursion between sibling functions is a genuine cycle and must
+    // still be reported (not overflow) — the sibling-call fix above must not
+    // over-suppress it.
+    let code = r#"
+    package a_pkg {
+        function f0() -> u32 {
+            return f1();
+        }
+        function f1() -> u32 {
+            return f0();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::CyclicTypeDependency { .. }
+    ));
 }
 
 #[test]
