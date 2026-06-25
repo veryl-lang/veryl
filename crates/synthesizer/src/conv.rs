@@ -1198,7 +1198,9 @@ fn eval_constant_bits(expr: &air::Expression, width: usize) -> Option<Vec<bool>>
         let n = value.to_u64()?;
         let mut bits = Vec::with_capacity(width);
         for i in 0..width {
-            bits.push((n >> i) & 1 != 0);
+            // `n` fits in u64, so bits >= 64 are 0; the guard also avoids the
+            // `i >= 64` shift overflow (panic in debug, wrong mask in release).
+            bits.push(i < 64 && (n >> i) & 1 != 0);
         }
         return Some(bits);
     }
