@@ -1426,7 +1426,7 @@ impl Op {
             }
             Op::LogicShiftR => {
                 let x = x.expand(width, signed);
-                let y = y.to_usize();
+                let y = y.to_shift_amount();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1458,7 +1458,7 @@ impl Op {
             }
             Op::LogicShiftL => {
                 let x = x.expand(width, signed);
-                let y = y.to_usize();
+                let y = y.to_shift_amount();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1498,7 +1498,7 @@ impl Op {
             }
             Op::ArithShiftR => {
                 let x = x.expand(width, signed);
-                let y = y.to_usize();
+                let y = y.to_shift_amount();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1563,7 +1563,7 @@ impl Op {
             }
             Op::ArithShiftL => {
                 let x = x.expand(width, signed);
-                let y = y.to_usize();
+                let y = y.to_shift_amount();
 
                 match x.as_ref() {
                     Value::U64(x) => {
