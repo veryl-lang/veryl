@@ -1243,7 +1243,8 @@ impl Op {
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
                         let is_one = if signed {
-                            let sh = 64 - xy_width;
+                            // max(1): a width-0 operand (`'0`/`'1`) would make sh 64 and overflow.
+                            let sh = 64 - xy_width.max(1);
                             ((x.payload << sh) as i64) >> sh > ((y.payload << sh) as i64) >> sh
                         } else {
                             x.payload > y.payload
@@ -1277,7 +1278,7 @@ impl Op {
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
                         let is_one = if signed {
-                            let sh = 64 - xy_width;
+                            let sh = 64 - xy_width.max(1);
                             ((x.payload << sh) as i64) >> sh >= ((y.payload << sh) as i64) >> sh
                         } else {
                             x.payload >= y.payload
@@ -1311,7 +1312,7 @@ impl Op {
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
                         let is_one = if signed {
-                            let sh = 64 - xy_width;
+                            let sh = 64 - xy_width.max(1);
                             ((x.payload << sh) as i64) >> sh < ((y.payload << sh) as i64) >> sh
                         } else {
                             x.payload < y.payload
@@ -1345,7 +1346,7 @@ impl Op {
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
                         let is_one = if signed {
-                            let sh = 64 - xy_width;
+                            let sh = 64 - xy_width.max(1);
                             ((x.payload << sh) as i64) >> sh <= ((y.payload << sh) as i64) >> sh
                         } else {
                             x.payload <= y.payload
