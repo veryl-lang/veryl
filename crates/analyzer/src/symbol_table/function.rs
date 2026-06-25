@@ -4,11 +4,11 @@ use crate::symbol_table;
 
 pub fn resolve_function(list: &[Symbol]) {
     for symbol in list {
-        resolve_constantable(symbol);
+        resolve_constantable(symbol, &mut Vec::new());
     }
 }
 
-fn resolve_constantable(symbol: &Symbol) -> bool {
+fn resolve_constantable(symbol: &Symbol, visited: &mut Vec<SymbolId>) -> bool {
     match &symbol.kind {
         SymbolKind::Function(func) | SymbolKind::ProtoFunction(func) => {
             if let Some(constantable) = func.constantable {
@@ -18,6 +18,14 @@ fn resolve_constantable(symbol: &Symbol) -> bool {
         _ => {}
     }
 
+    // Already in progress: a call cycle (mutual recursion `f0 -> f1 -> f0`),
+    // not constant-evaluable and would overflow on re-entry. `type_dag` reports
+    // the cycle; self-recursion is skipped earlier in `is_constantable_function`.
+    if visited.contains(&symbol.id) {
+        return false;
+    }
+    visited.push(symbol.id);
+
     let namespace = symbol.inner_namespace();
     let mut symbol = symbol.clone();
     let func = match &mut symbol.kind {
@@ -25,16 +33,23 @@ fn resolve_constantable(symbol: &Symbol) -> bool {
         _ => unreachable!(),
     };
 
-    let constantable = is_constantable_function(func, symbol.id, &namespace);
+    let constantable = is_constantable_function(func, symbol.id, &namespace, visited);
     func.constantable = Some(constantable);
     func.reference_paths.clear();
 
     symbol_table::update(symbol);
 
+    visited.pop();
+
     constantable
 }
 
-fn is_constantable_function(func: &FunctionProperty, id: SymbolId, namespace: &Namespace) -> bool {
+fn is_constantable_function(
+    func: &FunctionProperty,
+    id: SymbolId,
+    namespace: &Namespace,
+    visited: &mut Vec<SymbolId>,
+) -> bool {
     if func.ret.is_none() {
         // constant function should have a return value.
         return false;
@@ -66,7 +81,7 @@ fn is_constantable_function(func: &FunctionProperty, id: SymbolId, namespace: &N
             {
                 return false;
             }
-            SymbolKind::Function(_) if !resolve_constantable(&symbol.found) => {
+            SymbolKind::Function(_) if !resolve_constantable(&symbol.found, visited) => {
                 return false;
             }
             SymbolKind::Instance(_) => return false,
