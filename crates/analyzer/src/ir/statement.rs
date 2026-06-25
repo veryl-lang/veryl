@@ -215,7 +215,7 @@ pub struct TbMethodCall {
 pub enum TbMethod {
     ClockNext {
         count: Option<Expression>,
-        period: Option<Expression>,
+        period: Option<Box<Expression>>,
     },
     ResetAssert {
         clock: StrId,

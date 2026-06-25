@@ -3393,7 +3393,11 @@ pub fn tb_method_call(
             } else {
                 None
             };
-            let period = context.tb_clock_period.get(&inst_name).cloned();
+            let period = context
+                .tb_clock_period
+                .get(&inst_name)
+                .cloned()
+                .map(Box::new);
             TbMethod::ClockNext { count, period }
         }
         (TbComponentKind::ResetGen, "assert") => {

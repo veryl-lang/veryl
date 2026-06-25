@@ -391,6 +391,7 @@ pub struct Type {
     pub array: Shape,
     width: Shape,
     width_expr: Vec<crate::ir::WidthExpr>,
+    array_expr: Vec<crate::ir::WidthExpr>,
 }
 
 impl Type {
@@ -404,6 +405,14 @@ impl Type {
 
     pub fn width_expr(&self) -> &[crate::ir::WidthExpr] {
         &self.width_expr
+    }
+
+    pub fn array_expr(&self) -> &[crate::ir::WidthExpr] {
+        &self.array_expr
+    }
+
+    pub fn set_array_expr(&mut self, exprs: Vec<crate::ir::WidthExpr>) {
+        self.array_expr = exprs;
     }
 
     pub fn new(kind: TypeKind) -> Type {
@@ -469,6 +478,15 @@ impl Type {
     }
 
     pub fn to_sv_array(&self) -> String {
+        // Prefer the symbolic dims so a parametric dimension isn't baked
+        // to the parameter's default value.
+        if !self.array_expr.is_empty() && self.array_expr.len() == self.array.as_slice().len() {
+            return self
+                .array_expr
+                .iter()
+                .map(|e| format!("[{}]", e.to_sv_expr()))
+                .collect();
+        }
         let mut s = String::new();
         for n in self.array.as_slice().iter().flatten() {
             s.push_str(&format!("[{n}]"));

@@ -3898,3 +3898,33 @@ fn reverse_range_bound_is_parenthesized() {
         "single-factor bound needs no parentheses: {ret}"
     );
 }
+
+#[test]
+fn inferred_array_keeps_parametric_dims() {
+    // Regression: `let s = i_a;` for `i_a: logic<N> [N]` emitted the unpacked
+    // dimension baked to the parameter's DEFAULT value (`s [4]`) while the
+    // packed width stayed parametric.
+    let code = r#"module ModuleA #(
+    param N: u32 = 4,
+) (
+    i_a: input  logic<N> [N],
+    o_x: output logic<8>,
+) {
+    always_comb {
+        let s = i_a;
+        o_x = s[0] as 8;
+    }
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    let line = ret
+        .lines()
+        .find(|l| l.contains(" s ") && l.contains("logic"))
+        .unwrap_or("");
+    assert!(
+        line.contains("[N]"),
+        "inferred array dim must stay parametric: {line}\n{ret}"
+    );
+}
