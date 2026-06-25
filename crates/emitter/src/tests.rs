@@ -3928,3 +3928,87 @@ fn inferred_array_keeps_parametric_dims() {
         "inferred array dim must stay parametric: {line}\n{ret}"
     );
 }
+
+#[test]
+fn ifdef_block_group_emits_one_guard_per_group() {
+    // Regression: a multi-statement `#[ifdef] block` re-emitted the guard per
+    // statement, and the `#[else]` continuation produced two `else inside one
+    // `ifdef (illegal SV); statements after the first lost the alternative.
+    let code = r#"module ModuleA (
+    i_a: input  logic,
+    o_x: output logic,
+    o_y: output logic,
+) {
+    always_comb {
+        #[ifdef(FEATURE_A)]
+        block {
+            o_x = i_a;
+            o_y = i_a;
+        }
+        #[else]
+        block {
+            o_x = 0;
+            o_y = 1;
+        }
+    }
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert_eq!(
+        ret.matches("`ifdef FEATURE_A").count(),
+        1,
+        "one guard per group: {ret}"
+    );
+    assert_eq!(ret.matches("`else").count(), 1, "single else: {ret}");
+    assert_eq!(ret.matches("`endif").count(), 1, "single endif: {ret}");
+    let ifdef_pos = ret.find("`ifdef FEATURE_A").unwrap();
+    let else_pos = ret.find("`else").unwrap();
+    let endif_pos = ret.find("`endif").unwrap();
+    for stmt in ["o_x = i_a;", "o_y = i_a;"] {
+        let p = ret.find(stmt).unwrap();
+        assert!(ifdef_pos < p && p < else_pos, "{stmt} inside ifdef: {ret}");
+    }
+    for stmt in ["o_x = 0;", "o_y = 1;"] {
+        let p = ret.find(stmt).unwrap();
+        assert!(else_pos < p && p < endif_pos, "{stmt} inside else: {ret}");
+    }
+}
+
+#[test]
+fn nested_ifdef_block_group_keeps_inner_guard() {
+    // Regression: a `#[ifdef(B)] block` nested inside `#[ifdef(A)] block`
+    // had its guard flattened away entirely.
+    let code = r#"module ModuleA (
+    i_a: input  logic,
+    o_x: output logic,
+) {
+    always_comb {
+        o_x = 0;
+        #[ifdef(FEATURE_A)]
+        block {
+            o_x = i_a;
+            #[ifdef(FEATURE_B)]
+            block {
+                o_x = ~i_a;
+            }
+        }
+    }
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    assert_eq!(ret.matches("`ifdef FEATURE_A").count(), 1, "{ret}");
+    assert_eq!(ret.matches("`ifdef FEATURE_B").count(), 1, "{ret}");
+    assert_eq!(ret.matches("`endif").count(), 2, "{ret}");
+    let a_pos = ret.find("`ifdef FEATURE_A").unwrap();
+    let b_pos = ret.find("`ifdef FEATURE_B").unwrap();
+    let inner = ret.find("o_x = ~i_a;").unwrap();
+    let first_endif = ret.find("`endif").unwrap();
+    assert!(
+        a_pos < b_pos && b_pos < inner && inner < first_endif,
+        "inner statement guarded by both: {ret}"
+    );
+}
