@@ -11633,6 +11633,77 @@ fn clock_domain_function_call() {
 }
 
 #[test]
+fn clock_domain_system_function() {
+    // Regression: $signed/$unsigned laundered the operand's clock domain to
+    // None, so a crossing through them passed CDC silently.
+    let code = r#"
+    module ModuleA (
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic<8>,
+        o_b    : output 'b logic<8>,
+    ) {
+        var r: 'b logic<8>;
+        always_ff {
+            r = $signed(i_a);
+        }
+        assign o_b = r;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // $unsigned in a binary operand must not launder the domain either.
+    let code = r#"
+    module ModuleA (
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic<8>,
+        i_b    : input  'b logic<8>,
+        o_b    : output 'b logic<8>,
+    ) {
+        var r: 'b logic<8>;
+        always_ff {
+            r = $unsigned(i_a) + i_b;
+        }
+        assign o_b = r;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Same-domain $signed stays accepted.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_a    : input  'a logic<8>,
+        o_a    : output 'a logic<8>,
+    ) {
+        var r: 'a logic<8>;
+        always_ff {
+            r = $signed(i_a);
+        }
+        assign o_a = r;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn clock_domain_select_index() {
     // Regression: a bit/array-select index expression's clock domain was
     // neither checked nor merged, so `dat_'b[sel_'a]` passed CDC silently
