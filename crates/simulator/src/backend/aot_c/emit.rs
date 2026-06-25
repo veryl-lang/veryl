@@ -3737,7 +3737,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 {
                     let w = expr_context.width;
                     return Some(format!(
-                        "(((uint64_t)({ys})) >= {w} ? (__uint128_t)0 : (({xs}) {c_op} ({ys})))"
+                        "(((__uint128_t)({ys})) >= {w} ? (__uint128_t)0 : (({xs}) {c_op} ({ys})))"
                     ));
                 }
                 // Operand-derived overflow predicate, computable in parallel
@@ -3844,7 +3844,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                             (1u64 << target) - 1
                         };
                         return Some(format!(
-                            "((((uint64_t)({})) >= 64 ? 0 : ((uint64_t)(({}) & 0x{:x}ULL)) >> ({})))",
+                            "((((__uint128_t)({})) >= 64 ? 0 : ((uint64_t)(({}) & 0x{:x}ULL)) >> ({})))",
                             ye, xe, tmask, ye,
                         ));
                     }
@@ -3852,14 +3852,14 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         // C shifts are UB for counts >= 64 (x86 wraps mod 64);
                         // SystemVerilog yields 0.
                         return Some(wmask(format!(
-                            "(((uint64_t)({ye})) >= 64 ? 0 : (({xe}) {c_op} ({ye})))"
+                            "(((__uint128_t)({ye})) >= 64 ? 0 : (({xe}) {c_op} ({ye})))"
                         )));
                     }
                     return Some(wmask(format!("(({}) {} ({}))", xe, c_op, ye)));
                 }
                 if matches!(op, Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR) {
                     return Some(wmask(format!(
-                        "(((uint64_t)({ys})) >= 64 ? 0 : (({xs}) {c_op} ({ys})))"
+                        "(((__uint128_t)({ys})) >= 64 ? 0 : (({xs}) {c_op} ({ys})))"
                     )));
                 }
                 return Some(wmask(format!("(({}) {} ({}))", xs, c_op, ys)));
@@ -3881,7 +3881,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         if !expr_context.signed {
                             // `>>>` on an unsigned operand is a logical shift.
                             return Some(format!(
-                                "(((uint64_t)({ys})) >= {x_w} ? (__uint128_t)0 : (((__uint128_t)({xs})) >> ((uint64_t)({ys}))))"
+                                "(((__uint128_t)({ys})) >= {x_w} ? (__uint128_t)0 : (((__uint128_t)({xs})) >> ((uint64_t)({ys}))))"
                             ));
                         }
                         // Signed: sign-extend from x_w to 128 (shift the sign bit
@@ -3896,7 +3896,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                             )
                         };
                         return Some(format!(
-                            "((__uint128_t)(({sx}) >> (((uint64_t)({ys})) >= {x_w} ? {clamp} : ((uint64_t)({ys})))))",
+                            "((__uint128_t)(({sx}) >> (((__uint128_t)({ys})) >= {x_w} ? {clamp} : ((uint64_t)({ys})))))",
                             clamp = x_w - 1,
                         ));
                     }
@@ -3906,7 +3906,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         // sign-extended.  e.g. `8'hf1 >>> 2` is 0x003c,
                         // not 0xfffc.
                         Some(format!(
-                            "(((uint64_t)({ys})) >= 64 ? 0 : ((uint64_t)({xs}) >> ({ys})))",
+                            "(((__uint128_t)({ys})) >= 64 ? 0 : ((uint64_t)({xs}) >> ({ys})))",
                             xs = xs,
                             ys = ys,
                         ))
@@ -3914,14 +3914,14 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         // Clamp the count to 63: `>>>` by >= width fills
                         // with the sign bit, which a 63-shift produces.
                         Some(format!(
-                            "((uint64_t)((int64_t)((uint64_t)({xs})) >> (((uint64_t)({ys})) >= 64 ? 63 : ({ys}))))",
+                            "((uint64_t)((int64_t)((uint64_t)({xs})) >> (((__uint128_t)({ys})) >= 64 ? 63 : ({ys}))))",
                             xs = xs,
                             ys = ys,
                         ))
                     } else {
                         let shift = 64 - x_w;
                         Some(format!(
-                            "((uint64_t)((((int64_t)((uint64_t)({xs}) << {sh})) >> {sh}) >> (((uint64_t)({ys})) >= 64 ? 63 : ({ys}))))",
+                            "((uint64_t)((((int64_t)((uint64_t)({xs}) << {sh})) >> {sh}) >> (((__uint128_t)({ys})) >= 64 ? 63 : ({ys}))))",
                             xs = xs,
                             ys = ys,
                             sh = shift,

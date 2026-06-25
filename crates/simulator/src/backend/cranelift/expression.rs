@@ -825,6 +825,10 @@ impl ProtoExpression {
                         | Op::ArithShiftR
                         | Op::Pow
                 );
+                let shift_op = matches!(
+                    op,
+                    Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR
+                );
                 if !wide && value_domain_op {
                     let width_mask = gen_mask_for_width(expr_context.width);
                     if x_wide && builder.func.dfg.value_type(x_payload) == I128 {
@@ -837,8 +841,22 @@ impl ProtoExpression {
                         x_wide = false;
                     }
                     if y_wide && builder.func.dfg.value_type(y_payload) == I128 {
-                        y_payload = builder.ins().ireduce(I64, y_payload);
-                        y_payload = band_const(builder, y_payload, width_mask, false);
+                        if shift_op {
+                            // A shift count isn't width-bounded like an operand,
+                            // so don't mask it to the width (256 & 0xFF == 0 was
+                            // the bug). High bits past 64 mean it's certainly
+                            // >= width: pin to width and let the per-op `>= width`
+                            // clamp select the full-shift result.
+                            let hi = builder.ins().ushr_imm(y_payload, 64);
+                            let hi = builder.ins().ireduce(I64, hi);
+                            let hi_nonzero = builder.ins().icmp_imm(IntCC::NotEqual, hi, 0);
+                            let lo = builder.ins().ireduce(I64, y_payload);
+                            let w = builder.ins().iconst(I64, expr_context.width as i64);
+                            y_payload = builder.ins().select(hi_nonzero, w, lo);
+                        } else {
+                            y_payload = builder.ins().ireduce(I64, y_payload);
+                            y_payload = band_const(builder, y_payload, width_mask, false);
+                        }
                         if let Some(ym) = y_mask_xz {
                             let ym = builder.ins().ireduce(I64, ym);
                             y_mask_xz = Some(band_const(builder, ym, width_mask, false));
