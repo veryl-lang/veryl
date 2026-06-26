@@ -4156,6 +4156,52 @@ fn case_as_enum_cast() {
     }
 }
 
+// Regression: arithmetic right shift of a signed operand WIDER than the 128-bit
+// native container. The sign-extension shift amount `native_bits - width`
+// underflowed (128 - 129), corrupting the result. This 2-stage cascade mirrors
+// alu_rsft_comb's l32->l64 stages: each stage feeds a `signed logic<64>` into
+// the next concat, keeping the operand 129 bits wide at the final shift node (a
+// single 129-bit concat is reduced to 128 and does not reproduce). Expected
+// value confirmed against Verilator.
+#[test]
+fn arith_shift_operand_wider_than_native_container() {
+    let code = r#"
+    module Top (
+        clk: input clock,
+        a  : input  logic<32>,
+        b  : input  logic<32>,
+        s  : input  logic<6> ,
+        o  : output logic<64>,
+    ) {
+        var sg   : logic            ;
+        var l32_0: signed logic<64> ;
+        var l32_1: signed logic<64> ;
+        var l64  : signed logic<128>;
+        always_comb {
+            sg    = a[31];
+            l32_0 = $signed({sg, a, 16'b0, 16'b0} | {16'b0, a, 16'b0}) >>> {s[4], 4'b0};
+            l32_1 = $signed({sg, b, 16'b0, 16'b0} | {16'b0, b, 16'b0}) >>> {s[4], 4'b0};
+            l64   = $signed({sg, l32_1, 32'b0, 32'b0} | {32'b0, l32_0, 32'b0}) >>> {s[5], 5'b0};
+            o     = l64[127:64];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0xFF00_0000, 32, false));
+        sim.set("b", Value::new(0x0080_0000, 32, false));
+        sim.set("s", Value::new(32, 6, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0xffff_ffff_0080_0080, 64, false)
+        );
+    }
+}
+
 // Regression: $signed/$unsigned in expressions (previously fell through to
 // the catch-all Err in SystemFunctionCall::new, making the containing
 // always_comb an Unsupported declaration).
