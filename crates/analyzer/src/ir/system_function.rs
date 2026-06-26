@@ -318,6 +318,7 @@ impl SystemFunctionCall {
 
                 let arg0 = create_input(context, name, None, arg);
                 comptime.is_const = arg0.0.comptime().is_const;
+                comptime.clock_domain = arg0.0.comptime().clock_domain;
                 comptime.expr_context.signed = true;
 
                 Ok(SystemFunctionCall {
@@ -335,6 +336,7 @@ impl SystemFunctionCall {
 
                 let arg0 = create_input(context, name, None, arg);
                 comptime.is_const = arg0.0.comptime().is_const;
+                comptime.clock_domain = arg0.0.comptime().clock_domain;
                 comptime.expr_context.signed = false;
 
                 Ok(SystemFunctionCall {
