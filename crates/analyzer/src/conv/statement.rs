@@ -827,15 +827,15 @@ impl Conv<&SwitchStatement> for ir::StatementBlock {
             return Ok(ir::StatementBlock::default());
         }
 
-        let mut ret = ir::StatementBlock::default();
+        // The emitted SV is `case (1'b1)`, whose `default` is a fallback
+        // regardless of where it is listed, so `default` must be the final
+        // `else` here too. Lowering positionally instead drops every arm after a
+        // non-last `default` (and collapses the switch to the default body when
+        // it is listed first).
+        let mut arms: Vec<(ir::Expression, Vec<ir::Statement>, TokenRange)> = Vec::new();
+        let mut default: Vec<ir::Statement> = Vec::new();
 
         for item in &value.switch_statement_list {
-            let cond = match item.switch_item.switch_item_group.as_ref() {
-                SwitchItemGroup::SwitchCondition(x) => {
-                    Some(switch_condition(context, x.switch_condition.as_ref())?)
-                }
-                SwitchItemGroup::Defaul(_) => None,
-            };
             let true_side: ir::StatementBlock = match item.switch_item.switch_item_group0.as_ref() {
                 SwitchItemGroup0::Statement(x) => Conv::conv(context, x.statement.as_ref())?,
                 SwitchItemGroup0::StatementBlock(x) => {
@@ -843,24 +843,30 @@ impl Conv<&SwitchStatement> for ir::StatementBlock {
                 }
             };
 
-            let statements = if let Some(cond) = cond {
-                ir::StatementBlock(vec![ir::Statement::If(ir::IfStatement {
-                    cond,
-                    true_side: true_side.0,
-                    false_side: vec![],
-                    token: item.switch_item.as_ref().into(),
-                })])
-            } else {
-                true_side
-            };
-
-            if ret.0.is_empty() {
-                ret = statements;
-            } else if let ir::Statement::If(x) = &mut ret.0[0] {
-                x.insert_leaf_false(statements.0);
+            match item.switch_item.switch_item_group.as_ref() {
+                SwitchItemGroup::SwitchCondition(x) => {
+                    let cond = switch_condition(context, x.switch_condition.as_ref())?;
+                    arms.push((cond, true_side.0, item.switch_item.as_ref().into()));
+                }
+                SwitchItemGroup::Defaul(_) => {
+                    // Parser enforces at most one default.
+                    if default.is_empty() {
+                        default = true_side.0;
+                    }
+                }
             }
         }
 
-        Ok(ret)
+        let mut tail: Vec<ir::Statement> = default;
+        for (cond, body, token) in arms.into_iter().rev() {
+            tail = vec![ir::Statement::If(ir::IfStatement {
+                cond,
+                true_side: body,
+                false_side: std::mem::take(&mut tail),
+                token,
+            })];
+        }
+
+        Ok(ir::StatementBlock(tail))
     }
 }
