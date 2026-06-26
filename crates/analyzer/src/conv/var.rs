@@ -58,22 +58,34 @@ fn check_select_type(context: &mut Context, expr: &mut ir::Expression, value: &E
     }
 }
 
-// SystemVerilog requires a constant width for indexed part-selects
-// (`+:`/`-:`/`step`); a runtime width is unsynthesizable, so reject it.
-// `expr`'s comptime must already be evaluated (via check_select_type).
+// SystemVerilog requires constant bounds for part-selects: the width for
+// indexed part-selects (`+:`/`-:`/`step`), and BOTH bounds for a `[msb:lsb]`
+// range (`Colon`). A runtime bound is unsynthesizable, so reject it.
+// The comptimes must already be evaluated (via check_select_type).
 fn check_part_select_width(
     context: &mut Context,
     op: &VarSelectOp,
-    expr: &ir::Expression,
-    value: &Expression,
+    base: &ir::Expression,
+    bound: &ir::Expression,
 ) {
-    if matches!(
-        op,
-        VarSelectOp::PlusColon | VarSelectOp::MinusColon | VarSelectOp::Step
-    ) && !expr.comptime().is_const
+    if !bound.comptime().is_const
+        && matches!(
+            op,
+            VarSelectOp::PlusColon
+                | VarSelectOp::MinusColon
+                | VarSelectOp::Step
+                | VarSelectOp::Colon
+        )
     {
-        let token: TokenRange = value.into();
-        context.insert_error(AnalyzerError::non_constant_select_width(&token));
+        context.insert_error(AnalyzerError::non_constant_select_width(
+            &bound.token_range(),
+        ));
+    }
+    // A `[msb:lsb]` range also needs a constant base index (the msb).
+    if matches!(op, VarSelectOp::Colon) && !base.comptime().is_const {
+        context.insert_error(AnalyzerError::non_constant_select_width(
+            &base.token_range(),
+        ));
     }
 }
 
@@ -109,16 +121,17 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
             context
                 .select_paths
                 .push((path.clone(), generic_path.clone()));
-            let mut expr = Conv::conv(context, x.select.expression.as_ref())?;
-            check_select_type(context, &mut expr, &x.select.expression);
-            select.push(expr);
+            let base_value = x.select.expression.as_ref();
+            let mut base = Conv::conv(context, base_value)?;
+            check_select_type(context, &mut base, base_value);
             if let Some(x) = &x.select.select_opt {
                 let op = Conv::conv(context, x.select_operator.as_ref())?;
-                let mut expr = Conv::conv(context, x.expression.as_ref())?;
-                check_select_type(context, &mut expr, &x.expression);
-                check_part_select_width(context, &op, &expr, &x.expression);
-                end = Some((op, expr));
+                let mut bound = Conv::conv(context, x.expression.as_ref())?;
+                check_select_type(context, &mut bound, &x.expression);
+                check_part_select_width(context, &op, &base, &bound);
+                end = Some((op, bound));
             }
+            select.push(base);
             context.select_paths.pop();
             context.inc_select_dim();
         }
@@ -141,16 +154,17 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
                     ));
                     return Err(ir_error!(token));
                 }
-                let mut expr = Conv::conv(context, x.select.expression.as_ref())?;
-                check_select_type(context, &mut expr, &x.select.expression);
-                select.push(expr);
+                let base_value = x.select.expression.as_ref();
+                let mut base = Conv::conv(context, base_value)?;
+                check_select_type(context, &mut base, base_value);
                 if let Some(x) = &x.select.select_opt {
                     let op = Conv::conv(context, x.select_operator.as_ref())?;
-                    let mut expr = Conv::conv(context, x.expression.as_ref())?;
-                    check_select_type(context, &mut expr, &x.expression);
-                    check_part_select_width(context, &op, &expr, &x.expression);
-                    end = Some((op, expr));
+                    let mut bound = Conv::conv(context, x.expression.as_ref())?;
+                    check_select_type(context, &mut bound, &x.expression);
+                    check_part_select_width(context, &op, &base, &bound);
+                    end = Some((op, bound));
                 }
+                select.push(base);
                 context.inc_select_dim();
             }
             context.select_paths.pop();
@@ -184,16 +198,17 @@ impl Conv<&HierarchicalIdentifier> for VarPathSelect {
             context
                 .select_paths
                 .push((path.clone(), generic_path.clone()));
-            let mut expr = Conv::conv(context, x.select.expression.as_ref())?;
-            check_select_type(context, &mut expr, &x.select.expression);
-            select.push(expr);
+            let base_value = x.select.expression.as_ref();
+            let mut base = Conv::conv(context, base_value)?;
+            check_select_type(context, &mut base, base_value);
             if let Some(x) = &x.select.select_opt {
                 let op = Conv::conv(context, x.select_operator.as_ref())?;
-                let mut expr = Conv::conv(context, x.expression.as_ref())?;
-                check_select_type(context, &mut expr, &x.expression);
-                check_part_select_width(context, &op, &expr, &x.expression);
-                end = Some((op, expr));
+                let mut bound = Conv::conv(context, x.expression.as_ref())?;
+                check_select_type(context, &mut bound, &x.expression);
+                check_part_select_width(context, &op, &base, &bound);
+                end = Some((op, bound));
             }
+            select.push(base);
             context.select_paths.pop();
         }
 
@@ -215,16 +230,17 @@ impl Conv<&HierarchicalIdentifier> for VarPathSelect {
                     ));
                     return Err(ir_error!(token));
                 }
-                let mut expr = Conv::conv(context, x.select.expression.as_ref())?;
-                check_select_type(context, &mut expr, &x.select.expression);
-                select.push(expr);
+                let base_value = x.select.expression.as_ref();
+                let mut base = Conv::conv(context, base_value)?;
+                check_select_type(context, &mut base, base_value);
                 if let Some(x) = &x.select.select_opt {
                     let op = Conv::conv(context, x.select_operator.as_ref())?;
-                    let mut expr = Conv::conv(context, x.expression.as_ref())?;
-                    check_select_type(context, &mut expr, &x.expression);
-                    check_part_select_width(context, &op, &expr, &x.expression);
-                    end = Some((op, expr));
+                    let mut bound = Conv::conv(context, x.expression.as_ref())?;
+                    check_select_type(context, &mut bound, &x.expression);
+                    check_part_select_width(context, &op, &base, &bound);
+                    end = Some((op, bound));
                 }
+                select.push(base);
             }
             context.select_paths.pop();
         }

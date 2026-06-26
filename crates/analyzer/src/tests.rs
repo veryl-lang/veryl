@@ -11319,6 +11319,71 @@ fn non_constant_select_width_on_struct_member() {
 }
 
 #[test]
+fn non_constant_range_part_select_bounds() {
+    // Regression: a `[msb:lsb]` range part-select only had its width checked
+    // for `+:`/`-:`/`step`, never for `Colon`, so a runtime bound (msb or lsb)
+    // was accepted and emitted as illegal SystemVerilog.
+
+    // Runtime lsb (const msb).
+    let code = r#"
+    module ModuleA (
+        i_i: input  logic<3>,
+        i_d: input  logic<8>,
+        o_d: output logic<8>,
+    ) {
+        var r: logic<8>;
+        always_comb {
+            r = 0;
+            r[7:i_i] = i_d;
+        }
+        assign o_d = r;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. })),
+        "{errors:?}"
+    );
+
+    // Runtime msb (const lsb).
+    let code = r#"
+    module ModuleA (
+        i_i: input  logic<3>,
+        i_d: input  logic<8>,
+        o_d: output logic<8>,
+    ) {
+        assign o_d = i_d[i_i:0];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. })),
+        "{errors:?}"
+    );
+
+    // Constant bounds stay accepted.
+    let code = r#"
+    module ModuleA (
+        i_d: input  logic<8>,
+        o_d: output logic<8>,
+    ) {
+        assign o_d = i_d[7:0];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn enum_xz_variant_checks() {
     // Regression: a variant value containing any x/z bit bypassed the
     // too-large and width-inference checks (8'b1111111x in a 2-bit enum was
