@@ -4202,6 +4202,64 @@ fn arith_shift_operand_wider_than_native_container() {
     }
 }
 
+// Regression: a `switch` whose `default` is not listed last must still honor
+// the conditional arms. Positional lowering dropped every arm after a non-last
+// `default` (and collapsed a leading `default` to just its body), unlike SV
+// `case` whose `default` is position-independent.
+#[test]
+fn switch_default_not_last() {
+    // default listed FIRST
+    let code_first = r#"
+    module Top (
+        clk: input clock,
+        sel: input  logic<3>,
+        out: output logic<8>,
+    ) {
+        always_comb {
+            switch {
+                default    : out = 8'd0;
+                sel == 3'd1: out = 8'd1;
+                sel == 3'd2: out = 8'd2;
+                sel == 3'd3: out = 8'd3;
+            }
+        }
+    }
+    "#;
+
+    // default listed in the MIDDLE
+    let code_mid = r#"
+    module Top (
+        clk: input clock,
+        sel: input  logic<3>,
+        out: output logic<8>,
+    ) {
+        always_comb {
+            switch {
+                sel == 3'd1: out = 8'd1;
+                default    : out = 8'd0;
+                sel == 3'd2: out = 8'd2;
+                sel == 3'd3: out = 8'd3;
+            }
+        }
+    }
+    "#;
+
+    for code in [code_first, code_mid] {
+        for config in Config::all() {
+            dbg!(&config);
+
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+
+            for (sel, exp) in [(0u64, 0u64), (1, 1), (2, 2), (3, 3), (4, 0)] {
+                sim.set("sel", Value::new(sel, 3, false));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                assert_eq!(sim.get("out").unwrap(), Value::new(exp, 8, false));
+            }
+        }
+    }
+}
+
 // Regression: $signed/$unsigned in expressions (previously fell through to
 // the catch-all Err in SystemFunctionCall::new, making the containing
 // always_comb an Unsupported declaration).
