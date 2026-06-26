@@ -1997,6 +1997,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidEmbedIdentifier { input, .. } => input,
             AnalyzerError::InvalidEnumVariant { input, .. } => input,
             AnalyzerError::InvalidFactor { input, .. } => input,
+            AnalyzerError::InvalidForRange { input, .. } => input,
             AnalyzerError::InvalidForStep { input, .. } => input,
             AnalyzerError::InvalidIdentifier { input, .. } => input,
             AnalyzerError::InvalidImport { input, .. } => input,
