@@ -657,7 +657,11 @@ pub(crate) fn shift_mask_xz(
         Op::ArithShiftR => {
             if signed {
                 let native_bits = if wide { 128 } else { 64 };
-                let shl_amount = (native_bits - x_width) as i64;
+                // Operands wider than the native container are reduced to
+                // `native_bits` bits, so clamp the sign-extension width;
+                // `native_bits - x_width` would otherwise underflow.
+                let eff_width = x_width.min(native_bits);
+                let shl_amount = (native_bits - eff_width) as i64;
                 let shifted_up = builder.ins().ishl_imm(mask_xz, shl_amount);
                 let sign_extended = builder.ins().sshr_imm(shifted_up, shl_amount);
                 builder.ins().sshr(sign_extended, y_payload)

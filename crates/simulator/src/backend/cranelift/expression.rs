@@ -1122,11 +1122,17 @@ impl ProtoExpression {
                     Op::ArithShiftR => {
                         if signed {
                             let native_bits = if needs_wide { 128 } else { 64 };
-                            let shl_amount = (native_bits - x.width()) as i64;
+                            // Operands wider than the native container were
+                            // already reduced to `native_bits` bits (the
+                            // narrow-result path above), so clamp the
+                            // sign-extension width; `native_bits - x.width()`
+                            // would otherwise underflow and yield 0.
+                            let eff_width = x.width().min(native_bits);
+                            let shl_amount = (native_bits - eff_width) as i64;
                             let shifted_up = builder.ins().ishl_imm(x_payload, shl_amount);
                             let sign_extended = builder.ins().sshr_imm(shifted_up, shl_amount);
                             let raw = builder.ins().sshr(sign_extended, y_payload);
-                            if x.width() >= 1 && x.width() <= 128 {
+                            if (1..=128).contains(&eff_width) {
                                 // count >= width: arithmetic right shift fills
                                 // with the sign bit. sshr by (width-1) yields
                                 // all-sign-bits; native mod-128 would instead
@@ -1135,12 +1141,12 @@ impl ProtoExpression {
                                     builder,
                                     IntCC::UnsignedGreaterThanOrEqual,
                                     y_payload,
-                                    x.width() as u128,
+                                    eff_width as u128,
                                     needs_wide,
                                 );
                                 let fill = builder
                                     .ins()
-                                    .sshr_imm(sign_extended, (x.width() - 1) as i64);
+                                    .sshr_imm(sign_extended, (eff_width - 1) as i64);
                                 builder.ins().select(oob, fill, raw)
                             } else {
                                 raw
