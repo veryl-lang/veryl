@@ -2,6 +2,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::Attribute;
 use crate::attribute_table;
 use veryl_parser::ParolError;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_walker::{Handler, HandlerPoint};
 
@@ -116,10 +117,26 @@ impl VerylGrammarTrait for CheckStatement {
         Ok(())
     }
 
-    fn for_statement(&mut self, _arg: &ForStatement) -> Result<(), ParolError> {
+    fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
         match self.point {
-            HandlerPoint::Before => self.statement_depth_in_loop += 1,
+            HandlerPoint::Before => {
+                self.statement_depth_in_loop += 1;
+                if arg.range.range_opt.is_none() {
+                    let token: TokenRange = arg.range.as_ref().into();
+                    self.errors.push(AnalyzerError::invalid_for_range(&token));
+                }
+            }
             HandlerPoint::After => self.statement_depth_in_loop -= 1,
+        }
+        Ok(())
+    }
+
+    fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point
+            && arg.range.range_opt.is_none()
+        {
+            let token: TokenRange = arg.range.as_ref().into();
+            self.errors.push(AnalyzerError::invalid_for_range(&token));
         }
         Ok(())
     }

@@ -709,6 +709,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_for_range),
+        help("use a range with `..` or `..=`, e.g. `0..N`"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("for-loop range must use `..` or `..=`; a bare expression is not a valid range")]
+    InvalidForRange {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_for_step),
         help("make the step strictly advance the induction variable toward the end of the range"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1982,6 +1997,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidEmbedIdentifier { input, .. } => input,
             AnalyzerError::InvalidEnumVariant { input, .. } => input,
             AnalyzerError::InvalidFactor { input, .. } => input,
+            AnalyzerError::InvalidForRange { input, .. } => input,
             AnalyzerError::InvalidForStep { input, .. } => input,
             AnalyzerError::InvalidIdentifier { input, .. } => input,
             AnalyzerError::InvalidImport { input, .. } => input,
@@ -2109,6 +2125,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidRangeAssign { token_source, .. } => *token_source,
             AnalyzerError::NonConstantSelectWidth { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
+            AnalyzerError::InvalidForRange { token_source, .. } => *token_source,
             AnalyzerError::InvalidForStep { token_source, .. } => *token_source,
             AnalyzerError::InvalidTbUsage { token_source, .. } => *token_source,
             AnalyzerError::MissingTbPort { token_source, .. } => *token_source,
@@ -2559,6 +2576,13 @@ impl AnalyzerError {
     pub fn invalid_statement(kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidStatement {
             kind: kind.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_for_range(token: &TokenRange) -> Self {
+        AnalyzerError::InvalidForRange {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

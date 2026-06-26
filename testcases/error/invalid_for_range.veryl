@@ -1,0 +1,9 @@
+module invalid_for_range {
+    var a: logic<32>;
+    always_comb {
+        a = 0;
+        for i in 4 {
+            a += i;
+        }
+    }
+}
