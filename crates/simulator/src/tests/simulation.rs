@@ -41,6 +41,44 @@ fn simple_comb() {
 }
 
 #[test]
+fn wide_shift_amount_out_of_range() {
+    // A shift count whose type is wider than 64 bits and whose value is >= the
+    // operand width must yield 0 on the JIT/AOT-C backends. They used to mask
+    // the count to the operand width (256 & 0xFF == 0 -> no shift) or drop its
+    // high words, returning the operand unshifted. (The interpreter's wide-count
+    // handling is covered separately; this test targets the JIT/AOT-C codegen.)
+    let code = r#"
+    module Top (
+        v:   input  logic<8>,
+        amt: input  logic<70>,
+        r:   output logic<8>,
+    ) {
+        assign r = v >> amt;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let big = (BigUint::from(1u32) << 64u32) + BigUint::from(1u32);
+    for (amt, label) in [
+        (Value::new_biguint(BigUint::from(256u32), 70, false), "256"),
+        (Value::new_biguint(big.clone(), 70, false), "2^64+1"),
+    ] {
+        for config in Config::all().into_iter().filter(|c| c.use_jit || c.aot_c) {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("v", Value::new(0xFF, 8, false));
+            sim.set("amt", amt.clone());
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("r").unwrap(),
+                Value::new(0, 8, false),
+                "amt={label} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn simple_ff() {
     let code = r#"
     module Top (
