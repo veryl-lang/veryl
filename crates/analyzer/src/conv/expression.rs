@@ -1341,9 +1341,11 @@ mod tests {
 
         let x0: ir::Expression = Conv::conv(&mut context, &x0).unwrap();
 
+        // Switch conditions now resolve comptime types (like `if` conditions),
+        // so compile-time-constant conditions fold to a constant.
         assert_eq!(
             format!("{x0}"),
-            "((32'sh00000000 == 32'sh00000001) ? 32'sh00000002 : ((32'sh00000001 <: 32'sh00000002) ? 32'sh00000002 : 32'sh00000003))"
+            "(1'h0 ? 32'sh00000002 : (1'h1 ? 32'sh00000002 : 32'sh00000003))"
         );
     }
 }
