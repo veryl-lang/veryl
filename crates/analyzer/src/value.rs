@@ -1330,6 +1330,19 @@ impl Value {
         }
     }
 
+    /// Shift-amount conversion for `>>`/`<<`/`>>>`/`<<<`: a defined amount past
+    /// usize saturates to usize::MAX so the arms clamp it to the width (a full
+    /// shift), where to_usize() would return None and the arms read it as x/0,
+    /// dropping even an in-range amount on a >64-bit operand. x/z keeps None.
+    #[inline(always)]
+    pub fn to_shift_amount(&self) -> Option<usize> {
+        match self {
+            Self::U64(x) => x.to_usize(),
+            Self::BigUint(x) if x.is_xz() => None,
+            Self::BigUint(x) => Some(x.to_usize().unwrap_or(usize::MAX)),
+        }
+    }
+
     #[inline(always)]
     pub fn to_u32(&self) -> Option<u32> {
         match self {
@@ -2084,6 +2097,25 @@ mod tests {
             &format!("{:b}", x23),
             "80'bzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
         );
+    }
+
+    #[test]
+    fn shift_wide_amount() {
+        // A shift amount whose operand type is wider than 64 bits is stored as a
+        // BigUint; to_usize() returns None for it, so before to_shift_amount the
+        // shift arms produced x (0 in 2-state) even for an in-range amount.
+        let mut mc = MaskCache::default();
+        let x = Value::from_str("8'h80").unwrap();
+
+        // In-range wide amount: 0x80 >> 1 == 0x40 (was 8'hxx).
+        let amt1 = Value::from_str("70'd1").unwrap();
+        let r = Op::LogicShiftR.eval_value_binary(&x, &amt1, 8, false, &mut mc);
+        assert_eq!(format!("{:x}", r), "8'h40");
+
+        // Out-of-range wide amount (>= width): logical shift saturates to 0.
+        let amt256 = Value::from_str("70'd256").unwrap();
+        let r = Op::LogicShiftR.eval_value_binary(&x, &amt256, 8, false, &mut mc);
+        assert_eq!(format!("{:x}", r), "8'h00");
     }
 
     #[test]
