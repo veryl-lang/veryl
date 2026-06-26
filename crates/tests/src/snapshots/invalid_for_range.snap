@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_for_range (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_for_range)
+
+  × for-loop range must use `..` or `..=`; a bare expression is not a valid range
+   ╭─[../../testcases/error/invalid_for_range.veryl:5:18]
+ 4 │         a = 0;
+ 5 │         for i in 4 {
+   ·                  ┬
+   ·                  ╰── Error location
+ 6 │             a += i;
+   ╰────
+  help: use a range with `..` or `..=`, e.g. `0..N`
