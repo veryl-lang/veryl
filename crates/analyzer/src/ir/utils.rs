@@ -24,6 +24,17 @@ pub fn allow_missing_reset_statement(token: &TokenRange) -> bool {
     )
 }
 
+/// Sign-extend a width-masked `to_u64()` payload (i8 -2 is 0xFE) to i64, which
+/// a bare `as i64` would instead read as the positive 254.
+fn sign_extend_to_i64(bits: u64, width: usize) -> i64 {
+    if (1..64).contains(&width) {
+        let shift = 64 - width;
+        ((bits << shift) as i64) >> shift
+    } else {
+        bits as i64
+    }
+}
+
 /// Float values are stored as IEEE 754 bit patterns via `f64::to_bits()`,
 /// so float<->int casts require actual numeric conversion, not just bit reinterpretation.
 pub fn convert_cast(
@@ -56,7 +67,7 @@ pub fn convert_cast(
             TypeKind::F64 => {
                 if let Some(bits) = val.to_u64() {
                     let f: f64 = if val.signed() {
-                        bits as i64 as f64
+                        sign_extend_to_i64(bits, val.width()) as f64
                     } else {
                         bits as f64
                     };
@@ -68,7 +79,7 @@ pub fn convert_cast(
             TypeKind::F32 => {
                 if let Some(bits) = val.to_u64() {
                     let f: f32 = if val.signed() {
-                        bits as i64 as f32
+                        sign_extend_to_i64(bits, val.width()) as f32
                     } else {
                         bits as f32
                     };

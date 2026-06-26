@@ -2119,6 +2119,25 @@ mod tests {
     }
 
     #[test]
+    fn int_to_float_cast_keeps_sign() {
+        use crate::ir::convert_cast;
+        // A narrow signed value must sign-extend before reinterpreting: i8 -2
+        // (0xFE) -> -2.0, not +254.0 (the width-masked payload read as positive).
+        let v = Value::new(0xFE, 8, true);
+        let r = convert_cast(v, &TypeKind::Bit, &TypeKind::F32, 32);
+        assert_eq!(f32::from_bits(r.to_u64().unwrap() as u32), -2.0);
+
+        let v = Value::new(0xFE, 8, true);
+        let r = convert_cast(v, &TypeKind::Bit, &TypeKind::F64, 64);
+        assert_eq!(f64::from_bits(r.to_u64().unwrap()), -2.0);
+
+        // Unsigned stays positive.
+        let v = Value::new(0xFE, 8, false);
+        let r = convert_cast(v, &TypeKind::Bit, &TypeKind::F32, 32);
+        assert_eq!(f32::from_bits(r.to_u64().unwrap() as u32), 254.0);
+    }
+
+    #[test]
     fn xz_parse_format() {
         let x0 = Value::from_str("1'bx").unwrap();
         let x1 = Value::from_str("2'bx").unwrap();
