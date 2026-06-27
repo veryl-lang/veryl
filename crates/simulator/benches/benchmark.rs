@@ -1,3 +1,6 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use veryl_analyzer::ir as air;
 use veryl_analyzer::{Analyzer, Context};
