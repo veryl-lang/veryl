@@ -16572,3 +16572,58 @@ fn switch_compound_condition_width() {
         );
     }
 }
+
+#[test]
+fn wide_ff_dynamic_bit_select_write() {
+    // A wide (>64-bit) FF register written via a runtime bit-select in an
+    // always_ff block. The cranelift backend used to pass the I128 post-RMW
+    // payload directly to the narrow (I64) write-log-push helper, tripping a
+    // codegen assertion. The wide payload must be split into per-8-byte words.
+    let code = r#"
+    module Top (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        i_idx: input  logic<3>,
+        i_d  : input  logic<10>,
+        o_d  : output logic<10>,
+    ) {
+        var r: logic<80>; // 8 x 10-bit lanes, > 64 bits -> wide path
+        always_ff {
+            if_reset {
+                r = '0;
+            } else {
+                r[i_idx * 10 + 0 +: 10] = i_d;
+            }
+        }
+        assign o_d = r[i_idx * 10 + 0 +: 10];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_idx", Value::new(0, 3, false));
+        sim.set("i_d", Value::new(0, 10, false));
+        sim.step(&rst);
+
+        // Write a distinct value into each lane.
+        for lane in 0..8u64 {
+            sim.set("i_idx", Value::new(lane, 3, false));
+            sim.set("i_d", Value::new(0x100 + lane, 10, false));
+            sim.step(&clk);
+        }
+        // Every lane must read back its own value (no clobber, no panic).
+        for lane in 0..8u64 {
+            sim.set("i_idx", Value::new(lane, 3, false));
+            assert_eq!(
+                sim.get("o_d").unwrap(),
+                Value::new(0x100 + lane, 10, false),
+                "lane {lane}, {config:?}",
+            );
+        }
+    }
+}

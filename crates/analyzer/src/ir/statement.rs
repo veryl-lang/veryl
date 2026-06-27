@@ -622,11 +622,22 @@ fn compute_assign_target(
 ) -> Option<AssignTarget> {
     let dst = dst?;
     let var_info = context.get_variable_info(dst.id)?;
-    let arr_idx = dst
-        .index
-        .eval_value(context)
-        .and_then(|v| var_info.r#type.array.calc_index(&v));
-    let mask = if let Some((beg, end)) = dst.select.eval_value(context, &var_info.r#type, false) {
+    // A non-const index/select folds (via `eval_value`) to element 0, which
+    // would make a same-block self-read look comb-safe and let `ff_opt` demote
+    // a real register. Keep it dynamic instead.
+    let target_const = dst.index.is_const() && dst.select.is_const();
+    let arr_idx = if target_const {
+        dst.index
+            .eval_value(context)
+            .and_then(|v| var_info.r#type.array.calc_index(&v))
+    } else {
+        None
+    };
+    // A non-const select targets an indeterminate bit range, so fall back to
+    // the full-width mask.
+    let mask = if dst.select.is_const()
+        && let Some((beg, end)) = dst.select.eval_value(context, &var_info.r#type, false)
+    {
         ValueBigUint::gen_mask_range(beg, end)
     } else if let Some(width) = var_info.total_width() {
         ValueBigUint::gen_mask(width)

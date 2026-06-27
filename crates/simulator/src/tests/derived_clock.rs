@@ -638,3 +638,81 @@ fn gated_clock_pre_commit_consistency() {
         );
     }
 }
+
+/// Packed array-of-struct register (`sr_t<8>`) written field-wise at a runtime
+/// index in an always_ff block. The `<8>` is a *packed* dimension, so the
+/// analyzer flattens it and folds the element stride + field offset into the
+/// dynamic-select index as an absolute bit position. `build_dynamic_bit_select`
+/// used to re-apply the element stride (kind_width = struct width), corrupting
+/// the bit/element under the dual-slot FF path (`--disable-ff-opt`; cranelift
+/// also panicked pushing the wide write-log entry). Every element's `.sr` and
+/// `.vsr` must read back its own value on every backend.
+#[test]
+fn packed_struct_array_dynamic_field_ff() {
+    let code = r#"
+    module Top (
+        i_clk : input  '_ clock,
+        i_rst : input  '_ reset,
+        i_wen : input  '_ logic,
+        i_widx: input  '_ logic<3>,
+        i_ridx: input  '_ logic<3>,
+        i_sr  : input  '_ logic,
+        i_vsr : input  '_ logic<8>,
+        o_sr  : output    logic,
+        o_vsr : output    logic<8>,
+    ) {
+        struct sr_t {
+            sr : logic,
+            vsr: logic<8>,
+        }
+        var r_sr: sr_t<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                r_sr = '0;
+            } else if i_wen {
+                r_sr[i_widx].sr  = i_sr;
+                r_sr[i_widx].vsr = i_vsr;
+            }
+        }
+        assign o_sr  = r_sr[i_ridx].sr;
+        assign o_vsr = r_sr[i_ridx].vsr;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_wen", Value::new(0, 1, false));
+        sim.set("i_sr", Value::new(0, 1, false));
+        sim.set("i_vsr", Value::new(0, 8, false));
+        sim.set("i_widx", Value::new(0, 3, false));
+        sim.set("i_ridx", Value::new(0, 3, false));
+        sim.step(&rst);
+
+        // Round-robin write a distinct (sr, vsr) into each of the 8 elements.
+        for t in 0..8u64 {
+            sim.set("i_wen", Value::new(1, 1, false));
+            sim.set("i_widx", Value::new(t, 3, false));
+            sim.set("i_sr", Value::new(t & 1, 1, false));
+            sim.set("i_vsr", Value::new(0xA0 + t, 8, false));
+            sim.step(&clk);
+        }
+        // Every element must read back its own value (no clobber across the
+        // packed lanes, no cross-field corruption).
+        sim.set("i_wen", Value::new(0, 1, false));
+        for t in 0..8u64 {
+            sim.set("i_ridx", Value::new(t, 3, false));
+            assert_eq!(
+                sim.get("o_sr").unwrap(),
+                Value::new(t & 1, 1, false),
+                "element {t} .sr, {config:?}",
+            );
+            assert_eq!(
+                sim.get("o_vsr").unwrap(),
+                Value::new(0xA0 + t, 8, false),
+                "element {t} .vsr, {config:?}",
+            );
+        }
+    }
+}

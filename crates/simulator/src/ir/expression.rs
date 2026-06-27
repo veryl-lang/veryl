@@ -1376,6 +1376,22 @@ pub fn build_dynamic_bit_select(
     select: &air::VarSelect,
     kind_width: usize,
 ) -> Result<ProtoDynamicBitSelect, SimulatorError> {
+    // The analyzer already folds the element stride and any struct field offset
+    // into the select index as an absolute *bit* position. For a non-trivial
+    // kind (kind_width > 1) the structured (width_shape, kind_width) path below
+    // would re-apply the stride, double-scaling the index/window/clamp. Collapse
+    // to a flat single-bit view so the folded index passes through unscaled;
+    // plain logic (kind_width == 1) is already flat.
+    let flat_storage: [Option<usize>; 1];
+    let (width_shape, kind_width) = if kind_width > 1
+        && let Some(total) = width_shape.total()
+    {
+        flat_storage = [Some(total * kind_width)];
+        (veryl_analyzer::ir::ShapeRef::new(&flat_storage), 1usize)
+    } else {
+        (width_shape, kind_width)
+    };
+
     let select_dims = select.dimension();
 
     // Gracefully fail if the shape can't accommodate the select (too many
