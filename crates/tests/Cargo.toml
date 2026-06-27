@@ -20,6 +20,7 @@ veryl           = {version = "0.20.1", path = "../veryl"}
 [dev-dependencies]
 criterion = {workspace = true}
 insta     = "1.47"
+mimalloc  = "0.1"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pprof = {workspace = true}

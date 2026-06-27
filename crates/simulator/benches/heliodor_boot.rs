@@ -2,6 +2,9 @@
 // 1-core Linux boot, via the `test_soc_linux_boot` native testbench. Skipped when
 // the heliodor submodule (testcases/heliodor) isn't checked out.
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use std::path::{Path, PathBuf};
 use std::time::Duration;

@@ -10,6 +10,9 @@ mod tests;
 use backend::Backend;
 use tower_lsp_server::{LspService, Server};
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[tokio::main]
 async fn main() {
     let stdin = tokio::io::stdin();

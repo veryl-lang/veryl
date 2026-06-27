@@ -23,6 +23,7 @@ pre-release-hook = ["../../support/scripts/tag_submodule.sh", "{{version}}"]
 
 [dependencies]
 anstyle             = "1.0"
+mimalloc            = "0.1"
 clap                = {workspace = true}
 clap_complete       = "4.6"
 console             = {workspace = true}
