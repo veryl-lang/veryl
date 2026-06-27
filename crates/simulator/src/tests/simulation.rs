@@ -16534,3 +16534,41 @@ fn function_call_in_if_condition_runs_before_the_branch() {
         );
     }
 }
+
+/// Regression: a `switch` arm whose condition is a compound expression
+/// (e.g. `(inst & mask) == val`) must evaluate identically in the JIT and
+/// interpreter. The analyzer lowers `switch` to nested `if`, but unlike `if`
+/// conditions / `case` targets it skipped `eval_comptime`, leaving
+/// sub-expression widths unresolved; the interpreter then masked the inner
+/// `inst & mask` to a wrong width and the arm never matched (returned 0).
+/// Mirrors hw/rtl/pkg/inst_pkg.veryl `dec_imm0`.
+#[test]
+fn switch_compound_condition_width() {
+    let code = r#"
+    module Top (i_inst: input logic<32>, o: output logic<33>) {
+        function dec_imm0 (r#inst: input logic<32>) -> logic<33> {
+            switch {
+                (r#inst & 32'h7c000000) == 32'h08000000: return {1'b1, 12'h0, r#inst[19:0]};
+                (r#inst & 32'h7c000000) == 32'h10000000: return {1'b1, 20'h0, r#inst[13:2]};
+                default                                : return 33'h0;
+            }
+        }
+        assign o = dec_imm0(i_inst);
+    }
+    "#;
+    // movhi-form instruction: (inst & 0x7c000000) == 0x08000000, imm = inst[19:0].
+    let inst: u64 = 0x0800_0000 | 0x000a_bcde;
+    let exp = Value::new((1u64 << 32) | 0x000a_bcde, 33, false);
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i_inst", Value::new(inst, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            exp,
+            "dec_imm0 switch decode (use_jit={})",
+            config.use_jit,
+        );
+    }
+}

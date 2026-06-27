@@ -2470,6 +2470,9 @@ pub fn switch_condition(context: &mut Context, cond: &SwitchCondition) -> IrResu
         let comptime = Box::new(Comptime::create_unknown(exp.token_range()));
         ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(exp), comptime);
     }
+    // Resolve comptime widths like `if` conditions / `case` targets do;
+    // otherwise a compound condition's sub-expression widths stay unevaluated.
+    ret.eval_comptime(context, None);
     Ok(ret)
 }
 
