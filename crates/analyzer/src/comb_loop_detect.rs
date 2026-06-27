@@ -179,6 +179,19 @@ fn atomic_ranges(masks: &[BigUint], width: usize) -> Vec<BigUint> {
     ret
 }
 
+/// Arrays larger than this are under-detected: a dynamic write (`arr[i] = ...`
+/// with no foldable index) fans out to every element, so the per-element graph
+/// / bit-partition expansion below is O(elements). A memory this large is not a
+/// realistic combinational-loop participant, so adding no edges stays sound.
+const OVERSIZED_ARRAY: usize = 1 << 16;
+
+fn oversized_array(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
+    variables
+        .get(&id)
+        .and_then(|v| v.r#type.total_array())
+        .is_some_and(|n| n > OVERSIZED_ARRAY)
+}
+
 fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
     let mut masks: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
 
@@ -219,6 +232,7 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
                         .push(lhs_mask.clone());
                 } else if let Some(var) = module.variables.get(dst_id)
                     && let Some(total) = var.r#type.total_array()
+                    && total <= OVERSIZED_ARRAY
                 {
                     for i in 0..total {
                         masks
@@ -357,6 +371,10 @@ fn build_module_graph(
         if !is_module_scope_var(*src_id, &module.variables) {
             continue;
         }
+        // Under-detect oversized arrays (see `OVERSIZED_ARRAY`).
+        if oversized_array(*src_id, &module.variables) {
+            continue;
+        }
         let src_id_idx = (*src_id, *src_idx);
 
         for (reader_decl, assign_target, src_read_mask, from_ff) in &entry.refered {
@@ -409,6 +427,8 @@ fn build_module_graph(
                         vec![]
                     }
                 }
+                // Under-detect oversized arrays (see `OVERSIZED_ARRAY`).
+                Some((dst_id, None, _)) if oversized_array(*dst_id, &module.variables) => vec![],
                 Some((dst_id, None, lhs_mask)) => writes_per_decl
                     .get(reader_decl)
                     .map(|w| {

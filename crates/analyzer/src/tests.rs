@@ -8620,6 +8620,44 @@ fn unassignable_output() {
 }
 
 #[test]
+fn combinational_loop_oversized_array_underdetect() {
+    // Regression: a dynamic-index write to a very large array. The dynamic
+    // index makes `compute_assign_target` yield arr_idx = None, which routes
+    // through `comb_loop_detect`'s per-element expansion — O(elements) and a
+    // hang without the `OVERSIZED_ARRAY` guard. Analysis must finish and report
+    // no combinational loop.
+    let code = r#"
+    module ModuleA (
+        clk:  input  clock,
+        rst:  input  reset,
+        idx:  input  logic<23>,
+        wd:   input  logic<32>,
+        rd:   output logic<32>,
+    ) {
+        var mem: logic<32> [8388608];
+        always_ff {
+            if_reset {
+                mem[idx][7:0] = 0;
+            } else {
+                mem[idx][7:0]   = wd[7:0];
+                mem[idx][15:8]  = wd[15:8];
+                mem[idx][23:16] = wd[23:16];
+                mem[idx][31:24] = wd[31:24];
+            }
+        }
+        assign rd = mem[idx];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
+        "oversized dynamic-index array must not be flagged as a comb loop",
+    );
+}
+
+#[test]
 fn combinational_loop() {
     // 2-block ring: assign b = c + a; assign c = b + 1
     let code = r#"

@@ -16,6 +16,72 @@ use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::ValueU64;
 
+/// Push an FF write-log entry for a post-RMW `payload` (+ optional 4-state
+/// `mask_xz`). Narrow FFs (`nb <= 8`) push one I64 entry; wide FFs (`nb > 8`,
+/// I128 payload) split into per-8-byte words — `emit_inline_write_log_push`
+/// takes an I64, so passing a wide value directly panics cranelift.
+fn emit_ff_log_push(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    log_current_offset: i32,
+    nb: usize,
+    payload: CraneliftValue,
+    mask_xz: Option<CraneliftValue>,
+) {
+    let nb_i32 = nb as i32;
+    if nb <= 8 {
+        let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
+        let width_class_val = builder.ins().iconst(I32, nb as i64);
+        emit_inline_write_log_push(context, builder, offset_val, payload, width_class_val);
+        if context.use_4state
+            && let Some(m) = mask_xz
+        {
+            let mask_offset_val = builder
+                .ins()
+                .iconst(I32, (log_current_offset + nb_i32) as i64);
+            emit_inline_write_log_push(context, builder, mask_offset_val, m, width_class_val);
+        }
+    } else {
+        // Wide FF: split the I128 payload into per-8-byte words, one narrow
+        // entry each (commit-side `ff_commit_from_log` writes 8 bytes per
+        // width_class=8 entry).
+        let n_words = nb / 8;
+        let width_class_val = builder.ins().iconst(I32, 8);
+        for i in 0..n_words {
+            let shifted = if i == 0 {
+                payload
+            } else {
+                builder.ins().ushr_imm(payload, (i * 64) as i64)
+            };
+            let word = builder.ins().ireduce(I64, shifted);
+            let off = log_current_offset + (i * 8) as i32;
+            let entry_offset_val = builder.ins().iconst(I32, off as i64);
+            emit_inline_write_log_push(context, builder, entry_offset_val, word, width_class_val);
+        }
+        if context.use_4state
+            && let Some(m) = mask_xz
+        {
+            for i in 0..n_words {
+                let shifted = if i == 0 {
+                    m
+                } else {
+                    builder.ins().ushr_imm(m, (i * 64) as i64)
+                };
+                let word = builder.ins().ireduce(I64, shifted);
+                let off = log_current_offset + nb_i32 + (i * 8) as i32;
+                let entry_offset_val = builder.ins().iconst(I32, off as i64);
+                emit_inline_write_log_push(
+                    context,
+                    builder,
+                    entry_offset_val,
+                    word,
+                    width_class_val,
+                );
+            }
+        }
+    }
+}
+
 impl ProtoAssignDynamicStatement {
     pub fn can_build_binary(&self) -> bool {
         if !self.expr.can_build_binary() || !self.dst_index_expr.can_build_binary() {
@@ -1045,29 +1111,13 @@ impl ProtoAssignStatement {
             }
 
             // dynamic_select RMW log push.  dyn_sel selects bit ranges
-            // within a packed FF dst whose byte offset stays static, so
-            // `event_write_log_push_static` is fine.  4-state pushes a
-            // second entry for the mask_xz portion at
-            // `log_current_offset + nb` (matches the storage layout
+            // within a packed FF dst whose byte offset stays static.  Wide
+            // (nb > 8) dsts must split the I128 `fwd` into per-word entries —
+            // `emit_ff_log_push` handles both.  4-state pushes the mask_xz
+            // portion at `log_current_offset + nb` (matches the storage layout
             // `[payload][mask]` produced by write_native_value).
             if emit_log {
-                let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
-                let width_class_val = builder.ins().iconst(I32, nb as i64);
-                emit_inline_write_log_push(context, builder, offset_val, fwd, width_class_val);
-                if context.use_4state
-                    && let Some(fwd_m_v) = fwd_m
-                {
-                    let mask_offset_val = builder
-                        .ins()
-                        .iconst(I32, (log_current_offset + nb_i32) as i64);
-                    emit_inline_write_log_push(
-                        context,
-                        builder,
-                        mask_offset_val,
-                        fwd_m_v,
-                        width_class_val,
-                    );
-                }
+                emit_ff_log_push(context, builder, log_current_offset, nb, fwd, fwd_m);
             }
         } else if let Some((beg, end)) = self.select {
             // Read-modify-write with native width
@@ -1136,26 +1186,12 @@ impl ProtoAssignStatement {
 
             // Select RMW log push.  `fwd` is the post-RMW payload masked
             // to dst_width — pushed as the cycle's update to the FF
-            // current slot via `ff_commit_from_log`.  4-state appends
-            // a mask_xz entry at `log_current_offset + nb`.
+            // current slot via `ff_commit_from_log`.  Wide (nb > 8) dsts split
+            // the I128 `fwd` into per-word entries; 4-state appends a mask_xz
+            // entry at `log_current_offset + nb`.  `emit_ff_log_push` handles
+            // both.
             if emit_log {
-                let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
-                let width_class_val = builder.ins().iconst(I32, nb as i64);
-                emit_inline_write_log_push(context, builder, offset_val, fwd, width_class_val);
-                if context.use_4state
-                    && let Some(fwd_m_v) = fwd_m
-                {
-                    let mask_offset_val = builder
-                        .ins()
-                        .iconst(I32, (log_current_offset + nb_i32) as i64);
-                    emit_inline_write_log_push(
-                        context,
-                        builder,
-                        mask_offset_val,
-                        fwd_m_v,
-                        width_class_val,
-                    );
-                }
+                emit_ff_log_push(context, builder, log_current_offset, nb, fwd, fwd_m);
             }
         } else {
             // Store elimination relies on load_cache forwarding to
@@ -1315,76 +1351,7 @@ impl ProtoAssignStatement {
             // entry per word — the commit-side consumer in
             // `ff_commit_from_log` writes width_class=8 bytes per entry.
             if emit_log {
-                if nb <= 8 {
-                    let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
-                    let width_class_val = builder.ins().iconst(I32, nb as i64);
-                    emit_inline_write_log_push(
-                        context,
-                        builder,
-                        offset_val,
-                        fwd_p,
-                        width_class_val,
-                    );
-                    if context.use_4state
-                        && let Some(fwd_m_v) = fwd_m
-                    {
-                        let mask_offset_val = builder
-                            .ins()
-                            .iconst(I32, (log_current_offset + nb_i32) as i64);
-                        emit_inline_write_log_push(
-                            context,
-                            builder,
-                            mask_offset_val,
-                            fwd_m_v,
-                            width_class_val,
-                        );
-                    }
-                } else {
-                    // Wide FF: split into per-8-byte words.  fwd_p is
-                    // typically I128 (built by ensure_wide_ptr_val and
-                    // related helpers in the narrow-path expression flow
-                    // for 65-128 bit dsts).
-                    let n_words = nb / 8;
-                    let width_class_val = builder.ins().iconst(I32, 8);
-                    for i in 0..n_words {
-                        let shifted = if i == 0 {
-                            fwd_p
-                        } else {
-                            builder.ins().ushr_imm(fwd_p, (i * 64) as i64)
-                        };
-                        let word = builder.ins().ireduce(I64, shifted);
-                        let off = log_current_offset + (i * 8) as i32;
-                        let entry_offset_val = builder.ins().iconst(I32, off as i64);
-                        emit_inline_write_log_push(
-                            context,
-                            builder,
-                            entry_offset_val,
-                            word,
-                            width_class_val,
-                        );
-                    }
-                    if context.use_4state
-                        && let Some(fwd_m_v) = fwd_m
-                    {
-                        for i in 0..n_words {
-                            let shifted = if i == 0 {
-                                fwd_m_v
-                            } else {
-                                builder.ins().ushr_imm(fwd_m_v, (i * 64) as i64)
-                            };
-                            let word = builder.ins().ireduce(I64, shifted);
-                            let off = log_current_offset + nb_i32 + (i * 8) as i32;
-                            let entry_offset_val = builder.ins().iconst(I32, off as i64);
-                            emit_inline_write_log_push(
-                                context,
-                                builder,
-                                entry_offset_val,
-                                word,
-                                width_class_val,
-                            );
-                        }
-                    }
-                }
+                emit_ff_log_push(context, builder, log_current_offset, nb, fwd_p, fwd_m);
             }
         }
 
