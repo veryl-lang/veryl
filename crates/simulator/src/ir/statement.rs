@@ -2426,7 +2426,93 @@ fn is_string_literal(expr: &air::Expression) -> bool {
     false
 }
 
-fn extract_string_value(expr: &air::Expression) -> Option<String> {
+/// Per-test I/O string literals from an air module: `$readmemh` filenames and
+/// file-open paths, in appearance order. Re-injected into an `Ir` built from a
+/// shared template proto so the template's strings become this test's.
+#[derive(Default)]
+pub(crate) struct IoStrings {
+    pub readmemh: Vec<String>,
+    pub fileopen: Vec<String>,
+    /// False if any literal could not be extracted; the caller then declines
+    /// to share and builds a private proto instead.
+    pub ok: bool,
+}
+
+/// Collect the per-test I/O string literals reachable from `module`'s Initial
+/// blocks (including those bubbled up from sub-module instances), in the same
+/// declaration order `ProtoModule::conv` uses, so they line up positionally
+/// with the Initial statements of a shared template proto.
+pub(crate) fn extract_io_strings(module: &air::Module) -> IoStrings {
+    let mut io = IoStrings {
+        ok: true,
+        ..Default::default()
+    };
+    collect_io_module(module, &mut io);
+    io
+}
+
+fn collect_io_module(module: &air::Module, io: &mut IoStrings) {
+    for decl in &module.declarations {
+        match decl {
+            air::Declaration::Initial(i) => collect_io_stmts(&i.statements, io),
+            air::Declaration::Inst(inst) => {
+                if let air::Component::Module(m) = inst.component.as_ref() {
+                    collect_io_module(m, io);
+                }
+            }
+            air::Declaration::Comb(_)
+            | air::Declaration::Ff(_)
+            | air::Declaration::Final(_)
+            | air::Declaration::Unsupported(_)
+            | air::Declaration::Null => {}
+        }
+    }
+}
+
+fn collect_io_stmts(stmts: &[air::Statement], io: &mut IoStrings) {
+    for s in stmts {
+        match s {
+            air::Statement::SystemFunctionCall(sf) => {
+                if let SystemFunctionKind::Readmemh(input, _) = &sf.kind {
+                    match extract_string_value(&input.0) {
+                        Some(raw) => io.readmemh.push(raw.trim_matches('"').to_string()),
+                        None => io.ok = false,
+                    }
+                }
+            }
+            air::Statement::TbMethodCall(tb) => {
+                if let air::TbMethod::FileOpen { name, .. } = &tb.method {
+                    match extract_string_value(&name.0) {
+                        Some(raw) => io.fileopen.push(raw.trim_matches('"').to_string()),
+                        None => io.ok = false,
+                    }
+                }
+            }
+            air::Statement::If(i) => {
+                collect_io_stmts(&i.true_side, io);
+                collect_io_stmts(&i.false_side, io);
+            }
+            air::Statement::IfReset(i) => {
+                collect_io_stmts(&i.true_side, io);
+                collect_io_stmts(&i.false_side, io);
+            }
+            air::Statement::Case(c) => {
+                for arm in &c.arms {
+                    collect_io_stmts(&arm.body, io);
+                }
+                collect_io_stmts(&c.default, io);
+            }
+            air::Statement::For(f) => collect_io_stmts(&f.body, io),
+            air::Statement::Assign(_)
+            | air::Statement::FunctionCall(_)
+            | air::Statement::Break
+            | air::Statement::Unsupported(_)
+            | air::Statement::Null => {}
+        }
+    }
+}
+
+pub(crate) fn extract_string_value(expr: &air::Expression) -> Option<String> {
     if let air::Expression::Term(factor) = expr
         && let Some(comptime) = factor_comptime(factor.as_ref())
         && let ValueVariant::Numeric(value) = &comptime.value

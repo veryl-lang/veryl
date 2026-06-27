@@ -3,6 +3,7 @@ pub(crate) mod declaration;
 pub mod derived_clock;
 mod event;
 mod expression;
+pub mod fingerprint;
 pub(crate) mod inst_layout;
 mod module;
 pub(crate) mod opt;
@@ -17,6 +18,7 @@ pub use declaration::ProtoDeclaration;
 pub use derived_clock::{DerivedClock, DerivedClockSchedule};
 pub use event::Event;
 pub use expression::{Expression, ExpressionContext, ProtoDynamicBitSelect, ProtoExpression};
+pub use fingerprint::structural_fingerprint;
 pub use module::{Module, ProtoModule};
 pub use statement::{
     CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ProtoAssignDynamicStatement,
@@ -38,6 +40,8 @@ use crate::backend::{self, BackendRegistry, CompiledWhole, DispatchOutcome};
 use crate::simulator::SimProfile;
 use crate::simulator_error::SimulatorError;
 use std::sync::Arc;
+use std::sync::LazyLock;
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::MaskCache;
@@ -506,6 +510,24 @@ fn write_log_capacity(site_table: &site_table::SiteTable) -> (usize, usize) {
     (narrow_cap, wide_cap)
 }
 
+impl Ir {
+    /// Replace the per-test I/O string literals (`$readmemh` filenames, file
+    /// open paths) in the Initial event with `io`, matched in appearance
+    /// order. Returns false when the counts don't match this Ir's actual
+    /// occurrences, signalling the caller to fall back to a private build.
+    pub(crate) fn override_initial_io(&mut self, io: &statement::IoStrings) -> bool {
+        if !io.ok {
+            return false;
+        }
+        let mut ri = 0usize;
+        let mut fi = 0usize;
+        if let Some(stmts) = self.event_statements.get_mut(&Event::Initial) {
+            override_io_stmts(stmts, io, &mut ri, &mut fi);
+        }
+        ri == io.readmemh.len() && fi == io.fileopen.len()
+    }
+}
+
 pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {
     for x in &ir.components {
         if let air::Component::Module(x) = x
@@ -547,37 +569,148 @@ pub fn build_ir_cached(
     config: &Config,
     cache: &mut ProtoModuleCache,
 ) -> Result<Ir, SimulatorError> {
-    // Cache hit: reuse ProtoModule, just instantiate with fresh buffers
+    // Thread-local fast path: the same top seen again on this thread.
     if let Some(entry) = cache.entries.get(&top) {
         let module = entry.proto.instantiate();
         return Ok(Ir::from_module(module, config, entry.token));
     }
 
-    // Cache miss: run Conv::conv
-    for x in &ir.components {
-        if let air::Component::Module(x) = x
-            && top == x.name
-        {
-            let token = x.token;
-            let mut context = context::Context {
-                config: config.clone(),
-                backends: BackendRegistry::for_config(config),
-                ..Default::default()
-            };
+    let top_module = ir
+        .components
+        .iter()
+        .find_map(|x| match x {
+            air::Component::Module(m) if top == m.name => Some(m),
+            _ => None,
+        })
+        .ok_or_else(|| SimulatorError::TopModuleNotFound {
+            module_name: top.to_string(),
+        })?;
 
-            let proto: ProtoModule = Conv::conv(&mut context, x)?;
-            let module = proto.instantiate();
+    // Cross-test shared proto: native test suites instantiate the same
+    // hardware many times, differing only in per-test I/O strings (e.g.
+    // `$readmemh` files, dump paths). When the structural fingerprint matches,
+    // one ProtoModule is built once and shared across threads/tests, then each
+    // test re-injects its own I/O strings — turning Conv from O(tests) into
+    // O(distinct designs).
+    if let Some(fp) = structural_fingerprint(top_module)
+        && let Some(entry) = shared_proto(shared_proto_key(fp, config), top_module, config)
+    {
+        let mut sim_ir = Ir::from_module(entry.proto.instantiate(), config, entry.token);
+        let io = statement::extract_io_strings(top_module);
+        if sim_ir.override_initial_io(&io) {
+            // The template proto carries the first test's name; report this
+            // test's own name for diagnostics and results.
+            sim_ir.name = top;
+            return Ok(sim_ir);
+        }
+        // I/O count mismatch (fingerprint collision or an unhandled shape):
+        // fall through to a private build for correctness.
+    }
 
-            let result = Ir::from_module(module, config, token);
+    // Fallback: build a private proto for this top and cache it thread-locally.
+    let token = top_module.token;
+    let mut context = context::Context {
+        config: config.clone(),
+        backends: BackendRegistry::for_config(config),
+        ..Default::default()
+    };
+    let proto: ProtoModule = Conv::conv(&mut context, top_module)?;
+    let module = proto.instantiate();
+    let result = Ir::from_module(module, config, token);
+    cache.entries.insert(top, CacheEntry { proto, token });
+    Ok(result)
+}
 
-            cache.entries.insert(top, CacheEntry { proto, token });
+/// Each slot is an `OnceLock` so the first thread to request a fingerprint
+/// builds its proto while others block and reuse it (single-flight) — the sim
+/// threads start together and would otherwise all Conv the same design.
+type SharedProtoSlot = Arc<OnceLock<Option<Arc<CacheEntry>>>>;
+static SHARED_PROTO_CACHE: LazyLock<Mutex<HashMap<[u8; 16], SharedProtoSlot>>> =
+    LazyLock::new(|| Mutex::new(HashMap::default()));
 
-            return Ok(result);
+/// Fold the codegen-affecting `Config` bits into the fingerprint so protos
+/// built under different settings never alias.
+fn shared_proto_key(fp: [u8; 32], config: &Config) -> [u8; 16] {
+    let mut h = blake3::Hasher::new();
+    h.update(&fp);
+    h.update(&[
+        config.use_4state as u8,
+        config.disable_ff_opt as u8,
+        config.aot_c as u8,
+        config.aot_c_event as u8,
+        config.aot_c_async as u8,
+        config.use_jit as u8,
+    ]);
+    let mut key = [0u8; 16];
+    key.copy_from_slice(&h.finalize().as_bytes()[..16]);
+    key
+}
+
+/// Get or build the shared proto for `key` (single-flight). `None` when Conv
+/// fails, so the caller falls back to a private build.
+fn shared_proto(
+    key: [u8; 16],
+    top_module: &air::Module,
+    config: &Config,
+) -> Option<Arc<CacheEntry>> {
+    let slot = {
+        let mut cache = SHARED_PROTO_CACHE.lock().unwrap();
+        Arc::clone(cache.entry(key).or_default())
+    };
+    let entry = slot.get_or_init(|| {
+        let token = top_module.token;
+        let mut context = context::Context {
+            config: config.clone(),
+            backends: BackendRegistry::for_config(config),
+            ..Default::default()
+        };
+        Conv::conv(&mut context, top_module)
+            .ok()
+            .map(|proto| Arc::new(CacheEntry { proto, token }))
+    });
+    entry.clone()
+}
+
+/// Recursively replace `$readmemh` filenames / file-open paths in `stmts` with
+/// the per-test values in `io`, matched by appearance order.
+fn override_io_stmts(
+    stmts: &mut [Statement],
+    io: &statement::IoStrings,
+    ri: &mut usize,
+    fi: &mut usize,
+) {
+    for s in stmts {
+        match s {
+            Statement::SystemFunctionCall(SystemFunctionCall::Readmemh { filename, .. }) => {
+                if let Some(v) = io.readmemh.get(*ri) {
+                    *filename = v.clone();
+                }
+                *ri += 1;
+            }
+            Statement::TbMethodCall {
+                method: TbMethodKind::FileOpen { path, .. },
+                ..
+            } => {
+                if let Some(v) = io.fileopen.get(*fi) {
+                    *path = v.clone();
+                }
+                *fi += 1;
+            }
+            Statement::If(i) => {
+                override_io_stmts(&mut i.true_side, io, ri, fi);
+                override_io_stmts(&mut i.false_side, io, ri, fi);
+            }
+            Statement::For(f) => override_io_stmts(&mut f.body, io, ri, fi),
+            Statement::SequentialBlock(b) => override_io_stmts(b, io, ri, fi),
+            Statement::SystemFunctionCall(_)
+            | Statement::TbMethodCall { .. }
+            | Statement::Assign(_)
+            | Statement::AssignDynamic(_)
+            | Statement::Break
+            | Statement::Compiled(_)
+            | Statement::CompiledBatch(_) => {}
         }
     }
-    Err(SimulatorError::TopModuleNotFound {
-        module_name: top.to_string(),
-    })
 }
 
 #[derive(Clone, Debug, Default)]

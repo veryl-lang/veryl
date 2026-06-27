@@ -6173,6 +6173,7 @@ version = "0.20.1"
 name = "veryl-simulator"
 version = "0.20.1"
 dependencies = [
+ "blake3",
  "clap",
  "codspeed-criterion-compat",
  "cranelift",

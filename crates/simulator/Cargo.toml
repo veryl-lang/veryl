@@ -11,6 +11,7 @@ description.workspace = true
 edition.workspace     = true
 
 [dependencies]
+blake3         = {workspace = true}
 clap           = {workspace = true}
 daggy          = {workspace = true}
 fst-writer     = {workspace = true}
