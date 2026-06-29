@@ -6206,6 +6206,31 @@ fn undefined_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package a_proto_pkg {
+        const WIDTH: u32;
+    }
+    package a_pkg::<W: u32> for a_proto_pkg {
+        const WIDTH: u32 = W;
+    }
+    interface b_if::<PKG: a_proto_pkg> {
+        var b: logic<PKG::WIDTH>;
+        modport mp {
+            b: input,
+        }
+    }
+    package c_pkg {
+        gen W: u32 = 1 + 1;
+        alias package a = a_pkg::<W>;
+    }
+    module d_module (
+        bif: modport b_if::<c_pkg::a>::mp,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
