@@ -40,6 +40,9 @@ pub struct Context {
     pub comb_values: Value,
     /// Per-Ir `WriteLogBuffer` pointer (3rd JIT arg).
     pub log_buf: Value,
+    /// FF byte delta (4th JIT arg, I32) added to baked write-log offsets so a
+    /// relocated (cache-reused) chunk records absolute `ff_values` offsets.
+    pub ff_delta: Value,
     pub zero: Value,
     pub zero_128: Value,
     /// Load CSE cache: VarOffset → (payload, mask_xz).
@@ -170,6 +173,10 @@ pub fn emit_inline_write_log_push(
     let log_buf = context.log_buf;
     let flags = MemFlagsData::trusted();
 
+    // Relocate the baked offset to an absolute ff_values offset: a cache-reused
+    // chunk runs at a different base, so add the runtime ff_delta (0 otherwise).
+    let offset = builder.ins().iadd(offset, context.ff_delta);
+
     let count = builder
         .ins()
         .load(I32, flags, log_buf, WRITE_LOG_NARROW_OFFSET_COUNT);
@@ -256,6 +263,9 @@ pub fn emit_inline_write_log_push_wide(
     debug_assert!(nb > 0 && nb <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES);
     let log_buf = context.log_buf;
     let flags = MemFlagsData::trusted();
+
+    // Relocate the baked offset to an absolute ff_values offset (see narrow push).
+    let offset = builder.ins().iadd(offset, context.ff_delta);
 
     let count = builder
         .ins()
@@ -399,16 +409,20 @@ fn build_binary_inner(
     if !config.dump_cranelift {
         settings_builder.set("enable_verifier", "false").unwrap();
     }
-    // disable_load_cache only matters when the chunk contains a
-    // CompiledBlock; fully-JIT chunks keep alias analysis on.
     let chunk_has_compiled_block = proto_contains_compiled_block(&proto);
     let force_disable_load_cache = std::env::var("VERYL_FORCE_DISABLE_LOAD_CACHE")
         .ok()
         .as_deref()
         == Some("1");
-    let effective_disable_load_cache =
-        disable_load_cache && (chunk_has_compiled_block || force_disable_load_cache);
-    if effective_disable_load_cache {
+    // IR load-CSE: honor the caller's no-cache request unconditionally. A
+    // sub-group split from a settle that embeds a CompiledBlock is flagged
+    // disable_load_cache, and CSE across the (separately-compiled) CompiledBlock
+    // boundary can forward a pre-CompiledBlock (uninitialized) value.
+    let effective_disable_load_cache = disable_load_cache || force_disable_load_cache;
+    // Cranelift alias analysis is only unsafe when this chunk embeds a
+    // CompiledBlock (an opaque callee that may mutate comb storage between our
+    // memory ops).  Fully-JIT chunks keep it on for speed.
+    if (effective_disable_load_cache && chunk_has_compiled_block) || force_disable_load_cache {
         settings_builder
             .set("enable_alias_analysis", "false")
             .unwrap();
@@ -427,6 +441,7 @@ fn build_binary_inner(
     sig.params.push(AbiParam::new(ptr_type)); // *const u8 (ff base)
     sig.params.push(AbiParam::new(ptr_type)); // *const u8 (comb base)
     sig.params.push(AbiParam::new(ptr_type)); // *mut u8 (write_log buffer)
+    sig.params.push(AbiParam::new(ptr_type)); // isize (ff_delta for write-log)
 
     let mut func = Function::with_name_signature(UserFuncName::default(), sig);
     let mut func_ctx = FunctionBuilderContext::new();
@@ -439,6 +454,9 @@ fn build_binary_inner(
     let ff_values = builder.block_params(block)[0];
     let comb_values = builder.block_params(block)[1];
     let log_buf = builder.block_params(block)[2];
+    // 4th arg is the FF byte delta; reduce to I32 once (write-log offsets are u32).
+    let ff_delta_raw = builder.block_params(block)[3];
+    let ff_delta = builder.ins().ireduce(I32, ff_delta_raw);
     let zero = builder.ins().iconst(I64, 0);
     let zero_lo = builder.ins().iconst(I64, 0);
     let zero_hi = builder.ins().iconst(I64, 0);
@@ -449,6 +467,7 @@ fn build_binary_inner(
         ff_values,
         comb_values,
         log_buf,
+        ff_delta,
         zero,
         zero_128,
         load_cache: HashMap::default(),

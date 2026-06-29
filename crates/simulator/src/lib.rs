@@ -14,7 +14,10 @@ pub use ir::Config;
 pub use simulator::Simulator;
 pub use simulator_error::SimulatorError;
 
-pub type FuncPtr = unsafe extern "system" fn(*const u8, *const u8, *mut u8);
+// 4th arg `ff_delta`: byte delta from the base the chunk was compiled at to this
+// instance's ff base, added to baked FF write-log offsets so a relocated
+// (cache-reused) chunk records absolute `ff_values` offsets. 0 when not reused.
+pub type FuncPtr = unsafe extern "system" fn(*const u8, *const u8, *mut u8, isize);
 
 #[cfg(test)]
 mod tests;
