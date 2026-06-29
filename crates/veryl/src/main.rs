@@ -70,6 +70,11 @@ fn main() -> Result<ExitCode> {
         .level_for("veryl_parser", LevelFilter::Warn)
         .level_for("parol_runtime", LevelFilter::Warn)
         .level_for("scnr", LevelFilter::Warn)
+        .level_for("cranelift_codegen", LevelFilter::Warn)
+        .level_for("cranelift_jit", LevelFilter::Warn)
+        .level_for("cranelift_frontend", LevelFilter::Warn)
+        .level_for("cranelift_module", LevelFilter::Warn)
+        .level_for("regalloc2", LevelFilter::Warn)
         .chain(std::io::stderr())
         .apply()
         .into_diagnostic()?;
