@@ -86,6 +86,14 @@ pub struct Context {
     pub chunk_cache: HashMap<*const air::Component, ChunkCacheEntry>,
     pub expanding_functions: HashSet<VarId>,
     pub in_initial: bool,
+    /// True while converting a de-aliased DUT's subtree, so only the topmost
+    /// boundary is de-aliased — the DUT's internals stay aliased (they relocate
+    /// uniformly with it, no per-cycle boundary copies on hot paths).
+    pub in_reuse_dut: bool,
+    /// Per-testbench id (assigned at `ProtoModule::conv`).  A component is a reuse
+    /// DUT only when it recurs across DIFFERENT tops; replication within one top
+    /// (SMP harts) shares this id and so does not de-alias.
+    pub test_top_id: u64,
     /// Populated from `Config`.  Empty → interpreter-only.
     pub backends: BackendRegistry,
     /// See `alloc_internal_event_id`.
