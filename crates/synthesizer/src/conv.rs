@@ -235,7 +235,17 @@ impl ConvContext {
 
     pub(crate) fn add_cell(&mut self, kind: CellKind, inputs: Vec<NetId>) -> NetId {
         debug_assert_eq!(inputs.len(), kind.arity());
-        let out_origin = inputs.first().and_then(|n| self.nets[*n as usize].origin);
+        // A Mux2's first input is the select (often origin-less); prefer its
+        // data inputs so the downstream critical path stays labeled.
+        let pick = |ctx: &Self, n: &NetId| ctx.nets[*n as usize].origin;
+        let out_origin = match kind {
+            CellKind::Mux2 => inputs
+                .get(1)
+                .and_then(|n| pick(self, n))
+                .or_else(|| inputs.get(2).and_then(|n| pick(self, n)))
+                .or_else(|| inputs.first().and_then(|n| pick(self, n))),
+            _ => inputs.iter().find_map(|n| pick(self, n)),
+        };
         let output = self.alloc_net(out_origin);
         let idx = self.cells.len();
         self.cells.push(Cell {
@@ -681,8 +691,22 @@ impl ConvContext {
         let mut net_map: Vec<NetId> = Vec::with_capacity(child_gate.nets.len());
         net_map.push(NET_CONST0);
         net_map.push(NET_CONST1);
-        for _ in (RESERVED_NETS as usize)..child_gate.nets.len() {
-            net_map.push(self.alloc_net(None));
+        // Prefix child net origins with the instance name so a flattened
+        // critical path localizes to its source (e.g. `u_fp_sqrt.reg_r_exp`).
+        let inst_name = veryl_parser::resource_table::get_str_value(inst.name);
+        for ci in (RESERVED_NETS as usize)..child_gate.nets.len() {
+            let new_origin = match (&inst_name, child_gate.nets[ci].origin) {
+                (Some(iname), Some((name, bit))) => {
+                    let cname = veryl_parser::resource_table::get_str_value(name)
+                        .unwrap_or_else(|| format!("{}", name));
+                    Some((
+                        veryl_parser::resource_table::insert_str(&format!("{iname}.{cname}")),
+                        bit,
+                    ))
+                }
+                _ => None,
+            };
+            net_map.push(self.alloc_net(new_origin));
         }
 
         // Keyed by the full hierarchical path because modport expansion produces

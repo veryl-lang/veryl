@@ -379,7 +379,10 @@ impl TimingReport {
                     (StepKind::RamReadOutput(_), _, _) => {
                         origin_tag.clone().unwrap_or_else(|| "RAM Q".to_string())
                     }
-                    (StepKind::CellOutput(_, kind), _, _) => kind.symbol().to_string(),
+                    (StepKind::CellOutput(_, kind), _, _) => match &origin_tag {
+                        Some(t) => format!("{} {}", kind.symbol(), t),
+                        None => kind.symbol().to_string(),
+                    },
                     _ => "start".to_string(),
                 };
 
