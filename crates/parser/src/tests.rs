@@ -287,4 +287,64 @@ fn parse_error_help() {
         &help_message(code),
         "'if' is a reserved keyword and cannot be used as an identifier"
     );
+
+    // `else` is valid here; the hint must address `case`, not `else`.
+    let code = r#"
+    module ModuleA {
+        always_ff {
+            if_reset {
+                v = 0;
+            } else case sel {
+                0: v = 10;
+            }
+        }
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "'else' must be followed by a block ('{ ... }') or 'if'"
+    );
+}
+
+#[test]
+fn parse_error_location_points_at_divergence() {
+    use crate::ParserError;
+
+    // Regression for misleading error location: parol reports the syntax error at its
+    // LA(1) (`else`, which is valid here), but the real problem is `case` at LA(2).
+    let code = r#"module ModuleA {
+    always_ff {
+        if_reset {
+            v = 0;
+        } else case sel {
+            0: v = 10;
+        }
+    }
+}"#;
+    let err = Parser::parse(code, &"").err().unwrap();
+    let ParserError::SyntaxError(se) = err else {
+        panic!("expected a syntax error");
+    };
+
+    // The reported message and the highlighted location must both be `case`.
+    assert_eq!(se.to_string(), "Unexpected token: 'case'");
+    let case_offset = code.find("case").unwrap();
+    assert_eq!(se.error_location.offset(), case_offset);
+}
+
+#[test]
+fn parse_error_shows_source_text_for_error_token() {
+    use crate::ParserError;
+
+    // `[` is not lexable inside a generic argument, so it becomes an `Error` token.
+    // The message must show the offending source text (`[`), not the literal "error".
+    let code = "module ModuleA { inst u: ModuleA::<Pkg::C[0]>; }";
+    let err = Parser::parse(code, &"").err().unwrap();
+    let ParserError::SyntaxError(se) = err else {
+        panic!("expected a syntax error");
+    };
+
+    assert_eq!(se.to_string(), "Unexpected token: '['");
+    assert_eq!(se.error_location.offset(), code.find('[').unwrap());
 }
