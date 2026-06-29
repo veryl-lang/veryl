@@ -34,9 +34,16 @@ pub struct SyntaxError {
 
 impl std::fmt::Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if !self.unexpected_tokens.is_empty() {
-            let token = self.unexpected_tokens[0].token_type;
-            f.write_str(&format!("Unexpected token: '{token}'"))
+        // The last lookahead token is the actual divergence; earlier ones form a valid prefix.
+        if let Some(token) = self.unexpected_tokens.last() {
+            // `TokenType::Error` (an unlexable character) displays as "error"; show its text.
+            if token.token_type == TokenType::Error
+                && let Some(text) = &token.text
+            {
+                write!(f, "Unexpected token: '{text}'")
+            } else {
+                write!(f, "Unexpected token: '{}'", token.token_type)
+            }
         } else {
             f.write_str("Syntax Error")
         }
@@ -70,15 +77,47 @@ fn keyword_as_identifier(unexpected_token: TokenType, expected_tokens: &Expected
     unexpected_token.is_keyword() && expected_tokens.any(TokenType::Identifier)
 }
 
+fn block_or_if_after_else(
+    unexpected_tokens: &[UnexpectedToken],
+    expected_tokens: &ExpectedTokens,
+) -> bool {
+    // `else` is valid after the preceding block, so the hint targets what must follow it.
+    let after_else = unexpected_tokens.len() >= 2
+        && unexpected_tokens[unexpected_tokens.len() - 2].token_type == TokenType::Else;
+    after_else && expected_tokens.any(TokenType::LBrace) && expected_tokens.any(TokenType::If)
+}
+
 impl From<parol_runtime::SyntaxError> for SyntaxError {
     fn from(value: parol_runtime::SyntaxError) -> Self {
-        let unexpected_tokens: Vec<_> = UnexpectedTokens(value.unexpected_tokens).into();
+        let source = value.input.as_deref().map(|f| f.input.as_str());
+        let unexpected_tokens: Vec<UnexpectedToken> = value
+            .unexpected_tokens
+            .into_iter()
+            .map(|v| {
+                let token: SourceSpan = Location(v.token).into();
+                let token_type: TokenType = v.token_type.as_str().into();
+                let text = (token_type == TokenType::Error)
+                    .then(|| {
+                        source.and_then(|s| s.get(token.offset()..token.offset() + token.len()))
+                    })
+                    .flatten()
+                    .map(str::to_string);
+                UnexpectedToken {
+                    name: v.name,
+                    token_type,
+                    token,
+                    text,
+                }
+            })
+            .collect();
         let expected_tokens: ExpectedTokens = (&value.expected_tokens).into();
 
         let mut help = String::new();
-        if !unexpected_tokens.is_empty() {
-            let token = unexpected_tokens[0].token_type;
-            if l_angle(token, &expected_tokens) {
+        if let Some(token) = unexpected_tokens.last() {
+            let token = token.token_type;
+            if block_or_if_after_else(&unexpected_tokens, &expected_tokens) {
+                help = "'else' must be followed by a block ('{ ... }') or 'if'".to_string();
+            } else if l_angle(token, &expected_tokens) {
                 help = "If you mean \"less than operator\", please use '<:'".to_string();
             } else if r_angle(token, &expected_tokens) {
                 help = "If you mean \"greater than operator\", please use '>:'".to_string();
@@ -102,7 +141,11 @@ impl From<parol_runtime::SyntaxError> for SyntaxError {
         Self {
             cause: value.cause,
             input: value.input.map(|e| FileSource(*e).into()).unwrap(),
-            error_location: Location(*value.error_location).into(),
+            // parol points `error_location` at its LA(1), a valid prefix; use the divergence.
+            error_location: unexpected_tokens
+                .last()
+                .map(|t| t.token)
+                .unwrap_or_else(|| Location(*value.error_location).into()),
             unexpected_tokens,
             expected_tokens,
             help,
@@ -118,6 +161,8 @@ pub struct UnexpectedToken {
     token_type: TokenType,
     #[label("Unexpected token")]
     pub(crate) token: SourceSpan,
+    // Source text, set only for `Error` tokens (see `Display`).
+    text: Option<String>,
 }
 
 include!("generated/token_type_generated.rs");
@@ -168,22 +213,6 @@ struct Location(parol_runtime::Location);
 impl From<Location> for SourceSpan {
     fn from(location: Location) -> Self {
         SourceSpan::new((location.0.start as usize).into(), location.0.len())
-    }
-}
-
-struct UnexpectedTokens(Vec<parol_runtime::UnexpectedToken>);
-
-impl From<UnexpectedTokens> for Vec<UnexpectedToken> {
-    fn from(value: UnexpectedTokens) -> Self {
-        value
-            .0
-            .into_iter()
-            .map(|v| UnexpectedToken {
-                name: v.name,
-                token_type: v.token_type.as_str().into(),
-                token: Location(v.token).into(),
-            })
-            .collect::<Vec<UnexpectedToken>>()
     }
 }
 
