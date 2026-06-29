@@ -2294,13 +2294,16 @@ fn batch_compiled_statements(stmts: Vec<Statement>) -> Vec<Statement> {
                 Some(Statement::CompiledBatch(batch))
                     if Arc::ptr_eq(&batch.artifact, &c.artifact) =>
                 {
-                    batch.args.push((c.ff, c.comb));
+                    batch.args.push((c.ff, c.comb, c.ff_delta));
                 }
                 Some(Statement::Compiled(prev)) if Arc::ptr_eq(&prev.artifact, &c.artifact) => {
                     let batch = CompiledBatchStmt {
                         artifact: Arc::clone(&prev.artifact),
                         log_buf: prev.log_buf,
-                        args: vec![(prev.ff, prev.comb), (c.ff, c.comb)],
+                        args: vec![
+                            (prev.ff, prev.comb, prev.ff_delta),
+                            (c.ff, c.comb, c.ff_delta),
+                        ],
                     };
                     *result.last_mut().unwrap() = Statement::CompiledBatch(batch);
                 }

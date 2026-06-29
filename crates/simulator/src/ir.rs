@@ -39,6 +39,7 @@ use crate::simulator::SimProfile;
 use crate::simulator_error::SimulatorError;
 use std::sync::Arc;
 use std::sync::OnceLock;
+
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
@@ -454,12 +455,12 @@ impl Ir {
 pub fn dispatch_stmt_fast(s: &Statement, mask_cache: &mut MaskCache) {
     match s {
         Statement::Compiled(c) => unsafe {
-            (c.artifact.func)(c.ff, c.comb, c.log_buf);
+            (c.artifact.func)(c.ff, c.comb, c.log_buf, c.ff_delta);
         },
         Statement::CompiledBatch(c) => unsafe {
             let f = c.artifact.func;
-            for &(ff, comb) in &c.args {
-                f(ff, comb, c.log_buf);
+            for &(ff, comb, ff_delta) in &c.args {
+                f(ff, comb, c.log_buf, ff_delta);
             }
         },
         _ => {

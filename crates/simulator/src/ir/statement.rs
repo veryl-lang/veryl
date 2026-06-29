@@ -65,6 +65,7 @@ impl ProtoStatements {
                         ff: ff_ptr as *const u8,
                         comb: comb_ptr as *const u8,
                         log_buf: std::ptr::null_mut(),
+                        ff_delta: 0,
                     }));
                 }
             }
@@ -237,13 +238,17 @@ pub struct CompiledStmt {
     pub ff: *const u8,
     pub comb: *const u8,
     pub log_buf: *mut u8,
+    /// FF byte delta passed to the chunk (4th `FuncPtr` arg) so it records
+    /// absolute write-log offsets. 0 unless this is a relocated cache reuse.
+    pub ff_delta: isize,
 }
 
 #[derive(Clone)]
 pub struct CompiledBatchStmt {
     pub artifact: Arc<ChunkArtifact>,
     pub log_buf: *mut u8,
-    pub args: Vec<(*const u8, *const u8)>,
+    /// `(ff, comb, ff_delta)` per batched instance.
+    pub args: Vec<(*const u8, *const u8, isize)>,
 }
 
 // SAFETY: Raw pointers point into the owning Ir's exclusively-owned buffers.
@@ -366,13 +371,13 @@ impl Statement {
             }
             Statement::Break => ControlFlow::Break,
             Statement::Compiled(c) => unsafe {
-                (c.artifact.func)(c.ff, c.comb, c.log_buf);
+                (c.artifact.func)(c.ff, c.comb, c.log_buf, c.ff_delta);
                 ControlFlow::Continue
             },
             Statement::CompiledBatch(c) => unsafe {
                 let f = c.artifact.func;
-                for &(ff, comb) in &c.args {
-                    f(ff, comb, c.log_buf);
+                for &(ff, comb, ff_delta) in &c.args {
+                    f(ff, comb, c.log_buf, ff_delta);
                 }
                 ControlFlow::Continue
             },
@@ -1770,6 +1775,7 @@ impl ProtoStatement {
                         ff: adjusted_ff,
                         comb: adjusted_comb,
                         log_buf: std::ptr::null_mut(),
+                        ff_delta: x.ff_delta_bytes,
                     })
                 }
                 ProtoStatement::For(x) => {

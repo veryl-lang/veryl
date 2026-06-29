@@ -1091,17 +1091,19 @@ impl ProtoAssignStatement {
                 None
             };
 
-            // Mask forwarded value to dst_width to match load-path uextend
-            let fwd = if self.dst_width < 64 {
+            // Mask the forwarded value to dst_width (see the plain store path);
+            // wide non-native (64<w<128) needs it, full native widths are exempt.
+            let needs_fwd_mask = self.dst_width != 64 && self.dst_width < 128;
+            let fwd = if needs_fwd_mask {
                 let m = gen_mask_for_width(self.dst_width);
-                band_const(builder, result, m, false)
+                band_const(builder, result, m, wide)
             } else {
                 result
             };
-            let fwd_m = if self.dst_width < 64 {
+            let fwd_m = if needs_fwd_mask {
                 result_mask_xz.map(|v| {
                     let m = gen_mask_for_width(self.dst_width);
-                    band_const(builder, v, m, false)
+                    band_const(builder, v, m, wide)
                 })
             } else {
                 result_mask_xz
@@ -1165,17 +1167,19 @@ impl ProtoAssignStatement {
                 None
             };
 
-            // Mask forwarded value to dst_width to match load-path uextend
-            let fwd = if self.dst_width < 64 {
+            // Mask the forwarded value to dst_width (see the plain store path);
+            // wide non-native (64<w<128) needs it, full native widths are exempt.
+            let needs_fwd_mask = self.dst_width != 64 && self.dst_width < 128;
+            let fwd = if needs_fwd_mask {
                 let m = gen_mask_for_width(self.dst_width);
-                band_const(builder, result, m, false)
+                band_const(builder, result, m, wide)
             } else {
                 result
             };
-            let fwd_m = if self.dst_width < 64 {
+            let fwd_m = if needs_fwd_mask {
                 result_mask_xz.map(|v| {
                     let m = gen_mask_for_width(self.dst_width);
-                    band_const(builder, v, m, false)
+                    band_const(builder, v, m, wide)
                 })
             } else {
                 result_mask_xz
@@ -1321,20 +1325,21 @@ impl ProtoAssignStatement {
                 }
             }
 
-            // Forward value to load cache.  Mask to dst_width to match
-            // load+uextend, with the same elision as the storage mask above.
-            // Packed FF skips the cache insert so subsequent same-cycle
-            // FF reads load OLD value from memory (NBA semantics).
-            let fwd_p = if self.dst_width < 64 && !skip_writer_mask {
+            // Mask the cached value to dst_width like the store arm masks
+            // memory, else a later read forwards unmasked upper bits.  Wide
+            // non-native (64<w<128) needs it too; full native widths (64/128)
+            // store the whole slot and are exempt.
+            let needs_fwd_mask = !skip_writer_mask && self.dst_width != 64 && self.dst_width < 128;
+            let fwd_p = if needs_fwd_mask {
                 let m = gen_mask_for_width(self.dst_width);
-                band_const(builder, payload, m, false)
+                band_const(builder, payload, m, wide)
             } else {
                 payload
             };
-            let fwd_m = if self.dst_width < 64 && !skip_writer_mask {
+            let fwd_m = if needs_fwd_mask {
                 mask_xz.map(|v| {
                     let m = gen_mask_for_width(self.dst_width);
-                    band_const(builder, v, m, false)
+                    band_const(builder, v, m, wide)
                 })
             } else {
                 mask_xz

@@ -104,7 +104,8 @@ impl CompiledWhole for AotCWhole {
                 // function's reads/writes; emitted code follows the
                 // standard JIT ABI (ff, comb, write_log).
                 unsafe {
-                    (m.func)(ff, comb as *const u8, log);
+                    // Whole-design AOT-C functions are never relocated: ff_delta = 0.
+                    (m.func)(ff, comb as *const u8, log, 0);
                 }
                 DispatchOutcome::Done
             }

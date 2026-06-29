@@ -1555,9 +1555,7 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
     match stmt {
         ProtoStatement::CompiledBlock(cb) => {
             for s in &cb.original_stmts {
-                let mut adj = s.clone();
-                adj.adjust_offsets(cb.ff_delta_bytes, cb.comb_delta_bytes);
-                collect_uncovered(&adj, out);
+                collect_uncovered(s, out);
             }
         }
         ProtoStatement::If(x) => {
@@ -1710,10 +1708,8 @@ fn diag_find_fail(stmt: &ProtoStatement) -> String {
     match stmt {
         ProtoStatement::CompiledBlock(cb) => {
             for s in &cb.original_stmts {
-                let mut adj = s.clone();
-                adj.adjust_offsets(cb.ff_delta_bytes, cb.comb_delta_bytes);
-                if emit_stmt(&adj).is_none() {
-                    return format!("CB/{}", diag_find_fail(&adj));
+                if emit_stmt(s).is_none() {
+                    return format!("CB/{}", diag_find_fail(s));
                 }
             }
             "CB(?)".to_string()
@@ -2348,7 +2344,7 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     src.push_str(
         "\n\
          __attribute__((visibility(\"default\")))\n\
-         void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log) {\n",
+         void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
     );
     src.push_str(&emit_reserve_prologue(narrow_pushes, wide_pushes));
     src.push_str(&body);
@@ -2697,7 +2693,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     if chunks.len() == 1 {
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
-             void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log) {\n\
+             void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n\
              \x20   (void)write_log;\n",
         );
         body.push_str(&chunk_bodies[0]);
@@ -2718,7 +2714,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         }
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
-             void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log) {\n",
+             void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
         );
         for i in 0..chunks.len() {
             body.push_str(&format!(
@@ -3144,20 +3140,15 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             ))
         }
         ProtoStatement::CompiledBlock(cb) => {
-            // Walk the original pre-chunk ProtoStatements into the eval body,
-            // bypassing `cb.func`, so gcc keeps values in registers across the
-            // chunk boundary instead of spilling at a func-ptr call.
-            //
-            // The original_stmts carry canonical offsets (ff/comb base
-            // delta == 0).  At runtime the same compiled code is called
-            // with adjusted base pointers; here we instead shift the offsets
-            // in the cloned IR by ff_delta_bytes / comb_delta_bytes so the
-            // emitted code addresses the right bytes off the canonical buffers.
+            // Inline the pre-chunk statements instead of calling `cb.func`, so
+            // gcc keeps values in registers across the chunk boundary.
+            // `original_stmts` already hold this instance's actual offsets (the
+            // reuse paths pre-adjust them), so unlike Cranelift's relocated
+            // `cb.func` the inlined C must NOT re-add ff/comb_delta_bytes —
+            // that double-counts and corrupts memory under alias-off reuse.
             let mut s = String::from("{ ");
             for stmt in &cb.original_stmts {
-                let mut adjusted = stmt.clone();
-                adjusted.adjust_offsets(cb.ff_delta_bytes, cb.comb_delta_bytes);
-                let inner = emit_stmt(&adjusted)?;
+                let inner = emit_stmt(stmt)?;
                 s.push_str(&inner);
                 s.push(' ');
             }
@@ -5398,11 +5389,13 @@ mod tests {
     }
 
     #[test]
-    fn emit_stmt_compiled_block_applies_comb_delta() {
+    fn emit_stmt_compiled_block_emits_original_offsets_verbatim() {
         use crate::ir::CompiledBlockStatement;
-        // comb_delta_bytes=0x100: emitted addresses must shift by 0x100.
+        // original_stmts already hold actual offsets, so the cc inline path must
+        // emit them verbatim and NOT re-add ff/comb_delta_bytes (a Cranelift-only
+        // relocation hint); re-adding double-counts the delta.
         let inner = ProtoStatement::Assign(ProtoAssignStatement {
-            dst: VarOffset::Comb(0x10),
+            dst: VarOffset::Comb(0x110),
             dst_width: 32,
             select: None,
             dynamic_select: None,
@@ -5414,6 +5407,7 @@ mod tests {
         let cb = CompiledBlockStatement {
             artifact: bogus_artifact(),
             ff_delta_bytes: 0,
+            // Present (a Cranelift relocation hint) but must be ignored by cc.
             comb_delta_bytes: 0x100,
             input_offsets: vec![],
             output_offsets: vec![],
@@ -5422,15 +5416,15 @@ mod tests {
             original_stmts: vec![inner],
         };
         let s = emit_stmt(&ProtoStatement::CompiledBlock(cb)).unwrap();
-        assert!(s.contains("comb_values + 0x110"));
-        assert!(!s.contains("comb_values + 0x10 ")); // base shouldn't appear unshifted
+        assert!(s.contains("comb_values + 0x110")); // actual offset, verbatim
+        assert!(!s.contains("comb_values + 0x210")); // delta must NOT be re-added
     }
 
     fn bogus_artifact() -> Arc<ChunkArtifact> {
         // Never actually called — emit_stmt for CompiledBlock bypasses
         // the artifact entirely.  We just need a valid handle for the
         // struct field.
-        unsafe extern "system" fn stub(_: *const u8, _: *const u8, _: *mut u8) {}
+        unsafe extern "system" fn stub(_: *const u8, _: *const u8, _: *mut u8, _: isize) {}
         Arc::new(ChunkArtifact {
             func: stub,
             keepalive: None,
@@ -5609,6 +5603,7 @@ mod tests {
                 ff.as_mut_ptr(),
                 comb.as_mut_ptr(),
                 log.as_mut_ptr() as *mut u8,
+                0,
             );
         }
         let written = u32::from_le_bytes(comb[20..24].try_into().unwrap());
@@ -5623,6 +5618,7 @@ mod tests {
                 ff.as_mut_ptr(),
                 comb.as_mut_ptr(),
                 log.as_mut_ptr() as *mut u8,
+                0,
             );
         }
         let written = u32::from_le_bytes(comb[20..24].try_into().unwrap());
@@ -5674,8 +5670,8 @@ mod tests {
         let src = "\
             #include <stdint.h>\n\
             __attribute__((visibility(\"default\")))\n\
-            void veryl_aot_eval(uint8_t *ff, uint8_t *comb, uint64_t *log) {\n\
-                (void)ff; (void)log;\n\
+            void veryl_aot_eval(uint8_t *ff, uint8_t *comb, uint64_t *log, intptr_t ff_delta) {\n\
+                (void)ff; (void)log; (void)ff_delta;\n\
                 *(uint32_t*)(comb + 0) = 0xdeadbeef;\n\
             }\n";
         // Per-test cache dir passed explicitly so we don't pollute the
@@ -5695,6 +5691,7 @@ mod tests {
                 ff.as_mut_ptr(),
                 comb.as_mut_ptr(),
                 log.as_mut_ptr() as *mut u8,
+                0,
             );
         }
         let written = u32::from_le_bytes(comb[0..4].try_into().unwrap());
