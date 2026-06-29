@@ -613,6 +613,12 @@ pub struct Config {
     /// now that the compile pool caps concurrency; set `VERYL_AOT_C_MIN_STMTS=N`
     /// to restore a floor.
     pub aot_c_min_stmts: usize,
+    /// Cross-test DUT reuse: cache a converted DUT and relocate it into later
+    /// tests.  The caches are keyed by `Arc<Component>` pointer (unique only
+    /// within one `air::Ir`), so it's safe only for the CLI (one analysis per
+    /// process), not the parallel unit-test harness — hence default off, enabled
+    /// only by `apply_env`.
+    pub dut_reuse: bool,
 }
 
 impl Config {
@@ -651,6 +657,9 @@ impl Config {
         {
             self.aot_c_min_stmts = n;
         }
+        // On by default for the CLI; `VERYL_DUT_REUSE=0` opts out.  Off in the
+        // unit-test harness, which never calls `apply_env` (see `Config::dut_reuse`).
+        self.dut_reuse = std::env::var("VERYL_DUT_REUSE").ok().as_deref() != Some("0");
     }
 }
 

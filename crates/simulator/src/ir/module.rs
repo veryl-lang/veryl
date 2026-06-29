@@ -1,3 +1,4 @@
+use crate::backend::inst::next_test_top_id;
 use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole};
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::{stable_topo_sort, stable_topo_sort_with_blocks};
@@ -2320,6 +2321,10 @@ fn batch_compiled_statements(stmts: Vec<Statement>) -> Vec<Statement> {
 
 impl Conv<&air::Module> for ProtoModule {
     fn conv(context: &mut Context, src: &air::Module) -> Result<Self, SimulatorError> {
+        // This conv is one test top (testbench).  Tag it so cross-test DUT
+        // recurrence can be told apart from within-top replication (SMP harts).
+        context.test_top_id = next_test_top_id();
+
         let mut analyzer_context = veryl_analyzer::conv::Context::default();
         analyzer_context.variables = src.variables.clone();
         analyzer_context.functions = src.functions.clone();

@@ -1,4 +1,6 @@
-use crate::backend::inst::try_compile_inst_chunks;
+use crate::backend::inst::{
+    ReuseOutcome, port_alias_enabled, try_compile_inst_chunks, try_reuse_or_claim,
+};
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 use crate::ir::module::{BitRange, gather_bit_aware_outputs, ranges_overlap};
@@ -12,6 +14,7 @@ use crate::ir::{Event, ProtoExpression, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
 use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
+use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_parser::token_range::TokenRange;
 
@@ -818,9 +821,18 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         context.ff_total_bytes += child_ff_count;
         context.comb_total_bytes += child_comb_count;
 
-        // Alias child input/output port storage to the parent slot it's
-        // wired to, eliminating the inter-module copy at settle_comb.
-        let alias_enabled = std::env::var("VERYL_DISABLE_PORT_ALIAS").ok().as_deref() != Some("1");
+        // Alias child input/output port storage to the parent slot it's wired
+        // to, eliminating the inter-module copy at settle_comb.  De-aliased only
+        // for the reuse-target DUT boundary — see `port_alias_enabled`.
+        let component_key = Arc::as_ptr(&src.component);
+        let alias_enabled = port_alias_enabled(
+            component_key,
+            child_ff_count,
+            child_comb_count,
+            context.in_reuse_dut,
+            context.test_top_id,
+            context.config.dut_reuse,
+        );
         let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for input in &src.inputs {
@@ -933,46 +945,141 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
         }
 
-        let child_scope = ScopeContext {
-            variable_meta: child_variable_meta.clone(),
-            analyzer_context: child_analyzer_context,
-            ff_table: child_ff_table.clone(),
-            func_offset_index: None,
-        };
-        context.scope_contexts.push(child_scope);
-
         let mut all_event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
         let mut all_derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)> = vec![];
 
-        for decl in child_decls {
-            let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
-
-            for (event, mut stmts) in proto_decl.event_statements {
-                all_event_statements
-                    .entry(event)
-                    .and_modify(|v| v.append(&mut stmts))
-                    .or_insert(stmts);
-            }
-            all_comb_statements.append(&mut proto_decl.comb_statements.clone());
-            all_post_comb_fns.extend(proto_decl.post_comb_fns);
-            all_child_modules.extend(proto_decl.child_modules);
-            all_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
-        }
-
-        context.scope_contexts.pop();
-
-        try_compile_inst_chunks(
-            context,
-            src,
+        // Cross-test DUT reuse: if this component was already converted (earlier
+        // test/instance), restore its subtree relocated to this instance's
+        // offsets, skipping IR assembly AND codegen.  `child_variable_meta` and
+        // the port copies / event remap below are still rebuilt fresh.
+        let (reuse_hit, claim_guard) = match try_reuse_or_claim(
+            component_key,
+            alias_enabled,
             ff_start,
             comb_start,
-            alias_enabled,
-            &mut all_event_statements,
-            &mut all_comb_statements,
-        );
+            context.config.dut_reuse,
+        ) {
+            ReuseOutcome::Hit(r) => (Some(r), None),
+            ReuseOutcome::Compute(g) => (None, Some(g)),
+            ReuseOutcome::Disabled => (None, None),
+        };
+        if let Some(reuse) = reuse_hit {
+            // Re-key the cached subtree's grandchild derived-clock event ids
+            // (minted near u32::MAX) to fresh ones, else they collide with ids
+            // this context mints for its own parts.  Small per-scope ids pass through.
+            let threshold = air::VarId::from_raw(u32::MAX / 2);
+            let mut id_map: HashMap<air::VarId, air::VarId> = HashMap::default();
+            let mut intern = |vid: air::VarId, ctx: &mut Context| {
+                if vid > threshold {
+                    id_map
+                        .entry(vid)
+                        .or_insert_with(|| ctx.alloc_internal_event_id());
+                }
+            };
+            for ev in reuse.event_statements.keys() {
+                if let Event::Clock(v) | Event::Reset(v) = ev {
+                    intern(*v, context);
+                }
+            }
+            for (v, _, _) in &reuse.derived_clock_candidates {
+                intern(*v, context);
+            }
+            let rekey = |ev: Event| -> Event {
+                match ev {
+                    Event::Clock(v) => Event::Clock(id_map.get(&v).copied().unwrap_or(v)),
+                    Event::Reset(v) => Event::Reset(id_map.get(&v).copied().unwrap_or(v)),
+                    other => other,
+                }
+            };
+            all_event_statements = reuse
+                .event_statements
+                .into_iter()
+                .map(|(ev, stmts)| (rekey(ev), stmts))
+                .collect();
+            all_comb_statements = reuse.comb_statements;
+            all_post_comb_fns = reuse.post_comb_fns;
+            all_child_modules = reuse.child_modules;
+            all_derived_clock_candidates = reuse
+                .derived_clock_candidates
+                .into_iter()
+                .map(|(v, off, nb)| (id_map.get(&v).copied().unwrap_or(v), off, nb))
+                .collect();
+            // Reserve the full region the reference conv consumed (declared
+            // vars + function-local / temporary allocations + the whole nested
+            // subtree).  `create_variable_meta` above only advanced by this
+            // component's declared-var counts; the skipped child-decl loop is
+            // where the rest was allocated.
+            context.ff_total_bytes = ff_start as usize + reuse.ff_size;
+            context.comb_total_bytes = comb_start as usize + reuse.comb_size;
+        } else {
+            let child_scope = ScopeContext {
+                variable_meta: child_variable_meta.clone(),
+                analyzer_context: child_analyzer_context,
+                ff_table: child_ff_table.clone(),
+                func_offset_index: None,
+            };
+            context.scope_contexts.push(child_scope);
+
+            // If this component is the de-aliased DUT boundary, mark its whole
+            // subtree so descendants stay aliased (only the topmost boundary is
+            // de-aliased; internals relocate uniformly with the DUT).
+            let prev_in_reuse_dut = context.in_reuse_dut;
+            context.in_reuse_dut = prev_in_reuse_dut || !alias_enabled;
+
+            for decl in child_decls {
+                let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
+
+                for (event, mut stmts) in proto_decl.event_statements {
+                    all_event_statements
+                        .entry(event)
+                        .and_modify(|v| v.append(&mut stmts))
+                        .or_insert(stmts);
+                }
+                all_comb_statements.append(&mut proto_decl.comb_statements.clone());
+                all_post_comb_fns.extend(proto_decl.post_comb_fns);
+                all_child_modules.extend(proto_decl.child_modules);
+                all_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
+            }
+
+            context.in_reuse_dut = prev_in_reuse_dut;
+            context.scope_contexts.pop();
+
+            try_compile_inst_chunks(
+                context,
+                src,
+                ff_start,
+                comb_start,
+                alias_enabled,
+                &mut all_event_statements,
+                &mut all_comb_statements,
+            );
+
+            // Publish this component's whole internal subtree (statements +
+            // child-module metas + nested derived-clock candidates) for later
+            // instances/tests via the single-flight claim guard.  Dropping the
+            // guard unfulfilled (on an earlier `?` error) releases the claim.
+            // `all_derived_clock_candidates` here holds only the NESTED
+            // (grandchild) candidates; this component's own derived clocks are
+            // added later by the always-run event remap and stay per-instance.
+            if let Some(guard) = claim_guard {
+                let ff_size = context.ff_total_bytes - ff_start as usize;
+                let comb_size = context.comb_total_bytes - comb_start as usize;
+                guard.store(
+                    ff_start,
+                    comb_start,
+                    ff_size,
+                    comb_size,
+                    &all_event_statements,
+                    &all_comb_statements,
+                    &all_post_comb_fns,
+                    &all_child_modules,
+                    &all_derived_clock_candidates,
+                );
+            }
+        }
 
         // Input ports: parent expr → child port var
         for input in &src.inputs {
