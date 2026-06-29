@@ -363,7 +363,7 @@ impl Symbol {
     }
 
     pub fn generic_map(&self, id: Option<SymbolId>, arguments: &[GenericSymbolPath]) -> GenericMap {
-        let map = if arguments.is_empty() {
+        let map = if arguments.is_empty() && !self.has_generic_consts() {
             HashMap::default()
         } else {
             self.generic_table(arguments)
@@ -604,6 +604,20 @@ impl Symbol {
                 symbol.generic_consts()
             }
             _ => Vec::new(),
+        }
+    }
+
+    pub fn has_generic_consts(&self) -> bool {
+        match &self.kind {
+            SymbolKind::Function(x) => !x.generic_consts.is_empty(),
+            SymbolKind::Module(x) => !x.generic_consts.is_empty(),
+            SymbolKind::Interface(x) => !x.generic_consts.is_empty(),
+            SymbolKind::Package(x) => !x.generic_consts.is_empty(),
+            SymbolKind::GenericInstance(x) => {
+                let symbol = symbol_table::get(x.base).unwrap();
+                symbol.has_generic_consts()
+            }
+            _ => false,
         }
     }
 

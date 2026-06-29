@@ -521,7 +521,8 @@ impl GenericSymbolPath {
                 }
 
                 if let Ok(ref symbol) = symbol
-                    && matches!(&symbol.found.kind, SymbolKind::GenericInstance(_))
+                    && (matches!(&symbol.found.kind, SymbolKind::GenericInstance(_))
+                        || symbol.found.has_generic_consts())
                 {
                     let map = symbol
                         .found
