@@ -28,8 +28,6 @@ struct NativeTestJob {
     dump: Option<WaveDumper>,
 }
 
-/// Per-test outcome split so the main thread only logs "Executing test"
-/// when the test actually ran (not when elaboration failed).
 enum NativeOutcome {
     ElaborateFailed(SimulatorError),
     Ran {
@@ -237,21 +235,28 @@ impl CmdTest {
             // A single worker can't interleave, so stream live; `--no-capture`
             // forces streaming even in parallel.
             let buffered = num_threads > 1 && !self.opt.no_capture;
+            if buffered {
+                info!("Building simulation model");
+            }
             let pending_queue = std::sync::Mutex::new(pending_native.into_iter());
             let resource_snapshot = resource_table::export_tables();
             // `SimulatorError` snapshots source text from `text_table` eagerly
             // at construction time; without this, worker errors carry no source.
             let text_snapshot = text_table::export_tables();
 
-            type JobResult = (String, NativeOutcome, String);
             let ir_ref = &ir;
             let config_ref = &config;
             let opt_ref = &self.opt;
             let metadata_ref: &Metadata = metadata;
-            let results: Vec<Vec<JobResult>> = std::thread::scope(|s| {
+            // Workers print each finished test's block under this lock, so results
+            // stream as tests complete without interleaving between workers.
+            let print_lock = std::sync::Mutex::new(());
+            type ThreadTally = (i32, i32, Vec<PathBuf>);
+            let results: Vec<ThreadTally> = std::thread::scope(|s| {
                 let queue = &pending_queue;
                 let resource_snap = &resource_snapshot;
                 let text_snap = &text_snapshot;
+                let print_lock = &print_lock;
                 let handles: Vec<_> = (0..num_threads)
                     .map(|_| {
                         s.spawn(move || {
@@ -260,7 +265,8 @@ impl CmdTest {
                             // Per-thread cache avoids locking; cross-test
                             // reuse is rare since each top name is unique.
                             let mut thread_cache = ProtoModuleCache::default();
-                            let mut thread_results = Vec::new();
+                            let (mut tally_pass, mut tally_fail) = (0, 0);
+                            let mut tally_waves: Vec<PathBuf> = Vec::new();
                             loop {
                                 let pending = queue.lock().unwrap().next();
                                 let Some(pending) = pending else { break };
@@ -293,7 +299,6 @@ impl CmdTest {
                                     Ok(job) => {
                                         let wave_path =
                                             job.dump.as_ref().and_then(|d| d.path().cloned());
-                                        // Stream live: marker before the test's output.
                                         if !buffered {
                                             info!("Executing test ({})", pending.test_name);
                                         }
@@ -317,53 +322,62 @@ impl CmdTest {
                                     );
                                 }
                                 let output = output_buffer::take();
-                                thread_results.push((pending.test_name, outcome, output));
+                                let test_name = &pending.test_name;
+                                let _print = print_lock.lock().unwrap();
+                                match outcome {
+                                    NativeOutcome::ElaborateFailed(e) => {
+                                        // Buffered output is from IR build; emit before the diag.
+                                        if !output.is_empty() {
+                                            print!("{output}");
+                                        }
+                                        error!("Failed to elaborate test ({test_name})");
+                                        eprintln!("{:?}", miette::Report::new(e));
+                                        tally_fail += 1;
+                                    }
+                                    NativeOutcome::Ran { result, wave_path } => {
+                                        if buffered {
+                                            info!("Executing test ({test_name})");
+                                        }
+                                        if !output.is_empty() {
+                                            print!("{output}");
+                                        }
+                                        match result {
+                                            Ok(TestResult::Pass) => {
+                                                info!("Succeeded test ({test_name})");
+                                                tally_pass += 1;
+                                                if let Some(path) = wave_path {
+                                                    tally_waves.push(path);
+                                                }
+                                            }
+                                            Ok(TestResult::Fail(msg)) => {
+                                                error!("Failed test ({test_name}): {msg}");
+                                                tally_fail += 1;
+                                            }
+                                            Err(e) => {
+                                                error!("Failed test ({test_name})");
+                                                eprintln!("{:?}", miette::Report::new(e));
+                                                tally_fail += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                use std::io::Write;
+                                let _ = std::io::stdout().flush();
                             }
-                            thread_results
+                            (tally_pass, tally_fail, tally_waves)
                         })
                     })
                     .collect();
                 handles.into_iter().map(|h| h.join().unwrap()).collect()
             });
 
-            for (test_name, outcome, output) in results.into_iter().flatten() {
-                match outcome {
-                    NativeOutcome::ElaborateFailed(e) => {
-                        // Buffered output is from IR build; emit before the diag.
-                        if !output.is_empty() {
-                            print!("{output}");
-                        }
-                        error!("Failed to elaborate test ({test_name})");
-                        eprintln!("{:?}", miette::Report::new(e));
-                        failure += 1;
-                    }
-                    NativeOutcome::Ran { result, wave_path } => {
-                        // Streaming already logged this in the worker (`output` empty).
-                        if buffered {
-                            info!("Executing test ({test_name})");
-                        }
-                        if !output.is_empty() {
-                            print!("{output}");
-                        }
-                        match result {
-                            Ok(TestResult::Pass) => {
-                                info!("Succeeded test ({test_name})");
-                                success += 1;
-                                if let Some(path) = wave_path {
-                                    metadata.add_generated_file(path);
-                                }
-                            }
-                            Ok(TestResult::Fail(msg)) => {
-                                error!("Failed test ({test_name}): {msg}");
-                                failure += 1;
-                            }
-                            Err(e) => {
-                                error!("Failed test ({test_name})");
-                                eprintln!("{:?}", miette::Report::new(e));
-                                failure += 1;
-                            }
-                        }
-                    }
+            // Workers already printed each result as it finished; fold their
+            // tallies and register generated waveforms (needs `&mut metadata`).
+            for (passed, failed, waves) in results {
+                success += passed;
+                failure += failed;
+                for path in waves {
+                    metadata.add_generated_file(path);
                 }
             }
         }
