@@ -314,7 +314,22 @@ fn eval_generic_arg(context: &mut Context, path: &GenericSymbolPath) -> Option<C
     );
     context.allow_component_as_factor = allow_component_as_factor;
 
-    ret.map(|x| x.comptime().clone()).ok()
+    ret.map(|x| {
+        let mut comptime = x.comptime().clone();
+        // A const struct member read yields a variable factor rebased to the
+        // whole aggregate type (paired with a bit-offset select); a generic
+        // argument must be checked against the member's own type, so recover it
+        // from part_select.
+        if let Some(part_select) = &comptime.part_select {
+            comptime.r#type = part_select
+                .part_select
+                .last()
+                .map(|x| x.r#type.clone())
+                .unwrap_or_else(|| part_select.base.clone());
+        }
+        comptime
+    })
+    .ok()
 }
 
 pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath) {

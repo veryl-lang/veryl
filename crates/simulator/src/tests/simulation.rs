@@ -16627,3 +16627,59 @@ fn wide_ff_dynamic_bit_select_write() {
         }
     }
 }
+
+#[test]
+fn const_struct_member_select() {
+    // A member read of a module-local const struct (`C.x.a`) must select that
+    // field, not truncate the whole-struct value down to its lowest field.
+    // `oe`/`of` additionally exercise compile-time folding of member reads.
+    let code = r#"
+    module Top (
+        oa: output logic<8>,
+        ob: output logic<8>,
+        oc: output logic<8>,
+        od: output logic<8>,
+        oe: output logic<8>,
+        of: output logic<8>,
+    ) {
+        struct Inner {
+            a: logic<8>,
+            b: logic<8>,
+        }
+        struct Outer {
+            x: Inner,
+            y: Inner,
+        }
+        const C: Outer = Outer'{
+            x: Inner'{a: 3, b: 7},
+            y: Inner'{a: 11, b: 13},
+        };
+        const D: logic<8> = C.x.a + C.y.a;
+        assign oa = C.x.a;
+        assign ob = C.x.b;
+        assign oc = C.y.a;
+        assign od = C.y.b;
+        assign oe = D;
+        assign of = C.x.b + C.y.b;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let oa = sim.get("oa").unwrap();
+        let ob = sim.get("ob").unwrap();
+        let oc = sim.get("oc").unwrap();
+        let od = sim.get("od").unwrap();
+        let oe = sim.get("oe").unwrap();
+        let of = sim.get("of").unwrap();
+        println!("config={config:?} oa={oa:?} ob={ob:?} oc={oc:?} od={od:?} oe={oe:?} of={of:?}");
+        assert_eq!(oa, Value::new(3, 8, false), "oa C.x.a {config:?}");
+        assert_eq!(ob, Value::new(7, 8, false), "ob C.x.b {config:?}");
+        assert_eq!(oc, Value::new(11, 8, false), "oc C.y.a {config:?}");
+        assert_eq!(od, Value::new(13, 8, false), "od C.y.b {config:?}");
+        assert_eq!(oe, Value::new(14, 8, false), "oe D=C.x.a+C.y.a {config:?}");
+        assert_eq!(of, Value::new(20, 8, false), "of C.x.b+C.y.b {config:?}");
+    }
+}
