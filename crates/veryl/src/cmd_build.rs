@@ -97,8 +97,13 @@ impl CmdBuild {
                 }
 
                 let exclude_check = context.path.prj == "$std";
+                let bundle = temp_dir.is_some();
 
-                if self.opt.check && !exclude_check {
+                if self.opt.check && bundle {
+                    // Stage in the temp dir; the bundle is compared as a whole
+                    // after the loop.
+                    utils::write_file_if_changed(&dst, emitter.as_str().as_bytes())?;
+                } else if self.opt.check && !exclude_check {
                     let output = fs::read_to_string(&dst).unwrap_or(String::new());
                     if output != emitter.as_str() {
                         if !quiet {
@@ -146,6 +151,17 @@ impl CmdBuild {
                 include_tests,
                 &filelist_excluded,
             )?;
+        } else if let Some(temp_dir) = &temp_dir
+            && !self.check_bundle(
+                metadata,
+                &paths,
+                temp_dir,
+                include_tests,
+                &filelist_excluded,
+                quiet,
+            )?
+        {
+            all_pass = false;
         }
 
         debug!("Executed filelist ({} milliseconds)", stopwatch.lap());
@@ -239,6 +255,46 @@ impl CmdBuild {
         metadata.add_generated_file(filelist_path);
 
         Ok(())
+    }
+
+    /// Check-mode counterpart of the bundle branch in [`Self::gen_filelist`]:
+    /// a bundle target's per-file outputs never reach disk, so compare the
+    /// assembled bundle rather than each file.
+    fn check_bundle(
+        &self,
+        metadata: &Metadata,
+        paths: &[PathSet],
+        temp_dir: &TempDir,
+        include_tests: bool,
+        excluded: &HashSet<PathBuf>,
+        quiet: bool,
+    ) -> Result<bool> {
+        let Target::Bundle { path } = &metadata.build.target else {
+            return Ok(true);
+        };
+        let base_path = metadata.output_dir();
+        let target_path = base_path.join(path);
+
+        let mut paths = Self::sort_filelist(metadata, paths, include_tests);
+        paths.retain(|path| !excluded.contains(&path.src));
+
+        let mut text = String::new();
+        for path in &paths {
+            let dst = temp_dir
+                .path()
+                .join(path.dst.strip_prefix(&base_path).into_diagnostic()?);
+            text.push_str(&fs::read_to_string(&dst).into_diagnostic()?);
+        }
+
+        let output = fs::read_to_string(&target_path).unwrap_or_default();
+        if output == text {
+            Ok(true)
+        } else {
+            if !quiet {
+                print_diff(&target_path, &output, &text);
+            }
+            Ok(false)
+        }
     }
 
     pub fn sort_filelist(
@@ -552,6 +608,111 @@ incremental = true
 
         Analyzer::new(metadata).clear();
         ret
+    }
+
+    const BUNDLE_TOP: &str = r#"
+    module Top (
+        o_dat: output logic,
+    ) {
+        inst u: Sub (o_dat);
+    }
+    "#;
+
+    const BUNDLE_SUB: &str = r#"
+    module Sub (
+        o_dat: output logic,
+    ) {
+        assign o_dat = 0;
+    }
+    "#;
+
+    fn create_bundle_project(root: &Path, name: &str) -> (Metadata, PathBuf) {
+        let project_path = root.join(name);
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        fs::write(
+            project_path.join("Veryl.toml"),
+            format!(
+                r#"[project]
+name = "{name}"
+version = "0.1.0"
+
+[build]
+sources = ["src"]
+target = {{type = "bundle", path = "bundled.sv"}}
+sourcemap_target = {{type = "none"}}
+exclude_std = true
+"#
+            ),
+        )
+        .unwrap();
+        fs::write(src_path.join("top.veryl"), BUNDLE_TOP).unwrap();
+        fs::write(src_path.join("sub.veryl"), BUNDLE_SUB).unwrap();
+
+        let metadata = Metadata::load(project_path.join("Veryl.toml")).unwrap();
+        (metadata, project_path)
+    }
+
+    fn run_build_check(metadata: &mut Metadata) -> bool {
+        Analyzer::new(metadata).clear();
+
+        let build = CmdBuild::new(OptBuild {
+            files: Vec::new(),
+            check: true,
+            out_dir: None,
+        });
+        let pass = build
+            .exec(metadata, false, true, None, None, &[])
+            .expect("check should run");
+
+        Analyzer::new(metadata).clear();
+        pass
+    }
+
+    // Regression: check mode compared each file against an empty temp path, so
+    // `build --check` never passed on a freshly built bundle.
+    #[test]
+    fn bundle_check_passes_after_build() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) = create_bundle_project(tempdir.path(), "bundle_check");
+
+        run_build(&mut metadata, None);
+        assert!(project_path.join("bundled.sv").exists());
+
+        assert!(
+            run_build_check(&mut metadata),
+            "check must pass on the just-built bundle"
+        );
+    }
+
+    #[test]
+    fn bundle_check_detects_change() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_bundle_project(tempdir.path(), "bundle_check_change");
+
+        run_build(&mut metadata, None);
+
+        // Edit a source so the regenerated bundle differs.
+        fs::write(
+            project_path.join("src/sub.veryl"),
+            r#"
+    module Sub (
+        o_dat: output logic,
+    ) {
+        assign o_dat = 1;
+    }
+    "#,
+        )
+        .unwrap();
+
+        assert!(
+            !run_build_check(&mut metadata),
+            "check must detect the changed bundle"
+        );
     }
 
     #[test]
