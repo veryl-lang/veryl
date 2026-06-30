@@ -305,6 +305,10 @@ pub struct OptMetadata {
     /// output format
     #[arg(long, value_enum, default_value_t)]
     pub format: Format,
+
+    /// metadata output format version
+    #[arg(long = "format-version")]
+    pub format_version: Option<u32>,
 }
 
 #[derive(Clone, Copy, Default, Debug, ValueEnum)]

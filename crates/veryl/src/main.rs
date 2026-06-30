@@ -113,7 +113,7 @@ fn main() -> Result<ExitCode> {
         Commands::Publish(x) => cmd_publish::CmdPublish::new(x).exec(&mut metadata),
         Commands::Migrate(x) => cmd_migrate::CmdMigrate::new(x).exec(&mut metadata, opt.quiet),
         Commands::Doc(x) => cmd_doc::CmdDoc::new(x).exec(&mut metadata),
-        Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&metadata),
+        Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&mut metadata),
         Commands::Dump(x) => cmd_dump::CmdDump::new(x).exec(&mut metadata),
         Commands::Test(x) => {
             let ret = cmd_test::CmdTest::new(x).exec(&mut metadata);

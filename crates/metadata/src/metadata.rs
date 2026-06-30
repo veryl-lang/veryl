@@ -54,6 +54,8 @@ pub struct Metadata {
     pub synth: Synth,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
+    #[serde(default)]
+    pub metadata: HashMap<String, toml::Value>,
     #[serde(skip)]
     pub metadata_path: PathBuf,
     #[serde(skip)]
