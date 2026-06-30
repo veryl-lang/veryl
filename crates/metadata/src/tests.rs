@@ -356,6 +356,7 @@ fn reject_unknown_top_level_table() {
 fn metadata_output_v2_simple_project() {
     let tempdir = tempfile::tempdir().unwrap();
     let metadata = create_project(tempdir.path(), "test", EXTENSION_EXTERNAL_TOOL_TOML, false);
+    let project_path = tempdir.path().join("test").canonicalize().unwrap();
 
     let output = MetadataOutputV2::from_metadata(&metadata).unwrap();
     let encoded = serde_json::to_string(&output).unwrap();
@@ -365,7 +366,7 @@ fn metadata_output_v2_simple_project() {
     assert_eq!(value["format_version"], 2);
     assert_eq!(output.root.name, "test");
     assert_eq!(output.root.version, Some(Version::parse("0.1.0").unwrap()));
-    assert_eq!(output.root.local_path, tempdir.path().join("test"));
+    assert_eq!(output.root.local_path, project_path);
     assert_eq!(
         output
             .root
@@ -388,7 +389,7 @@ fn metadata_output_v2_simple_project() {
     assert_eq!(value["root"]["name"], "test");
     assert_eq!(
         value["root"]["local_path"].as_str().unwrap(),
-        tempdir.path().join("test").to_string_lossy().as_ref()
+        project_path.to_string_lossy().as_ref()
     );
     assert_eq!(
         value["root"]["metadata"]["external_tool"]["attrs"]["role"],

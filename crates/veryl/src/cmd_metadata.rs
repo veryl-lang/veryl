@@ -42,7 +42,7 @@ impl CmdMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{fs, path::Path};
 
     const TEST_TOML: &str = r#"
 [project]
@@ -227,12 +227,8 @@ role = "dependency"
         assert_eq!(value["dependencies"][0]["name"], "dep");
         assert_eq!(value["dependencies"][0]["project"], "real_dep");
         assert_eq!(value["dependencies"][0]["source"]["kind"], "path");
-        assert!(
-            value["dependencies"][0]["local_path"]
-                .as_str()
-                .unwrap()
-                .starts_with('/')
-        );
+        let local_path = value["dependencies"][0]["local_path"].as_str().unwrap();
+        assert!(Path::new(local_path).is_absolute());
         assert_eq!(
             value["dependencies"][0]["metadata"]["external_tool"]["role"],
             "dependency"
