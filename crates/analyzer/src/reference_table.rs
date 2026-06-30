@@ -532,7 +532,7 @@ impl ReferenceTable {
     ) {
         fn get_parent_generic_component(namespace: &Namespace) -> Option<Symbol> {
             let target = namespace.get_symbol()?;
-            if target.has_generic_paramters() {
+            if target.has_generic_paramters() || target.has_generic_consts() {
                 Some(target)
             } else {
                 get_parent_generic_component(&target.namespace)

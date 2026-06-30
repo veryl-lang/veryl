@@ -6231,6 +6231,26 @@ fn undefined_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package a_proto_pkg {
+        type T;
+    }
+    package a_pkg::<W: u32> for a_proto_pkg {
+        type T = logic<W>;
+    }
+    package b_pkg {
+        gen W: u32 = 1 + 1;
+        alias package a = a_pkg::<W>;
+    }
+    package c_pkg {
+        import b_pkg::a::T;
+        const C: T = 0 as T;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

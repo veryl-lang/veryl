@@ -340,7 +340,9 @@ impl Symbol {
     pub fn generic_maps(&self) -> Vec<GenericMap> {
         let mut ret = Vec::new();
 
-        let generic_instances = if matches!(self.kind, SymbolKind::GenericInstance(_)) {
+        let generic_instances = if matches!(self.kind, SymbolKind::GenericInstance(_))
+            || (!self.has_generic_paramters() && self.has_generic_consts())
+        {
             &vec![self.id]
         } else {
             &self.generic_instances
