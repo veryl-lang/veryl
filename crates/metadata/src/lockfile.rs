@@ -93,35 +93,15 @@ impl LockSource {
 #[serde(deny_unknown_fields)]
 pub struct LockSourceRepository {
     uuid: Uuid,
-    url: UrlPath,
-    path: PathBuf,
-    project: String,
-    version: Version,
-    revision: String,
+    pub url: UrlPath,
+    pub path: PathBuf,
+    pub project: String,
+    pub version: Version,
+    pub revision: String,
     r#override: Option<PathBuf>,
 }
 
 impl LockSourceRepository {
-    pub fn url(&self) -> &UrlPath {
-        &self.url
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn project(&self) -> &str {
-        &self.project
-    }
-
-    pub fn version(&self) -> &Version {
-        &self.version
-    }
-
-    pub fn revision(&self) -> &str {
-        &self.revision
-    }
-
     pub fn local_path(&self) -> Result<PathBuf, MetadataError> {
         Ok(Lockfile::dependency_path(&self.url, &self.path, &self.revision)?.join(&self.path))
     }

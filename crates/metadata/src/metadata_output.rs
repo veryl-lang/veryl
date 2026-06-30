@@ -112,11 +112,11 @@ impl MetadataSourceV2 {
         match source {
             LockSource::Path(path) => Self::Path { path: path.clone() },
             LockSource::Repository(repository) => Self::Repository {
-                url: repository.url().to_string(),
-                project: repository.project().to_string(),
-                version: repository.version().clone(),
-                revision: repository.revision().to_string(),
-                path: repository.path().to_path_buf(),
+                url: repository.url.to_string(),
+                project: repository.project.clone(),
+                version: repository.version.clone(),
+                revision: repository.revision.clone(),
+                path: repository.path.clone(),
             },
         }
     }
