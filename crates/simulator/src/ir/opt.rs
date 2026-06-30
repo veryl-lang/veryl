@@ -26,6 +26,9 @@ pub(crate) mod multi_write_analysis {
     ) -> HashSet<(VarId, usize)> {
         HashSet::default()
     }
+    pub fn collect_dyn_indexed_vars(_decls: &[air::Declaration]) -> HashSet<VarId> {
+        HashSet::default()
+    }
 }
 
 #[cfg(target_family = "wasm")]

@@ -16683,3 +16683,935 @@ fn const_struct_member_select() {
         assert_eq!(of, Value::new(20, 8, false), "of C.x.b+C.y.b {config:?}");
     }
 }
+
+// Coverage for the head-pointer circular-buffer pipeline construct used by
+// sarugaku's pe_dec_pipe (dst pipe): a write into r_buf[head] each valid cycle,
+// a circular head pointer, and a computed-index case-mux that reconstructs each
+// pipeline stage.  An equivalent plain shift register carries the same data at
+// the same depth, so a correct simulator must keep the two bit-identical every
+// cycle from cold-start onward.  (This isolated construct is handled correctly;
+// it is kept as coverage for the dynamic-index mux + per-element gated write.)
+#[test]
+fn head_pointer_circular_buffer_pipeline() {
+    let code = r#"
+    module Top (
+        i_clk  : input  '_ clock    ,
+        i_rst  : input  '_ reset    ,
+        i_valid: input  '_ logic     ,
+        i_data : input  '_ logic<16>,
+        o_circ : output    logic<16>,
+        o_shift: output    logic<16>,
+        o_en4  : output    logic    ,
+    ) {
+        const DST_LEN: u32 = 8;
+        const EX4    : u32 = 4;
+
+        // enable shift register: r_en[0]=valid, r_en[i]=r_en[i-1]
+        var r_en: logic<10>;
+        for i in 0..10 :en_pipe {
+            if i == 0 :g {
+                always_ff {
+                    if_reset {
+                        r_en[i] = 0;
+                    } else {
+                        r_en[i] = i_valid;
+                    }
+                }
+            } else {
+                always_ff {
+                    if_reset {
+                        r_en[i] = 0;
+                    } else {
+                        r_en[i] = r_en[i - 1];
+                    }
+                }
+            }
+        }
+
+        // circular head pointer
+        var w_head_next: logic;
+        assign w_head_next = i_valid | (|r_en[DST_LEN - 1:0]);
+        var r_head: logic<4>;
+        always_ff {
+            if_reset {
+                r_head = 0;
+            } else {
+                r_head = if w_head_next ? (if r_head == DST_LEN - 1 ? 0 : r_head + 1) : r_head;
+            }
+        }
+
+        // circular buffer: write data into r_buf[head] when valid
+        var r_buf: logic<16> [DST_LEN];
+        for i in 0..DST_LEN :buf_pipe {
+            always_ff {
+                if_reset {
+                    r_buf[i] = 0;
+                } else if i_valid && r_head == i {
+                    r_buf[i] = i_data;
+                }
+            }
+        }
+
+        function buf_mux (
+            pipe: input logic<16> [DST_LEN],
+            head: input logic<3>           ,
+            pos : input logic<3>           ,
+        ) -> logic<16> {
+            var tmp: logic<4>;
+            var idx: logic<3>;
+            tmp = 7 - pos + head;
+            idx = if tmp >: 7 ? tmp - 8 : tmp;
+            case idx {
+                3'd0   : return pipe[0];
+                3'd1   : return pipe[1];
+                3'd2   : return pipe[2];
+                3'd3   : return pipe[3];
+                3'd4   : return pipe[4];
+                3'd5   : return pipe[5];
+                3'd6   : return pipe[6];
+                3'd7   : return pipe[7];
+                default: return pipe[7];
+            }
+        }
+
+        assign o_circ = if r_en[EX4] ? buf_mux(r_buf, r_head, EX4) : 0;
+        assign o_en4  = r_en[EX4];
+
+        // reference: plain 5-stage shift register (oracle), same depth
+        var r_sh: logic<16> [5];
+        for i in 0..5 :sh_pipe {
+            if i == 0 :g {
+                always_ff {
+                    if_reset {
+                        r_sh[i] = 0;
+                    } else {
+                        r_sh[i] = i_data;
+                    }
+                }
+            } else {
+                always_ff {
+                    if_reset {
+                        r_sh[i] = 0;
+                    } else {
+                        r_sh[i] = r_sh[i - 1];
+                    }
+                }
+            }
+        }
+        assign o_shift = if r_en[EX4] ? r_sh[4] : 0;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_valid", Value::new(0, 1, false));
+        sim.set("i_data", Value::new(0, 16, false));
+        sim.step(&rst);
+
+        let getu = |sim: &mut Simulator, name: &str| -> u64 {
+            match sim.get(name).unwrap() {
+                Value::U64(v) => v.payload,
+                _ => panic!("expected U64 for {name}"),
+            }
+        };
+
+        // Drive continuous valid with a distinct data value each cycle.
+        sim.set("i_valid", Value::new(1, 1, false));
+        let mut rows = vec![];
+        for t in 0..16u64 {
+            sim.set("i_data", Value::new(0x100 + t, 16, false));
+            sim.step(&clk);
+            let circ = getu(&mut sim, "o_circ");
+            let shift = getu(&mut sim, "o_shift");
+            let en4 = getu(&mut sim, "o_en4");
+            rows.push((t, en4, circ, shift));
+        }
+        println!("== {config:?} ==");
+        for (t, en4, circ, shift) in &rows {
+            let mark = if circ != shift { "  <-- MISMATCH" } else { "" };
+            println!("t={t} en4={en4} circ={circ:#x} shift={shift:#x}{mark}");
+        }
+        for (t, _en4, circ, shift) in &rows {
+            assert_eq!(
+                circ, shift,
+                "cycle {t}, {config:?}: circular buffer EX4 output diverged from shift-register oracle"
+            );
+        }
+    }
+}
+
+// Direct test of the modeling difference at the heart of sarugaku bug #8: the
+// engine's behavioral LM captures its SRAM word with a MASTER-clock FF plus an
+// `if (en)` guard, while the real tensor_lm SRAM is clocked by a DATA-GATED
+// clock (clk & en).  These two idioms are equivalent hardware, so a correct
+// simulator must produce bit-identical state every cycle — including the very
+// first (cold-start) enable, where a derived (gated) clock fires for the first
+// time.  Drives an idle->pulse enable pattern and asserts the two stay equal.
+#[test]
+fn gated_clock_vs_master_if_equivalence() {
+    let code = r#"
+    module Top (
+        i_clk    : input  '_ clock    ,
+        i_rst    : input  '_ reset    ,
+        i_en     : input  '_ logic    ,
+        i_data   : input  '_ logic<8> ,
+        o_gated  : output    logic<8> ,
+        o_master : output    logic<8> ,
+    ) {
+        // real tensor_lm style: SRAM word register on a data-gated clock.
+        let sram_clk: clock = i_clk & i_en;
+        var r_q_gated: logic<8>;
+        always_ff (sram_clk, i_rst) {
+            if_reset {
+                r_q_gated = 0;
+            } else {
+                r_q_gated = i_data;
+            }
+        }
+
+        // engine behavioral style: master clock + if(en) guard.
+        var r_q_master: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                r_q_master = 0;
+            } else if i_en {
+                r_q_master = i_data;
+            }
+        }
+
+        assign o_gated  = r_q_gated;
+        assign o_master = r_q_master;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_en", Value::new(0, 1, false));
+        sim.set("i_data", Value::new(0, 8, false));
+        sim.step(&rst);
+
+        let getu = |sim: &mut Simulator, name: &str| -> u64 {
+            match sim.get(name).unwrap() {
+                Value::U64(v) => v.payload,
+                _ => panic!("expected U64 for {name}"),
+            }
+        };
+
+        // idle, then first enable pulse (cold-start of the gated clock), then more.
+        let stim: Vec<(u64, u64)> = vec![
+            (0, 0xA0),
+            (0, 0xA1),
+            (1, 0xA2), // first gated-clock edge
+            (0, 0xA3),
+            (1, 0xA4),
+            (1, 0xA5),
+            (0, 0xA6),
+            (1, 0xA7),
+        ];
+        let mut rows = vec![];
+        for (t, (en, data)) in stim.iter().enumerate() {
+            sim.set("i_en", Value::new(*en, 1, false));
+            sim.set("i_data", Value::new(*data, 8, false));
+            sim.step(&clk);
+            let g = getu(&mut sim, "o_gated");
+            let m = getu(&mut sim, "o_master");
+            rows.push((t, *en, g, m));
+        }
+        println!("== {config:?} ==");
+        for (t, en, g, m) in &rows {
+            let mark = if g != m { "  <-- MISMATCH" } else { "" };
+            println!("t={t} en={en} gated={g:#x} master={m:#x}{mark}");
+        }
+        for (t, _en, g, m) in &rows {
+            assert_eq!(
+                g, m,
+                "cycle {t}, {config:?}: data-gated-clock FF diverged from master+if FF"
+            );
+        }
+    }
+}
+
+// Faithful minimal model of sarugaku's pe_dec_pipe dst pipe (bug #8).  This
+// differs from `head_pointer_circular_buffer_pipeline` in the one structural
+// detail the earlier coverage test omitted: the buffer element is a *packed
+// struct array* `od_t<2>` and each valid cycle writes the two sub-elements
+// SEPARATELY (`r_buf[i][0]=...; r_buf[i][1]=...`), exactly like the real
+// `r_dst[i][0]=i_id1_req.d; r_dst[i][1]=i_id1_req.e`.  An equivalent plain
+// 22-bit shift register carries `{i_e, i_d}` at the same depth, so a correct
+// simulator must keep the circular-buffer EX4 readout bit-identical to the
+// shift-register oracle every cycle from cold-start onward.
+#[test]
+fn head_pointer_circular_buffer_packed_struct_subwrite() {
+    let code = r#"
+    package Pkg {
+        struct od_t {
+            ext: logic   ,
+            we4: logic   ,
+            we6: logic   ,
+            d2s: logic   ,
+            dbl: logic   ,
+            idx: logic<6>,
+        }
+    }
+    module Top (
+        i_clk  : input  '_ clock     ,
+        i_rst  : input  '_ reset     ,
+        i_valid: input  '_ logic     ,
+        i_d    : input  '_ Pkg::od_t ,
+        i_e    : input  '_ Pkg::od_t ,
+        o_circ : output    Pkg::od_t<2>,
+        o_shift: output    logic<22> ,
+        o_en4  : output    logic     ,
+    ) {
+        const DST_LEN: u32 = 8;
+        const EX4    : u32 = 4;
+
+        // enable shift register: r_en[0]=valid, r_en[i]=r_en[i-1]
+        var r_en: logic<10>;
+        for i in 0..10 :en_pipe {
+            if i == 0 :g {
+                always_ff {
+                    if_reset {
+                        r_en[i] = 0;
+                    } else {
+                        r_en[i] = i_valid;
+                    }
+                }
+            } else {
+                always_ff {
+                    if_reset {
+                        r_en[i] = 0;
+                    } else {
+                        r_en[i] = r_en[i - 1];
+                    }
+                }
+            }
+        }
+
+        // circular head pointer
+        var w_head_next: logic;
+        assign w_head_next = i_valid | (|r_en[DST_LEN - 1:0]);
+        var r_head: logic<4>;
+        always_ff {
+            if_reset {
+                r_head = 0;
+            } else {
+                r_head = if w_head_next ? (if r_head == DST_LEN - 1 ? 0 : r_head + 1) : r_head;
+            }
+        }
+
+        // circular buffer of packed struct arrays; per-element gated SUB-WRITES.
+        var r_buf: Pkg::od_t<2> [DST_LEN];
+        for i in 0..DST_LEN :buf_pipe {
+            always_ff {
+                if_reset {
+                    r_buf[i] = 0;
+                } else if i_valid && r_head == i {
+                    r_buf[i][0] = i_d;
+                    r_buf[i][1] = i_e;
+                }
+            }
+        }
+
+        function buf_mux (
+            pipe: input Pkg::od_t<2> [DST_LEN],
+            head: input logic<3>              ,
+            pos : input logic<3>              ,
+        ) -> Pkg::od_t<2> {
+            var tmp: logic<4>;
+            var idx: logic<3>;
+            tmp = 7 - pos + head;
+            idx = if tmp >: 7 ? tmp - 8 : tmp;
+            case idx {
+                3'd0   : return pipe[0];
+                3'd1   : return pipe[1];
+                3'd2   : return pipe[2];
+                3'd3   : return pipe[3];
+                3'd4   : return pipe[4];
+                3'd5   : return pipe[5];
+                3'd6   : return pipe[6];
+                3'd7   : return pipe[7];
+                default: return pipe[7];
+            }
+        }
+
+        assign o_circ = if r_en[EX4] ? buf_mux(r_buf, r_head, EX4) : 0;
+        assign o_en4  = r_en[EX4];
+
+        // reference: plain 22-bit shift register (oracle) carrying {i_e, i_d}.
+        var r_sh: logic<22> [5];
+        for i in 0..5 :sh_pipe {
+            if i == 0 :g {
+                always_ff {
+                    if_reset {
+                        r_sh[i] = 0;
+                    } else {
+                        r_sh[i] = {i_e, i_d};
+                    }
+                }
+            } else {
+                always_ff {
+                    if_reset {
+                        r_sh[i] = 0;
+                    } else {
+                        r_sh[i] = r_sh[i - 1];
+                    }
+                }
+            }
+        }
+        assign o_shift = if r_en[EX4] ? r_sh[4] : 0;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_valid", Value::new(0, 1, false));
+        sim.set("i_d", Value::new(0, 11, false));
+        sim.set("i_e", Value::new(0, 11, false));
+        sim.step(&rst);
+
+        let getu = |sim: &mut Simulator, name: &str| -> u64 {
+            match sim.get(name).unwrap() {
+                Value::U64(v) => v.payload,
+                other => panic!("expected U64 for {name}, got {other:?}"),
+            }
+        };
+
+        // Drive continuous valid with distinct sub-element values each cycle.
+        sim.set("i_valid", Value::new(1, 1, false));
+        let mut rows = vec![];
+        for t in 0..16u64 {
+            sim.set("i_d", Value::new(0x100 + t, 11, false));
+            sim.set("i_e", Value::new(0x200 + t, 11, false));
+            sim.step(&clk);
+            let circ = getu(&mut sim, "o_circ");
+            let shift = getu(&mut sim, "o_shift");
+            let en4 = getu(&mut sim, "o_en4");
+            rows.push((t, en4, circ, shift));
+        }
+        println!("== {config:?} ==");
+        for (t, en4, circ, shift) in &rows {
+            let mark = if circ != shift { "  <-- MISMATCH" } else { "" };
+            println!("t={t} en4={en4} circ={circ:#x} shift={shift:#x}{mark}");
+        }
+        for (t, _en4, circ, shift) in &rows {
+            assert_eq!(
+                circ, shift,
+                "cycle {t}, {config:?}: packed-struct-array circular buffer EX4 output diverged from shift-register oracle"
+            );
+        }
+    }
+}
+
+// Minimal model of sarugaku's per-lane register file (pe_rf): four replicated
+// `pe_rf_thread #(ID: i)` instances generated by `for i in 0..4`, each of which
+// captures the write only on the cycle its own ID matches the rotating phase
+// (`i_phase == ID`) and otherwise self-keeps.  A correct simulator must keep the
+// four instances' state INDEPENDENT: a write issued at phase 2 must land in lane
+// 2 alone, leaving lanes 0/1/3 untouched.  (bug #8 trace: the SV engine showed
+// the store operand present only in lanes 2/3 while the native sim had it in all
+// four lanes -- this isolates whether native mis-shares per-instance state.)
+#[test]
+fn generate_loop_per_instance_id_phase_gated_register() {
+    let code = r#"
+    module Lane #(
+        param ID: u32 = 0,
+    ) (
+        i_clk  : input  '_ clock    ,
+        i_rst  : input  '_ reset    ,
+        i_phase: input  '_ logic<2> ,
+        i_we   : input  '_ logic    ,
+        i_data : input  '_ logic<16>,
+        o_data : output    logic<16>,
+    ) {
+        var r_data: logic<16>;
+        always_ff {
+            if_reset {
+                r_data = 0;
+            } else if i_phase == ID && i_we {
+                r_data = i_data;
+            }
+        }
+        assign o_data = r_data;
+    }
+    module Top (
+        i_clk  : input  '_ clock    ,
+        i_rst  : input  '_ reset    ,
+        i_phase: input  '_ logic<2> ,
+        i_we   : input  '_ logic    ,
+        i_data : input  '_ logic<16>,
+        o_l0   : output    logic<16>,
+        o_l1   : output    logic<16>,
+        o_l2   : output    logic<16>,
+        o_l3   : output    logic<16>,
+    ) {
+        var w_lane: logic<16> [4];
+        for i in 0..4 :lanes {
+            inst u_lane: Lane #( ID: i ) (
+                i_clk                 ,
+                i_rst                 ,
+                i_phase               ,
+                i_we                  ,
+                i_data                ,
+                o_data: w_lane[i]     ,
+            );
+        }
+        assign o_l0 = w_lane[0];
+        assign o_l1 = w_lane[1];
+        assign o_l2 = w_lane[2];
+        assign o_l3 = w_lane[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_phase", Value::new(0, 2, false));
+        sim.set("i_we", Value::new(0, 1, false));
+        sim.set("i_data", Value::new(0, 16, false));
+        sim.step(&rst);
+
+        let getu = |sim: &mut Simulator, name: &str| -> u64 {
+            match sim.get(name).unwrap() {
+                Value::U64(v) => v.payload,
+                other => panic!("expected U64 for {name}, got {other:?}"),
+            }
+        };
+
+        // Write a distinct value into each lane, one lane per cycle, by setting
+        // the phase to that lane's ID.  Lane k receives 0xA0 + k.
+        for ph in 0..4u64 {
+            sim.set("i_phase", Value::new(ph, 2, false));
+            sim.set("i_we", Value::new(1, 1, false));
+            sim.set("i_data", Value::new(0xA0 + ph, 16, false));
+            sim.step(&clk);
+        }
+        sim.set("i_we", Value::new(0, 1, false));
+        // settle a read cycle
+        sim.set("i_phase", Value::new(0, 2, false));
+        sim.step(&clk);
+
+        let l0 = getu(&mut sim, "o_l0");
+        let l1 = getu(&mut sim, "o_l1");
+        let l2 = getu(&mut sim, "o_l2");
+        let l3 = getu(&mut sim, "o_l3");
+        println!("== {config:?} == l0={l0:#x} l1={l1:#x} l2={l2:#x} l3={l3:#x}");
+        // each lane must hold exactly its own write -- no cross-lane sharing.
+        assert_eq!(l0, 0xA0, "lane0 {config:?}");
+        assert_eq!(l1, 0xA1, "lane1 {config:?}");
+        assert_eq!(l2, 0xA2, "lane2 {config:?}");
+        assert_eq!(l3, 0xA3, "lane3 {config:?}");
+    }
+}
+
+// Isolates sarugaku bug #8's root: the r_en-gated "locrange" shift pipe in
+// pe_dec_pipe.  `r_locrange[EX1]` is combinational from the input, and each later
+// stage shifts forward only while its enable bit r_en[i-1] is high (a self-keep
+// FF otherwise).  An ungated reference shift `s` carries the same input at the
+// same depth.  With a continuously-valid stream both r_en[*] and the input are 1
+// from cold-start, so the gated pipe must reach EX4 at the SAME cycle as the
+// ungated one -- a one-cycle lag at cold-start is exactly the misalignment that
+// drops one phase's writeback (we4) in the real design.
+#[test]
+fn en_gated_locrange_shift_coldstart_alignment() {
+    let code = r#"
+    module Top (
+        i_clk  : input  '_ clock,
+        i_rst  : input  '_ reset,
+        i_valid: input  '_ logic,
+        i_loc  : input  '_ logic,
+        o_gated: output    logic,
+        o_ref  : output    logic,
+        o_en4  : output    logic,
+    ) {
+        const EX1: u32 = 1;
+        const EX2: u32 = 2;
+        const EX3: u32 = 3;
+        const EX4: u32 = 4;
+        const WB2: u32 = 6;
+
+        // enable pipe: r_en[0]=valid, r_en[i]=r_en[i-1]
+        var r_en: logic<10>;
+        for i in 0..10 :en_pipe {
+            if i == 0 :g {
+                always_ff {
+                    if_reset {
+                        r_en[i] = 0;
+                    } else {
+                        r_en[i] = i_valid;
+                    }
+                }
+            } else {
+                always_ff {
+                    if_reset {
+                        r_en[i] = 0;
+                    } else {
+                        r_en[i] = r_en[i - 1];
+                    }
+                }
+            }
+        }
+
+        // locrange pipe (r_en-gated self-keep shift), exactly like pe_dec_pipe.
+        var r_loc: logic [WB2 + 1];
+        assign r_loc[0]   = 0; // index 0 unused (EX1=1), tie off
+        assign r_loc[EX1] = i_loc;
+        for i in EX2..=WB2 :loc_pipe {
+            always_ff {
+                if_reset {
+                    r_loc[i] = 0;
+                } else if r_en[i - 1] {
+                    r_loc[i] = r_loc[i - 1];
+                }
+            }
+        }
+
+        // ungated reference shift of the same input at the same depth.
+        var r_ref: logic [WB2 + 1];
+        assign r_ref[0]   = 0; // index 0 unused (EX1=1), tie off
+        assign r_ref[EX1] = i_loc;
+        for i in EX2..=WB2 :ref_pipe {
+            always_ff {
+                if_reset {
+                    r_ref[i] = 0;
+                } else {
+                    r_ref[i] = r_ref[i - 1];
+                }
+            }
+        }
+
+        assign o_gated = r_loc[EX4];
+        assign o_ref   = r_ref[EX4];
+        assign o_en4   = r_en[EX4];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_valid", Value::new(0, 1, false));
+        sim.set("i_loc", Value::new(0, 1, false));
+        sim.step(&rst);
+
+        let getu = |sim: &mut Simulator, name: &str| -> u64 {
+            match sim.get(name).unwrap() {
+                Value::U64(v) => v.payload,
+                other => panic!("expected U64 for {name}, got {other:?}"),
+            }
+        };
+
+        // Continuously-valid stream so the enable pipe is full early.  The
+        // local-range flag, like the real LSU's o_ex1_locrange, stays low for
+        // the first instructions and only RISES mid-stream -- this rising edge,
+        // propagating through the en-gated pipe AFTER the enable is already
+        // full, is what the real bug mis-times by one cycle.
+        sim.set("i_valid", Value::new(1, 1, false));
+        sim.set("i_loc", Value::new(0, 1, false));
+        let mut rows = vec![];
+        for t in 0..12u64 {
+            // raise the local-range flag from t=5 onward (well after en fills).
+            sim.set("i_loc", Value::new(if t >= 5 { 1 } else { 0 }, 1, false));
+            sim.step(&clk);
+            let g = getu(&mut sim, "o_gated");
+            let r = getu(&mut sim, "o_ref");
+            let e = getu(&mut sim, "o_en4");
+            rows.push((t, e, g, r));
+        }
+        println!("== {config:?} ==");
+        for (t, e, g, r) in &rows {
+            let mark = if g != r { "  <-- gated lags ref" } else { "" };
+            println!("t={t} en4={e} gated={g} ref={r}{mark}");
+        }
+        // Once the enable pipe is full (en4=1), gated must equal the ungated ref.
+        for (t, e, g, r) in &rows {
+            if *e == 1 {
+                assert_eq!(
+                    g, r,
+                    "cycle {t}, {config:?}: en-gated locrange diverged from ungated reference while enabled"
+                );
+            }
+        }
+    }
+}
+
+// Coverage for sarugaku bug #8's locrange path on a gated clock.  The same
+// r_en-gated self-keep shift (pe_dec_pipe's r_locrange) is built twice: once on
+// the master clock i_clk and once on a gated clock `gclk = i_clk & i_en` in the
+// default ('_) domain, exactly like the engine's w_dec_gclk under auto_cg=0
+// (enable tied high).  Because the gate is functionally a pass-through, the two
+// copies must stay bit-identical every cycle from cold-start.  (The isolated
+// construct IS handled correctly; bug #8's one-cycle locrange lag only appears
+// in the full pe_dec_pipe combination, not in this piece alone.)
+#[test]
+fn en_gated_locrange_shift_master_vs_gated_clock() {
+    let code = r#"
+    module Top (
+        i_clk  : input  '_ clock,
+        i_rst  : input  '_ reset,
+        i_en   : input  '_ logic,
+        i_loc  : input  '_ logic,
+        o_gated: output    logic,
+        o_ref  : output    logic,
+    ) {
+        // A gated clock in the default ('_) domain, exactly like the engine's
+        // w_dec_gclk (i_clk & enable, with enable tied to 1 by auto_cg=0).  It
+        // is functionally identical to i_clk, so the two copies below MUST agree.
+        let gclk: '_ clock = i_clk & i_en;
+
+        // ---- MASTER copy: r_en chain + r_en-gated locrange shift on i_clk ----
+        var r_en_m: logic<5>;
+        for i in 0..5 :en_m {
+            if i == 0 :g {
+                always_ff (i_clk, i_rst) { if_reset { r_en_m[i] = 0; } else { r_en_m[i] = i_en; } }
+            } else {
+                always_ff (i_clk, i_rst) { if_reset { r_en_m[i] = 0; } else { r_en_m[i] = r_en_m[i - 1]; } }
+            }
+        }
+        var r_loc_m: logic [4];
+        assign r_loc_m[0] = i_loc;
+        for i in 1..4 :loc_m {
+            always_ff (i_clk, i_rst) {
+                if_reset { r_loc_m[i] = 0; } else if r_en_m[i - 1] { r_loc_m[i] = r_loc_m[i - 1]; }
+            }
+        }
+
+        // ---- GATED copy: identical chains on gclk (= i_clk & 1) -------------
+        var r_en_g: logic<5>;
+        for i in 0..5 :en_g {
+            if i == 0 :g {
+                always_ff (gclk, i_rst) { if_reset { r_en_g[i] = 0; } else { r_en_g[i] = i_en; } }
+            } else {
+                always_ff (gclk, i_rst) { if_reset { r_en_g[i] = 0; } else { r_en_g[i] = r_en_g[i - 1]; } }
+            }
+        }
+        var r_loc_g: logic [4];
+        assign r_loc_g[0] = i_loc;
+        for i in 1..4 :loc_g {
+            always_ff (gclk, i_rst) {
+                if_reset { r_loc_g[i] = 0; } else if r_en_g[i - 1] { r_loc_g[i] = r_loc_g[i - 1]; }
+            }
+        }
+
+        assign o_gated = r_loc_g[3];
+        assign o_ref   = r_loc_m[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_en", Value::new(1, 1, false));
+        sim.set("i_loc", Value::new(0, 1, false));
+        sim.step(&rst);
+
+        let getu = |sim: &mut Simulator, name: &str| -> u64 {
+            match sim.get(name).unwrap() {
+                Value::U64(v) => v.payload,
+                other => panic!("expected U64 for {name}, got {other:?}"),
+            }
+        };
+
+        sim.set("i_en", Value::new(1, 1, false));
+        let mut rows = vec![];
+        for t in 0..10u64 {
+            sim.set("i_loc", Value::new(if t >= 3 { 1 } else { 0 }, 1, false));
+            sim.step(&clk);
+            let g = getu(&mut sim, "o_gated");
+            let r = getu(&mut sim, "o_ref");
+            rows.push((t, g, r));
+        }
+        println!("== {config:?} ==");
+        for (t, g, r) in &rows {
+            let mark = if g != r {
+                "  <-- gated clock diverged from master"
+            } else {
+                ""
+            };
+            println!("t={t} gated={g} ref={r}{mark}");
+        }
+        for (t, g, r) in &rows {
+            assert_eq!(
+                g, r,
+                "cycle {t}, {config:?}: en-gated locrange shift on gated clock diverged from i_clk copy"
+            );
+        }
+    }
+}
+
+// bug#8 ROOT repro (self-contained): a comb `assign` into one element of an
+// otherwise `always_ff` array (`r_loc[1] = comb; r_loc[2..4] <= r_loc[i-1]`,
+// like pe_dec_pipe's r_locrange) must shift with the same delay as a plain
+// scalar FF chain.  The forced-FF comb element used to lag it by one cycle.
+#[test]
+fn bug8_mixed_comb_ff_array_shift() {
+    let code = r#"
+    #[allow(unassign_variable)]
+    #[allow(unused_variable)]
+    module Top (
+        i_clk   : input  '_ clock,
+        i_rst   : input  '_ reset,
+        i_loc   : input  '_ logic,
+        o_mixed : output    logic,
+        o_scalar: output    logic,
+        o_cwire : output    logic,
+        o_loc1  : output    logic,
+        o_pass  : output    logic,
+        o_sep   : output    logic,
+    ) {
+        // mixed comb/FF array: element [1] is comb, [2..4] are FF (like r_locrange)
+        var r_loc: logic [5];
+        assign r_loc[1] = i_loc;
+        for i in 2..=4 :loc_pipe {
+            always_ff { if_reset { r_loc[i] = '0; } else { r_loc[i] = r_loc[i - 1]; } }
+        }
+        assign o_loc1 = r_loc[1]; // comb element: should equal i_loc with 0 delay
+        assign o_pass = i_loc;    // pure comb passthrough reference
+
+        // SEPARATE comb scalar feeding an FF ARRAY (comb is NOT an array element)
+        var sep1: logic; assign sep1 = i_loc;
+        var r_sep: logic [5];
+        for i in 2..=4 :sep_pipe {
+            if i == 2 :g {
+                always_ff { if_reset { r_sep[i] = '0; } else { r_sep[i] = sep1; } }
+            } else {
+                always_ff { if_reset { r_sep[i] = '0; } else { r_sep[i] = r_sep[i - 1]; } }
+            }
+        }
+        assign o_sep = r_sep[4];
+        // plain scalar FF chain of equal depth (3 FFs), i_loc straight into FF
+        var s2: logic; var s3: logic; var s4: logic;
+        always_ff { if_reset { s2 = 0; } else { s2 = i_loc; } }
+        always_ff { if_reset { s3 = 0; } else { s3 = s2; } }
+        always_ff { if_reset { s4 = 0; } else { s4 = s3; } }
+        // scalar comb wire feeding a 3-FF chain (comb->FF, but NOT an array elem)
+        var w1: logic; assign w1 = i_loc;
+        var c2: logic; var c3: logic; var c4: logic;
+        always_ff { if_reset { c2 = 0; } else { c2 = w1; } }
+        always_ff { if_reset { c3 = 0; } else { c3 = c2; } }
+        always_ff { if_reset { c4 = 0; } else { c4 = c3; } }
+
+        assign o_mixed  = r_loc[4];
+        assign o_scalar = s4;
+        assign o_cwire  = c4;
+    }
+    "#;
+
+    // i_loc pattern with a rising and falling edge well clear of reset.
+    let pattern: Vec<u64> = (0..16u64)
+        .map(|t| if (5..=9).contains(&t) { 1 } else { 0 })
+        .collect();
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_loc", Value::new(0, 1, false));
+        sim.step(&rst);
+        let getu = |sim: &mut Simulator, n: &str| -> u64 {
+            match sim.get(n).unwrap() {
+                Value::U64(v) => v.payload,
+                o => panic!("{o:?}"),
+            }
+        };
+        let tag = format!(
+            "4state={} jit={} ff_opt_off={} aot_c={}",
+            config.use_4state, config.use_jit, config.disable_ff_opt, config.aot_c
+        );
+        let mut rows = vec![];
+        for &l in &pattern {
+            sim.set("i_loc", Value::new(l, 1, false));
+            sim.step(&clk);
+            rows.push((
+                l,
+                getu(&mut sim, "o_mixed"),
+                getu(&mut sim, "o_scalar"),
+                getu(&mut sim, "o_cwire"),
+                getu(&mut sim, "o_loc1"),
+                getu(&mut sim, "o_pass"),
+                getu(&mut sim, "o_sep"),
+            ));
+        }
+        println!("== {tag} ==");
+        for (t, (l, m, s, c, l1, p, sp)) in rows.iter().enumerate() {
+            let mark = if m != s {
+                "  <-- mixed-array lags (BUG)"
+            } else {
+                ""
+            };
+            let mark2 = if l1 != p { "  [loc1!=pass]" } else { "" };
+            let mark3 = if sp != s {
+                "  [sep-comb->FFarray lags]"
+            } else {
+                ""
+            };
+            println!(
+                "  t={t} loc={l} mixed={m} scalar={s} cwire={c} loc1={l1} pass={p} sep={sp}{mark}{mark2}{mark3}"
+            );
+        }
+        for (t, (_l, m, s, c, _l1, _p, sp)) in rows.iter().enumerate() {
+            assert_eq!(
+                c, s,
+                "cycle {t}, {tag}: scalar comb-wire chain diverged from direct FF chain"
+            );
+            assert_eq!(
+                sp, s,
+                "cycle {t}, {tag}: separate-comb -> FF array diverged from direct FF chain"
+            );
+            assert_eq!(
+                m, s,
+                "cycle {t}, {tag}: mixed comb/FF array shift diverged from scalar FF chain"
+            );
+        }
+    }
+}
+
+// A mixed comb/FF array reached through a RUNTIME index has no single stride;
+// the simulator must report a clean `unsupported_description` diagnostic rather
+// than panic or compute a garbage stride.
+#[test]
+fn bug8_mixed_array_dynamic_read_is_unsupported() {
+    let code = r#"
+    #[allow(unassign_variable)]
+    #[allow(unused_variable)]
+    module Top (
+        i_clk: input  '_ clock    ,
+        i_rst: input  '_ reset    ,
+        i_x  : input     logic    ,
+        i_idx: input     logic<2> ,
+        o    : output    logic    ,
+    ) {
+        var arr: logic [4];
+        assign arr[0] = i_x; // comb element
+        always_ff {          // FF elements -> mixed array
+            if_reset { arr[1] = 0; arr[2] = 0; arr[3] = 0; }
+            else { arr[1] = arr[0]; arr[2] = arr[1]; arr[3] = arr[2]; }
+        }
+        assign o = arr[i_idx]; // runtime index into the mixed array
+    }
+    "#;
+    for config in Config::all() {
+        let result = analyze_top(code, &config, "Top");
+        assert!(
+            matches!(result, Err(SimulatorError::UnsupportedDescription { .. })),
+            "{config:?}: expected UnsupportedDescription, got {:?}",
+            result.map(|_| "Ok(ir)")
+        );
+    }
+}

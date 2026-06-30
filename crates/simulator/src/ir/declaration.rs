@@ -5,6 +5,7 @@ use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 use crate::ir::module::{BitRange, gather_bit_aware_outputs, ranges_overlap};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
+use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::statement::{ProtoAssignStatement, msb_first_window, size_fill_literal_rhs};
 use crate::ir::variable::{
@@ -807,11 +808,13 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             &mut child_analyzer_context,
             context.config.disable_ff_opt,
         );
+        let dyn_indexed = collect_dyn_indexed_vars(child_decls);
 
         let (mut child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
             &child_module.variables,
             &child_ff_table,
             &multi_rmw_set,
+            &dyn_indexed,
             context.config.use_4state,
             ff_start,
             comb_start,

@@ -2874,7 +2874,9 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                 }));
             } else {
                 let array_shape = meta.r#type.array.clone();
-                let dyn_info = meta.dynamic_index_info().unwrap();
+                let dyn_info = meta
+                    .dynamic_index_info()
+                    .ok_or_else(|| SimulatorError::unsupported_description(&src.token))?;
                 let num_elements = meta.elements.len();
                 let (base_current, base_next, stride, is_ff) = dyn_info;
                 // FF assignment writes to next, but in initial block writes to current
@@ -3157,7 +3159,9 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             let scope = context.scope();
             let meta = scope.variable_meta.get(&id).unwrap();
             let array_shape = meta.r#type.array.clone();
-            let dyn_info = meta.dynamic_index_info().unwrap();
+            let dyn_info = meta
+                .dynamic_index_info()
+                .ok_or_else(|| SimulatorError::unsupported_description(&src.token))?;
             let num_elements = meta.elements.len();
             let (base_current, base_next, stride, is_ff) = dyn_info;
             // FF assignment writes to next, but in initial block writes to current
