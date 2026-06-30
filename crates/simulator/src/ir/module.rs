@@ -9,6 +9,7 @@ use crate::ir::inst_layout::InstLayout;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
+use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::site_table::{SiteInfo, SiteKind, SiteTable};
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, align_up_64, create_variable_meta,
@@ -2379,10 +2380,13 @@ impl Conv<&air::Module> for ProtoModule {
             context.config.disable_ff_opt,
         );
 
+        let dyn_indexed = collect_dyn_indexed_vars(declarations);
+
         let (variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
             &src.variables,
             &ff_table,
             &multi_rmw_set,
+            &dyn_indexed,
             context.config.use_4state,
             ff_start,
             comb_start,

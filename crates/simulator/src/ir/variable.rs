@@ -263,25 +263,21 @@ pub struct VariableMeta {
     pub elements: Vec<VariableElement>,
     /// initial value for each element; used when instantiating
     pub initial_values: Vec<Value>,
+    /// All elements share one buffer kind, giving the array a single stride for
+    /// runtime indexing; false for a genuinely mixed comb/FF array.
+    pub uniform_buffer: bool,
 }
 
 impl VariableMeta {
     /// Returns (base_current_offset, base_next_offset, stride, is_ff) for dynamic indexing.
     pub fn dynamic_index_info(&self) -> Option<(isize, isize, isize, bool)> {
+        // A mixed comb/FF array has no single stride; bail so the caller raises
+        // a clean unsupported diagnostic instead of computing a garbage stride.
+        if !self.uniform_buffer {
+            return None;
+        }
         let first = self.elements.first()?;
         let is_ff = first.is_ff();
-        #[cfg(debug_assertions)]
-        for (i, elem) in self.elements.iter().enumerate() {
-            debug_assert_eq!(
-                elem.is_ff(),
-                is_ff,
-                "dynamic_index_info: mixed FF/comb in array, elem[{}] is_ff={} but elem[0] is_ff={} (path={:?})",
-                i,
-                elem.is_ff(),
-                is_ff,
-                self.path,
-            );
-        }
         let stride = if self.elements.len() > 1 {
             self.elements[1].current_offset() - self.elements[0].current_offset()
         } else {
@@ -314,6 +310,7 @@ pub fn create_variable_meta(
     src: &HashMap<VarId, air::Variable>,
     ff_table: &air::FfTable,
     multi_rmw_set: &HashSet<(VarId, usize)>,
+    dyn_indexed: &HashSet<VarId>,
     use_4state: bool,
     ff_start_bytes: isize,
     comb_start_bytes: isize,
@@ -343,17 +340,23 @@ pub fn create_variable_meta(
         let total_array = v.r#type.total_array().unwrap_or(v.value.len());
         let total_array = total_array.max(v.value.len()).max(1);
 
-        // For multi-element variables (arrays), all elements must have the
-        // same FF/comb classification. DynamicVariable expressions assume
-        // uniform stride in a single buffer; mixed placement is invalid.
+        // Classify each element by its own driver: a comb-driven element
+        // (`assign`) must not land in the FF dual-slot buffer, which would
+        // register it and add a one-cycle delay (sarugaku bug #8: r_locrange).
+        // Exception: a runtime-indexed array needs one uniform buffer/stride for
+        // DynamicVariable access, yet the FfTable only flags its base element --
+        // so force every element to FF for the arrays in `dyn_indexed`.
         let any_ff = (0..total_array).any(|i| ff_table.is_ff(v.id, i));
-        let force_ff = any_ff && total_array > 1;
+        let all_ff = (0..total_array).all(|i| ff_table.is_ff(v.id, i));
+        let force_ff = any_ff && total_array > 1 && dyn_indexed.contains(&v.id);
+        // Lets `dynamic_index_info` reject a runtime index into a mixed array
+        // in O(1).
+        let uniform_buffer = force_ff || all_ff || !any_ff;
 
-        // Per-Variable storage destination is uniform: arrays via force_ff,
-        // scalars via the single is_ff query.  This drives the FF single/dual
-        // slot selection below (`packed_ff`).
+        // Only a uniformly-FF array joins the packed layout; a mixed array's FF
+        // elements stay unpacked (correct, just not packed).
         let is_ff_var = if total_array > 1 {
-            force_ff
+            force_ff || all_ff
         } else {
             ff_table.is_ff(v.id, 0)
         };
@@ -435,6 +438,7 @@ pub fn create_variable_meta(
             native_bytes: nb,
             elements,
             initial_values,
+            uniform_buffer,
         };
         variables.insert(*k, meta);
     }

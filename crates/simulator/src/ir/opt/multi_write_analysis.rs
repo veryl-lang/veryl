@@ -162,6 +162,73 @@ fn merge_branches_max(
     }
 }
 
+/// `VarId`s of arrays written through a runtime (non-const) index.  These are
+/// accessed as a `DynamicVariable` needing a uniform single-buffer layout, but
+/// the `FfTable` flags only the base element `(id, 0)` of such a write, so
+/// `create_variable_meta` force-FFs them.  Statically indexed arrays are left to
+/// per-element classification (they may be genuinely mixed comb/FF).
+pub fn collect_dyn_indexed_vars(decls: &[air::Declaration]) -> HashSet<VarId> {
+    let mut out: HashSet<VarId> = HashSet::default();
+    for decl in decls {
+        let stmts = match decl {
+            air::Declaration::Ff(ff) => &ff.statements,
+            air::Declaration::Comb(c) => &c.statements,
+            _ => continue,
+        };
+        for s in stmts {
+            collect_dyn_one(s, &mut out);
+        }
+    }
+    out
+}
+
+fn collect_dyn_one(stmt: &air::Statement, out: &mut HashSet<VarId>) {
+    use air::Statement;
+    match stmt {
+        Statement::Assign(a) => {
+            for dst in &a.dst {
+                check_dyn_dst(dst, out);
+            }
+        }
+        Statement::If(i) => {
+            for s in i.true_side.iter().chain(&i.false_side) {
+                collect_dyn_one(s, out);
+            }
+        }
+        Statement::IfReset(i) => {
+            for s in i.true_side.iter().chain(&i.false_side) {
+                collect_dyn_one(s, out);
+            }
+        }
+        Statement::Case(c) => {
+            for s in c.lower_to_nested_if() {
+                collect_dyn_one(&s, out);
+            }
+        }
+        Statement::For(f) => {
+            for s in &f.body {
+                collect_dyn_one(s, out);
+            }
+        }
+        Statement::FunctionCall(call) => {
+            for outputs in call.outputs.values() {
+                for dst in outputs {
+                    check_dyn_dst(dst, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Flags `dst.id` on a non-const (runtime) array index.  Uses `is_const`, not
+/// `eval_value`, which would wrongly resolve a runtime `For` loop variable.
+fn check_dyn_dst(dst: &air::AssignDestination, out: &mut HashSet<VarId>) {
+    if !dst.index.is_const() {
+        out.insert(dst.id);
+    }
+}
+
 /// Mirror of `AssignDestination::gather_ff` element resolution.  A
 /// non-const index in the simulator becomes `AssignDynamic` at
 /// `base_offset = element[0].current_offset`, so we key the

@@ -1607,7 +1607,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                         let (array_shape, num_elements, base_offset, stride, is_ff, element_nb) = {
                             let scope = context.scope();
                             let meta = scope.variable_meta.get(id).unwrap();
-                            let dyn_info = meta.dynamic_index_info().unwrap();
+                            let dyn_info = meta.dynamic_index_info().ok_or_else(|| {
+                                SimulatorError::unsupported_description(&comptime.token)
+                            })?;
                             (
                                 meta.r#type.array.clone(),
                                 meta.elements.len(),
