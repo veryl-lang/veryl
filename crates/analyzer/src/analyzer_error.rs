@@ -3181,8 +3181,6 @@ impl AnalyzerError {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ExceedLimitKind {
     EvaluateSize,
-    ExpressionDepth,
-    StatementDepth,
     HierarchyDepth,
     TotalInstance,
 }
@@ -3191,8 +3189,6 @@ impl fmt::Display for ExceedLimitKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ExceedLimitKind::EvaluateSize => "evaluate size".fmt(f),
-            ExceedLimitKind::ExpressionDepth => "expression depth".fmt(f),
-            ExceedLimitKind::StatementDepth => "statement depth".fmt(f),
             ExceedLimitKind::HierarchyDepth => "hierarchy depth".fmt(f),
             ExceedLimitKind::TotalInstance => "total instance".fmt(f),
         }

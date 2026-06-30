@@ -11683,34 +11683,6 @@ fn enum_forward_reference_rejected() {
 }
 
 #[test]
-fn deeply_nested_statements_report_exceed_limit() {
-    // Regression: deeply nested `if` statements overflowed the stack (the
-    // expression-depth limit covered expressions only).  200 levels is past
-    // the 128 depth limit while staying shallow enough for the walkers.
-    let n = 200;
-    let mut body = String::new();
-    for _ in 0..n {
-        body.push_str("if a {");
-    }
-    body.push_str("b = 1;");
-    for _ in 0..n {
-        body.push('}');
-    }
-    let code = format!(
-        "module Top (i_a: input logic) {{ var b: logic; let a: logic = i_a; \
-         always_comb {{ b = 0; {body} }} }}"
-    );
-    let errors = analyze_with_large_stack(&code);
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, AnalyzerError::ExceedLimit { .. })),
-        "{}",
-        errors.len()
-    );
-}
-
-#[test]
 fn invalid_range_assign() {
     let code = r#"
     proto package a_proto_pkg {
@@ -13190,25 +13162,6 @@ fn exceed_limit() {
 
     let errors = analyze_with_ir(code);
     assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
-
-    // Deep expression nesting must error out instead of overflowing the stack.
-    let expr = format!("{}1{}", "(".repeat(300), ")".repeat(300));
-    let code = format!(
-        r#"
-    module ModuleA (
-        o: output logic<8>,
-    ) {{
-        assign o = {expr};
-    }}
-    "#
-    );
-
-    let errors = analyze_with_large_stack(&code);
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, AnalyzerError::ExceedLimit { .. }))
-    );
 
     let code = r#"
     module ModuleA {

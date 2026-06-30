@@ -18,42 +18,23 @@ use veryl_parser::veryl_grammar_trait::*;
 
 impl Conv<&StatementBlock> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &StatementBlock) -> IrResult<Self> {
-        if context.stmt_depth >= context.config.expression_depth_limit {
-            let token: TokenRange = value.into();
-            context.insert_error(AnalyzerError::exceed_limit(
-                crate::analyzer_error::ExceedLimitKind::StatementDepth,
-                context.config.expression_depth_limit,
-                &token,
-            ));
-            return Err(ir_error!(token));
-        }
-        context.stmt_depth += 1;
-        let ret = conv_statement_block(context, value);
-        context.stmt_depth -= 1;
-        ret
-    }
-}
-
-fn conv_statement_block(
-    context: &mut Context,
-    value: &StatementBlock,
-) -> IrResult<ir::StatementBlock> {
-    let statements: Vec<_> = value.into();
-    let mut ret = vec![];
-    for s in statements {
-        let x: IrResult<ir::StatementBlock> = Conv::conv(context, s);
-        match x {
-            Ok(x) => {
-                ret.append(&mut x.0.into_iter().filter(|x| !x.is_null()).collect());
-            }
-            Err(e) => {
-                if !context.in_generic {
-                    ret.push(ir::Statement::Unsupported(e.token));
+        let statements: Vec<_> = value.into();
+        let mut ret = vec![];
+        for s in statements {
+            let x: IrResult<ir::StatementBlock> = Conv::conv(context, s);
+            match x {
+                Ok(x) => {
+                    ret.append(&mut x.0.into_iter().filter(|x| !x.is_null()).collect());
+                }
+                Err(e) => {
+                    if !context.in_generic {
+                        ret.push(ir::Statement::Unsupported(e.token));
+                    }
                 }
             }
         }
+        Ok(ir::StatementBlock(ret))
     }
-    Ok(ir::StatementBlock(ret))
 }
 
 impl Conv<&StatementBlockItem> for ir::StatementBlock {

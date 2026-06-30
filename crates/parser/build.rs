@@ -1,6 +1,16 @@
 #[cfg(not(feature = "build"))]
 fn main() {}
 
+// Caps parol's LL(k) production-stack depth so deep *nesting* can't overflow the
+// stack in the parse-tree drop and the walker/conv passes. As of parol_runtime
+// 5.0.0 push productions (repetition-based flat lists: case arms, array elements,
+// operator chains) are excluded from the depth count, so a flat list of any
+// length parses and only genuine recursive nesting is bounded. The statement path
+// binds: on an 8MB release stack it overflows at ~325 levels (~7 productions
+// each), so 1152 leaves ~2x margin.
+#[cfg(feature = "build")]
+const MAX_PARSING_DEPTH: usize = 1152;
+
 #[cfg(feature = "build")]
 fn generate_token_type() {
     use regex::Regex;
@@ -191,11 +201,19 @@ fn main() {
         let par_modified = fs::metadata(par_file).unwrap().modified().unwrap();
         let exp_modified = fs::metadata(exp_file).unwrap().modified().unwrap();
 
-        par_modified > exp_modified
+        // Changing MAX_PARSING_DEPTH doesn't touch veryl.par, so the mtime check
+        // above misses it; regenerate when the parser embeds a stale value.
+        let parser_file = PathBuf::from("src/generated/veryl_parser.rs");
+        let depth_call = format!("set_max_parsing_depth({MAX_PARSING_DEPTH})");
+        let depth_stale = fs::read_to_string(&parser_file)
+            .map(|s| !s.contains(&depth_call))
+            .unwrap_or(true);
+
+        par_modified > exp_modified || depth_stale
     };
 
     if generate_parser {
-        println!("cargo:warning=veryl.par was changed");
+        println!("cargo:warning=regenerating parser (veryl.par or max parsing depth changed)");
         generate_token_type();
 
         let now = Instant::now();
@@ -213,6 +231,7 @@ fn main() {
                 "serde::Serialize".to_string(),
                 "serde::Deserialize".to_string(),
             ])
+            .max_parsing_depth(MAX_PARSING_DEPTH)
             .trim_parse_tree()
             .generate_parser()
         {

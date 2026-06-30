@@ -33344,2116 +33344,2539 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
     Production {
         lhs: 125,
         production: &[ParseType::T(5)],
+        is_push_production: false,
     },
     // 1 - StringLiteralTerm: "\u{0022}(?:\\[\u{0022}\\fnt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}";
     Production {
         lhs: 677,
         production: &[ParseType::T(6)],
+        is_push_production: false,
     },
     // 2 - ExponentTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/;
     Production {
         lhs: 214,
         production: &[ParseType::T(7)],
+        is_push_production: false,
     },
     // 3 - FixedPointTerm: /[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/;
     Production {
         lhs: 250,
         production: &[ParseType::T(8)],
+        is_push_production: false,
     },
     // 4 - BasedTerm: /(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/;
     Production {
         lhs: 70,
         production: &[ParseType::T(9)],
+        is_push_production: false,
     },
     // 5 - AllBitTerm: /(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/;
     Production {
         lhs: 6,
         production: &[ParseType::T(10)],
+        is_push_production: false,
     },
     // 6 - BaseLessTerm: /[0-9]+(?:_[0-9]+)*/;
     Production {
         lhs: 67,
         production: &[ParseType::T(11)],
+        is_push_production: false,
     },
     // 7 - MinusColonTerm: '-:';
     Production {
         lhs: 436,
         production: &[ParseType::T(12)],
+        is_push_production: false,
     },
     // 8 - MinusGTTerm: '->';
     Production {
         lhs: 439,
         production: &[ParseType::T(13)],
+        is_push_production: false,
     },
     // 9 - LTMinusTerm: '<-';
     Production {
         lhs: 418,
         production: &[ParseType::T(14)],
+        is_push_production: false,
     },
     // 10 - PlusColonTerm: '+:';
     Production {
         lhs: 535,
         production: &[ParseType::T(15)],
+        is_push_production: false,
     },
     // 11 - AssignmentOperatorTerm: "\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|<<<=|>>>=";
     Production {
         lhs: 55,
         production: &[ParseType::T(16)],
+        is_push_production: false,
     },
     // 12 - DiamondOperatorTerm: '<>';
     Production {
         lhs: 160,
         production: &[ParseType::T(17)],
+        is_push_production: false,
     },
     // 13 - Operator08Term: "\*\*";
     Production {
         lhs: 498,
         production: &[ParseType::T(18)],
+        is_push_production: false,
     },
     // 14 - Operator07Term: "/|%";
     Production {
         lhs: 495,
         production: &[ParseType::T(19)],
+        is_push_production: false,
     },
     // 15 - Operator06Term: "\+|-";
     Production {
         lhs: 492,
         production: &[ParseType::T(20)],
+        is_push_production: false,
     },
     // 16 - Operator02Term: "<<<|>>>|<<|>>|==\?|!=\?|==|!=|<=|>=|<:|>:";
     Production {
         lhs: 480,
         production: &[ParseType::T(21)],
+        is_push_production: false,
     },
     // 17 - Operator01Term: "\|\||&&";
     Production {
         lhs: 477,
         production: &[ParseType::T(22)],
+        is_push_production: false,
     },
     // 18 - Operator05Term: "&";
     Production {
         lhs: 489,
         production: &[ParseType::T(23)],
+        is_push_production: false,
     },
     // 19 - Operator04Term: "\^|~\^";
     Production {
         lhs: 486,
         production: &[ParseType::T(24)],
+        is_push_production: false,
     },
     // 20 - Operator03Term: "\|";
     Production {
         lhs: 483,
         production: &[ParseType::T(25)],
+        is_push_production: false,
     },
     // 21 - UnaryOperatorTerm: "~&|~\||!|~";
     Production {
         lhs: 744,
         production: &[ParseType::T(26)],
+        is_push_production: false,
     },
     // 22 - ColonColonLAngleTerm: '::<';
     Production {
         lhs: 114,
         production: &[ParseType::T(27)],
+        is_push_production: false,
     },
     // 23 - ColonColonTerm: '::';
     Production {
         lhs: 116,
         production: &[ParseType::T(28)],
+        is_push_production: false,
     },
     // 24 - ColonTerm: ':';
     Production {
         lhs: 118,
         production: &[ParseType::T(29)],
+        is_push_production: false,
     },
     // 25 - CommaTerm: ',';
     Production {
         lhs: 121,
         production: &[ParseType::T(30)],
+        is_push_production: false,
     },
     // 26 - DotDotEquTerm: '..=';
     Production {
         lhs: 169,
         production: &[ParseType::T(31)],
+        is_push_production: false,
     },
     // 27 - DotDotTerm: '..';
     Production {
         lhs: 171,
         production: &[ParseType::T(32)],
+        is_push_production: false,
     },
     // 28 - DotTerm: '.';
     Production {
         lhs: 173,
         production: &[ParseType::T(33)],
+        is_push_production: false,
     },
     // 29 - EquTerm: '=';
     Production {
         lhs: 205,
         production: &[ParseType::T(34)],
+        is_push_production: false,
     },
     // 30 - HashLBracketTerm: '#[';
     Production {
         lhs: 296,
         production: &[ParseType::T(35)],
+        is_push_production: false,
     },
     // 31 - HashTerm: '#';
     Production {
         lhs: 298,
         production: &[ParseType::T(36)],
+        is_push_production: false,
     },
     // 32 - LAngleTerm: '<';
     Production {
         lhs: 403,
         production: &[ParseType::T(37)],
+        is_push_production: false,
     },
     // 33 - QuestionTerm: '?';
     Production {
         lhs: 585,
         production: &[ParseType::T(38)],
+        is_push_production: false,
     },
     // 34 - QuoteLBraceTerm: "'\{";
     Production {
         lhs: 589,
         production: &[ParseType::T(39)],
+        is_push_production: false,
     },
     // 35 - QuoteTerm: "'";
     Production {
         lhs: 591,
         production: &[ParseType::T(40)],
+        is_push_production: false,
     },
     // 36 - EscapedLBraceTerm: '\{';
     Production {
         lhs: 208,
         production: &[ParseType::T(41)],
+        is_push_production: false,
     },
     // 37 - TripleLBraceTerm: '{{{';
     Production {
         lhs: 717,
         production: &[ParseType::T(42)],
+        is_push_production: false,
     },
     // 38 - LBraceTerm: '{';
     Production {
         lhs: 409,
         production: &[ParseType::T(43)],
+        is_push_production: false,
     },
     // 39 - LBracketTerm: '[';
     Production {
         lhs: 412,
         production: &[ParseType::T(44)],
+        is_push_production: false,
     },
     // 40 - LParenTerm: '(';
     Production {
         lhs: 415,
         production: &[ParseType::T(45)],
+        is_push_production: false,
     },
     // 41 - RAngleTerm: '>';
     Production {
         lhs: 594,
         production: &[ParseType::T(46)],
+        is_push_production: false,
     },
     // 42 - EscapedRBraceTerm: '\}';
     Production {
         lhs: 211,
         production: &[ParseType::T(47)],
+        is_push_production: false,
     },
     // 43 - TripleRBraceTerm: '}}}';
     Production {
         lhs: 720,
         production: &[ParseType::T(48)],
+        is_push_production: false,
     },
     // 44 - RBraceTerm: '}';
     Production {
         lhs: 597,
         production: &[ParseType::T(49)],
+        is_push_production: false,
     },
     // 45 - RBracketTerm: ']';
     Production {
         lhs: 600,
         production: &[ParseType::T(50)],
+        is_push_production: false,
     },
     // 46 - RParenTerm: ')';
     Production {
         lhs: 603,
         production: &[ParseType::T(51)],
+        is_push_production: false,
     },
     // 47 - SemicolonTerm: ';';
     Production {
         lhs: 654,
         production: &[ParseType::T(52)],
+        is_push_production: false,
     },
     // 48 - StarTerm: '*';
     Production {
         lhs: 660,
         production: &[ParseType::T(53)],
+        is_push_production: false,
     },
     // 49 - AliasTerm: 'alias';
     Production {
         lhs: 3,
         production: &[ParseType::T(54)],
+        is_push_production: false,
     },
     // 50 - AlwaysCombTerm: 'always_comb';
     Production {
         lhs: 10,
         production: &[ParseType::T(55)],
+        is_push_production: false,
     },
     // 51 - AlwaysFfTerm: 'always_ff';
     Production {
         lhs: 19,
         production: &[ParseType::T(56)],
+        is_push_production: false,
     },
     // 52 - AssignTerm: 'assign';
     Production {
         lhs: 50,
         production: &[ParseType::T(57)],
+        is_push_production: false,
     },
     // 53 - AsTerm: 'as';
     Production {
         lhs: 41,
         production: &[ParseType::T(58)],
+        is_push_production: false,
     },
     // 54 - BindTerm: 'bind';
     Production {
         lhs: 74,
         production: &[ParseType::T(59)],
+        is_push_production: false,
     },
     // 55 - BitTerm: 'bit';
     Production {
         lhs: 77,
         production: &[ParseType::T(60)],
+        is_push_production: false,
     },
     // 56 - BlockTerm: 'block';
     Production {
         lhs: 80,
         production: &[ParseType::T(61)],
+        is_push_production: false,
     },
     // 57 - BBoolTerm: 'bbool';
     Production {
         lhs: 64,
         production: &[ParseType::T(62)],
+        is_push_production: false,
     },
     // 58 - LBoolTerm: 'lbool';
     Production {
         lhs: 406,
         production: &[ParseType::T(63)],
+        is_push_production: false,
     },
     // 59 - CaseTerm: 'case';
     Production {
         lhs: 98,
         production: &[ParseType::T(64)],
+        is_push_production: false,
     },
     // 60 - ClockTerm: 'clock';
     Production {
         lhs: 109,
         production: &[ParseType::T(65)],
+        is_push_production: false,
     },
     // 61 - ClockPosedgeTerm: 'clock_posedge';
     Production {
         lhs: 107,
         production: &[ParseType::T(66)],
+        is_push_production: false,
     },
     // 62 - ClockNegedgeTerm: 'clock_negedge';
     Production {
         lhs: 104,
         production: &[ParseType::T(67)],
+        is_push_production: false,
     },
     // 63 - ConnectTerm: 'connect';
     Production {
         lhs: 139,
         production: &[ParseType::T(68)],
+        is_push_production: false,
     },
     // 64 - ConstTerm: 'const';
     Production {
         lhs: 145,
         production: &[ParseType::T(69)],
+        is_push_production: false,
     },
     // 65 - ConverseTerm: 'converse';
     Production {
         lhs: 148,
         production: &[ParseType::T(70)],
+        is_push_production: false,
     },
     // 66 - DefaultTerm: 'default';
     Production {
         lhs: 151,
         production: &[ParseType::T(71)],
+        is_push_production: false,
     },
     // 67 - ElseTerm: 'else';
     Production {
         lhs: 176,
         production: &[ParseType::T(72)],
+        is_push_production: false,
     },
     // 68 - EmbedTerm: 'embed';
     Production {
         lhs: 189,
         production: &[ParseType::T(73)],
+        is_push_production: false,
     },
     // 69 - EnumTerm: 'enum';
     Production {
         lhs: 202,
         production: &[ParseType::T(74)],
+        is_push_production: false,
     },
     // 70 - F32Term: 'f32';
     Production {
         lhs: 230,
         production: &[ParseType::T(75)],
+        is_push_production: false,
     },
     // 71 - F64Term: 'f64';
     Production {
         lhs: 233,
         production: &[ParseType::T(76)],
+        is_push_production: false,
     },
     // 72 - FalseTerm: 'false';
     Production {
         lhs: 243,
         production: &[ParseType::T(77)],
+        is_push_production: false,
     },
     // 73 - FinalTerm: 'final';
     Production {
         lhs: 247,
         production: &[ParseType::T(78)],
+        is_push_production: false,
     },
     // 74 - ForTerm: 'for';
     Production {
         lhs: 257,
         production: &[ParseType::T(79)],
+        is_push_production: false,
     },
     // 75 - FunctionTerm: 'function';
     Production {
         lhs: 266,
         production: &[ParseType::T(80)],
+        is_push_production: false,
     },
     // 76 - GenTerm: 'gen';
     Production {
         lhs: 271,
         production: &[ParseType::T(81)],
+        is_push_production: false,
     },
     // 77 - I8Term: 'i8';
     Production {
         lhs: 314,
         production: &[ParseType::T(82)],
+        is_push_production: false,
     },
     // 78 - I16Term: 'i16';
     Production {
         lhs: 305,
         production: &[ParseType::T(83)],
+        is_push_production: false,
     },
     // 79 - I32Term: 'i32';
     Production {
         lhs: 308,
         production: &[ParseType::T(84)],
+        is_push_production: false,
     },
     // 80 - I64Term: 'i64';
     Production {
         lhs: 311,
         production: &[ParseType::T(85)],
+        is_push_production: false,
     },
     // 81 - IfResetTerm: 'if_reset';
     Production {
         lhs: 331,
         production: &[ParseType::T(86)],
+        is_push_production: false,
     },
     // 82 - IfTerm: 'if';
     Production {
         lhs: 336,
         production: &[ParseType::T(87)],
+        is_push_production: false,
     },
     // 83 - ImportTerm: 'import';
     Production {
         lhs: 341,
         production: &[ParseType::T(88)],
+        is_push_production: false,
     },
     // 84 - IncludeTerm: 'include';
     Production {
         lhs: 348,
         production: &[ParseType::T(89)],
+        is_push_production: false,
     },
     // 85 - InitialTerm: 'initial';
     Production {
         lhs: 352,
         production: &[ParseType::T(90)],
+        is_push_production: false,
     },
     // 86 - InoutTerm: 'inout';
     Production {
         lhs: 355,
         production: &[ParseType::T(91)],
+        is_push_production: false,
     },
     // 87 - InputTerm: 'input';
     Production {
         lhs: 358,
         production: &[ParseType::T(92)],
+        is_push_production: false,
     },
     // 88 - InsideTerm: 'inside';
     Production {
         lhs: 362,
         production: &[ParseType::T(93)],
+        is_push_production: false,
     },
     // 89 - InstTerm: 'inst';
     Production {
         lhs: 386,
         production: &[ParseType::T(94)],
+        is_push_production: false,
     },
     // 90 - InterfaceTerm: 'interface';
     Production {
         lhs: 400,
         production: &[ParseType::T(95)],
+        is_push_production: false,
     },
     // 91 - InTerm: 'in';
     Production {
         lhs: 344,
         production: &[ParseType::T(96)],
+        is_push_production: false,
     },
     // 92 - LetTerm: 'let';
     Production {
         lhs: 427,
         production: &[ParseType::T(97)],
+        is_push_production: false,
     },
     // 93 - LogicTerm: 'logic';
     Production {
         lhs: 430,
         production: &[ParseType::T(98)],
+        is_push_production: false,
     },
     // 94 - LsbTerm: 'lsb';
     Production {
         lhs: 433,
         production: &[ParseType::T(99)],
+        is_push_production: false,
     },
     // 95 - ModportTerm: 'modport';
     Production {
         lhs: 456,
         production: &[ParseType::T(100)],
+        is_push_production: false,
     },
     // 96 - ModuleTerm: 'module';
     Production {
         lhs: 470,
         production: &[ParseType::T(101)],
+        is_push_production: false,
     },
     // 97 - MsbTerm: 'msb';
     Production {
         lhs: 473,
         production: &[ParseType::T(102)],
+        is_push_production: false,
     },
     // 98 - OutputTerm: 'output';
     Production {
         lhs: 501,
         production: &[ParseType::T(103)],
+        is_push_production: false,
     },
     // 99 - OutsideTerm: 'outside';
     Production {
         lhs: 505,
         production: &[ParseType::T(104)],
+        is_push_production: false,
     },
     // 100 - PackageTerm: 'package';
     Production {
         lhs: 529,
         production: &[ParseType::T(105)],
+        is_push_production: false,
     },
     // 101 - ParamTerm: 'param';
     Production {
         lhs: 532,
         production: &[ParseType::T(106)],
+        is_push_production: false,
     },
     // 102 - ProtoTerm: 'proto';
     Production {
         lhs: 576,
         production: &[ParseType::T(107)],
+        is_push_production: false,
     },
     // 103 - PubTerm: 'pub';
     Production {
         lhs: 581,
         production: &[ParseType::T(108)],
+        is_push_production: false,
     },
     // 104 - RepeatTerm: 'repeat';
     Production {
         lhs: 614,
         production: &[ParseType::T(109)],
+        is_push_production: false,
     },
     // 105 - ResetTerm: 'reset';
     Production {
         lhs: 629,
         production: &[ParseType::T(110)],
+        is_push_production: false,
     },
     // 106 - ResetAsyncHighTerm: 'reset_async_high';
     Production {
         lhs: 618,
         production: &[ParseType::T(111)],
+        is_push_production: false,
     },
     // 107 - ResetAsyncLowTerm: 'reset_async_low';
     Production {
         lhs: 621,
         production: &[ParseType::T(112)],
+        is_push_production: false,
     },
     // 108 - ResetSyncHighTerm: 'reset_sync_high';
     Production {
         lhs: 624,
         production: &[ParseType::T(113)],
+        is_push_production: false,
     },
     // 109 - ResetSyncLowTerm: 'reset_sync_low';
     Production {
         lhs: 627,
         production: &[ParseType::T(114)],
+        is_push_production: false,
     },
     // 110 - ReturnTerm: 'return';
     Production {
         lhs: 633,
         production: &[ParseType::T(115)],
+        is_push_production: false,
     },
     // 111 - RevTerm: 'rev';
     Production {
         lhs: 636,
         production: &[ParseType::T(116)],
+        is_push_production: false,
     },
     // 112 - BreakTerm: 'break';
     Production {
         lhs: 85,
         production: &[ParseType::T(117)],
+        is_push_production: false,
     },
     // 113 - SameTerm: 'same';
     Production {
         lhs: 639,
         production: &[ParseType::T(118)],
+        is_push_production: false,
     },
     // 114 - SignedTerm: 'signed';
     Production {
         lhs: 657,
         production: &[ParseType::T(119)],
+        is_push_production: false,
     },
     // 115 - StepTerm: 'step';
     Production {
         lhs: 673,
         production: &[ParseType::T(120)],
+        is_push_production: false,
     },
     // 116 - StringTerm: 'string';
     Production {
         lhs: 679,
         production: &[ParseType::T(121)],
+        is_push_production: false,
     },
     // 117 - StructTerm: 'struct';
     Production {
         lhs: 688,
         production: &[ParseType::T(122)],
+        is_push_production: false,
     },
     // 118 - SwitchTerm: 'switch';
     Production {
         lhs: 711,
         production: &[ParseType::T(123)],
+        is_push_production: false,
     },
     // 119 - TriTerm: 'tri';
     Production {
         lhs: 714,
         production: &[ParseType::T(124)],
+        is_push_production: false,
     },
     // 120 - TrueTerm: 'true';
     Production {
         lhs: 723,
         production: &[ParseType::T(125)],
+        is_push_production: false,
     },
     // 121 - TypeTerm: 'type';
     Production {
         lhs: 729,
         production: &[ParseType::T(126)],
+        is_push_production: false,
     },
     // 122 - P8Term: 'p8';
     Production {
         lhs: 517,
         production: &[ParseType::T(127)],
+        is_push_production: false,
     },
     // 123 - P16Term: 'p16';
     Production {
         lhs: 508,
         production: &[ParseType::T(128)],
+        is_push_production: false,
     },
     // 124 - P32Term: 'p32';
     Production {
         lhs: 511,
         production: &[ParseType::T(129)],
+        is_push_production: false,
     },
     // 125 - P64Term: 'p64';
     Production {
         lhs: 514,
         production: &[ParseType::T(130)],
+        is_push_production: false,
     },
     // 126 - U8Term: 'u8';
     Production {
         lhs: 741,
         production: &[ParseType::T(131)],
+        is_push_production: false,
     },
     // 127 - U16Term: 'u16';
     Production {
         lhs: 732,
         production: &[ParseType::T(132)],
+        is_push_production: false,
     },
     // 128 - U32Term: 'u32';
     Production {
         lhs: 735,
         production: &[ParseType::T(133)],
+        is_push_production: false,
     },
     // 129 - U64Term: 'u64';
     Production {
         lhs: 738,
         production: &[ParseType::T(134)],
+        is_push_production: false,
     },
     // 130 - UnionTerm: 'union';
     Production {
         lhs: 747,
         production: &[ParseType::T(135)],
+        is_push_production: false,
     },
     // 131 - UnsafeTerm: 'unsafe';
     Production {
         lhs: 752,
         production: &[ParseType::T(136)],
+        is_push_production: false,
     },
     // 132 - VarTerm: 'var';
     Production {
         lhs: 759,
         production: &[ParseType::T(137)],
+        is_push_production: false,
     },
     // 133 - DollarIdentifierTerm: /\$[a-zA-Z_][0-9a-zA-Z_$]*/;
     Production {
         lhs: 164,
         production: &[ParseType::T(138)],
+        is_push_production: false,
     },
     // 134 - IdentifierTerm: /(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*/;
     Production {
         lhs: 322,
         production: &[ParseType::T(139)],
+        is_push_production: false,
     },
     // 135 - AnyTerm: /(?:[^{}\\]|\\[^{])+/;
     Production {
         lhs: 22,
         production: &[ParseType::T(140)],
+        is_push_production: false,
     },
     // 136 - Comments: CommentsOpt /* Option */;
     Production {
         lhs: 123,
         production: &[ParseType::N(124)],
+        is_push_production: false,
     },
     // 137 - CommentsOpt: CommentsTerm;
     Production {
         lhs: 124,
         production: &[ParseType::N(125)],
+        is_push_production: false,
     },
     // 138 - CommentsOpt: ;
     Production {
         lhs: 124,
         production: &[],
+        is_push_production: false,
     },
     // 139 - StartToken: Comments;
     Production {
         lhs: 663,
         production: &[ParseType::N(123)],
+        is_push_production: false,
     },
     // 140 - StringLiteralToken: StringLiteralTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 678,
         production: &[ParseType::N(123), ParseType::N(677)],
+        is_push_production: false,
     },
     // 141 - ExponentToken: ExponentTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 215,
         production: &[ParseType::N(123), ParseType::N(214)],
+        is_push_production: false,
     },
     // 142 - FixedPointToken: FixedPointTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 251,
         production: &[ParseType::N(123), ParseType::N(250)],
+        is_push_production: false,
     },
     // 143 - BasedToken: BasedTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 71,
         production: &[ParseType::N(123), ParseType::N(70)],
+        is_push_production: false,
     },
     // 144 - BaseLessToken: BaseLessTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 68,
         production: &[ParseType::N(123), ParseType::N(67)],
+        is_push_production: false,
     },
     // 145 - AllBitToken: AllBitTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 7,
         production: &[ParseType::N(123), ParseType::N(6)],
+        is_push_production: false,
     },
     // 146 - AssignmentOperatorToken: AssignmentOperatorTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 56,
         production: &[ParseType::N(123), ParseType::N(55)],
+        is_push_production: false,
     },
     // 147 - DiamondOperatorToken: DiamondOperatorTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 161,
         production: &[ParseType::N(123), ParseType::N(160)],
+        is_push_production: false,
     },
     // 148 - Operator01Token: Operator01Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 478,
         production: &[ParseType::N(123), ParseType::N(477)],
+        is_push_production: false,
     },
     // 149 - Operator02Token: Operator02Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 481,
         production: &[ParseType::N(123), ParseType::N(480)],
+        is_push_production: false,
     },
     // 150 - Operator03Token: Operator03Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 484,
         production: &[ParseType::N(123), ParseType::N(483)],
+        is_push_production: false,
     },
     // 151 - Operator04Token: Operator04Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 487,
         production: &[ParseType::N(123), ParseType::N(486)],
+        is_push_production: false,
     },
     // 152 - Operator05Token: Operator05Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 490,
         production: &[ParseType::N(123), ParseType::N(489)],
+        is_push_production: false,
     },
     // 153 - Operator06Token: Operator06Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 493,
         production: &[ParseType::N(123), ParseType::N(492)],
+        is_push_production: false,
     },
     // 154 - Operator07Token: Operator07Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 496,
         production: &[ParseType::N(123), ParseType::N(495)],
+        is_push_production: false,
     },
     // 155 - Operator08Token: Operator08Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 499,
         production: &[ParseType::N(123), ParseType::N(498)],
+        is_push_production: false,
     },
     // 156 - UnaryOperatorToken: UnaryOperatorTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 745,
         production: &[ParseType::N(123), ParseType::N(744)],
+        is_push_production: false,
     },
     // 157 - ColonToken: ColonTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 119,
         production: &[ParseType::N(123), ParseType::N(118)],
+        is_push_production: false,
     },
     // 158 - ColonColonLAngleToken: ColonColonLAngleTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 115,
         production: &[ParseType::N(123), ParseType::N(114)],
+        is_push_production: false,
     },
     // 159 - ColonColonToken: ColonColonTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 117,
         production: &[ParseType::N(123), ParseType::N(116)],
+        is_push_production: false,
     },
     // 160 - CommaToken: CommaTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 122,
         production: &[ParseType::N(123), ParseType::N(121)],
+        is_push_production: false,
     },
     // 161 - DotDotToken: DotDotTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 172,
         production: &[ParseType::N(123), ParseType::N(171)],
+        is_push_production: false,
     },
     // 162 - DotDotEquToken: DotDotEquTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 170,
         production: &[ParseType::N(123), ParseType::N(169)],
+        is_push_production: false,
     },
     // 163 - DotToken: DotTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 174,
         production: &[ParseType::N(123), ParseType::N(173)],
+        is_push_production: false,
     },
     // 164 - EquToken: EquTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 206,
         production: &[ParseType::N(123), ParseType::N(205)],
+        is_push_production: false,
     },
     // 165 - HashLBracketToken: HashLBracketTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 297,
         production: &[ParseType::N(123), ParseType::N(296)],
+        is_push_production: false,
     },
     // 166 - HashToken: HashTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 299,
         production: &[ParseType::N(123), ParseType::N(298)],
+        is_push_production: false,
     },
     // 167 - QuestionToken: QuestionTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 586,
         production: &[ParseType::N(123), ParseType::N(585)],
+        is_push_production: false,
     },
     // 168 - QuoteLBraceToken: QuoteLBraceTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 590,
         production: &[ParseType::N(123), ParseType::N(589)],
+        is_push_production: false,
     },
     // 169 - QuoteToken: QuoteTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 592,
         production: &[ParseType::N(123), ParseType::N(591)],
+        is_push_production: false,
     },
     // 170 - LAngleToken: LAngleTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 404,
         production: &[ParseType::N(123), ParseType::N(403)],
+        is_push_production: false,
     },
     // 171 - EmbedLBraceToken: LBraceTerm : crate::veryl_token::Token ;
     Production {
         lhs: 185,
         production: &[ParseType::N(409)],
+        is_push_production: false,
     },
     // 172 - EscapedLBraceToken: EscapedLBraceTerm : crate::veryl_token::Token ;
     Production {
         lhs: 209,
         production: &[ParseType::N(208)],
+        is_push_production: false,
     },
     // 173 - TripleLBraceToken: TripleLBraceTerm : crate::veryl_token::Token ;
     Production {
         lhs: 718,
         production: &[ParseType::N(717)],
+        is_push_production: false,
     },
     // 174 - LBraceToken: LBraceTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 410,
         production: &[ParseType::N(123), ParseType::N(409)],
+        is_push_production: false,
     },
     // 175 - LBracketToken: LBracketTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 413,
         production: &[ParseType::N(123), ParseType::N(412)],
+        is_push_production: false,
     },
     // 176 - LParenToken: LParenTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 416,
         production: &[ParseType::N(123), ParseType::N(415)],
+        is_push_production: false,
     },
     // 177 - LTMinusToken: LTMinusTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 419,
         production: &[ParseType::N(123), ParseType::N(418)],
+        is_push_production: false,
     },
     // 178 - MinusColonToken: MinusColonTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 437,
         production: &[ParseType::N(123), ParseType::N(436)],
+        is_push_production: false,
     },
     // 179 - MinusGTToken: MinusGTTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 440,
         production: &[ParseType::N(123), ParseType::N(439)],
+        is_push_production: false,
     },
     // 180 - PlusColonToken: PlusColonTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 536,
         production: &[ParseType::N(123), ParseType::N(535)],
+        is_push_production: false,
     },
     // 181 - RAngleToken: RAngleTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 595,
         production: &[ParseType::N(123), ParseType::N(594)],
+        is_push_production: false,
     },
     // 182 - EmbedRBraceToken: RBraceTerm : crate::veryl_token::Token ;
     Production {
         lhs: 187,
         production: &[ParseType::N(597)],
+        is_push_production: false,
     },
     // 183 - EscapedRBraceToken: EscapedRBraceTerm : crate::veryl_token::Token ;
     Production {
         lhs: 212,
         production: &[ParseType::N(211)],
+        is_push_production: false,
     },
     // 184 - TripleRBraceToken: TripleRBraceTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 721,
         production: &[ParseType::N(123), ParseType::N(720)],
+        is_push_production: false,
     },
     // 185 - RBraceToken: RBraceTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 598,
         production: &[ParseType::N(123), ParseType::N(597)],
+        is_push_production: false,
     },
     // 186 - RBracketToken: RBracketTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 601,
         production: &[ParseType::N(123), ParseType::N(600)],
+        is_push_production: false,
     },
     // 187 - RParenToken: RParenTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 604,
         production: &[ParseType::N(123), ParseType::N(603)],
+        is_push_production: false,
     },
     // 188 - SemicolonToken: SemicolonTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 655,
         production: &[ParseType::N(123), ParseType::N(654)],
+        is_push_production: false,
     },
     // 189 - StarToken: StarTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 661,
         production: &[ParseType::N(123), ParseType::N(660)],
+        is_push_production: false,
     },
     // 190 - AliasToken: AliasTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 4,
         production: &[ParseType::N(123), ParseType::N(3)],
+        is_push_production: false,
     },
     // 191 - AlwaysCombToken: AlwaysCombTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 11,
         production: &[ParseType::N(123), ParseType::N(10)],
+        is_push_production: false,
     },
     // 192 - AlwaysFfToken: AlwaysFfTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 20,
         production: &[ParseType::N(123), ParseType::N(19)],
+        is_push_production: false,
     },
     // 193 - AsToken: AsTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 42,
         production: &[ParseType::N(123), ParseType::N(41)],
+        is_push_production: false,
     },
     // 194 - AssignToken: AssignTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 51,
         production: &[ParseType::N(123), ParseType::N(50)],
+        is_push_production: false,
     },
     // 195 - BindToken: BindTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 75,
         production: &[ParseType::N(123), ParseType::N(74)],
+        is_push_production: false,
     },
     // 196 - BitToken: BitTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 78,
         production: &[ParseType::N(123), ParseType::N(77)],
+        is_push_production: false,
     },
     // 197 - BlockToken: BlockTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 81,
         production: &[ParseType::N(123), ParseType::N(80)],
+        is_push_production: false,
     },
     // 198 - BBoolToken: BBoolTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 65,
         production: &[ParseType::N(123), ParseType::N(64)],
+        is_push_production: false,
     },
     // 199 - LBoolToken: LBoolTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 407,
         production: &[ParseType::N(123), ParseType::N(406)],
+        is_push_production: false,
     },
     // 200 - CaseToken: CaseTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 99,
         production: &[ParseType::N(123), ParseType::N(98)],
+        is_push_production: false,
     },
     // 201 - ClockToken: ClockTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 110,
         production: &[ParseType::N(123), ParseType::N(109)],
+        is_push_production: false,
     },
     // 202 - ClockPosedgeToken: ClockPosedgeTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 108,
         production: &[ParseType::N(123), ParseType::N(107)],
+        is_push_production: false,
     },
     // 203 - ClockNegedgeToken: ClockNegedgeTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 105,
         production: &[ParseType::N(123), ParseType::N(104)],
+        is_push_production: false,
     },
     // 204 - ConnectToken: ConnectTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 140,
         production: &[ParseType::N(123), ParseType::N(139)],
+        is_push_production: false,
     },
     // 205 - ConstToken: ConstTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 146,
         production: &[ParseType::N(123), ParseType::N(145)],
+        is_push_production: false,
     },
     // 206 - ConverseToken: ConverseTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 149,
         production: &[ParseType::N(123), ParseType::N(148)],
+        is_push_production: false,
     },
     // 207 - DefaultToken: DefaultTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 152,
         production: &[ParseType::N(123), ParseType::N(151)],
+        is_push_production: false,
     },
     // 208 - ElseToken: ElseTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 177,
         production: &[ParseType::N(123), ParseType::N(176)],
+        is_push_production: false,
     },
     // 209 - EmbedToken: EmbedTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 190,
         production: &[ParseType::N(123), ParseType::N(189)],
+        is_push_production: false,
     },
     // 210 - EnumToken: EnumTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 203,
         production: &[ParseType::N(123), ParseType::N(202)],
+        is_push_production: false,
     },
     // 211 - F32Token: F32Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 231,
         production: &[ParseType::N(123), ParseType::N(230)],
+        is_push_production: false,
     },
     // 212 - F64Token: F64Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 234,
         production: &[ParseType::N(123), ParseType::N(233)],
+        is_push_production: false,
     },
     // 213 - FalseToken: FalseTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 244,
         production: &[ParseType::N(123), ParseType::N(243)],
+        is_push_production: false,
     },
     // 214 - FinalToken: FinalTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 248,
         production: &[ParseType::N(123), ParseType::N(247)],
+        is_push_production: false,
     },
     // 215 - ForToken: ForTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 258,
         production: &[ParseType::N(123), ParseType::N(257)],
+        is_push_production: false,
     },
     // 216 - FunctionToken: FunctionTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 267,
         production: &[ParseType::N(123), ParseType::N(266)],
+        is_push_production: false,
     },
     // 217 - GenToken: GenTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 272,
         production: &[ParseType::N(123), ParseType::N(271)],
+        is_push_production: false,
     },
     // 218 - I8Token: I8Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 315,
         production: &[ParseType::N(123), ParseType::N(314)],
+        is_push_production: false,
     },
     // 219 - I16Token: I16Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 306,
         production: &[ParseType::N(123), ParseType::N(305)],
+        is_push_production: false,
     },
     // 220 - I32Token: I32Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 309,
         production: &[ParseType::N(123), ParseType::N(308)],
+        is_push_production: false,
     },
     // 221 - I64Token: I64Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 312,
         production: &[ParseType::N(123), ParseType::N(311)],
+        is_push_production: false,
     },
     // 222 - IfResetToken: IfResetTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 332,
         production: &[ParseType::N(123), ParseType::N(331)],
+        is_push_production: false,
     },
     // 223 - IfToken: IfTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 337,
         production: &[ParseType::N(123), ParseType::N(336)],
+        is_push_production: false,
     },
     // 224 - ImportToken: ImportTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 342,
         production: &[ParseType::N(123), ParseType::N(341)],
+        is_push_production: false,
     },
     // 225 - IncludeToken: IncludeTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 349,
         production: &[ParseType::N(123), ParseType::N(348)],
+        is_push_production: false,
     },
     // 226 - InitialToken: InitialTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 353,
         production: &[ParseType::N(123), ParseType::N(352)],
+        is_push_production: false,
     },
     // 227 - InoutToken: InoutTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 356,
         production: &[ParseType::N(123), ParseType::N(355)],
+        is_push_production: false,
     },
     // 228 - InputToken: InputTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 359,
         production: &[ParseType::N(123), ParseType::N(358)],
+        is_push_production: false,
     },
     // 229 - InsideToken: InsideTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 363,
         production: &[ParseType::N(123), ParseType::N(362)],
+        is_push_production: false,
     },
     // 230 - InstToken: InstTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 387,
         production: &[ParseType::N(123), ParseType::N(386)],
+        is_push_production: false,
     },
     // 231 - InterfaceToken: InterfaceTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 401,
         production: &[ParseType::N(123), ParseType::N(400)],
+        is_push_production: false,
     },
     // 232 - InToken: InTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 345,
         production: &[ParseType::N(123), ParseType::N(344)],
+        is_push_production: false,
     },
     // 233 - LetToken: LetTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 428,
         production: &[ParseType::N(123), ParseType::N(427)],
+        is_push_production: false,
     },
     // 234 - LogicToken: LogicTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 431,
         production: &[ParseType::N(123), ParseType::N(430)],
+        is_push_production: false,
     },
     // 235 - LsbToken: LsbTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 434,
         production: &[ParseType::N(123), ParseType::N(433)],
+        is_push_production: false,
     },
     // 236 - ModportToken: ModportTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 457,
         production: &[ParseType::N(123), ParseType::N(456)],
+        is_push_production: false,
     },
     // 237 - ModuleToken: ModuleTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 471,
         production: &[ParseType::N(123), ParseType::N(470)],
+        is_push_production: false,
     },
     // 238 - MsbToken: MsbTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 474,
         production: &[ParseType::N(123), ParseType::N(473)],
+        is_push_production: false,
     },
     // 239 - OutputToken: OutputTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 502,
         production: &[ParseType::N(123), ParseType::N(501)],
+        is_push_production: false,
     },
     // 240 - OutsideToken: OutsideTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 506,
         production: &[ParseType::N(123), ParseType::N(505)],
+        is_push_production: false,
     },
     // 241 - PackageToken: PackageTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 530,
         production: &[ParseType::N(123), ParseType::N(529)],
+        is_push_production: false,
     },
     // 242 - ParamToken: ParamTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 533,
         production: &[ParseType::N(123), ParseType::N(532)],
+        is_push_production: false,
     },
     // 243 - ProtoToken: ProtoTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 577,
         production: &[ParseType::N(123), ParseType::N(576)],
+        is_push_production: false,
     },
     // 244 - PubToken: PubTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 582,
         production: &[ParseType::N(123), ParseType::N(581)],
+        is_push_production: false,
     },
     // 245 - RepeatToken: RepeatTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 615,
         production: &[ParseType::N(123), ParseType::N(614)],
+        is_push_production: false,
     },
     // 246 - ResetToken: ResetTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 630,
         production: &[ParseType::N(123), ParseType::N(629)],
+        is_push_production: false,
     },
     // 247 - ResetAsyncHighToken: ResetAsyncHighTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 619,
         production: &[ParseType::N(123), ParseType::N(618)],
+        is_push_production: false,
     },
     // 248 - ResetAsyncLowToken: ResetAsyncLowTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 622,
         production: &[ParseType::N(123), ParseType::N(621)],
+        is_push_production: false,
     },
     // 249 - ResetSyncHighToken: ResetSyncHighTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 625,
         production: &[ParseType::N(123), ParseType::N(624)],
+        is_push_production: false,
     },
     // 250 - ResetSyncLowToken: ResetSyncLowTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 628,
         production: &[ParseType::N(123), ParseType::N(627)],
+        is_push_production: false,
     },
     // 251 - ReturnToken: ReturnTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 634,
         production: &[ParseType::N(123), ParseType::N(633)],
+        is_push_production: false,
     },
     // 252 - RevToken: RevTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 637,
         production: &[ParseType::N(123), ParseType::N(636)],
+        is_push_production: false,
     },
     // 253 - BreakToken: BreakTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 86,
         production: &[ParseType::N(123), ParseType::N(85)],
+        is_push_production: false,
     },
     // 254 - SameToken: SameTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 640,
         production: &[ParseType::N(123), ParseType::N(639)],
+        is_push_production: false,
     },
     // 255 - SignedToken: SignedTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 658,
         production: &[ParseType::N(123), ParseType::N(657)],
+        is_push_production: false,
     },
     // 256 - StepToken: StepTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 674,
         production: &[ParseType::N(123), ParseType::N(673)],
+        is_push_production: false,
     },
     // 257 - StringToken: StringTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 680,
         production: &[ParseType::N(123), ParseType::N(679)],
+        is_push_production: false,
     },
     // 258 - StructToken: StructTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 689,
         production: &[ParseType::N(123), ParseType::N(688)],
+        is_push_production: false,
     },
     // 259 - SwitchToken: SwitchTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 712,
         production: &[ParseType::N(123), ParseType::N(711)],
+        is_push_production: false,
     },
     // 260 - TriToken: TriTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 715,
         production: &[ParseType::N(123), ParseType::N(714)],
+        is_push_production: false,
     },
     // 261 - TrueToken: TrueTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 724,
         production: &[ParseType::N(123), ParseType::N(723)],
+        is_push_production: false,
     },
     // 262 - TypeToken: TypeTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 730,
         production: &[ParseType::N(123), ParseType::N(729)],
+        is_push_production: false,
     },
     // 263 - P8Token: P8Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 518,
         production: &[ParseType::N(123), ParseType::N(517)],
+        is_push_production: false,
     },
     // 264 - P16Token: P16Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 509,
         production: &[ParseType::N(123), ParseType::N(508)],
+        is_push_production: false,
     },
     // 265 - P32Token: P32Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 512,
         production: &[ParseType::N(123), ParseType::N(511)],
+        is_push_production: false,
     },
     // 266 - P64Token: P64Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 515,
         production: &[ParseType::N(123), ParseType::N(514)],
+        is_push_production: false,
     },
     // 267 - U8Token: U8Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 742,
         production: &[ParseType::N(123), ParseType::N(741)],
+        is_push_production: false,
     },
     // 268 - U16Token: U16Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 733,
         production: &[ParseType::N(123), ParseType::N(732)],
+        is_push_production: false,
     },
     // 269 - U32Token: U32Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 736,
         production: &[ParseType::N(123), ParseType::N(735)],
+        is_push_production: false,
     },
     // 270 - U64Token: U64Term : crate::veryl_token::Token  Comments;
     Production {
         lhs: 739,
         production: &[ParseType::N(123), ParseType::N(738)],
+        is_push_production: false,
     },
     // 271 - UnionToken: UnionTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 748,
         production: &[ParseType::N(123), ParseType::N(747)],
+        is_push_production: false,
     },
     // 272 - UnsafeToken: UnsafeTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 753,
         production: &[ParseType::N(123), ParseType::N(752)],
+        is_push_production: false,
     },
     // 273 - VarToken: VarTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 760,
         production: &[ParseType::N(123), ParseType::N(759)],
+        is_push_production: false,
     },
     // 274 - DollarIdentifierToken: DollarIdentifierTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 165,
         production: &[ParseType::N(123), ParseType::N(164)],
+        is_push_production: false,
     },
     // 275 - IdentifierToken: IdentifierTerm : crate::veryl_token::Token  Comments;
     Production {
         lhs: 323,
         production: &[ParseType::N(123), ParseType::N(322)],
+        is_push_production: false,
     },
     // 276 - AnyToken: AnyTerm : crate::veryl_token::Token ;
     Production {
         lhs: 23,
         production: &[ParseType::N(22)],
+        is_push_production: false,
     },
     // 277 - Start: StartToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 662,
         production: &[ParseType::N(663)],
+        is_push_production: false,
     },
     // 278 - StringLiteral: StringLiteralToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 676,
         production: &[ParseType::N(678)],
+        is_push_production: false,
     },
     // 279 - Exponent: ExponentToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 213,
         production: &[ParseType::N(215)],
+        is_push_production: false,
     },
     // 280 - FixedPoint: FixedPointToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 249,
         production: &[ParseType::N(251)],
+        is_push_production: false,
     },
     // 281 - Based: BasedToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 69,
         production: &[ParseType::N(71)],
+        is_push_production: false,
     },
     // 282 - BaseLess: BaseLessToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 66,
         production: &[ParseType::N(68)],
+        is_push_production: false,
     },
     // 283 - AllBit: AllBitToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 5,
         production: &[ParseType::N(7)],
+        is_push_production: false,
     },
     // 284 - AssignmentOperator: AssignmentOperatorToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 54,
         production: &[ParseType::N(56)],
+        is_push_production: false,
     },
     // 285 - DiamondOperator: DiamondOperatorToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 159,
         production: &[ParseType::N(161)],
+        is_push_production: false,
     },
     // 286 - Operator01: Operator01Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 476,
         production: &[ParseType::N(478)],
+        is_push_production: false,
     },
     // 287 - Operator02: Operator02Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 479,
         production: &[ParseType::N(481)],
+        is_push_production: false,
     },
     // 288 - Operator03: Operator03Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 482,
         production: &[ParseType::N(484)],
+        is_push_production: false,
     },
     // 289 - Operator04: Operator04Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 485,
         production: &[ParseType::N(487)],
+        is_push_production: false,
     },
     // 290 - Operator05: Operator05Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 488,
         production: &[ParseType::N(490)],
+        is_push_production: false,
     },
     // 291 - Operator06: Operator06Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 491,
         production: &[ParseType::N(493)],
+        is_push_production: false,
     },
     // 292 - Operator07: Operator07Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 494,
         production: &[ParseType::N(496)],
+        is_push_production: false,
     },
     // 293 - Operator08: Operator08Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 497,
         production: &[ParseType::N(499)],
+        is_push_production: false,
     },
     // 294 - UnaryOperator: UnaryOperatorToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 743,
         production: &[ParseType::N(745)],
+        is_push_production: false,
     },
     // 295 - Colon: ColonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 111,
         production: &[ParseType::N(119)],
+        is_push_production: false,
     },
     // 296 - ColonColonLAngle: ColonColonLAngleToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 113,
         production: &[ParseType::N(115)],
+        is_push_production: false,
     },
     // 297 - ColonColon: ColonColonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 112,
         production: &[ParseType::N(117)],
+        is_push_production: false,
     },
     // 298 - Comma: CommaToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 120,
         production: &[ParseType::N(122)],
+        is_push_production: false,
     },
     // 299 - DotDot: DotDotToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 167,
         production: &[ParseType::N(172)],
+        is_push_production: false,
     },
     // 300 - DotDotEqu: DotDotEquToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 168,
         production: &[ParseType::N(170)],
+        is_push_production: false,
     },
     // 301 - Dot: DotToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 166,
         production: &[ParseType::N(174)],
+        is_push_production: false,
     },
     // 302 - Equ: EquToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 204,
         production: &[ParseType::N(206)],
+        is_push_production: false,
     },
     // 303 - HashLBracket: HashLBracketToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 295,
         production: &[ParseType::N(297)],
+        is_push_production: false,
     },
     // 304 - Hash: HashToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 294,
         production: &[ParseType::N(299)],
+        is_push_production: false,
     },
     // 305 - Question: QuestionToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 584,
         production: &[ParseType::N(586)],
+        is_push_production: false,
     },
     // 306 - QuoteLBrace: QuoteLBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 588,
         production: &[ParseType::N(590)],
+        is_push_production: false,
     },
     // 307 - Quote: QuoteToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 587,
         production: &[ParseType::N(592)],
+        is_push_production: false,
     },
     // 308 - LAngle: LAngleToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 402,
         production: &[ParseType::N(404)],
+        is_push_production: false,
     },
     // 309 - EmbedLBrace: EmbedLBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 184,
         production: &[ParseType::N(185)],
+        is_push_production: false,
     },
     // 310 - EscapedLBrace: EscapedLBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 207,
         production: &[ParseType::N(209)],
+        is_push_production: false,
     },
     // 311 - TripleLBrace: TripleLBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 716,
         production: &[ParseType::N(718)],
+        is_push_production: false,
     },
     // 312 - LBrace: LBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 408,
         production: &[ParseType::N(410)],
+        is_push_production: false,
     },
     // 313 - LBracket: LBracketToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 411,
         production: &[ParseType::N(413)],
+        is_push_production: false,
     },
     // 314 - LParen: LParenToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 414,
         production: &[ParseType::N(416)],
+        is_push_production: false,
     },
     // 315 - LTMinus: LTMinusToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 417,
         production: &[ParseType::N(419)],
+        is_push_production: false,
     },
     // 316 - MinusColon: MinusColonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 435,
         production: &[ParseType::N(437)],
+        is_push_production: false,
     },
     // 317 - MinusGT: MinusGTToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 438,
         production: &[ParseType::N(440)],
+        is_push_production: false,
     },
     // 318 - PlusColon: PlusColonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 534,
         production: &[ParseType::N(536)],
+        is_push_production: false,
     },
     // 319 - RAngle: RAngleToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 593,
         production: &[ParseType::N(595)],
+        is_push_production: false,
     },
     // 320 - EmbedRBrace: EmbedRBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 186,
         production: &[ParseType::N(187)],
+        is_push_production: false,
     },
     // 321 - EscapedRBrace: EscapedRBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 210,
         production: &[ParseType::N(212)],
+        is_push_production: false,
     },
     // 322 - TripleRBrace: TripleRBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 719,
         production: &[ParseType::N(721)],
+        is_push_production: false,
     },
     // 323 - RBrace: RBraceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 596,
         production: &[ParseType::N(598)],
+        is_push_production: false,
     },
     // 324 - RBracket: RBracketToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 599,
         production: &[ParseType::N(601)],
+        is_push_production: false,
     },
     // 325 - RParen: RParenToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 602,
         production: &[ParseType::N(604)],
+        is_push_production: false,
     },
     // 326 - Semicolon: SemicolonToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 653,
         production: &[ParseType::N(655)],
+        is_push_production: false,
     },
     // 327 - Star: StarToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 659,
         production: &[ParseType::N(661)],
+        is_push_production: false,
     },
     // 328 - Alias: AliasToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 0,
         production: &[ParseType::N(4)],
+        is_push_production: false,
     },
     // 329 - AlwaysComb: AlwaysCombToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 8,
         production: &[ParseType::N(11)],
+        is_push_production: false,
     },
     // 330 - AlwaysFf: AlwaysFfToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 12,
         production: &[ParseType::N(20)],
+        is_push_production: false,
     },
     // 331 - As: AsToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 40,
         production: &[ParseType::N(42)],
+        is_push_production: false,
     },
     // 332 - Assign: AssignToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 43,
         production: &[ParseType::N(51)],
+        is_push_production: false,
     },
     // 333 - Bind: BindToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 72,
         production: &[ParseType::N(75)],
+        is_push_production: false,
     },
     // 334 - Bit: BitToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 76,
         production: &[ParseType::N(78)],
+        is_push_production: false,
     },
     // 335 - Block: BlockToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 79,
         production: &[ParseType::N(81)],
+        is_push_production: false,
     },
     // 336 - BBool: BBoolToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 63,
         production: &[ParseType::N(65)],
+        is_push_production: false,
     },
     // 337 - LBool: LBoolToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 405,
         production: &[ParseType::N(407)],
+        is_push_production: false,
     },
     // 338 - Break: BreakToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 83,
         production: &[ParseType::N(86)],
+        is_push_production: false,
     },
     // 339 - Case: CaseToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 87,
         production: &[ParseType::N(99)],
+        is_push_production: false,
     },
     // 340 - Clock: ClockToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 101,
         production: &[ParseType::N(110)],
+        is_push_production: false,
     },
     // 341 - ClockPosedge: ClockPosedgeToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 106,
         production: &[ParseType::N(108)],
+        is_push_production: false,
     },
     // 342 - ClockNegedge: ClockNegedgeToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 103,
         production: &[ParseType::N(105)],
+        is_push_production: false,
     },
     // 343 - Connect: ConnectToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 137,
         production: &[ParseType::N(140)],
+        is_push_production: false,
     },
     // 344 - Const: ConstToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 141,
         production: &[ParseType::N(146)],
+        is_push_production: false,
     },
     // 345 - Converse: ConverseToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 147,
         production: &[ParseType::N(149)],
+        is_push_production: false,
     },
     // 346 - Defaul: DefaultToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 150,
         production: &[ParseType::N(152)],
+        is_push_production: false,
     },
     // 347 - Else: ElseToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 175,
         production: &[ParseType::N(177)],
+        is_push_production: false,
     },
     // 348 - Embed: EmbedToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 178,
         production: &[ParseType::N(190)],
+        is_push_production: false,
     },
     // 349 - Enum: EnumToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 191,
         production: &[ParseType::N(203)],
+        is_push_production: false,
     },
     // 350 - F32: F32Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 229,
         production: &[ParseType::N(231)],
+        is_push_production: false,
     },
     // 351 - F64: F64Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 232,
         production: &[ParseType::N(234)],
+        is_push_production: false,
     },
     // 352 - False: FalseToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 242,
         production: &[ParseType::N(244)],
+        is_push_production: false,
     },
     // 353 - Final: FinalToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 245,
         production: &[ParseType::N(248)],
+        is_push_production: false,
     },
     // 354 - For: ForToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 253,
         production: &[ParseType::N(258)],
+        is_push_production: false,
     },
     // 355 - Function: FunctionToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 259,
         production: &[ParseType::N(267)],
+        is_push_production: false,
     },
     // 356 - Gen: GenToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 268,
         production: &[ParseType::N(272)],
+        is_push_production: false,
     },
     // 357 - I8: I8Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 313,
         production: &[ParseType::N(315)],
+        is_push_production: false,
     },
     // 358 - I16: I16Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 304,
         production: &[ParseType::N(306)],
+        is_push_production: false,
     },
     // 359 - I32: I32Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 307,
         production: &[ParseType::N(309)],
+        is_push_production: false,
     },
     // 360 - I64: I64Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 310,
         production: &[ParseType::N(312)],
+        is_push_production: false,
     },
     // 361 - If: IfToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 324,
         production: &[ParseType::N(337)],
+        is_push_production: false,
     },
     // 362 - IfReset: IfResetToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 327,
         production: &[ParseType::N(332)],
+        is_push_production: false,
     },
     // 363 - Import: ImportToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 338,
         production: &[ParseType::N(342)],
+        is_push_production: false,
     },
     // 364 - In: InToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 343,
         production: &[ParseType::N(345)],
+        is_push_production: false,
     },
     // 365 - Include: IncludeToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 346,
         production: &[ParseType::N(349)],
+        is_push_production: false,
     },
     // 366 - Initial: InitialToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 350,
         production: &[ParseType::N(353)],
+        is_push_production: false,
     },
     // 367 - Inout: InoutToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 354,
         production: &[ParseType::N(356)],
+        is_push_production: false,
     },
     // 368 - Input: InputToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 357,
         production: &[ParseType::N(359)],
+        is_push_production: false,
     },
     // 369 - Inside: InsideToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 360,
         production: &[ParseType::N(363)],
+        is_push_production: false,
     },
     // 370 - Inst: InstToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 364,
         production: &[ParseType::N(387)],
+        is_push_production: false,
     },
     // 371 - Interface: InterfaceToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 389,
         production: &[ParseType::N(401)],
+        is_push_production: false,
     },
     // 372 - Let: LetToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 420,
         production: &[ParseType::N(428)],
+        is_push_production: false,
     },
     // 373 - Logic: LogicToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 429,
         production: &[ParseType::N(431)],
+        is_push_production: false,
     },
     // 374 - Lsb: LsbToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 432,
         production: &[ParseType::N(434)],
+        is_push_production: false,
     },
     // 375 - Modport: ModportToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 441,
         production: &[ParseType::N(457)],
+        is_push_production: false,
     },
     // 376 - Module: ModuleToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 458,
         production: &[ParseType::N(471)],
+        is_push_production: false,
     },
     // 377 - Msb: MsbToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 472,
         production: &[ParseType::N(474)],
+        is_push_production: false,
     },
     // 378 - Output: OutputToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 500,
         production: &[ParseType::N(502)],
+        is_push_production: false,
     },
     // 379 - Outside: OutsideToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 503,
         production: &[ParseType::N(506)],
+        is_push_production: false,
     },
     // 380 - Package: PackageToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 519,
         production: &[ParseType::N(530)],
+        is_push_production: false,
     },
     // 381 - Param: ParamToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 531,
         production: &[ParseType::N(533)],
+        is_push_production: false,
     },
     // 382 - Proto: ProtoToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 555,
         production: &[ParseType::N(577)],
+        is_push_production: false,
     },
     // 383 - Pub: PubToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 580,
         production: &[ParseType::N(582)],
+        is_push_production: false,
     },
     // 384 - Repeat: RepeatToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 613,
         production: &[ParseType::N(615)],
+        is_push_production: false,
     },
     // 385 - Reset: ResetToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 616,
         production: &[ParseType::N(630)],
+        is_push_production: false,
     },
     // 386 - ResetAsyncHigh: ResetAsyncHighToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 617,
         production: &[ParseType::N(619)],
+        is_push_production: false,
     },
     // 387 - ResetAsyncLow: ResetAsyncLowToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 620,
         production: &[ParseType::N(622)],
+        is_push_production: false,
     },
     // 388 - ResetSyncHigh: ResetSyncHighToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 623,
         production: &[ParseType::N(625)],
+        is_push_production: false,
     },
     // 389 - ResetSyncLow: ResetSyncLowToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 626,
         production: &[ParseType::N(628)],
+        is_push_production: false,
     },
     // 390 - Return: ReturnToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 631,
         production: &[ParseType::N(634)],
+        is_push_production: false,
     },
     // 391 - Rev: RevToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 635,
         production: &[ParseType::N(637)],
+        is_push_production: false,
     },
     // 392 - Same: SameToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 638,
         production: &[ParseType::N(640)],
+        is_push_production: false,
     },
     // 393 - Signed: SignedToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 656,
         production: &[ParseType::N(658)],
+        is_push_production: false,
     },
     // 394 - Step: StepToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 672,
         production: &[ParseType::N(674)],
+        is_push_production: false,
     },
     // 395 - Strin: StringToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 675,
         production: &[ParseType::N(680)],
+        is_push_production: false,
     },
     // 396 - Struct: StructToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 681,
         production: &[ParseType::N(689)],
+        is_push_production: false,
     },
     // 397 - Switch: SwitchToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 700,
         production: &[ParseType::N(712)],
+        is_push_production: false,
     },
     // 398 - Tri: TriToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 713,
         production: &[ParseType::N(715)],
+        is_push_production: false,
     },
     // 399 - True: TrueToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 722,
         production: &[ParseType::N(724)],
+        is_push_production: false,
     },
     // 400 - Type: TypeToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 725,
         production: &[ParseType::N(730)],
+        is_push_production: false,
     },
     // 401 - P8: P8Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 516,
         production: &[ParseType::N(518)],
+        is_push_production: false,
     },
     // 402 - P16: P16Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 507,
         production: &[ParseType::N(509)],
+        is_push_production: false,
     },
     // 403 - P32: P32Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 510,
         production: &[ParseType::N(512)],
+        is_push_production: false,
     },
     // 404 - P64: P64Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 513,
         production: &[ParseType::N(515)],
+        is_push_production: false,
     },
     // 405 - U8: U8Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 740,
         production: &[ParseType::N(742)],
+        is_push_production: false,
     },
     // 406 - U16: U16Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 731,
         production: &[ParseType::N(733)],
+        is_push_production: false,
     },
     // 407 - U32: U32Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 734,
         production: &[ParseType::N(736)],
+        is_push_production: false,
     },
     // 408 - U64: U64Token : crate::veryl_token::VerylToken ;
     Production {
         lhs: 737,
         production: &[ParseType::N(739)],
+        is_push_production: false,
     },
     // 409 - Union: UnionToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 746,
         production: &[ParseType::N(748)],
+        is_push_production: false,
     },
     // 410 - Unsafe: UnsafeToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 749,
         production: &[ParseType::N(753)],
+        is_push_production: false,
     },
     // 411 - Var: VarToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 755,
         production: &[ParseType::N(760)],
+        is_push_production: false,
     },
     // 412 - DollarIdentifier: DollarIdentifierToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 163,
         production: &[ParseType::N(165)],
+        is_push_production: false,
     },
     // 413 - Identifier: IdentifierToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 316,
         production: &[ParseType::N(323)],
+        is_push_production: false,
     },
     // 414 - Any: AnyToken : crate::veryl_token::VerylToken ;
     Production {
         lhs: 21,
         production: &[ParseType::N(23)],
+        is_push_production: false,
     },
     // 415 - Number: IntegralNumber;
     Production {
         lhs: 475,
         production: &[ParseType::N(388)],
+        is_push_production: false,
     },
     // 416 - Number: RealNumber;
     Production {
         lhs: 475,
         production: &[ParseType::N(612)],
+        is_push_production: false,
     },
     // 417 - IntegralNumber: Based;
     Production {
         lhs: 388,
         production: &[ParseType::N(69)],
+        is_push_production: false,
     },
     // 418 - IntegralNumber: BaseLess;
     Production {
         lhs: 388,
         production: &[ParseType::N(66)],
+        is_push_production: false,
     },
     // 419 - IntegralNumber: AllBit;
     Production {
         lhs: 388,
         production: &[ParseType::N(5)],
+        is_push_production: false,
     },
     // 420 - RealNumber: FixedPoint;
     Production {
         lhs: 612,
         production: &[ParseType::N(249)],
+        is_push_production: false,
     },
     // 421 - RealNumber: Exponent;
     Production {
         lhs: 612,
         production: &[ParseType::N(213)],
+        is_push_production: false,
     },
     // 422 - HierarchicalIdentifier: Identifier HierarchicalIdentifierList /* Vec */ HierarchicalIdentifierList0 /* Vec */;
     Production {
         lhs: 300,
         production: &[ParseType::N(302), ParseType::N(301), ParseType::N(316)],
+        is_push_production: false,
     },
     // 423 - HierarchicalIdentifierList0: Dot Identifier HierarchicalIdentifierList0List /* Vec */ HierarchicalIdentifierList0;
     Production {
@@ -35464,46 +35887,55 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(166),
         ],
+        is_push_production: true,
     },
     // 424 - HierarchicalIdentifierList0List: Select HierarchicalIdentifierList0List;
     Production {
         lhs: 303,
         production: &[ParseType::N(303), ParseType::N(650)],
+        is_push_production: true,
     },
     // 425 - HierarchicalIdentifierList0List: ;
     Production {
         lhs: 303,
         production: &[],
+        is_push_production: false,
     },
     // 426 - HierarchicalIdentifierList0: ;
     Production {
         lhs: 302,
         production: &[],
+        is_push_production: false,
     },
     // 427 - HierarchicalIdentifierList: Select HierarchicalIdentifierList;
     Production {
         lhs: 301,
         production: &[ParseType::N(301), ParseType::N(650)],
+        is_push_production: true,
     },
     // 428 - HierarchicalIdentifierList: ;
     Production {
         lhs: 301,
         production: &[],
+        is_push_production: false,
     },
     // 429 - ScopedIdentifier: ScopedIdentifierGroup ScopedIdentifierList /* Vec */;
     Production {
         lhs: 645,
         production: &[ParseType::N(647), ParseType::N(646)],
+        is_push_production: false,
     },
     // 430 - ScopedIdentifierGroup: DollarIdentifier;
     Production {
         lhs: 646,
         production: &[ParseType::N(163)],
+        is_push_production: false,
     },
     // 431 - ScopedIdentifierGroup: Identifier ScopedIdentifierOpt /* Option */;
     Production {
         lhs: 646,
         production: &[ParseType::N(648), ParseType::N(316)],
+        is_push_production: false,
     },
     // 432 - ScopedIdentifierList: ColonColon Identifier ScopedIdentifierOpt0 /* Option */ ScopedIdentifierList;
     Production {
@@ -35514,31 +35946,37 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(112),
         ],
+        is_push_production: true,
     },
     // 433 - ScopedIdentifierList: ;
     Production {
         lhs: 647,
         production: &[],
+        is_push_production: false,
     },
     // 434 - ScopedIdentifierOpt0: WithGenericArgument;
     Production {
         lhs: 649,
         production: &[ParseType::N(766)],
+        is_push_production: false,
     },
     // 435 - ScopedIdentifierOpt0: ;
     Production {
         lhs: 649,
         production: &[],
+        is_push_production: false,
     },
     // 436 - ScopedIdentifierOpt: WithGenericArgument;
     Production {
         lhs: 648,
         production: &[ParseType::N(766)],
+        is_push_production: false,
     },
     // 437 - ScopedIdentifierOpt: ;
     Production {
         lhs: 648,
         production: &[],
+        is_push_production: false,
     },
     // 438 - ExpressionIdentifier: ScopedIdentifier ExpressionIdentifierOpt /* Option */ ExpressionIdentifierList /* Vec */ ExpressionIdentifierList0 /* Vec */;
     Production {
@@ -35549,6 +35987,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(228),
             ParseType::N(645),
         ],
+        is_push_production: false,
     },
     // 439 - ExpressionIdentifierList0: Dot Identifier ExpressionIdentifierList0List /* Vec */ ExpressionIdentifierList0;
     Production {
@@ -35559,66 +35998,79 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(166),
         ],
+        is_push_production: true,
     },
     // 440 - ExpressionIdentifierList0List: Select ExpressionIdentifierList0List;
     Production {
         lhs: 227,
         production: &[ParseType::N(227), ParseType::N(650)],
+        is_push_production: true,
     },
     // 441 - ExpressionIdentifierList0List: ;
     Production {
         lhs: 227,
         production: &[],
+        is_push_production: false,
     },
     // 442 - ExpressionIdentifierList0: ;
     Production {
         lhs: 226,
         production: &[],
+        is_push_production: false,
     },
     // 443 - ExpressionIdentifierList: Select ExpressionIdentifierList;
     Production {
         lhs: 225,
         production: &[ParseType::N(225), ParseType::N(650)],
+        is_push_production: true,
     },
     // 444 - ExpressionIdentifierList: ;
     Production {
         lhs: 225,
         production: &[],
+        is_push_production: false,
     },
     // 445 - ExpressionIdentifierOpt: Width;
     Production {
         lhs: 228,
         production: &[ParseType::N(764)],
+        is_push_production: false,
     },
     // 446 - ExpressionIdentifierOpt: ;
     Production {
         lhs: 228,
         production: &[],
+        is_push_production: false,
     },
     // 447 - GenericArgIdentifier: ScopedIdentifier GenericArgIdentifierList /* Vec */;
     Production {
         lhs: 290,
         production: &[ParseType::N(291), ParseType::N(645)],
+        is_push_production: false,
     },
     // 448 - GenericArgIdentifierList: Dot Identifier GenericArgIdentifierList;
     Production {
         lhs: 291,
         production: &[ParseType::N(291), ParseType::N(316), ParseType::N(166)],
+        is_push_production: true,
     },
     // 449 - GenericArgIdentifierList: ;
     Production {
         lhs: 291,
         production: &[],
+        is_push_production: false,
     },
     // 450 - Expression: IfExpression;
     Production {
         lhs: 216,
         production: &[ParseType::N(325)],
+        is_push_production: false,
     },
     // 451 - IfExpression: IfExpressionList /* Vec */ Expression01;
     Production {
         lhs: 325,
         production: &[ParseType::N(217), ParseType::N(326)],
+        is_push_production: false,
     },
     // 452 - IfExpressionList: If Expression Question Expression Colon IfExpressionList;
     Production {
@@ -35631,311 +36083,373 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(216),
             ParseType::N(324),
         ],
+        is_push_production: true,
     },
     // 453 - IfExpressionList: ;
     Production {
         lhs: 326,
         production: &[],
+        is_push_production: false,
     },
     // 454 - Expression01: Expression02 Expression01List /* Vec */;
     Production {
         lhs: 217,
         production: &[ParseType::N(218), ParseType::N(220)],
+        is_push_production: false,
     },
     // 455 - Expression01List: Expression01Op Expression02 Expression01List;
     Production {
         lhs: 218,
         production: &[ParseType::N(218), ParseType::N(220), ParseType::N(219)],
+        is_push_production: true,
     },
     // 456 - Expression01List: ;
     Production {
         lhs: 218,
         production: &[],
+        is_push_production: false,
     },
     // 457 - Expression02: Expression02List /* Vec */ Factor Expression02Opt /* Option */;
     Production {
         lhs: 220,
         production: &[ParseType::N(223), ParseType::N(235), ParseType::N(221)],
+        is_push_production: false,
     },
     // 458 - Expression02List: Expression02Op Expression02List;
     Production {
         lhs: 221,
         production: &[ParseType::N(221), ParseType::N(222)],
+        is_push_production: true,
     },
     // 459 - Expression02List: ;
     Production {
         lhs: 221,
         production: &[],
+        is_push_production: false,
     },
     // 460 - Expression02Opt: As CastingType;
     Production {
         lhs: 223,
         production: &[ParseType::N(100), ParseType::N(40)],
+        is_push_production: false,
     },
     // 461 - Expression02Opt: ;
     Production {
         lhs: 223,
         production: &[],
+        is_push_production: false,
     },
     // 462 - Expression01Op: Operator01;
     Production {
         lhs: 219,
         production: &[ParseType::N(476)],
+        is_push_production: false,
     },
     // 463 - Expression01Op: Operator02;
     Production {
         lhs: 219,
         production: &[ParseType::N(479)],
+        is_push_production: false,
     },
     // 464 - Expression01Op: Operator03;
     Production {
         lhs: 219,
         production: &[ParseType::N(482)],
+        is_push_production: false,
     },
     // 465 - Expression01Op: Operator04;
     Production {
         lhs: 219,
         production: &[ParseType::N(485)],
+        is_push_production: false,
     },
     // 466 - Expression01Op: Operator05;
     Production {
         lhs: 219,
         production: &[ParseType::N(488)],
+        is_push_production: false,
     },
     // 467 - Expression01Op: Operator06;
     Production {
         lhs: 219,
         production: &[ParseType::N(491)],
+        is_push_production: false,
     },
     // 468 - Expression01Op: Operator07;
     Production {
         lhs: 219,
         production: &[ParseType::N(494)],
+        is_push_production: false,
     },
     // 469 - Expression01Op: Star;
     Production {
         lhs: 219,
         production: &[ParseType::N(659)],
+        is_push_production: false,
     },
     // 470 - Expression01Op: Operator08;
     Production {
         lhs: 219,
         production: &[ParseType::N(497)],
+        is_push_production: false,
     },
     // 471 - Expression02Op: UnaryOperator;
     Production {
         lhs: 222,
         production: &[ParseType::N(743)],
+        is_push_production: false,
     },
     // 472 - Expression02Op: Operator06;
     Production {
         lhs: 222,
         production: &[ParseType::N(491)],
+        is_push_production: false,
     },
     // 473 - Expression02Op: Operator05;
     Production {
         lhs: 222,
         production: &[ParseType::N(488)],
+        is_push_production: false,
     },
     // 474 - Expression02Op: Operator03;
     Production {
         lhs: 222,
         production: &[ParseType::N(482)],
+        is_push_production: false,
     },
     // 475 - Expression02Op: Operator04;
     Production {
         lhs: 222,
         production: &[ParseType::N(485)],
+        is_push_production: false,
     },
     // 476 - Factor: Number;
     Production {
         lhs: 235,
         production: &[ParseType::N(475)],
+        is_push_production: false,
     },
     // 477 - Factor: BooleanLiteral;
     Production {
         lhs: 235,
         production: &[ParseType::N(82)],
+        is_push_production: false,
     },
     // 478 - Factor: IdentifierFactor;
     Production {
         lhs: 235,
         production: &[ParseType::N(317)],
+        is_push_production: false,
     },
     // 479 - Factor: LParen Expression RParen;
     Production {
         lhs: 235,
         production: &[ParseType::N(602), ParseType::N(216), ParseType::N(414)],
+        is_push_production: false,
     },
     // 480 - Factor: LBrace ConcatenationList RBrace;
     Production {
         lhs: 235,
         production: &[ParseType::N(596), ParseType::N(134), ParseType::N(408)],
+        is_push_production: false,
     },
     // 481 - Factor: QuoteLBrace ArrayLiteralList RBrace;
     Production {
         lhs: 235,
         production: &[ParseType::N(596), ParseType::N(35), ParseType::N(588)],
+        is_push_production: false,
     },
     // 482 - Factor: CaseExpression;
     Production {
         lhs: 235,
         production: &[ParseType::N(90)],
+        is_push_production: false,
     },
     // 483 - Factor: SwitchExpression;
     Production {
         lhs: 235,
         production: &[ParseType::N(703)],
+        is_push_production: false,
     },
     // 484 - Factor: StringLiteral;
     Production {
         lhs: 235,
         production: &[ParseType::N(676)],
+        is_push_production: false,
     },
     // 485 - Factor: FactorGroup;
     Production {
         lhs: 235,
         production: &[ParseType::N(236)],
+        is_push_production: false,
     },
     // 486 - FactorGroup: Msb;
     Production {
         lhs: 236,
         production: &[ParseType::N(472)],
+        is_push_production: false,
     },
     // 487 - FactorGroup: Lsb;
     Production {
         lhs: 236,
         production: &[ParseType::N(432)],
+        is_push_production: false,
     },
     // 488 - Factor: InsideExpression;
     Production {
         lhs: 235,
         production: &[ParseType::N(361)],
+        is_push_production: false,
     },
     // 489 - Factor: OutsideExpression;
     Production {
         lhs: 235,
         production: &[ParseType::N(504)],
+        is_push_production: false,
     },
     // 490 - Factor: TypeExpression;
     Production {
         lhs: 235,
         production: &[ParseType::N(727)],
+        is_push_production: false,
     },
     // 491 - Factor: FactorTypeFactor;
     Production {
         lhs: 235,
         production: &[ParseType::N(238)],
+        is_push_production: false,
     },
     // 492 - BooleanLiteral: True;
     Production {
         lhs: 82,
         production: &[ParseType::N(722)],
+        is_push_production: false,
     },
     // 493 - BooleanLiteral: False;
     Production {
         lhs: 82,
         production: &[ParseType::N(242)],
+        is_push_production: false,
     },
     // 494 - IdentifierFactor: ExpressionIdentifier IdentifierFactorOpt /* Option */;
     Production {
         lhs: 317,
         production: &[ParseType::N(318), ParseType::N(224)],
+        is_push_production: false,
     },
     // 495 - IdentifierFactorOpt: IdentifierFactorOptGroup;
     Production {
         lhs: 318,
         production: &[ParseType::N(319)],
+        is_push_production: false,
     },
     // 496 - IdentifierFactorOptGroup: FunctionCall;
     Production {
         lhs: 319,
         production: &[ParseType::N(260)],
+        is_push_production: false,
     },
     // 497 - IdentifierFactorOptGroup: StructConstructor;
     Production {
         lhs: 319,
         production: &[ParseType::N(682)],
+        is_push_production: false,
     },
     // 498 - IdentifierFactorOpt: ;
     Production {
         lhs: 318,
         production: &[],
+        is_push_production: false,
     },
     // 499 - FactorTypeFactor: FactorTypeFactorList /* Vec */ FactorType;
     Production {
         lhs: 238,
         production: &[ParseType::N(237), ParseType::N(239)],
+        is_push_production: false,
     },
     // 500 - FactorTypeFactorList: TypeModifier FactorTypeFactorList;
     Production {
         lhs: 239,
         production: &[ParseType::N(239), ParseType::N(728)],
+        is_push_production: true,
     },
     // 501 - FactorTypeFactorList: ;
     Production {
         lhs: 239,
         production: &[],
+        is_push_production: false,
     },
     // 502 - FunctionCall: LParen FunctionCallOpt /* Option */ RParen;
     Production {
         lhs: 260,
         production: &[ParseType::N(602), ParseType::N(261), ParseType::N(414)],
+        is_push_production: false,
     },
     // 503 - FunctionCallOpt: ArgumentList;
     Production {
         lhs: 261,
         production: &[ParseType::N(27)],
+        is_push_production: false,
     },
     // 504 - FunctionCallOpt: ;
     Production {
         lhs: 261,
         production: &[],
+        is_push_production: false,
     },
     // 505 - ArgumentList: ArgumentItem ArgumentListList /* Vec */ ArgumentListOpt /* Option */;
     Production {
         lhs: 27,
         production: &[ParseType::N(29), ParseType::N(28), ParseType::N(25)],
+        is_push_production: false,
     },
     // 506 - ArgumentListList: Comma ArgumentItem ArgumentListList;
     Production {
         lhs: 28,
         production: &[ParseType::N(28), ParseType::N(25), ParseType::N(120)],
+        is_push_production: true,
     },
     // 507 - ArgumentListList: ;
     Production {
         lhs: 28,
         production: &[],
+        is_push_production: false,
     },
     // 508 - ArgumentListOpt: Comma;
     Production {
         lhs: 29,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 509 - ArgumentListOpt: ;
     Production {
         lhs: 29,
         production: &[],
+        is_push_production: false,
     },
     // 510 - ArgumentItem: ArgumentExpression ArgumentItemOpt /* Option */;
     Production {
         lhs: 25,
         production: &[ParseType::N(26), ParseType::N(24)],
+        is_push_production: false,
     },
     // 511 - ArgumentItemOpt: Colon Expression;
     Production {
         lhs: 26,
         production: &[ParseType::N(216), ParseType::N(111)],
+        is_push_production: false,
     },
     // 512 - ArgumentItemOpt: ;
     Production {
         lhs: 26,
         production: &[],
+        is_push_production: false,
     },
     // 513 - ArgumentExpression: Expression;
     Production {
         lhs: 24,
         production: &[ParseType::N(216)],
+        is_push_production: false,
     },
     // 514 - StructConstructor: QuoteLBrace StructConstructorList StructConstructorOpt /* Option */ RBrace;
     Production {
@@ -35946,6 +36460,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(684),
             ParseType::N(588),
         ],
+        is_push_production: false,
     },
     // 515 - StructConstructorOpt: DotDot Defaul LParen Expression RParen;
     Production {
@@ -35957,131 +36472,157 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(150),
             ParseType::N(167),
         ],
+        is_push_production: false,
     },
     // 516 - StructConstructorOpt: ;
     Production {
         lhs: 687,
         production: &[],
+        is_push_production: false,
     },
     // 517 - StructConstructorList: StructConstructorItem StructConstructorListList /* Vec */ StructConstructorListOpt /* Option */;
     Production {
         lhs: 684,
         production: &[ParseType::N(686), ParseType::N(685), ParseType::N(683)],
+        is_push_production: false,
     },
     // 518 - StructConstructorListList: Comma StructConstructorItem StructConstructorListList;
     Production {
         lhs: 685,
         production: &[ParseType::N(685), ParseType::N(683), ParseType::N(120)],
+        is_push_production: true,
     },
     // 519 - StructConstructorListList: ;
     Production {
         lhs: 685,
         production: &[],
+        is_push_production: false,
     },
     // 520 - StructConstructorListOpt: Comma;
     Production {
         lhs: 686,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 521 - StructConstructorListOpt: ;
     Production {
         lhs: 686,
         production: &[],
+        is_push_production: false,
     },
     // 522 - StructConstructorItem: Identifier Colon Expression;
     Production {
         lhs: 683,
         production: &[ParseType::N(216), ParseType::N(111), ParseType::N(316)],
+        is_push_production: false,
     },
     // 523 - ConcatenationList: ConcatenationItem ConcatenationListList /* Vec */ ConcatenationListOpt /* Option */;
     Production {
         lhs: 134,
         production: &[ParseType::N(136), ParseType::N(135), ParseType::N(132)],
+        is_push_production: false,
     },
     // 524 - ConcatenationListList: Comma ConcatenationItem ConcatenationListList;
     Production {
         lhs: 135,
         production: &[ParseType::N(135), ParseType::N(132), ParseType::N(120)],
+        is_push_production: true,
     },
     // 525 - ConcatenationListList: ;
     Production {
         lhs: 135,
         production: &[],
+        is_push_production: false,
     },
     // 526 - ConcatenationListOpt: Comma;
     Production {
         lhs: 136,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 527 - ConcatenationListOpt: ;
     Production {
         lhs: 136,
         production: &[],
+        is_push_production: false,
     },
     // 528 - ConcatenationItem: Expression ConcatenationItemOpt /* Option */;
     Production {
         lhs: 132,
         production: &[ParseType::N(133), ParseType::N(216)],
+        is_push_production: false,
     },
     // 529 - ConcatenationItemOpt: Repeat Expression;
     Production {
         lhs: 133,
         production: &[ParseType::N(216), ParseType::N(613)],
+        is_push_production: false,
     },
     // 530 - ConcatenationItemOpt: ;
     Production {
         lhs: 133,
         production: &[],
+        is_push_production: false,
     },
     // 531 - ArrayLiteralList: ArrayLiteralItem ArrayLiteralListList /* Vec */ ArrayLiteralListOpt /* Option */;
     Production {
         lhs: 35,
         production: &[ParseType::N(37), ParseType::N(36), ParseType::N(32)],
+        is_push_production: false,
     },
     // 532 - ArrayLiteralListList: Comma ArrayLiteralItem ArrayLiteralListList;
     Production {
         lhs: 36,
         production: &[ParseType::N(36), ParseType::N(32), ParseType::N(120)],
+        is_push_production: true,
     },
     // 533 - ArrayLiteralListList: ;
     Production {
         lhs: 36,
         production: &[],
+        is_push_production: false,
     },
     // 534 - ArrayLiteralListOpt: Comma;
     Production {
         lhs: 37,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 535 - ArrayLiteralListOpt: ;
     Production {
         lhs: 37,
         production: &[],
+        is_push_production: false,
     },
     // 536 - ArrayLiteralItem: ArrayLiteralItemGroup;
     Production {
         lhs: 32,
         production: &[ParseType::N(33)],
+        is_push_production: false,
     },
     // 537 - ArrayLiteralItemGroup: Expression ArrayLiteralItemOpt /* Option */;
     Production {
         lhs: 33,
         production: &[ParseType::N(34), ParseType::N(216)],
+        is_push_production: false,
     },
     // 538 - ArrayLiteralItemGroup: Defaul Colon Expression;
     Production {
         lhs: 33,
         production: &[ParseType::N(216), ParseType::N(111), ParseType::N(150)],
+        is_push_production: false,
     },
     // 539 - ArrayLiteralItemOpt: Repeat Expression;
     Production {
         lhs: 34,
         production: &[ParseType::N(216), ParseType::N(613)],
+        is_push_production: false,
     },
     // 540 - ArrayLiteralItemOpt: ;
     Production {
         lhs: 34,
         production: &[],
+        is_push_production: false,
     },
     // 541 - CaseExpression: Case Expression LBrace CaseCondition Colon Expression Comma CaseExpressionList /* Vec */ Defaul Colon Expression CaseExpressionOpt /* Option */ RBrace;
     Production {
@@ -36101,6 +36642,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(216),
             ParseType::N(87),
         ],
+        is_push_production: false,
     },
     // 542 - CaseExpressionList: CaseCondition Colon Expression Comma CaseExpressionList;
     Production {
@@ -36112,21 +36654,25 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(111),
             ParseType::N(88),
         ],
+        is_push_production: true,
     },
     // 543 - CaseExpressionList: ;
     Production {
         lhs: 91,
         production: &[],
+        is_push_production: false,
     },
     // 544 - CaseExpressionOpt: Comma;
     Production {
         lhs: 92,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 545 - CaseExpressionOpt: ;
     Production {
         lhs: 92,
         production: &[],
+        is_push_production: false,
     },
     // 546 - SwitchExpression: Switch LBrace SwitchCondition Colon Expression Comma SwitchExpressionList /* Vec */ Defaul Colon Expression SwitchExpressionOpt /* Option */ RBrace;
     Production {
@@ -36145,6 +36691,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(408),
             ParseType::N(700),
         ],
+        is_push_production: false,
     },
     // 547 - SwitchExpressionList: SwitchCondition Colon Expression Comma SwitchExpressionList;
     Production {
@@ -36156,21 +36703,25 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(111),
             ParseType::N(701),
         ],
+        is_push_production: true,
     },
     // 548 - SwitchExpressionList: ;
     Production {
         lhs: 704,
         production: &[],
+        is_push_production: false,
     },
     // 549 - SwitchExpressionOpt: Comma;
     Production {
         lhs: 705,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 550 - SwitchExpressionOpt: ;
     Production {
         lhs: 705,
         production: &[],
+        is_push_production: false,
     },
     // 551 - TypeExpression: Type LParen Expression RParen;
     Production {
@@ -36181,6 +36732,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(414),
             ParseType::N(725),
         ],
+        is_push_production: false,
     },
     // 552 - InsideExpression: Inside Expression LBrace RangeList RBrace;
     Production {
@@ -36192,6 +36744,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(216),
             ParseType::N(360),
         ],
+        is_push_production: false,
     },
     // 553 - OutsideExpression: Outside Expression LBrace RangeList RBrace;
     Production {
@@ -36203,36 +36756,43 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(216),
             ParseType::N(503),
         ],
+        is_push_production: false,
     },
     // 554 - RangeList: RangeItem RangeListList /* Vec */ RangeListOpt /* Option */;
     Production {
         lhs: 607,
         production: &[ParseType::N(609), ParseType::N(608), ParseType::N(606)],
+        is_push_production: false,
     },
     // 555 - RangeListList: Comma RangeItem RangeListList;
     Production {
         lhs: 608,
         production: &[ParseType::N(608), ParseType::N(606), ParseType::N(120)],
+        is_push_production: true,
     },
     // 556 - RangeListList: ;
     Production {
         lhs: 608,
         production: &[],
+        is_push_production: false,
     },
     // 557 - RangeListOpt: Comma;
     Production {
         lhs: 609,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 558 - RangeListOpt: ;
     Production {
         lhs: 609,
         production: &[],
+        is_push_production: false,
     },
     // 559 - RangeItem: Range;
     Production {
         lhs: 606,
         production: &[ParseType::N(605)],
+        is_push_production: false,
     },
     // 560 - Select: LBracket Expression SelectOpt /* Option */ RBracket;
     Production {
@@ -36243,36 +36803,43 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(216),
             ParseType::N(411),
         ],
+        is_push_production: false,
     },
     // 561 - SelectOpt: SelectOperator Expression;
     Production {
         lhs: 652,
         production: &[ParseType::N(216), ParseType::N(651)],
+        is_push_production: false,
     },
     // 562 - SelectOpt: ;
     Production {
         lhs: 652,
         production: &[],
+        is_push_production: false,
     },
     // 563 - SelectOperator: Colon;
     Production {
         lhs: 651,
         production: &[ParseType::N(111)],
+        is_push_production: false,
     },
     // 564 - SelectOperator: PlusColon;
     Production {
         lhs: 651,
         production: &[ParseType::N(534)],
+        is_push_production: false,
     },
     // 565 - SelectOperator: MinusColon;
     Production {
         lhs: 651,
         production: &[ParseType::N(435)],
+        is_push_production: false,
     },
     // 566 - SelectOperator: Step;
     Production {
         lhs: 651,
         production: &[ParseType::N(672)],
+        is_push_production: false,
     },
     // 567 - Width: LAngle Expression WidthList /* Vec */ RAngle;
     Production {
@@ -36283,16 +36850,19 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(216),
             ParseType::N(402),
         ],
+        is_push_production: false,
     },
     // 568 - WidthList: Comma Expression WidthList;
     Production {
         lhs: 765,
         production: &[ParseType::N(765), ParseType::N(216), ParseType::N(120)],
+        is_push_production: true,
     },
     // 569 - WidthList: ;
     Production {
         lhs: 765,
         production: &[],
+        is_push_production: false,
     },
     // 570 - Array: LBracket Expression ArrayList /* Vec */ RBracket;
     Production {
@@ -36303,431 +36873,517 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(216),
             ParseType::N(411),
         ],
+        is_push_production: false,
     },
     // 571 - ArrayList: Comma Expression ArrayList;
     Production {
         lhs: 31,
         production: &[ParseType::N(31), ParseType::N(216), ParseType::N(120)],
+        is_push_production: true,
     },
     // 572 - ArrayList: ;
     Production {
         lhs: 31,
         production: &[],
+        is_push_production: false,
     },
     // 573 - Range: Expression RangeOpt /* Option */;
     Production {
         lhs: 605,
         production: &[ParseType::N(611), ParseType::N(216)],
+        is_push_production: false,
     },
     // 574 - RangeOpt: RangeOperator Expression;
     Production {
         lhs: 611,
         production: &[ParseType::N(216), ParseType::N(610)],
+        is_push_production: false,
     },
     // 575 - RangeOpt: ;
     Production {
         lhs: 611,
         production: &[],
+        is_push_production: false,
     },
     // 576 - RangeOperator: DotDot;
     Production {
         lhs: 610,
         production: &[ParseType::N(167)],
+        is_push_production: false,
     },
     // 577 - RangeOperator: DotDotEqu;
     Production {
         lhs: 610,
         production: &[ParseType::N(168)],
+        is_push_production: false,
     },
     // 578 - FixedType: P8;
     Production {
         lhs: 252,
         production: &[ParseType::N(516)],
+        is_push_production: false,
     },
     // 579 - FixedType: P16;
     Production {
         lhs: 252,
         production: &[ParseType::N(507)],
+        is_push_production: false,
     },
     // 580 - FixedType: P32;
     Production {
         lhs: 252,
         production: &[ParseType::N(510)],
+        is_push_production: false,
     },
     // 581 - FixedType: P64;
     Production {
         lhs: 252,
         production: &[ParseType::N(513)],
+        is_push_production: false,
     },
     // 582 - FixedType: U8;
     Production {
         lhs: 252,
         production: &[ParseType::N(740)],
+        is_push_production: false,
     },
     // 583 - FixedType: U16;
     Production {
         lhs: 252,
         production: &[ParseType::N(731)],
+        is_push_production: false,
     },
     // 584 - FixedType: U32;
     Production {
         lhs: 252,
         production: &[ParseType::N(734)],
+        is_push_production: false,
     },
     // 585 - FixedType: U64;
     Production {
         lhs: 252,
         production: &[ParseType::N(737)],
+        is_push_production: false,
     },
     // 586 - FixedType: I8;
     Production {
         lhs: 252,
         production: &[ParseType::N(313)],
+        is_push_production: false,
     },
     // 587 - FixedType: I16;
     Production {
         lhs: 252,
         production: &[ParseType::N(304)],
+        is_push_production: false,
     },
     // 588 - FixedType: I32;
     Production {
         lhs: 252,
         production: &[ParseType::N(307)],
+        is_push_production: false,
     },
     // 589 - FixedType: I64;
     Production {
         lhs: 252,
         production: &[ParseType::N(310)],
+        is_push_production: false,
     },
     // 590 - FixedType: F32;
     Production {
         lhs: 252,
         production: &[ParseType::N(229)],
+        is_push_production: false,
     },
     // 591 - FixedType: F64;
     Production {
         lhs: 252,
         production: &[ParseType::N(232)],
+        is_push_production: false,
     },
     // 592 - FixedType: BBool;
     Production {
         lhs: 252,
         production: &[ParseType::N(63)],
+        is_push_production: false,
     },
     // 593 - FixedType: LBool;
     Production {
         lhs: 252,
         production: &[ParseType::N(405)],
+        is_push_production: false,
     },
     // 594 - FixedType: Strin;
     Production {
         lhs: 252,
         production: &[ParseType::N(675)],
+        is_push_production: false,
     },
     // 595 - VariableType: Clock;
     Production {
         lhs: 761,
         production: &[ParseType::N(101)],
+        is_push_production: false,
     },
     // 596 - VariableType: ClockPosedge;
     Production {
         lhs: 761,
         production: &[ParseType::N(106)],
+        is_push_production: false,
     },
     // 597 - VariableType: ClockNegedge;
     Production {
         lhs: 761,
         production: &[ParseType::N(103)],
+        is_push_production: false,
     },
     // 598 - VariableType: Reset;
     Production {
         lhs: 761,
         production: &[ParseType::N(616)],
+        is_push_production: false,
     },
     // 599 - VariableType: ResetAsyncHigh;
     Production {
         lhs: 761,
         production: &[ParseType::N(617)],
+        is_push_production: false,
     },
     // 600 - VariableType: ResetAsyncLow;
     Production {
         lhs: 761,
         production: &[ParseType::N(620)],
+        is_push_production: false,
     },
     // 601 - VariableType: ResetSyncHigh;
     Production {
         lhs: 761,
         production: &[ParseType::N(623)],
+        is_push_production: false,
     },
     // 602 - VariableType: ResetSyncLow;
     Production {
         lhs: 761,
         production: &[ParseType::N(626)],
+        is_push_production: false,
     },
     // 603 - VariableType: Logic;
     Production {
         lhs: 761,
         production: &[ParseType::N(429)],
+        is_push_production: false,
     },
     // 604 - VariableType: Bit;
     Production {
         lhs: 761,
         production: &[ParseType::N(76)],
+        is_push_production: false,
     },
     // 605 - UserDefinedType: ScopedIdentifier;
     Production {
         lhs: 754,
         production: &[ParseType::N(645)],
+        is_push_production: false,
     },
     // 606 - TypeModifier: Tri;
     Production {
         lhs: 728,
         production: &[ParseType::N(713)],
+        is_push_production: false,
     },
     // 607 - TypeModifier: Signed;
     Production {
         lhs: 728,
         production: &[ParseType::N(656)],
+        is_push_production: false,
     },
     // 608 - TypeModifier: Defaul;
     Production {
         lhs: 728,
         production: &[ParseType::N(150)],
+        is_push_production: false,
     },
     // 609 - FactorType: FactorTypeGroup;
     Production {
         lhs: 237,
         production: &[ParseType::N(240)],
+        is_push_production: false,
     },
     // 610 - FactorTypeGroup: VariableType FactorTypeOpt /* Option */;
     Production {
         lhs: 240,
         production: &[ParseType::N(241), ParseType::N(761)],
+        is_push_production: false,
     },
     // 611 - FactorTypeGroup: FixedType;
     Production {
         lhs: 240,
         production: &[ParseType::N(252)],
+        is_push_production: false,
     },
     // 612 - FactorTypeOpt: Width;
     Production {
         lhs: 241,
         production: &[ParseType::N(764)],
+        is_push_production: false,
     },
     // 613 - FactorTypeOpt: ;
     Production {
         lhs: 241,
         production: &[],
+        is_push_production: false,
     },
     // 614 - ScalarType: ScalarTypeList /* Vec */ ScalarTypeGroup;
     Production {
         lhs: 641,
         production: &[ParseType::N(642), ParseType::N(643)],
+        is_push_production: false,
     },
     // 615 - ScalarTypeGroup: UserDefinedType ScalarTypeOpt /* Option */;
     Production {
         lhs: 642,
         production: &[ParseType::N(644), ParseType::N(754)],
+        is_push_production: false,
     },
     // 616 - ScalarTypeGroup: FactorType;
     Production {
         lhs: 642,
         production: &[ParseType::N(237)],
+        is_push_production: false,
     },
     // 617 - ScalarTypeList: TypeModifier ScalarTypeList;
     Production {
         lhs: 643,
         production: &[ParseType::N(643), ParseType::N(728)],
+        is_push_production: true,
     },
     // 618 - ScalarTypeList: ;
     Production {
         lhs: 643,
         production: &[],
+        is_push_production: false,
     },
     // 619 - ScalarTypeOpt: Width;
     Production {
         lhs: 644,
         production: &[ParseType::N(764)],
+        is_push_production: false,
     },
     // 620 - ScalarTypeOpt: ;
     Production {
         lhs: 644,
         production: &[],
+        is_push_production: false,
     },
     // 621 - ArrayType: ScalarType ArrayTypeOpt /* Option */;
     Production {
         lhs: 38,
         production: &[ParseType::N(39), ParseType::N(641)],
+        is_push_production: false,
     },
     // 622 - ArrayTypeOpt: Array;
     Production {
         lhs: 39,
         production: &[ParseType::N(30)],
+        is_push_production: false,
     },
     // 623 - ArrayTypeOpt: ;
     Production {
         lhs: 39,
         production: &[],
+        is_push_production: false,
     },
     // 624 - CastingType: U8;
     Production {
         lhs: 100,
         production: &[ParseType::N(740)],
+        is_push_production: false,
     },
     // 625 - CastingType: U16;
     Production {
         lhs: 100,
         production: &[ParseType::N(731)],
+        is_push_production: false,
     },
     // 626 - CastingType: U32;
     Production {
         lhs: 100,
         production: &[ParseType::N(734)],
+        is_push_production: false,
     },
     // 627 - CastingType: U64;
     Production {
         lhs: 100,
         production: &[ParseType::N(737)],
+        is_push_production: false,
     },
     // 628 - CastingType: P8;
     Production {
         lhs: 100,
         production: &[ParseType::N(516)],
+        is_push_production: false,
     },
     // 629 - CastingType: P16;
     Production {
         lhs: 100,
         production: &[ParseType::N(507)],
+        is_push_production: false,
     },
     // 630 - CastingType: P32;
     Production {
         lhs: 100,
         production: &[ParseType::N(510)],
+        is_push_production: false,
     },
     // 631 - CastingType: P64;
     Production {
         lhs: 100,
         production: &[ParseType::N(513)],
+        is_push_production: false,
     },
     // 632 - CastingType: I8;
     Production {
         lhs: 100,
         production: &[ParseType::N(313)],
+        is_push_production: false,
     },
     // 633 - CastingType: I16;
     Production {
         lhs: 100,
         production: &[ParseType::N(304)],
+        is_push_production: false,
     },
     // 634 - CastingType: I32;
     Production {
         lhs: 100,
         production: &[ParseType::N(307)],
+        is_push_production: false,
     },
     // 635 - CastingType: I64;
     Production {
         lhs: 100,
         production: &[ParseType::N(310)],
+        is_push_production: false,
     },
     // 636 - CastingType: F32;
     Production {
         lhs: 100,
         production: &[ParseType::N(229)],
+        is_push_production: false,
     },
     // 637 - CastingType: F64;
     Production {
         lhs: 100,
         production: &[ParseType::N(232)],
+        is_push_production: false,
     },
     // 638 - CastingType: BBool;
     Production {
         lhs: 100,
         production: &[ParseType::N(63)],
+        is_push_production: false,
     },
     // 639 - CastingType: LBool;
     Production {
         lhs: 100,
         production: &[ParseType::N(405)],
+        is_push_production: false,
     },
     // 640 - CastingType: Clock;
     Production {
         lhs: 100,
         production: &[ParseType::N(101)],
+        is_push_production: false,
     },
     // 641 - CastingType: ClockPosedge;
     Production {
         lhs: 100,
         production: &[ParseType::N(106)],
+        is_push_production: false,
     },
     // 642 - CastingType: ClockNegedge;
     Production {
         lhs: 100,
         production: &[ParseType::N(103)],
+        is_push_production: false,
     },
     // 643 - CastingType: Reset;
     Production {
         lhs: 100,
         production: &[ParseType::N(616)],
+        is_push_production: false,
     },
     // 644 - CastingType: ResetAsyncHigh;
     Production {
         lhs: 100,
         production: &[ParseType::N(617)],
+        is_push_production: false,
     },
     // 645 - CastingType: ResetAsyncLow;
     Production {
         lhs: 100,
         production: &[ParseType::N(620)],
+        is_push_production: false,
     },
     // 646 - CastingType: ResetSyncHigh;
     Production {
         lhs: 100,
         production: &[ParseType::N(623)],
+        is_push_production: false,
     },
     // 647 - CastingType: ResetSyncLow;
     Production {
         lhs: 100,
         production: &[ParseType::N(626)],
+        is_push_production: false,
     },
     // 648 - CastingType: UserDefinedType;
     Production {
         lhs: 100,
         production: &[ParseType::N(754)],
+        is_push_production: false,
     },
     // 649 - CastingType: Based;
     Production {
         lhs: 100,
         production: &[ParseType::N(69)],
+        is_push_production: false,
     },
     // 650 - CastingType: BaseLess;
     Production {
         lhs: 100,
         production: &[ParseType::N(66)],
+        is_push_production: false,
     },
     // 651 - ClockDomain: Quote Identifier;
     Production {
         lhs: 102,
         production: &[ParseType::N(316), ParseType::N(587)],
+        is_push_production: false,
     },
     // 652 - StatementBlock: LBrace StatementBlockList /* Vec */ RBrace;
     Production {
         lhs: 665,
         production: &[ParseType::N(596), ParseType::N(671), ParseType::N(408)],
+        is_push_production: false,
     },
     // 653 - StatementBlockList: StatementBlockGroup StatementBlockList;
     Production {
         lhs: 671,
         production: &[ParseType::N(671), ParseType::N(666)],
+        is_push_production: true,
     },
     // 654 - StatementBlockList: ;
     Production {
         lhs: 671,
         production: &[],
+        is_push_production: false,
     },
     // 655 - StatementBlockGroup: StatementBlockGroupList /* Vec */ StatementBlockGroupGroup;
     Production {
         lhs: 666,
         production: &[ParseType::N(667), ParseType::N(669)],
+        is_push_production: false,
     },
     // 656 - StatementBlockGroupGroup: Block LBrace StatementBlockGroupGroupList /* Vec */ RBrace;
     Production {
@@ -36738,101 +37394,121 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(408),
             ParseType::N(79),
         ],
+        is_push_production: false,
     },
     // 657 - StatementBlockGroupGroupList: StatementBlockGroup StatementBlockGroupGroupList;
     Production {
         lhs: 668,
         production: &[ParseType::N(668), ParseType::N(666)],
+        is_push_production: true,
     },
     // 658 - StatementBlockGroupGroupList: ;
     Production {
         lhs: 668,
         production: &[],
+        is_push_production: false,
     },
     // 659 - StatementBlockGroupGroup: StatementBlockItem;
     Production {
         lhs: 667,
         production: &[ParseType::N(670)],
+        is_push_production: false,
     },
     // 660 - StatementBlockGroupList: Attribute StatementBlockGroupList;
     Production {
         lhs: 669,
         production: &[ParseType::N(669), ParseType::N(57)],
+        is_push_production: true,
     },
     // 661 - StatementBlockGroupList: ;
     Production {
         lhs: 669,
         production: &[],
+        is_push_production: false,
     },
     // 662 - StatementBlockItem: VarDeclaration;
     Production {
         lhs: 670,
         production: &[ParseType::N(756)],
+        is_push_production: false,
     },
     // 663 - StatementBlockItem: LetStatement;
     Production {
         lhs: 670,
         production: &[ParseType::N(424)],
+        is_push_production: false,
     },
     // 664 - StatementBlockItem: ConstDeclaration;
     Production {
         lhs: 670,
         production: &[ParseType::N(142)],
+        is_push_production: false,
     },
     // 665 - StatementBlockItem: GenDeclaration;
     Production {
         lhs: 670,
         production: &[ParseType::N(269)],
+        is_push_production: false,
     },
     // 666 - StatementBlockItem: Statement;
     Production {
         lhs: 670,
         production: &[ParseType::N(664)],
+        is_push_production: false,
     },
     // 667 - StatementBlockItem: ConcatenationAssignment;
     Production {
         lhs: 670,
         production: &[ParseType::N(131)],
+        is_push_production: false,
     },
     // 668 - Statement: IdentifierStatement;
     Production {
         lhs: 664,
         production: &[ParseType::N(320)],
+        is_push_production: false,
     },
     // 669 - Statement: IfStatement;
     Production {
         lhs: 664,
         production: &[ParseType::N(333)],
+        is_push_production: false,
     },
     // 670 - Statement: IfResetStatement;
     Production {
         lhs: 664,
         production: &[ParseType::N(328)],
+        is_push_production: false,
     },
     // 671 - Statement: ReturnStatement;
     Production {
         lhs: 664,
         production: &[ParseType::N(632)],
+        is_push_production: false,
     },
     // 672 - Statement: BreakStatement;
     Production {
         lhs: 664,
         production: &[ParseType::N(84)],
+        is_push_production: false,
     },
     // 673 - Statement: ForStatement;
     Production {
         lhs: 664,
         production: &[ParseType::N(254)],
+        is_push_production: false,
     },
     // 674 - Statement: CaseStatement;
     Production {
         lhs: 664,
         production: &[ParseType::N(96)],
+        is_push_production: false,
     },
     // 675 - Statement: SwitchStatement;
     Production {
         lhs: 664,
         production: &[ParseType::N(709)],
+        is_push_production: false,
     },
     // 676 - LetStatement: Let Identifier LetStatementOpt /* Option */ Equ Expression Semicolon;
     Production {
@@ -36845,41 +37521,49 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(420),
         ],
+        is_push_production: false,
     },
     // 677 - LetStatementOpt: Colon LetStatementOpt0 /* Option */ ArrayType;
     Production {
         lhs: 425,
         production: &[ParseType::N(38), ParseType::N(426), ParseType::N(111)],
+        is_push_production: false,
     },
     // 678 - LetStatementOpt0: ClockDomain;
     Production {
         lhs: 426,
         production: &[ParseType::N(102)],
+        is_push_production: false,
     },
     // 679 - LetStatementOpt0: ;
     Production {
         lhs: 426,
         production: &[],
+        is_push_production: false,
     },
     // 680 - LetStatementOpt: ;
     Production {
         lhs: 425,
         production: &[],
+        is_push_production: false,
     },
     // 681 - IdentifierStatement: ExpressionIdentifier IdentifierStatementGroup Semicolon;
     Production {
         lhs: 320,
         production: &[ParseType::N(653), ParseType::N(321), ParseType::N(224)],
+        is_push_production: false,
     },
     // 682 - IdentifierStatementGroup: FunctionCall;
     Production {
         lhs: 321,
         production: &[ParseType::N(260)],
+        is_push_production: false,
     },
     // 683 - IdentifierStatementGroup: Assignment;
     Production {
         lhs: 321,
         production: &[ParseType::N(52)],
+        is_push_production: false,
     },
     // 684 - ConcatenationAssignment: LBrace AssignConcatenationList RBrace Equ Expression Semicolon;
     Production {
@@ -36892,26 +37576,31 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(45),
             ParseType::N(408),
         ],
+        is_push_production: false,
     },
     // 685 - Assignment: AssignmentGroup Expression;
     Production {
         lhs: 52,
         production: &[ParseType::N(216), ParseType::N(53)],
+        is_push_production: false,
     },
     // 686 - AssignmentGroup: Equ;
     Production {
         lhs: 53,
         production: &[ParseType::N(204)],
+        is_push_production: false,
     },
     // 687 - AssignmentGroup: AssignmentOperator;
     Production {
         lhs: 53,
         production: &[ParseType::N(54)],
+        is_push_production: false,
     },
     // 688 - AssignmentGroup: DiamondOperator;
     Production {
         lhs: 53,
         production: &[ParseType::N(159)],
+        is_push_production: false,
     },
     // 689 - IfStatement: If Expression StatementBlock IfStatementList /* Vec */ IfStatementOpt /* Option */;
     Production {
@@ -36923,6 +37612,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(216),
             ParseType::N(324),
         ],
+        is_push_production: false,
     },
     // 690 - IfStatementList: Else If Expression StatementBlock IfStatementList;
     Production {
@@ -36934,21 +37624,25 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(324),
             ParseType::N(175),
         ],
+        is_push_production: true,
     },
     // 691 - IfStatementList: ;
     Production {
         lhs: 334,
         production: &[],
+        is_push_production: false,
     },
     // 692 - IfStatementOpt: Else StatementBlock;
     Production {
         lhs: 335,
         production: &[ParseType::N(665), ParseType::N(175)],
+        is_push_production: false,
     },
     // 693 - IfStatementOpt: ;
     Production {
         lhs: 335,
         production: &[],
+        is_push_production: false,
     },
     // 694 - IfResetStatement: IfReset StatementBlock IfResetStatementList /* Vec */ IfResetStatementOpt /* Option */;
     Production {
@@ -36959,6 +37653,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(665),
             ParseType::N(327),
         ],
+        is_push_production: false,
     },
     // 695 - IfResetStatementList: Else If Expression StatementBlock IfResetStatementList;
     Production {
@@ -36970,31 +37665,37 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(324),
             ParseType::N(175),
         ],
+        is_push_production: true,
     },
     // 696 - IfResetStatementList: ;
     Production {
         lhs: 329,
         production: &[],
+        is_push_production: false,
     },
     // 697 - IfResetStatementOpt: Else StatementBlock;
     Production {
         lhs: 330,
         production: &[ParseType::N(665), ParseType::N(175)],
+        is_push_production: false,
     },
     // 698 - IfResetStatementOpt: ;
     Production {
         lhs: 330,
         production: &[],
+        is_push_production: false,
     },
     // 699 - ReturnStatement: Return Expression Semicolon;
     Production {
         lhs: 632,
         production: &[ParseType::N(653), ParseType::N(216), ParseType::N(631)],
+        is_push_production: false,
     },
     // 700 - BreakStatement: Break Semicolon;
     Production {
         lhs: 84,
         production: &[ParseType::N(653), ParseType::N(83)],
+        is_push_production: false,
     },
     // 701 - ForStatement: For Identifier In ForStatementOpt /* Option */ Range ForStatementOpt0 /* Option */ StatementBlock;
     Production {
@@ -37008,26 +37709,31 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(253),
         ],
+        is_push_production: false,
     },
     // 702 - ForStatementOpt0: Step AssignmentOperator Expression;
     Production {
         lhs: 256,
         production: &[ParseType::N(216), ParseType::N(54), ParseType::N(672)],
+        is_push_production: false,
     },
     // 703 - ForStatementOpt0: ;
     Production {
         lhs: 256,
         production: &[],
+        is_push_production: false,
     },
     // 704 - ForStatementOpt: Rev;
     Production {
         lhs: 255,
         production: &[ParseType::N(635)],
+        is_push_production: false,
     },
     // 705 - ForStatementOpt: ;
     Production {
         lhs: 255,
         production: &[],
+        is_push_production: false,
     },
     // 706 - CaseStatement: Case Expression LBrace CaseStatementList /* Vec */ RBrace;
     Production {
@@ -37039,56 +37745,67 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(216),
             ParseType::N(87),
         ],
+        is_push_production: false,
     },
     // 707 - CaseStatementList: CaseItem CaseStatementList;
     Production {
         lhs: 97,
         production: &[ParseType::N(97), ParseType::N(93)],
+        is_push_production: true,
     },
     // 708 - CaseStatementList: ;
     Production {
         lhs: 97,
         production: &[],
+        is_push_production: false,
     },
     // 709 - CaseItem: CaseItemGroup Colon CaseItemGroup0;
     Production {
         lhs: 93,
         production: &[ParseType::N(95), ParseType::N(111), ParseType::N(94)],
+        is_push_production: false,
     },
     // 710 - CaseItemGroup0: Statement;
     Production {
         lhs: 95,
         production: &[ParseType::N(664)],
+        is_push_production: false,
     },
     // 711 - CaseItemGroup0: StatementBlock;
     Production {
         lhs: 95,
         production: &[ParseType::N(665)],
+        is_push_production: false,
     },
     // 712 - CaseItemGroup: CaseCondition;
     Production {
         lhs: 94,
         production: &[ParseType::N(88)],
+        is_push_production: false,
     },
     // 713 - CaseItemGroup: Defaul;
     Production {
         lhs: 94,
         production: &[ParseType::N(150)],
+        is_push_production: false,
     },
     // 714 - CaseCondition: RangeItem CaseConditionList /* Vec */;
     Production {
         lhs: 88,
         production: &[ParseType::N(89), ParseType::N(606)],
+        is_push_production: false,
     },
     // 715 - CaseConditionList: Comma RangeItem CaseConditionList;
     Production {
         lhs: 89,
         production: &[ParseType::N(89), ParseType::N(606), ParseType::N(120)],
+        is_push_production: true,
     },
     // 716 - CaseConditionList: ;
     Production {
         lhs: 89,
         production: &[],
+        is_push_production: false,
     },
     // 717 - SwitchStatement: Switch LBrace SwitchStatementList /* Vec */ RBrace;
     Production {
@@ -37099,56 +37816,67 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(408),
             ParseType::N(700),
         ],
+        is_push_production: false,
     },
     // 718 - SwitchStatementList: SwitchItem SwitchStatementList;
     Production {
         lhs: 710,
         production: &[ParseType::N(710), ParseType::N(706)],
+        is_push_production: true,
     },
     // 719 - SwitchStatementList: ;
     Production {
         lhs: 710,
         production: &[],
+        is_push_production: false,
     },
     // 720 - SwitchItem: SwitchItemGroup Colon SwitchItemGroup0;
     Production {
         lhs: 706,
         production: &[ParseType::N(708), ParseType::N(111), ParseType::N(707)],
+        is_push_production: false,
     },
     // 721 - SwitchItemGroup0: Statement;
     Production {
         lhs: 708,
         production: &[ParseType::N(664)],
+        is_push_production: false,
     },
     // 722 - SwitchItemGroup0: StatementBlock;
     Production {
         lhs: 708,
         production: &[ParseType::N(665)],
+        is_push_production: false,
     },
     // 723 - SwitchItemGroup: SwitchCondition;
     Production {
         lhs: 707,
         production: &[ParseType::N(701)],
+        is_push_production: false,
     },
     // 724 - SwitchItemGroup: Defaul;
     Production {
         lhs: 707,
         production: &[ParseType::N(150)],
+        is_push_production: false,
     },
     // 725 - SwitchCondition: Expression SwitchConditionList /* Vec */;
     Production {
         lhs: 701,
         production: &[ParseType::N(702), ParseType::N(216)],
+        is_push_production: false,
     },
     // 726 - SwitchConditionList: Comma Expression SwitchConditionList;
     Production {
         lhs: 702,
         production: &[ParseType::N(702), ParseType::N(216), ParseType::N(120)],
+        is_push_production: true,
     },
     // 727 - SwitchConditionList: ;
     Production {
         lhs: 702,
         production: &[],
+        is_push_production: false,
     },
     // 728 - Attribute: HashLBracket Identifier AttributeOpt /* Option */ RBracket;
     Production {
@@ -37159,51 +37887,61 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(295),
         ],
+        is_push_production: false,
     },
     // 729 - AttributeOpt: LParen AttributeList RParen;
     Production {
         lhs: 62,
         production: &[ParseType::N(602), ParseType::N(59), ParseType::N(414)],
+        is_push_production: false,
     },
     // 730 - AttributeOpt: ;
     Production {
         lhs: 62,
         production: &[],
+        is_push_production: false,
     },
     // 731 - AttributeList: AttributeItem AttributeListList /* Vec */ AttributeListOpt /* Option */;
     Production {
         lhs: 59,
         production: &[ParseType::N(61), ParseType::N(60), ParseType::N(58)],
+        is_push_production: false,
     },
     // 732 - AttributeListList: Comma AttributeItem AttributeListList;
     Production {
         lhs: 60,
         production: &[ParseType::N(60), ParseType::N(58), ParseType::N(120)],
+        is_push_production: true,
     },
     // 733 - AttributeListList: ;
     Production {
         lhs: 60,
         production: &[],
+        is_push_production: false,
     },
     // 734 - AttributeListOpt: Comma;
     Production {
         lhs: 61,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 735 - AttributeListOpt: ;
     Production {
         lhs: 61,
         production: &[],
+        is_push_production: false,
     },
     // 736 - AttributeItem: Identifier;
     Production {
         lhs: 58,
         production: &[ParseType::N(316)],
+        is_push_production: false,
     },
     // 737 - AttributeItem: StringLiteral;
     Production {
         lhs: 58,
         production: &[ParseType::N(676)],
+        is_push_production: false,
     },
     // 738 - LetDeclaration: Let Identifier LetDeclarationOpt /* Option */ Equ Expression Semicolon;
     Production {
@@ -37216,26 +37954,31 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(420),
         ],
+        is_push_production: false,
     },
     // 739 - LetDeclarationOpt: Colon LetDeclarationOpt0 /* Option */ ArrayType;
     Production {
         lhs: 422,
         production: &[ParseType::N(38), ParseType::N(423), ParseType::N(111)],
+        is_push_production: false,
     },
     // 740 - LetDeclarationOpt0: ClockDomain;
     Production {
         lhs: 423,
         production: &[ParseType::N(102)],
+        is_push_production: false,
     },
     // 741 - LetDeclarationOpt0: ;
     Production {
         lhs: 423,
         production: &[],
+        is_push_production: false,
     },
     // 742 - LetDeclarationOpt: ;
     Production {
         lhs: 422,
         production: &[],
+        is_push_production: false,
     },
     // 743 - VarDeclaration: Var Identifier VarDeclarationOpt /* Option */ Semicolon;
     Production {
@@ -37246,26 +37989,31 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(755),
         ],
+        is_push_production: false,
     },
     // 744 - VarDeclarationOpt: Colon VarDeclarationOpt0 /* Option */ ArrayType;
     Production {
         lhs: 757,
         production: &[ParseType::N(38), ParseType::N(758), ParseType::N(111)],
+        is_push_production: false,
     },
     // 745 - VarDeclarationOpt0: ClockDomain;
     Production {
         lhs: 758,
         production: &[ParseType::N(102)],
+        is_push_production: false,
     },
     // 746 - VarDeclarationOpt0: ;
     Production {
         lhs: 758,
         production: &[],
+        is_push_production: false,
     },
     // 747 - VarDeclarationOpt: ;
     Production {
         lhs: 757,
         production: &[],
+        is_push_production: false,
     },
     // 748 - ConstDeclaration: Const Identifier ConstDeclarationOpt /* Option */ Equ Expression Semicolon;
     Production {
@@ -37278,26 +38026,31 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(141),
         ],
+        is_push_production: false,
     },
     // 749 - ConstDeclarationOpt: Colon ConstDeclarationOptGroup;
     Production {
         lhs: 143,
         production: &[ParseType::N(144), ParseType::N(111)],
+        is_push_production: false,
     },
     // 750 - ConstDeclarationOptGroup: ArrayType;
     Production {
         lhs: 144,
         production: &[ParseType::N(38)],
+        is_push_production: false,
     },
     // 751 - ConstDeclarationOptGroup: Type;
     Production {
         lhs: 144,
         production: &[ParseType::N(725)],
+        is_push_production: false,
     },
     // 752 - ConstDeclarationOpt: ;
     Production {
         lhs: 143,
         production: &[],
+        is_push_production: false,
     },
     // 753 - GenDeclaration: Gen Identifier Colon GenDeclarationGroup Equ Expression Semicolon;
     Production {
@@ -37311,16 +38064,19 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(268),
         ],
+        is_push_production: false,
     },
     // 754 - GenDeclarationGroup: GenericProtoBound;
     Production {
         lhs: 270,
         production: &[ParseType::N(293)],
+        is_push_production: false,
     },
     // 755 - GenDeclarationGroup: Type;
     Production {
         lhs: 270,
         production: &[ParseType::N(725)],
+        is_push_production: false,
     },
     // 756 - TypeDefDeclaration: Type Identifier Equ ArrayType Semicolon;
     Production {
@@ -37332,21 +38088,25 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(725),
         ],
+        is_push_production: false,
     },
     // 757 - AlwaysFfDeclaration: AlwaysFf AlwaysFfDeclarationOpt /* Option */ StatementBlock;
     Production {
         lhs: 14,
         production: &[ParseType::N(665), ParseType::N(15), ParseType::N(12)],
+        is_push_production: false,
     },
     // 758 - AlwaysFfDeclarationOpt: AlwaysFfEventList;
     Production {
         lhs: 15,
         production: &[ParseType::N(16)],
+        is_push_production: false,
     },
     // 759 - AlwaysFfDeclarationOpt: ;
     Production {
         lhs: 15,
         production: &[],
+        is_push_production: false,
     },
     // 760 - AlwaysFfEventList: LParen AlwaysFfClock AlwaysFfEventListOpt /* Option */ RParen;
     Production {
@@ -37357,31 +38117,37 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(13),
             ParseType::N(414),
         ],
+        is_push_production: false,
     },
     // 761 - AlwaysFfEventListOpt: Comma AlwaysFfReset;
     Production {
         lhs: 17,
         production: &[ParseType::N(18), ParseType::N(120)],
+        is_push_production: false,
     },
     // 762 - AlwaysFfEventListOpt: ;
     Production {
         lhs: 17,
         production: &[],
+        is_push_production: false,
     },
     // 763 - AlwaysFfClock: HierarchicalIdentifier;
     Production {
         lhs: 13,
         production: &[ParseType::N(300)],
+        is_push_production: false,
     },
     // 764 - AlwaysFfReset: HierarchicalIdentifier;
     Production {
         lhs: 18,
         production: &[ParseType::N(300)],
+        is_push_production: false,
     },
     // 765 - AlwaysCombDeclaration: AlwaysComb StatementBlock;
     Production {
         lhs: 9,
         production: &[ParseType::N(665), ParseType::N(8)],
+        is_push_production: false,
     },
     // 766 - AssignDeclaration: Assign AssignDestination Equ Expression Semicolon;
     Production {
@@ -37393,46 +38159,55 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(49),
             ParseType::N(43),
         ],
+        is_push_production: false,
     },
     // 767 - AssignDestination: HierarchicalIdentifier;
     Production {
         lhs: 49,
         production: &[ParseType::N(300)],
+        is_push_production: false,
     },
     // 768 - AssignDestination: LBrace AssignConcatenationList RBrace;
     Production {
         lhs: 49,
         production: &[ParseType::N(596), ParseType::N(45), ParseType::N(408)],
+        is_push_production: false,
     },
     // 769 - AssignConcatenationList: AssignConcatenationItem AssignConcatenationListList /* Vec */ AssignConcatenationListOpt /* Option */;
     Production {
         lhs: 45,
         production: &[ParseType::N(47), ParseType::N(46), ParseType::N(44)],
+        is_push_production: false,
     },
     // 770 - AssignConcatenationListList: Comma AssignConcatenationItem AssignConcatenationListList;
     Production {
         lhs: 46,
         production: &[ParseType::N(46), ParseType::N(44), ParseType::N(120)],
+        is_push_production: true,
     },
     // 771 - AssignConcatenationListList: ;
     Production {
         lhs: 46,
         production: &[],
+        is_push_production: false,
     },
     // 772 - AssignConcatenationListOpt: Comma;
     Production {
         lhs: 47,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 773 - AssignConcatenationListOpt: ;
     Production {
         lhs: 47,
         production: &[],
+        is_push_production: false,
     },
     // 774 - AssignConcatenationItem: HierarchicalIdentifier;
     Production {
         lhs: 44,
         production: &[ParseType::N(300)],
+        is_push_production: false,
     },
     // 775 - ConnectDeclaration: Connect HierarchicalIdentifier DiamondOperator Expression Semicolon;
     Production {
@@ -37444,6 +38219,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(300),
             ParseType::N(137),
         ],
+        is_push_production: false,
     },
     // 776 - ModportDeclaration: Modport Identifier LBrace ModportDeclarationOpt /* Option */ ModportDeclarationOpt0 /* Option */ RBrace;
     Production {
@@ -37456,91 +38232,109 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(441),
         ],
+        is_push_production: false,
     },
     // 777 - ModportDeclarationOpt0: DotDot ModportDefault;
     Production {
         lhs: 444,
         production: &[ParseType::N(445), ParseType::N(167)],
+        is_push_production: false,
     },
     // 778 - ModportDeclarationOpt0: ;
     Production {
         lhs: 444,
         production: &[],
+        is_push_production: false,
     },
     // 779 - ModportDeclarationOpt: ModportList;
     Production {
         lhs: 443,
         production: &[ParseType::N(453)],
+        is_push_production: false,
     },
     // 780 - ModportDeclarationOpt: ;
     Production {
         lhs: 443,
         production: &[],
+        is_push_production: false,
     },
     // 781 - ModportList: ModportGroup ModportListList /* Vec */ ModportListOpt /* Option */;
     Production {
         lhs: 453,
         production: &[ParseType::N(455), ParseType::N(454), ParseType::N(449)],
+        is_push_production: false,
     },
     // 782 - ModportListList: Comma ModportGroup ModportListList;
     Production {
         lhs: 454,
         production: &[ParseType::N(454), ParseType::N(449), ParseType::N(120)],
+        is_push_production: true,
     },
     // 783 - ModportListList: ;
     Production {
         lhs: 454,
         production: &[],
+        is_push_production: false,
     },
     // 784 - ModportListOpt: Comma;
     Production {
         lhs: 455,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 785 - ModportListOpt: ;
     Production {
         lhs: 455,
         production: &[],
+        is_push_production: false,
     },
     // 786 - ModportGroup: ModportGroupList /* Vec */ ModportGroupGroup;
     Production {
         lhs: 449,
         production: &[ParseType::N(450), ParseType::N(451)],
+        is_push_production: false,
     },
     // 787 - ModportGroupGroup: LBrace ModportList RBrace;
     Production {
         lhs: 450,
         production: &[ParseType::N(596), ParseType::N(453), ParseType::N(408)],
+        is_push_production: false,
     },
     // 788 - ModportGroupGroup: ModportItem;
     Production {
         lhs: 450,
         production: &[ParseType::N(452)],
+        is_push_production: false,
     },
     // 789 - ModportGroupList: Attribute ModportGroupList;
     Production {
         lhs: 451,
         production: &[ParseType::N(451), ParseType::N(57)],
+        is_push_production: true,
     },
     // 790 - ModportGroupList: ;
     Production {
         lhs: 451,
         production: &[],
+        is_push_production: false,
     },
     // 791 - ModportItem: Identifier Colon Direction;
     Production {
         lhs: 452,
         production: &[ParseType::N(162), ParseType::N(111), ParseType::N(316)],
+        is_push_production: false,
     },
     // 792 - ModportDefault: Input;
     Production {
         lhs: 445,
         production: &[ParseType::N(357)],
+        is_push_production: false,
     },
     // 793 - ModportDefault: Output;
     Production {
         lhs: 445,
         production: &[ParseType::N(500)],
+        is_push_production: false,
     },
     // 794 - ModportDefault: Same LParen ModportDefaultList RParen;
     Production {
@@ -37551,6 +38345,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(414),
             ParseType::N(638),
         ],
+        is_push_production: false,
     },
     // 795 - ModportDefault: Converse LParen ModportDefaultList RParen;
     Production {
@@ -37561,31 +38356,37 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(414),
             ParseType::N(147),
         ],
+        is_push_production: false,
     },
     // 796 - ModportDefaultList: Identifier ModportDefaultListList /* Vec */ ModportDefaultListOpt /* Option */;
     Production {
         lhs: 446,
         production: &[ParseType::N(448), ParseType::N(447), ParseType::N(316)],
+        is_push_production: false,
     },
     // 797 - ModportDefaultListList: Comma Identifier ModportDefaultListList;
     Production {
         lhs: 447,
         production: &[ParseType::N(447), ParseType::N(316), ParseType::N(120)],
+        is_push_production: true,
     },
     // 798 - ModportDefaultListList: ;
     Production {
         lhs: 447,
         production: &[],
+        is_push_production: false,
     },
     // 799 - ModportDefaultListOpt: Comma;
     Production {
         lhs: 448,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 800 - ModportDefaultListOpt: ;
     Production {
         lhs: 448,
         production: &[],
+        is_push_production: false,
     },
     // 801 - EnumDeclaration: Enum Identifier EnumDeclarationOpt /* Option */ LBrace EnumList RBrace;
     Production {
@@ -37598,91 +38399,109 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(191),
         ],
+        is_push_production: false,
     },
     // 802 - EnumDeclarationOpt: Colon ScalarType;
     Production {
         lhs: 193,
         production: &[ParseType::N(641), ParseType::N(111)],
+        is_push_production: false,
     },
     // 803 - EnumDeclarationOpt: ;
     Production {
         lhs: 193,
         production: &[],
+        is_push_production: false,
     },
     // 804 - EnumList: EnumGroup EnumListList /* Vec */ EnumListOpt /* Option */;
     Production {
         lhs: 199,
         production: &[ParseType::N(201), ParseType::N(200), ParseType::N(194)],
+        is_push_production: false,
     },
     // 805 - EnumListList: Comma EnumGroup EnumListList;
     Production {
         lhs: 200,
         production: &[ParseType::N(200), ParseType::N(194), ParseType::N(120)],
+        is_push_production: true,
     },
     // 806 - EnumListList: ;
     Production {
         lhs: 200,
         production: &[],
+        is_push_production: false,
     },
     // 807 - EnumListOpt: Comma;
     Production {
         lhs: 201,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 808 - EnumListOpt: ;
     Production {
         lhs: 201,
         production: &[],
+        is_push_production: false,
     },
     // 809 - EnumGroup: EnumGroupList /* Vec */ EnumGroupGroup;
     Production {
         lhs: 194,
         production: &[ParseType::N(195), ParseType::N(196)],
+        is_push_production: false,
     },
     // 810 - EnumGroupGroup: LBrace EnumList RBrace;
     Production {
         lhs: 195,
         production: &[ParseType::N(596), ParseType::N(199), ParseType::N(408)],
+        is_push_production: false,
     },
     // 811 - EnumGroupGroup: EnumItem;
     Production {
         lhs: 195,
         production: &[ParseType::N(197)],
+        is_push_production: false,
     },
     // 812 - EnumGroupList: Attribute EnumGroupList;
     Production {
         lhs: 196,
         production: &[ParseType::N(196), ParseType::N(57)],
+        is_push_production: true,
     },
     // 813 - EnumGroupList: ;
     Production {
         lhs: 196,
         production: &[],
+        is_push_production: false,
     },
     // 814 - EnumItem: Identifier EnumItemOpt /* Option */;
     Production {
         lhs: 197,
         production: &[ParseType::N(198), ParseType::N(316)],
+        is_push_production: false,
     },
     // 815 - EnumItemOpt: Equ Expression;
     Production {
         lhs: 198,
         production: &[ParseType::N(216), ParseType::N(204)],
+        is_push_production: false,
     },
     // 816 - EnumItemOpt: ;
     Production {
         lhs: 198,
         production: &[],
+        is_push_production: false,
     },
     // 817 - StructUnion: Struct;
     Production {
         lhs: 690,
         production: &[ParseType::N(681)],
+        is_push_production: false,
     },
     // 818 - StructUnion: Union;
     Production {
         lhs: 690,
         production: &[ParseType::N(746)],
+        is_push_production: false,
     },
     // 819 - StructUnionDeclaration: StructUnion Identifier StructUnionDeclarationOpt /* Option */ LBrace StructUnionList RBrace;
     Production {
@@ -37695,86 +38514,103 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(690),
         ],
+        is_push_production: false,
     },
     // 820 - StructUnionDeclarationOpt: WithGenericParameter;
     Production {
         lhs: 692,
         production: &[ParseType::N(772)],
+        is_push_production: false,
     },
     // 821 - StructUnionDeclarationOpt: ;
     Production {
         lhs: 692,
         production: &[],
+        is_push_production: false,
     },
     // 822 - StructUnionList: StructUnionGroup StructUnionListList /* Vec */ StructUnionListOpt /* Option */;
     Production {
         lhs: 697,
         production: &[ParseType::N(699), ParseType::N(698), ParseType::N(693)],
+        is_push_production: false,
     },
     // 823 - StructUnionListList: Comma StructUnionGroup StructUnionListList;
     Production {
         lhs: 698,
         production: &[ParseType::N(698), ParseType::N(693), ParseType::N(120)],
+        is_push_production: true,
     },
     // 824 - StructUnionListList: ;
     Production {
         lhs: 698,
         production: &[],
+        is_push_production: false,
     },
     // 825 - StructUnionListOpt: Comma;
     Production {
         lhs: 699,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 826 - StructUnionListOpt: ;
     Production {
         lhs: 699,
         production: &[],
+        is_push_production: false,
     },
     // 827 - StructUnionGroup: StructUnionGroupList /* Vec */ StructUnionGroupGroup;
     Production {
         lhs: 693,
         production: &[ParseType::N(694), ParseType::N(695)],
+        is_push_production: false,
     },
     // 828 - StructUnionGroupGroup: LBrace StructUnionList RBrace;
     Production {
         lhs: 694,
         production: &[ParseType::N(596), ParseType::N(697), ParseType::N(408)],
+        is_push_production: false,
     },
     // 829 - StructUnionGroupGroup: StructUnionItem;
     Production {
         lhs: 694,
         production: &[ParseType::N(696)],
+        is_push_production: false,
     },
     // 830 - StructUnionGroupList: Attribute StructUnionGroupList;
     Production {
         lhs: 695,
         production: &[ParseType::N(695), ParseType::N(57)],
+        is_push_production: true,
     },
     // 831 - StructUnionGroupList: ;
     Production {
         lhs: 695,
         production: &[],
+        is_push_production: false,
     },
     // 832 - StructUnionItem: Identifier Colon ScalarType;
     Production {
         lhs: 696,
         production: &[ParseType::N(641), ParseType::N(111), ParseType::N(316)],
+        is_push_production: false,
     },
     // 833 - InitialDeclaration: Initial StatementBlock;
     Production {
         lhs: 351,
         production: &[ParseType::N(665), ParseType::N(350)],
+        is_push_production: false,
     },
     // 834 - FinalDeclaration: Final StatementBlock;
     Production {
         lhs: 246,
         production: &[ParseType::N(665), ParseType::N(245)],
+        is_push_production: false,
     },
     // 835 - InstDeclaration: Inst ComponentInstantiation Semicolon;
     Production {
         lhs: 365,
         production: &[ParseType::N(653), ParseType::N(126), ParseType::N(364)],
+        is_push_production: false,
     },
     // 836 - BindDeclaration: Bind ScopedIdentifier LTMinus ComponentInstantiation Semicolon;
     Production {
@@ -37786,6 +38622,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(645),
             ParseType::N(72),
         ],
+        is_push_production: false,
     },
     // 837 - ComponentInstantiation: Identifier Colon ComponentInstantiationOpt /* Option */ ScopedIdentifier ComponentInstantiationOpt0 /* Option */ ComponentInstantiationOpt1 /* Option */ ComponentInstantiationOpt2 /* Option */;
     Production {
@@ -37799,46 +38636,55 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(111),
             ParseType::N(316),
         ],
+        is_push_production: false,
     },
     // 838 - ComponentInstantiationOpt2: InstPort;
     Production {
         lhs: 130,
         production: &[ParseType::N(376)],
+        is_push_production: false,
     },
     // 839 - ComponentInstantiationOpt2: ;
     Production {
         lhs: 130,
         production: &[],
+        is_push_production: false,
     },
     // 840 - ComponentInstantiationOpt1: InstParameter;
     Production {
         lhs: 129,
         production: &[ParseType::N(366)],
+        is_push_production: false,
     },
     // 841 - ComponentInstantiationOpt1: ;
     Production {
         lhs: 129,
         production: &[],
+        is_push_production: false,
     },
     // 842 - ComponentInstantiationOpt0: Array;
     Production {
         lhs: 128,
         production: &[ParseType::N(30)],
+        is_push_production: false,
     },
     // 843 - ComponentInstantiationOpt0: ;
     Production {
         lhs: 128,
         production: &[],
+        is_push_production: false,
     },
     // 844 - ComponentInstantiationOpt: ClockDomain;
     Production {
         lhs: 127,
         production: &[ParseType::N(102)],
+        is_push_production: false,
     },
     // 845 - ComponentInstantiationOpt: ;
     Production {
         lhs: 127,
         production: &[],
+        is_push_production: false,
     },
     // 846 - InstParameter: Hash LParen InstParameterOpt /* Option */ RParen;
     Production {
@@ -37849,161 +38695,193 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(414),
             ParseType::N(294),
         ],
+        is_push_production: false,
     },
     // 847 - InstParameterOpt: InstParameterList;
     Production {
         lhs: 375,
         production: &[ParseType::N(372)],
+        is_push_production: false,
     },
     // 848 - InstParameterOpt: ;
     Production {
         lhs: 375,
         production: &[],
+        is_push_production: false,
     },
     // 849 - InstParameterList: InstParameterGroup InstParameterListList /* Vec */ InstParameterListOpt /* Option */;
     Production {
         lhs: 372,
         production: &[ParseType::N(374), ParseType::N(373), ParseType::N(367)],
+        is_push_production: false,
     },
     // 850 - InstParameterListList: Comma InstParameterGroup InstParameterListList;
     Production {
         lhs: 373,
         production: &[ParseType::N(373), ParseType::N(367), ParseType::N(120)],
+        is_push_production: true,
     },
     // 851 - InstParameterListList: ;
     Production {
         lhs: 373,
         production: &[],
+        is_push_production: false,
     },
     // 852 - InstParameterListOpt: Comma;
     Production {
         lhs: 374,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 853 - InstParameterListOpt: ;
     Production {
         lhs: 374,
         production: &[],
+        is_push_production: false,
     },
     // 854 - InstParameterGroup: InstParameterGroupList /* Vec */ InstParameterGroupGroup;
     Production {
         lhs: 367,
         production: &[ParseType::N(368), ParseType::N(369)],
+        is_push_production: false,
     },
     // 855 - InstParameterGroupGroup: LBrace InstParameterList RBrace;
     Production {
         lhs: 368,
         production: &[ParseType::N(596), ParseType::N(372), ParseType::N(408)],
+        is_push_production: false,
     },
     // 856 - InstParameterGroupGroup: InstParameterItem;
     Production {
         lhs: 368,
         production: &[ParseType::N(370)],
+        is_push_production: false,
     },
     // 857 - InstParameterGroupList: Attribute InstParameterGroupList;
     Production {
         lhs: 369,
         production: &[ParseType::N(369), ParseType::N(57)],
+        is_push_production: true,
     },
     // 858 - InstParameterGroupList: ;
     Production {
         lhs: 369,
         production: &[],
+        is_push_production: false,
     },
     // 859 - InstParameterItem: Identifier InstParameterItemOpt /* Option */;
     Production {
         lhs: 370,
         production: &[ParseType::N(371), ParseType::N(316)],
+        is_push_production: false,
     },
     // 860 - InstParameterItemOpt: Colon Expression;
     Production {
         lhs: 371,
         production: &[ParseType::N(216), ParseType::N(111)],
+        is_push_production: false,
     },
     // 861 - InstParameterItemOpt: ;
     Production {
         lhs: 371,
         production: &[],
+        is_push_production: false,
     },
     // 862 - InstPort: LParen InstPortOpt /* Option */ RParen;
     Production {
         lhs: 376,
         production: &[ParseType::N(602), ParseType::N(385), ParseType::N(414)],
+        is_push_production: false,
     },
     // 863 - InstPortOpt: InstPortList;
     Production {
         lhs: 385,
         production: &[ParseType::N(382)],
+        is_push_production: false,
     },
     // 864 - InstPortOpt: ;
     Production {
         lhs: 385,
         production: &[],
+        is_push_production: false,
     },
     // 865 - InstPortList: InstPortGroup InstPortListList /* Vec */ InstPortListOpt /* Option */;
     Production {
         lhs: 382,
         production: &[ParseType::N(384), ParseType::N(383), ParseType::N(377)],
+        is_push_production: false,
     },
     // 866 - InstPortListList: Comma InstPortGroup InstPortListList;
     Production {
         lhs: 383,
         production: &[ParseType::N(383), ParseType::N(377), ParseType::N(120)],
+        is_push_production: true,
     },
     // 867 - InstPortListList: ;
     Production {
         lhs: 383,
         production: &[],
+        is_push_production: false,
     },
     // 868 - InstPortListOpt: Comma;
     Production {
         lhs: 384,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 869 - InstPortListOpt: ;
     Production {
         lhs: 384,
         production: &[],
+        is_push_production: false,
     },
     // 870 - InstPortGroup: InstPortGroupList /* Vec */ InstPortGroupGroup;
     Production {
         lhs: 377,
         production: &[ParseType::N(378), ParseType::N(379)],
+        is_push_production: false,
     },
     // 871 - InstPortGroupGroup: LBrace InstPortList RBrace;
     Production {
         lhs: 378,
         production: &[ParseType::N(596), ParseType::N(382), ParseType::N(408)],
+        is_push_production: false,
     },
     // 872 - InstPortGroupGroup: InstPortItem;
     Production {
         lhs: 378,
         production: &[ParseType::N(380)],
+        is_push_production: false,
     },
     // 873 - InstPortGroupList: Attribute InstPortGroupList;
     Production {
         lhs: 379,
         production: &[ParseType::N(379), ParseType::N(57)],
+        is_push_production: true,
     },
     // 874 - InstPortGroupList: ;
     Production {
         lhs: 379,
         production: &[],
+        is_push_production: false,
     },
     // 875 - InstPortItem: Identifier InstPortItemOpt /* Option */;
     Production {
         lhs: 380,
         production: &[ParseType::N(381), ParseType::N(316)],
+        is_push_production: false,
     },
     // 876 - InstPortItemOpt: Colon Expression;
     Production {
         lhs: 381,
         production: &[ParseType::N(216), ParseType::N(111)],
+        is_push_production: false,
     },
     // 877 - InstPortItemOpt: ;
     Production {
         lhs: 381,
         production: &[],
+        is_push_production: false,
     },
     // 878 - WithParameter: Hash LParen WithParameterOpt /* Option */ RParen;
     Production {
@@ -38014,66 +38892,79 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(414),
             ParseType::N(294),
         ],
+        is_push_production: false,
     },
     // 879 - WithParameterOpt: WithParameterList;
     Production {
         lhs: 789,
         production: &[ParseType::N(786)],
+        is_push_production: false,
     },
     // 880 - WithParameterOpt: ;
     Production {
         lhs: 789,
         production: &[],
+        is_push_production: false,
     },
     // 881 - WithParameterList: WithParameterGroup WithParameterListList /* Vec */ WithParameterListOpt /* Option */;
     Production {
         lhs: 786,
         production: &[ParseType::N(788), ParseType::N(787), ParseType::N(779)],
+        is_push_production: false,
     },
     // 882 - WithParameterListList: Comma WithParameterGroup WithParameterListList;
     Production {
         lhs: 787,
         production: &[ParseType::N(787), ParseType::N(779), ParseType::N(120)],
+        is_push_production: true,
     },
     // 883 - WithParameterListList: ;
     Production {
         lhs: 787,
         production: &[],
+        is_push_production: false,
     },
     // 884 - WithParameterListOpt: Comma;
     Production {
         lhs: 788,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 885 - WithParameterListOpt: ;
     Production {
         lhs: 788,
         production: &[],
+        is_push_production: false,
     },
     // 886 - WithParameterGroup: WithParameterGroupList /* Vec */ WithParameterGroupGroup;
     Production {
         lhs: 779,
         production: &[ParseType::N(780), ParseType::N(781)],
+        is_push_production: false,
     },
     // 887 - WithParameterGroupGroup: LBrace WithParameterList RBrace;
     Production {
         lhs: 780,
         production: &[ParseType::N(596), ParseType::N(786), ParseType::N(408)],
+        is_push_production: false,
     },
     // 888 - WithParameterGroupGroup: WithParameterItem;
     Production {
         lhs: 780,
         production: &[ParseType::N(782)],
+        is_push_production: false,
     },
     // 889 - WithParameterGroupList: Attribute WithParameterGroupList;
     Production {
         lhs: 781,
         production: &[ParseType::N(781), ParseType::N(57)],
+        is_push_production: true,
     },
     // 890 - WithParameterGroupList: ;
     Production {
         lhs: 781,
         production: &[],
+        is_push_production: false,
     },
     // 891 - WithParameterItem: WithParameterItemGroup Identifier Colon WithParameterItemGroup0 WithParameterItemOpt /* Option */;
     Production {
@@ -38085,81 +38976,97 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(783),
         ],
+        is_push_production: false,
     },
     // 892 - WithParameterItemGroup0: ArrayType;
     Production {
         lhs: 784,
         production: &[ParseType::N(38)],
+        is_push_production: false,
     },
     // 893 - WithParameterItemGroup0: Type;
     Production {
         lhs: 784,
         production: &[ParseType::N(725)],
+        is_push_production: false,
     },
     // 894 - WithParameterItemGroup: Param;
     Production {
         lhs: 783,
         production: &[ParseType::N(531)],
+        is_push_production: false,
     },
     // 895 - WithParameterItemGroup: Const;
     Production {
         lhs: 783,
         production: &[ParseType::N(141)],
+        is_push_production: false,
     },
     // 896 - WithParameterItemOpt: Equ Expression;
     Production {
         lhs: 785,
         production: &[ParseType::N(216), ParseType::N(204)],
+        is_push_production: false,
     },
     // 897 - WithParameterItemOpt: ;
     Production {
         lhs: 785,
         production: &[],
+        is_push_production: false,
     },
     // 898 - GenericBound: Type;
     Production {
         lhs: 292,
         production: &[ParseType::N(725)],
+        is_push_production: false,
     },
     // 899 - GenericBound: Inst ScopedIdentifier;
     Production {
         lhs: 292,
         production: &[ParseType::N(645), ParseType::N(364)],
+        is_push_production: false,
     },
     // 900 - GenericBound: GenericProtoBound;
     Production {
         lhs: 292,
         production: &[ParseType::N(293)],
+        is_push_production: false,
     },
     // 901 - WithGenericParameter: ColonColonLAngle WithGenericParameterList RAngle;
     Production {
         lhs: 772,
         production: &[ParseType::N(593), ParseType::N(775), ParseType::N(113)],
+        is_push_production: false,
     },
     // 902 - WithGenericParameterList: WithGenericParameterItem WithGenericParameterListList /* Vec */ WithGenericParameterListOpt /* Option */;
     Production {
         lhs: 775,
         production: &[ParseType::N(777), ParseType::N(776), ParseType::N(773)],
+        is_push_production: false,
     },
     // 903 - WithGenericParameterListList: Comma WithGenericParameterItem WithGenericParameterListList;
     Production {
         lhs: 776,
         production: &[ParseType::N(776), ParseType::N(773), ParseType::N(120)],
+        is_push_production: true,
     },
     // 904 - WithGenericParameterListList: ;
     Production {
         lhs: 776,
         production: &[],
+        is_push_production: false,
     },
     // 905 - WithGenericParameterListOpt: Comma;
     Production {
         lhs: 777,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 906 - WithGenericParameterListOpt: ;
     Production {
         lhs: 777,
         production: &[],
+        is_push_production: false,
     },
     // 907 - WithGenericParameterItem: Identifier Colon GenericBound WithGenericParameterItemOpt /* Option */;
     Production {
@@ -38170,166 +39077,199 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(111),
             ParseType::N(316),
         ],
+        is_push_production: false,
     },
     // 908 - WithGenericParameterItemOpt: Equ WithGenericArgumentItem;
     Production {
         lhs: 774,
         production: &[ParseType::N(767), ParseType::N(204)],
+        is_push_production: false,
     },
     // 909 - WithGenericParameterItemOpt: ;
     Production {
         lhs: 774,
         production: &[],
+        is_push_production: false,
     },
     // 910 - GenericProtoBound: ScopedIdentifier;
     Production {
         lhs: 293,
         production: &[ParseType::N(645)],
+        is_push_production: false,
     },
     // 911 - GenericProtoBound: FixedType;
     Production {
         lhs: 293,
         production: &[ParseType::N(252)],
+        is_push_production: false,
     },
     // 912 - WithGenericArgument: ColonColonLAngle WithGenericArgumentOpt /* Option */ RAngle;
     Production {
         lhs: 766,
         production: &[ParseType::N(593), ParseType::N(771), ParseType::N(113)],
+        is_push_production: false,
     },
     // 913 - WithGenericArgumentOpt: WithGenericArgumentList;
     Production {
         lhs: 771,
         production: &[ParseType::N(768)],
+        is_push_production: false,
     },
     // 914 - WithGenericArgumentOpt: ;
     Production {
         lhs: 771,
         production: &[],
+        is_push_production: false,
     },
     // 915 - WithGenericArgumentList: WithGenericArgumentItem WithGenericArgumentListList /* Vec */ WithGenericArgumentListOpt /* Option */;
     Production {
         lhs: 768,
         production: &[ParseType::N(770), ParseType::N(769), ParseType::N(767)],
+        is_push_production: false,
     },
     // 916 - WithGenericArgumentListList: Comma WithGenericArgumentItem WithGenericArgumentListList;
     Production {
         lhs: 769,
         production: &[ParseType::N(769), ParseType::N(767), ParseType::N(120)],
+        is_push_production: true,
     },
     // 917 - WithGenericArgumentListList: ;
     Production {
         lhs: 769,
         production: &[],
+        is_push_production: false,
     },
     // 918 - WithGenericArgumentListOpt: Comma;
     Production {
         lhs: 770,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 919 - WithGenericArgumentListOpt: ;
     Production {
         lhs: 770,
         production: &[],
+        is_push_production: false,
     },
     // 920 - WithGenericArgumentItem: GenericArgIdentifier;
     Production {
         lhs: 767,
         production: &[ParseType::N(290)],
+        is_push_production: false,
     },
     // 921 - WithGenericArgumentItem: FixedType;
     Production {
         lhs: 767,
         production: &[ParseType::N(252)],
+        is_push_production: false,
     },
     // 922 - WithGenericArgumentItem: Number;
     Production {
         lhs: 767,
         production: &[ParseType::N(475)],
+        is_push_production: false,
     },
     // 923 - WithGenericArgumentItem: BooleanLiteral;
     Production {
         lhs: 767,
         production: &[ParseType::N(82)],
+        is_push_production: false,
     },
     // 924 - PortDeclaration: LParen PortDeclarationOpt /* Option */ RParen;
     Production {
         lhs: 537,
         production: &[ParseType::N(602), ParseType::N(546), ParseType::N(414)],
+        is_push_production: false,
     },
     // 925 - PortDeclarationOpt: PortDeclarationList;
     Production {
         lhs: 546,
         production: &[ParseType::N(543)],
+        is_push_production: false,
     },
     // 926 - PortDeclarationOpt: ;
     Production {
         lhs: 546,
         production: &[],
+        is_push_production: false,
     },
     // 927 - PortDeclarationList: PortDeclarationGroup PortDeclarationListList /* Vec */ PortDeclarationListOpt /* Option */;
     Production {
         lhs: 543,
         production: &[ParseType::N(545), ParseType::N(544), ParseType::N(538)],
+        is_push_production: false,
     },
     // 928 - PortDeclarationListList: Comma PortDeclarationGroup PortDeclarationListList;
     Production {
         lhs: 544,
         production: &[ParseType::N(544), ParseType::N(538), ParseType::N(120)],
+        is_push_production: true,
     },
     // 929 - PortDeclarationListList: ;
     Production {
         lhs: 544,
         production: &[],
+        is_push_production: false,
     },
     // 930 - PortDeclarationListOpt: Comma;
     Production {
         lhs: 545,
         production: &[ParseType::N(120)],
+        is_push_production: false,
     },
     // 931 - PortDeclarationListOpt: ;
     Production {
         lhs: 545,
         production: &[],
+        is_push_production: false,
     },
     // 932 - PortDeclarationGroup: PortDeclarationGroupList /* Vec */ PortDeclarationGroupGroup;
     Production {
         lhs: 538,
         production: &[ParseType::N(539), ParseType::N(540)],
+        is_push_production: false,
     },
     // 933 - PortDeclarationGroupGroup: LBrace PortDeclarationList RBrace;
     Production {
         lhs: 539,
         production: &[ParseType::N(596), ParseType::N(543), ParseType::N(408)],
+        is_push_production: false,
     },
     // 934 - PortDeclarationGroupGroup: PortDeclarationItem;
     Production {
         lhs: 539,
         production: &[ParseType::N(541)],
+        is_push_production: false,
     },
     // 935 - PortDeclarationGroupList: Attribute PortDeclarationGroupList;
     Production {
         lhs: 540,
         production: &[ParseType::N(540), ParseType::N(57)],
+        is_push_production: true,
     },
     // 936 - PortDeclarationGroupList: ;
     Production {
         lhs: 540,
         production: &[],
+        is_push_production: false,
     },
     // 937 - PortDeclarationItem: Identifier Colon PortDeclarationItemGroup;
     Production {
         lhs: 541,
         production: &[ParseType::N(542), ParseType::N(111), ParseType::N(316)],
+        is_push_production: false,
     },
     // 938 - PortDeclarationItemGroup: PortTypeConcrete;
     Production {
         lhs: 542,
         production: &[ParseType::N(552)],
+        is_push_production: false,
     },
     // 939 - PortDeclarationItemGroup: PortTypeAbstract;
     Production {
         lhs: 542,
         production: &[ParseType::N(548)],
+        is_push_production: false,
     },
     // 940 - PortTypeConcrete: Direction PortTypeConcreteOpt /* Option */ ArrayType PortTypeConcreteOpt0 /* Option */;
     Production {
@@ -38340,31 +39280,37 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(553),
             ParseType::N(162),
         ],
+        is_push_production: false,
     },
     // 941 - PortTypeConcreteOpt0: Equ PortDefaultValue;
     Production {
         lhs: 554,
         production: &[ParseType::N(547), ParseType::N(204)],
+        is_push_production: false,
     },
     // 942 - PortTypeConcreteOpt0: ;
     Production {
         lhs: 554,
         production: &[],
+        is_push_production: false,
     },
     // 943 - PortTypeConcreteOpt: ClockDomain;
     Production {
         lhs: 553,
         production: &[ParseType::N(102)],
+        is_push_production: false,
     },
     // 944 - PortTypeConcreteOpt: ;
     Production {
         lhs: 553,
         production: &[],
+        is_push_production: false,
     },
     // 945 - PortDefaultValue: Expression;
     Production {
         lhs: 547,
         production: &[ParseType::N(216)],
+        is_push_production: false,
     },
     // 946 - PortTypeAbstract: PortTypeAbstractOpt /* Option */ Interface PortTypeAbstractOpt0 /* Option */ PortTypeAbstractOpt1 /* Option */;
     Production {
@@ -38375,61 +39321,73 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(389),
             ParseType::N(549),
         ],
+        is_push_production: false,
     },
     // 947 - PortTypeAbstractOpt1: Array;
     Production {
         lhs: 551,
         production: &[ParseType::N(30)],
+        is_push_production: false,
     },
     // 948 - PortTypeAbstractOpt1: ;
     Production {
         lhs: 551,
         production: &[],
+        is_push_production: false,
     },
     // 949 - PortTypeAbstractOpt0: ColonColon Identifier;
     Production {
         lhs: 550,
         production: &[ParseType::N(316), ParseType::N(112)],
+        is_push_production: false,
     },
     // 950 - PortTypeAbstractOpt0: ;
     Production {
         lhs: 550,
         production: &[],
+        is_push_production: false,
     },
     // 951 - PortTypeAbstractOpt: ClockDomain;
     Production {
         lhs: 549,
         production: &[ParseType::N(102)],
+        is_push_production: false,
     },
     // 952 - PortTypeAbstractOpt: ;
     Production {
         lhs: 549,
         production: &[],
+        is_push_production: false,
     },
     // 953 - Direction: Input;
     Production {
         lhs: 162,
         production: &[ParseType::N(357)],
+        is_push_production: false,
     },
     // 954 - Direction: Output;
     Production {
         lhs: 162,
         production: &[ParseType::N(500)],
+        is_push_production: false,
     },
     // 955 - Direction: Inout;
     Production {
         lhs: 162,
         production: &[ParseType::N(354)],
+        is_push_production: false,
     },
     // 956 - Direction: Modport;
     Production {
         lhs: 162,
         production: &[ParseType::N(441)],
+        is_push_production: false,
     },
     // 957 - Direction: Import;
     Production {
         lhs: 162,
         production: &[ParseType::N(338)],
+        is_push_production: false,
     },
     // 958 - FunctionDeclaration: Function Identifier FunctionDeclarationOpt /* Option */ FunctionDeclarationOpt0 /* Option */ FunctionDeclarationOpt1 /* Option */ StatementBlock;
     Production {
@@ -38442,36 +39400,43 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(259),
         ],
+        is_push_production: false,
     },
     // 959 - FunctionDeclarationOpt1: MinusGT ScalarType;
     Production {
         lhs: 265,
         production: &[ParseType::N(641), ParseType::N(438)],
+        is_push_production: false,
     },
     // 960 - FunctionDeclarationOpt1: ;
     Production {
         lhs: 265,
         production: &[],
+        is_push_production: false,
     },
     // 961 - FunctionDeclarationOpt0: PortDeclaration;
     Production {
         lhs: 264,
         production: &[ParseType::N(537)],
+        is_push_production: false,
     },
     // 962 - FunctionDeclarationOpt0: ;
     Production {
         lhs: 264,
         production: &[],
+        is_push_production: false,
     },
     // 963 - FunctionDeclarationOpt: WithGenericParameter;
     Production {
         lhs: 263,
         production: &[ParseType::N(772)],
+        is_push_production: false,
     },
     // 964 - FunctionDeclarationOpt: ;
     Production {
         lhs: 263,
         production: &[],
+        is_push_production: false,
     },
     // 965 - ImportDeclaration: Import ScopedIdentifier ImportDeclarationOpt /* Option */ Semicolon;
     Production {
@@ -38482,16 +39447,19 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(645),
             ParseType::N(338),
         ],
+        is_push_production: false,
     },
     // 966 - ImportDeclarationOpt: ColonColon Star;
     Production {
         lhs: 340,
         production: &[ParseType::N(659), ParseType::N(112)],
+        is_push_production: false,
     },
     // 967 - ImportDeclarationOpt: ;
     Production {
         lhs: 340,
         production: &[],
+        is_push_production: false,
     },
     // 968 - UnsafeBlock: Unsafe LParen Identifier RParen LBrace UnsafeBlockList /* Vec */ RBrace;
     Production {
@@ -38505,16 +39473,19 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(414),
             ParseType::N(749),
         ],
+        is_push_production: false,
     },
     // 969 - UnsafeBlockList: GenerateGroup UnsafeBlockList;
     Production {
         lhs: 751,
         production: &[ParseType::N(751), ParseType::N(277)],
+        is_push_production: true,
     },
     // 970 - UnsafeBlockList: ;
     Production {
         lhs: 751,
         production: &[],
+        is_push_production: false,
     },
     // 971 - ModuleDeclaration: Module Identifier ModuleDeclarationOpt /* Option */ ModuleDeclarationOpt0 /* Option */ ModuleDeclarationOpt1 /* Option */ ModuleDeclarationOpt2 /* Option */ LBrace ModuleDeclarationList /* Vec */ RBrace;
     Production {
@@ -38530,96 +39501,115 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(458),
         ],
+        is_push_production: false,
     },
     // 972 - ModuleDeclarationList: ModuleGroup ModuleDeclarationList;
     Production {
         lhs: 460,
         production: &[ParseType::N(460), ParseType::N(465)],
+        is_push_production: true,
     },
     // 973 - ModuleDeclarationList: ;
     Production {
         lhs: 460,
         production: &[],
+        is_push_production: false,
     },
     // 974 - ModuleDeclarationOpt2: PortDeclaration;
     Production {
         lhs: 464,
         production: &[ParseType::N(537)],
+        is_push_production: false,
     },
     // 975 - ModuleDeclarationOpt2: ;
     Production {
         lhs: 464,
         production: &[],
+        is_push_production: false,
     },
     // 976 - ModuleDeclarationOpt1: WithParameter;
     Production {
         lhs: 463,
         production: &[ParseType::N(778)],
+        is_push_production: false,
     },
     // 977 - ModuleDeclarationOpt1: ;
     Production {
         lhs: 463,
         production: &[],
+        is_push_production: false,
     },
     // 978 - ModuleDeclarationOpt0: For ScopedIdentifier;
     Production {
         lhs: 462,
         production: &[ParseType::N(645), ParseType::N(253)],
+        is_push_production: false,
     },
     // 979 - ModuleDeclarationOpt0: ;
     Production {
         lhs: 462,
         production: &[],
+        is_push_production: false,
     },
     // 980 - ModuleDeclarationOpt: WithGenericParameter;
     Production {
         lhs: 461,
         production: &[ParseType::N(772)],
+        is_push_production: false,
     },
     // 981 - ModuleDeclarationOpt: ;
     Production {
         lhs: 461,
         production: &[],
+        is_push_production: false,
     },
     // 982 - ModuleGroup: ModuleGroupList /* Vec */ ModuleGroupGroup;
     Production {
         lhs: 465,
         production: &[ParseType::N(466), ParseType::N(468)],
+        is_push_production: false,
     },
     // 983 - ModuleGroupGroup: LBrace ModuleGroupGroupList /* Vec */ RBrace;
     Production {
         lhs: 466,
         production: &[ParseType::N(596), ParseType::N(467), ParseType::N(408)],
+        is_push_production: false,
     },
     // 984 - ModuleGroupGroupList: ModuleGroup ModuleGroupGroupList;
     Production {
         lhs: 467,
         production: &[ParseType::N(467), ParseType::N(465)],
+        is_push_production: true,
     },
     // 985 - ModuleGroupGroupList: ;
     Production {
         lhs: 467,
         production: &[],
+        is_push_production: false,
     },
     // 986 - ModuleGroupGroup: ModuleItem;
     Production {
         lhs: 466,
         production: &[ParseType::N(469)],
+        is_push_production: false,
     },
     // 987 - ModuleGroupList: Attribute ModuleGroupList;
     Production {
         lhs: 468,
         production: &[ParseType::N(468), ParseType::N(57)],
+        is_push_production: true,
     },
     // 988 - ModuleGroupList: ;
     Production {
         lhs: 468,
         production: &[],
+        is_push_production: false,
     },
     // 989 - ModuleItem: GenerateItem;
     Production {
         lhs: 469,
         production: &[ParseType::N(284)],
+        is_push_production: false,
     },
     // 990 - InterfaceDeclaration: Interface Identifier InterfaceDeclarationOpt /* Option */ InterfaceDeclarationOpt0 /* Option */ InterfaceDeclarationOpt1 /* Option */ LBrace InterfaceDeclarationList /* Vec */ RBrace;
     Production {
@@ -38634,91 +39624,109 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(389),
         ],
+        is_push_production: false,
     },
     // 991 - InterfaceDeclarationList: InterfaceGroup InterfaceDeclarationList;
     Production {
         lhs: 391,
         production: &[ParseType::N(391), ParseType::N(395)],
+        is_push_production: true,
     },
     // 992 - InterfaceDeclarationList: ;
     Production {
         lhs: 391,
         production: &[],
+        is_push_production: false,
     },
     // 993 - InterfaceDeclarationOpt1: WithParameter;
     Production {
         lhs: 394,
         production: &[ParseType::N(778)],
+        is_push_production: false,
     },
     // 994 - InterfaceDeclarationOpt1: ;
     Production {
         lhs: 394,
         production: &[],
+        is_push_production: false,
     },
     // 995 - InterfaceDeclarationOpt0: For ScopedIdentifier;
     Production {
         lhs: 393,
         production: &[ParseType::N(645), ParseType::N(253)],
+        is_push_production: false,
     },
     // 996 - InterfaceDeclarationOpt0: ;
     Production {
         lhs: 393,
         production: &[],
+        is_push_production: false,
     },
     // 997 - InterfaceDeclarationOpt: WithGenericParameter;
     Production {
         lhs: 392,
         production: &[ParseType::N(772)],
+        is_push_production: false,
     },
     // 998 - InterfaceDeclarationOpt: ;
     Production {
         lhs: 392,
         production: &[],
+        is_push_production: false,
     },
     // 999 - InterfaceGroup: InterfaceGroupList /* Vec */ InterfaceGroupGroup;
     Production {
         lhs: 395,
         production: &[ParseType::N(396), ParseType::N(398)],
+        is_push_production: false,
     },
     // 1000 - InterfaceGroupGroup: LBrace InterfaceGroupGroupList /* Vec */ RBrace;
     Production {
         lhs: 396,
         production: &[ParseType::N(596), ParseType::N(397), ParseType::N(408)],
+        is_push_production: false,
     },
     // 1001 - InterfaceGroupGroupList: InterfaceGroup InterfaceGroupGroupList;
     Production {
         lhs: 397,
         production: &[ParseType::N(397), ParseType::N(395)],
+        is_push_production: true,
     },
     // 1002 - InterfaceGroupGroupList: ;
     Production {
         lhs: 397,
         production: &[],
+        is_push_production: false,
     },
     // 1003 - InterfaceGroupGroup: InterfaceItem;
     Production {
         lhs: 396,
         production: &[ParseType::N(399)],
+        is_push_production: false,
     },
     // 1004 - InterfaceGroupList: Attribute InterfaceGroupList;
     Production {
         lhs: 398,
         production: &[ParseType::N(398), ParseType::N(57)],
+        is_push_production: true,
     },
     // 1005 - InterfaceGroupList: ;
     Production {
         lhs: 398,
         production: &[],
+        is_push_production: false,
     },
     // 1006 - InterfaceItem: GenerateItem;
     Production {
         lhs: 399,
         production: &[ParseType::N(284)],
+        is_push_production: false,
     },
     // 1007 - InterfaceItem: ModportDeclaration;
     Production {
         lhs: 399,
         production: &[ParseType::N(442)],
+        is_push_production: false,
     },
     // 1008 - GenerateIfDeclaration: If Expression GenerateNamedBlock GenerateIfDeclarationList /* Vec */ GenerateIfDeclarationOpt /* Option */;
     Production {
@@ -38730,6 +39738,7 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(216),
             ParseType::N(324),
         ],
+        is_push_production: false,
     },
     // 1009 - GenerateIfDeclarationList: Else If Expression GenerateOptionalNamedBlock GenerateIfDeclarationList;
     Production {
@@ -38741,21 +39750,25 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(324),
             ParseType::N(175),
         ],
+        is_push_production: true,
     },
     // 1010 - GenerateIfDeclarationList: ;
     Production {
         lhs: 282,
         production: &[],
+        is_push_production: false,
     },
     // 1011 - GenerateIfDeclarationOpt: Else GenerateOptionalNamedBlock;
     Production {
         lhs: 283,
         production: &[ParseType::N(287), ParseType::N(175)],
+        is_push_production: false,
     },
     // 1012 - GenerateIfDeclarationOpt: ;
     Production {
         lhs: 283,
         production: &[],
+        is_push_production: false,
     },
     // 1013 - GenerateForDeclaration: For Identifier In GenerateForDeclarationOpt /* Option */ Range GenerateForDeclarationOpt0 /* Option */ GenerateNamedBlock;
     Production {
@@ -38769,31 +39782,37 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(253),
         ],
+        is_push_production: false,
     },
     // 1014 - GenerateForDeclarationOpt0: Step AssignmentOperator Expression;
     Production {
         lhs: 276,
         production: &[ParseType::N(216), ParseType::N(54), ParseType::N(672)],
+        is_push_production: false,
     },
     // 1015 - GenerateForDeclarationOpt0: ;
     Production {
         lhs: 276,
         production: &[],
+        is_push_production: false,
     },
     // 1016 - GenerateForDeclarationOpt: Rev;
     Production {
         lhs: 275,
         production: &[ParseType::N(635)],
+        is_push_production: false,
     },
     // 1017 - GenerateForDeclarationOpt: ;
     Production {
         lhs: 275,
         production: &[],
+        is_push_production: false,
     },
     // 1018 - GenerateBlockDeclaration: GenerateNamedBlock;
     Production {
         lhs: 273,
         production: &[ParseType::N(285)],
+        is_push_production: false,
     },
     // 1019 - GenerateNamedBlock: Colon Identifier LBrace GenerateNamedBlockList /* Vec */ RBrace;
     Production {
@@ -38805,16 +39824,19 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(111),
         ],
+        is_push_production: false,
     },
     // 1020 - GenerateNamedBlockList: GenerateGroup GenerateNamedBlockList;
     Production {
         lhs: 286,
         production: &[ParseType::N(286), ParseType::N(277)],
+        is_push_production: true,
     },
     // 1021 - GenerateNamedBlockList: ;
     Production {
         lhs: 286,
         production: &[],
+        is_push_production: false,
     },
     // 1022 - GenerateOptionalNamedBlock: GenerateOptionalNamedBlockOpt /* Option */ LBrace GenerateOptionalNamedBlockList /* Vec */ RBrace;
     Production {
@@ -38825,176 +39847,211 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(408),
             ParseType::N(289),
         ],
+        is_push_production: false,
     },
     // 1023 - GenerateOptionalNamedBlockList: GenerateGroup GenerateOptionalNamedBlockList;
     Production {
         lhs: 288,
         production: &[ParseType::N(288), ParseType::N(277)],
+        is_push_production: true,
     },
     // 1024 - GenerateOptionalNamedBlockList: ;
     Production {
         lhs: 288,
         production: &[],
+        is_push_production: false,
     },
     // 1025 - GenerateOptionalNamedBlockOpt: Colon Identifier;
     Production {
         lhs: 289,
         production: &[ParseType::N(316), ParseType::N(111)],
+        is_push_production: false,
     },
     // 1026 - GenerateOptionalNamedBlockOpt: ;
     Production {
         lhs: 289,
         production: &[],
+        is_push_production: false,
     },
     // 1027 - GenerateGroup: GenerateGroupList /* Vec */ GenerateGroupGroup;
     Production {
         lhs: 277,
         production: &[ParseType::N(278), ParseType::N(280)],
+        is_push_production: false,
     },
     // 1028 - GenerateGroupGroup: LBrace GenerateGroupGroupList /* Vec */ RBrace;
     Production {
         lhs: 278,
         production: &[ParseType::N(596), ParseType::N(279), ParseType::N(408)],
+        is_push_production: false,
     },
     // 1029 - GenerateGroupGroupList: GenerateGroup GenerateGroupGroupList;
     Production {
         lhs: 279,
         production: &[ParseType::N(279), ParseType::N(277)],
+        is_push_production: true,
     },
     // 1030 - GenerateGroupGroupList: ;
     Production {
         lhs: 279,
         production: &[],
+        is_push_production: false,
     },
     // 1031 - GenerateGroupGroup: GenerateItem;
     Production {
         lhs: 278,
         production: &[ParseType::N(284)],
+        is_push_production: false,
     },
     // 1032 - GenerateGroupList: Attribute GenerateGroupList;
     Production {
         lhs: 280,
         production: &[ParseType::N(280), ParseType::N(57)],
+        is_push_production: true,
     },
     // 1033 - GenerateGroupList: ;
     Production {
         lhs: 280,
         production: &[],
+        is_push_production: false,
     },
     // 1034 - GenerateItem: LetDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(421)],
+        is_push_production: false,
     },
     // 1035 - GenerateItem: VarDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(756)],
+        is_push_production: false,
     },
     // 1036 - GenerateItem: InstDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(365)],
+        is_push_production: false,
     },
     // 1037 - GenerateItem: BindDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(73)],
+        is_push_production: false,
     },
     // 1038 - GenerateItem: ConstDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(142)],
+        is_push_production: false,
     },
     // 1039 - GenerateItem: GenDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(269)],
+        is_push_production: false,
     },
     // 1040 - GenerateItem: AlwaysFfDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(14)],
+        is_push_production: false,
     },
     // 1041 - GenerateItem: AlwaysCombDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(9)],
+        is_push_production: false,
     },
     // 1042 - GenerateItem: AssignDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(48)],
+        is_push_production: false,
     },
     // 1043 - GenerateItem: ConnectDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(138)],
+        is_push_production: false,
     },
     // 1044 - GenerateItem: FunctionDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(262)],
+        is_push_production: false,
     },
     // 1045 - GenerateItem: GenerateIfDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(281)],
+        is_push_production: false,
     },
     // 1046 - GenerateItem: GenerateForDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(274)],
+        is_push_production: false,
     },
     // 1047 - GenerateItem: GenerateBlockDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(273)],
+        is_push_production: false,
     },
     // 1048 - GenerateItem: TypeDefDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(726)],
+        is_push_production: false,
     },
     // 1049 - GenerateItem: EnumDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(192)],
+        is_push_production: false,
     },
     // 1050 - GenerateItem: StructUnionDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(691)],
+        is_push_production: false,
     },
     // 1051 - GenerateItem: ImportDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(339)],
+        is_push_production: false,
     },
     // 1052 - GenerateItem: AliasDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(1)],
+        is_push_production: false,
     },
     // 1053 - GenerateItem: InitialDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(351)],
+        is_push_production: false,
     },
     // 1054 - GenerateItem: FinalDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(246)],
+        is_push_production: false,
     },
     // 1055 - GenerateItem: UnsafeBlock;
     Production {
         lhs: 284,
         production: &[ParseType::N(750)],
+        is_push_production: false,
     },
     // 1056 - GenerateItem: EmbedDeclaration;
     Production {
         lhs: 284,
         production: &[ParseType::N(181)],
+        is_push_production: false,
     },
     // 1057 - PackageDeclaration: Package Identifier PackageDeclarationOpt /* Option */ PackageDeclarationOpt0 /* Option */ LBrace PackageDeclarationList /* Vec */ RBrace;
     Production {
@@ -39008,116 +40065,139 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(519),
         ],
+        is_push_production: false,
     },
     // 1058 - PackageDeclarationList: PackageGroup PackageDeclarationList;
     Production {
         lhs: 521,
         production: &[ParseType::N(521), ParseType::N(524)],
+        is_push_production: true,
     },
     // 1059 - PackageDeclarationList: ;
     Production {
         lhs: 521,
         production: &[],
+        is_push_production: false,
     },
     // 1060 - PackageDeclarationOpt0: For ScopedIdentifier;
     Production {
         lhs: 523,
         production: &[ParseType::N(645), ParseType::N(253)],
+        is_push_production: false,
     },
     // 1061 - PackageDeclarationOpt0: ;
     Production {
         lhs: 523,
         production: &[],
+        is_push_production: false,
     },
     // 1062 - PackageDeclarationOpt: WithGenericParameter;
     Production {
         lhs: 522,
         production: &[ParseType::N(772)],
+        is_push_production: false,
     },
     // 1063 - PackageDeclarationOpt: ;
     Production {
         lhs: 522,
         production: &[],
+        is_push_production: false,
     },
     // 1064 - PackageGroup: PackageGroupList /* Vec */ PackageGroupGroup;
     Production {
         lhs: 524,
         production: &[ParseType::N(525), ParseType::N(527)],
+        is_push_production: false,
     },
     // 1065 - PackageGroupGroup: LBrace PackageGroupGroupList /* Vec */ RBrace;
     Production {
         lhs: 525,
         production: &[ParseType::N(596), ParseType::N(526), ParseType::N(408)],
+        is_push_production: false,
     },
     // 1066 - PackageGroupGroupList: PackageGroup PackageGroupGroupList;
     Production {
         lhs: 526,
         production: &[ParseType::N(526), ParseType::N(524)],
+        is_push_production: true,
     },
     // 1067 - PackageGroupGroupList: ;
     Production {
         lhs: 526,
         production: &[],
+        is_push_production: false,
     },
     // 1068 - PackageGroupGroup: PackageItem;
     Production {
         lhs: 525,
         production: &[ParseType::N(528)],
+        is_push_production: false,
     },
     // 1069 - PackageGroupList: Attribute PackageGroupList;
     Production {
         lhs: 527,
         production: &[ParseType::N(527), ParseType::N(57)],
+        is_push_production: true,
     },
     // 1070 - PackageGroupList: ;
     Production {
         lhs: 527,
         production: &[],
+        is_push_production: false,
     },
     // 1071 - PackageItem: ConstDeclaration;
     Production {
         lhs: 528,
         production: &[ParseType::N(142)],
+        is_push_production: false,
     },
     // 1072 - PackageItem: GenDeclaration;
     Production {
         lhs: 528,
         production: &[ParseType::N(269)],
+        is_push_production: false,
     },
     // 1073 - PackageItem: TypeDefDeclaration;
     Production {
         lhs: 528,
         production: &[ParseType::N(726)],
+        is_push_production: false,
     },
     // 1074 - PackageItem: EnumDeclaration;
     Production {
         lhs: 528,
         production: &[ParseType::N(192)],
+        is_push_production: false,
     },
     // 1075 - PackageItem: StructUnionDeclaration;
     Production {
         lhs: 528,
         production: &[ParseType::N(691)],
+        is_push_production: false,
     },
     // 1076 - PackageItem: FunctionDeclaration;
     Production {
         lhs: 528,
         production: &[ParseType::N(262)],
+        is_push_production: false,
     },
     // 1077 - PackageItem: ImportDeclaration;
     Production {
         lhs: 528,
         production: &[ParseType::N(339)],
+        is_push_production: false,
     },
     // 1078 - PackageItem: AliasDeclaration;
     Production {
         lhs: 528,
         production: &[ParseType::N(1)],
+        is_push_production: false,
     },
     // 1079 - PackageItem: EmbedDeclaration;
     Production {
         lhs: 528,
         production: &[ParseType::N(181)],
+        is_push_production: false,
     },
     // 1080 - AliasDeclaration: Alias AliasDeclarationGroup Identifier Equ ScopedIdentifier Semicolon;
     Production {
@@ -39130,41 +40210,49 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(2),
             ParseType::N(0),
         ],
+        is_push_production: false,
     },
     // 1081 - AliasDeclarationGroup: Module;
     Production {
         lhs: 2,
         production: &[ParseType::N(458)],
+        is_push_production: false,
     },
     // 1082 - AliasDeclarationGroup: Interface;
     Production {
         lhs: 2,
         production: &[ParseType::N(389)],
+        is_push_production: false,
     },
     // 1083 - AliasDeclarationGroup: Package;
     Production {
         lhs: 2,
         production: &[ParseType::N(519)],
+        is_push_production: false,
     },
     // 1084 - ProtoDeclaration: Proto ProtoDeclarationGroup;
     Production {
         lhs: 560,
         production: &[ParseType::N(561), ParseType::N(555)],
+        is_push_production: false,
     },
     // 1085 - ProtoDeclarationGroup: ProtoModuleDeclaration;
     Production {
         lhs: 561,
         production: &[ParseType::N(570)],
+        is_push_production: false,
     },
     // 1086 - ProtoDeclarationGroup: ProtoInterfaceDeclaration;
     Production {
         lhs: 561,
         production: &[ParseType::N(566)],
+        is_push_production: false,
     },
     // 1087 - ProtoDeclarationGroup: ProtoPackageDeclaration;
     Production {
         lhs: 561,
         production: &[ParseType::N(574)],
+        is_push_production: false,
     },
     // 1088 - ProtoModuleDeclaration: Module Identifier ProtoModuleDeclarationOpt /* Option */ ProtoModuleDeclarationOpt0 /* Option */ Semicolon;
     Production {
@@ -39176,26 +40264,31 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(458),
         ],
+        is_push_production: false,
     },
     // 1089 - ProtoModuleDeclarationOpt0: PortDeclaration;
     Production {
         lhs: 572,
         production: &[ParseType::N(537)],
+        is_push_production: false,
     },
     // 1090 - ProtoModuleDeclarationOpt0: ;
     Production {
         lhs: 572,
         production: &[],
+        is_push_production: false,
     },
     // 1091 - ProtoModuleDeclarationOpt: WithParameter;
     Production {
         lhs: 571,
         production: &[ParseType::N(778)],
+        is_push_production: false,
     },
     // 1092 - ProtoModuleDeclarationOpt: ;
     Production {
         lhs: 571,
         production: &[],
+        is_push_production: false,
     },
     // 1093 - ProtoInterfaceDeclaration: Interface Identifier ProtoInterfaceDeclarationOpt /* Option */ LBrace ProtoInterfaceDeclarationList /* Vec */ RBrace;
     Production {
@@ -39208,61 +40301,73 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(389),
         ],
+        is_push_production: false,
     },
     // 1094 - ProtoInterfaceDeclarationList: ProtoInterfaceItem ProtoInterfaceDeclarationList;
     Production {
         lhs: 567,
         production: &[ParseType::N(567), ParseType::N(569)],
+        is_push_production: true,
     },
     // 1095 - ProtoInterfaceDeclarationList: ;
     Production {
         lhs: 567,
         production: &[],
+        is_push_production: false,
     },
     // 1096 - ProtoInterfaceDeclarationOpt: WithParameter;
     Production {
         lhs: 568,
         production: &[ParseType::N(778)],
+        is_push_production: false,
     },
     // 1097 - ProtoInterfaceDeclarationOpt: ;
     Production {
         lhs: 568,
         production: &[],
+        is_push_production: false,
     },
     // 1098 - ProtoInterfaceItem: VarDeclaration;
     Production {
         lhs: 569,
         production: &[ParseType::N(756)],
+        is_push_production: false,
     },
     // 1099 - ProtoInterfaceItem: ProtoConstDeclaration;
     Production {
         lhs: 569,
         production: &[ParseType::N(558)],
+        is_push_production: false,
     },
     // 1100 - ProtoInterfaceItem: ProtoFunctionDeclaration;
     Production {
         lhs: 569,
         production: &[ParseType::N(562)],
+        is_push_production: false,
     },
     // 1101 - ProtoInterfaceItem: ProtoTypeDefDeclaration;
     Production {
         lhs: 569,
         production: &[ParseType::N(578)],
+        is_push_production: false,
     },
     // 1102 - ProtoInterfaceItem: ProtoAliasDeclaration;
     Production {
         lhs: 569,
         production: &[ParseType::N(556)],
+        is_push_production: false,
     },
     // 1103 - ProtoInterfaceItem: ModportDeclaration;
     Production {
         lhs: 569,
         production: &[ParseType::N(442)],
+        is_push_production: false,
     },
     // 1104 - ProtoInterfaceItem: ImportDeclaration;
     Production {
         lhs: 569,
         production: &[ParseType::N(339)],
+        is_push_production: false,
     },
     // 1105 - ProtoPackageDeclaration: Package Identifier LBrace ProtoPackageDeclarationList /* Vec */ RBrace;
     Production {
@@ -39274,51 +40379,61 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(519),
         ],
+        is_push_production: false,
     },
     // 1106 - ProtoPackageDeclarationList: ProtoPacakgeItem ProtoPackageDeclarationList;
     Production {
         lhs: 575,
         production: &[ParseType::N(575), ParseType::N(573)],
+        is_push_production: true,
     },
     // 1107 - ProtoPackageDeclarationList: ;
     Production {
         lhs: 575,
         production: &[],
+        is_push_production: false,
     },
     // 1108 - ProtoPacakgeItem: ProtoConstDeclaration;
     Production {
         lhs: 573,
         production: &[ParseType::N(558)],
+        is_push_production: false,
     },
     // 1109 - ProtoPacakgeItem: ProtoTypeDefDeclaration;
     Production {
         lhs: 573,
         production: &[ParseType::N(578)],
+        is_push_production: false,
     },
     // 1110 - ProtoPacakgeItem: EnumDeclaration;
     Production {
         lhs: 573,
         production: &[ParseType::N(192)],
+        is_push_production: false,
     },
     // 1111 - ProtoPacakgeItem: StructUnionDeclaration;
     Production {
         lhs: 573,
         production: &[ParseType::N(691)],
+        is_push_production: false,
     },
     // 1112 - ProtoPacakgeItem: ProtoFunctionDeclaration;
     Production {
         lhs: 573,
         production: &[ParseType::N(562)],
+        is_push_production: false,
     },
     // 1113 - ProtoPacakgeItem: ProtoAliasDeclaration;
     Production {
         lhs: 573,
         production: &[ParseType::N(556)],
+        is_push_production: false,
     },
     // 1114 - ProtoPacakgeItem: ImportDeclaration;
     Production {
         lhs: 573,
         production: &[ParseType::N(339)],
+        is_push_production: false,
     },
     // 1115 - ProtoConstDeclaration: Const Identifier Colon ProtoConstDeclarationGroup Semicolon;
     Production {
@@ -39330,16 +40445,19 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(141),
         ],
+        is_push_production: false,
     },
     // 1116 - ProtoConstDeclarationGroup: ArrayType;
     Production {
         lhs: 559,
         production: &[ParseType::N(38)],
+        is_push_production: false,
     },
     // 1117 - ProtoConstDeclarationGroup: Type;
     Production {
         lhs: 559,
         production: &[ParseType::N(725)],
+        is_push_production: false,
     },
     // 1118 - ProtoTypeDefDeclaration: Type Identifier ProtoTypeDefDeclarationOpt /* Option */ Semicolon;
     Production {
@@ -39350,16 +40468,19 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(725),
         ],
+        is_push_production: false,
     },
     // 1119 - ProtoTypeDefDeclarationOpt: Equ ArrayType;
     Production {
         lhs: 579,
         production: &[ParseType::N(38), ParseType::N(204)],
+        is_push_production: false,
     },
     // 1120 - ProtoTypeDefDeclarationOpt: ;
     Production {
         lhs: 579,
         production: &[],
+        is_push_production: false,
     },
     // 1121 - ProtoFunctionDeclaration: Function Identifier ProtoFunctionDeclarationOpt /* Option */ ProtoFunctionDeclarationOpt0 /* Option */ ProtoFunctionDeclarationOpt1 /* Option */ Semicolon;
     Production {
@@ -39372,36 +40493,43 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(316),
             ParseType::N(259),
         ],
+        is_push_production: false,
     },
     // 1122 - ProtoFunctionDeclarationOpt1: MinusGT ScalarType;
     Production {
         lhs: 565,
         production: &[ParseType::N(641), ParseType::N(438)],
+        is_push_production: false,
     },
     // 1123 - ProtoFunctionDeclarationOpt1: ;
     Production {
         lhs: 565,
         production: &[],
+        is_push_production: false,
     },
     // 1124 - ProtoFunctionDeclarationOpt0: PortDeclaration;
     Production {
         lhs: 564,
         production: &[ParseType::N(537)],
+        is_push_production: false,
     },
     // 1125 - ProtoFunctionDeclarationOpt0: ;
     Production {
         lhs: 564,
         production: &[],
+        is_push_production: false,
     },
     // 1126 - ProtoFunctionDeclarationOpt: WithGenericParameter;
     Production {
         lhs: 563,
         production: &[ParseType::N(772)],
+        is_push_production: false,
     },
     // 1127 - ProtoFunctionDeclarationOpt: ;
     Production {
         lhs: 563,
         production: &[],
+        is_push_production: false,
     },
     // 1128 - ProtoAliasDeclaration: Alias ProtoAliasDeclarationGroup Identifier Colon ScopedIdentifier Semicolon;
     Production {
@@ -39414,21 +40542,25 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(557),
             ParseType::N(0),
         ],
+        is_push_production: false,
     },
     // 1129 - ProtoAliasDeclarationGroup: Module;
     Production {
         lhs: 557,
         production: &[ParseType::N(458)],
+        is_push_production: false,
     },
     // 1130 - ProtoAliasDeclarationGroup: Interface;
     Production {
         lhs: 557,
         production: &[ParseType::N(389)],
+        is_push_production: false,
     },
     // 1131 - ProtoAliasDeclarationGroup: Package;
     Production {
         lhs: 557,
         production: &[ParseType::N(519)],
+        is_push_production: false,
     },
     // 1132 - EmbedDeclaration: Embed LParen Identifier RParen Identifier EmbedContent;
     Production {
@@ -39441,51 +40573,61 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(414),
             ParseType::N(178),
         ],
+        is_push_production: false,
     },
     // 1133 - EmbedContent: TripleLBrace EmbedContentList /* Vec */ TripleRBrace;
     Production {
         lhs: 179,
         production: &[ParseType::N(719), ParseType::N(180), ParseType::N(716)],
+        is_push_production: false,
     },
     // 1134 - EmbedContentList: EmbedItem EmbedContentList;
     Production {
         lhs: 180,
         production: &[ParseType::N(180), ParseType::N(182)],
+        is_push_production: true,
     },
     // 1135 - EmbedContentList: ;
     Production {
         lhs: 180,
         production: &[],
+        is_push_production: false,
     },
     // 1136 - EmbedScopedIdentifier: EscapedLBrace ScopedIdentifier EscapedRBrace;
     Production {
         lhs: 188,
         production: &[ParseType::N(210), ParseType::N(645), ParseType::N(207)],
+        is_push_production: false,
     },
     // 1137 - EmbedItem: EmbedLBrace EmbedItemList /* Vec */ EmbedRBrace;
     Production {
         lhs: 182,
         production: &[ParseType::N(186), ParseType::N(183), ParseType::N(184)],
+        is_push_production: false,
     },
     // 1138 - EmbedItemList: EmbedItem EmbedItemList;
     Production {
         lhs: 183,
         production: &[ParseType::N(183), ParseType::N(182)],
+        is_push_production: true,
     },
     // 1139 - EmbedItemList: ;
     Production {
         lhs: 183,
         production: &[],
+        is_push_production: false,
     },
     // 1140 - EmbedItem: EmbedScopedIdentifier;
     Production {
         lhs: 182,
         production: &[ParseType::N(188)],
+        is_push_production: false,
     },
     // 1141 - EmbedItem: Any;
     Production {
         lhs: 182,
         production: &[ParseType::N(21)],
+        is_push_production: false,
     },
     // 1142 - IncludeDeclaration: Include LParen Identifier Comma StringLiteral RParen Semicolon;
     Production {
@@ -39499,121 +40641,145 @@ pub const PRODUCTIONS: &[Production; 1166] = &[
             ParseType::N(414),
             ParseType::N(346),
         ],
+        is_push_production: false,
     },
     // 1143 - DescriptionGroup: DescriptionGroupList /* Vec */ DescriptionGroupGroup;
     Production {
         lhs: 153,
         production: &[ParseType::N(154), ParseType::N(156)],
+        is_push_production: false,
     },
     // 1144 - DescriptionGroupGroup: LBrace DescriptionGroupGroupList /* Vec */ RBrace;
     Production {
         lhs: 154,
         production: &[ParseType::N(596), ParseType::N(155), ParseType::N(408)],
+        is_push_production: false,
     },
     // 1145 - DescriptionGroupGroupList: DescriptionGroup DescriptionGroupGroupList;
     Production {
         lhs: 155,
         production: &[ParseType::N(155), ParseType::N(153)],
+        is_push_production: true,
     },
     // 1146 - DescriptionGroupGroupList: ;
     Production {
         lhs: 155,
         production: &[],
+        is_push_production: false,
     },
     // 1147 - DescriptionGroupGroup: DescriptionItem;
     Production {
         lhs: 154,
         production: &[ParseType::N(157)],
+        is_push_production: false,
     },
     // 1148 - DescriptionGroupList: Attribute DescriptionGroupList;
     Production {
         lhs: 156,
         production: &[ParseType::N(156), ParseType::N(57)],
+        is_push_production: true,
     },
     // 1149 - DescriptionGroupList: ;
     Production {
         lhs: 156,
         production: &[],
+        is_push_production: false,
     },
     // 1150 - DescriptionItem: DescriptionItemOpt /* Option */ PublicDescriptionItem;
     Production {
         lhs: 157,
         production: &[ParseType::N(583), ParseType::N(158)],
+        is_push_production: false,
     },
     // 1151 - DescriptionItem: ImportDeclaration;
     Production {
         lhs: 157,
         production: &[ParseType::N(339)],
+        is_push_production: false,
     },
     // 1152 - DescriptionItem: BindDeclaration;
     Production {
         lhs: 157,
         production: &[ParseType::N(73)],
+        is_push_production: false,
     },
     // 1153 - DescriptionItem: EmbedDeclaration;
     Production {
         lhs: 157,
         production: &[ParseType::N(181)],
+        is_push_production: false,
     },
     // 1154 - DescriptionItem: IncludeDeclaration;
     Production {
         lhs: 157,
         production: &[ParseType::N(347)],
+        is_push_production: false,
     },
     // 1155 - DescriptionItemOpt: Pub;
     Production {
         lhs: 158,
         production: &[ParseType::N(580)],
+        is_push_production: false,
     },
     // 1156 - DescriptionItemOpt: ;
     Production {
         lhs: 158,
         production: &[],
+        is_push_production: false,
     },
     // 1157 - PublicDescriptionItem: ModuleDeclaration;
     Production {
         lhs: 583,
         production: &[ParseType::N(459)],
+        is_push_production: false,
     },
     // 1158 - PublicDescriptionItem: InterfaceDeclaration;
     Production {
         lhs: 583,
         production: &[ParseType::N(390)],
+        is_push_production: false,
     },
     // 1159 - PublicDescriptionItem: PackageDeclaration;
     Production {
         lhs: 583,
         production: &[ParseType::N(520)],
+        is_push_production: false,
     },
     // 1160 - PublicDescriptionItem: AliasDeclaration;
     Production {
         lhs: 583,
         production: &[ParseType::N(1)],
+        is_push_production: false,
     },
     // 1161 - PublicDescriptionItem: ProtoDeclaration;
     Production {
         lhs: 583,
         production: &[ParseType::N(560)],
+        is_push_production: false,
     },
     // 1162 - PublicDescriptionItem: FunctionDeclaration;
     Production {
         lhs: 583,
         production: &[ParseType::N(262)],
+        is_push_production: false,
     },
     // 1163 - Veryl: Start VerylList /* Vec */;
     Production {
         lhs: 762,
         production: &[ParseType::N(763), ParseType::N(662)],
+        is_push_production: false,
     },
     // 1164 - VerylList: DescriptionGroup VerylList;
     Production {
         lhs: 763,
         production: &[ParseType::N(763), ParseType::N(153)],
+        is_push_production: true,
     },
     // 1165 - VerylList: ;
     Production {
         lhs: 763,
         production: &[],
+        is_push_production: false,
     },
 ];
 
@@ -39652,6 +40818,7 @@ where
         NON_TERMINALS,
     );
     llk_parser.trim_parse_tree();
+    llk_parser.set_max_parsing_depth(1152);
     let scanner = VerylGrammarScanner::new();
     // Initialize wrapper
     let mut user_actions = VerylGrammarAuto::new(user_actions);

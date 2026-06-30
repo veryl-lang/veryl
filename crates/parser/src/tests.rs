@@ -66,6 +66,52 @@ fn string_literal_rejects_non_sv_escapes() {
 }
 
 #[test]
+fn max_parsing_depth() {
+    use crate::ParserError;
+    use parol_runtime::ParserError as Parol;
+
+    let nested_paren = |n: usize| {
+        format!(
+            "module A {{ assign o = {}1{}; }}",
+            "(".repeat(n),
+            ")".repeat(n)
+        )
+    };
+    let nested_if = |n: usize| {
+        format!(
+            "module A {{ always_comb {{ {}b = 1;{} }} }}",
+            "if a {".repeat(n),
+            "}".repeat(n)
+        )
+    };
+    let wide_case = |n: usize| {
+        let arms: String = (0..n).map(|i| format!("{i}: b = 1;")).collect();
+        format!("module A {{ always_comb {{ case a {{ {arms} default: b = 1; }} }} }}")
+    };
+
+    // Nesting past the limit is rejected instead of overflowing the stack.
+    for code in [nested_paren(4000), nested_if(4000)] {
+        let err = Parser::parse(&code, &"").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ParserError::ParserError(Parol::MaxParsingDepthExceeded { .. })
+            ),
+            "{err:?}"
+        );
+    }
+
+    // Realistic nesting still parses (128 was the old analyzer-side limit).
+    assert!(Parser::parse(&nested_paren(128), &"").is_ok());
+    assert!(Parser::parse(&nested_if(128), &"").is_ok());
+
+    // Flat lists are push productions: parol_runtime 5.0.0 excludes them from
+    // the depth count, so a case with far more arms than MAX_PARSING_DEPTH still
+    // parses instead of being wrongly rejected as too deep.
+    assert!(Parser::parse(&wide_case(3000), &"").is_ok());
+}
+
+#[test]
 fn number() {
     // integer
     success("let a: u32 = 0123456789;");
