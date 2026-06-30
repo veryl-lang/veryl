@@ -9964,6 +9964,15 @@ fn unevaluable_value_const_value() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package a_pkg {
+        const A: bit<4> = {2'b00, 2'b00} as 4;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
