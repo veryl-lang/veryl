@@ -73,6 +73,20 @@ impl LockSource {
             LockSource::Path(_) => None,
         }
     }
+
+    pub fn project(&self) -> Option<&str> {
+        match self {
+            LockSource::Repository(x) => Some(&x.project),
+            LockSource::Path(_) => None,
+        }
+    }
+
+    pub fn local_path(&self, root_path: &Path) -> Result<PathBuf, MetadataError> {
+        match self {
+            LockSource::Repository(x) => x.local_path(),
+            LockSource::Path(path) => Ok(root_path.join(path)),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -85,6 +99,32 @@ pub struct LockSourceRepository {
     version: Version,
     revision: String,
     r#override: Option<PathBuf>,
+}
+
+impl LockSourceRepository {
+    pub fn url(&self) -> &UrlPath {
+        &self.url
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn project(&self) -> &str {
+        &self.project
+    }
+
+    pub fn version(&self) -> &Version {
+        &self.version
+    }
+
+    pub fn revision(&self) -> &str {
+        &self.revision
+    }
+
+    pub fn local_path(&self) -> Result<PathBuf, MetadataError> {
+        Ok(Lockfile::dependency_path(&self.url, &self.path, &self.revision)?.join(&self.path))
+    }
 }
 
 impl PartialOrd for LockSource {
@@ -131,6 +171,16 @@ pub struct LockDependency {
 }
 
 impl Lockfile {
+    pub fn projects(&self) -> Vec<&Lock> {
+        let mut ret = self
+            .lock_table
+            .values()
+            .flat_map(|locks| locks.iter())
+            .collect::<Vec<_>>();
+        ret.sort_by(|x, y| x.name.cmp(&y.name).then(x.source.cmp(&y.source)));
+        ret
+    }
+
     pub fn load(metadata: &Metadata) -> Result<Self, MetadataError> {
         let path = metadata
             .lockfile_path
@@ -595,7 +645,7 @@ impl Lockfile {
         Ok(dependencies_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer())))
     }
 
-    fn get_metadata(&self, source: &LockSource) -> Result<Metadata, MetadataError> {
+    pub(crate) fn get_metadata(&self, source: &LockSource) -> Result<Metadata, MetadataError> {
         // try to load from local path
         let path = match source {
             LockSource::Path(x) => Some(x.clone()),

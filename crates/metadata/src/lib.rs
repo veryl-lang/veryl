@@ -8,6 +8,7 @@ mod lockfile;
 mod lockfile_compat;
 mod metadata;
 mod metadata_error;
+mod metadata_output;
 mod project;
 mod pubfile;
 mod publish;
@@ -24,6 +25,9 @@ pub use lint::{Case, Lint};
 pub use lockfile::{LockSource, Lockfile};
 pub use metadata::{BumpKind, Metadata, UrlPath};
 pub use metadata_error::MetadataError;
+pub use metadata_output::{
+    MetadataDependencyV2, MetadataOutputV2, MetadataProjectV2, MetadataSourceV2,
+};
 pub use project::Project;
 pub use pubfile::{Pubfile, Release};
 pub use publish::Publish;

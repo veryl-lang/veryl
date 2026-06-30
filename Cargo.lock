@@ -6102,6 +6102,7 @@ dependencies = [
  "regex",
  "semver",
  "serde",
+ "serde_json",
  "serde_regex",
  "spdx",
  "tempfile",
