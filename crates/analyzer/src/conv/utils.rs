@@ -751,6 +751,67 @@ fn eval_array_literal_expressions(
     Ok(ret)
 }
 
+/// Fold an array-literal expression into its per-element values, or `None`
+/// when it isn't a resolvable array literal.
+fn eval_array_literal_values(
+    context: &mut Context,
+    r#type: &ir::Type,
+    expr: &mut ir::Expression,
+) -> IrResult<Option<Vec<Value>>> {
+    let token = expr.token_range();
+    let Some(exprs) = eval_array_literal(context, Some(&r#type.array), Some(r#type.width()), expr)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(eval_array_literal_expressions(
+        context, r#type, exprs, token,
+    )?))
+}
+
+/// Register a const/param variable from its element `values`. The scalar arm
+/// of `eval_const_assign` also expands struct/union members, so it can't use
+/// this.
+fn insert_const_variable(
+    context: &mut Context,
+    dst: &ir::AssignDestination,
+    kind: VarKind,
+    r#type: &ir::Type,
+    comptime: Comptime,
+    values: Vec<Value>,
+) {
+    let id = context.insert_var_path(dst.path.clone(), comptime);
+    let array_limit = context.config.evaluate_array_limit;
+    let variable = Variable::new(
+        id,
+        dst.path.clone(),
+        kind,
+        r#type.clone(),
+        values,
+        context.get_affiliation(),
+        &dst.token,
+        array_limit,
+    );
+    context.insert_variable(id, variable);
+}
+
+/// Fit each element to the destination element width. Values copied from a
+/// source variable (inherited/sliced array params) keep the source width, so a
+/// narrower signed source must be sign-extended -- the array-literal path can't
+/// hit this because it evaluates each element in the destination type context.
+/// A `None` width (e.g. `string`) is left untouched.
+fn fit_array_elements(mut values: Vec<Value>, r#type: &ir::Type) -> Vec<Value> {
+    if let Some(total_width) = r#type.total_width() {
+        for value in &mut values {
+            if value.width() > total_width {
+                value.trunc(total_width);
+            } else if value.width() < total_width {
+                *value = value.expand(total_width, value.signed()).into_owned();
+            }
+        }
+    }
+    values
+}
+
 pub fn eval_const_assign(
     context: &mut Context,
     kind: VarKind,
@@ -764,27 +825,15 @@ pub fn eval_const_assign(
     let token = expr.token_range();
 
     match expr {
-        ir::Expression::ArrayLiteral(_, _) => {
-            let exprs =
-                eval_array_literal(context, Some(&r#type.array), Some(r#type.width()), expr)?;
-            if let Some(exprs) = exprs {
-                let values = eval_array_literal_expressions(context, r#type, exprs, token)?;
-                let id = context.insert_var_path(path.clone(), comptime);
-                let array_limit = context.config.evaluate_array_limit;
-                let variable = Variable::new(
-                    id,
-                    path.clone(),
-                    kind,
-                    r#type.clone(),
-                    values,
-                    context.get_affiliation(),
-                    &dst.token,
-                    array_limit,
-                );
-                context.insert_variable(id, variable);
-            } else {
+        // The guard skips an override literal, which already carries its values
+        // as a NumericArray (below), so the literal isn't folded twice.
+        ir::Expression::ArrayLiteral(_, _)
+            if !matches!(comptime.value, ValueVariant::NumericArray(_)) =>
+        {
+            let Some(values) = eval_array_literal_values(context, r#type, expr)? else {
                 return Err(ir_error!(token));
-            }
+            };
+            insert_const_variable(context, dst, kind, r#type, comptime, values);
         }
         _ => {
             match &comptime.value {
@@ -825,9 +874,12 @@ pub fn eval_const_assign(
                     );
                     context.insert_variable(id, variable);
                 }
-                ValueVariant::NumericArray(_) => {
-                    // TODO for param array
-                    return Err(ir_error!(token));
+                ValueVariant::NumericArray(values) => {
+                    // An array override resolved by `get_overridden_params`
+                    // (inheriting `#(XS)` or slicing `#(YS: XS[0])`). Not
+                    // materializing it would leave later `XS[0]` reads dangling.
+                    let values = fit_array_elements(values.clone(), r#type);
+                    insert_const_variable(context, dst, kind, r#type, comptime, values);
                 }
                 ValueVariant::Type(x) => {
                     let mut comptime = comptime.clone();
@@ -2660,6 +2712,75 @@ pub fn get_component(
     }
 }
 
+/// Resolve the per-element values of an array-typed parameter override.
+///
+/// `eval_expr` leaves an array value `Unknown` (only scalars fold to
+/// `Numeric`), so this must run while the source variables are still in scope,
+/// letting the caller carry the values in the override comptime for the
+/// instance signature and `eval_const_assign`.
+fn resolve_array_value(
+    context: &mut Context,
+    r#type: &ir::Type,
+    expr: &ir::Expression,
+) -> Option<Vec<Value>> {
+    if r#type.array.is_empty() {
+        return None;
+    }
+
+    match expr {
+        ir::Expression::ArrayLiteral(_, _) => {
+            // Clone so folding's constant-fold side effects don't mutate the
+            // stored override expression.
+            let mut expr = expr.clone();
+            eval_array_literal_values(context, r#type, &mut expr)
+                .ok()
+                .flatten()
+        }
+        ir::Expression::Term(factor) => {
+            let ir::Factor::Variable(id, index, select, _) = factor.as_ref() else {
+                return None;
+            };
+            // A bit/part select can't be copied element-wise.
+            if !select.is_empty() {
+                return None;
+            }
+            if index.dimension() == 0 {
+                // Whole-array reference; a single-entry template is preserved.
+                return context.variables.get(id).map(|v| v.value.clone());
+            }
+            // Constant-indexed sub-array reference, e.g. `XS[0]` selecting a row
+            // of a 2-D source into a 1-D parameter.
+            if !index.is_const() {
+                return None;
+            }
+            let idx = index.eval_value(context)?;
+            let var = context.variables.get(id)?;
+            let shape = &var.r#type.array;
+            // calc_range/calc_index don't bounds-check, so an out-of-range index
+            // would silently pick the wrong sub-array; reject it here.
+            if idx
+                .iter()
+                .enumerate()
+                .any(|(i, &v)| matches!(shape.get(i), Some(&Some(dim)) if v >= dim))
+            {
+                return None;
+            }
+            let (beg, end) = shape.calc_range(&idx)?;
+            let inner_total = end - beg + 1;
+            let total = var.r#type.total_array().unwrap_or(var.value.len());
+            if var.value.len() == total {
+                var.value.get(beg..=end).map(<[Value]>::to_vec)
+            } else if var.value.len() == 1 {
+                // All-same array stored as a single template value.
+                Some(vec![var.value[0].clone(); inner_total])
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 pub fn get_overridden_params(
     context: &mut Context,
     arg: &ComponentInstantiation,
@@ -2701,12 +2822,21 @@ pub fn get_overridden_params(
             None
         };
 
-        let expr = if let Some(x) = &param.inst_parameter_item_opt {
-            eval_expr(context, target_type, &x.expression, false)?
+        let mut expr = if let Some(x) = &param.inst_parameter_item_opt {
+            eval_expr(context, target_type.clone(), &x.expression, false)?
         } else {
             let src: Expression = param.identifier.as_ref().into();
-            eval_expr(context, target_type, &src, false)?
+            eval_expr(context, target_type.clone(), &src, false)?
         };
+
+        // Carry an array override's element values as a NumericArray so the
+        // signature distinguishes them and eval_const_assign can materialize it.
+        if expr.0.value.is_unknown()
+            && let Some(r#type) = &target_type
+            && let Some(values) = resolve_array_value(context, r#type, &expr.1)
+        {
+            expr.0.value = ValueVariant::NumericArray(values);
+        }
 
         let is_type_param = matches!(
             &target.kind,

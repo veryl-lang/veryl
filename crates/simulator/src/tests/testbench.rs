@@ -1697,6 +1697,209 @@ fn tb_multi_inst_distinct_params() {
 }
 
 #[test]
+fn tb_inherit_unpacked_array_param() {
+    // Regression for veryl-lang/veryl#2929. Inheriting an unpacked-array
+    // parameter by name (`#(XS)`) used to drop the parameter and panic the
+    // simulator; distinct array overrides also aliased one cached component.
+    let code = r#"
+    module Top #(
+        param XS: u32 [2] = '{1, 2},
+    ) (
+        o_sum: output logic<32>,
+    ) {
+        inst u_sub: Sub #(
+            XS,
+        ) (
+            o_sum,
+        );
+    }
+
+    module Sub #(
+        param XS: u32 [2] = '{0, 0},
+    ) (
+        o_sum: output logic<32>,
+    ) {
+        assign o_sum = XS[0] + XS[1];
+    }
+
+    #[test(test_inherit_array_param)]
+    module test_inherit_array_param {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var s_default: logic<32>;
+        var s_override: logic<32>;
+
+        // Default {1, 2} inherited by name -> 3.
+        inst u_default: Top (
+            o_sum: s_default,
+        );
+
+        // Distinct override {10, 20} must not alias u_default -> 30.
+        inst u_override: Top #(
+            XS: '{10, 20},
+        ) (
+            o_sum: s_override,
+        );
+
+        initial {
+            rst.assert();
+            clk.next(1);
+            $assert(s_default == 3, "inherited array param produced wrong sum");
+            $assert(s_override == 30, "overridden array param aliased the default");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_inherit_array_param");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_inherit_unpacked_array_param failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn tb_inherit_sliced_array_param() {
+    // Regression for veryl-lang/veryl#2929 (generalized): a constant-indexed
+    // sub-array override (`#(YS: M[1])`) must materialize the selected row, not
+    // drop the parameter and panic.
+    let code = r#"
+    module Top #(
+        param M: u32 [2, 2] = '{'{1, 2}, '{3, 4}},
+    ) (
+        o: output logic<32>,
+    ) {
+        inst u_sub: Sub #(
+            YS: M[1],
+        ) (
+            o,
+        );
+    }
+
+    module Sub #(
+        param YS: u32 [2] = '{0, 0},
+    ) (
+        o: output logic<32>,
+    ) {
+        assign o = YS[0] + YS[1];
+    }
+
+    #[test(test_slice_param)]
+    module test_slice_param {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var s: logic<32>;
+
+        // M[1] selects the row {3, 4} -> 7.
+        inst u: Top (
+            o: s,
+        );
+
+        initial {
+            rst.assert();
+            clk.next(1);
+            $assert(s == 7, "sliced array param produced wrong sum");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_slice_param");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_inherit_sliced_array_param failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn tb_inherit_signed_array_param_sign_extends() {
+    // A sliced/inherited array parameter copies source-width element values, so
+    // a narrower signed source must be sign-extended to the destination width:
+    // `M[1] = {-3, -4}` (i8) into i32 must read -3 (0xFFFFFFFD), not 0x000000FD.
+    let code = r#"
+    module Top #(
+        param M: i8 [2, 2] = '{'{1, 2}, '{-3, -4}},
+    ) (
+        o: output logic<32>,
+    ) {
+        inst u_sub: Sub #(
+            YS: M[1],
+        ) (
+            o,
+        );
+    }
+
+    module Sub #(
+        param YS: i32 [2] = '{0, 0},
+    ) (
+        o: output logic<32>,
+    ) {
+        assign o = YS[0];
+    }
+
+    #[test(test_signed_slice)]
+    module test_signed_slice {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var s: logic<32>;
+
+        inst u: Top (
+            o: s,
+        );
+
+        initial {
+            rst.assert();
+            clk.next(1);
+            $assert(s == 32'hFFFFFFFD, "narrow signed slice must sign-extend");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_signed_slice");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_inherit_signed_array_param_sign_extends failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
 fn tb_assert_continue_reports_all_failures() {
     let code = r#"
     #[test(test_ac)]
