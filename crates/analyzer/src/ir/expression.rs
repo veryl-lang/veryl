@@ -354,9 +354,15 @@ impl Expression {
                 op.eval_type_ternary(context, x.comptime(), y.comptime(), z.comptime(), comptime);
                 comptime.evaluated = true;
             }
-            Expression::Concatenation(_, _) => (),
-            Expression::StructConstructor(_, _, _) => (),
-            Expression::ArrayLiteral(_, _) => (),
+            Expression::Concatenation(_, comptime)
+            | Expression::StructConstructor(_, _, comptime)
+            | Expression::ArrayLiteral(_, comptime) => {
+                // These are evaluated in `gather_context`, but their context (e.g.
+                // is_const/is_global) must still be recorded so a parent reading
+                // `comptime().expr_context` after `apply_context` (such as an `as`
+                // cast) sees the gathered values instead of the default.
+                comptime.expr_context = expr_context
+            }
         }
     }
 
