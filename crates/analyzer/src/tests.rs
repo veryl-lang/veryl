@@ -4620,6 +4620,44 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    module b_module (
+        a: modport a_if,
+    ) {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        &errors[0],
+        AnalyzerError::MismatchType {
+            kind: crate::analyzer_error::MismatchTypeKind::SymbolKind { actual, .. },
+            ..
+        } if actual == "interface a_if"
+    ));
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    module b_module (
+        a: modport a_if::mp,
+    ) {
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

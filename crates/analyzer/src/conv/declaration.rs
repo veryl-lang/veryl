@@ -530,7 +530,7 @@ impl Conv<&PortDeclarationItem> for () {
                                 MismatchTypeKind::SymbolKind {
                                     name: symbol.found.token.to_string(),
                                     expected: "modport".to_string(),
-                                    actual: symbol.found.kind.to_kind_name(),
+                                    actual: r#type.kind.to_string(),
                                 },
                                 &variable_token,
                             ));
