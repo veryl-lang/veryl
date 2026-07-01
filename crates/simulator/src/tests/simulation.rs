@@ -1023,7 +1023,7 @@ fn probe_wide_comb_oor_select_store() {
         base: input  logic<200>,
         i:    input  logic<9>,
         b:    input  logic<8>,
-        o:    output logic<200>,
+        o:    output logic<134>,
     ) {
         always_comb {
             o = base;
@@ -17943,5 +17943,75 @@ fn bug8_mixed_array_dynamic_read_is_unsupported() {
             "{config:?}: expected UnsupportedDescription, got {:?}",
             result.map(|_| "Ok(ir)")
         );
+    }
+}
+
+#[test]
+fn wide_concat_long_repeat_no_stack_overflow() {
+    // pe_pkg::shift_loc_wdata from the sarugaku PE: a 64-bit datum byte-rotated
+    // into a 256-bit line at byte offset `addr`.  With all 32 arms in one comb
+    // function the zero-pad concats used to allocate a fresh wide slot per shift
+    // step and overflow the stack (4-state worst); this guards that fix across
+    // every backend.
+    use num_bigint::BigUint;
+
+    let data_bytes: [u8; 8] = [0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7];
+    let data_val: u64 = u64::from_le_bytes(data_bytes);
+    let expected_of = |a: usize| {
+        let mut result = [0u8; 32];
+        for (i, &byte) in data_bytes.iter().enumerate() {
+            result[(a + i) % 32] = byte;
+        }
+        Value::new_biguint(BigUint::from_bytes_le(&result), 256, false)
+    };
+    let arm_expr = |a: usize| -> String {
+        if a == 0 {
+            "data".to_string()
+        } else if a <= 24 {
+            format!("{{data, {{1'b0 repeat {}}}}}", 8 * a)
+        } else {
+            let t = 32 - a; // number of high data bytes that stay at the top
+            format!(
+                "{{data[{}:0], {{1'b0 repeat 192}}, data[63:{}]}}",
+                8 * t - 1,
+                8 * t
+            )
+        }
+    };
+
+    let mut arms = String::new();
+    for a in 0..32usize {
+        arms.push_str(&format!("            {a}: o = {};\n", arm_expr(a)));
+    }
+    let code = format!(
+        r#"
+    module Top (
+        addr: input  logic<5>  ,
+        data: input  logic<64> ,
+        o:    output logic<256>,
+    ) {{
+        always_comb {{
+            case addr {{
+{arms}            default: o = {};
+            }}
+        }}
+    }}
+    "#,
+        arm_expr(31)
+    );
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for a in 0..32usize {
+            sim.set("addr", Value::new(a as u64, 5, false));
+            sim.set("data", Value::new(data_val, 64, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                expected_of(a),
+                "addr={a} config={config:?}"
+            );
+        }
     }
 }

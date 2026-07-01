@@ -2850,8 +2850,46 @@ impl ProtoExpression {
         let nb_val = builder.ins().iconst(I32, nb as i64);
 
         for (expr, repeat, elem_width) in elements {
-            let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
+            let repeat = *repeat;
+            if repeat == 0 {
+                continue;
+            }
             let ew = *elem_width;
+
+            // A constant-zero run only shifts the accumulator, so collapse it to
+            // one shift: the per-step path below allocates a fresh wide slot each
+            // iteration, and a long zero pad would grow the frame past the stack.
+            let elem_is_zero = matches!(
+                expr.as_ref(),
+                ProtoExpression::Value { value, .. }
+                    if !value.is_xz() && value.payload().iter_u64_digits().next().is_none()
+            );
+            if repeat > 1 && elem_is_zero {
+                let amount = builder.ins().iconst(I64, (ew * repeat) as i64);
+                let new_acc = alloc_wide_slot(builder, nb);
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::BinaryOp,
+                    wide_fn_addrs::shl(),
+                    &[new_acc, acc, amount, nb_val],
+                );
+                acc = new_acc;
+                if let Some(acc_xz_val) = acc_xz {
+                    let new_xz = alloc_wide_slot(builder, nb);
+                    call_helper_void(
+                        context,
+                        builder,
+                        HelperSig::BinaryOp,
+                        wide_fn_addrs::shl(),
+                        &[new_xz, acc_xz_val, amount, nb_val],
+                    );
+                    acc_xz = Some(new_xz);
+                }
+                continue;
+            }
+
+            let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
 
             // Each element is zero-extended to `nb` before the nb-wide
             // `wide_shl`/`wide_bor` below (a short element's slot spans only its
@@ -2864,7 +2902,7 @@ impl ProtoExpression {
             let elem_xz_ptr = elem_mask_xz
                 .map(|m| wide_operand_as_ptr(builder, elem_is_ptr, expr.width(), m, nb));
 
-            for _ in 0..*repeat {
+            for _ in 0..repeat {
                 // acc <<= ew
                 let amount = builder.ins().iconst(I64, ew as i64);
                 let new_acc = alloc_wide_slot(builder, nb);
