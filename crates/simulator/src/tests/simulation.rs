@@ -283,6 +283,39 @@ fn ff_reset_fill_literal_field_wise() {
 }
 
 #[test]
+fn struct_constructor_wide_member_offset() {
+    // Regression for #2932: a member wider than 32 bits was packed into a
+    // 32-bit slot, pushing `x` down to bit 32 so `foo.x` read back 0.
+    let code = r#"
+    module Top (
+        i_clk: input clock,
+    ) {
+        struct Foo {
+            x: logic,
+            y: logic<100>,
+        }
+        initial {
+            // Unsized RHS is required to trigger the bug; `100'h3` would not.
+            let foo: Foo = Foo'{x: 1, y: 3};
+            $assert(foo.x == 1);
+            $assert(foo.y == 3);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        crate::assert_buffer::reset();
+        sim.step(&Event::Initial);
+        assert!(!crate::assert_buffer::has_fatal(), "{config:?}");
+    }
+}
+
+#[test]
 fn ff_reset_fill_literal_full_width() {
     // Companion to `ff_reset_fill_literal_field_wise` for a bare `'1` written
     // to a full-width register (no bit-select).

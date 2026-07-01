@@ -498,7 +498,11 @@ impl Expression {
                     let sub_type = r#type.get_member_type(*name)?;
                     let width = sub_type.total_width()?;
                     let mut value = expr.eval_value(context)?;
+                    // Extend a narrow RHS (e.g. a 32-bit literal in a `logic<100>`
+                    // field) to the member width; otherwise the field's slot
+                    // shrinks and later fields land at the wrong packed offset.
                     value.trunc(width);
+                    let value = value.expand(width, true).into_owned();
                     ret = ret.concat(&value);
                 }
                 Some(ret)
