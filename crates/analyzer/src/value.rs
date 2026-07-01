@@ -313,8 +313,11 @@ impl ValueU64 {
         let mask_range = Self::gen_mask_range(beg, end);
         let inv_mask = mask ^ mask_range;
 
-        self.payload = (self.payload & inv_mask) | (value.payload & mask);
-        self.mask_xz = (self.mask_xz & inv_mask) | (value.mask_xz & mask);
+        // Clip the shifted RHS to the [beg:end] window, not the whole dst: the
+        // RHS is evaluated at the assignment width (`s.f[0] = ~(a==b)`), so its
+        // extra bits would else leak into neighbouring fields.
+        self.payload = (self.payload & inv_mask) | (value.payload & mask_range);
+        self.mask_xz = (self.mask_xz & inv_mask) | (value.mask_xz & mask_range);
     }
 
     pub fn to_usize(&self) -> Option<usize> {
@@ -694,8 +697,9 @@ impl ValueBigUint {
         let mask_range = Self::gen_mask_range(beg, end);
         let inv_mask = &mask ^ &mask_range;
 
-        *self.payload = (self.payload() & &inv_mask) | (value.payload() & &mask);
-        *self.mask_xz = (self.mask_xz() & &inv_mask) | (value.mask_xz() & &mask);
+        // Clip to the field window like `ValueU64::assign`.
+        *self.payload = (self.payload() & &inv_mask) | (value.payload() & &mask_range);
+        *self.mask_xz = (self.mask_xz() & &inv_mask) | (value.mask_xz() & &mask_range);
     }
 
     pub fn to_usize(&self) -> Option<usize> {

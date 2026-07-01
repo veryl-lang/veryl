@@ -290,7 +290,11 @@ impl ProtoAssignDynamicStatement {
         } else if let Some((beg, end)) = self.select {
             let mask = ValueU64::gen_mask_range(beg, end);
 
+            // Clip the shifted payload to the [beg:end] window: the RHS is
+            // evaluated at the assignment width (`s.f = ~x`), so bits above
+            // `beg` would else leak into adjacent fields / the storage padding.
             let payload = builder.ins().ishl_imm(payload, end as i64);
+            let payload = builder.ins().band_imm(payload, mask as i64);
             let org = load_native_to_i64(builder, addr, 0);
             let org = builder.ins().band_imm(org, !mask as i64);
             let result = builder.ins().bor(payload, org);
@@ -299,6 +303,7 @@ impl ProtoAssignDynamicStatement {
             }
             let mask_result = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
+                let mask_xz = builder.ins().band_imm(mask_xz, mask as i64);
                 let org = load_native_to_i64(builder, addr, nb_i32);
                 let org = builder.ins().band_imm(org, !mask as i64);
                 let result_m = builder.ins().bor(mask_xz, org);
@@ -1122,8 +1127,23 @@ impl ProtoAssignStatement {
                 emit_ff_log_push(context, builder, log_current_offset, nb, fwd, fwd_m);
             }
         } else if let Some((beg, end)) = self.select {
+            // Absolute-position masks for the [beg:end] window.  The shifted
+            // payload is clipped to it (`pos_mask`) since the RHS, evaluated at
+            // the assignment width (`s.f = ~x`), can carry bits above the field.
+            let (pos_mask, not_mask) = if wide {
+                let mask = gen_mask_range_128(beg, end);
+                (iconst_128(builder, mask), iconst_128(builder, !mask))
+            } else {
+                let mask = ValueU64::gen_mask_range(beg, end);
+                (
+                    builder.ins().iconst(I64, mask as i64),
+                    builder.ins().iconst(I64, !mask as i64),
+                )
+            };
+
             // Read-modify-write with native width
             let payload = builder.ins().ishl_imm(payload, end as i64);
+            let payload = builder.ins().band(payload, pos_mask);
 
             // Use cached value if available, otherwise load from memory
             let (org_payload, org_mask_xz) = if !context.disable_load_cache
@@ -1140,13 +1160,6 @@ impl ProtoAssignStatement {
                 (p, m)
             };
 
-            let not_mask = if wide {
-                let mask = gen_mask_range_128(beg, end);
-                iconst_128(builder, !mask)
-            } else {
-                let mask = ValueU64::gen_mask_range(beg, end);
-                builder.ins().iconst(I64, !mask as i64)
-            };
             let org = builder.ins().band(org_payload, not_mask);
             let result = builder.ins().bor(payload, org);
             if !is_packed_ff {
@@ -1155,6 +1168,7 @@ impl ProtoAssignStatement {
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
+                let mask_xz = builder.ins().band(mask_xz, pos_mask);
                 let z = if wide { context.zero_128 } else { context.zero };
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
