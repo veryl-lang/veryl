@@ -645,7 +645,13 @@ impl Type {
             dst_sig.parameters.clear();
             if let Some(mut src_sig) = src.r#type.kind.signature() {
                 src_sig.parameters.clear();
-                dst_sig.to_string() == src_sig.to_string()
+                if let TypeKind::Modport(_, dst_mp) = self.kind
+                    && let TypeKind::Modport(_, src_mp) = src.r#type.kind
+                {
+                    dst_mp == src_mp && dst_sig.to_string() == src_sig.to_string()
+                } else {
+                    dst_sig.to_string() == src_sig.to_string()
+                }
             } else {
                 false
             }
@@ -1027,7 +1033,7 @@ impl fmt::Display for TypeKind {
             TypeKind::Enum(x) => x.fmt(f),
             TypeKind::Module(x) => format!("module {x}").fmt(f),
             TypeKind::Interface(x) => format!("interface {x}").fmt(f),
-            TypeKind::Modport(x, _) => format!("modport {x}").fmt(f),
+            TypeKind::Modport(sig, mp) => format!("modport {sig}::{mp}").fmt(f),
             TypeKind::Package(x) => format!("package {x}").fmt(f),
             TypeKind::Instance(x, _) => format!("instance {x}").fmt(f),
             TypeKind::AbstractInterface(x) => {

@@ -4755,6 +4755,64 @@ fn mismatch_assignment() {
         AnalyzerError::MismatchAssignment { .. }
     ));
 
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        var b: logic;
+        modport mp_a {
+            a: input,
+        }
+        modport mp_ab {
+            a: input,
+            b: input,
+        }
+    }
+    module b_module (
+        a: modport a_if::mp_a
+    ) {
+        inst c: c_module (
+            ab: a,
+        );
+    }
+    module c_module (
+        ab: modport a_if::mp_ab,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment { .. }
+    ));
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        var b: logic;
+        modport mp_a {
+            a: input,
+        }
+        modport mp_ab {
+            a: input,
+            b: input,
+        }
+    }
+    module b_module () {
+        inst a: a_if();
+        assign a.a = '0;
+        assign a.b = '0;
+        inst c: c_module (
+            ab: a,
+        );
+    }
+    module c_module (
+        ab: modport a_if::mp_ab,
+    ) {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
     //let code = r#"
     //interface InterfaceA {
     //    var a: logic;
