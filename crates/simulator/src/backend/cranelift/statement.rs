@@ -1474,37 +1474,27 @@ impl ProtoAssignStatement {
                 .store(MemFlagsData::trusted(), payload, slot, 0);
             slot
         };
-        let _ = expr_width; // no longer gates representation (builds_wide_pointer does)
 
-        // rhs_select: `dst = src[beg:end]`.  Size the shift to the SOURCE,
-        // whose bits above the dst's native size must survive the
-        // extraction; a narrower source is copied into a zeroed dst-sized
-        // slot first so the wide ops never read past its storage (and into
-        // its 4-state mask words).
-        let src_nb = if returns_wide_pointer(&self.expr) {
+        // A wide-pointer source is sized to its expression width, which can be
+        // narrower than the dst (`wide256 = concat129`); widen it so the
+        // apply-mask / store / select-RMW below don't stride `nb` past its slot.
+        // A wider source keeps its pointer (surplus high words ignored).
+        let src_wide_nb = if returns_wide_pointer(&self.expr) {
             calc_native_bytes(expr_width)
         } else {
-            // Force-stored above into an nb-sized zeroed slot.
-            nb
+            nb // force-stored above into an nb-sized zeroed slot
         };
+        let src_ptr = super::helpers::widen_wide_ptr(builder, src_ptr, src_wide_nb, nb);
+        // `src_nb >= nb` after the widen; a wider source keeps its size so
+        // `rhs_select`'s shift can reach the high bits it carries.
+        let src_nb = src_wide_nb.max(nb);
         let extract_window = |context: &mut CraneliftContext,
                               builder: &mut FunctionBuilder,
                               ptr: CraneliftValue,
                               beg: usize,
                               end: usize| {
             use super::helpers::emit_wide_shift_right_mask;
-            let (src, op_nb) = if src_nb < nb {
-                let slot = alloc_wide_zero(builder, nb);
-                for i in 0..(src_nb / 8) {
-                    let off = (i * 8) as i32;
-                    let w = builder.ins().load(I64, MemFlagsData::trusted(), ptr, off);
-                    builder.ins().store(MemFlagsData::trusted(), w, slot, off);
-                }
-                (slot, nb)
-            } else {
-                (ptr, src_nb)
-            };
-            emit_wide_shift_right_mask(context, builder, src, end, beg - end + 1, op_nb)
+            emit_wide_shift_right_mask(context, builder, ptr, end, beg - end + 1, src_nb)
         };
         let src_ptr = if let Some((beg, end)) = self.rhs_select {
             extract_window(context, builder, src_ptr, beg, end)
@@ -1561,6 +1551,8 @@ impl ProtoAssignStatement {
                     .store(MemFlagsData::trusted(), mask_xz, slot, 0);
                 slot
             };
+            // Widen the mask half like the payload above.
+            let mask_ptr = super::helpers::widen_wide_ptr(builder, mask_ptr, src_wide_nb, nb);
             // rhs_select shifts the mask half in parallel with the payload
             // (4-state).  dst-select RMW only reaches here in 2-state, where
             // there is no mask half, so it never combines with this block.
