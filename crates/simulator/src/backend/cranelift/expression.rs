@@ -590,7 +590,11 @@ impl ProtoExpression {
                     Op::Sub => {
                         let mask = gen_mask_for_width(width);
                         let x0 = bxor_const(builder, x_payload, mask, wide);
-                        iadd_const(builder, x0, 1, wide)
+                        let neg = iadd_const(builder, x0, 1, wide);
+                        // Mask off the carry into bit `width`: `-0` = `~0 + 1`
+                        // sets it, breaking the "no bits ≥ width" invariant — as
+                        // a shift count `x << -0` would then shift by `2^width`.
+                        band_const(builder, neg, mask, wide)
                     }
                     Op::BitNot => {
                         let mask = gen_mask_for_width(width);
