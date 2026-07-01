@@ -20,7 +20,7 @@ fn check_ir(code: &str, exp: &str) {
     let mut errors = vec![];
     errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     dbg!(&errors);
@@ -274,7 +274,7 @@ fn large_case_no_stack_overflow_on_clone() {
     let mut errors = vec![];
     errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     assert!(
         errors.is_empty(),
@@ -636,7 +636,7 @@ fn const_function_with_static_for() {
     let mut ir = Ir::default();
     analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
     Analyzer::analyze_post_pass2(&ir);
     let ir = ir.to_string();
     // sum() = 0+1+2+3+4 = 10 = 0xa
@@ -669,7 +669,7 @@ fn const_function_with_static_for() {
     let mut ir = Ir::default();
     analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
     Analyzer::analyze_post_pass2(&ir);
     let ir = ir.to_string();
     // sum(5) = 0+1+2+3+4 = 10 = 0xa
@@ -3018,7 +3018,7 @@ fn build_ir_with_defines(code: &str, defines: &[&str]) -> String {
     let mut ir = Ir::default();
     analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir));
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
     Analyzer::analyze_post_pass2(&ir);
     ir.to_string()
 }

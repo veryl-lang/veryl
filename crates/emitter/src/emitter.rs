@@ -12,17 +12,20 @@ use veryl_analyzer::definition_table::{self, Definition};
 use veryl_analyzer::generic_inference_table;
 use veryl_analyzer::ir::{self, IrResult};
 use veryl_analyzer::literal::{Literal, TypeLiteral};
-use veryl_analyzer::namespace::Namespace;
+use veryl_analyzer::msb_table;
+use veryl_analyzer::namespace::{DefineContext, Namespace};
 use veryl_analyzer::resolved_type_table;
+use veryl_analyzer::scope;
 use veryl_analyzer::symbol::Direction as SymDirection;
 use veryl_analyzer::symbol::TypeModifierKind as SymTypeModifierKind;
 use veryl_analyzer::symbol::{
     Affiliation, GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TestType, TypeKind,
 };
-use veryl_analyzer::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
+use veryl_analyzer::symbol_path::{
+    GenericSymbolPath, GenericSymbolPathKind, SymbolPath, SymbolPathNamespace,
+};
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_analyzer::value::calc_emitted_width;
-use veryl_analyzer::{msb_table, namespace_table};
 use veryl_metadata::{Build, BuiltinType, ClockType, Format, Metadata, ResetType, SourceMapTarget};
 use veryl_parser::Stringifier;
 use veryl_parser::resource_table::{self, StrId};
@@ -237,11 +240,8 @@ fn should_skip_import(arg: &ScopedIdentifier, is_wildcard: bool) -> bool {
             .and_then(|enum_sym| enum_sym.get_parent())
             .is_none_or(|grandparent| !grandparent.is_package(true)),
         SymbolKind::AliasModule(_)
-        | SymbolKind::ProtoAliasModule(_)
         | SymbolKind::AliasInterface(_)
-        | SymbolKind::ProtoAliasInterface(_)
-        | SymbolKind::AliasPackage(_)
-        | SymbolKind::ProtoAliasPackage(_) => !is_wildcard,
+        | SymbolKind::AliasPackage(_) => !is_wildcard,
         _ => false,
     }
 }
@@ -260,9 +260,8 @@ impl Emitter {
         }
     }
 
-    pub fn emit(&mut self, project_name: &str, input: &Veryl, raw_input: &str) {
+    pub fn emit(&mut self, input: &Veryl, raw_input: &str) {
         self.newline = self.format_opt.newline_style.newline_str(raw_input);
-        namespace_table::set_default(&[project_name.into()]);
         if self.format_opt.vertical_align {
             self.mode = Mode::Align;
             self.duplicated_index = 0;
@@ -2117,8 +2116,12 @@ impl Emitter {
             }
 
             let user_defined = r#type.unwrap().get_user_defined()?;
-            let (type_symbol, _) =
-                resolve_generic_path(&user_defined.path, &symbol.namespace, Some(map));
+            let (type_symbol, _) = resolve_generic_path(
+                &user_defined.path,
+                scope::intern_namespace(&symbol.namespace),
+                &symbol.namespace.define_context,
+                Some(map),
+            );
             type_symbol.ok().map(|x| {
                 (
                     (*x.found).clone(),
@@ -2490,10 +2493,15 @@ impl Emitter {
     ) -> (Result<Rc<ResolveResult>, ResolveError>, GenericSymbolPath) {
         let generic_map = self.generic_map.last();
         if let Some(namespace) = namespace {
-            resolve_generic_path(path, namespace, generic_map)
+            resolve_generic_path(
+                path,
+                scope::intern_namespace(namespace),
+                &namespace.define_context,
+                generic_map,
+            )
         } else {
-            let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
-            resolve_generic_path(path, &namespace, generic_map)
+            let (scope, define_context) = scope::token_scope(path.paths[0].base.id).unwrap();
+            resolve_generic_path(path, scope, &define_context, generic_map)
         }
     }
 
@@ -6277,7 +6285,13 @@ fn namespace_string(
     let mut ret = String::from("");
     let mut resolve_namespace = Namespace::new();
     let mut in_sv_namespace = false;
+    // Navigate the scope tree in parallel with the path: a namespace segment's
+    // symbol is the owner of the scope the segment names, recovered structurally
+    // without resolve-by-name. Synthetic `$sv` interop symbols own no scope, so
+    // those segments fall back to name resolution (the permitted boundary).
+    let mut struct_cursor: Option<scope::ScopeId> = Some(scope::ScopeId(0));
     for (i, path) in namespace.paths.iter().enumerate() {
+        struct_cursor = struct_cursor.and_then(|s| scope::child(s, *path));
         if i == 0 {
             // top level namespace is always `_`
             let text = format!("{path}_");
@@ -6297,24 +6311,26 @@ fn namespace_string(
                 }
             }
         } else {
-            let symbol_path = SymbolPath::new(&[*path]);
-            if let Ok(ref symbol) = symbol_table::resolve((&symbol_path, &resolve_namespace)) {
-                let text = if let SymbolKind::GenericInstance(_) = symbol.found.kind {
-                    generic_instance_namespace_string(&symbol.found, context)
-                } else if let Some(symbol) = get_generic_instance(&symbol.found, generic_tables) {
-                    generic_instance_namespace_string(&symbol, context)
-                } else {
-                    let separator = namespace_separator(
-                        &symbol.found,
-                        context.in_direction_modport,
-                        in_sv_namespace,
-                    );
-                    format!("{path}{separator}")
-                };
-                ret.push_str(&text);
+            let found = match struct_cursor.and_then(scope::owner_of) {
+                Some(id) => symbol_table::get_rc(id).unwrap(),
+                None => {
+                    let symbol_path = SymbolPath::new(&[*path]);
+                    match symbol_table::resolve((&symbol_path, &resolve_namespace)) {
+                        Ok(symbol) => symbol.found.clone(),
+                        Err(_) => return format!("{namespace}"),
+                    }
+                }
+            };
+            let text = if let SymbolKind::GenericInstance(_) = found.kind {
+                generic_instance_namespace_string(&found, context)
+            } else if let Some(symbol) = get_generic_instance(&found, generic_tables) {
+                generic_instance_namespace_string(&symbol, context)
             } else {
-                return format!("{namespace}");
-            }
+                let separator =
+                    namespace_separator(&found, context.in_direction_modport, in_sv_namespace);
+                format!("{path}{separator}")
+            };
+            ret.push_str(&text);
         }
 
         resolve_namespace.push(*path);
@@ -6348,7 +6364,7 @@ fn namespace_separator(
     in_sv_namespace: bool,
 ) -> String {
     let separator = match symbol.kind {
-        SymbolKind::Package(_) => "::",
+        SymbolKind::Package(ref x) if !x.is_proto => "::",
         SymbolKind::Interface(_) => ".",
         SymbolKind::SystemVerilog if in_direction_modport => ".",
         _ if in_sv_namespace => "::",
@@ -6358,7 +6374,10 @@ fn namespace_separator(
 }
 
 fn get_generic_instance(symbol: &Symbol, generic_tables: &GenericTables) -> Option<Symbol> {
-    let table = generic_tables.get(&symbol.inner_namespace())?;
+    let table = generic_tables.get(&(
+        scope::inner_scope(symbol.scope, symbol.token.text),
+        symbol.namespace.define_context.clone(),
+    ))?;
     let params = symbol.generic_parameters();
     if params.is_empty() {
         return None;
@@ -6374,9 +6393,8 @@ fn get_generic_instance(symbol: &Symbol, generic_tables: &GenericTables) -> Opti
         path.paths[0].arguments.push(arg.clone());
     }
 
-    symbol_table::resolve((&path.mangled_path(), &symbol.namespace))
-        .ok()
-        .map(|x| (*x.found).clone())
+    let resolved = symbol_table::resolve_generic_structural(&path, &symbol.namespace);
+    resolved.ok().map(|x| (*x.found).clone())
 }
 
 pub fn symbol_string(
@@ -6389,7 +6407,8 @@ pub fn symbol_string(
     scope_depth: usize,
 ) -> String {
     let mut ret = String::new();
-    let namespace = namespace_table::get(token.token.id).unwrap();
+    let (token_scope, token_define_context) = scope::token_scope(token.token.id).unwrap();
+    let namespace = scope::namespace(token_scope, &token_define_context);
 
     let token_text = symbol.token.to_string();
     let token_text = if let Some(text) = token_text.strip_prefix("r#") {
@@ -6399,6 +6418,9 @@ pub fn symbol_string(
     };
 
     match &symbol.kind {
+        SymbolKind::Module(x) if x.is_proto => (),
+        SymbolKind::Interface(x) if x.is_proto => (),
+        SymbolKind::Package(x) if x.is_proto => (),
         SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
             ret.push_str(&namespace_string(
                 &symbol.namespace,
@@ -6406,6 +6428,15 @@ pub fn symbol_string(
                 context,
             ));
             ret.push_str(&token_text);
+        }
+        SymbolKind::Parameter(x) if x.is_proto => {
+            unreachable!("proto parameter is not emitted as a symbol")
+        }
+        SymbolKind::Function(x) if x.is_proto => {
+            unreachable!("proto function is not emitted as a symbol")
+        }
+        SymbolKind::TypeDef(x) if x.is_proto => {
+            unreachable!("proto typedef is not emitted as a symbol")
         }
         SymbolKind::Parameter(_)
         | SymbolKind::Function(_)
@@ -6416,10 +6447,20 @@ pub fn symbol_string(
             let visible = if let Some(bound_namespace) = &context.bound_namespace {
                 bound_namespace.included(symbol_namespace)
                     || namespace.included(symbol_namespace)
-                    || symbol.imported.iter().any(|x| x.namespace == namespace)
+                    || scope::is_imported(
+                        &namespace,
+                        symbol.id,
+                        symbol.token.text,
+                        &symbol.namespace.define_context,
+                    )
             } else {
                 namespace.included(symbol_namespace)
-                    || symbol.imported.iter().any(|x| x.namespace == namespace)
+                    || scope::is_imported(
+                        &namespace,
+                        symbol.id,
+                        symbol.token.text,
+                        &symbol.namespace.define_context,
+                    )
             };
             if (scope_depth == 1) & visible & !context.in_import {
                 ret.push_str(&token_text);
@@ -6459,7 +6500,12 @@ pub fn symbol_string(
         SymbolKind::GenericInstance(x) => {
             let base = symbol_table::get(x.base).unwrap();
             let visible = namespace.included(&base.namespace)
-                || base.imported.iter().any(|x| x.namespace == namespace);
+                || scope::is_imported(
+                    &namespace,
+                    base.id,
+                    base.token.text,
+                    &base.namespace.define_context,
+                );
             let top_level = matches!(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
@@ -6482,11 +6528,7 @@ pub fn symbol_string(
                 ret.push_str(&token_text);
             }
         }
-        SymbolKind::GenericParameter(_)
-        | SymbolKind::GenericConst(_)
-        | SymbolKind::ProtoModule(_)
-        | SymbolKind::ProtoInterface(_)
-        | SymbolKind::ProtoPackage(_) => (),
+        SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_) => (),
         SymbolKind::Port(x) => {
             if let Some(ref x) = x.prefix {
                 ret.push_str(x);
@@ -6543,16 +6585,10 @@ pub fn symbol_string(
         | SymbolKind::Namespace
         | SymbolKind::SystemFunction(_) => ret.push_str(&token_text),
         SymbolKind::AliasModule(_)
-        | SymbolKind::ProtoAliasModule(_)
         | SymbolKind::AliasInterface(_)
-        | SymbolKind::ProtoAliasInterface(_)
         | SymbolKind::AliasPackage(_)
-        | SymbolKind::ProtoAliasPackage(_)
         | SymbolKind::ClockDomain
         | SymbolKind::EnumMemberMangled
-        | SymbolKind::ProtoConst(_)
-        | SymbolKind::ProtoTypeDef(_)
-        | SymbolKind::ProtoFunction(_)
         | SymbolKind::Test(_)
         | SymbolKind::Embed
         | SymbolKind::TbComponent(_) => {
@@ -6611,12 +6647,13 @@ fn emitting_identifier_token(token: &VerylToken, symbol: Option<&Symbol>) -> Ver
 
 pub fn resolve_generic_path(
     path: &GenericSymbolPath,
-    namespace: &Namespace,
+    scope: scope::ScopeId,
+    define_context: &DefineContext,
     generic_maps: Option<&Vec<GenericMap>>,
 ) -> (Result<Rc<ResolveResult>, ResolveError>, GenericSymbolPath) {
     let mut path = path.clone();
 
-    path.resolve_imported(namespace, generic_maps);
+    path.resolve_imported(scope, define_context, generic_maps);
     if let Some(maps) = generic_maps {
         path.apply_map(maps);
     }
@@ -6624,9 +6661,13 @@ pub fn resolve_generic_path(
 
     let path_symbols: Vec<_> = (0..path.len())
         .filter_map(|i| {
-            symbol_table::resolve((&path.slice(i).generic_path(), namespace))
-                .map(|x| (i, Rc::clone(&x.found)))
-                .ok()
+            symbol_table::resolve(SymbolPathNamespace::from_scope(
+                path.slice(i).generic_path(),
+                scope,
+                define_context.clone(),
+            ))
+            .map(|x| (i, Rc::clone(&x.found)))
+            .ok()
         })
         .collect();
 
@@ -6649,31 +6690,36 @@ pub fn resolve_generic_path(
                 path.paths[*i].arguments.push(arg);
             }
 
+            // The argument namespace expansion below needs the query namespace;
+            // build it only on this generic branch rather than on every call.
+            let namespace = scope::namespace(scope, define_context);
             for arg in path.paths[*i].arguments.iter_mut() {
                 if let Some(maps) = generic_maps {
                     arg.apply_map(maps);
                 }
                 arg.unalias(None);
                 if !symbol.is_global_function() {
-                    arg.append_namespace_path(namespace, &symbol.namespace);
+                    arg.append_namespace_path(&namespace, &symbol.namespace);
                 }
             }
         }
     }
 
-    let result = symbol_table::resolve((&path.mangled_path(), namespace));
+    let result = symbol_table::resolve_generic_structural(&path, (scope, define_context.clone()));
     if let Ok(symbol) = &result
         && let Some(target) = symbol.found.alias_target(false)
     {
+        let target_scope = scope::intern_namespace(&symbol.found.namespace);
+        let target_dctx = &symbol.found.namespace.define_context;
         if let Some(parent) = symbol.found.get_parent()
             && matches!(parent.kind, SymbolKind::GenericInstance(_))
         {
             // Alias target may be a generic parameter if it is defined in a generic package.
             // Need to apply parent's generic map to resolve a generic parameter.
             let map = parent.generic_maps();
-            return resolve_generic_path(&target, &symbol.found.namespace, Some(&map));
+            return resolve_generic_path(&target, target_scope, target_dctx, Some(&map));
         }
-        return resolve_generic_path(&target, &symbol.found.namespace, generic_maps);
+        return resolve_generic_path(&target, target_scope, target_dctx, generic_maps);
     }
 
     (result, path)

@@ -142,7 +142,6 @@ impl Preprocessor for Veryl {
                                     errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
                                     errors.append(&mut Analyzer::analyze_post_pass1());
                                     errors.append(&mut analyzer.analyze_pass2(
-                                        prj,
                                         &ret.veryl,
                                         &mut context,
                                         Some(&mut ir),

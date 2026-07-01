@@ -374,7 +374,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             Box::new(ret),
                         )]))
                     }
-                    SymbolKind::Function(x) => {
+                    SymbolKind::Function(x) if !x.is_proto => {
                         let ret = function_call(
                             context,
                             value.expression_identifier.as_ref(),
@@ -417,9 +417,8 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             unreachable!();
                         }
                     }
-                    SymbolKind::ProtoFunction(_) | SymbolKind::SystemVerilog => {
-                        Err(ir_error!(token))
-                    }
+                    SymbolKind::Function(x) if x.is_proto => Err(ir_error!(token)),
+                    SymbolKind::SystemVerilog => Err(ir_error!(token)),
                     _ => {
                         let name = symbol.found.token.text.to_string();
                         let kind = symbol.found.kind.to_kind_name();

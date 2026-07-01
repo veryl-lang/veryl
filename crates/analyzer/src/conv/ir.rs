@@ -169,6 +169,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
             && let SymbolKind::Module(x) = &symbol.found.kind
+            && !x.is_proto
         {
             context.push_namespace(symbol.found.inner_namespace());
             context.in_test_module = x.test.is_some();
@@ -288,7 +289,7 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
         context.push_affiliation(Affiliation::Interface);
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && matches!(symbol.found.kind, SymbolKind::Interface(_))
+            && matches!(symbol.found.kind, SymbolKind::Interface(ref x) if !x.is_proto)
         {
             context.push_namespace(symbol.found.inner_namespace());
         } else {
@@ -374,7 +375,7 @@ impl Conv<&PackageDeclaration> for () {
         context.push_affiliation(Affiliation::Package);
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && matches!(symbol.found.kind, SymbolKind::Package(_))
+            && matches!(symbol.found.kind, SymbolKind::Package(ref x) if !x.is_proto)
         {
             context.push_namespace(symbol.found.inner_namespace());
         } else {
@@ -429,7 +430,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
         context.push_affiliation(Affiliation::ProtoModule);
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && matches!(symbol.found.kind, SymbolKind::ProtoModule(_))
+            && matches!(symbol.found.kind, SymbolKind::Module(ref x) if x.is_proto)
         {
             context.push_namespace(symbol.found.inner_namespace());
         } else {
@@ -490,7 +491,7 @@ impl Conv<&ProtoInterfaceDeclaration> for () {
         context.push_affiliation(Affiliation::ProtoInterface);
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && matches!(symbol.found.kind, SymbolKind::ProtoInterface(_))
+            && matches!(symbol.found.kind, SymbolKind::Interface(ref x) if x.is_proto)
         {
             context.push_namespace(symbol.found.inner_namespace());
         } else {
@@ -528,7 +529,7 @@ impl Conv<&ProtoPackageDeclaration> for () {
         context.push_affiliation(Affiliation::ProtoPackage);
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && matches!(symbol.found.kind, SymbolKind::ProtoPackage(_))
+            && matches!(symbol.found.kind, SymbolKind::Package(ref x) if x.is_proto)
         {
             context.push_namespace(symbol.found.inner_namespace());
         } else {

@@ -32,7 +32,7 @@ fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorEr
     let mut ir = air::Ir::default();
     errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     dbg!(&errors);
@@ -92,13 +92,8 @@ fn analyze_multi_file_prj(
     // Pass2 for each file, accumulating IR
     let mut context = Context::default();
     let mut ir = air::Ir::default();
-    for ((prj, parser), analyzer) in parsers.iter().zip(analyzers.iter()) {
-        all_errors.append(&mut analyzer.analyze_pass2(
-            prj,
-            &parser.veryl,
-            &mut context,
-            Some(&mut ir),
-        ));
+    for ((_prj, parser), analyzer) in parsers.iter().zip(analyzers.iter()) {
+        all_errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     }
     all_errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 

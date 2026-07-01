@@ -59,8 +59,8 @@ fn analyze_heliodor(root: &Path) -> air::Ir {
 
     let mut context = Context::default();
     let mut ir = air::Ir::default();
-    for (path, parser, analyzer) in &contexts {
-        let errors = analyzer.analyze_pass2(&path.prj, &parser.veryl, &mut context, Some(&mut ir));
+    for (_path, parser, analyzer) in &contexts {
+        let errors = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
         assert_no_errors("pass2", errors);
     }
 

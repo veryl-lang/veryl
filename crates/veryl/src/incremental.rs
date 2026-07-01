@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use veryl_analyzer::fragment_cache::{self, Fragment, FragmentWatermark};
 use veryl_analyzer::{
-    CachedDiagnostic, attribute_table, definition_table, namespace_table, symbol_table, type_dag,
+    CachedDiagnostic, attribute_table, definition_table, scope, symbol_table, type_dag,
     unsafe_table,
 };
 use veryl_cache::Store;
@@ -181,7 +181,7 @@ impl Incremental {
 
         // What analyze_pass1 would otherwise register for the project.
         let is_root = path.prj == self.root_project;
-        namespace_table::set_project(path.prj.as_str().into(), is_root);
+        scope::set_project(path.prj.as_str().into(), is_root);
 
         match fragment_cache::restore(&fragment) {
             Ok(()) => {
@@ -308,7 +308,7 @@ fn global_key(metadata: &Metadata, defines: &[String]) -> Option<String> {
 fn drop_file_state(src: &Path) {
     let path = resource_table::insert_path(src);
     symbol_table::drop(path);
-    namespace_table::drop(path);
+    scope::drop_tokens(path);
     text_table::drop(path);
     attribute_table::drop(path);
     unsafe_table::drop(path);

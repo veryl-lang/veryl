@@ -4,10 +4,8 @@ use crate::conv::Context;
 use crate::namespace::Namespace;
 use crate::symbol::{
     Direction, EnumProperty, FunctionProperty, InterfaceProperty, ModportProperty, ModuleProperty,
-    PackageProperty, Parameter, ParameterProperty, Port, ProtoConstProperty,
-    ProtoInterfaceProperty, ProtoModuleProperty, ProtoPackageProperty, ProtoTypeDefProperty,
-    StructProperty, SymbolId, SymbolKind, Type, TypeDefProperty, TypeKind, UnionProperty,
-    VariableProperty,
+    PackageProperty, Parameter, ParameterProperty, Port, StructProperty, SymbolId, SymbolKind,
+    Type, TypeDefProperty, TypeKind, UnionProperty, VariableProperty,
 };
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
@@ -15,10 +13,7 @@ use std::rc::Rc;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 
-fn check_module_compat(
-    actual: &ModuleProperty,
-    proto: &ProtoModuleProperty,
-) -> Vec<IncompatProtoKind> {
+fn check_module_compat(actual: &ModuleProperty, proto: &ModuleProperty) -> Vec<IncompatProtoKind> {
     let mut ret = Vec::new();
     ret.append(&mut check_params_compat(
         &actual.parameters,
@@ -30,11 +25,12 @@ fn check_module_compat(
 
 // TODO: remove when rust-clippy#16717 is fixed
 // False positive: collapsing the inner `if`s into guards would let the
-// trailing `(_, SymbolKind::Proto*)` fallback arms fire, changing behavior.
+// trailing `is_proto` fallback arms fire for non-proto symbols, changing
+// behavior.
 #[allow(clippy::collapsible_match)]
 fn check_interface_compat(
     actual: &InterfaceProperty,
-    proto: &ProtoInterfaceProperty,
+    proto: &InterfaceProperty,
 ) -> Vec<IncompatProtoKind> {
     let mut ret = Vec::new();
 
@@ -59,12 +55,14 @@ fn check_interface_compat(
             let actual_symbol = actual;
             let proto_symbol = proto;
             match (&actual_symbol.kind, &proto_symbol.kind) {
-                (SymbolKind::Parameter(actual), SymbolKind::ProtoConst(proto)) => {
+                (SymbolKind::Parameter(actual), SymbolKind::Parameter(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_const_compat(actual, proto).is_empty() {
                         ret.push(IncompatProtoKind::IncompatibleParam(text));
                     }
                 }
-                (_, SymbolKind::ProtoConst(_)) => {
+                (_, SymbolKind::Parameter(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleParam(text));
                 }
                 (SymbolKind::Variable(actual), SymbolKind::Variable(proto)) => {
@@ -75,23 +73,29 @@ fn check_interface_compat(
                 (_, SymbolKind::Variable(_)) => {
                     ret.push(IncompatProtoKind::IncompatibleVar(text));
                 }
-                (SymbolKind::TypeDef(actual), SymbolKind::ProtoTypeDef(proto)) => {
+                (SymbolKind::TypeDef(actual), SymbolKind::TypeDef(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_typedef_compat(actual, proto).is_empty() {
                         ret.push(IncompatProtoKind::IncompatibleTypedef(text));
                     }
                 }
-                (_, SymbolKind::ProtoTypeDef(_)) => {
+                (_, SymbolKind::TypeDef(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleTypedef(text));
                 }
-                (SymbolKind::Function(actual), SymbolKind::ProtoFunction(proto)) => {
+                (SymbolKind::Function(actual), SymbolKind::Function(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_function_compat(actual, proto).is_empty() {
                         ret.push(IncompatProtoKind::IncompatibleFunction(text));
                     }
                 }
-                (_, SymbolKind::ProtoFunction(_)) => {
+                (_, SymbolKind::Function(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleFunction(text));
                 }
-                (SymbolKind::AliasModule(actual), SymbolKind::ProtoAliasModule(proto)) => {
+                (SymbolKind::AliasModule(actual), SymbolKind::AliasModule(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_alias_compat(
                         &actual.target,
                         &actual_symbol.namespace,
@@ -103,10 +107,12 @@ fn check_interface_compat(
                         ret.push(IncompatProtoKind::IncompatibleAlias(text));
                     }
                 }
-                (_, SymbolKind::ProtoAliasModule(_)) => {
+                (_, SymbolKind::AliasModule(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleAlias(text));
                 }
-                (SymbolKind::AliasInterface(actual), SymbolKind::ProtoAliasInterface(proto)) => {
+                (SymbolKind::AliasInterface(actual), SymbolKind::AliasInterface(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_alias_compat(
                         &actual.target,
                         &actual_symbol.namespace,
@@ -118,10 +124,12 @@ fn check_interface_compat(
                         ret.push(IncompatProtoKind::IncompatibleAlias(text));
                     }
                 }
-                (_, SymbolKind::ProtoAliasInterface(_)) => {
+                (_, SymbolKind::AliasInterface(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleAlias(text));
                 }
-                (SymbolKind::AliasPackage(actual), SymbolKind::ProtoAliasPackage(proto)) => {
+                (SymbolKind::AliasPackage(actual), SymbolKind::AliasPackage(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_alias_compat(
                         &actual.target,
                         &actual_symbol.namespace,
@@ -133,7 +141,7 @@ fn check_interface_compat(
                         ret.push(IncompatProtoKind::IncompatibleAlias(text));
                     }
                 }
-                (_, SymbolKind::ProtoAliasPackage(_)) => {
+                (_, SymbolKind::AliasPackage(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleAlias(text));
                 }
                 (SymbolKind::Modport(actual), SymbolKind::Modport(proto)) => {
@@ -147,18 +155,16 @@ fn check_interface_compat(
                 _ => {}
             }
         } else {
-            match proto.kind {
-                SymbolKind::Parameter(_) | SymbolKind::ProtoConst(_) => {
-                    ret.push(IncompatProtoKind::MissingParam(text))
-                }
+            match &proto.kind {
+                SymbolKind::Parameter(_) => ret.push(IncompatProtoKind::MissingParam(text)),
                 SymbolKind::Variable(_) => ret.push(IncompatProtoKind::MissingVar(text)),
-                SymbolKind::ProtoTypeDef(_) => ret.push(IncompatProtoKind::MissingTypedef(text)),
-                SymbolKind::ProtoFunction(_) => ret.push(IncompatProtoKind::MissingFunction(text)),
-                SymbolKind::ProtoAliasModule(_)
-                | SymbolKind::ProtoAliasInterface(_)
-                | SymbolKind::ProtoAliasPackage(_) => {
-                    ret.push(IncompatProtoKind::MissingAlias(text))
+                SymbolKind::TypeDef(x) if x.is_proto => {
+                    ret.push(IncompatProtoKind::MissingTypedef(text))
                 }
+                SymbolKind::Function(x) if x.is_proto => {
+                    ret.push(IncompatProtoKind::MissingFunction(text))
+                }
+                _ if proto.kind.is_proto_alias() => ret.push(IncompatProtoKind::MissingAlias(text)),
                 SymbolKind::Modport(_) => ret.push(IncompatProtoKind::MissingModport(text)),
                 _ => {}
             }
@@ -172,7 +178,7 @@ fn check_interface_compat(
 #[allow(clippy::collapsible_match)]
 fn check_package_compat(
     actual: &PackageProperty,
-    proto: &ProtoPackageProperty,
+    proto: &PackageProperty,
 ) -> Vec<IncompatProtoKind> {
     let mut ret = Vec::new();
 
@@ -193,20 +199,24 @@ fn check_package_compat(
             let actual_symbol = actual;
             let proto_symbol = proto;
             match (&actual_symbol.kind, &proto_symbol.kind) {
-                (SymbolKind::Parameter(actual), SymbolKind::ProtoConst(proto)) => {
+                (SymbolKind::Parameter(actual), SymbolKind::Parameter(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_const_compat(actual, proto).is_empty() {
                         ret.push(IncompatProtoKind::IncompatibleParam(text));
                     }
                 }
-                (_, SymbolKind::ProtoConst(_)) => {
+                (_, SymbolKind::Parameter(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleParam(text));
                 }
-                (SymbolKind::TypeDef(actual), SymbolKind::ProtoTypeDef(proto)) => {
+                (SymbolKind::TypeDef(actual), SymbolKind::TypeDef(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_typedef_compat(actual, proto).is_empty() {
                         ret.push(IncompatProtoKind::IncompatibleTypedef(text));
                     }
                 }
-                (_, SymbolKind::ProtoTypeDef(_)) => {
+                (_, SymbolKind::TypeDef(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleTypedef(text));
                 }
                 (SymbolKind::Enum(actual), SymbolKind::Enum(proto)) => {
@@ -233,15 +243,19 @@ fn check_package_compat(
                 (_, SymbolKind::Union(_)) => {
                     ret.push(IncompatProtoKind::IncompatibleTypedef(text));
                 }
-                (SymbolKind::Function(actual), SymbolKind::ProtoFunction(proto)) => {
+                (SymbolKind::Function(actual), SymbolKind::Function(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_function_compat(actual, proto).is_empty() {
                         ret.push(IncompatProtoKind::IncompatibleFunction(text));
                     }
                 }
-                (_, SymbolKind::ProtoFunction(_)) => {
+                (_, SymbolKind::Function(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleFunction(text));
                 }
-                (SymbolKind::AliasModule(actual), SymbolKind::ProtoAliasModule(proto)) => {
+                (SymbolKind::AliasModule(actual), SymbolKind::AliasModule(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_alias_compat(
                         &actual.target,
                         &actual_symbol.namespace,
@@ -253,10 +267,12 @@ fn check_package_compat(
                         ret.push(IncompatProtoKind::IncompatibleAlias(text));
                     }
                 }
-                (_, SymbolKind::ProtoAliasModule(_)) => {
+                (_, SymbolKind::AliasModule(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleAlias(text));
                 }
-                (SymbolKind::AliasInterface(actual), SymbolKind::ProtoAliasInterface(proto)) => {
+                (SymbolKind::AliasInterface(actual), SymbolKind::AliasInterface(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_alias_compat(
                         &actual.target,
                         &actual_symbol.namespace,
@@ -268,10 +284,12 @@ fn check_package_compat(
                         ret.push(IncompatProtoKind::IncompatibleAlias(text));
                     }
                 }
-                (_, SymbolKind::ProtoAliasInterface(_)) => {
+                (_, SymbolKind::AliasInterface(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleAlias(text));
                 }
-                (SymbolKind::AliasPackage(actual), SymbolKind::ProtoAliasPackage(proto)) => {
+                (SymbolKind::AliasPackage(actual), SymbolKind::AliasPackage(proto))
+                    if !actual.is_proto && proto.is_proto =>
+                {
                     if !check_alias_compat(
                         &actual.target,
                         &actual_symbol.namespace,
@@ -283,24 +301,26 @@ fn check_package_compat(
                         ret.push(IncompatProtoKind::IncompatibleAlias(text));
                     }
                 }
-                (_, SymbolKind::ProtoAliasPackage(_)) => {
+                (_, SymbolKind::AliasPackage(proto)) if proto.is_proto => {
                     ret.push(IncompatProtoKind::IncompatibleAlias(text));
                 }
                 _ => {}
             }
         } else {
-            match proto.kind {
-                SymbolKind::ProtoConst(_) => ret.push(IncompatProtoKind::MissingParam(text)),
-                SymbolKind::ProtoTypeDef(_) => ret.push(IncompatProtoKind::MissingTypedef(text)),
+            match &proto.kind {
+                SymbolKind::Parameter(x) if x.is_proto => {
+                    ret.push(IncompatProtoKind::MissingParam(text))
+                }
+                SymbolKind::TypeDef(x) if x.is_proto => {
+                    ret.push(IncompatProtoKind::MissingTypedef(text))
+                }
                 SymbolKind::Enum(_) => ret.push(IncompatProtoKind::MissingTypedef(text)),
                 SymbolKind::Struct(_) => ret.push(IncompatProtoKind::MissingTypedef(text)),
                 SymbolKind::Union(_) => ret.push(IncompatProtoKind::MissingTypedef(text)),
-                SymbolKind::ProtoFunction(_) => ret.push(IncompatProtoKind::MissingFunction(text)),
-                SymbolKind::ProtoAliasModule(_)
-                | SymbolKind::ProtoAliasInterface(_)
-                | SymbolKind::ProtoAliasPackage(_) => {
-                    ret.push(IncompatProtoKind::MissingAlias(text))
+                SymbolKind::Function(x) if x.is_proto => {
+                    ret.push(IncompatProtoKind::MissingFunction(text))
                 }
+                _ if proto.kind.is_proto_alias() => ret.push(IncompatProtoKind::MissingAlias(text)),
                 _ => {}
             }
         }
@@ -418,7 +438,7 @@ fn check_variable_compat(
 
 fn check_const_compat(
     actual: &ParameterProperty,
-    proto: &ProtoConstProperty,
+    proto: &ParameterProperty,
 ) -> Vec<IncompatProtoKind> {
     let mut ret = Vec::new();
     if !(actual.kind.is_const() && actual.r#type.is_compatible(&proto.r#type)) {
@@ -429,14 +449,11 @@ fn check_const_compat(
 
 fn check_typedef_compat(
     actual: &TypeDefProperty,
-    proto: &ProtoTypeDefProperty,
+    proto: &TypeDefProperty,
 ) -> Vec<IncompatProtoKind> {
     let mut ret = Vec::new();
     if proto.r#type.is_some() {
-        ret.append(&mut check_type_compat(
-            &Some(actual.r#type.clone()),
-            &proto.r#type,
-        ));
+        ret.append(&mut check_type_compat(&actual.r#type, &proto.r#type));
     }
     ret
 }
@@ -651,10 +668,12 @@ pub fn check_proto(context: &mut Context, actual: &Identifier, proto: &ScopedIde
 
     let mut errors = Vec::new();
     match (&actual_symbol.kind, &proto_symbol.kind) {
-        (SymbolKind::Module(actual), SymbolKind::ProtoModule(proto)) => {
+        (SymbolKind::Module(actual), SymbolKind::Module(proto))
+            if !actual.is_proto && proto.is_proto =>
+        {
             errors.append(&mut check_module_compat(actual, proto));
         }
-        (SymbolKind::Module(_), _) => {
+        (SymbolKind::Module(actual), _) if !actual.is_proto => {
             context.insert_error(AnalyzerError::mismatch_type(
                 MismatchTypeKind::SymbolKind {
                     name: proto_symbol.token.to_string(),
@@ -664,10 +683,12 @@ pub fn check_proto(context: &mut Context, actual: &Identifier, proto: &ScopedIde
                 &proto.identifier().token.into(),
             ));
         }
-        (SymbolKind::Interface(actual), SymbolKind::ProtoInterface(proto)) => {
+        (SymbolKind::Interface(actual), SymbolKind::Interface(proto))
+            if !actual.is_proto && proto.is_proto =>
+        {
             errors.append(&mut check_interface_compat(actual, proto));
         }
-        (SymbolKind::Interface(_), _) => {
+        (SymbolKind::Interface(actual), _) if !actual.is_proto => {
             context.insert_error(AnalyzerError::mismatch_type(
                 MismatchTypeKind::SymbolKind {
                     name: proto_symbol.token.to_string(),
@@ -677,10 +698,12 @@ pub fn check_proto(context: &mut Context, actual: &Identifier, proto: &ScopedIde
                 &proto.identifier().token.into(),
             ));
         }
-        (SymbolKind::Package(actual), SymbolKind::ProtoPackage(proto)) => {
+        (SymbolKind::Package(actual), SymbolKind::Package(proto))
+            if !actual.is_proto && proto.is_proto =>
+        {
             errors.append(&mut check_package_compat(actual, proto));
         }
-        (SymbolKind::Package(_), _) => {
+        (SymbolKind::Package(actual), _) if !actual.is_proto => {
             context.insert_error(AnalyzerError::mismatch_type(
                 MismatchTypeKind::SymbolKind {
                     name: proto_symbol.token.to_string(),

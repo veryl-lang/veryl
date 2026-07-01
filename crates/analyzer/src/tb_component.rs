@@ -56,6 +56,7 @@ fn insert_method(
 
     let func_prop = FunctionProperty {
         affiliation: Affiliation::Module,
+        is_proto: false,
         range: TokenRange::default(),
         generic_parameters: vec![],
         generic_consts: vec![],

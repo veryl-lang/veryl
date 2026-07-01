@@ -1,7 +1,7 @@
 use crate::AnalyzerError;
 use crate::generic_inference_table;
-use crate::namespace::Namespace;
-use crate::namespace_table;
+use crate::namespace::{DefineContext, Namespace};
+use crate::scope;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
@@ -20,36 +20,28 @@ use veryl_parser::veryl_token::{Token, TokenSource, is_anonymous_text};
 pub enum ReferenceCandidate {
     Identifier {
         arg: Identifier,
-        namespace: Namespace,
     },
     HierarchicalIdentifier {
         arg: HierarchicalIdentifier,
-        namespace: Namespace,
     },
     ScopedIdentifier {
         arg: ScopedIdentifier,
-        namespace: Namespace,
         in_import_declaration: bool,
     },
     ExpressionIdentifier {
         arg: ExpressionIdentifier,
-        namespace: Namespace,
     },
     GenericArgIdentifier {
         arg: GenericArgIdentifier,
-        namespace: Namespace,
     },
     ModportItem {
         arg: ModportItem,
-        namespace: Namespace,
     },
     InstParameterItem {
         arg: InstParameterItem,
-        namespace: Namespace,
     },
     InstPortItem {
         arg: InstPortItem,
-        namespace: Namespace,
     },
     StructConstructorItem {
         arg: StructConstructorItem,
@@ -63,19 +55,13 @@ pub enum ReferenceCandidate {
 
 impl From<&Identifier> for ReferenceCandidate {
     fn from(value: &Identifier) -> Self {
-        Self::Identifier {
-            arg: value.clone(),
-            namespace: namespace_table::get_default(),
-        }
+        Self::Identifier { arg: value.clone() }
     }
 }
 
 impl From<&HierarchicalIdentifier> for ReferenceCandidate {
     fn from(value: &HierarchicalIdentifier) -> Self {
-        Self::HierarchicalIdentifier {
-            arg: value.clone(),
-            namespace: namespace_table::get_default(),
-        }
+        Self::HierarchicalIdentifier { arg: value.clone() }
     }
 }
 
@@ -83,7 +69,6 @@ impl From<(&ScopedIdentifier, bool)> for ReferenceCandidate {
     fn from(value: (&ScopedIdentifier, bool)) -> Self {
         Self::ScopedIdentifier {
             arg: value.0.clone(),
-            namespace: namespace_table::get_default(),
             in_import_declaration: value.1,
         }
     }
@@ -91,46 +76,31 @@ impl From<(&ScopedIdentifier, bool)> for ReferenceCandidate {
 
 impl From<&ExpressionIdentifier> for ReferenceCandidate {
     fn from(value: &ExpressionIdentifier) -> Self {
-        Self::ExpressionIdentifier {
-            arg: value.clone(),
-            namespace: namespace_table::get_default(),
-        }
+        Self::ExpressionIdentifier { arg: value.clone() }
     }
 }
 
 impl From<&GenericArgIdentifier> for ReferenceCandidate {
     fn from(value: &GenericArgIdentifier) -> Self {
-        Self::GenericArgIdentifier {
-            arg: value.clone(),
-            namespace: namespace_table::get_default(),
-        }
+        Self::GenericArgIdentifier { arg: value.clone() }
     }
 }
 
 impl From<&ModportItem> for ReferenceCandidate {
     fn from(value: &ModportItem) -> Self {
-        Self::ModportItem {
-            arg: value.clone(),
-            namespace: namespace_table::get_default(),
-        }
+        Self::ModportItem { arg: value.clone() }
     }
 }
 
 impl From<&InstParameterItem> for ReferenceCandidate {
     fn from(value: &InstParameterItem) -> Self {
-        Self::InstParameterItem {
-            arg: value.clone(),
-            namespace: namespace_table::get_default(),
-        }
+        Self::InstParameterItem { arg: value.clone() }
     }
 }
 
 impl From<&InstPortItem> for ReferenceCandidate {
     fn from(value: &InstPortItem) -> Self {
-        Self::InstPortItem {
-            arg: value.clone(),
-            namespace: namespace_table::get_default(),
-        }
+        Self::InstPortItem { arg: value.clone() }
     }
 }
 
@@ -224,7 +194,7 @@ impl ReferenceTable {
     }
 
     fn check_pacakge_reference(&mut self, symbol: &Symbol, token_range: &TokenRange) {
-        if !matches!(symbol.kind, SymbolKind::Package(_)) {
+        if !matches!(symbol.kind, SymbolKind::Package(ref x) if !x.is_proto) {
             return;
         }
 
@@ -255,7 +225,8 @@ impl ReferenceTable {
     fn generic_symbol_path(
         &mut self,
         path: &GenericSymbolPath,
-        namespace: &Namespace,
+        scope: scope::ScopeId,
+        define_context: &DefineContext,
         in_import_declaration: bool,
         generics_token: Option<&Token>,
         generic_maps: Option<&Vec<GenericMap>>,
@@ -264,14 +235,13 @@ impl ReferenceTable {
         let mut generic_maps = generic_maps.cloned().unwrap_or_default();
 
         let orig_len = path.len();
-        path.resolve_imported(namespace, Some(&generic_maps));
+        path.resolve_imported(scope, define_context, Some(&generic_maps));
 
         // Prefix paths added by `resolve_imported` have already been resolved.
         // They should be skipped.
         let prefix_len = path.len() - orig_len;
         for i in prefix_len..path.len() {
-            let base_path = path.base_path(i);
-            match symbol_table::resolve((&base_path, namespace)) {
+            match symbol_table::resolve_base_path(&path, i, (scope, define_context.clone())) {
                 Ok(symbol) => {
                     self.check_pacakge_reference(&symbol.found, &path.range);
                     symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
@@ -293,10 +263,10 @@ impl ReferenceTable {
 
                     if in_import_declaration
                         && !params.is_empty()
-                        && matches!(
+                        && (matches!(
                             symbol.found.kind,
-                            SymbolKind::Function(_) | SymbolKind::Struct(_) | SymbolKind::Union(_)
-                        )
+                            SymbolKind::Struct(_) | SymbolKind::Union(_)
+                        ) || matches!(symbol.found.kind, SymbolKind::Function(ref x) if !x.is_proto))
                     {
                         // Generic function, struct and union should be imorted as-is
                         // but not as thier instances.
@@ -335,7 +305,8 @@ impl ReferenceTable {
                         // If the alias is in a generic instance namespace, include its maps
                         // so generic parameters in the alias target can be correctly resolved.
                         let mut alias_maps = generic_maps.clone();
-                        if let Some(ns_sym) = symbol.found.namespace.get_symbol()
+                        if let Some(ns_sym) =
+                            symbol_table::get_namespace_symbol(&symbol.found.namespace)
                             && matches!(ns_sym.kind, SymbolKind::GenericInstance(_))
                         {
                             alias_maps.extend(ns_sym.generic_maps());
@@ -345,7 +316,8 @@ impl ReferenceTable {
                         self.alias_stack.push(symbol.found.id);
                         self.generic_symbol_path(
                             &alias_target,
-                            &symbol.found.namespace,
+                            scope::intern_namespace(&symbol.found.namespace),
+                            &symbol.found.namespace.define_context,
                             false,
                             None,
                             Some(&alias_maps),
@@ -359,6 +331,10 @@ impl ReferenceTable {
 
                     let target_symbol = Rc::clone(&symbol.found);
 
+                    // Namespace expansion below needs the query namespace; reconstruct
+                    // it from the scope cursor only on this generic branch.
+                    let namespace = scope::namespace(scope, define_context);
+
                     let mut args: Vec<_> = path.paths[i].arguments.drain(0..).collect();
                     for param in params.iter().skip(n_args) {
                         //  apply default value
@@ -368,24 +344,24 @@ impl ReferenceTable {
                     for arg in args.iter_mut() {
                         // To ensure generic instances are emitted in the correct order,
                         // generic args must be processed before the base component is processed.
-                        self.generic_symbol_path(arg, namespace, false, None, None);
+                        self.generic_symbol_path(arg, scope, define_context, false, None, None);
 
                         arg.unalias(None);
                         // Global function is emitted into the caller namespace.
                         // So namespace expansion is not needed.
                         if !target_symbol.is_global_function() {
-                            arg.append_namespace_path(namespace, &target_symbol.namespace);
+                            arg.append_namespace_path(&namespace, &target_symbol.namespace);
                         }
                     }
 
                     path.paths[i].arguments.append(&mut args);
                     if path.is_generic_reference() {
-                        Self::add_generic_reference(&target_symbol, namespace, &path, i);
+                        Self::add_generic_reference(&target_symbol, &namespace, &path, i);
                     } else {
                         Self::insert_generic_instance(
                             &path,
                             i,
-                            namespace,
+                            &namespace,
                             &target_symbol,
                             &mut generic_maps,
                             None,
@@ -421,9 +397,29 @@ impl ReferenceTable {
 
         if let Some(ref id) = symbol_table::insert(&token, symbol.clone()) {
             symbol_table::add_generic_instance(target.id, *id);
+            // Register the instance in the structural identity index (queried by
+            // `resolve_generic_structural`). `symbol.scope` is the instance's
+            // enclosing scope, which encodes the parent instance for nested generics.
+            symbol_table::index_generic_instance(
+                symbol.scope,
+                target.id,
+                &instance_path.arguments,
+                *id,
+            );
+            // Record the instance scope's owner so structural namespace
+            // recovery can map an instance namespace segment back to its symbol
+            // without resolve-by-name.
+            let inst_inner = scope::inner_scope(symbol.scope, symbol.token.text);
+            scope::set_kind_owner(inst_inner, scope::ScopeKind::Unknown, *id);
         } else {
             symbol_table::update_generic_instance_affiliation(target.id, &symbol);
         }
+
+        // Register the instance's scope-tree node, whose member scope delegates
+        // to the base template's — the delegation resolution navigates. The
+        // mangled instance symbol persists only as the SV emission name and the
+        // structural-index key, not as a resolution mechanism.
+        scope::register_generic_instance(symbol.scope, target.token.text, symbol.token.text);
 
         generic_maps.push(GenericMap {
             id: None,
@@ -455,7 +451,7 @@ impl ReferenceTable {
                     affiliation_symbol.get_parent_component().as_ref(),
                 )
             }
-        } else if let Some(namespace_symbol) = namespace.get_symbol() {
+        } else if let Some(namespace_symbol) = symbol_table::get_namespace_symbol(namespace) {
             if namespace_symbol.is_component(true) {
                 symbol.get_generic_instance(target, Some(&namespace_symbol))
             } else {
@@ -531,7 +527,7 @@ impl ReferenceTable {
         ith: usize,
     ) {
         fn get_parent_generic_component(namespace: &Namespace) -> Option<Symbol> {
-            let target = namespace.get_symbol()?;
+            let target = symbol_table::get_namespace_symbol(namespace)?;
             if target.has_generic_paramters() || target.has_generic_consts() {
                 Some(target)
             } else {
@@ -577,7 +573,7 @@ impl ReferenceTable {
         }
 
         let kind = match target.kind {
-            SymbolKind::Function(mut x) => {
+            SymbolKind::Function(mut x) if !x.is_proto => {
                 x.generic_references.push(path);
                 SymbolKind::Function(x)
             }
@@ -589,7 +585,7 @@ impl ReferenceTable {
                 x.generic_references.push(path);
                 SymbolKind::Interface(x)
             }
-            SymbolKind::Package(mut x) => {
+            SymbolKind::Package(mut x) if !x.is_proto => {
                 x.generic_references.push(path);
                 SymbolKind::Package(x)
             }
@@ -611,14 +607,9 @@ impl ReferenceTable {
     fn check_simple_identifier(
         &mut self,
         path: &SymbolPathNamespace,
-        default_namespace: Option<&Namespace>,
         token: &TokenRange,
         struct_token: Option<&Token>,
     ) {
-        if let Some(default_namespace) = default_namespace {
-            namespace_table::set_default(&default_namespace.paths);
-        }
-
         match symbol_table::resolve(path) {
             Ok(symbol) => {
                 for id in symbol.full_path.iter().copied() {
@@ -634,12 +625,11 @@ impl ReferenceTable {
     fn check_array_member_access(
         &mut self,
         path: &GenericSymbolPath,
-        namespace: &Namespace,
+        token: &Token,
         selects_per_component: &[usize],
     ) {
         for i in 0..path.len().saturating_sub(1) {
-            let base_path = path.base_path(i);
-            if let Ok(symbol) = symbol_table::resolve((&base_path, namespace))
+            if let Ok(symbol) = symbol_table::resolve_base_path(path, i, token.id)
                 && let Some(r#type) = symbol.found.kind.get_type()
             {
                 let array_dims = r#type.array.len();
@@ -665,13 +655,18 @@ impl ReferenceTable {
     fn check_complex_identifier(
         &mut self,
         path: &GenericSymbolPath,
-        default_namespace: &Namespace,
         token: &Token,
         in_import_declaration: bool,
     ) {
-        namespace_table::set_default(&default_namespace.paths);
-        let namespace = namespace_table::get(token.id).unwrap();
-        self.generic_symbol_path(path, &namespace, in_import_declaration, None, None);
+        let (scope, define_context) = scope::token_scope(token.id).unwrap();
+        self.generic_symbol_path(
+            path,
+            scope,
+            &define_context,
+            in_import_declaration,
+            None,
+            None,
+        );
     }
 
     pub fn apply(&mut self) -> Vec<AnalyzerError> {
@@ -680,15 +675,14 @@ impl ReferenceTable {
 
         for x in &candidates {
             match x {
-                ReferenceCandidate::Identifier { arg, namespace } => {
-                    self.check_simple_identifier(&arg.into(), Some(namespace), &arg.into(), None);
+                ReferenceCandidate::Identifier { arg } => {
+                    self.check_simple_identifier(&arg.into(), &arg.into(), None);
                 }
-                ReferenceCandidate::HierarchicalIdentifier { arg, namespace } => {
+                ReferenceCandidate::HierarchicalIdentifier { arg } => {
                     let token = arg.identifier.identifier_token.token;
                     let path: GenericSymbolPath = arg.into();
-                    self.check_complex_identifier(&path, namespace, &token, false);
+                    self.check_complex_identifier(&path, &token, false);
                     if !arg.hierarchical_identifier_list0.is_empty() {
-                        let ns = namespace_table::get(token.id).unwrap_or(namespace.clone());
                         let mut selects = vec![0usize; path.len()];
                         selects[0] = arg.hierarchical_identifier_list.len();
                         for (j, member) in arg.hierarchical_identifier_list0.iter().enumerate() {
@@ -696,28 +690,21 @@ impl ReferenceTable {
                                 selects[1 + j] = member.hierarchical_identifier_list0_list.len();
                             }
                         }
-                        self.check_array_member_access(&path, &ns, &selects);
+                        self.check_array_member_access(&path, &token, &selects);
                     }
                 }
                 ReferenceCandidate::ScopedIdentifier {
                     arg,
-                    namespace,
                     in_import_declaration,
                 } => {
                     let token = arg.identifier().token;
-                    self.check_complex_identifier(
-                        &arg.into(),
-                        namespace,
-                        &token,
-                        *in_import_declaration,
-                    );
+                    self.check_complex_identifier(&arg.into(), &token, *in_import_declaration);
                 }
-                ReferenceCandidate::ExpressionIdentifier { arg, namespace } => {
+                ReferenceCandidate::ExpressionIdentifier { arg } => {
                     let token = arg.scoped_identifier.identifier().token;
                     let path: GenericSymbolPath = arg.into();
-                    self.check_complex_identifier(&path, namespace, &token, false);
+                    self.check_complex_identifier(&path, &token, false);
                     if !arg.expression_identifier_list0.is_empty() {
-                        let ns = namespace_table::get(token.id).unwrap_or(namespace.clone());
                         let scoped_len = arg.scoped_identifier.scoped_identifier_list.len() + 1;
                         let mut selects = vec![0usize; path.len()];
                         if scoped_len <= selects.len() {
@@ -729,40 +716,30 @@ impl ReferenceTable {
                                     member.expression_identifier_list0_list.len();
                             }
                         }
-                        self.check_array_member_access(&path, &ns, &selects);
+                        self.check_array_member_access(&path, &token, &selects);
                     }
                 }
-                ReferenceCandidate::GenericArgIdentifier { arg, namespace } => {
+                ReferenceCandidate::GenericArgIdentifier { arg } => {
                     let token = arg.scoped_identifier.identifier().token;
-                    self.check_complex_identifier(&arg.into(), namespace, &token, false);
+                    self.check_complex_identifier(&arg.into(), &token, false);
                 }
-                ReferenceCandidate::ModportItem { arg, namespace } => {
+                ReferenceCandidate::ModportItem { arg } => {
                     let mut path: SymbolPathNamespace = arg.identifier.as_ref().into();
                     path.pop_namespace();
-                    self.check_simple_identifier(&path, Some(namespace), &arg.into(), None);
+                    self.check_simple_identifier(&path, &arg.into(), None);
                 }
-                ReferenceCandidate::InstParameterItem { arg, namespace } => {
+                ReferenceCandidate::InstParameterItem { arg } => {
                     if arg.inst_parameter_item_opt.is_none() {
                         // implicit port connection by name
                         let identifier = arg.identifier.as_ref();
-                        self.check_simple_identifier(
-                            &identifier.into(),
-                            Some(namespace),
-                            &identifier.into(),
-                            None,
-                        );
+                        self.check_simple_identifier(&identifier.into(), &identifier.into(), None);
                     }
                 }
-                ReferenceCandidate::InstPortItem { arg, namespace } => {
+                ReferenceCandidate::InstPortItem { arg } => {
                     if arg.inst_port_item_opt.is_none() {
                         // implicit port connection by name
                         let identifier = arg.identifier.as_ref();
-                        self.check_simple_identifier(
-                            &identifier.into(),
-                            Some(namespace),
-                            &identifier.into(),
-                            None,
-                        );
+                        self.check_simple_identifier(&identifier.into(), &identifier.into(), None);
                     }
                 }
                 ReferenceCandidate::StructConstructorItem { arg, r#type } => {
@@ -776,7 +753,6 @@ impl ReferenceTable {
 
                         self.check_simple_identifier(
                             &path,
-                            None,
                             &identifier.into(),
                             Some(&symbol.found.token),
                         );
@@ -793,12 +769,7 @@ impl ReferenceTable {
                         let namespace = func_symbol.inner_namespace();
                         let path: SymbolPath = arg.into();
                         let path: SymbolPathNamespace = (&path, &namespace).into();
-                        self.check_simple_identifier(
-                            &path,
-                            None,
-                            &arg.into(),
-                            Some(&func_symbol.token),
-                        );
+                        self.check_simple_identifier(&path, &arg.into(), Some(&func_symbol.token));
                     }
                 }
             }
@@ -809,22 +780,13 @@ impl ReferenceTable {
     }
 
     fn get_struct_namespace(symbol: &Symbol) -> Namespace {
-        match &symbol.kind {
-            SymbolKind::TypeDef(x) => {
-                let namespace = Some(&symbol.namespace);
-                if let Some((_, Some(symbol))) = x.r#type.trace_user_defined(namespace) {
-                    return Self::get_struct_namespace(&symbol);
-                }
+        if let SymbolKind::TypeDef(x) = &symbol.kind
+            && let Some(r#type) = &x.r#type
+        {
+            let namespace = Some(&symbol.namespace);
+            if let Some((_, Some(symbol))) = r#type.trace_user_defined(namespace) {
+                return Self::get_struct_namespace(&symbol);
             }
-            SymbolKind::ProtoTypeDef(x) => {
-                if let Some(r#type) = &x.r#type {
-                    let namespace = Some(&symbol.namespace);
-                    if let Some((_, Some(symbol))) = r#type.trace_user_defined(namespace) {
-                        return Self::get_struct_namespace(&symbol);
-                    }
-                }
-            }
-            _ => {}
         }
         symbol.inner_namespace()
     }

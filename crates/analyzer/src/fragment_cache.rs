@@ -17,8 +17,8 @@ use crate::generic_inference_table::{self, PendingEntry};
 use crate::literal::Literal;
 use crate::literal_table;
 use crate::namespace::Namespace;
-use crate::namespace_table;
 use crate::reference_table::{self, ReferenceCandidate};
+use crate::scope;
 use crate::symbol;
 use crate::symbol_table::{self, PendingWatermark, SymbolTableFragment};
 use crate::type_dag::{self, TypeDagCandidate};
@@ -163,7 +163,7 @@ pub fn capture(
     let payload = FragmentPayload {
         doc_comments: doc_comment_table::export_by_path(path_id),
         symbols: symbol_table::export_fragment(watermark.symbol, symbol_end, &watermark.pending),
-        namespace_entries: namespace_table::export_by_path(path_id),
+        namespace_entries: scope::export_tokens_by_path(path_id),
         literals: literal_table::export_in_window(watermark.token, token_end),
         attributes: attribute_table::export_by_path(path_id),
         unsafes: unsafe_table::export_by_path(path_id),
@@ -217,7 +217,7 @@ pub fn capture(
 
 /// Restores a fragment into the global tables, replacing parse +
 /// `analyze_pass1` for the file. The caller must do the project setup pass1
-/// would (`namespace_table::set_project`) and have run `Analyzer::new` at
+/// would (`scope::set_project`) and have run `Analyzer::new` at
 /// least once (it inserts the shared project namespace symbol, which this
 /// does not). On failure the tables may hold a partial restore; the caller
 /// must `drop` the file and fall back to a regular parse + pass1.
@@ -272,7 +272,7 @@ pub fn restore(fragment: &Fragment) -> Result<(), FragmentError> {
     symbol_table::restore_fragment(payload.symbols)
         .map_err(|x| FragmentError::Restore(format!("symbol conflict on restore: {}", x.token)))?;
     for (id, namespace) in payload.namespace_entries {
-        namespace_table::insert(id, path_id, &namespace);
+        scope::insert_token(id, path_id, &namespace);
     }
     for (id, literal) in payload.literals {
         literal_table::insert(id, literal);
@@ -371,6 +371,7 @@ mod tests {
     struct RunResult {
         symbol_dump: String,
         namespace_dump: String,
+        scope_dump: String,
         type_dag_dump: String,
         file_dag_dump: String,
         errors: usize,
@@ -416,7 +417,8 @@ mod tests {
 
                 RunResult {
                     symbol_dump: symbol_table::dump(),
-                    namespace_dump: namespace_table::dump(),
+                    namespace_dump: scope::dump_tokens(),
+                    scope_dump: scope::dump_owned_scopes(),
                     type_dag_dump: type_dag::dump(),
                     file_dag_dump: type_dag::dump_file(),
                     errors: errors.len(),
@@ -447,6 +449,10 @@ mod tests {
         // same ID ranges, so the dumps must match byte-for-byte.
         assert_eq!(cold.symbol_dump, warm.symbol_dump);
         assert_eq!(cold.namespace_dump, warm.namespace_dump);
+        // The restored run must rebuild the scope tree's kind/owner exactly as
+        // a cold pass1 does, so structural navigation (e.g. the emitter's
+        // namespace owner lookup) behaves identically on warm builds.
+        assert_eq!(cold.scope_dump, warm.scope_dump);
         assert_eq!(cold.type_dag_dump, warm.type_dag_dump);
         assert_eq!(cold.file_dag_dump, warm.file_dag_dump);
     }

@@ -32,6 +32,11 @@ pub enum Diag {
     Cached(CachedDiagnostic),
 }
 
+/// Identity of a diagnostic for cross-source dedup: same owning file, code,
+/// message, and label spans mean the same warning, whether freshly produced or
+/// restored from the cache.
+type DiagKey = (Option<PathBuf>, Option<String>, String, Vec<(usize, usize)>);
+
 impl Diag {
     fn is_error(&self) -> bool {
         match self {
@@ -49,6 +54,19 @@ impl Diag {
                 .and_then(resource_table::get_path_value),
             Diag::Cached(x) => x.token_path().map(PathBuf::from),
         }
+    }
+
+    fn dedup_key(&self) -> DiagKey {
+        let labels = self
+            .labels()
+            .map(|labels| labels.map(|x| (x.offset(), x.len())).collect())
+            .unwrap_or_default();
+        (
+            self.path(),
+            self.code().map(|x| x.to_string()),
+            self.to_string(),
+            labels,
+        )
     }
 
     fn as_diagnostic(&self) -> &dyn Diagnostic {
@@ -133,6 +151,21 @@ impl CheckError {
     pub fn append_cached(&mut self, diagnostics: Vec<CachedDiagnostic>) {
         self.related
             .extend(diagnostics.into_iter().map(Diag::Cached));
+    }
+
+    /// Drops a cached diagnostic when a freshly produced one already covers it.
+    /// A restored file replays its cached warnings, but a global post-pass
+    /// (e.g. the unused-variable check) re-derives some of them fresh from the
+    /// restored symbol table; without this, those would be reported twice.
+    fn drop_cached_duplicates(&mut self) {
+        let fresh: HashSet<DiagKey> = self
+            .related
+            .iter()
+            .filter(|x| matches!(x, Diag::Analyzer(_)))
+            .map(Diag::dedup_key)
+            .collect();
+        self.related
+            .retain(|x| !matches!(x, Diag::Cached(_)) || !fresh.contains(&x.dedup_key()));
     }
 
     pub fn check_err(self) -> Result<Self> {
@@ -324,7 +357,6 @@ pub fn analyze(
             let path = &context.path;
             analyzer_context.set_project_name(&path.prj);
             let mut errors = context.analyzer.analyze_pass2(
-                &path.prj,
                 &context.parser.veryl,
                 &mut analyzer_context,
                 Some(ir_for_pass2),
@@ -339,9 +371,12 @@ pub fn analyze(
     analyzer_context.finalize_conv_profiler()?;
 
     let mut errors = Analyzer::analyze_post_pass2(ir_for_pass2);
-    check_error = check_error
-        .append(&mut errors)
-        .check_err_if(opts.fail_fast)?;
+    check_error = check_error.append(&mut errors);
+
+    // After all passes, so the re-derived diagnostics are present to dedup against.
+    check_error.drop_cached_duplicates();
+
+    check_error = check_error.check_err_if(opts.fail_fast)?;
 
     debug!(
         "Executed analyze_post_pass2 ({} milliseconds)",

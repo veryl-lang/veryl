@@ -11,7 +11,7 @@ fn format(metadata: &Metadata, code: &str) -> String {
 
     analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, None);
+    analyzer.analyze_pass2(&parser.veryl, &mut context, None);
 
     let mut formatter = Formatter::new(metadata);
     formatter.format(&parser.veryl, code);

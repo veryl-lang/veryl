@@ -15,7 +15,7 @@ fn emit(metadata: &Metadata, code: &str) -> String {
 
     analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2("prj", &parser.veryl, &mut context, None);
+    analyzer.analyze_pass2(&parser.veryl, &mut context, None);
 
     let mut emitter = Emitter::new(
         metadata,
@@ -23,7 +23,7 @@ fn emit(metadata: &Metadata, code: &str) -> String {
         &PathBuf::from("test.sv"),
         &PathBuf::from("test.sv.map"),
     );
-    emitter.emit("prj", &parser.veryl, code);
+    emitter.emit(&parser.veryl, code);
     emitter.as_str().to_string()
 }
 
@@ -4010,5 +4010,85 @@ fn nested_ifdef_block_group_keeps_inner_guard() {
     assert!(
         a_pos < b_pos && b_pos < inner && inner < first_endif,
         "inner statement guarded by both: {ret}"
+    );
+}
+
+#[track_caller]
+fn emit_multiple(metadata: &Metadata, inputs: &[&str]) -> String {
+    symbol_table::clear();
+    attribute_table::clear();
+
+    let parsers: Vec<_> = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, input)| {
+            let path = format!("test_{i}.veryl");
+            let parser = Parser::parse(input, &path).unwrap();
+            let analyzer = Analyzer::new(metadata);
+            analyzer.analyze_pass1("prj", &parser.veryl);
+            (parser, analyzer)
+        })
+        .collect();
+
+    Analyzer::analyze_post_pass1();
+
+    let mut context = Context::default();
+    for (parser, analyzer) in &parsers {
+        analyzer.analyze_pass2(&parser.veryl, &mut context, None);
+    }
+
+    // Emit the last input (the consumer module).
+    let (parser, _) = parsers.last().unwrap();
+    let mut emitter = Emitter::new(
+        metadata,
+        &PathBuf::from("test.veryl"),
+        &PathBuf::from("test.sv"),
+        &PathBuf::from("test.sv.map"),
+    );
+    emitter.emit(&parser.veryl, inputs.last().unwrap());
+    emitter.as_str().to_string()
+}
+
+#[test]
+fn local_const_shadows_wildcard_import() {
+    // A module-local `const` shadows a same-named symbol brought in by a
+    // file-level wildcard import of a package declared in another file: the
+    // reference resolves to the local declaration and is emitted bare, not
+    // package-qualified. The package's `IDLE`/`READ` are distinct symbols, and a
+    // wildcard import yields to a local declaration (IEEE 1800 §26.3). The
+    // cross-file split matters: a single-file program resolves locally either
+    // way; the bug only surfaces when the package lives in another file.
+    let pkg = r#"package mst_pkg {
+    const IDLE: u32 = 0;
+    const READ: u32 = 2;
+}
+"#;
+    let module = r#"import mst_pkg::*;
+module ModuleA (
+    i_mcmd: input  logic<2>,
+    o     : output logic   ,
+) {
+    const IDLE : u32 = 0;
+    const WRITE: u32 = 1;
+    const READ : u32 = 2;
+    always_comb {
+        if (i_mcmd != IDLE) || (i_mcmd == READ) {
+            o = 1;
+        } else {
+            o = 0;
+        }
+    }
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit_multiple(&metadata, &[pkg, module]);
+    assert!(
+        ret.contains("i_mcmd != IDLE") && ret.contains("i_mcmd == READ"),
+        "local const must shadow the cross-file wildcard import and emit bare: {ret}"
+    );
+    assert!(
+        !ret.contains("prj_mst_pkg::IDLE") && !ret.contains("prj_mst_pkg::READ"),
+        "reference must not resolve to the wildcard-imported package const: {ret}"
     );
 }

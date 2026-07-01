@@ -5,6 +5,7 @@ mod msb;
 
 use crate::analyzer_error::DuplicatedIdentifierKind;
 use crate::namespace::{DefineContext, Namespace};
+use crate::scope;
 use crate::sv_system_function;
 use crate::symbol::{
     ConnectTarget, Direction, DocComment, GenericBoundKind, GenericMap, GenericTable,
@@ -15,7 +16,7 @@ use crate::symbol_path::{
 };
 use crate::tb_component;
 use crate::wavedrom::{self, DocTestTarget};
-use crate::{AnalyzerError, HashMap, SVec, namespace_table};
+use crate::{AnalyzerError, HashMap, SVec};
 use connect::check_connect;
 use log::trace;
 use msb::check_msb;
@@ -100,6 +101,71 @@ pub struct PendingWatermark {
     connect: usize,
 }
 
+/// Outcome of a lexical `lookup_name` over the scope tree.
+enum LexicalLookup {
+    Found {
+        symbol: SymbolId,
+        imported: bool,
+    },
+    /// Two or more distinct, simultaneously-active bindings of the name in the
+    /// nearest scope that binds it (e.g. a local and an explicit import, or two
+    /// wildcard imports). The reference must be qualified.
+    Ambiguous,
+    NotFound,
+}
+
+/// One candidate binding gathered for a single scope during `lookup_name`.
+struct LookupCandidate {
+    /// Definition site (`token` source/line/column); generic instantiation
+    /// clones one declaration into several `SymbolId`s, so candidates are
+    /// deduplicated by this rather than by id.
+    site: (TokenSource, u32, u32),
+    /// Define context that gates this binding's activeness (the declaration's
+    /// or the import statement's ifdef).
+    define_context: DefineContext,
+    depth: usize,
+    id: SymbolId,
+    imported: bool,
+    /// Whether the symbol can hold `::member`, used to prefer a container over a
+    /// same-named leaf when this candidate fills a non-final path segment.
+    can_have_member: bool,
+}
+
+/// Resolves the candidates gathered within one scope (one precedence tier).
+/// Ambiguous when two distinct definition sites could be active together;
+/// otherwise picks the deepest binding (last wins ties) among generic clones
+/// and ifdef variants. When `prefer_container` (a non-final path segment), a
+/// container outranks a deeper same-named leaf.
+fn resolve_tier(candidates: &[LookupCandidate], prefer_container: bool) -> LexicalLookup {
+    let mut distinct: Vec<&LookupCandidate> = Vec::new();
+    for candidate in candidates {
+        if !distinct.iter().any(|x| x.site == candidate.site) {
+            distinct.push(candidate);
+        }
+    }
+    let ambiguous = distinct.iter().enumerate().any(|(i, ci)| {
+        distinct
+            .iter()
+            .skip(i + 1)
+            .any(|cj| !ci.define_context.exclusive(&cj.define_context))
+    });
+    if ambiguous {
+        return LexicalLookup::Ambiguous;
+    }
+
+    let rank = |c: &LookupCandidate| (prefer_container && c.can_have_member, c.depth);
+    let mut best = &candidates[0];
+    for candidate in &candidates[1..] {
+        if rank(candidate) >= rank(best) {
+            best = candidate;
+        }
+    }
+    LexicalLookup::Found {
+        symbol: best.id,
+        imported: best.imported,
+    }
+}
+
 /// Everything one file's pass1 wrote into the symbol table, in a
 /// serializable form. Part of the fragment cache payload.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -173,10 +239,14 @@ impl SymbolTable {
             }
         }
         let id = symbol.id;
+        let scope = symbol.scope;
         let ns_paths = symbol.namespace.paths.clone();
         entry.push(id);
         self.symbol_table.insert(id, Rc::new(symbol));
         self.namespace_index.entry(ns_paths).or_default().push(id);
+        // Mirror the binding into the scope tree so lexical lookup sees every
+        // inserted symbol regardless of which path created it.
+        scope::add_local(scope, token.text, id);
         Some(id)
     }
 
@@ -198,8 +268,12 @@ impl SymbolTable {
             && let (SymbolKind::GenericInstance(_), SymbolKind::GenericInstance(_)) =
                 (&last_found.kind, &found.kind)
         {
-            let namespace = last_found.inner_namespace();
-            return namespace.matched(&found.namespace);
+            let inner = scope::inner_scope(last_found.scope, last_found.token.text);
+            return inner == found.scope
+                && !last_found
+                    .namespace
+                    .define_context
+                    .exclusive(&found.namespace.define_context);
         }
         false
     }
@@ -210,36 +284,37 @@ impl SymbolTable {
         kind: &TypeKind,
     ) -> Result<ResolveContext<'a>, ResolveError> {
         if let TypeKind::UserDefined(x) = kind {
-            // Detect infinite loop in trace_type_kind
-            if let Some(last_found) = context.last_found
-                && x.path.paths.first().unwrap().base.text == last_found.token.text
-            {
-                return Ok(context);
-            }
-
             let mut path = x.path.clone();
-            path.resolve_imported(&context.namespace, None);
+            path.resolve_imported(context.scope, &context.define_context, None);
             path.unalias(None);
             let symbol = self.resolve(
                 &path.generic_path(),
                 &path.generic_arguments(),
                 context.push(),
             )?;
+
+            // cyclic-type guard: stop tracing if this type is already being
+            // traced (a self- or mutually-referential type definition).
+            let key = (symbol.found.id, ResolvePhase::TypeTrace);
+            if context.visiting.contains(&key) {
+                return Ok(context);
+            }
+            context.visiting.push(key);
+
             match &symbol.found.kind {
                 SymbolKind::SystemVerilog => context.sv_member = true,
-                SymbolKind::Parameter(x) => {
+                SymbolKind::Parameter(x) if !x.is_proto => {
                     if matches!(x.r#type.kind, TypeKind::Type) {
                         let value = x.value.as_ref().unwrap();
                         return self.trace_type_parameter(context, value, &symbol.found);
                     }
                 }
                 SymbolKind::TypeDef(x) => {
-                    context.namespace = symbol.found.namespace.clone();
-                    return self.trace_type_kind(context, &x.r#type.kind);
-                }
-                SymbolKind::ProtoTypeDef(x) => {
                     if let Some(r#type) = &x.r#type {
-                        context.namespace = symbol.found.namespace.clone();
+                        context.set_namespace(
+                            symbol.found.scope,
+                            symbol.found.namespace.define_context.clone(),
+                        );
                         return self.trace_type_kind(context, &r#type.kind);
                     }
                 }
@@ -250,14 +325,14 @@ impl SymbolTable {
                 }
                 _ => (),
             }
-            context.namespace = symbol.found.inner_namespace();
+            context.set_inner(&symbol.found);
             context.last_found_type = Some(symbol.found.id);
             context.inner = true;
             context.generic_tables = symbol.generic_tables;
         } else {
             // assign a new empty namespace becuase
             // factor types and abstruct interface type have no members.
-            context.namespace = Namespace::new();
+            context.set_namespace(scope::ScopeId::default(), DefineContext::default());
             context.inner = true;
         }
         Ok(context)
@@ -268,15 +343,30 @@ impl SymbolTable {
         context: ResolveContext<'a>,
         path: &GenericSymbolPath,
     ) -> Result<ResolveContext<'a>, ResolveError> {
-        self.trace_type_path_inner(context, path, &mut Vec::new())
+        let (mut context, found) = self.expand_alias(context, path)?;
+        match &found.kind {
+            SymbolKind::GenericInstance(_) => self.trace_generic_instance(context, &found),
+            SymbolKind::GenericParameter(_) => self.trace_generic_parameter(context, &found),
+            _ => {
+                if matches!(found.kind, SymbolKind::SystemVerilog) {
+                    context.sv_member = true;
+                }
+                context.set_inner(&found);
+                context.last_found_type = Some(found.id);
+                context.inner = true;
+                Ok(context)
+            }
+        }
     }
 
-    fn trace_type_path_inner<'a>(
+    /// Follows an alias chain (`alias module`/`interface`/`package`) to its
+    /// non-alias target, resolving each link in `context` and returning the
+    /// terminal symbol. `context.visiting` breaks cyclic aliases used as a type.
+    fn expand_alias<'a>(
         &self,
         mut context: ResolveContext<'a>,
         path: &GenericSymbolPath,
-        visited: &mut Vec<SymbolId>,
-    ) -> Result<ResolveContext<'a>, ResolveError> {
+    ) -> Result<(ResolveContext<'a>, Rc<Symbol>), ResolveError> {
         let symbol = self.resolve(
             &path.generic_path(),
             &path.generic_arguments(),
@@ -291,32 +381,21 @@ impl SymbolTable {
                 | SymbolKind::AliasInterface(_)
                 | SymbolKind::AliasPackage(_)
         ) {
-            if visited.contains(&symbol.found.id) {
+            let key = (symbol.found.id, ResolvePhase::Alias);
+            if context.visiting.contains(&key) {
                 return Err(ResolveError::new(
                     Some(&symbol.found),
                     ResolveErrorCause::NotFound(symbol.found.token.text),
                 ));
             }
-            visited.push(symbol.found.id);
+            context.visiting.push(key);
         }
 
         match &symbol.found.kind {
-            SymbolKind::AliasModule(x) => self.trace_type_path_inner(context, &x.target, visited),
-            SymbolKind::AliasInterface(x) => {
-                self.trace_type_path_inner(context, &x.target, visited)
-            }
-            SymbolKind::AliasPackage(x) => self.trace_type_path_inner(context, &x.target, visited),
-            SymbolKind::GenericInstance(_) => self.trace_generic_instance(context, &symbol.found),
-            SymbolKind::GenericParameter(_) => self.trace_generic_parameter(context, &symbol.found),
-            _ => {
-                if matches!(symbol.found.kind, SymbolKind::SystemVerilog) {
-                    context.sv_member = true;
-                }
-                context.namespace = symbol.found.inner_namespace();
-                context.last_found_type = Some(symbol.found.id);
-                context.inner = true;
-                Ok(context)
-            }
+            SymbolKind::AliasModule(x) => self.expand_alias(context, &x.target),
+            SymbolKind::AliasInterface(x) => self.expand_alias(context, &x.target),
+            SymbolKind::AliasPackage(x) => self.expand_alias(context, &x.target),
+            _ => Ok((context, Rc::clone(&symbol.found))),
         }
     }
 
@@ -327,12 +406,35 @@ impl SymbolTable {
     ) -> Result<ResolveContext<'a>, ResolveError> {
         if let SymbolKind::GenericInstance(x) = &found.kind {
             let base = self.symbol_table.get(&x.base).unwrap();
-            context.namespace = base.inner_namespace();
+
+            // The scope-tree delegation built at instance creation must point
+            // the instance's member scope at the same base member scope that
+            // `set_inner(base)` below redirects to.
+            #[cfg(debug_assertions)]
+            {
+                let inst_inner = scope::inner_scope(found.scope, found.token.text);
+                let base_inner = scope::inner_scope(base.scope, base.token.text);
+                debug_assert_eq!(
+                    scope::generic_delegation(inst_inner),
+                    Some(base_inner),
+                    "generic instance delegation must match the base redirect"
+                );
+            }
+
+            let prev_inst = context.inst_scope;
+            context.set_inner(base);
+            // Shadow cursor moves to the instance-side (mangled) scope instead of
+            // the base, so the reconstructed namespace carries the mangled name.
+            // For nested instances the mangled scope is rebased onto the outer
+            // instance cursor; otherwise it is the registered instance scope.
+            let base_inner = context.scope;
+            context.inst_scope = if scope::generic_delegation(prev_inst) == Some(found.scope) {
+                scope::register_generic_child(prev_inst, found.token.text, base_inner)
+            } else {
+                scope::inner_scope(found.scope, found.token.text)
+            };
             context.last_found_type = Some(base.id);
             context.inner = true;
-            context
-                .generic_namespace_map
-                .insert(base.token.text, found.token.text);
         }
         Ok(context)
     }
@@ -357,7 +459,9 @@ impl SymbolTable {
                 GenericBoundKind::Inst(proto) => {
                     let mut ctxt = ResolveContext::new(&found.namespace);
                     ctxt.depth = context.depth + 1;
-                    &self.resolve(&proto.mangled_path(), &[], ctxt)?.found
+                    &self
+                        .resolve(&proto.generic_path(), &proto.generic_arguments(), ctxt)?
+                        .found
                 }
                 GenericBoundKind::Proto(proto) => {
                     if let Some(x) = proto.get_user_defined() {
@@ -371,7 +475,7 @@ impl SymbolTable {
                 _ => found,
             };
 
-            context.namespace = symbol.inner_namespace();
+            context.set_inner(symbol);
             context.last_found_type = Some(symbol.id);
             context.inner = true;
         }
@@ -411,7 +515,7 @@ impl SymbolTable {
                 _ => found,
             };
 
-            context.namespace = symbol.inner_namespace();
+            context.set_inner(symbol);
             context.last_found_type = Some(symbol.id);
             context.inner = true;
         }
@@ -425,7 +529,9 @@ impl SymbolTable {
     ) -> Option<Result<ResolveContext<'a>, ResolveError>> {
         match &found.kind {
             SymbolKind::GenericParameter(_) | SymbolKind::GenericConst(_) => {
-                if let Some(generic_table) = context.generic_tables.get(&found.namespace)
+                if let Some(generic_table) = context
+                    .generic_tables
+                    .get(&(found.scope, found.namespace.define_context.clone()))
                     && let Some(path) = generic_table.get(&found.token.text)
                 {
                     let result = self.resolve(
@@ -434,7 +540,7 @@ impl SymbolTable {
                         context.push(),
                     );
                     if let Ok(symbol) = result {
-                        context.namespace = symbol.found.inner_namespace();
+                        context.set_inner(&symbol.found);
                         context.last_found_type = Some(symbol.found.id);
                         context.inner = true;
                         return Some(Ok(context));
@@ -461,16 +567,13 @@ impl SymbolTable {
 
             let symbol = self.resolve(&identifier.into(), &[], ctxt)?;
             match &symbol.found.kind {
-                SymbolKind::Parameter(x) => {
+                SymbolKind::Parameter(x) if !x.is_proto => {
                     if matches!(x.r#type.kind, TypeKind::Type) {
                         let value = x.value.as_ref().unwrap();
                         return self.trace_type_parameter(context, value, &symbol.found);
                     }
                 }
                 SymbolKind::TypeDef(x) => {
-                    return self.trace_type_kind(context, &x.r#type.kind);
-                }
-                SymbolKind::ProtoTypeDef(x) => {
                     if let Some(ref r#type) = x.r#type {
                         return self.trace_type_kind(context, &r#type.kind);
                     }
@@ -494,7 +597,7 @@ impl SymbolTable {
                 _ => {}
             }
 
-            context.namespace = symbol.found.inner_namespace();
+            context.set_inner(&symbol.found);
             context.last_found_type = Some(symbol.found.id);
             context.inner = true;
             context.generic_tables = symbol.generic_tables;
@@ -503,16 +606,136 @@ impl SymbolTable {
         Ok(context)
     }
 
+    /// Advances the cursor from a non-final path segment `found` to the scope
+    /// holding the members the next segment resolves against. Dispatches on the
+    /// symbol kind: typed members trace to their type's definition, aliases
+    /// follow their target, generics instantiate, and containers descend into
+    /// their inner scope.
+    fn navigate_member<'a>(
+        &self,
+        mut context: ResolveContext<'a>,
+        found: &Rc<Symbol>,
+    ) -> Result<ResolveContext<'a>, ResolveError> {
+        match &found.kind {
+            SymbolKind::Variable(x) => {
+                context = self.trace_type_kind(context, &x.r#type.kind)?;
+            }
+            SymbolKind::StructMember(x) => {
+                context = self.trace_type_kind(context, &x.r#type.kind)?;
+            }
+            SymbolKind::UnionMember(x) => {
+                context = self.trace_type_kind(context, &x.r#type.kind)?;
+            }
+            SymbolKind::Parameter(x) if x.is_proto => {
+                context = self.trace_type_kind(context, &x.r#type.kind)?;
+            }
+            SymbolKind::Parameter(x) => {
+                if matches!(x.r#type.kind, TypeKind::Type) {
+                    let value = x.value.as_ref().unwrap();
+                    context = self.trace_type_parameter(context, value, found)?;
+                } else {
+                    context = self.trace_type_kind(context, &x.r#type.kind)?;
+                }
+            }
+            SymbolKind::TypeDef(x) => {
+                if let Some(ref r#type) = x.r#type {
+                    context = self.trace_type_kind(context, &r#type.kind)?;
+                }
+            }
+            SymbolKind::Port(x) => {
+                context = self.trace_type_kind(context, &x.r#type.kind)?;
+            }
+            SymbolKind::ModportVariableMember(_) => {
+                let path = SymbolPath::new(&[found.token.text]);
+                context.set_namespace(
+                    scope::parent(found.scope).unwrap_or_default(),
+                    found.namespace.define_context.clone(),
+                );
+                let symbol = self.resolve(&path, &[], context.push())?;
+                if let SymbolKind::Variable(x) = &symbol.found.kind {
+                    context = self.trace_type_kind(context, &x.r#type.kind)?;
+                }
+            }
+            // proto module has no inner item to trace
+            SymbolKind::Module(x) if x.is_proto => (),
+            SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_) => {
+                context.set_inner(found);
+                context.inner = true;
+            }
+            SymbolKind::AliasModule(x) => {
+                context = self.trace_type_path(context, &x.target)?;
+            }
+            SymbolKind::AliasInterface(x) => {
+                context = self.trace_type_path(context, &x.target)?;
+            }
+            SymbolKind::AliasPackage(x) => {
+                context = self.trace_type_path(context, &x.target)?;
+            }
+            SymbolKind::Enum(_) | SymbolKind::Namespace | SymbolKind::TbComponent(_) => {
+                context.set_inner(found);
+                context.inner = true;
+            }
+            SymbolKind::SystemVerilog => {
+                context.set_inner(found);
+                context.inner = true;
+                context.sv_member = true;
+            }
+            SymbolKind::Instance(x) => {
+                let mut type_name = x.type_name.clone();
+                type_name.resolve_imported(context.scope, &context.define_context, None);
+                type_name.unalias(None);
+                context = self.trace_type_path(context, &type_name)?;
+            }
+            SymbolKind::GenericInstance(_) => {
+                context = self.trace_generic_instance(context, found)?;
+            }
+            SymbolKind::GenericParameter(_) => {
+                context = self.trace_generic_parameter(context, found)?;
+            }
+            SymbolKind::GenericConst(_) => {
+                context = self.trace_generic_const(context, found)?;
+            }
+            // don't trace inner item
+            SymbolKind::Function(_)
+            | SymbolKind::Struct(_)
+            | SymbolKind::Union(_)
+            | SymbolKind::Modport(_)
+            | SymbolKind::ModportFunctionMember(_)
+            | SymbolKind::EnumMember(_)
+            | SymbolKind::EnumMemberMangled
+            | SymbolKind::Block
+            | SymbolKind::SystemFunction(_)
+            | SymbolKind::Genvar
+            | SymbolKind::ClockDomain
+            | SymbolKind::Test(_)
+            | SymbolKind::Embed => (),
+        }
+        Ok(context)
+    }
+
+    /// Checks that `found` is reachable from the current cursor: public across a
+    /// project boundary (`is_public`) and visible through the container just
+    /// navigated (`is_visible`).
+    fn check_access(&self, context: &ResolveContext, found: &Symbol) -> Result<(), ResolveError> {
+        if !self.is_public(context, found) {
+            Err(ResolveError::new(context.found, ResolveErrorCause::Private))
+        } else if !self.is_visible(context, found) {
+            Err(ResolveError::new(
+                context.found,
+                ResolveErrorCause::Invisible,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     fn is_public(&self, context: &ResolveContext, found: &Symbol) -> bool {
         match found.kind {
             SymbolKind::Module(_)
-            | SymbolKind::ProtoModule(_)
             | SymbolKind::AliasModule(_)
             | SymbolKind::Interface(_)
-            | SymbolKind::ProtoInterface(_)
             | SymbolKind::AliasInterface(_)
             | SymbolKind::Package(_)
-            | SymbolKind::ProtoPackage(_)
             | SymbolKind::AliasPackage(_) => !context.other_prj || found.public,
             SymbolKind::Namespace => !context.root_prj || found.public,
             _ => true,
@@ -536,52 +759,38 @@ impl SymbolTable {
         let via_interface_instance = match &last_found.kind {
             SymbolKind::Instance(_) => matches!(
                 last_found_type,
-                Some(SymbolKind::Interface(_))
-                    | Some(SymbolKind::ProtoInterface(_))
-                    | Some(SymbolKind::AliasInterface(_))
+                Some(SymbolKind::Interface(_)) | Some(SymbolKind::AliasInterface(_))
             ),
             SymbolKind::GenericParameter(x) => {
                 matches!(&x.bound, GenericBoundKind::Inst(_))
-                    && matches!(
-                        last_found_type,
-                        Some(SymbolKind::Interface(_)) | Some(SymbolKind::ProtoInterface(_))
-                    )
+                    && matches!(last_found_type, Some(SymbolKind::Interface(_)))
             }
             _ => false,
         };
         let via_interface = match &last_found.kind {
-            SymbolKind::Interface(_)
-            | SymbolKind::ProtoInterface(_)
-            | SymbolKind::AliasInterface(_) => true,
+            SymbolKind::Interface(_) | SymbolKind::AliasInterface(_) => true,
             SymbolKind::GenericInstance(_) => {
-                matches!(last_found_type, Some(SymbolKind::Interface(_)))
+                matches!(last_found_type, Some(SymbolKind::Interface(ref x)) if !x.is_proto)
             }
             SymbolKind::GenericParameter(x) => {
                 matches!(&x.bound, GenericBoundKind::Proto(_))
-                    && matches!(last_found_type, Some(SymbolKind::ProtoInterface(_)))
+                    && matches!(last_found_type, Some(SymbolKind::Interface(ref x)) if x.is_proto)
             }
             _ => false,
         };
         let via_pacakge = match &last_found.kind {
-            SymbolKind::Package(_)
-            | SymbolKind::ProtoPackage(_)
-            | SymbolKind::AliasPackage(_)
-            | SymbolKind::ProtoAliasPackage(_) => true,
+            SymbolKind::Package(_) | SymbolKind::AliasPackage(_) => true,
             SymbolKind::GenericInstance(_) => {
                 matches!(last_found_type, Some(SymbolKind::Package(_)))
             }
             SymbolKind::GenericParameter(_) => {
-                matches!(
-                    last_found_type,
-                    Some(SymbolKind::ProtoPackage(_)) | Some(SymbolKind::Package(_))
-                )
+                matches!(last_found_type, Some(SymbolKind::Package(_)))
             }
             _ => false,
         };
         let via_enum = match &last_found.kind {
             SymbolKind::Enum(_) => true,
-            SymbolKind::TypeDef(_) => matches!(last_found_type, Some(SymbolKind::Enum(_))),
-            SymbolKind::ProtoTypeDef(x) => {
+            SymbolKind::TypeDef(x) => {
                 x.r#type.is_some() && matches!(last_found_type, Some(SymbolKind::Enum(_)))
             }
             _ => false,
@@ -599,25 +808,19 @@ impl SymbolTable {
                     | SymbolKind::ModportVariableMember(_)
                     | SymbolKind::Variable(_)
                     | SymbolKind::Parameter(_)
-                    | SymbolKind::ProtoConst(_)
                     | SymbolKind::StructMember(_)
                     | SymbolKind::UnionMember(_)
                     | SymbolKind::GenericParameter(_)
             ),
             SymbolKind::Parameter(_)
-            | SymbolKind::ProtoConst(_)
             | SymbolKind::TypeDef(_)
-            | SymbolKind::ProtoTypeDef(_)
             | SymbolKind::Enum(_)
             | SymbolKind::Struct(_)
             | SymbolKind::Union(_)
             | SymbolKind::AliasModule(_)
-            | SymbolKind::ProtoAliasModule(_)
             | SymbolKind::AliasInterface(_)
-            | SymbolKind::ProtoAliasInterface(_)
-            | SymbolKind::AliasPackage(_)
-            | SymbolKind::ProtoAliasPackage(_)
-            | SymbolKind::ProtoFunction(_) => via_pacakge,
+            | SymbolKind::AliasPackage(_) => via_pacakge,
+            SymbolKind::Function(x) if x.is_proto => via_pacakge,
             SymbolKind::Function(x) => {
                 via_modport
                     || via_interface_instance
@@ -636,22 +839,225 @@ impl SymbolTable {
         }
     }
 
+    /// Member lookup (`a.b`): among the symbols sharing the segment's name,
+    /// picks the one declared directly in the cursor scope — or a matching
+    /// nested generic instance — with the deepest namespace winning. Unlike
+    /// `lookup_name` it does not walk parent scopes.
+    fn lookup_member<'a>(
+        &'a self,
+        context: &ResolveContext,
+        name: StrId,
+    ) -> Option<&'a Rc<Symbol>> {
+        // For nested generic instances the member lives in the base instance's
+        // inner scope, so include those locals too.
+        let mut candidates = scope::locals_get(context.scope, name);
+        if let Some(last_found) = context.last_found
+            && matches!(last_found.kind, SymbolKind::GenericInstance(_))
+        {
+            let inner = scope::inner_scope(last_found.scope, last_found.token.text);
+            candidates.extend(scope::locals_get(inner, name));
+        }
+
+        let mut max_depth = 0;
+        let mut found = None;
+        for id in candidates {
+            let symbol = self.symbol_table.get(&id).unwrap();
+            let matched = self.match_nested_generic_instance(context, symbol)
+                || (context.scope == symbol.scope
+                    && !context
+                        .define_context
+                        .exclusive(&symbol.namespace.define_context));
+            if matched && symbol.namespace.depth() >= max_depth {
+                found = Some(symbol);
+                max_depth = symbol.namespace.depth();
+            }
+        }
+        found
+    }
+
+    /// Lexical name lookup over the scope tree: walk from `scope` up the parent
+    /// chain and resolve `name` in the nearest scope that binds it. Within a
+    /// scope, explicit bindings (local declarations and explicit imports) take
+    /// precedence over wildcard imports, matching SystemVerilog import rules; a
+    /// binding in an inner scope shadows everything above it. Candidates whose
+    /// define context is mutually exclusive with the query are not visible.
+    fn lookup_name(
+        &self,
+        scope: scope::ScopeId,
+        name: StrId,
+        query_dctx: &DefineContext,
+        prefer_container: bool,
+    ) -> LexicalLookup {
+        let candidate = |id: SymbolId, symbol: &Symbol, define_context, imported| LookupCandidate {
+            site: (symbol.token.source, symbol.token.line, symbol.token.column),
+            define_context,
+            depth: symbol.namespace.depth(),
+            id,
+            imported,
+            can_have_member: symbol.kind.can_have_path_member(),
+        };
+
+        // A non-final segment prefers a container: a nearer same-named leaf is
+        // kept only as a fallback while the walk continues outward for a
+        // container (the first one found is the deepest).
+        let mut fallback: Option<LexicalLookup> = None;
+        let mut current = Some(scope);
+        while let Some(scope) = current {
+            // A generic-instance scope holds no members of its own: resolve names
+            // in the base template it delegates to, and continue up the base's
+            // parent chain. For non-instance scopes this is the scope itself.
+            let scope = scope::generic_delegation(scope).unwrap_or(scope);
+
+            // Tier 1: explicit bindings — local declarations and explicit imports.
+            let mut tier = Vec::new();
+            for id in scope::locals_get(scope, name) {
+                if let Some(symbol) = self.symbol_table.get(&id)
+                    && !query_dctx.exclusive(&symbol.namespace.define_context)
+                {
+                    let dctx = symbol.namespace.define_context.clone();
+                    tier.push(candidate(id, symbol, dctx, false));
+                }
+            }
+            for binding in scope::imports_get(scope, name) {
+                if !query_dctx.exclusive(&binding.define_context)
+                    && let Some(symbol) = self.symbol_table.get(&binding.symbol)
+                {
+                    tier.push(candidate(
+                        binding.symbol,
+                        symbol,
+                        binding.define_context,
+                        true,
+                    ));
+                }
+            }
+            if !tier.is_empty()
+                && let Some(result) = self.container_or_stash(
+                    resolve_tier(&tier, prefer_container),
+                    prefer_container,
+                    &mut fallback,
+                )
+            {
+                return result;
+            }
+
+            // Tier 2: wildcard imports, only when no explicit binding shadows them.
+            let mut tier = Vec::new();
+            for wildcard in scope::wildcards_get(scope) {
+                if query_dctx.exclusive(&wildcard.define_context) {
+                    continue;
+                }
+                for id in scope::locals_get(wildcard.source, name) {
+                    if let Some(symbol) = self.symbol_table.get(&id)
+                        && !symbol
+                            .namespace
+                            .define_context
+                            .exclusive(&wildcard.source_define_context)
+                    {
+                        let dctx = symbol.namespace.define_context.clone();
+                        tier.push(candidate(id, symbol, dctx, true));
+                    }
+                }
+            }
+            if !tier.is_empty()
+                && let Some(result) = self.container_or_stash(
+                    resolve_tier(&tier, prefer_container),
+                    prefer_container,
+                    &mut fallback,
+                )
+            {
+                return result;
+            }
+
+            current = scope::parent(scope);
+        }
+        fallback.unwrap_or(LexicalLookup::NotFound)
+    }
+
+    /// For a non-final path segment (`prefer_container`), a same-named leaf that
+    /// is nearer than a container must not shadow it: such a leaf is stashed as
+    /// the fallback (the first/nearest one) and the caller keeps walking outward.
+    /// A container result, or any result for a final segment, is returned as-is.
+    fn container_or_stash(
+        &self,
+        result: LexicalLookup,
+        prefer_container: bool,
+        fallback: &mut Option<LexicalLookup>,
+    ) -> Option<LexicalLookup> {
+        if prefer_container
+            && let LexicalLookup::Found { symbol, .. } = &result
+            && !self
+                .symbol_table
+                .get(symbol)
+                .is_some_and(|s| s.kind.can_have_path_member())
+        {
+            if fallback.is_none() {
+                *fallback = Some(result);
+            }
+            return None;
+        }
+        Some(result)
+    }
+
+    /// Registers the generic instantiation for `found` built from this segment's
+    /// generic arguments, after normalizing them into the base component's
+    /// namespace.
+    fn instantiate_generic(
+        &self,
+        context: &mut ResolveContext,
+        found: &Symbol,
+        mut arguments: Vec<GenericSymbolPath>,
+        namespace_generic_map: &NamespaceGenericMap,
+        entry_scope: scope::ScopeId,
+        entry_define_context: &DefineContext,
+    ) {
+        for arg in &mut arguments {
+            // Generic arguments will be resolved in the namespace of base component.
+            // Therefore, generic parameters given as generic arguments should be replaced
+            // with their types.
+            // See: https://github.com/veryl-lang/veryl/issues/1714#issuecomment-2967149726
+            if let Some(map) = namespace_generic_map {
+                arg.apply_map(map.as_slice());
+            }
+
+            // Path to generic arg should have its project prefix to make it visible from
+            // the namespace of base component. An empty query namespace carries no project
+            // to prepend, so there is nothing to append.
+            if let Some(prj) = scope::project_of(entry_scope)
+                && Some(prj) != scope::project_of(context.scope)
+            {
+                self.append_project_path(arg, entry_scope, entry_define_context);
+            }
+        }
+
+        context.generic_tables.insert(
+            (
+                scope::inner_scope(found.scope, found.token.text),
+                found.namespace.define_context.clone(),
+            ),
+            found.generic_table(&arguments),
+        );
+    }
+
     fn resolve<'a>(
         &'a self,
         path: &SymbolPath,
         generic_arguments: &[Vec<GenericSymbolPath>],
         mut context: ResolveContext<'a>,
     ) -> Result<ResolveResult, ResolveError> {
-        let project_namespace = context.namespace.clone();
+        let entry_scope = context.scope;
+        let entry_define_context = context.define_context.clone();
         let mut path = path.clone();
 
-        // replace project local name
-        let prj = project_namespace.paths[0];
-        let path_head = path.0[0];
-        if let Some(map) = self.project_local_table.get(&prj) {
-            context.root_prj = false;
-            if let Some(id) = map.get(&path_head) {
-                path.0[0] = *id;
+        // Replace project-local names. An empty namespace carries no project
+        // context (e.g. resolving a numeric or builtin-type generic argument),
+        // so there is no project-local aliasing to apply.
+        if let Some(prj) = scope::project_of(entry_scope) {
+            let path_head = path.0[0];
+            if let Some(map) = self.project_local_table.get(&prj) {
+                context.root_prj = false;
+                if let Some(id) = map.get(&path_head) {
+                    path.0[0] = *id;
+                }
             }
         }
 
@@ -660,46 +1066,31 @@ impl SymbolTable {
         let namespace_generic_map = if self.skip_generic_args {
             None
         } else {
-            self.get_namespace_generic_map(&project_namespace)
+            self.get_namespace_generic_map(entry_scope, &context.define_context)
         };
+        // Recursion entries pushed while navigating one segment's type must not
+        // leak into the next segment: each segment's traversal starts from this
+        // base (the outer call-path carried in via `push`).
+        let visiting_base = context.visiting.len();
         for (i, name) in path.as_slice().iter().enumerate() {
-            let is_last = (i + 1) == path.len();
-            // For a non-final segment prefer a container over a same-named leaf
-            // even if the leaf is deeper, so an item imported under its package's
-            // name can't shadow the package as a prefix. Final segment ranks by
-            // depth alone.
-            let mut best: Option<(u8, usize)> = None;
+            // For a non-final path segment, prefer a container (a kind that can
+            // hold `::member`) over a same-named leaf, so an item imported under
+            // its package's name cannot shadow the package as a prefix.
+            let prefer_container = (i + 1) != path.len();
             context.found = None;
 
-            let mut generic_argument = if self.skip_generic_args {
+            let generic_argument = if self.skip_generic_args {
                 None
             } else {
                 generic_arguments.get(i).cloned()
             };
-            if let Some(args) = &mut generic_argument {
-                for arg in args {
-                    // Generic argumetns will be resolved in the namespace of base component.
-                    // Therefore, generic parameters given as generic arguments should be replaced
-                    // with thier types.
-                    // See: https://github.com/veryl-lang/veryl/issues/1714#issuecomment-2967149726
-                    if let Some(map) = &namespace_generic_map {
-                        arg.apply_map(map.as_slice());
-                    }
-
-                    // Path to generic arg should have its project prefix to make it visiable from
-                    // the namespace of base component.
-                    if project_namespace.paths[0] != context.namespace.paths[0] {
-                        self.append_project_path(arg, &project_namespace);
-                    }
-                }
-            }
 
             if context.sv_member {
                 let token = Token::new(&name.to_string(), 0, 0, 0, 0, TokenSource::External);
                 let symbol = Symbol::new(
                     &token,
                     SymbolKind::SystemVerilog,
-                    &context.namespace,
+                    &context.namespace(),
                     false,
                     DocComment::default(),
                 );
@@ -711,127 +1102,57 @@ impl SymbolTable {
                 });
             }
 
-            if let Some(ids) = self
+            if self
                 .name_table
-                .get(&resource_table::canonical_str_id(*name))
+                .contains_key(&resource_table::canonical_str_id(*name))
             {
-                let mut included_count = 0usize;
-                for id in ids {
-                    let symbol = self.symbol_table.get(id).unwrap();
-                    let (included, imported) = if context.inner {
-                        (
-                            self.match_nested_generic_instance(&context, symbol)
-                                || context.namespace.matched(&symbol.namespace),
-                            false,
-                        )
-                    } else {
-                        let imported = symbol
-                            .imported
-                            .iter()
-                            .any(|x| context.namespace.included(&x.namespace));
-                        (
-                            context.namespace.included(&symbol.namespace) || imported,
-                            imported,
-                        )
-                    };
-                    if included {
-                        included_count += 1;
-                        let container_pref =
-                            u8::from(is_last || symbol.kind.can_have_path_member());
-                        let depth = symbol.namespace.depth();
-                        let key = (container_pref, depth);
-                        let better = match best {
-                            None => true,
-                            Some(b) => key >= b,
-                        };
-                        if better {
-                            context.found = Some(symbol);
+                if context.inner {
+                    if let Some(symbol) = self.lookup_member(&context, *name) {
+                        context.found = Some(symbol);
+                        context.imported = false;
+                    }
+                } else {
+                    match self.lookup_name(
+                        context.scope,
+                        *name,
+                        &context.define_context,
+                        prefer_container,
+                    ) {
+                        LexicalLookup::Found { symbol, imported } => {
+                            context.found = self.symbol_table.get(&symbol);
                             context.imported = imported;
-                            best = Some(key);
                         }
-                    }
-                }
-
-                // Detect a name made ambiguous by two or more wildcard imports
-                // from different packages (`import A::*; import B::*;`), which
-                // otherwise binds arbitrarily. A local declaration or explicit
-                // import is authoritative and is never flagged. Candidates are
-                // keyed by definition site, not SymbolId, since generic
-                // instantiation clones one declaration into several SymbolIds.
-                // Gated on >= 2 in-scope candidates so the single-match hot path
-                // skips the rescan and allocation.
-                if context.found.is_some() && !context.inner && included_count >= 2 {
-                    let mut candidates: Vec<((TokenSource, u32, u32), DefineContext)> = Vec::new();
-                    let mut authoritative = false;
-                    for id in ids {
-                        let symbol = self.symbol_table.get(id).unwrap();
-                        // Scan candidates at every depth, not just `max_depth`:
-                        // cross-depth wildcard imports (`import A::*` vs
-                        // `import B::E::*`) collide too, but the deeper candidate
-                        // would otherwise silently win.
-                        if context.namespace.included(&symbol.namespace) {
-                            authoritative = true;
-                            continue;
+                        LexicalLookup::Ambiguous => {
+                            trace!("symbol_table: {}ambiguous '{}'", context.indent(), path);
+                            return Err(ResolveError::new(
+                                None,
+                                ResolveErrorCause::Ambiguous(*name),
+                            ));
                         }
-                        let in_scope = symbol
-                            .imported
-                            .iter()
-                            .filter(|x| context.namespace.included(&x.namespace));
-                        let mut via_wildcard = false;
-                        let mut via_explicit = false;
-                        for imp in in_scope {
-                            if imp.wildcard {
-                                via_wildcard = true;
-                            } else {
-                                via_explicit = true;
-                            }
-                        }
-                        if via_explicit {
-                            authoritative = true;
-                        } else if via_wildcard {
-                            let t = &symbol.token;
-                            let key = (t.source, t.line, t.column);
-                            if !candidates.iter().any(|(k, _)| *k == key) {
-                                candidates.push((key, symbol.namespace.define_context.clone()));
-                            }
-                        }
-                    }
-                    // Two candidates whose `#[ifdef]`/`#[ifndef]` contexts are
-                    // mutually exclusive can never both be active at the same
-                    // time, so they do not introduce ambiguity. Only flag when
-                    // a pair could be simultaneously active.
-                    let ambiguous = !authoritative
-                        && candidates.iter().enumerate().any(|(i, (_, ci))| {
-                            candidates
-                                .iter()
-                                .skip(i + 1)
-                                .any(|(_, cj)| !ci.exclusive(cj))
-                        });
-                    if ambiguous {
-                        trace!("symbol_table: {}ambiguous '{}'", context.indent(), path);
-                        return Err(ResolveError::new(
-                            context.found,
-                            ResolveErrorCause::Ambiguous(*name),
-                        ));
+                        LexicalLookup::NotFound => {}
                     }
                 }
 
                 if let Some(found) = context.found {
-                    if !self.is_public(&context, found) {
-                        trace!("symbol_table: {}private '{}'", context.indent(), path);
-                        return Err(ResolveError::new(context.found, ResolveErrorCause::Private));
-                    } else if !self.is_visible(&context, found) {
-                        trace!("symbol_table: {}invisible '{}'", context.indent(), path);
-                        return Err(ResolveError::new(
-                            context.found,
-                            ResolveErrorCause::Invisible,
-                        ));
-                    }
+                    self.check_access(&context, found).map_err(|err| {
+                        let kind = if matches!(err.cause, ResolveErrorCause::Private) {
+                            "private"
+                        } else {
+                            "invisible"
+                        };
+                        trace!("symbol_table: {}{} '{}'", context.indent(), kind, path);
+                        err
+                    })?;
 
-                    if let Some(x) = generic_argument {
-                        context
-                            .generic_tables
-                            .insert(found.inner_namespace(), found.generic_table(&x));
+                    if let Some(arguments) = generic_argument {
+                        self.instantiate_generic(
+                            &mut context,
+                            found,
+                            arguments,
+                            &namespace_generic_map,
+                            entry_scope,
+                            &entry_define_context,
+                        );
                     }
 
                     context.last_found = context.found;
@@ -842,118 +1163,19 @@ impl SymbolTable {
                         context.indent(),
                         name,
                         found.kind,
-                        context.namespace,
+                        context.namespace(),
                     );
 
                     if (i + 1) < path.len() {
-                        match &found.kind {
-                            SymbolKind::Variable(x) => {
-                                context = self.trace_type_kind(context, &x.r#type.kind)?;
-                            }
-                            SymbolKind::StructMember(x) => {
-                                context = self.trace_type_kind(context, &x.r#type.kind)?;
-                            }
-                            SymbolKind::UnionMember(x) => {
-                                context = self.trace_type_kind(context, &x.r#type.kind)?;
-                            }
-                            SymbolKind::Parameter(x) => {
-                                if matches!(x.r#type.kind, TypeKind::Type) {
-                                    let value = x.value.as_ref().unwrap();
-                                    context = self.trace_type_parameter(context, value, found)?;
-                                } else {
-                                    context = self.trace_type_kind(context, &x.r#type.kind)?;
-                                }
-                            }
-                            SymbolKind::ProtoConst(x) => {
-                                context = self.trace_type_kind(context, &x.r#type.kind)?;
-                            }
-                            SymbolKind::TypeDef(x) => {
-                                context = self.trace_type_kind(context, &x.r#type.kind)?;
-                            }
-                            SymbolKind::ProtoTypeDef(x) => {
-                                if let Some(ref r#type) = x.r#type {
-                                    context = self.trace_type_kind(context, &r#type.kind)?;
-                                }
-                            }
-                            SymbolKind::Port(x) => {
-                                context = self.trace_type_kind(context, &x.r#type.kind)?;
-                            }
-                            SymbolKind::ModportVariableMember(_) => {
-                                let path = SymbolPath::new(&[found.token.text]);
-                                context.namespace = found.namespace.clone();
-                                context.namespace.pop();
-                                let symbol = self.resolve(&path, &[], context.push())?;
-                                if let SymbolKind::Variable(x) = &symbol.found.kind {
-                                    context = self.trace_type_kind(context, &x.r#type.kind)?;
-                                }
-                            }
-                            SymbolKind::Module(_)
-                            | SymbolKind::Interface(_)
-                            | SymbolKind::ProtoInterface(_)
-                            | SymbolKind::Package(_)
-                            | SymbolKind::ProtoPackage(_) => {
-                                context.namespace = found.inner_namespace();
-                                context.inner = true;
-                            }
-                            SymbolKind::AliasModule(x) | SymbolKind::ProtoAliasModule(x) => {
-                                context = self.trace_type_path(context, &x.target)?;
-                            }
-                            SymbolKind::AliasInterface(x) | SymbolKind::ProtoAliasInterface(x) => {
-                                context = self.trace_type_path(context, &x.target)?;
-                            }
-                            SymbolKind::AliasPackage(x) | SymbolKind::ProtoAliasPackage(x) => {
-                                context = self.trace_type_path(context, &x.target)?;
-                            }
-                            SymbolKind::Enum(_)
-                            | SymbolKind::Namespace
-                            | SymbolKind::TbComponent(_) => {
-                                context.namespace = found.inner_namespace();
-                                context.inner = true;
-                            }
-                            SymbolKind::SystemVerilog => {
-                                context.namespace = found.inner_namespace();
-                                context.inner = true;
-                                context.sv_member = true;
-                            }
-                            SymbolKind::Instance(x) => {
-                                let mut type_name = x.type_name.clone();
-                                type_name.resolve_imported(&context.namespace, None);
-                                type_name.unalias(None);
-                                context = self.trace_type_path(context, &type_name)?;
-                            }
-                            SymbolKind::GenericInstance(_) => {
-                                context = self.trace_generic_instance(context, found)?;
-                            }
-                            SymbolKind::GenericParameter(_) => {
-                                context = self.trace_generic_parameter(context, found)?;
-                            }
-                            SymbolKind::GenericConst(_) => {
-                                context = self.trace_generic_const(context, found)?;
-                            }
-                            // don't trace inner item
-                            SymbolKind::Function(_)
-                            | SymbolKind::ProtoFunction(_)
-                            | SymbolKind::ProtoModule(_)
-                            | SymbolKind::Struct(_)
-                            | SymbolKind::Union(_)
-                            | SymbolKind::Modport(_)
-                            | SymbolKind::ModportFunctionMember(_)
-                            | SymbolKind::EnumMember(_)
-                            | SymbolKind::EnumMemberMangled
-                            | SymbolKind::Block
-                            | SymbolKind::SystemFunction(_)
-                            | SymbolKind::Genvar
-                            | SymbolKind::ClockDomain
-                            | SymbolKind::Test(_)
-                            | SymbolKind::Embed => (),
-                        }
+                        context = self.navigate_member(context, found)?;
+                        context.visiting.truncate(visiting_base);
                     }
                 } else {
                     trace!(
                         "symbol_table: {}not found '{}' @ {}",
                         context.indent(),
                         path,
-                        context.namespace
+                        context.namespace()
                     );
 
                     return Err(ResolveError::new(
@@ -963,21 +1185,26 @@ impl SymbolTable {
                 }
             } else {
                 // If symbol is not found, the name is treated as namespace
-                context.namespace = Namespace::new();
-                context.namespace.push(*name);
+                context.set_namespace(
+                    scope::inner_scope(scope::ScopeId::default(), *name),
+                    DefineContext::default(),
+                );
                 context.inner = true;
                 context.other_prj = true;
             }
         }
         if let Some(found) = context.found {
-            // Re-use the table-owned allocation when no generic namespace
-            // replacement is needed.
-            let found = if context.generic_namespace_map.is_empty() {
-                Rc::clone(found)
-            } else {
+            // A member that physically lives in the base template the instance
+            // cursor delegates to takes the instance's mangled namespace,
+            // reconstructed from the instance-side scope path. Symbols reached
+            // from elsewhere (aliases, imports, the instance's own base) keep
+            // their own (table-owned) namespace.
+            let found = if scope::generic_delegation(context.inst_scope) == Some(found.scope) {
                 let mut found = (**found).clone();
-                found.namespace = found.namespace.replace(&context.generic_namespace_map);
+                found.namespace = scope::namespace(context.inst_scope, &context.define_context);
                 Rc::new(found)
+            } else {
+                Rc::clone(found)
             };
 
             trace!(
@@ -996,20 +1223,158 @@ impl SymbolTable {
         } else {
             trace!("symbol_table: {}not found '{}'", context.indent(), path);
 
-            let cause = ResolveErrorCause::NotFound(context.namespace.pop().unwrap());
+            let cause = ResolveErrorCause::NotFound(
+                scope::name_path(context.scope).last().copied().unwrap(),
+            );
             Err(ResolveError::new(context.last_found, cause))
         }
     }
 
-    fn get_namespace_generic_map(&self, namespace: &Namespace) -> Option<Rc<Vec<GenericMap>>> {
-        if namespace.depth() <= 1 {
+    /// Structural counterpart of [`Self::resolve`] for a fully-formed generic
+    /// instance path. Walks the segments reusing the same member-lookup and
+    /// navigation machinery, but resolves a generic segment by looking up its
+    /// *un-mangled* base template and navigating to the instance through the
+    /// structural index — never constructing a mangled name. Returns a
+    /// [`ResolveResult`] carrying the fields generic-instance callers consume;
+    /// `generic_tables` is empty, matching the mangled resolution of an instance
+    /// path (which passes no generic arguments, so it instantiates none). Returns
+    /// `None` for cases this walk does not model (synthesized SystemVerilog
+    /// members, pre-mangled degenerate paths), where the caller falls back to the
+    /// mangled resolution.
+    fn resolve_generic_structural<'a>(
+        &'a self,
+        path: &GenericSymbolPath,
+        scope: scope::ScopeId,
+        define_context: DefineContext,
+    ) -> Option<ResolveResult> {
+        let mut context = ResolveContext::from_scope(scope, define_context);
+        let visiting_base = context.visiting.len();
+        let segments = &path.paths;
+        for (i, segment) in segments.iter().enumerate() {
+            context.found = None;
+            let prefer_container = (i + 1) != segments.len();
+
+            let mut name = segment.base();
+            if i == 0
+                && let Some(prj) = scope::project_of(scope)
+                && let Some(map) = self.project_local_table.get(&prj)
+            {
+                context.root_prj = false;
+                if let Some(id) = map.get(&name) {
+                    name = *id;
+                }
+            }
+
+            // Synthesized SystemVerilog members carry a freshly allocated id each
+            // time they are built, so they are neither structurally indexed nor
+            // id-comparable. Defer such paths to the mangled-name fallback.
+            if context.sv_member {
+                return None;
+            }
+
+            if !self
+                .name_table
+                .contains_key(&resource_table::canonical_str_id(name))
+            {
+                context.set_namespace(
+                    scope::inner_scope(scope::ScopeId::default(), name),
+                    DefineContext::default(),
+                );
+                context.inner = true;
+                context.other_prj = true;
+                continue;
+            }
+
+            // Look up the (un-mangled) base name with the same lexical/member rules.
+            let base: &'a Rc<Symbol> = if context.inner {
+                let member = self.lookup_member(&context, name)?;
+                context.imported = false;
+                member
+            } else {
+                match self.lookup_name(
+                    context.scope,
+                    name,
+                    &context.define_context,
+                    prefer_container,
+                ) {
+                    LexicalLookup::Found { symbol, imported } => {
+                        context.imported = imported;
+                        self.symbol_table.get(&symbol)?
+                    }
+                    LexicalLookup::Ambiguous | LexicalLookup::NotFound => return None,
+                }
+            };
+            self.check_access(&context, base).ok()?;
+
+            // A segment whose arguments do not mangle to a distinct name (none, or
+            // unresolved generic parameters) carries no instantiation — the mangled
+            // walk resolves its base, so the structural walk does too. Otherwise
+            // navigate to the instance through the structural index keyed by
+            // (enclosing scope, base template, arguments), the identity the mangled
+            // name encodes.
+            let found: &'a Rc<Symbol> = if segment.mangled() == segment.base() {
+                base
+            } else {
+                // When the base template is reached through a generic-instance
+                // delegation (a nested instance, e.g. `Pkg::<1>::Struct::<2>`), the
+                // enclosing scope keying the index is the parent instance's rebased
+                // scope (the instance-side cursor), not the template's declaration
+                // scope — mirroring the namespace rebasing applied to the final
+                // found. Otherwise it is the base template's own enclosing scope.
+                let enclosing = if scope::generic_delegation(context.inst_scope) == Some(base.scope)
+                {
+                    context.inst_scope
+                } else {
+                    scope::intern_namespace(&base.namespace)
+                };
+                let key = generic_instance_key(enclosing, base.id, &segment.arguments);
+                let inst = GENERIC_INSTANCE_INDEX.with(|f| f.borrow().get(&key).copied())?;
+                self.symbol_table.get(&inst)?
+            };
+
+            context.found = Some(found);
+            context.last_found = context.found;
+            context.full_path.push(found.id);
+
+            if (i + 1) < segments.len() {
+                context = self.navigate_member(context, found).ok()?;
+                context.visiting.truncate(visiting_base);
+            }
+        }
+
+        let found = context.found?;
+        let found = if scope::generic_delegation(context.inst_scope) == Some(found.scope) {
+            let mut found = (**found).clone();
+            found.namespace = scope::namespace(context.inst_scope, &context.define_context);
+            Rc::new(found)
+        } else {
+            Rc::clone(found)
+        };
+        Some(ResolveResult {
+            found,
+            full_path: context.full_path,
+            imported: context.imported,
+            generic_tables: context.generic_tables,
+        })
+    }
+
+    fn get_namespace_generic_map(
+        &self,
+        scope: scope::ScopeId,
+        define_context: &DefineContext,
+    ) -> Option<Rc<Vec<GenericMap>>> {
+        if scope::depth(scope) <= 1 {
             return None;
         }
-        if let Some(cached) = NS_GENERIC_MAP_CACHE.with(|f| f.borrow().get(namespace).cloned()) {
+        let key = (scope, define_context.clone());
+        if let Some(cached) = NS_GENERIC_MAP_CACHE.with(|f| f.borrow().get(&key).cloned()) {
             return cached;
         }
-        let ret = self.get_namespace_generic_map_inner(namespace).map(Rc::new);
-        NS_GENERIC_MAP_CACHE.with(|f| f.borrow_mut().insert(namespace.clone(), ret.clone()));
+        let namespace = scope::namespace(scope, define_context);
+        let ret = self
+            .get_namespace_generic_map_inner(&namespace)
+            .map(Rc::new);
+        NS_GENERIC_MAP_CACHE.with(|f| f.borrow_mut().insert(key, ret.clone()));
         ret
     }
 
@@ -1087,12 +1452,14 @@ impl SymbolTable {
         match &symbol.kind {
             SymbolKind::Module(x) => vec![collect_generic_params(self, &x.generic_parameters)],
             SymbolKind::Interface(x) => vec![collect_generic_params(self, &x.generic_parameters)],
-            SymbolKind::Package(x) => vec![collect_generic_params(self, &x.generic_parameters)],
+            SymbolKind::Package(x) if !x.is_proto => {
+                vec![collect_generic_params(self, &x.generic_parameters)]
+            }
             SymbolKind::GenericInstance(x) => {
                 let symbol = self.get(x.base).unwrap();
                 self.collect_generic_bounds(&symbol)
             }
-            SymbolKind::Function(x) => {
+            SymbolKind::Function(x) if !x.is_proto => {
                 let mut bounds = if let Some(parent) = get_parent_symbol(self, symbol) {
                     self.collect_generic_bounds(&parent)
                 } else {
@@ -1130,8 +1497,14 @@ impl SymbolTable {
         }
     }
 
-    fn append_project_path(&self, path: &mut GenericSymbolPath, namespace: &Namespace) {
-        let context = ResolveContext::new(namespace);
+    fn append_project_path(
+        &self,
+        path: &mut GenericSymbolPath,
+        scope: scope::ScopeId,
+        define_context: &DefineContext,
+    ) {
+        let namespace = scope::namespace(scope, define_context);
+        let context = ResolveContext::new(&namespace);
         let Ok(symbol) = self.resolve(&path.base_path(0), &[], context) else {
             return;
         };
@@ -1139,21 +1512,17 @@ impl SymbolTable {
             symbol.found.kind,
             SymbolKind::Module(_)
                 | SymbolKind::AliasModule(_)
-                | SymbolKind::ProtoModule(_)
-                | SymbolKind::ProtoAliasModule(_)
                 | SymbolKind::Interface(_)
                 | SymbolKind::AliasInterface(_)
-                | SymbolKind::ProtoInterface(_)
-                | SymbolKind::ProtoAliasInterface(_)
                 | SymbolKind::Package(_)
                 | SymbolKind::AliasPackage(_)
-                | SymbolKind::ProtoPackage(_)
-                | SymbolKind::ProtoAliasPackage(_)
         ) {
             return;
         }
 
-        if let Some(project_symbol) = self.find_project_symbol(namespace.paths[0]) {
+        if let Some(prj) = scope::project_of(scope)
+            && let Some(project_symbol) = self.find_project_symbol(prj)
+        {
             let project_path = GenericSymbol {
                 base: project_symbol.token,
                 arguments: vec![],
@@ -1273,10 +1642,26 @@ impl SymbolTable {
     /// symbol conflicts with an existing one; the caller is expected to
     /// fall back to a regular parse + pass1 after `drop`ping the file.
     pub fn restore_fragment(&mut self, fragment: SymbolTableFragment) -> Result<(), Box<Symbol>> {
-        for symbol in fragment.symbols {
+        for mut symbol in fragment.symbols {
+            // `scope` is not serialized (runtime-only intern handle); re-derive
+            // it from the namespace so the restored binding lands in the right
+            // scope instead of the default root.
+            symbol.scope = scope::intern_namespace(&symbol.namespace);
             let token = symbol.token;
+            let id = symbol.id;
+            let scope = symbol.scope;
+            let owned_scope_kind = scope::scope_kind_of(&symbol.kind);
             if self.insert(&token, symbol.clone()).is_none() {
                 return Err(Box::new(symbol));
+            }
+            // Re-establish the owned inner scope's kind/owner, which pass1 sets
+            // in `insert_symbol` but the serialized fragment does not carry.
+            // Without this, `scope::owner_of` is `None` for restored
+            // declarations and structural navigation falls back to name
+            // resolution on warm builds.
+            if let Some(kind) = owned_scope_kind {
+                let owned = scope::intern_child(scope, token.text, kind);
+                scope::set_kind_owner(owned, kind, id);
             }
         }
         self.import_list.extend(fragment.imports);
@@ -1329,12 +1714,6 @@ impl SymbolTable {
         }
     }
 
-    fn add_imported_item(&mut self, target: SymbolId, import: &Import) {
-        if let Some(symbol) = self.symbol_table.get_mut(&target).map(Rc::make_mut) {
-            symbol.imported.push(import.to_owned());
-        }
-    }
-
     pub fn add_import(&mut self, import: Import) {
         self.import_list.push(import);
     }
@@ -1355,6 +1734,11 @@ impl SymbolTable {
                 continue;
             };
 
+            // The import target scope records the binding; resolution and
+            // imported-path expansion read it from the scope tree.
+            let target_scope = scope::intern_namespace(&import.namespace);
+            let define_context = import.namespace.define_context.clone();
+
             if import.wildcard {
                 let wildcard_target = if matches!(symbol.kind, SymbolKind::Enum(_)) {
                     Some(symbol.clone())
@@ -1363,20 +1747,25 @@ impl SymbolTable {
                 };
                 if let Some(target_symbol) = wildcard_target {
                     let target = target_symbol.inner_namespace();
-                    if let Some(ids) = self.namespace_index.get(&target.paths) {
-                        for id in ids {
-                            let Some(symbol) = self.symbol_table.get_mut(id).map(Rc::make_mut)
-                            else {
-                                continue;
-                            };
-                            if symbol.namespace.matched(&target) {
-                                symbol.imported.push((*import).to_owned());
-                            }
-                        }
-                    }
+                    let source_scope = scope::intern_namespace(&target);
+                    scope::add_wildcard(
+                        target_scope,
+                        source_scope,
+                        define_context,
+                        target.define_context.clone(),
+                        import.path.0.clone(),
+                    );
                 }
             } else if !matches!(symbol.kind, SymbolKind::SystemVerilog) {
-                self.add_imported_item(symbol.id, import);
+                let mut package_path = import.path.0.clone();
+                package_path.paths.pop();
+                scope::add_import(
+                    target_scope,
+                    symbol.token.text,
+                    symbol.id,
+                    define_context,
+                    package_path,
+                );
             }
         }
 
@@ -1390,18 +1779,17 @@ impl SymbolTable {
         include_proto_alias: bool,
     ) -> Option<Symbol> {
         match &symbol.kind {
-            SymbolKind::Package(_) => return Some(symbol.clone()),
-            SymbolKind::ProtoPackage(_) if include_proto => return Some(symbol.clone()),
-            SymbolKind::AliasPackage(x) => {
-                let context = ResolveContext::new(&symbol.namespace);
-                if let Ok(symbol) = self.resolve(&x.target.generic_path(), &[], context) {
-                    return self.get_package(&symbol.found, include_proto, false);
+            SymbolKind::Package(x) if x.is_proto => {
+                if include_proto {
+                    return Some(symbol.clone());
                 }
             }
-            SymbolKind::ProtoAliasPackage(x) if include_proto_alias => {
+            SymbolKind::Package(_) => return Some(symbol.clone()),
+            SymbolKind::AliasPackage(x) if !x.is_proto || include_proto_alias => {
                 let context = ResolveContext::new(&symbol.namespace);
                 if let Ok(symbol) = self.resolve(&x.target.generic_path(), &[], context) {
-                    return self.get_package(&symbol.found, true, false);
+                    let include_proto = if x.is_proto { true } else { include_proto };
+                    return self.get_package(&symbol.found, include_proto, false);
                 }
             }
             SymbolKind::GenericInstance(x) => {
@@ -1450,7 +1838,7 @@ impl SymbolTable {
 
             if self.insert(&bind.token, symbol).is_some() {
                 if let TokenSource::File { path, .. } = bind.token.source {
-                    namespace_table::insert(bind.token.id, path, &namespace);
+                    scope::insert_token(bind.token.id, path, &namespace);
 
                     for target in bind.property.parameter_connects.values() {
                         Self::update_connect_target_namespace(target, path, &namespace);
@@ -1525,7 +1913,7 @@ impl SymbolTable {
         collector.expression(&target.expression);
 
         for token in &collector.tokens {
-            namespace_table::insert(token.id, path, namespace);
+            scope::insert_token(token.id, path, namespace);
         }
     }
 
@@ -1561,10 +1949,7 @@ impl SymbolTable {
         self.symbol_table
             .values()
             .filter_map(|symbol| {
-                if matches!(
-                    symbol.kind,
-                    SymbolKind::Function(_) | SymbolKind::ProtoFunction(_)
-                ) {
+                if matches!(symbol.kind, SymbolKind::Function(_)) {
                     Some((**symbol).clone())
                 } else {
                     None
@@ -1605,10 +1990,6 @@ impl SymbolTable {
             .or_insert(HashMap::from_iter([(from, to)]));
     }
 
-    pub fn get_project_local(&self, prj: StrId) -> Option<HashMap<StrId, StrId>> {
-        self.project_local_table.get(&prj).cloned()
-    }
-
     pub fn add_reference_functions(&mut self, id: SymbolId, functions: Vec<GenericSymbolPath>) {
         self.reference_func_table.insert(id, functions);
     }
@@ -1622,6 +2003,9 @@ impl SymbolTable {
     }
 
     pub fn clear(&mut self) {
+        // The scope arena must be reset before `Self::new` re-registers builtin
+        // symbols (which intern their scopes), so the two tables stay in sync.
+        scope::clear();
         self.clone_from(&Self::new());
     }
 
@@ -1727,7 +2111,6 @@ impl fmt::Display for SymbolTable {
         let mut symbol_width = 0;
         let mut namespace_width = 0;
         let mut reference_width = 0;
-        let mut import_width = 0;
         let mut vec: Vec<_> = self.name_table.iter().collect();
         vec.sort_by(|x, y| format!("{}", x.0).cmp(&format!("{}", y.0)));
         for (k, v) in &vec {
@@ -1737,7 +2120,6 @@ impl fmt::Display for SymbolTable {
                 namespace_width = namespace_width.max(format!("{}", symbol.namespace).len());
                 reference_width = reference_width
                     .max(format!("{}", self.reference_table.get(id).map_or(0, |v| v.len())).len());
-                import_width = import_width.max(format!("{}", symbol.imported.len()).len());
             }
         }
         for (k, v) in &vec {
@@ -1745,16 +2127,14 @@ impl fmt::Display for SymbolTable {
                 let symbol = self.symbol_table.get(id).unwrap();
                 writeln!(
                     f,
-                    "    {:symbol_width$} @ {:namespace_width$} {{ref: {:reference_width$}, import: {:import_width$}}}: {},",
+                    "    {:symbol_width$} @ {:namespace_width$} {{ref: {:reference_width$}}}: {},",
                     k,
                     symbol.namespace,
                     self.reference_table.get(id).map_or(0, |v| v.len()),
-                    symbol.imported.len(),
                     symbol.kind,
                     symbol_width = symbol_width,
                     namespace_width = namespace_width,
                     reference_width = reference_width,
-                    import_width = import_width,
                 )?;
             }
         }
@@ -1764,15 +2144,43 @@ impl fmt::Display for SymbolTable {
     }
 }
 
+/// Kind of recursion a symbol is being re-entered through, paired with its
+/// `SymbolId` on `ResolveContext::visiting` to terminate cycles. Distinct
+/// phases let the same symbol legitimately appear once per phase.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ResolvePhase {
+    /// Following an alias (`alias module`/`interface`/`package`) to its target.
+    Alias,
+    /// Tracing a user-defined type to the scope holding its members.
+    TypeTrace,
+}
+
 #[derive(Clone)]
 struct ResolveContext<'a> {
     found: Option<&'a Rc<Symbol>>,
     last_found: Option<&'a Rc<Symbol>>,
     last_found_type: Option<SymbolId>,
     full_path: Vec<SymbolId>,
-    namespace: Namespace,
-    generic_namespace_map: HashMap<StrId, StrId>,
+    /// Scope-tree cursor: the scope reference resolution searches from. Derived
+    /// structurally (a symbol's `scope`/`inner_scope`) rather than by carrying a
+    /// `Namespace`, which the cursor used to hold.
+    scope: scope::ScopeId,
+    /// Instance-side counterpart of `scope`: members are looked up in `scope`
+    /// (where the base template's members physically live), but their emission
+    /// namespace is reconstructed from `inst_scope`, which carries the mangled
+    /// generic-instance prefix through navigation. This is the delegating view —
+    /// members are not cloned per instance.
+    inst_scope: scope::ScopeId,
+    /// ifdef context of the cursor, kept alongside `scope` because it is not
+    /// part of the scope's interned identity.
+    define_context: DefineContext,
     generic_tables: GenericTables,
+    /// Symbols currently being resolved through (alias expansion / type
+    /// tracing). Re-entering a `(SymbolId, ResolvePhase)` already present is a
+    /// cycle. Entries are pushed while descending and truncated back to the
+    /// segment's base in the resolve loop, giving call-path (not monotonic)
+    /// scope. Carried into nested resolves via `push`.
+    visiting: SVec<(SymbolId, ResolvePhase)>,
     inner: bool,
     other_prj: bool,
     root_prj: bool,
@@ -1782,15 +2190,17 @@ struct ResolveContext<'a> {
 }
 
 impl ResolveContext<'_> {
-    fn new(namespace: &Namespace) -> Self {
+    fn from_scope(scope: scope::ScopeId, define_context: DefineContext) -> Self {
         Self {
             found: None,
             last_found: None,
             last_found_type: None,
             full_path: vec![],
-            namespace: namespace.clone(),
-            generic_namespace_map: HashMap::default(),
+            scope,
+            inst_scope: scope,
+            define_context,
             generic_tables: GenericTables::default(),
+            visiting: SVec::new(),
             inner: false,
             other_prj: false,
             root_prj: true,
@@ -1800,11 +2210,53 @@ impl ResolveContext<'_> {
         }
     }
 
+    fn new(namespace: &Namespace) -> Self {
+        Self::from_scope(
+            scope::intern_namespace(namespace),
+            namespace.define_context.clone(),
+        )
+    }
+
     fn push(&self) -> Self {
-        let mut ret = ResolveContext::new(&self.namespace);
+        // A nested resolve does not inherit the instance context: `inst_scope`
+        // starts from the (base-side) cursor, scoped to a single resolve call.
+        let mut ret = Self::from_scope(self.scope, self.define_context.clone());
         ret.generic_tables = self.generic_tables.clone();
+        ret.visiting = self.visiting.clone();
         ret.depth = self.depth + 1;
         ret
+    }
+
+    /// Moves the cursor to `scope` under `define_context`. These jumps (type
+    /// tracing, name-as-namespace) do not preserve a generic-instance context, so
+    /// the shadow cursor follows `scope` directly.
+    fn set_namespace(&mut self, scope: scope::ScopeId, define_context: DefineContext) {
+        self.scope = scope;
+        self.inst_scope = scope;
+        self.define_context = define_context;
+    }
+
+    /// Moves the cursor into a symbol's inner scope (where its members live).
+    fn set_inner(&mut self, symbol: &Symbol) {
+        let base_inner = scope::inner_scope(symbol.scope, symbol.token.text);
+        // Shadow cursor: rebase onto the instance-side cursor only when the symbol
+        // is a direct member of the delegated base scope (it really lives in the
+        // instance's template). Symbols reached from elsewhere (e.g. imports) keep
+        // their own home; only the base segment is renamed.
+        self.inst_scope = if scope::generic_delegation(self.inst_scope) == Some(symbol.scope) {
+            scope::register_generic_child(self.inst_scope, symbol.token.text, base_inner)
+        } else {
+            base_inner
+        };
+        self.scope = base_inner;
+        self.define_context = symbol.namespace.define_context.clone();
+    }
+
+    /// Reconstructs the cursor namespace from the scope tree on demand. Used by
+    /// the few consumers that still need a `Namespace` value (import expansion,
+    /// synthesized SystemVerilog members, trace logging).
+    fn namespace(&self) -> Namespace {
+        scope::namespace(self.scope, &self.define_context)
     }
 
     fn indent(&self) -> String {
@@ -2072,16 +2524,68 @@ pub fn is_sv_keyword(s: &str) -> bool {
 }
 
 thread_local!(static SYMBOL_TABLE: RefCell<SymbolTable> = RefCell::new(SymbolTable::new()));
-thread_local!(static SYMBOL_CACHE: RefCell<HashMap<SymbolPathNamespace, Rc<ResolveResult>>> = RefCell::new(HashMap::default()));
+// Resolve caches are keyed by the resolution start (scope + ifdef context)
+// rather than a materialized namespace, so a reference's scope is enough to hit
+// the cache without reconstructing its namespace path.
+type ResolveCacheKey = (SymbolPath, scope::ScopeId, DefineContext);
+thread_local!(static SYMBOL_CACHE: RefCell<HashMap<ResolveCacheKey, Rc<ResolveResult>>> = RefCell::new(HashMap::default()));
 
 // Cache for get_namespace_generic_map; its result only depends on the symbol
 // table state, so it is invalidated together with SYMBOL_CACHE.
-thread_local!(static NS_GENERIC_MAP_CACHE: RefCell<HashMap<Namespace, Option<Rc<Vec<GenericMap>>>>> = RefCell::new(HashMap::default()));
+type NamespaceGenericMap = Option<Rc<Vec<GenericMap>>>;
+thread_local!(static NS_GENERIC_MAP_CACHE: RefCell<HashMap<(scope::ScopeId, DefineContext), NamespaceGenericMap>> = RefCell::new(HashMap::default()));
 
 // Cache for resolve failures. A new symbol can turn a cached NotFound into a
 // successful resolution, so `insert` invalidates this cache even while cache
 // clear is suppressed.
-thread_local!(static SYMBOL_ERR_CACHE: RefCell<HashMap<SymbolPathNamespace, ResolveError>> = RefCell::new(HashMap::default()));
+thread_local!(static SYMBOL_ERR_CACHE: RefCell<HashMap<ResolveCacheKey, ResolveError>> = RefCell::new(HashMap::default()));
+
+// Structural identity index for generic instances. An instance is keyed by its
+// enclosing scope, its base template symbol, and its argument signature instead
+// of the mangled string `__Foo__8`. The enclosing scope distinguishes nested
+// instances of the same `base::<args>` living under different parent instances
+// (e.g. `Func::<1>` in `PkgB::<PkgA::<1>>` vs `PkgB::<PkgA::<2>>`), which the
+// mangled identity encodes via the namespace. Built during `insert_generic_instance`
+// (instances are never restored from fragments — they are post-pass1, outside the
+// pass1 capture window — so the index is complete on cold and warm builds) and
+// queried by `resolve_generic_structural` to reach an instance without resolving
+// its mangled name.
+type GenericInstanceKey = (scope::ScopeId, SymbolId, Vec<SymbolPath>);
+thread_local!(static GENERIC_INSTANCE_INDEX: RefCell<HashMap<GenericInstanceKey, SymbolId>> = RefCell::new(HashMap::default()));
+
+fn generic_instance_key(
+    enclosing: scope::ScopeId,
+    base: SymbolId,
+    arguments: &[GenericSymbolPath],
+) -> GenericInstanceKey {
+    (
+        enclosing,
+        base,
+        arguments.iter().map(|a| a.mangled_path()).collect(),
+    )
+}
+
+/// Registers a generic instance under its structural identity key, asserting the
+/// key is injective: no two distinct instances may share
+/// `(enclosing_scope, base, args)`.
+pub fn index_generic_instance(
+    enclosing: scope::ScopeId,
+    base: SymbolId,
+    arguments: &[GenericSymbolPath],
+    instance: SymbolId,
+) {
+    let key = generic_instance_key(enclosing, base, arguments);
+    GENERIC_INSTANCE_INDEX.with(|f| {
+        let mut index = f.borrow_mut();
+        if let Some(prev) = index.get(&key) {
+            debug_assert_eq!(
+                *prev, instance,
+                "structural generic-instance key collides with a distinct instance"
+            );
+        }
+        index.insert(key, instance);
+    });
+}
 
 fn clear_resolve_caches() {
     SYMBOL_CACHE.with(|f| f.borrow_mut().clear());
@@ -2131,26 +2635,138 @@ pub fn update(symbol: Symbol) {
 
 pub fn resolve<T: Into<SymbolPathNamespace>>(path: T) -> Result<Rc<ResolveResult>, ResolveError> {
     let path: SymbolPathNamespace = path.into();
+    let scope = path.2.unwrap_or_else(|| scope::intern_namespace(&path.1));
+    let define_context = path.1.define_context.clone();
+    let key: ResolveCacheKey = (path.0, scope, define_context.clone());
 
-    if let Some(x) = SYMBOL_CACHE.with(|f| f.borrow().get(&path).cloned()) {
+    if let Some(x) = SYMBOL_CACHE.with(|f| f.borrow().get(&key).cloned()) {
         Ok(x)
-    } else if let Some(e) = SYMBOL_ERR_CACHE.with(|f| f.borrow().get(&path).cloned()) {
+    } else if let Some(e) = SYMBOL_ERR_CACHE.with(|f| f.borrow().get(&key).cloned()) {
         Err(e)
     } else {
         match SYMBOL_TABLE.with(|f| {
-            f.borrow()
-                .resolve(&path.0, &[], ResolveContext::new(&path.1))
+            f.borrow().resolve(
+                &key.0,
+                &[],
+                ResolveContext::from_scope(scope, define_context),
+            )
         }) {
             Ok(x) => {
                 let x = Rc::new(x);
-                SYMBOL_CACHE.with(|f| f.borrow_mut().insert(path, Rc::clone(&x)));
+                SYMBOL_CACHE.with(|f| f.borrow_mut().insert(key, Rc::clone(&x)));
                 Ok(x)
             }
             Err(e) => {
-                SYMBOL_ERR_CACHE.with(|f| f.borrow_mut().insert(path, e.clone()));
+                SYMBOL_ERR_CACHE.with(|f| f.borrow_mut().insert(key, e.clone()));
                 Err(e)
             }
         }
+    }
+}
+
+/// How a structural generic resolution is rooted: at an explicit scope, or at a
+/// token or namespace it is derived from. Mirrors the general [`resolve`]
+/// accepting an `Into<SymbolPathNamespace>`.
+pub enum StructuralRoot {
+    Scope(scope::ScopeId, DefineContext),
+    Token(resource_table::TokenId),
+}
+
+impl From<(scope::ScopeId, DefineContext)> for StructuralRoot {
+    fn from((scope, define_context): (scope::ScopeId, DefineContext)) -> Self {
+        StructuralRoot::Scope(scope, define_context)
+    }
+}
+
+impl From<resource_table::TokenId> for StructuralRoot {
+    fn from(token: resource_table::TokenId) -> Self {
+        StructuralRoot::Token(token)
+    }
+}
+
+impl From<&Namespace> for StructuralRoot {
+    fn from(namespace: &Namespace) -> Self {
+        StructuralRoot::Scope(
+            scope::intern_namespace(namespace),
+            namespace.define_context.clone(),
+        )
+    }
+}
+
+impl StructuralRoot {
+    /// The scope (and ifdef context) the structural walk starts from, if known.
+    fn structural_scope(&self) -> Option<(scope::ScopeId, DefineContext)> {
+        match self {
+            StructuralRoot::Scope(scope, define_context) => Some((*scope, define_context.clone())),
+            StructuralRoot::Token(token) => scope::token_scope(*token),
+        }
+    }
+
+    /// The mangled-name path the structural walk falls back to when it declines.
+    fn fallback_path(&self, path: SymbolPath) -> SymbolPathNamespace {
+        match self {
+            StructuralRoot::Scope(scope, define_context) => {
+                SymbolPathNamespace::from_scope(path, *scope, define_context.clone())
+            }
+            StructuralRoot::Token(token) => SymbolPathNamespace::from_token(path, *token),
+        }
+    }
+}
+
+/// Resolve a generic instance path structurally — navigating generic segments
+/// through the scope-tree index instead of a mangled name — rooted at a scope,
+/// token, or namespace. Falls back to the mangled resolution for the paths the
+/// structural walk does not model (synthesized SystemVerilog members). General
+/// resolve sites pass arbitrary (possibly non-generic or already-mangled) paths;
+/// a degenerate path keeps the mangled behaviour (e.g. double-mangle → not found)
+/// these sites' diagnostics rely on.
+pub fn resolve_generic_structural(
+    path: &GenericSymbolPath,
+    root: impl Into<StructuralRoot>,
+) -> Result<Rc<ResolveResult>, ResolveError> {
+    let root = root.into();
+    let structural = root.structural_scope().and_then(|(scope, define_context)| {
+        SYMBOL_TABLE.with(|f| {
+            f.borrow()
+                .resolve_generic_structural(path, scope, define_context)
+        })
+    });
+    match structural {
+        Some(structural) => Ok(Rc::new(structural)),
+        None => resolve(root.fallback_path(path.mangled_path())),
+    }
+}
+
+/// Resolve the symbol at depth `i` of `path` — segment `i` taken as a template
+/// (its arguments ignored), reached by navigating the prefix `[0..i)` through the
+/// instance index, never constructing a mangled prefix name. The structural
+/// replacement for the `resolve(path.base_path(i), ..)` idiom: `base_path(i)`
+/// mangled the prefix and dropped segment `i`'s arguments, which this reproduces
+/// by slicing to `[0..=i]` and clearing the last segment's arguments.
+pub fn resolve_base_path(
+    path: &GenericSymbolPath,
+    i: usize,
+    root: impl Into<StructuralRoot>,
+) -> Result<Rc<ResolveResult>, ResolveError> {
+    let mut sliced = path.slice(i);
+    if let Some(last) = sliced.paths.last_mut() {
+        last.arguments.clear();
+    }
+    resolve_generic_structural(&sliced, root)
+}
+
+/// Resolve the symbol that `namespace` points to (its deepest segment resolved
+/// in the enclosing namespace).
+pub fn get_namespace_symbol(namespace: &Namespace) -> Option<Symbol> {
+    let mut namespace = namespace.clone();
+    namespace.strip_anonymous_path();
+
+    if let Some(path) = namespace.pop()
+        && namespace.depth() >= 1
+    {
+        resolve((path, &namespace)).map(|x| (*x.found).clone()).ok()
+    } else {
+        None
     }
 }
 
@@ -2238,17 +2854,9 @@ pub fn resolve_enum() -> Vec<AnalyzerError> {
     r#enum::resolve_enum(&list)
 }
 
-pub fn find_project_symbol(prj: StrId) -> Option<Symbol> {
-    SYMBOL_TABLE.with(|f| f.borrow().find_project_symbol(prj))
-}
-
 pub fn add_project_local(prj: StrId, from: StrId, to: StrId) {
     clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().add_project_local(prj, from, to))
-}
-
-pub fn get_project_local(prj: StrId) -> Option<HashMap<StrId, StrId>> {
-    SYMBOL_TABLE.with(|f| f.borrow().get_project_local(prj))
 }
 
 pub fn add_reference_functions(id: SymbolId, functions: Vec<GenericSymbolPath>) {
@@ -2290,6 +2898,7 @@ pub fn restore_fragment(fragment: SymbolTableFragment) -> Result<(), Box<Symbol>
 
 pub fn clear() {
     clear_resolve_caches();
+    GENERIC_INSTANCE_INDEX.with(|f| f.borrow_mut().clear());
     SYMBOL_TABLE.with(|f| f.borrow_mut().clear())
 }
 
@@ -2410,7 +3019,10 @@ mod tests {
     }
 
     fn create_namespace(paths: &[&str]) -> Namespace {
-        let mut ret = Namespace::default();
+        // The fixture is analyzed under project "prj", so anchor queries at that
+        // project root, matching the namespace pass1 builds for its symbols.
+        let mut ret = Namespace::new();
+        ret.push(resource_table::insert_str("prj"));
 
         for path in paths {
             ret.push(resource_table::insert_str(path));
@@ -2760,5 +3372,53 @@ mod tests {
 
         let symbol = resolve(&["instA", "memberB", "memberB", "memberA"], &["ModuleA"]);
         check_found(symbol, "prj::PackageA::StructB");
+    }
+
+    const IMPORT_PRECEDENCE_CODE: &str = r##"
+    package PkgA {
+        enum EnumA: u32 {
+            val = 100,
+        }
+    }
+    package PkgB {
+        const val: u32 = 200;
+    }
+    module ModLocal {
+        import PkgA::EnumA::*;
+        const val: u32 = 7;
+    }
+    module ModExplicit {
+        import PkgA::EnumA::*;
+        import PkgB::val;
+    }
+    module ModAmbiguous {
+        import PkgA::EnumA::*;
+        import PkgB::*;
+    }
+    "##;
+
+    /// SystemVerilog import precedence: a local declaration or an explicit
+    /// import shadows a wildcard import in the same scope without error, while
+    /// two wildcard imports of the same name are ambiguous.
+    #[test]
+    fn import_precedence() {
+        let handle = std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                let metadata = Metadata::create_default("prj").unwrap();
+                let parser = Parser::parse(IMPORT_PRECEDENCE_CODE, &"").unwrap();
+                let analyzer = Analyzer::new(&metadata);
+                analyzer.analyze_pass1("prj", &parser.veryl);
+                Analyzer::analyze_post_pass1();
+
+                // Local declaration wins over the wildcard-imported enum member.
+                check_found(resolve(&["val"], &["ModLocal"]), "prj::ModLocal");
+                // Explicit import wins over the wildcard import.
+                check_found(resolve(&["val"], &["ModExplicit"]), "prj::PkgB");
+                // Two wildcard imports of the same name are ambiguous.
+                check_not_found(resolve(&["val"], &["ModAmbiguous"]));
+            })
+            .unwrap();
+        handle.join().unwrap();
     }
 }

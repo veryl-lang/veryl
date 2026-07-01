@@ -31,7 +31,7 @@ impl CmdDump {
         }
 
         if self.opt.namespace_table {
-            println!("{}", veryl_analyzer::namespace_table::dump());
+            println!("{}", veryl_analyzer::scope::dump_tokens());
         }
 
         if self.opt.type_dag {

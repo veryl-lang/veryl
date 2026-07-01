@@ -44,7 +44,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         let mut errors = Vec::new();
         errors.append(&mut analyzer.analyze_pass1(prj, &parser.veryl));
         errors.append(&mut Analyzer::analyze_post_pass1());
-        errors.append(&mut analyzer.analyze_pass2(prj, &parser.veryl, &mut context, Some(&mut ir)));
+        errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
         errors.append(&mut Analyzer::analyze_post_pass2(&ir));
         analyzer.clear();
         if !errors.is_empty() {
@@ -74,7 +74,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let mut ir = veryl_analyzer::ir::Ir::default();
             analyzer.analyze_pass1(prj, &parser.veryl);
             Analyzer::analyze_post_pass1();
-            analyzer.analyze_pass2(prj, &parser.veryl, &mut context, Some(&mut ir));
+            analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
             Analyzer::analyze_post_pass2(&ir);
             analyzer.clear();
         })

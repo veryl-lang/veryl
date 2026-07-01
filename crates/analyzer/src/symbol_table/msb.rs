@@ -10,9 +10,7 @@ fn trace_type(r#type: &Type) -> Vec<(Type, Option<SymbolKind>)> {
     {
         let symbol = symbol_table::get(id).unwrap();
         ret.last_mut().unwrap().1 = Some(symbol.kind.clone());
-        if let SymbolKind::TypeDef(ref x) = symbol.kind {
-            ret.append(&mut trace_type(&x.r#type));
-        } else if let SymbolKind::ProtoTypeDef(ref x) = symbol.kind
+        if let SymbolKind::TypeDef(ref x) = symbol.kind
             && let Some(ref r#type) = x.r#type
         {
             ret.append(&mut trace_type(r#type));
@@ -44,7 +42,7 @@ pub fn check_msb(list: Vec<Msb>) -> Vec<AnalyzerError> {
                 match &x.found.kind {
                     SymbolKind::Variable(x) => Some(x.r#type.clone()),
                     SymbolKind::Port(x) => Some(x.r#type.clone()),
-                    SymbolKind::Parameter(x) => Some(x.r#type.clone()),
+                    SymbolKind::Parameter(x) if !x.is_proto => Some(x.r#type.clone()),
                     SymbolKind::StructMember(x) => Some(x.r#type.clone()),
                     SymbolKind::UnionMember(x) => Some(x.r#type.clone()),
                     _ => None,

@@ -23,7 +23,9 @@ fn check_path(
         // if the type of the preceed symbol is defined in the SV namespace.
         return;
     };
-    let expect_dot_separator = if let SymbolKind::Function(_) = this_symbol.kind {
+    let expect_dot_separator = if let SymbolKind::Function(x) = &this_symbol.kind
+        && !x.is_proto
+    {
         matches!(
             preceed_symbol.kind,
             SymbolKind::Instance(_) // member function of interface

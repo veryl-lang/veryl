@@ -713,18 +713,9 @@ impl Factor {
     pub fn from_component_symbol(symbol: &Symbol, token: TokenRange) -> Self {
         let sig = Signature::new(symbol.id);
         let kind = match &symbol.kind {
-            SymbolKind::Module(_)
-            | SymbolKind::ProtoModule(_)
-            | SymbolKind::AliasModule(_)
-            | SymbolKind::ProtoAliasModule(_) => TypeKind::Module(sig),
-            SymbolKind::Interface(_)
-            | SymbolKind::ProtoInterface(_)
-            | SymbolKind::AliasInterface(_)
-            | SymbolKind::ProtoAliasInterface(_) => TypeKind::Interface(sig),
-            SymbolKind::Package(_)
-            | SymbolKind::ProtoPackage(_)
-            | SymbolKind::AliasPackage(_)
-            | SymbolKind::ProtoAliasPackage(_) => TypeKind::Package(sig),
+            SymbolKind::Module(_) | SymbolKind::AliasModule(_) => TypeKind::Module(sig),
+            SymbolKind::Interface(_) | SymbolKind::AliasInterface(_) => TypeKind::Interface(sig),
+            SymbolKind::Package(_) | SymbolKind::AliasPackage(_) => TypeKind::Package(sig),
             _ => unreachable!(),
         };
         let r#type = Type::new(kind);
