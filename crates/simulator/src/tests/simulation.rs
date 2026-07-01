@@ -111,6 +111,97 @@ fn unary_minus_as_shift_amount() {
 }
 
 #[test]
+fn struct_bit_field_rhs_no_spill() {
+    // A struct bit-field RHS is evaluated at the assignment width, which can
+    // exceed the field width — e.g. `~(a == b)` here is computed at the 10-bit
+    // struct width, not 1 bit.  Both codegen paths shifted that wide value into
+    // the field position without clipping it to the field, so bits above the
+    // field leaked into the neighbouring fields (`hi`/`lo`): the JIT bit-select
+    // store, and the interpreter's `Value::assign` (which masked the shifted
+    // RHS with the whole dst width instead of the [beg:end] window).  With
+    // `a != b`, `~(a==b) == 1`, so the packed struct is {lo=0xf, ext=0b01,
+    // hi=0xf} = 0x3df; both pre-fix paths produced 0x3ff.  Covers every backend.
+    let code = r#"
+    module Top (
+        a: input  logic<8> ,
+        b: input  logic<8> ,
+        o: output logic<10>,
+    ) {
+        struct s_t {
+            lo : logic<4>,
+            ext: logic<2>,
+            hi : logic<4>,
+        }
+        var m: s_t;
+        assign m.lo     = 4'hf;
+        assign m.ext[0] = ~(a == b);
+        assign m.ext[1] = 1'b0;
+        assign m.hi     = 4'hf;
+        assign o        = m;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0, 8, false));
+        sim.set("b", Value::new(1, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x3df, 10, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn interp_wide_struct_bit_field_rhs_no_spill() {
+    // The interpreter/analyzer `Value::assign` half of the spill fix, through
+    // the BigUint path with a >128-bit struct.  `m.ext[0] = ~(a==b)` at bit 98
+    // of a 200-bit struct evaluates the RHS wider than the 1-bit field; the
+    // BigUint assign must clip it to the field, not spill into `ext[1]`.
+    // Interpret-only here: a wide `~(a==b)` bit-field RHS also exercises a
+    // separate cranelift wide-operand issue fixed on its own branch.
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        a: input  logic<8>  ,
+        b: input  logic<8>  ,
+        o: output logic<200>,
+    ) {
+        struct w_t {
+            lo : logic<100>,
+            ext: logic<2>  ,
+            hi : logic<98> ,
+        }
+        var m: w_t;
+        assign m.lo     = '1;
+        assign m.ext[0] = ~(a == b);
+        assign m.ext[1] = 1'b0;
+        assign m.hi     = '1;
+        assign o        = m;
+    }
+    "#;
+    // layout (first field = MSB): lo[199:100], ext[99:98], hi[97:0].
+    // a != b → ~(a==b)=1 → ext[0]=1 (bit 98), ext[1]=0 (bit 99): all ones
+    // except bit 99.
+    let expected = ((BigUint::from(1u32) << 200u32) - 1u32) ^ (BigUint::from(1u32) << 99u32);
+    for config in Config::all().into_iter().filter(|c| !c.use_jit && !c.aot_c) {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0, 8, false));
+        sim.set("b", Value::new(1, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            *sim.get("o").unwrap().payload(),
+            expected,
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn simple_ff() {
     let code = r#"
     module Top (
