@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-synthesizer"
-version               = "0.20.1"
+version               = "0.20.2"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -15,9 +15,9 @@ fxhash         = {workspace = true}
 indent         = {workspace = true}
 log            = {workspace = true}
 thiserror      = {workspace = true}
-veryl-analyzer = {version = "0.20.1", path = "../analyzer"}
-veryl-metadata = {version = "0.20.1", path = "../metadata"}
-veryl-parser   = {version = "0.20.1", path = "../parser"}
+veryl-analyzer = {version = "0.20.2", path = "../analyzer"}
+veryl-metadata = {version = "0.20.2", path = "../metadata"}
+veryl-parser   = {version = "0.20.2", path = "../parser"}
 
 [features]
 # Enables the experimental AIG-based structural rewrite + tech-map pass.

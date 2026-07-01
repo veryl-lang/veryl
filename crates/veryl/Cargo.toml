@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl"
-version               = "0.20.1"
+version               = "0.20.2"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -45,18 +45,18 @@ thiserror           = {workspace = true}
 tokio               = {workspace = true}
 tokio-util          = {version = "0.7.17", features = ["codec"]}
 toml                = {workspace = true}
-veryl-analyzer      = {version = "0.20.1", path = "../analyzer"}
-veryl-cache         = {version = "0.20.1", path = "../cache"}
-veryl-emitter       = {version = "0.20.1", path = "../emitter"}
-veryl-formatter     = {version = "0.20.1", path = "../formatter"}
-veryl-metadata      = {version = "0.20.1", path = "../metadata"}
-veryl-migrator      = {version = "0.20.1", path = "../migrator"}
-veryl-parser        = {version = "0.20.1", path = "../parser"}
-veryl-simulator     = {version = "0.20.1", path = "../simulator"}
-veryl-synthesizer   = {version = "0.20.1", path = "../synthesizer"}
-veryl-path          = {version = "0.20.1", path = "../path"}
-veryl-sourcemap     = {version = "0.20.1", path = "../sourcemap"}
-veryl-translator    = {version = "0.20.1", path = "../translator"}
+veryl-analyzer      = {version = "0.20.2", path = "../analyzer"}
+veryl-cache         = {version = "0.20.2", path = "../cache"}
+veryl-emitter       = {version = "0.20.2", path = "../emitter"}
+veryl-formatter     = {version = "0.20.2", path = "../formatter"}
+veryl-metadata      = {version = "0.20.2", path = "../metadata"}
+veryl-migrator      = {version = "0.20.2", path = "../migrator"}
+veryl-parser        = {version = "0.20.2", path = "../parser"}
+veryl-simulator     = {version = "0.20.2", path = "../simulator"}
+veryl-synthesizer   = {version = "0.20.2", path = "../synthesizer"}
+veryl-path          = {version = "0.20.2", path = "../path"}
+veryl-sourcemap     = {version = "0.20.2", path = "../sourcemap"}
+veryl-translator    = {version = "0.20.2", path = "../translator"}
 
 [features]
 # Forwards to the simulator's profile feature and enables the per-test
