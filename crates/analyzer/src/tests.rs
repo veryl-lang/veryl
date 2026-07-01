@@ -4807,6 +4807,35 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    let code = r#"
+    interface a_if::<W: u32> {
+        var a: logic<W>;
+        modport mp {
+          a: input,
+        }
+    }
+    module b_module (
+        a: modport a_if::<32>::mp,
+    ) {
+        inst u: c_module (
+            a: a,
+        );
+    }
+    module c_module (
+        a: modport a_if::<32>::mp,
+    ) {}
+    module d_module::<D: u32> {
+        inst a: a_if::<32>;
+        assign a.a = 0;
+        inst b: b_module (
+            a: a,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
     //let code = r#"
     //interface InterfaceA {
     //    var a: logic;

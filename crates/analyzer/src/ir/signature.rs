@@ -27,6 +27,24 @@ impl Signature {
         }
     }
 
+    pub fn is_compatible(
+        &self,
+        x: &Signature,
+        ignore_params: bool,
+        ignore_generic_params: bool,
+    ) -> bool {
+        if self.symbol != x.symbol {
+            return false;
+        }
+        if !ignore_params && self.parameters != x.parameters {
+            return false;
+        }
+        if !ignore_generic_params && self.generic_parameters != x.generic_parameters {
+            return false;
+        }
+        true
+    }
+
     pub fn add_parameter(&mut self, id: StrId, value: ValueVariant) {
         self.parameters.push((id, value));
     }
