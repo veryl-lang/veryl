@@ -79,6 +79,38 @@ fn wide_shift_amount_out_of_range() {
 }
 
 #[test]
+fn unary_minus_as_shift_amount() {
+    // `base << -exp` with `exp == 0`: the unary minus must yield 0, not the
+    // unmasked `~0 + 1` whose carry sets bit `width`.  The JIT used to leave
+    // that carry, so the shift count read as `2^width` (>= operand width) and
+    // clamped the result to 0.  Mirrors `alu_ffo_align`'s
+    // `{1'b1 repeat W} << -i_exp` sticky-mask, where `i_exp == 0` must keep all
+    // ones.  Cross-validated against the interpreter via Config::all().
+    let code = r#"
+    module Top (
+        base: input  logic<28>,
+        exp:  input  logic<10>,
+        r:    output logic<28>,
+    ) {
+        assign r = base << -exp;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("base", Value::new(0x0FFF_FFFF, 28, false));
+        sim.set("exp", Value::new(0, 10, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new(0x0FFF_FFFF, 28, false),
+            "config={config:?}",
+        );
+    }
+}
+
+#[test]
 fn simple_ff() {
     let code = r#"
     module Top (
