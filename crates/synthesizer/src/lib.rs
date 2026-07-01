@@ -16,19 +16,54 @@ pub use ir::{
 };
 pub use library::{CellInfo, CellLibrary, SramModel, library_for};
 pub use synthesizer_error::SynthesizerError;
-pub use veryl_metadata::Library;
+pub use veryl_metadata::{Library, Synth};
 
 use std::env;
 use std::time::Instant;
 use veryl_analyzer::ir::Ir as AnalyzerIr;
 use veryl_parser::resource_table::StrId;
 
+/// RAM-inference thresholds. Fields mirror the `ram_*` keys of the `[synth]`
+/// section of `Veryl.toml` (see [`veryl_metadata::Synth`]).
+#[derive(Clone, Copy, Debug)]
+pub struct RamConfig {
+    pub min_bits: usize,
+    pub max_read_ports: usize,
+    pub max_write_ports: usize,
+}
+
+impl From<&Synth> for RamConfig {
+    fn from(s: &Synth) -> Self {
+        RamConfig {
+            min_bits: s.ram_min_bits,
+            max_read_ports: s.ram_max_read_ports,
+            max_write_ports: s.ram_max_write_ports,
+        }
+    }
+}
+
+impl Default for RamConfig {
+    fn default() -> Self {
+        // Single source of truth: Synth's serde defaults.
+        RamConfig::from(&Synth::default())
+    }
+}
+
 pub fn build_gate_ir(ir: &AnalyzerIr, top: StrId) -> Result<GateIr, SynthesizerError> {
+    build_gate_ir_with(ir, top, RamConfig::default())
+}
+
+/// [`build_gate_ir`] with explicit RAM thresholds.
+pub fn build_gate_ir_with(
+    ir: &AnalyzerIr,
+    top: StrId,
+    ram: RamConfig,
+) -> Result<GateIr, SynthesizerError> {
     for c in &ir.components {
         if let veryl_analyzer::ir::Component::Module(m) = c
             && m.name == top
         {
-            let module = conv::convert_module(m)?;
+            let module = conv::convert_module(m, ram)?;
             return Ok(GateIr { module });
         }
     }
@@ -48,9 +83,19 @@ pub fn synthesize(
     top: StrId,
     library: Library,
 ) -> Result<SynthResult, SynthesizerError> {
+    synthesize_with(ir, top, library, RamConfig::default())
+}
+
+/// [`synthesize`] with explicit RAM thresholds.
+pub fn synthesize_with(
+    ir: &AnalyzerIr,
+    top: StrId,
+    library: Library,
+    ram: RamConfig,
+) -> Result<SynthResult, SynthesizerError> {
     let timed = env::var_os("VERYL_SYNTH_TIME").is_some();
     let t = Instant::now();
-    let gate_ir = build_gate_ir(ir, top)?;
+    let gate_ir = build_gate_ir_with(ir, top, ram)?;
     if timed {
         eprintln!(
             "[synth-time] build_gate_ir: {:.3}s ({} cells, {} ffs, {} rams)",

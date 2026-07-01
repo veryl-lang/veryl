@@ -5,7 +5,9 @@ use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 use veryl_parser::resource_table;
 use veryl_synthesizer::ir::{CellKind, NetDriver};
-use veryl_synthesizer::{Library, build_gate_ir, compute_power, library_for, synthesize};
+use veryl_synthesizer::{
+    Library, RamConfig, build_gate_ir, build_gate_ir_with, compute_power, library_for, synthesize,
+};
 
 #[track_caller]
 fn analyze(code: &str, top: &str) -> (air::Ir, veryl_parser::resource_table::StrId) {
@@ -2722,6 +2724,49 @@ fn small_reset_array_stays_flip_flops() {
         "small array should stay flip-flops, not RAM"
     );
     assert!(result.gate_ir.module.ffs.len() >= 32);
+}
+
+#[test]
+fn ram_min_bits_config_lowers_inference_floor() {
+    // A 512-bit array is below the default 1024-bit floor. Lowering `min_bits`
+    // makes it infer as a RAM instead of flip-flops.
+    let code = r#"
+        module Mem (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<5>  ,
+            wdata: input  logic<16> ,
+            raddr: input  logic<5>  ,
+            rdata: output logic<16> ,
+        ) {
+            var mem: logic<16> [32];
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = wdata;
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Mem");
+
+    let default = build_gate_ir(&ir, top).expect("synthesize");
+    assert!(
+        default.module.ram_blocks.is_empty(),
+        "512-bit array is below the default 1024-bit floor, so it stays flip-flops"
+    );
+
+    let cfg = RamConfig {
+        min_bits: 256,
+        ..RamConfig::default()
+    };
+    let lowered = build_gate_ir_with(&ir, top, cfg).expect("synthesize");
+    assert_eq!(
+        lowered.module.ram_blocks.len(),
+        1,
+        "with min_bits lowered, the 512-bit array must infer as RAM"
+    );
+    assert_eq!(lowered.module.ffs.len(), 0);
 }
 
 #[test]
