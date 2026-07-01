@@ -30,6 +30,7 @@ pub struct RamConfig {
     pub min_bits: usize,
     pub max_read_ports: usize,
     pub max_write_ports: usize,
+    pub max_ff_bits: usize,
 }
 
 impl From<&Synth> for RamConfig {
@@ -38,6 +39,7 @@ impl From<&Synth> for RamConfig {
             min_bits: s.ram_min_bits,
             max_read_ports: s.ram_max_read_ports,
             max_write_ports: s.ram_max_write_ports,
+            max_ff_bits: s.ram_max_ff_bits,
         }
     }
 }

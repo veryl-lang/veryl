@@ -24,6 +24,10 @@
 //!
 //! Partial / sub-word writes remain out of scope and keep the array as
 //! flip-flops.
+//!
+//! A dynamically-indexed array that fails inference but exceeds `max_ff_bits`
+//! is rejected rather than expanded into the `O(depth × width)` gates that
+//! would exhaust memory ([`oversized_ff_array`], issue #2941).
 
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -101,6 +105,101 @@ pub(crate) fn infer_ram_vars(
             )
         })
         .collect()
+}
+
+/// The first array that would blow up if expanded into flip-flops: dynamically
+/// indexed, over `ram.max_ff_bits` stored bits, and not inferred as RAM — so the
+/// caller can reject it (#2941) instead of building `depth × width` gates.
+/// Only 1-D: a dynamic multi-dim index errors elsewhere, and static indexing
+/// gives a flat FF bank (linear, no decode). `VarId` order for determinism.
+pub(crate) fn oversized_ff_array(
+    module: &air::Module,
+    ram_vars: &HashMap<air::VarId, RamCandidate>,
+    ram: &RamConfig,
+) -> Option<(air::VarId, usize)> {
+    let limit = ram.max_ff_bits;
+    let mut ids: Vec<air::VarId> = module.variables.keys().copied().collect();
+    ids.sort();
+
+    for vid in ids {
+        if ram_vars.contains_key(&vid) {
+            continue;
+        }
+        let Some(var) = module.variables.get(&vid) else {
+            continue;
+        };
+        let Some(width) = var.r#type.total_width() else {
+            continue;
+        };
+        let Some(depth) = var.r#type.array.total() else {
+            continue;
+        };
+        if depth < 2 || width == 0 || var.r#type.array.dims() != 1 {
+            continue;
+        }
+        let bits = width * depth;
+        if bits <= limit {
+            continue;
+        }
+        if is_dynamically_indexed(module, vid) {
+            return Some((vid, bits));
+        }
+    }
+    None
+}
+
+/// Does `vid` have any dynamic (non-constant) array-index access?
+fn is_dynamically_indexed(module: &air::Module, vid: air::VarId) -> bool {
+    let is_dyn = |index: &air::VarIndex| !index.0.is_empty() && !index.is_const();
+
+    for decl in &module.declarations {
+        let mut dynamic = false;
+        match decl {
+            Declaration::Ff(ff) => {
+                for st in &ff.statements {
+                    walk_writes(st, vid, false, &mut |dst, _, _| {
+                        if is_dyn(&dst.index) {
+                            dynamic = true;
+                        }
+                    });
+                }
+            }
+            Declaration::Comb(comb) => {
+                for st in &comb.statements {
+                    walk_writes(st, vid, false, &mut |dst, _, _| {
+                        if is_dyn(&dst.index) {
+                            dynamic = true;
+                        }
+                    });
+                }
+            }
+            // An inst-output `foo.o: arr[i]` writes at a dynamic index that
+            // `flatten_inst` expands like any clocked/comb write.
+            Declaration::Inst(inst) => {
+                for o in &inst.outputs {
+                    for d in &o.dst {
+                        if d.id == vid && is_dyn(&d.index) {
+                            dynamic = true;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        if dynamic {
+            return true;
+        }
+    }
+
+    let mut dynamic = false;
+    for decl in &module.declarations {
+        for_each_read_in_decl(decl, vid, &mut |index, _select| {
+            if is_dyn(index) {
+                dynamic = true;
+            }
+        });
+    }
+    dynamic
 }
 
 /// Does any statement in `stmts` (recursively) write a RAM-inferred variable?

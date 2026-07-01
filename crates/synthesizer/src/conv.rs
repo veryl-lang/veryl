@@ -97,6 +97,20 @@ pub fn convert_module(
     if env::var_os("VERYL_SYNTH_NO_RAM").is_none() {
         ctx.ram_vars = phase!("infer_ram_vars", ram::infer_ram_vars(module, &ram));
     }
+    // Reject a too-large dynamically-indexed array that RAM inference declined
+    // (e.g. it has a reset) before it expands into an OOM-sized flip-flop +
+    // decode bank (#2941).
+    if let Some((vid, bits)) = ram::oversized_ff_array(module, &ctx.ram_vars, &ram) {
+        let var = &module.variables[&vid];
+        return Err(SynthesizerError::unsupported(
+            UnsupportedKind::ArrayTooLargeForFf {
+                path: var.path.to_string(),
+                bits,
+                limit: ram.max_ff_bits,
+            },
+            &var.token,
+        ));
+    }
     phase!("allocate_variables", ctx.allocate_variables(module)?);
     phase!("classify_drivers", ctx.classify_drivers(module)?);
 

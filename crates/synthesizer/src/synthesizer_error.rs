@@ -59,13 +59,29 @@ pub enum UnsupportedKind {
     UnknownFactor,
     SystemFunctionCall,
     PowOperator,
-    DynamicRangeSelect { what: String },
-    DynamicRangeEnd { what: String },
-    MultiDimDynamicSelect { what: String },
-    DynamicMultiDimIndex { what: String },
+    DynamicRangeSelect {
+        what: String,
+    },
+    DynamicRangeEnd {
+        what: String,
+    },
+    MultiDimDynamicSelect {
+        what: String,
+    },
+    DynamicMultiDimIndex {
+        what: String,
+    },
     ForStatement,
-    UnsupportedVariableType { path: String, type_kind: String },
+    UnsupportedVariableType {
+        path: String,
+        type_kind: String,
+    },
     SystemVerilogBlackbox,
+    ArrayTooLargeForFf {
+        path: String,
+        bits: usize,
+        limit: usize,
+    },
 }
 
 impl fmt::Display for UnsupportedKind {
@@ -93,6 +109,14 @@ impl fmt::Display for UnsupportedKind {
                 write!(f, "variable '{}' has unsupported {} type", path, type_kind)
             }
             Self::SystemVerilogBlackbox => "SystemVerilog blackbox instantiation".fmt(f),
+            Self::ArrayTooLargeForFf { path, bits, limit } => write!(
+                f,
+                "array '{}' is too large to synthesize as flip-flops ({} bits > {} limit); \
+                 a dynamically-indexed array this large should be a memory — write it as a \
+                 reset-less clocked array so it is inferred as RAM, or raise ram_max_ff_bits \
+                 in the [synth] section of Veryl.toml",
+                path, bits, limit
+            ),
         }
     }
 }
