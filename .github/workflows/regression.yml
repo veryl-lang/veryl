@@ -95,12 +95,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      # Cache the crate registry only; sccache handles compilation caching below.
+      # Variant B: rust-cache caches ~/.cargo AND target/ (dependency compilation),
+      # so cargo skips deps entirely; sccache then only serves workspace crates.
+      # (`-b` key + temporary head_ref save populate target/ for the measurement.)
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: build-veryl
-          cache-targets: false
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: build-veryl-b
+          save-if: ${{ github.ref == 'refs/heads/master' || github.head_ref == 'ci/sccache-tarball' }}
       - uses: mozilla-actions/sccache-action@v0.0.10
       # Content-addressed compiler cache persisted as one tarball. sccache keys on
       # input content (not mtime), so unlike rust-cache's target/ cache it reuses
