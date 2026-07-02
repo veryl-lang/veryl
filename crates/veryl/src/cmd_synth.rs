@@ -10,7 +10,9 @@ use veryl_analyzer::ir::{Component, Ir, Module};
 use veryl_metadata::Metadata;
 use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::veryl_token::TokenSource;
-use veryl_synthesizer::{compute_power, compute_timing_top_n, library_for, port_label, synthesize};
+use veryl_synthesizer::{
+    RamConfig, compute_power, compute_timing_top_n, library_for, port_label, synthesize_with,
+};
 
 pub struct CmdSynth {
     opt: OptSynth,
@@ -75,7 +77,8 @@ impl CmdSynth {
 
         let library = library_for(metadata.synth.library);
 
-        let result = match synthesize(&ir, top_id, metadata.synth.library) {
+        let ram_config = RamConfig::from(&metadata.synth);
+        let result = match synthesize_with(&ir, top_id, metadata.synth.library, ram_config) {
             Ok(r) => r,
             Err(err) => {
                 warn!("Synthesis failed: {}", err);
