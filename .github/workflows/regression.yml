@@ -88,19 +88,44 @@ jobs:
   # compile + fewer heavy jobs competing for runners).
   build-veryl:
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_CACHE_SIZE: "3G"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      # Also cache the workspace crates (not just dependencies). The `-ws` key is
-      # distinct from the dependency-only cache so the first master run repopulates
-      # it including the workspace crate artifacts.
+      # Cache the crate registry only; sccache handles compilation caching below.
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: build-veryl-ws
-          cache-workspace-crates: true
+          shared-key: build-veryl
+          cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: mozilla-actions/sccache-action@v0.0.10
+      # Content-addressed compiler cache persisted as one tarball. sccache keys on
+      # input content (not mtime), so unlike rust-cache's target/ cache it reuses
+      # unchanged workspace crate compilations. The rotating sha key + prefix
+      # restore-key keeps the snapshot fresh; a single tarball avoids the GHA cache
+      # API rate limit that sccache's own gha backend would hit across many jobs.
+      - uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ~/.cache/sccache
+          key: sccache-build-veryl-${{ github.sha }}
+          restore-keys: sccache-build-veryl-
       - name: Build veryl
         run: cargo build --profile release-verylup --bin veryl
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+      # Temporary `|| head_ref` lets this branch's PR populate the cache so a second
+      # push can measure warm restore; revert to master-only before merging.
+      - uses: actions/cache/save@v4
+        if: github.ref == 'refs/heads/master' || github.head_ref == 'ci/sccache-tarball'
+        continue-on-error: true
+        with:
+          path: ~/.cache/sccache
+          key: sccache-build-veryl-${{ github.sha }}
       - uses: actions/upload-artifact@v4
         with:
           name: veryl-release-verylup
