@@ -29,26 +29,45 @@ jobs:
             target: aarch64-pc-windows-msvc
 
     runs-on: ${{ matrix.os }}
+    env:
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_CACHE_SIZE: "3G"
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
           targets: ${{ matrix.target }}
-      # Master saves; PRs (incl. forks) restore read-only.
+      # `-b` key so target/ is rebuilt with sccache as RUSTC_WRAPPER (deps skipped
+      # on restore); sccache then only serves workspace crates. Master saves; PRs
+      # (incl. forks) restore read-only.
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ matrix.target }}
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: ${{ matrix.target }}-b
+          save-if: ${{ github.ref == 'refs/heads/master' || github.head_ref == 'ci/sccache-tarball' }}
+      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: sccache-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: sccache-${{ matrix.target }}-
       - name: Run tests
         run: cargo test --locked --target ${{ matrix.target }}
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+      - uses: actions/cache/save@v4
+        if: github.ref == 'refs/heads/master' || github.head_ref == 'ci/sccache-tarball'
+        continue-on-error: true
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: sccache-${{ matrix.target }}-${{ github.sha }}
 
   gen_sv:
     runs-on: ubuntu-latest
-    env:
-      RUSTC_WRAPPER: sccache
-      CARGO_INCREMENTAL: "0"
-      SCCACHE_CACHE_SIZE: "3G"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -58,26 +77,10 @@ jobs:
         with:
           shared-key: gen_sv
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: mozilla-actions/sccache-action@v0.0.10
-      - uses: actions/cache/restore@v4
-        continue-on-error: true
-        with:
-          path: ~/.cache/sccache
-          key: sccache-gen_sv-${{ github.sha }}
-          restore-keys: sccache-gen_sv-
       - name: Run gen_sv
         run: make gen_sv
       - name: Check gen_sv
         run: git diff --exit-code
-      - name: sccache stats
-        if: always()
-        run: sccache --show-stats
-      - uses: actions/cache/save@v4
-        if: github.ref == 'refs/heads/master' || github.head_ref == 'ci/sccache-tarball'
-        continue-on-error: true
-        with:
-          path: ~/.cache/sccache
-          key: sccache-gen_sv-${{ github.sha }}
 
   rustfmt:
     runs-on: ubuntu-latest
@@ -91,10 +94,6 @@ jobs:
 
   clippy:
     runs-on: ubuntu-latest
-    env:
-      RUSTC_WRAPPER: sccache
-      CARGO_INCREMENTAL: "0"
-      SCCACHE_CACHE_SIZE: "3G"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -104,24 +103,8 @@ jobs:
         with:
           shared-key: clippy
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: mozilla-actions/sccache-action@v0.0.10
-      - uses: actions/cache/restore@v4
-        continue-on-error: true
-        with:
-          path: ~/.cache/sccache
-          key: sccache-clippy-${{ github.sha }}
-          restore-keys: sccache-clippy-
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
-      - name: sccache stats
-        if: always()
-        run: sccache --show-stats
-      - uses: actions/cache/save@v4
-        if: github.ref == 'refs/heads/master' || github.head_ref == 'ci/sccache-tarball'
-        continue-on-error: true
-        with:
-          path: ~/.cache/sccache
-          key: sccache-clippy-${{ github.sha }}
 
   # Build the release-verylup veryl binary once and share it via an artifact;
   # std / heliodor / cocotb consume it instead of each rebuilding (less redundant
