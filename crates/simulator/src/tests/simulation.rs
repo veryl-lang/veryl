@@ -2264,6 +2264,50 @@ fn inst() {
 }
 
 #[test]
+fn inst_port_default_value_connected_not_folded() {
+    // A default-valued input port must evaluate to the *connected* value in a
+    // connected instance; the default is only the fallback for an unconnected
+    // one. The module IR is shared by every instance, so registering the
+    // default as the port's comptime value used to const-fold expressions
+    // over the port (e.g. a shift amount) to the default for all instances.
+    let code = r#"
+    module Sub (
+        i_cfg : input  logic<5>  = 5'd0,
+        o_mask: output logic<16>,
+    ) {
+        assign o_mask = (16'd1 << i_cfg) - 16'd1;
+    }
+
+    module Top (
+        o_conn: output logic<16>,
+        o_open: output logic<16>,
+    ) {
+        inst s_conn: Sub (
+            i_cfg : 5'd2  ,
+            o_mask: o_conn,
+        );
+        inst s_open: Sub (
+            o_mask: o_open,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // connected: (1 << 2) - 1
+        assert_eq!(sim.get("o_conn").unwrap(), Value::new(3, 16, false));
+        // unconnected: the default applies, (1 << 0) - 1
+        assert_eq!(sim.get("o_open").unwrap(), Value::new(0, 16, false));
+    }
+}
+
+#[test]
 fn inst_array_input_port() {
     let code = r#"
     module Top (
