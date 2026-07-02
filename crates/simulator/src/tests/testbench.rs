@@ -226,7 +226,7 @@ fn tb_clock_reset_analyze() {
     let mut ir = air::Ir::default();
     errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     let errors: Vec<_> = errors
@@ -2102,7 +2102,7 @@ fn tb_file_analyze() {
     let mut ir = air::Ir::default();
     errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     let errors: Vec<_> = errors
@@ -2134,7 +2134,7 @@ fn tb_file_requires_test_module() {
     let mut ir = air::Ir::default();
     errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     assert!(
@@ -2329,7 +2329,7 @@ fn tb_file_misuse_diagnostics() {
     let mut ir = air::Ir::default();
     errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
     errors.append(&mut Analyzer::analyze_post_pass1());
-    errors.append(&mut analyzer.analyze_pass2("prj", &parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     assert!(

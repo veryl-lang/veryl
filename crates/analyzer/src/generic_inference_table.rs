@@ -8,7 +8,6 @@ use crate::ir::{WidthExpr, WidthOp};
 use crate::literal::Literal;
 use crate::literal_table;
 use crate::namespace::Namespace;
-use crate::namespace_table;
 use crate::symbol::{GenericParameterProperty, Symbol, SymbolKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
 use crate::symbol_table;
@@ -75,7 +74,7 @@ pub fn apply_inferred_args(path: &mut GenericSymbolPath, symbol: &Symbol) -> Inf
     if !last.arguments.is_empty() {
         return InferredApply::NotApplicable;
     }
-    if !matches!(symbol.kind, SymbolKind::Function(_)) {
+    if !matches!(symbol.kind, SymbolKind::Function(ref x) if !x.is_proto) {
         return InferredApply::NotApplicable;
     }
     if symbol.generic_parameters().is_empty() {
@@ -105,22 +104,18 @@ pub fn clear() {
 }
 
 pub fn resolve_pending() {
-    let saved = namespace_table::get_default();
     let entries = drain_pending();
     for entry in entries {
         if let Some(args) = try_infer_entry(&entry) {
             insert_inferred(entry.call_token_id, args);
         }
     }
-    namespace_table::set_default(&saved.paths);
 }
 
 fn try_infer_entry(entry: &PendingEntry) -> Option<Vec<GenericSymbolPath>> {
     if entry.arg_exprs.is_empty() {
         return None;
     }
-
-    namespace_table::set_default(&entry.namespace.paths);
 
     if entry.path.paths.len() != 1 {
         return None;
@@ -132,7 +127,7 @@ fn try_infer_entry(entry: &PendingEntry) -> Option<Vec<GenericSymbolPath>> {
         return None;
     }
     let ports = match &symbol.found.kind {
-        SymbolKind::Function(x) => x.ports.clone(),
+        SymbolKind::Function(x) if !x.is_proto => x.ports.clone(),
         _ => return None,
     };
 
@@ -318,7 +313,7 @@ fn resolve_argument_width(expr: &Expression) -> Option<usize> {
     let symbol = symbol_table::resolve(scoped.scoped_identifier.as_ref()).ok()?;
     let var_type = match &symbol.found.kind {
         SymbolKind::Variable(x) => &x.r#type,
-        SymbolKind::Parameter(x) => &x.r#type,
+        SymbolKind::Parameter(x) if !x.is_proto => &x.r#type,
         _ => return None,
     };
     if var_type.width.len() != 1 {

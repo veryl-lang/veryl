@@ -9,13 +9,10 @@ pub fn resolve_function(list: &[Symbol]) {
 }
 
 fn resolve_constantable(symbol: &Symbol, visited: &mut Vec<SymbolId>) -> bool {
-    match &symbol.kind {
-        SymbolKind::Function(func) | SymbolKind::ProtoFunction(func) => {
-            if let Some(constantable) = func.constantable {
-                return constantable;
-            }
-        }
-        _ => {}
+    if let SymbolKind::Function(func) = &symbol.kind
+        && let Some(constantable) = func.constantable
+    {
+        return constantable;
     }
 
     // Already in progress: a call cycle (mutual recursion `f0 -> f1 -> f0`),
@@ -29,7 +26,7 @@ fn resolve_constantable(symbol: &Symbol, visited: &mut Vec<SymbolId>) -> bool {
     let namespace = symbol.inner_namespace();
     let mut symbol = symbol.clone();
     let func = match &mut symbol.kind {
-        SymbolKind::Function(func) | SymbolKind::ProtoFunction(func) => func,
+        SymbolKind::Function(func) => func,
         _ => unreachable!(),
     };
 
@@ -81,7 +78,9 @@ fn is_constantable_function(
             {
                 return false;
             }
-            SymbolKind::Function(_) if !resolve_constantable(&symbol.found, visited) => {
+            SymbolKind::Function(x)
+                if !x.is_proto && !resolve_constantable(&symbol.found, visited) =>
+            {
                 return false;
             }
             SymbolKind::Instance(_) => return false,

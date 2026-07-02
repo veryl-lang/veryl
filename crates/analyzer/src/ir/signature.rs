@@ -5,7 +5,7 @@ use crate::namespace::Namespace;
 use crate::symbol::GenericMap;
 use crate::symbol::{GenericBoundKind, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::GenericSymbolPath;
-use crate::{namespace_table, symbol_table};
+use crate::{scope, symbol_table};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 
@@ -27,6 +27,24 @@ impl Signature {
         }
     }
 
+    pub fn is_compatible(
+        &self,
+        x: &Signature,
+        ignore_params: bool,
+        ignore_generic_params: bool,
+    ) -> bool {
+        if self.symbol != x.symbol {
+            return false;
+        }
+        if !ignore_params && self.parameters != x.parameters {
+            return false;
+        }
+        if !ignore_generic_params && self.generic_parameters != x.generic_parameters {
+            return false;
+        }
+        true
+    }
+
     pub fn add_parameter(&mut self, id: StrId, value: ValueVariant) {
         self.parameters.push((id, value));
     }
@@ -41,14 +59,22 @@ impl Signature {
     }
 
     pub fn from_path(context: &mut Context, mut path: GenericSymbolPath) -> Option<Self> {
-        let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
-        path.resolve_imported(&namespace, None);
+        let (scope, define_context) = scope::token_scope(path.paths[0].base.id).unwrap();
+        path.resolve_imported(scope, &define_context, None);
         path.unalias(None);
 
         let symbol = symbol_table::resolve(&path).ok()?;
 
         generic_inference_table::apply_inferred_args(&mut path, &symbol.found);
         let mut sig = match &symbol.found.kind {
+            SymbolKind::Function(x) if x.is_proto => {
+                let resolved = context.resolve_path(path.clone());
+                let symbol = symbol_table::resolve(&resolved).ok()?;
+                match &symbol.found.kind {
+                    SymbolKind::Function(_) => Self::new(symbol.found.id),
+                    _ => return None,
+                }
+            }
             SymbolKind::Module(_)
             | SymbolKind::Interface(_)
             | SymbolKind::Modport(_)
@@ -72,17 +98,7 @@ impl Signature {
                 }
                 Self::new(symbol.found.id)
             }
-            SymbolKind::ProtoFunction(_) => {
-                let resolved = context.resolve_path(path.clone());
-                let symbol = symbol_table::resolve(&resolved).ok()?;
-                match &symbol.found.kind {
-                    SymbolKind::Function(_) | SymbolKind::ProtoFunction(_) => {
-                        Self::new(symbol.found.id)
-                    }
-                    _ => return None,
-                }
-            }
-            SymbolKind::ProtoAliasModule(x) => {
+            SymbolKind::AliasModule(x) if x.is_proto => {
                 let symbol = symbol_table::resolve(&x.target).ok()?;
                 return Some(Signature::new(symbol.found.id));
             }
@@ -108,16 +124,19 @@ impl Signature {
             }
 
             if path.is_generic() {
-                let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
-                path.resolve_imported(&namespace, None);
+                let (scope, define_context) = scope::token_scope(path.paths[0].base.id).unwrap();
+                path.resolve_imported(scope, &define_context, None);
 
                 // Apply generic map
                 let path = context.resolve_path(path);
 
-                let namespace = namespace_table::get(path.paths[0].base.id).unwrap();
-                if let Ok(symbol) = symbol_table::resolve((&path.mangled_path(), &namespace)) {
+                if let Some((found, full_path)) =
+                    symbol_table::resolve_generic_structural(&path, path.paths[0].base.id)
+                        .ok()
+                        .map(|r| (r.found.clone(), r.full_path.clone()))
+                {
                     let current_namespace = context.current_namespace();
-                    for id in &symbol.full_path {
+                    for id in &full_path {
                         let symbol = symbol_table::get(*id).unwrap();
                         let SymbolKind::GenericInstance(inst) = &symbol.kind else {
                             continue;
@@ -137,7 +156,7 @@ impl Signature {
                     }
 
                     sig.full_path
-                        .append(&mut symbol.found.inner_namespace().paths.to_vec());
+                        .append(&mut found.inner_namespace().paths.to_vec());
                 }
             }
         }

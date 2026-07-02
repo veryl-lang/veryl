@@ -17,7 +17,9 @@ use crate::symbol::{
     self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, ProtoBound, Symbol,
     SymbolKind, TbComponentKind, TypeKind,
 };
-use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathKind, SymbolPath};
+use crate::symbol_path::{
+    GenericSymbolPath, GenericSymbolPathKind, SymbolPath, SymbolPathNamespace,
+};
 use crate::symbol_table::{self, ResolveResult};
 use crate::value::Value;
 use crate::{HashMap, HashSet, ir_error};
@@ -972,7 +974,7 @@ pub fn eval_struct_member(
 
     if let Ok(symbol) = symbol_table::resolve(&parent_path) {
         match &symbol.found.kind {
-            SymbolKind::Parameter(x) => {
+            SymbolKind::Parameter(x) if !x.is_proto => {
                 if let Some(expr) = &x.value {
                     let path = VarPath::new(symbol.found.token.text);
                     let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
@@ -1004,7 +1006,7 @@ pub fn eval_struct_member(
                 }
                 Err(ir_error!(token))
             }
-            SymbolKind::ProtoConst(x) => {
+            SymbolKind::Parameter(x) if x.is_proto => {
                 let path = VarPath::new(symbol.found.token.text);
                 let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
                 member_path.add_prelude(&path.0);
@@ -1213,22 +1215,31 @@ pub fn eval_type(
                         Signature::from_path(context, path).ok_or_else(|| ir_error!(token))?;
                     ir::TypeKind::Modport(sig, symbol.found.token.text)
                 }
-                SymbolKind::TypeDef(x) => {
-                    context.push_generic_map(map.clone());
+                SymbolKind::TypeDef(x) if !x.is_proto => {
+                    if let Some(ty) = &x.r#type
+                        && context.push_typedef_visiting(symbol.found.id)
+                    {
+                        context.push_generic_map(map.clone());
 
-                    let r#type = context.block(|c| x.r#type.to_ir_type(c, TypePosition::TypeDef));
+                        let r#type = context.block(|c| ty.to_ir_type(c, TypePosition::TypeDef));
 
-                    context.pop_generic_map();
+                        context.pop_generic_map();
+                        context.pop_typedef_visiting();
 
-                    let mut r#type = r#type?;
+                        let mut r#type = r#type?;
 
-                    width.append(r#type.width_mut());
-                    array.append(&mut r#type.array);
-                    signed = r#type.signed;
+                        width.append(r#type.width_mut());
+                        array.append(&mut r#type.array);
+                        signed = r#type.signed;
 
-                    r#type.kind
+                        r#type.kind
+                    } else {
+                        // Cyclic typedef chain (type_dag already reports it);
+                        // stop expanding instead of recursing forever.
+                        ir::TypeKind::Unknown
+                    }
                 }
-                SymbolKind::ProtoConst(x) => {
+                SymbolKind::Parameter(x) if x.is_proto => {
                     if x.r#type.kind.is_type() {
                         ir::TypeKind::Unknown
                     } else {
@@ -1236,7 +1247,7 @@ pub fn eval_type(
                         return Err(ir_error!(token));
                     }
                 }
-                SymbolKind::ProtoTypeDef(x) => {
+                SymbolKind::TypeDef(x) if x.is_proto => {
                     if let Some(x) = &x.r#type {
                         let mut r#type = x.to_ir_type(context, TypePosition::TypeDef)?;
                         width.append(r#type.width_mut());
@@ -1294,7 +1305,7 @@ pub fn eval_type(
                     }
                     _ => ir::TypeKind::Unknown,
                 },
-                SymbolKind::Parameter(x) => {
+                SymbolKind::Parameter(x) if !x.is_proto => {
                     if x.r#type.kind.is_type() {
                         if let Some(expr) = &x.value {
                             context.push_generic_map(map.clone());
@@ -1800,6 +1811,18 @@ pub fn eval_function_call(
                     ir::Factor::SystemFunctionCall(ret),
                 )))
             }
+            SymbolKind::Function(x) if x.is_proto => {
+                if context.in_generic {
+                    let ret =
+                        function_call(context, value.expression_identifier.as_ref(), args, token)?;
+
+                    Ok(ir::Expression::Term(Box::new(ir::Factor::FunctionCall(
+                        ret,
+                    ))))
+                } else {
+                    Err(ir_error!(token))
+                }
+            }
             SymbolKind::Function(_) | SymbolKind::ModportFunctionMember(_) => {
                 let ret =
                     function_call(context, value.expression_identifier.as_ref(), args, token)?;
@@ -1812,18 +1835,6 @@ pub fn eval_function_call(
                 let mut x = Comptime::create_unknown(token);
                 x.is_const = true;
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))))
-            }
-            SymbolKind::ProtoFunction(_) => {
-                if context.in_generic {
-                    let ret =
-                        function_call(context, value.expression_identifier.as_ref(), args, token)?;
-
-                    Ok(ir::Expression::Term(Box::new(ir::Factor::FunctionCall(
-                        ret,
-                    ))))
-                } else {
-                    Err(ir_error!(token))
-                }
             }
             _ => {
                 let name = symbol.found.token.text.to_string();
@@ -2025,7 +2036,7 @@ pub fn eval_factor_symbol(
     token: TokenRange,
 ) -> IrResult<ir::Factor> {
     match &symbol.found.kind {
-        SymbolKind::Parameter(x) => {
+        SymbolKind::Parameter(x) if !x.is_proto => {
             // Parameter should be found through context.find_path from the defined namespace
             if let Some(namespace) = context.current_namespace()
                 && symbol.found.namespace.included(&namespace)
@@ -2152,7 +2163,7 @@ pub fn eval_factor_symbol(
                 return Ok(ir::Factor::Value(comptime));
             }
         }
-        SymbolKind::ProtoConst(x) if allow_unknown_value => {
+        SymbolKind::Parameter(x) if x.is_proto && allow_unknown_value => {
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
             let mut x = Comptime::from_type(r#type, ClockDomain::None, token);
 
@@ -2161,13 +2172,15 @@ pub fn eval_factor_symbol(
 
             return Ok(ir::Factor::Value(x));
         }
-        SymbolKind::ProtoTypeDef(_) if allow_unknown_value => {
-            let mut x = Comptime::create_unknown(token);
+        SymbolKind::TypeDef(x) if x.is_proto => {
+            if allow_unknown_value {
+                let mut x = Comptime::create_unknown(token);
 
-            x.is_const = true;
-            x.is_global = true;
+                x.is_const = true;
+                x.is_global = true;
 
-            return Ok(ir::Factor::Value(x));
+                return Ok(ir::Factor::Value(x));
+            }
         }
         SymbolKind::EnumMember(x) => {
             let enum_symbol = symbol.found.get_parent().unwrap();
@@ -2240,17 +2253,11 @@ pub fn eval_factor_symbol(
             return Ok(ir::Factor::Value(x));
         }
         SymbolKind::Module(_)
-        | SymbolKind::ProtoModule(_)
         | SymbolKind::AliasModule(_)
-        | SymbolKind::ProtoAliasModule(_)
         | SymbolKind::Interface(_)
-        | SymbolKind::ProtoInterface(_)
         | SymbolKind::AliasInterface(_)
-        | SymbolKind::ProtoAliasInterface(_)
         | SymbolKind::Package(_)
-        | SymbolKind::ProtoPackage(_)
-        | SymbolKind::AliasPackage(_)
-        | SymbolKind::ProtoAliasPackage(_) => {
+        | SymbolKind::AliasPackage(_) => {
             if context.allow_component_as_factor {
                 context.allow_component_as_factor = false;
                 return Ok(ir::Factor::from_component_symbol(&symbol.found, token));
@@ -2266,7 +2273,7 @@ pub fn eval_factor_symbol(
         SymbolKind::Instance(x) if context.allow_component_as_factor => {
             context.allow_component_as_factor = false;
             if let Ok(component) =
-                symbol_table::resolve((&x.type_name.mangled_path(), &symbol.found.namespace))
+                symbol_table::resolve_generic_structural(&x.type_name, &symbol.found.namespace)
             {
                 let sig = Signature::new(component.found.id);
                 let kind = if symbol.found.is_module(true) {
@@ -2282,7 +2289,15 @@ pub fn eval_factor_symbol(
                 return Ok(ir::Factor::Value(comptime));
             }
         }
-        SymbolKind::Function(_) | SymbolKind::SystemFunction(_) => {
+        SymbolKind::Function(x) if !x.is_proto => {
+            context.insert_error(AnalyzerError::invalid_factor(
+                Some(&symbol.found.token.to_string()),
+                &symbol.found.kind.to_kind_name(),
+                &token,
+                &[],
+            ));
+        }
+        SymbolKind::SystemFunction(_) => {
             context.insert_error(AnalyzerError::invalid_factor(
                 Some(&symbol.found.token.to_string()),
                 &symbol.found.kind.to_kind_name(),
@@ -2590,8 +2605,16 @@ pub fn get_component(
     sig.normalize();
     let sig = &sig;
 
-    if let Some(component) = context.get_instance_history(sig) {
-        Ok(component)
+    if let Some((component, in_generic)) = context.get_instance_history(sig) {
+        if in_generic && !context.in_generic {
+            // The IR result gotten from the cache may be incomplete
+            // if the `in_generic` flag is set.
+            // Such result should be removed from the cache and be created again.
+            context.remove_instance_history(sig);
+            get_component(context, sig, token)
+        } else {
+            Ok(component)
+        }
     } else {
         let symbol = symbol_table::get(sig.symbol).unwrap();
 
@@ -2631,14 +2654,15 @@ pub fn get_component(
         context.push_generic_map(sig.to_generic_map());
 
         let ret = context.block(|c| match &symbol.kind {
-            SymbolKind::Module(x) => {
+            SymbolKind::Module(x) if !x.is_proto => {
                 let definition =
                     definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
                 let Definition::Module(x) = definition.as_ref() else {
                     unreachable!()
                 };
 
-                let component: IrResult<ir::Module> = Conv::conv(c, x);
+                let header_only = c.in_generic;
+                let component: IrResult<ir::Module> = Conv::conv(c, (x, header_only));
                 match component {
                     Ok(mut component) => {
                         if !c.config.retain_component_body {
@@ -2657,9 +2681,11 @@ pub fn get_component(
                     }
                 }
             }
-            SymbolKind::Interface(x) => {
-                let definition =
-                    definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
+            SymbolKind::Interface(x) if !x.is_proto => {
+                let definition = x
+                    .definition
+                    .and_then(definition_table::get)
+                    .ok_or_else(|| ir_error!(token))?;
                 let Definition::Interface(x) = definition.as_ref() else {
                     unreachable!()
                 };
@@ -2678,7 +2704,7 @@ pub fn get_component(
                     }
                 }
             }
-            SymbolKind::ProtoModule(x) => {
+            SymbolKind::Module(x) if x.is_proto => {
                 let definition =
                     definition_table::get(x.definition).ok_or_else(|| ir_error!(token))?;
                 let Definition::ProtoModule(x) = definition.as_ref() else {
@@ -2840,7 +2866,7 @@ pub fn get_overridden_params(
 
         let is_type_param = matches!(
             &target.kind,
-            SymbolKind::Parameter(x) if matches!(x.r#type.kind, TypeKind::Type)
+            SymbolKind::Parameter(x) if !x.is_proto && matches!(x.r#type.kind, TypeKind::Type)
         );
         if !is_type_param && !expr.0.is_const {
             let token: TokenRange = param.identifier.as_ref().into();
@@ -3158,7 +3184,6 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
         let symbol = symbol_table::get(path.sig.symbol).unwrap();
         let (definition, is_global) = match &symbol.kind {
             SymbolKind::Function(x) => (x.definition.unwrap(), x.is_global()),
-            SymbolKind::ProtoFunction(x) => (x.definition.unwrap(), x.is_global()),
             SymbolKind::ModportFunctionMember(x) => {
                 let symbol = symbol_table::get(x.function).unwrap();
                 let SymbolKind::Function(x) = symbol.kind else {
@@ -3348,7 +3373,7 @@ pub fn check_compatibility(
         check_implicit_clock_conversion(context, dst, src, token);
         return;
     }
-    if !dst.compatible(src) {
+    if !dst.compatible(src, context.in_generic) {
         let src_type = src.r#type.to_string();
         let dst_type = dst.to_string();
         context.insert_error(AnalyzerError::mismatch_assignment(
@@ -3412,10 +3437,8 @@ pub fn check_module_with_unevaluable_generic_parameters(ident: &Identifier) -> b
                             true
                         } else if let TypeKind::UserDefined(x) = &x.kind
                             && let Ok(symbol) = symbol_table::resolve(&x.path)
-                            && matches!(
-                                symbol.found.kind,
-                                SymbolKind::ProtoPackage(_) | SymbolKind::ProtoAliasPackage(_)
-                            )
+                            && (matches!(symbol.found.kind, SymbolKind::Package(ref x) if x.is_proto)
+                                || matches!(&symbol.found.kind, SymbolKind::AliasPackage(x) if x.is_proto))
                             && !has_default
                         {
                             true
@@ -3477,12 +3500,16 @@ pub fn tb_method_call(
     // Resolve just the first element (the instance name)
     let inst_name = path.paths[0].base.text;
     let inst_path = SymbolPath::new(&[inst_name]);
-    let inst_namespace = match crate::namespace_table::get(path.paths[0].base.id) {
-        Some(ns) => ns,
-        None => return Ok(None),
+    let Some((inst_scope, inst_define_context)) = crate::scope::token_scope(path.paths[0].base.id)
+    else {
+        return Ok(None);
     };
 
-    let inst_symbol = match symbol_table::resolve((&inst_path, &inst_namespace)) {
+    let inst_symbol = match symbol_table::resolve(SymbolPathNamespace::from_scope(
+        inst_path,
+        inst_scope,
+        inst_define_context,
+    )) {
         Ok(s) => s,
         Err(_) => return Ok(None),
     };
@@ -3490,10 +3517,10 @@ pub fn tb_method_call(
     // `$tb` methods are called on either an `inst` (clock_gen/reset_gen) or a
     // `var` (file). Pull the component type path from whichever form it is.
     let type_path = match &inst_symbol.found.kind {
-        SymbolKind::Instance(x) => x.type_name.mangled_path(),
+        SymbolKind::Instance(x) => &x.type_name,
         SymbolKind::Variable(x) => {
             if let TypeKind::UserDefined(ref ud) = x.r#type.kind {
-                ud.path.mangled_path()
+                &ud.path
             } else {
                 return Ok(None);
             }
@@ -3501,10 +3528,11 @@ pub fn tb_method_call(
         _ => return Ok(None),
     };
 
-    let type_symbol = match symbol_table::resolve((&type_path, &inst_symbol.found.namespace)) {
-        Ok(s) => s,
-        Err(_) => return Ok(None),
-    };
+    let type_symbol =
+        match symbol_table::resolve_generic_structural(type_path, &inst_symbol.found.namespace) {
+            Ok(s) => s,
+            Err(_) => return Ok(None),
+        };
 
     let tb_kind = match &type_symbol.found.kind {
         SymbolKind::TbComponent(x) => &x.kind,

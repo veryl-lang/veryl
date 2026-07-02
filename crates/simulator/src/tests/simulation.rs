@@ -79,6 +79,303 @@ fn wide_shift_amount_out_of_range() {
 }
 
 #[test]
+fn unary_minus_as_shift_amount() {
+    // `base << -exp` with `exp == 0`: the unary minus must yield 0, not the
+    // unmasked `~0 + 1` whose carry sets bit `width`.  The JIT used to leave
+    // that carry, so the shift count read as `2^width` (>= operand width) and
+    // clamped the result to 0.  Mirrors `alu_ffo_align`'s
+    // `{1'b1 repeat W} << -i_exp` sticky-mask, where `i_exp == 0` must keep all
+    // ones.  Cross-validated against the interpreter via Config::all().
+    let code = r#"
+    module Top (
+        base: input  logic<28>,
+        exp:  input  logic<10>,
+        r:    output logic<28>,
+    ) {
+        assign r = base << -exp;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("base", Value::new(0x0FFF_FFFF, 28, false));
+        sim.set("exp", Value::new(0, 10, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new(0x0FFF_FFFF, 28, false),
+            "config={config:?}",
+        );
+    }
+}
+
+#[test]
+fn struct_bit_field_rhs_no_spill() {
+    // A struct bit-field RHS is evaluated at the assignment width, which can
+    // exceed the field width — e.g. `~(a == b)` here is computed at the 10-bit
+    // struct width, not 1 bit.  Both codegen paths shifted that wide value into
+    // the field position without clipping it to the field, so bits above the
+    // field leaked into the neighbouring fields (`hi`/`lo`): the JIT bit-select
+    // store, and the interpreter's `Value::assign` (which masked the shifted
+    // RHS with the whole dst width instead of the [beg:end] window).  With
+    // `a != b`, `~(a==b) == 1`, so the packed struct is {lo=0xf, ext=0b01,
+    // hi=0xf} = 0x3df; both pre-fix paths produced 0x3ff.  Covers every backend.
+    let code = r#"
+    module Top (
+        a: input  logic<8> ,
+        b: input  logic<8> ,
+        o: output logic<10>,
+    ) {
+        struct s_t {
+            lo : logic<4>,
+            ext: logic<2>,
+            hi : logic<4>,
+        }
+        var m: s_t;
+        assign m.lo     = 4'hf;
+        assign m.ext[0] = ~(a == b);
+        assign m.ext[1] = 1'b0;
+        assign m.hi     = 4'hf;
+        assign o        = m;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0, 8, false));
+        sim.set("b", Value::new(1, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x3df, 10, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn interp_wide_struct_bit_field_rhs_no_spill() {
+    // The interpreter/analyzer `Value::assign` half of the spill fix, through
+    // the BigUint path with a >128-bit struct.  `m.ext[0] = ~(a==b)` at bit 98
+    // of a 200-bit struct evaluates the RHS wider than the 1-bit field; the
+    // BigUint assign must clip it to the field, not spill into `ext[1]`.
+    // Interpret-only here: a wide `~(a==b)` bit-field RHS also exercises a
+    // separate cranelift wide-operand issue fixed on its own branch.
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        a: input  logic<8>  ,
+        b: input  logic<8>  ,
+        o: output logic<200>,
+    ) {
+        struct w_t {
+            lo : logic<100>,
+            ext: logic<2>  ,
+            hi : logic<98> ,
+        }
+        var m: w_t;
+        assign m.lo     = '1;
+        assign m.ext[0] = ~(a == b);
+        assign m.ext[1] = 1'b0;
+        assign m.hi     = '1;
+        assign o        = m;
+    }
+    "#;
+    // layout (first field = MSB): lo[199:100], ext[99:98], hi[97:0].
+    // a != b → ~(a==b)=1 → ext[0]=1 (bit 98), ext[1]=0 (bit 99): all ones
+    // except bit 99.
+    let expected = ((BigUint::from(1u32) << 200u32) - 1u32) ^ (BigUint::from(1u32) << 99u32);
+    for config in Config::all().into_iter().filter(|c| !c.use_jit && !c.aot_c) {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0, 8, false));
+        sim.set("b", Value::new(1, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            *sim.get("o").unwrap().payload(),
+            expected,
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn shift_loc_wdata_256_all_offsets() {
+    // Reproduces pe_pkg::shift_loc_wdata from the sarugaku PE (the 0127_x_sdw_loc
+    // testcase): a 64-bit datum is byte-rotated into a 256-bit line at byte
+    // offset `addr`, wrapping past byte 31 back to byte 0.  Offsets 0..=24 are a
+    // plain `{data, zeros}` shift; 25..=31 a wrap-around 3-way concat
+    // `{data[hi:0], 192'b0, data[63:lo]}`.
+    //
+    // Each arm is a wide (>128-bit) concat whose OWN width can be narrower than
+    // the 256-bit dst (offset 8 → 128-bit; offset 23 → 248-bit).  The JIT sized
+    // the concat's result slot, its wide element slots, and (in a ternary/case
+    // merge) each branch slot to those narrower widths, then strode the full
+    // 256-bit dst when storing / apply-masking / bor-ing elements / selecting —
+    // reading past the slots into uninitialised stack.  `interpret` was correct
+    // throughout, so cranelift diverged deterministically.
+    use num_bigint::BigUint;
+
+    let data_bytes: [u8; 8] = [0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7];
+    let data_val: u64 = u64::from_le_bytes(data_bytes);
+    let expected_of = |a: usize| {
+        let mut result = [0u8; 32];
+        for (i, &byte) in data_bytes.iter().enumerate() {
+            result[(a + i) % 32] = byte;
+        }
+        Value::new_biguint(BigUint::from_bytes_le(&result), 256, false)
+    };
+    let arm_expr = |a: usize| -> String {
+        if a == 0 {
+            "data".to_string()
+        } else if a <= 24 {
+            format!("{{data, {{1'b0 repeat {}}}}}", 8 * a)
+        } else {
+            let t = 32 - a; // number of high data bytes that stay at the top
+            format!(
+                "{{data[{}:0], {{1'b0 repeat 192}}, data[63:{}]}}",
+                8 * t - 1,
+                8 * t
+            )
+        }
+    };
+
+    // Part A — each offset as its own single-concat module, on every backend.
+    // One arm per module keeps the wide-slot count low, so this exercises the
+    // store + concat-element widen fixes in all configs (incl. 4-state).
+    for config in Config::all() {
+        for a in 0..32usize {
+            let m = format!(
+                "\n    module Top (\n        data: input logic<64>,\n        o: output logic<256>,\n    ) {{\n        assign o = {};\n    }}\n    ",
+                arm_expr(a)
+            );
+            let ir = analyze(&m, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("data", Value::new(data_val, 64, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                expected_of(a),
+                "isolated addr={a} config={config:?}"
+            );
+        }
+    }
+
+    // The full addr-indexed `case` mux (the exact shift_loc_wdata shape) is
+    // deliberately not tested here: merging all 32 arms into one comb function
+    // makes the O(N)-slot concat lowering allocate enough wide slots to overflow
+    // a thread stack — an orthogonal scalability limit of `build_binary_wide_concat`,
+    // not this read fix.  The per-arm store/concat widen (above) and the branch
+    // widen (`wide_ternary_narrow_branch_no_spill`) cover the fix in full.
+}
+
+#[test]
+fn wide_ternary_narrow_branch_no_spill() {
+    // A wide ternary whose branches are NARROWER than the 256-bit result: the
+    // true branch `{data, 72'b0}` is a 136-bit concat (a 3-word slot), yet the
+    // select strides the 256-bit dst.  Without widening the branch pointer,
+    // `emit_wide_select` reads the 4th word past the branch slot (uninitialised
+    // stack).  `sel ? A : 0` must give A when selected, 0 otherwise.
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        sel:  input  logic     ,
+        data: input  logic<64> ,
+        o:    output logic<256>,
+    ) {
+        assign o = if sel ? {data, {1'b0 repeat 72}} : 256'd0;
+    }
+    "#;
+
+    let data_val: u64 = 0xf7f6f5f4f3f2f1f0;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("data", Value::new(data_val, 64, false));
+        for (sel, exp) in [
+            (0u64, BigUint::from(0u32)),
+            (1u64, BigUint::from(data_val) << 72),
+        ] {
+            sim.set("sel", Value::new(sel, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new_biguint(exp, 256, false),
+                "sel={sel} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_binary_4state_scalar_mask_operand() {
+    // A wide (>128-bit) binary op whose operand is a comparison — `c + (a==b)`,
+    // `c & (a==b)` — context-widens `(a==b)` to 200 bits (`is_wide_ptr` true) yet
+    // builds a SCALAR payload AND a scalar 4-state mask.  The payload marshaling
+    // already gated on `returns_wide_pointer`, but the 4-state MASK marshaling
+    // still trusted the width and dereferenced the scalar mask as a pointer
+    // (wild read → SIGABRT/SIGSEGV) — only in the 4-state JIT config.  With
+    // clean (x/z-free) inputs the mask is zero, so the arithmetic must be exact.
+    use num_bigint::BigUint;
+    let cval = (BigUint::from(1u32) << 200u32) - 1u32; // 200-bit all ones
+    for (expr, exp) in [
+        ("c + (a == b)", cval.clone()),        // a!=b → +0
+        ("c & (a == b)", BigUint::from(0u32)), // a!=b → &0
+    ] {
+        let code = format!(
+            "\n    module Top (\n        a: input logic<8>,\n        b: input logic<8>,\n        c: input logic<200>,\n        o: output logic<200>,\n    ) {{\n        assign o = {expr};\n    }}\n    "
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::new(0, 8, false));
+            sim.set("b", Value::new(1, 8, false));
+            sim.set("c", Value::new_biguint(cval.clone(), 200, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                *sim.get("o").unwrap().payload(),
+                exp,
+                "expr=`{expr}` config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_unary_scalar_operand_no_deref() {
+    // A wide (>128-bit) unary `~` whose operand is a comparison — `~(a==b)` —
+    // context-widens `(a==b)` to 200 bits (`is_wide_ptr` true) yet builds a
+    // SCALAR.  Trusting the width dereferenced that scalar as a pointer (wild
+    // read → SIGSEGV) in the JIT; it must be force-stored instead.  With clean
+    // inputs `~(a==b)` at 200-bit is all ones (a!=b → (a==b)=0 → ~0).
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        a: input  logic<8>  ,
+        b: input  logic<8>  ,
+        o: output logic<200>,
+    ) {
+        assign o = ~(a == b);
+    }
+    "#;
+    let expected = (BigUint::from(1u32) << 200u32) - 1u32; // 200-bit all ones
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0, 8, false));
+        sim.set("b", Value::new(1, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            *sim.get("o").unwrap().payload(),
+            expected,
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn simple_ff() {
     let code = r#"
     module Top (
@@ -726,7 +1023,7 @@ fn probe_wide_comb_oor_select_store() {
         base: input  logic<200>,
         i:    input  logic<9>,
         b:    input  logic<8>,
-        o:    output logic<200>,
+        o:    output logic<134>,
     ) {
         always_comb {
             o = base;
@@ -17646,5 +17943,75 @@ fn bug8_mixed_array_dynamic_read_is_unsupported() {
             "{config:?}: expected UnsupportedDescription, got {:?}",
             result.map(|_| "Ok(ir)")
         );
+    }
+}
+
+#[test]
+fn wide_concat_long_repeat_no_stack_overflow() {
+    // pe_pkg::shift_loc_wdata from the sarugaku PE: a 64-bit datum byte-rotated
+    // into a 256-bit line at byte offset `addr`.  With all 32 arms in one comb
+    // function the zero-pad concats used to allocate a fresh wide slot per shift
+    // step and overflow the stack (4-state worst); this guards that fix across
+    // every backend.
+    use num_bigint::BigUint;
+
+    let data_bytes: [u8; 8] = [0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7];
+    let data_val: u64 = u64::from_le_bytes(data_bytes);
+    let expected_of = |a: usize| {
+        let mut result = [0u8; 32];
+        for (i, &byte) in data_bytes.iter().enumerate() {
+            result[(a + i) % 32] = byte;
+        }
+        Value::new_biguint(BigUint::from_bytes_le(&result), 256, false)
+    };
+    let arm_expr = |a: usize| -> String {
+        if a == 0 {
+            "data".to_string()
+        } else if a <= 24 {
+            format!("{{data, {{1'b0 repeat {}}}}}", 8 * a)
+        } else {
+            let t = 32 - a; // number of high data bytes that stay at the top
+            format!(
+                "{{data[{}:0], {{1'b0 repeat 192}}, data[63:{}]}}",
+                8 * t - 1,
+                8 * t
+            )
+        }
+    };
+
+    let mut arms = String::new();
+    for a in 0..32usize {
+        arms.push_str(&format!("            {a}: o = {};\n", arm_expr(a)));
+    }
+    let code = format!(
+        r#"
+    module Top (
+        addr: input  logic<5>  ,
+        data: input  logic<64> ,
+        o:    output logic<256>,
+    ) {{
+        always_comb {{
+            case addr {{
+{arms}            default: o = {};
+            }}
+        }}
+    }}
+    "#,
+        arm_expr(31)
+    );
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for a in 0..32usize {
+            sim.set("addr", Value::new(a as u64, 5, false));
+            sim.set("data", Value::new(data_val, 64, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                expected_of(a),
+                "addr={a} config={config:?}"
+            );
+        }
     }
 }

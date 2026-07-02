@@ -19,6 +19,19 @@ pub struct Synth {
     /// Built-in cell library / PDK to use.
     #[serde(default)]
     pub library: Library,
+    /// Smallest array, in stored bits, inferred as a RAM instead of flip-flops.
+    #[serde(default = "default_ram_min_bits")]
+    pub ram_min_bits: usize,
+    /// Largest number of distinct read addresses a RAM-inferred array may have.
+    #[serde(default = "default_ram_max_read_ports")]
+    pub ram_max_read_ports: usize,
+    /// Largest number of distinct write sites a RAM-inferred array may have.
+    #[serde(default = "default_ram_max_write_ports")]
+    pub ram_max_write_ports: usize,
+    /// Largest array, in stored bits, expanded into flip-flops after failing RAM
+    /// inference; a larger dynamically-indexed array is rejected, not expanded.
+    #[serde(default = "default_ram_max_ff_bits")]
+    pub ram_max_ff_bits: usize,
 }
 
 /// Built-in PDK library identifiers. Each variant maps to a hard-coded
@@ -59,4 +72,20 @@ fn default_clock_freq() -> f64 {
 
 fn default_activity() -> f64 {
     0.1
+}
+
+fn default_ram_min_bits() -> usize {
+    1024
+}
+
+fn default_ram_max_read_ports() -> usize {
+    16
+}
+
+fn default_ram_max_write_ports() -> usize {
+    8
+}
+
+fn default_ram_max_ff_bits() -> usize {
+    1 << 16
 }

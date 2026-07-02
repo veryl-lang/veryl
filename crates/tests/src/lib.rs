@@ -97,8 +97,8 @@ mod analyzer {
 
         let mut context = Context::default();
         let mut ir = veryl_analyzer::ir::Ir::default();
-        for (prj, veryl, analyzer) in &parse_results {
-            let errors = analyzer.analyze_pass2(prj, veryl, &mut context, Some(&mut ir));
+        for (_prj, veryl, analyzer) in &parse_results {
+            let errors = analyzer.analyze_pass2(veryl, &mut context, Some(&mut ir));
             dbg!(&errors);
             assert!(errors.is_empty());
         }
@@ -282,17 +282,15 @@ mod emitter {
         }
         let _ = Analyzer::analyze_post_pass1();
         for (_, result) in &parse_results {
-            let prj = &metadata.project.name;
             let analyzer = Analyzer::new(&metadata);
-            let _ = analyzer.analyze_pass2(prj, &result.veryl, &mut context, None);
+            let _ = analyzer.analyze_pass2(&result.veryl, &mut context, None);
         }
 
         for (i, (input, result)) in parse_results.iter().enumerate() {
             let (src, dst, map) = &file_paths[i];
-            let prj = &metadata.project.name;
 
             let mut emitter = Emitter::new(&metadata, src, dst, map);
-            emitter.emit(prj, &result.veryl, input);
+            emitter.emit(&result.veryl, input);
 
             let out_code = emitter.as_str();
             let ref_code = fs::read_to_string(dst).unwrap();
@@ -367,7 +365,6 @@ mod error {
                         errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
                         errors.append(&mut Analyzer::analyze_post_pass1());
                         errors.append(&mut analyzer.analyze_pass2(
-                            prj,
                             &ret.veryl,
                             &mut context,
                             Some(&mut ir),
@@ -654,8 +651,8 @@ mod filelist {
 
         let mut context = Context::default();
         let mut ir = veryl_analyzer::ir::Ir::default();
-        for (path, _, parser, analyzer) in &contexts {
-            let err = analyzer.analyze_pass2(&path.prj, &parser.veryl, &mut context, Some(&mut ir));
+        for (_path, _, parser, analyzer) in &contexts {
+            let err = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
             dbg!(&err);
             assert!(err.is_empty());
         }
@@ -809,9 +806,8 @@ mod native_test {
         assert!(errors.is_empty(), "post_pass1 errors: {errors:?}");
 
         let mut context = Context::default();
-        for (path, parser, analyzer) in &contexts {
-            let errors =
-                analyzer.analyze_pass2(&path.prj, &parser.veryl, &mut context, Some(&mut ir));
+        for (_path, parser, analyzer) in &contexts {
+            let errors = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
             assert!(errors.is_empty(), "pass2 errors: {errors:?}");
         }
 

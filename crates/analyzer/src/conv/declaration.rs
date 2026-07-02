@@ -405,6 +405,7 @@ impl Conv<&WithParameterItem> for () {
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
             && let SymbolKind::Parameter(x) = &symbol.found.kind
+            && !x.is_proto
         {
             let path = VarPath::new(symbol.found.token.text);
             let kind: VarKind = (&x.kind).into();
@@ -664,7 +665,7 @@ impl Conv<&VarDeclaration> for ir::Declaration {
             // the `inst` $tb forms do.
             if let crate::symbol::TypeKind::UserDefined(ref ud) = x.r#type.kind
                 && let Ok(ty_symbol) =
-                    symbol_table::resolve((&ud.path.mangled_path(), &symbol.found.namespace))
+                    symbol_table::resolve_generic_structural(&ud.path, &symbol.found.namespace)
                 && matches!(
                     &ty_symbol.found.kind,
                     SymbolKind::TbComponent(c) if matches!(c.kind, TbComponentKind::File)
@@ -752,6 +753,7 @@ impl Conv<&ConstDeclaration> for ir::Declaration {
 
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
             && let SymbolKind::Parameter(x) = &symbol.found.kind
+            && !x.is_proto
         {
             let path = VarPath::new(symbol.found.token.text);
             let kind: VarKind = (&x.kind).into();
@@ -963,7 +965,8 @@ impl Conv<(&FunctionDeclaration, Option<&FuncPath>)> for () {
         }
 
         if let Ok(symbol) = symbol_table::resolve(func_def.identifier.as_ref())
-            && let SymbolKind::Function(_) = &symbol.found.kind
+            && let SymbolKind::Function(x) = &symbol.found.kind
+            && !x.is_proto
         {
             let port_declaration = func_def
                 .function_declaration_opt0
@@ -1015,7 +1018,8 @@ impl Conv<(&ProtoFunctionDeclaration, Option<&FuncPath>)> for () {
         }
 
         if let Ok(symbol) = symbol_table::resolve(func_def.identifier.as_ref())
-            && let SymbolKind::ProtoFunction(_) = &symbol.found.kind
+            && let SymbolKind::Function(x) = &symbol.found.kind
+            && x.is_proto
         {
             let port_declaration = func_def
                 .proto_function_declaration_opt0
@@ -1060,7 +1064,6 @@ fn conv_function(
 
     let proeprty = match &symbol.kind {
         SymbolKind::Function(x) => x,
-        SymbolKind::ProtoFunction(x) => x,
         _ => unreachable!(),
     };
 
@@ -1783,8 +1786,10 @@ impl Conv<&TypeDefDeclaration> for () {
     fn conv(context: &mut Context, value: &TypeDefDeclaration) -> IrResult<Self> {
         if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
             && let SymbolKind::TypeDef(x) = &symbol.found.kind
+            && !x.is_proto
+            && let Some(r#type) = &x.r#type
         {
-            x.r#type.to_ir_type(context, TypePosition::TypeDef)?;
+            r#type.to_ir_type(context, TypePosition::TypeDef)?;
         }
 
         Ok(())

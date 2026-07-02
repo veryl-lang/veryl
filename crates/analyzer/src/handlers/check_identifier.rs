@@ -309,7 +309,7 @@ impl VerylGrammarTrait for CheckIdentifier {
     }
 
     fn identifier_statement(&mut self, arg: &IdentifierStatement) -> Result<(), ParolError> {
-        // After: child `identifier` nodes have populated `namespace_table`,
+        // After: child `identifier` nodes have populated the token scope table,
         // so LHS resolution can reach vars declared in the always_* body.
         if let HandlerPoint::After = self.point {
             let token = arg.expression_identifier.identifier().token;

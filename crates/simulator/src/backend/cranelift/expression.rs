@@ -74,6 +74,31 @@ fn marshal_wide_operand(
     }
 }
 
+/// Materialise a wide operand (payload or 4-state mask) as an `op_nb`-byte
+/// pointer.  `is_ptr` must be `returns_wide_pointer`, not `is_wide_ptr(width)`:
+/// a comparison/reduction/narrowing node can be wide-WIDTH yet build a scalar,
+/// which must be force-stored — `ensure_wide_ptr_val`'s own `is_wide_ptr` guard
+/// would otherwise leave it undereferenced as a bogus pointer.
+fn wide_operand_as_ptr(
+    builder: &mut FunctionBuilder,
+    is_ptr: bool,
+    x_width: usize,
+    payload: CraneliftValue,
+    op_nb: usize,
+) -> CraneliftValue {
+    if is_ptr {
+        widen_wide_ptr(builder, payload, calc_native_bytes(x_width), op_nb)
+    } else if is_wide_ptr(x_width) {
+        let slot = alloc_wide_zero(builder, op_nb);
+        builder
+            .ins()
+            .store(MemFlagsData::trusted(), payload, slot, 0);
+        slot
+    } else {
+        ensure_wide_ptr_val(builder, payload, x_width, op_nb)
+    }
+}
+
 impl ProtoExpression {
     pub fn can_build_binary(&self) -> bool {
         match self {
@@ -590,7 +615,11 @@ impl ProtoExpression {
                     Op::Sub => {
                         let mask = gen_mask_for_width(width);
                         let x0 = bxor_const(builder, x_payload, mask, wide);
-                        iadd_const(builder, x0, 1, wide)
+                        let neg = iadd_const(builder, x0, 1, wide);
+                        // Mask off the carry into bit `width`: `-0` = `~0 + 1`
+                        // sets it, breaking the "no bits ≥ width" invariant — as
+                        // a shift count `x << -0` would then shift by `2^width`.
+                        band_const(builder, neg, mask, wide)
                     }
                     Op::BitNot => {
                         let mask = gen_mask_for_width(width);
@@ -2141,6 +2170,7 @@ impl ProtoExpression {
         let width = expr_context.width;
         let x_width = x.width();
         let (x_payload, x_mask_xz) = x.build_binary(context, builder)?;
+        let is_x_ptr = returns_wide_pointer(x);
 
         // Reduction ops always produce 1-bit I64 results
         let is_reduction = matches!(
@@ -2156,12 +2186,8 @@ impl ProtoExpression {
 
         if is_reduction {
             // Input is wide, output is I64 (1-bit)
-            let x_ptr = if is_wide_ptr(x_width) {
-                x_payload
-            } else {
-                ensure_wide_ptr_val(builder, x_payload, x_width, calc_native_bytes(x_width))
-            };
             let x_nb = calc_native_bytes(x_width);
+            let x_ptr = wide_operand_as_ptr(builder, is_x_ptr, x_width, x_payload, x_nb);
             let packed = wide_ops::pack_nb_width(x_nb, x_width);
             let nb_val = builder.ins().iconst(I32, x_nb as i64);
             let packed_val = builder.ins().iconst(I32, packed as i64);
@@ -2230,11 +2256,7 @@ impl ProtoExpression {
 
             // 4-state: if x has any X/Z bits, result is X
             if let Some(x_mask_xz) = x_mask_xz {
-                let x_mask_ptr = if is_wide_ptr(x_width) {
-                    x_mask_xz
-                } else {
-                    ensure_wide_ptr_val(builder, x_mask_xz, x_width, x_nb)
-                };
+                let x_mask_ptr = wide_operand_as_ptr(builder, is_x_ptr, x_width, x_mask_xz, x_nb);
                 let is_xz = emit_wide_is_nonzero(context, builder, x_mask_ptr, x_nb);
                 let one = builder.ins().iconst(I64, 1);
                 let payload = builder.ins().select(is_xz, context.zero, payload);
@@ -2247,11 +2269,7 @@ impl ProtoExpression {
         // Non-reduction unary ops with wide result
         let nb = calc_native_bytes(width);
         let x_nb = calc_native_bytes(x_width);
-        let x_ptr = if is_wide_ptr(x_width) {
-            x_payload
-        } else {
-            ensure_wide_ptr_val(builder, x_payload, x_width, nb)
-        };
+        let x_ptr = wide_operand_as_ptr(builder, is_x_ptr, x_width, x_payload, nb);
 
         let payload = match op {
             Op::Add => {
@@ -2278,11 +2296,7 @@ impl ProtoExpression {
 
         // 4-state handling for non-reduction ops
         if let Some(x_mask_xz) = x_mask_xz {
-            let x_mask_ptr = if is_wide_ptr(x_width) {
-                x_mask_xz
-            } else {
-                ensure_wide_ptr_val(builder, x_mask_xz, x_width, nb)
-            };
+            let x_mask_ptr = wide_operand_as_ptr(builder, is_x_ptr, x_width, x_mask_xz, nb);
 
             let mask_xz = match op {
                 Op::Add => x_mask_ptr,
@@ -2474,7 +2488,16 @@ impl ProtoExpression {
             };
 
             // 4-state for comparisons: if any mask is nonzero, result is X
-            let mask_xz = wide_any_xz(context, builder, x_mask_xz, y_mask_xz, x_width, y_width);
+            let mask_xz = wide_any_xz(
+                context,
+                builder,
+                x_mask_xz,
+                y_mask_xz,
+                returns_wide_pointer(x),
+                returns_wide_pointer(y),
+                x_width,
+                y_width,
+            );
             if let Some(is_xz) = mask_xz {
                 let one = builder.ins().iconst(I64, 1);
                 let payload = builder.ins().select(is_xz, context.zero, payload);
@@ -2580,6 +2603,8 @@ impl ProtoExpression {
                 y_ptr,
                 x_width,
                 y_width,
+                x_is_ptr: returns_wide_pointer(x),
+                y_is_ptr: returns_wide_pointer(y),
                 width,
                 op_nb,
             },
@@ -2628,26 +2653,19 @@ impl ProtoExpression {
             y_ptr,
             x_width,
             y_width,
+            x_is_ptr,
+            y_is_ptr,
             width,
             op_nb,
         } = *operands;
         if !context.use_4state {
             return None;
         }
-        let x_mask_ptr = x_mask_xz.map(|m| {
-            if is_wide_ptr(x_width) {
-                marshal_wide_operand(context, builder, true, m, x_width, op_nb, false)
-            } else {
-                ensure_wide_ptr_val(builder, m, x_width, op_nb)
-            }
-        });
-        let y_mask_ptr = y_mask_xz.map(|m| {
-            if is_wide_ptr(y_width) {
-                marshal_wide_operand(context, builder, true, m, y_width, op_nb, false)
-            } else {
-                ensure_wide_ptr_val(builder, m, y_width, op_nb)
-            }
-        });
+        // The mask follows the payload's pointer-vs-scalar (see WideOperandPair).
+        let x_mask_ptr =
+            x_mask_xz.map(|m| wide_operand_as_ptr(builder, x_is_ptr, x_width, m, op_nb));
+        let y_mask_ptr =
+            y_mask_xz.map(|m| wide_operand_as_ptr(builder, y_is_ptr, y_width, m, op_nb));
 
         match op {
             Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
@@ -2798,7 +2816,9 @@ impl ProtoExpression {
             | Op::ArithShiftL
             | Op::ArithShiftR => {
                 // If any operand has X/Z, result mask = all-ones for width
-                let is_xz = wide_any_xz(context, builder, x_mask_xz, y_mask_xz, x_width, y_width)?;
+                let is_xz = wide_any_xz(
+                    context, builder, x_mask_xz, y_mask_xz, x_is_ptr, y_is_ptr, x_width, y_width,
+                )?;
                 let full_mask = emit_wide_fill_ones(context, builder, op_nb, width);
                 let zero = alloc_wide_zero(builder, op_nb);
                 Some(emit_wide_select(builder, is_xz, full_mask, zero, op_nb))
@@ -2830,24 +2850,59 @@ impl ProtoExpression {
         let nb_val = builder.ins().iconst(I32, nb as i64);
 
         for (expr, repeat, elem_width) in elements {
-            let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
+            let repeat = *repeat;
+            if repeat == 0 {
+                continue;
+            }
             let ew = *elem_width;
 
-            // Ensure element is a wide pointer
-            let elem_ptr = if is_wide_ptr(expr.width()) {
-                elem_payload
-            } else {
-                ensure_wide_ptr_val(builder, elem_payload, expr.width(), nb)
-            };
-            let elem_xz_ptr = elem_mask_xz.map(|m| {
-                if is_wide_ptr(expr.width()) {
-                    m
-                } else {
-                    ensure_wide_ptr_val(builder, m, expr.width(), nb)
+            // A constant-zero run only shifts the accumulator, so collapse it to
+            // one shift: the per-step path below allocates a fresh wide slot each
+            // iteration, and a long zero pad would grow the frame past the stack.
+            let elem_is_zero = matches!(
+                expr.as_ref(),
+                ProtoExpression::Value { value, .. }
+                    if !value.is_xz() && value.payload().iter_u64_digits().next().is_none()
+            );
+            if repeat > 1 && elem_is_zero {
+                let amount = builder.ins().iconst(I64, (ew * repeat) as i64);
+                let new_acc = alloc_wide_slot(builder, nb);
+                call_helper_void(
+                    context,
+                    builder,
+                    HelperSig::BinaryOp,
+                    wide_fn_addrs::shl(),
+                    &[new_acc, acc, amount, nb_val],
+                );
+                acc = new_acc;
+                if let Some(acc_xz_val) = acc_xz {
+                    let new_xz = alloc_wide_slot(builder, nb);
+                    call_helper_void(
+                        context,
+                        builder,
+                        HelperSig::BinaryOp,
+                        wide_fn_addrs::shl(),
+                        &[new_xz, acc_xz_val, amount, nb_val],
+                    );
+                    acc_xz = Some(new_xz);
                 }
-            });
+                continue;
+            }
 
-            for _ in 0..*repeat {
+            let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
+
+            // Each element is zero-extended to `nb` before the nb-wide
+            // `wide_shl`/`wide_bor` below (a short element's slot spans only its
+            // own width).  `returns_wide_pointer` over `is_wide_ptr(width())` is
+            // defense-in-depth here: concat operand widths are self-determined,
+            // so the two agree today.
+            let elem_is_ptr = returns_wide_pointer(expr);
+            let elem_ptr =
+                wide_operand_as_ptr(builder, elem_is_ptr, expr.width(), elem_payload, nb);
+            let elem_xz_ptr = elem_mask_xz
+                .map(|m| wide_operand_as_ptr(builder, elem_is_ptr, expr.width(), m, nb));
+
+            for _ in 0..repeat {
                 // acc <<= ew
                 let amount = builder.ins().iconst(I64, ew as i64);
                 let new_acc = alloc_wide_slot(builder, nb);
@@ -2943,7 +2998,10 @@ impl ProtoExpression {
         let to_wide_ptr =
             |builder: &mut FunctionBuilder, expr: &ProtoExpression, val: CraneliftValue| {
                 if returns_wide_pointer(expr) {
-                    val
+                    // Widen a short branch to `nb` before `emit_wide_select`
+                    // strides it (mixed-width case arms: a 136-bit branch → a
+                    // 256-bit dst).
+                    widen_wide_ptr(builder, val, calc_native_bytes(expr.width()), nb)
                 } else {
                     let slot = alloc_wide_zero(builder, nb);
                     builder.ins().store(MemFlagsData::trusted(), val, slot, 0);

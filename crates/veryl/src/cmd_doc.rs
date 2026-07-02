@@ -40,7 +40,7 @@ impl CmdDoc {
             let symbol = symbol.clone();
             if format!("{}", symbol.namespace) == metadata.project.name && symbol.public {
                 match &symbol.kind {
-                    SymbolKind::Module(x) => {
+                    SymbolKind::Module(x) if !x.is_proto => {
                         let html_name = fmt_generic_parameters(&text, &x.generic_parameters);
                         let item = TopLevelItem {
                             file_name,
@@ -49,7 +49,7 @@ impl CmdDoc {
                         };
                         modules.insert(text, item);
                     }
-                    SymbolKind::ProtoModule(_) => {
+                    SymbolKind::Module(x) if x.is_proto => {
                         let html_name = file_name.clone();
                         let item = TopLevelItem {
                             file_name,
@@ -58,7 +58,7 @@ impl CmdDoc {
                         };
                         proto_modules.insert(text, item);
                     }
-                    SymbolKind::Interface(x) => {
+                    SymbolKind::Interface(x) if !x.is_proto => {
                         let html_name = fmt_generic_parameters(&text, &x.generic_parameters);
                         let item = TopLevelItem {
                             file_name,
@@ -67,7 +67,7 @@ impl CmdDoc {
                         };
                         interfaces.insert(text, item);
                     }
-                    SymbolKind::Package(x) => {
+                    SymbolKind::Package(x) if !x.is_proto => {
                         let html_name = fmt_generic_parameters(&text, &x.generic_parameters);
                         let item = TopLevelItem {
                             file_name,

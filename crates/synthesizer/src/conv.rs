@@ -17,6 +17,7 @@ use std::time::Instant;
 use veryl_analyzer::ir::{self as air, Declaration, Function, Shape, Statement, VarKind};
 use veryl_parser::resource_table::StrId;
 
+use crate::RamConfig;
 use crate::conv::expression::synthesize_expr;
 use crate::conv::postpass::complex_gate_replacement;
 use crate::conv::ram::RamCandidate;
@@ -50,7 +51,10 @@ thread_local! {
         cell::RefCell::new(HashMap::new());
 }
 
-pub fn convert_module(module: &air::Module) -> Result<GateModule, SynthesizerError> {
+pub fn convert_module(
+    module: &air::Module,
+    ram: RamConfig,
+) -> Result<GateModule, SynthesizerError> {
     struct DepthGuard;
     impl Drop for DepthGuard {
         fn drop(&mut self) {
@@ -87,11 +91,25 @@ pub fn convert_module(module: &air::Module) -> Result<GateModule, SynthesizerErr
         .iter()
         .map(|(k, v)| (*k, v.clone()))
         .collect();
-    let mut ctx = ConvContext::new(functions);
+    let mut ctx = ConvContext::new(functions, ram);
     // Detect RAMs before FF banks are allocated, so qualifying arrays skip the
     // per-bit flip-flop + address decode/mux expansion. Opt-out: VERYL_SYNTH_NO_RAM.
     if env::var_os("VERYL_SYNTH_NO_RAM").is_none() {
-        ctx.ram_vars = phase!("infer_ram_vars", ram::infer_ram_vars(module));
+        ctx.ram_vars = phase!("infer_ram_vars", ram::infer_ram_vars(module, &ram));
+    }
+    // Reject a too-large dynamically-indexed array that RAM inference declined
+    // (e.g. it has a reset) before it expands into an OOM-sized flip-flop +
+    // decode bank (#2941).
+    if let Some((vid, bits)) = ram::oversized_ff_array(module, &ctx.ram_vars, &ram) {
+        let var = &module.variables[&vid];
+        return Err(SynthesizerError::unsupported(
+            UnsupportedKind::ArrayTooLargeForFf {
+                path: var.path.to_string(),
+                bits,
+                limit: ram.max_ff_bits,
+            },
+            &var.token,
+        ));
     }
     phase!("allocate_variables", ctx.allocate_variables(module)?);
     phase!("classify_drivers", ctx.classify_drivers(module)?);
@@ -186,6 +204,8 @@ pub(crate) struct ConvContext {
     /// Read only by `record_ram_write` (AND'd into a write-enable); balanced
     /// push/pop leaves it empty at statement-stream boundaries.
     pub cond_stack: Vec<CondTerm>,
+    /// RAM-inference thresholds, forwarded to flattened child conversions.
+    pub ram_config: RamConfig,
 }
 
 /// One enclosing branch condition. `Neg` (the `else` side) materialises its NOT
@@ -198,7 +218,7 @@ pub(crate) enum CondTerm {
 }
 
 impl ConvContext {
-    fn new(functions: HashMap<air::VarId, Function>) -> Self {
+    fn new(functions: HashMap<air::VarId, Function>, ram_config: RamConfig) -> Self {
         let mut nets = Vec::with_capacity(16);
         nets.push(NetInfo {
             driver: NetDriver::Const(false),
@@ -221,6 +241,7 @@ impl ConvContext {
             ram_builders: HashMap::new(),
             flattened_rams: Vec::new(),
             cond_stack: Vec::new(),
+            ram_config,
         }
     }
 
@@ -680,7 +701,7 @@ impl ConvContext {
             match CHILD_CACHE.with(|c| c.borrow().get(&cache_key).cloned()) {
                 Some(g) => g,
                 None => {
-                    let g = Rc::new(convert_module(child_module)?);
+                    let g = Rc::new(convert_module(child_module, self.ram_config)?);
                     CHILD_CACHE.with(|c| c.borrow_mut().insert(cache_key, g.clone()));
                     g
                 }

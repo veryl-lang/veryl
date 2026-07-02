@@ -7,22 +7,27 @@
 //! conversion (`conv::statement` / `conv::expression`) and assembled in
 //! `conv::finalize`.
 //!
-//! Criteria:
-//!   * array variable, at least [`RAM_MIN_BITS`] stored bits and depth ≥ 2;
-//!   * 1..=[`RAM_MAX_WRITE_PORTS`] *clocked* writes `mem[addr] = data`, each a
+//! Criteria (thresholds come from [`RamConfig`], set in `Veryl.toml`'s
+//! `[synth]` section):
+//!   * array variable, at least `min_bits` stored bits and depth ≥ 2;
+//!   * 1..=`max_write_ports` *clocked* writes `mem[addr] = data`, each a
 //!     single destination, single dynamic index dimension, whole-word (no
 //!     bit/part select). A multi-write array (cache data filled two words per
 //!     beat, a superscalar register file) gets one port per write site;
 //!   * every read is also `mem[addr]` — single dynamic index, whole word — and
-//!     there are at most [`RAM_MAX_READ_PORTS`] distinct read addresses.
+//!     there are at most `max_read_ports` distinct read addresses.
 //!
 //! A reset (`if_reset`) array stays flip-flops: real SRAM has no reset, so an
 //! array meant to be SRAM is written reset-less in the RTL. (Small reset
 //! bit-arrays such as a cache `valid` stay as flops regardless via the
-//! [`RAM_MIN_BITS`] floor.)
+//! `min_bits` floor.)
 //!
 //! Partial / sub-word writes remain out of scope and keep the array as
 //! flip-flops.
+//!
+//! A dynamically-indexed array that fails inference but exceeds `max_ff_bits`
+//! is rejected rather than expanded into the `O(depth × width)` gates that
+//! would exhaust memory ([`oversized_ff_array`], issue #2941).
 
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -31,19 +36,7 @@ use veryl_analyzer::ir::{
     self as air, AssignDestination, Declaration, Expression, Factor, Statement,
 };
 
-/// Smallest array, in stored bits, worth turning into a RAM. Below this the
-/// flip-flop form is simpler and the macro periphery would dominate.
-pub(crate) const RAM_MIN_BITS: usize = 1024;
-
-/// A read port costs an independent macro access; past this many distinct read
-/// addresses the array is left as flip-flops rather than modelled as an
-/// implausibly wide multi-port memory.
-pub(crate) const RAM_MAX_READ_PORTS: usize = 16;
-
-/// Real designs do use multi-write-port memories (a cache data array filled two
-/// words per beat, a superscalar register file). Past this many distinct write
-/// sites the array is left as flip-flops.
-pub(crate) const RAM_MAX_WRITE_PORTS: usize = 8;
+use crate::RamConfig;
 
 /// A variable that passed inference. `ram_idx` is its stable index into
 /// `GateModule::ram_blocks`, assigned by ascending `VarId` so net `RamRead`
@@ -58,7 +51,10 @@ pub(crate) struct RamCandidate {
 /// Detect every array variable in `module` that qualifies for RAM inference.
 /// A reset array stays flip-flops — an array meant to be SRAM is written
 /// reset-less in the RTL (real SRAM has no reset).
-pub(crate) fn infer_ram_vars(module: &air::Module) -> HashMap<air::VarId, RamCandidate> {
+pub(crate) fn infer_ram_vars(
+    module: &air::Module,
+    ram: &RamConfig,
+) -> HashMap<air::VarId, RamCandidate> {
     // Stable ordering: sort candidate VarIds so ram_idx assignment is
     // deterministic regardless of HashMap iteration order.
     let mut accepted: Vec<(air::VarId, usize, usize)> = Vec::new();
@@ -82,14 +78,14 @@ pub(crate) fn infer_ram_vars(module: &air::Module) -> HashMap<air::VarId, RamCan
         if var.r#type.array.dims() != 1 {
             continue;
         }
-        if depth < 2 || width == 0 || width * depth < RAM_MIN_BITS {
+        if depth < 2 || width == 0 || width * depth < ram.min_bits {
             continue;
         }
 
-        if !write_pattern_ok(module, vid) {
+        if !write_pattern_ok(module, vid, ram) {
             continue;
         }
-        if !read_pattern_ok(module, vid) {
+        if !read_pattern_ok(module, vid, ram) {
             continue;
         }
         accepted.push((vid, depth, width));
@@ -109,6 +105,101 @@ pub(crate) fn infer_ram_vars(module: &air::Module) -> HashMap<air::VarId, RamCan
             )
         })
         .collect()
+}
+
+/// The first array that would blow up if expanded into flip-flops: dynamically
+/// indexed, over `ram.max_ff_bits` stored bits, and not inferred as RAM — so the
+/// caller can reject it (#2941) instead of building `depth × width` gates.
+/// Only 1-D: a dynamic multi-dim index errors elsewhere, and static indexing
+/// gives a flat FF bank (linear, no decode). `VarId` order for determinism.
+pub(crate) fn oversized_ff_array(
+    module: &air::Module,
+    ram_vars: &HashMap<air::VarId, RamCandidate>,
+    ram: &RamConfig,
+) -> Option<(air::VarId, usize)> {
+    let limit = ram.max_ff_bits;
+    let mut ids: Vec<air::VarId> = module.variables.keys().copied().collect();
+    ids.sort();
+
+    for vid in ids {
+        if ram_vars.contains_key(&vid) {
+            continue;
+        }
+        let Some(var) = module.variables.get(&vid) else {
+            continue;
+        };
+        let Some(width) = var.r#type.total_width() else {
+            continue;
+        };
+        let Some(depth) = var.r#type.array.total() else {
+            continue;
+        };
+        if depth < 2 || width == 0 || var.r#type.array.dims() != 1 {
+            continue;
+        }
+        let bits = width * depth;
+        if bits <= limit {
+            continue;
+        }
+        if is_dynamically_indexed(module, vid) {
+            return Some((vid, bits));
+        }
+    }
+    None
+}
+
+/// Does `vid` have any dynamic (non-constant) array-index access?
+fn is_dynamically_indexed(module: &air::Module, vid: air::VarId) -> bool {
+    let is_dyn = |index: &air::VarIndex| !index.0.is_empty() && !index.is_const();
+
+    for decl in &module.declarations {
+        let mut dynamic = false;
+        match decl {
+            Declaration::Ff(ff) => {
+                for st in &ff.statements {
+                    walk_writes(st, vid, false, &mut |dst, _, _| {
+                        if is_dyn(&dst.index) {
+                            dynamic = true;
+                        }
+                    });
+                }
+            }
+            Declaration::Comb(comb) => {
+                for st in &comb.statements {
+                    walk_writes(st, vid, false, &mut |dst, _, _| {
+                        if is_dyn(&dst.index) {
+                            dynamic = true;
+                        }
+                    });
+                }
+            }
+            // An inst-output `foo.o: arr[i]` writes at a dynamic index that
+            // `flatten_inst` expands like any clocked/comb write.
+            Declaration::Inst(inst) => {
+                for o in &inst.outputs {
+                    for d in &o.dst {
+                        if d.id == vid && is_dyn(&d.index) {
+                            dynamic = true;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        if dynamic {
+            return true;
+        }
+    }
+
+    let mut dynamic = false;
+    for decl in &module.declarations {
+        for_each_read_in_decl(decl, vid, &mut |index, _select| {
+            if is_dyn(index) {
+                dynamic = true;
+            }
+        });
+    }
+    dynamic
 }
 
 /// Does any statement in `stmts` (recursively) write a RAM-inferred variable?
@@ -145,11 +236,11 @@ fn stmt_writes_ram(ram_vars: &HashMap<air::VarId, RamCandidate>, stmt: &Statemen
     }
 }
 
-/// 1..=[`RAM_MAX_WRITE_PORTS`] clocked writes, each a single dynamic whole-word
+/// 1..=`max_write_ports` clocked writes, each a single dynamic whole-word
 /// destination, no comb / static-index write. A reset (`if_reset`) write
 /// disqualifies the array (real SRAM has no reset; an SRAM-intended array is
 /// written reset-less in the RTL).
-fn write_pattern_ok(module: &air::Module, vid: air::VarId) -> bool {
+fn write_pattern_ok(module: &air::Module, vid: air::VarId, ram: &RamConfig) -> bool {
     let mut clocked_writes = 0usize;
     let mut ok = true;
 
@@ -193,12 +284,12 @@ fn write_pattern_ok(module: &air::Module, vid: air::VarId) -> bool {
         }
     }
 
-    ok && (1..=RAM_MAX_WRITE_PORTS).contains(&clocked_writes)
+    ok && (1..=ram.max_write_ports).contains(&clocked_writes)
 }
 
 /// Every read of `vid` is a single dynamic whole-word `mem[addr]`, with at most
-/// [`RAM_MAX_READ_PORTS`] distinct addresses.
-fn read_pattern_ok(module: &air::Module, vid: air::VarId) -> bool {
+/// `max_read_ports` distinct addresses.
+fn read_pattern_ok(module: &air::Module, vid: air::VarId, ram: &RamConfig) -> bool {
     // Collect (whole_word_dynamic?, addr_key) for every read, then validate —
     // collecting first sidesteps borrowing `ok` across the visitor closure.
     // A trailing bit/part select (`mem[addr][1]`) is fine — the port returns
@@ -223,7 +314,7 @@ fn read_pattern_ok(module: &air::Module, vid: air::VarId) -> bool {
     let mut addrs: Vec<&String> = reads.iter().map(|(_, k)| k).collect();
     addrs.sort();
     addrs.dedup();
-    addrs.len() <= RAM_MAX_READ_PORTS
+    addrs.len() <= ram.max_read_ports
 }
 
 /// Source-location-independent signature of an address expression, so reads of

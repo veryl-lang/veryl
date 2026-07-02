@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use veryl_analyzer::fragment_cache::{self, Fragment, FragmentWatermark};
 use veryl_analyzer::{
-    attribute_table, definition_table, namespace_table, symbol_table, type_dag, unsafe_table,
+    attribute_table, definition_table, scope, symbol_table, type_dag, unsafe_table,
 };
 use veryl_cache::Store;
 use veryl_metadata::Metadata;
@@ -66,7 +66,7 @@ impl LsIncremental {
         drop_file_state(&path.src);
 
         let is_root = path.prj == self.root_project;
-        namespace_table::set_project(path.prj.as_str().into(), is_root);
+        scope::set_project(path.prj.as_str().into(), is_root);
 
         match fragment_cache::restore(&fragment) {
             Ok(()) => {
@@ -145,7 +145,7 @@ fn global_key(metadata: &Metadata) -> Option<String> {
 fn drop_file_state(src: &Path) {
     let path = resource_table::insert_path(src);
     symbol_table::drop(path);
-    namespace_table::drop(path);
+    scope::drop_tokens(path);
     text_table::drop(path);
     attribute_table::drop(path);
     unsafe_table::drop(path);
