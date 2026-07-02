@@ -94,7 +94,7 @@ fn create_input(
     // eval_comptime is required for width propagation, not just the type check.
     let comptime = expr.eval_comptime(context, None);
     if let Some(r#type) = r#type
-        && !r#type.compatible(comptime)
+        && !r#type.compatible(comptime, context.in_generic)
     {
         context.insert_error(AnalyzerError::mismatch_function_arg(
             &name.to_string(),
@@ -121,7 +121,7 @@ fn create_output(
 
     if let Some(r#type) = r#type {
         let comptime = expr.eval_comptime(context, None);
-        if !r#type.compatible(comptime) {
+        if !r#type.compatible(comptime, context.in_generic) {
             context.insert_error(AnalyzerError::mismatch_function_arg(
                 &name.to_string(),
                 &comptime.r#type.to_string(),

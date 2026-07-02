@@ -165,10 +165,10 @@ fn is_referable_symbol(symbol: &Symbol, base: Option<&Symbol>) -> bool {
     false
 }
 
-fn check_generic_type_arg(arg: &Comptime) -> Option<AnalyzerError> {
+fn check_generic_type_arg(arg: &Comptime, in_generic: bool) -> Option<AnalyzerError> {
     let dst = Type::new(crate::ir::TypeKind::Type);
 
-    if dst.compatible(arg) {
+    if dst.compatible(arg, in_generic) {
         None
     } else {
         let src_type = arg.r#type.to_string();
@@ -276,7 +276,7 @@ fn check_generic_proto_arg(
         }
         ProtoBound::FactorType(r) => {
             let param_type = r.to_ir_type(context, TypePosition::Generic).ok()?;
-            if param_type.compatible(arg) {
+            if param_type.compatible(arg, context.in_generic) {
                 None
             } else {
                 Some((format!("{}", r), None))
@@ -368,7 +368,7 @@ pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath)
 
                 if let Some(expr) = eval_generic_arg(context, &arg).as_ref() {
                     let error = match bound {
-                        GenericBoundKind::Type => check_generic_type_arg(expr),
+                        GenericBoundKind::Type => check_generic_type_arg(expr, context.in_generic),
                         GenericBoundKind::Inst(_) => {
                             check_generic_inst_arg(expr, bound, &symbol.found.namespace)
                         }
@@ -410,7 +410,7 @@ pub fn check_generic_expression(
     };
 
     let error = match bound {
-        GenericBoundKind::Type => check_generic_type_arg(&expression),
+        GenericBoundKind::Type => check_generic_type_arg(&expression, context.in_generic),
         GenericBoundKind::Inst(_) => check_generic_inst_arg(&expression, bound, bound_namespace),
         GenericBoundKind::Proto(_) => {
             check_generic_proto_arg(context, &expression, bound, bound_namespace)

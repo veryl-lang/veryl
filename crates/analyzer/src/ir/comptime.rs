@@ -633,7 +633,7 @@ impl Type {
         self.array.total()
     }
 
-    pub fn compatible(&self, src: &Comptime) -> bool {
+    pub fn compatible(&self, src: &Comptime, in_generic: bool) -> bool {
         // TODO type compatible check
         if self.is_unknown()
             | self.is_systemverilog()
@@ -642,15 +642,18 @@ impl Type {
         {
             true
         } else if let Some(mut dst_sig) = self.kind.signature() {
-            dst_sig.parameters.clear();
             if let Some(mut src_sig) = src.r#type.kind.signature() {
-                src_sig.parameters.clear();
+                dst_sig.normalize();
+                src_sig.normalize();
+                // In generic components, signatures are compared by using symbol only
+                // becuase they may not have generic args.
+                let match_sig = dst_sig.is_compatible(&src_sig, true, in_generic);
                 if let TypeKind::Modport(_, dst_mp) = self.kind
                     && let TypeKind::Modport(_, src_mp) = src.r#type.kind
                 {
-                    dst_mp == src_mp && dst_sig.to_string() == src_sig.to_string()
+                    match_sig && dst_mp == src_mp
                 } else {
-                    dst_sig.to_string() == src_sig.to_string()
+                    match_sig
                 }
             } else {
                 false

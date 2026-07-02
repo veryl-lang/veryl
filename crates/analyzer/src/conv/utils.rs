@@ -3364,7 +3364,7 @@ pub fn check_compatibility(
         check_implicit_clock_conversion(context, dst, src, token);
         return;
     }
-    if !dst.compatible(src) {
+    if !dst.compatible(src, context.in_generic) {
         let src_type = src.r#type.to_string();
         let dst_type = dst.to_string();
         context.insert_error(AnalyzerError::mismatch_assignment(
