@@ -30,6 +30,7 @@ console             = {workspace = true}
 fern                = "0.7.0"
 futures             = {workspace = true}
 handlebars          = {workspace = true}
+libc                = "0.2"
 log                 = {workspace = true}
 once_cell           = {workspace = true}
 mdbook-driver       = {workspace = true}

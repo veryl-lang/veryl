@@ -1,3 +1,4 @@
+use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use clap_complete::aot::Shell;
 use console::Style;
@@ -5,6 +6,8 @@ use fern::Dispatch;
 use log::debug;
 use log::{Level, LevelFilter};
 use miette::{IntoDiagnostic, Result};
+use std::ffi::{OsStr, OsString};
+use std::io::Write;
 use std::process::ExitCode;
 use veryl_metadata::Metadata;
 
@@ -18,7 +21,17 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 // ---------------------------------------------------------------------------------------------------------------------
 
 fn main() -> Result<ExitCode> {
+    if root_help_requested(std::env::args_os()) {
+        print_root_help()?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
     let opt = Opt::parse();
+
+    if opt.list {
+        external_subcommand::print_command_list(Opt::command())?;
+        return Ok(ExitCode::SUCCESS);
+    }
 
     if let Some(shell) = opt.completion {
         let shell = match shell {
@@ -31,6 +44,15 @@ fn main() -> Result<ExitCode> {
         clap_complete::generate(shell, &mut Opt::command(), "veryl", &mut std::io::stdout());
         return Ok(ExitCode::SUCCESS);
     }
+
+    let Some(command) = opt.command else {
+        Opt::command()
+            .error(
+                ErrorKind::MissingSubcommand,
+                "'veryl' requires a subcommand but one was not provided",
+            )
+            .exit();
+    };
 
     let level = if opt.trace {
         LevelFilter::Trace
@@ -79,11 +101,16 @@ fn main() -> Result<ExitCode> {
         .apply()
         .into_diagnostic()?;
 
-    let (mut metadata, dot_build_lock) = match opt.command {
+    if let Commands::External(args) = &command {
+        return external_subcommand::dispatch(args.clone());
+    }
+
+    let (mut metadata, dot_build_lock) = match command {
         Commands::New(_) | Commands::Init(_) | Commands::Translate(_) => {
             // dummy metadata
             (Metadata::create_default("dummy").unwrap(), None)
         }
+        Commands::External(_) => unreachable!(),
         _ => {
             let metadata_path = Metadata::search_from_current()?;
             let metadata = Metadata::load(metadata_path)?;
@@ -96,7 +123,7 @@ fn main() -> Result<ExitCode> {
 
     let mut stopwatch = StopWatch::new();
 
-    let ret = match opt.command {
+    let ret = match command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec(),
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec(),
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&mut metadata, opt.quiet),
@@ -122,6 +149,7 @@ fn main() -> Result<ExitCode> {
         }
         Commands::Synth(x) => cmd_synth::CmdSynth::new(x).exec(&mut metadata),
         Commands::Translate(x) => cmd_translate::CmdTranslate::new(x).exec(),
+        Commands::External(_) => unreachable!(),
     };
 
     if let Some(dot_build_lock) = dot_build_lock {
@@ -136,4 +164,24 @@ fn main() -> Result<ExitCode> {
     } else {
         Ok(ExitCode::FAILURE)
     }
+}
+
+fn root_help_requested(args: impl IntoIterator<Item = OsString>) -> bool {
+    let mut args = args.into_iter();
+    let _program = args.next();
+    let Some(flag) = args.next() else {
+        return false;
+    };
+
+    args.next().is_none()
+        && (flag == OsStr::new("-h") || flag == OsStr::new("--help") || flag == OsStr::new("help"))
+}
+
+fn print_root_help() -> Result<()> {
+    let mut command = Opt::command();
+    command.print_help().into_diagnostic()?;
+    std::io::stdout()
+        .write_all(b"\n\n... See all commands with --list\n")
+        .into_diagnostic()?;
+    Ok(())
 }
