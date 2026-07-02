@@ -140,8 +140,22 @@ jobs:
       - name: Test
         run: ../../target/release-verylup/veryl test
         working-directory: testcases/heliodor
-      # The single-hart SoC Linux boot is #[ignore] (long); run it explicitly. It
-      # runs on the built-in cc-backend simulator (~30s, not verilator).
+
+  # The single-hart SoC Linux boot is #[ignore] (long); run it in its own job so
+  # it runs in parallel with the main heliodor tests instead of serializing after
+  # them. It runs on the built-in cc-backend simulator (not verilator).
+  heliodor-boot:
+    needs: build-veryl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/download-artifact@v4
+        with:
+          name: veryl-release-verylup
+          path: target/release-verylup
+      - run: chmod +x target/release-verylup/veryl
       - name: Test Linux boot
         run: ../../target/release-verylup/veryl test --ignored --test test_soc_linux_boot
         working-directory: testcases/heliodor
