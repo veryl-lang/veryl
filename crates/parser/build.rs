@@ -1,13 +1,10 @@
 #[cfg(not(feature = "build"))]
 fn main() {}
 
-// Caps parol's LL(k) production-stack depth so deep *nesting* can't overflow the
-// stack in the parse-tree drop and the walker/conv passes. As of parol_runtime
-// 5.0.0 push productions (repetition-based flat lists: case arms, array elements,
-// operator chains) are excluded from the depth count, so a flat list of any
-// length parses and only genuine recursive nesting is bounded. The statement path
-// binds: on an 8MB release stack it overflows at ~325 levels (~7 productions
-// each), so 1152 leaves ~2x margin.
+// Caps parol's production-stack depth so deep nesting can't overflow the stack
+// when parsing or dropping the parse tree. Flat lists (case arms, array elements,
+// operator chains) are push productions and don't count, so only genuine nesting
+// is bounded; 1152 keeps ~2x margin below the observed overflow point.
 #[cfg(feature = "build")]
 const MAX_PARSING_DEPTH: usize = 1152;
 
