@@ -90,6 +90,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # Restore source file mtimes to their last-commit times. checkout sets every
+      # file's mtime to now, which makes cargo recompile all workspace crates even
+      # when unchanged; restoring mtimes lets cargo reuse the cached workspace
+      # crate artifacts (cache-workspace-crates below).
+      - uses: chetan/git-restore-mtime-action@v2
       - uses: dtolnay/rust-toolchain@stable
       # Also cache the workspace crates (not just dependencies). The `-ws` key is
       # distinct from the dependency-only cache so the first master run repopulates
@@ -100,7 +107,7 @@ jobs:
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Build veryl
-        run: cargo build --profile release-verylup --bin veryl
+        run: CARGO_LOG=cargo::core::compiler::fingerprint=trace cargo build -v --profile release-verylup --bin veryl
       - uses: actions/upload-artifact@v4
         with:
           name: veryl-release-verylup
