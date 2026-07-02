@@ -181,6 +181,29 @@ pub(crate) fn alloc_wide_zero(builder: &mut FunctionBuilder, nb: usize) -> Crane
     ptr
 }
 
+/// Zero-extend a wide-pointer value to span `nb` bytes.  A wide value's slot is
+/// sized to its own width; a consumer that strides a wider `nb` (a concat/store
+/// into a larger dst) would read past it into uninitialised stack.  Short →
+/// copy into a zeroed `nb` slot; already `nb` or wider → passed through
+/// (surplus high words ignored, never truncated).
+pub(crate) fn widen_wide_ptr(
+    builder: &mut FunctionBuilder,
+    ptr: CraneliftValue,
+    src_nb: usize,
+    nb: usize,
+) -> CraneliftValue {
+    if src_nb >= nb {
+        return ptr;
+    }
+    let slot = alloc_wide_zero(builder, nb);
+    for i in 0..(src_nb / 8) {
+        let off = (i * 8) as i32;
+        let w = builder.ins().load(I64, MemFlagsData::trusted(), ptr, off);
+        builder.ins().store(MemFlagsData::trusted(), w, slot, off);
+    }
+    slot
+}
+
 /// Promote a narrow value to a wide stack slot, or return as-is when
 /// already a pointer.
 pub(crate) fn ensure_wide_ptr_val(
@@ -549,35 +572,44 @@ pub(crate) struct WideOperandPair {
     pub y_ptr: CraneliftValue,
     pub x_width: usize,
     pub y_width: usize,
+    /// `returns_wide_pointer(x)`/`(y)`: the mask marshaling gates on these, not
+    /// on `is_wide_ptr(x_width)` (an inflated width can accompany a scalar).
+    pub x_is_ptr: bool,
+    pub y_is_ptr: bool,
     pub width: usize,
     pub op_nb: usize,
 }
 
 /// Either wide operand has nonzero mask_xz? Returns I8 truth value.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn wide_any_xz(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
     x_mask_xz: Option<CraneliftValue>,
     y_mask_xz: Option<CraneliftValue>,
+    x_is_ptr: bool,
+    y_is_ptr: bool,
     x_width: usize,
     y_width: usize,
 ) -> Option<CraneliftValue> {
     if !context.use_4state {
         return None;
     }
+    // A scalar mask can carry an inflated wide `width` (`c + (a==b)`), so gate on
+    // `x_is_ptr`, and pick i64-vs-i128 from the value's type, not the width.
     let x_has_xz = x_mask_xz.map(|m| {
-        if is_wide_ptr(x_width) {
+        if x_is_ptr {
             emit_wide_is_nonzero(context, builder, m, calc_native_bytes(x_width))
         } else {
-            let wide = x_width > 64;
+            let wide = builder.func.dfg.value_type(m) == I128;
             icmp_const(builder, IntCC::NotEqual, m, 0, wide)
         }
     });
     let y_has_xz = y_mask_xz.map(|m| {
-        if is_wide_ptr(y_width) {
+        if y_is_ptr {
             emit_wide_is_nonzero(context, builder, m, calc_native_bytes(y_width))
         } else {
-            let wide = y_width > 64;
+            let wide = builder.func.dfg.value_type(m) == I128;
             icmp_const(builder, IntCC::NotEqual, m, 0, wide)
         }
     });
