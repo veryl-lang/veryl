@@ -293,6 +293,7 @@ fn synth_ram_thresholds_default_and_override() {
     assert_eq!(metadata.synth.ram_min_bits, 1024);
     assert_eq!(metadata.synth.ram_max_read_ports, 16);
     assert_eq!(metadata.synth.ram_max_write_ports, 8);
+    assert_eq!(metadata.synth.ram_max_ff_bits, 1 << 16);
 
     // Explicit values in `[synth]` override the defaults.
     let toml = r#"
@@ -304,11 +305,13 @@ version = "0.1.0"
 ram_min_bits = 256
 ram_max_read_ports = 4
 ram_max_write_ports = 2
+ram_max_ff_bits = 4096
 "#;
     let metadata: Metadata = toml::from_str(toml).unwrap();
     assert_eq!(metadata.synth.ram_min_bits, 256);
     assert_eq!(metadata.synth.ram_max_read_ports, 4);
     assert_eq!(metadata.synth.ram_max_write_ports, 2);
+    assert_eq!(metadata.synth.ram_max_ff_bits, 4096);
 }
 
 #[test]

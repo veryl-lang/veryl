@@ -7,6 +7,7 @@ use veryl_parser::resource_table;
 use veryl_synthesizer::ir::{CellKind, NetDriver};
 use veryl_synthesizer::{
     Library, RamConfig, build_gate_ir, build_gate_ir_with, compute_power, library_for, synthesize,
+    synthesize_with,
 };
 
 #[track_caller]
@@ -2727,6 +2728,123 @@ fn small_reset_array_stays_flip_flops() {
 }
 
 #[test]
+fn oversized_reset_array_is_rejected_not_ooming() {
+    // A large reset register file: RAM inference declines it (reset), and
+    // expanding it into a flip-flop + decoder bank would OOM (#2941), so it must
+    // be rejected instead.
+    let code = r#"
+        module Big (
+            clk:   input  clock     ,
+            rst:   input  reset     ,
+            we:    input  logic     ,
+            waddr: input  logic<12> ,
+            wdata: input  logic<64> ,
+            raddr: input  logic<12> ,
+            rdata: output logic<64> ,
+        ) {
+            var arr: logic<64> [4096];
+            always_ff (clk, rst) {
+                if_reset {
+                    for i in 0..4096 {
+                        arr[i] = 0;
+                    }
+                } else {
+                    if we {
+                        arr[waddr] = wdata;
+                    }
+                }
+            }
+            assign rdata = arr[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Big");
+    let err = synthesize(&ir, top, Library::default())
+        .err()
+        .expect("oversized reset array must be rejected, not synthesized");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("too large to synthesize as flip-flops"),
+        "expected the array-too-large diagnostic, got: {msg}"
+    );
+    // 64 × 4096 = 262144 stored bits, above the default 65536 limit.
+    assert!(
+        msg.contains("262144"),
+        "diagnostic should report the bit count: {msg}"
+    );
+    assert!(
+        msg.contains("arr"),
+        "diagnostic should name the array: {msg}"
+    );
+}
+
+#[test]
+fn oversized_array_via_dynamic_inst_output_is_rejected() {
+    // Regression: the guard must also see dynamic-index writes arriving through
+    // an inst-output connection (`u.o: arr[sel]`), not just Ff/Comb writes.
+    let code = r#"
+        module Sub (
+            o: output logic<64> ,
+        ) {
+            assign o = 0;
+        }
+        module Top (
+            sel:  input  logic<12> ,
+            dout: output logic<64> ,
+        ) {
+            var arr: logic<64> [4096];
+            inst u: Sub (
+                o: arr[sel] ,
+            );
+            assign dout = arr[0];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let err = synthesize(&ir, top, Library::default())
+        .err()
+        .expect("dynamic inst-output write to an oversized array must be rejected");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("too large to synthesize as flip-flops"),
+        "expected the array-too-large diagnostic, got: {msg}"
+    );
+}
+
+#[test]
+fn large_reset_less_array_still_infers_ram() {
+    // Reset-less, the same shape infers as a RAM macro, so the size limit never
+    // fires.
+    let code = r#"
+        module Big (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<12> ,
+            wdata: input  logic<64> ,
+            raddr: input  logic<12> ,
+            rdata: output logic<64> ,
+        ) {
+            var arr: logic<64> [4096];
+            always_ff (clk) {
+                if we {
+                    arr[waddr] = wdata;
+                }
+            }
+            assign rdata = arr[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Big");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(
+        m.ram_blocks.len(),
+        1,
+        "reset-less large array must infer as RAM"
+    );
+    assert_eq!(m.ram_blocks[0].depth, 4096);
+    assert_eq!(m.ram_blocks[0].width, 64);
+    assert_eq!(m.ffs.len(), 0, "RAM array must not expand to flip-flops");
+}
+
+#[test]
 fn ram_min_bits_config_lowers_inference_floor() {
     // A 512-bit array is below the default 1024-bit floor. Lowering `min_bits`
     // makes it infer as a RAM instead of flip-flops.
@@ -2767,6 +2885,57 @@ fn ram_min_bits_config_lowers_inference_floor() {
         "with min_bits lowered, the 512-bit array must infer as RAM"
     );
     assert_eq!(lowered.module.ffs.len(), 0);
+}
+
+#[test]
+fn ram_max_ff_bits_config_tightens_rejection() {
+    // A 2048-bit reset array expands to flip-flops by default. Tightening
+    // `max_ff_bits` below its size rejects it instead.
+    let code = r#"
+        module RegArray (
+            clk:   input  clock     ,
+            rst:   input  reset     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var arr: logic<32> [64];
+            always_ff (clk, rst) {
+                if_reset {
+                    for i in 0..64 {
+                        arr[i] = 0;
+                    }
+                } else {
+                    if we {
+                        arr[waddr] = wdata;
+                    }
+                }
+            }
+            assign rdata = arr[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "RegArray");
+
+    let default = synthesize(&ir, top, Library::default()).expect("synthesize");
+    assert!(
+        default.gate_ir.module.ram_blocks.is_empty() && !default.gate_ir.module.ffs.is_empty(),
+        "2048-bit reset array stays flip-flops under the default limit"
+    );
+
+    let cfg = RamConfig {
+        max_ff_bits: 1024,
+        ..RamConfig::default()
+    };
+    let err = synthesize_with(&ir, top, Library::default(), cfg)
+        .err()
+        .expect("tightened max_ff_bits must reject the 2048-bit array");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("too large to synthesize as flip-flops") && msg.contains("2048 bits > 1024"),
+        "diagnostic should report the configured limit: {msg}"
+    );
 }
 
 #[test]
