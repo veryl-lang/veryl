@@ -23,12 +23,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          # Group caches by their logical key (the Swatinem key with the
-          # trailing rustc-hash and lockfile-hash segments removed), keep the
-          # newest by created_at in each group, and delete the rest.
+          # Group caches by their logical key, keep the newest by created_at in
+          # each group, and delete the rest. rust-cache keys end in
+          # `-<rustc-hash>-<lockfile-hash>`; sccache keys end in a single
+          # `-<commit-sha>` segment.
           gh api --paginate "repos/$REPO/actions/caches" \
             --jq '.actions_caches[] | [.key, .created_at, (.id|tostring)] | @tsv' \
-          | awk -F'\t' '{ g=$1; sub(/-[0-9a-f]+-[0-9a-f]+$/,"",g); print g"\t"$2"\t"$3 }' \
+          | awk -F'\t' '{ g=$1; if (g ~ /^sccache-/) sub(/-[0-9a-f]+$/,"",g); else sub(/-[0-9a-f]+-[0-9a-f]+$/,"",g); print g"\t"$2"\t"$3 }' \
           | sort -t"$(printf '\t')" -k1,1 -k2,2r \
           | awk -F'\t' '{ if ($1==p) print $3; p=$1 }' \
           | while read -r id; do
