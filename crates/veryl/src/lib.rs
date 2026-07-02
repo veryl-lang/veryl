@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub mod cmd_build;
@@ -19,6 +20,7 @@ pub mod cmd_update;
 pub mod context;
 pub mod diff;
 pub mod doc;
+pub mod external_subcommand;
 pub mod incremental;
 pub mod pipeline;
 pub mod runner;
@@ -32,6 +34,7 @@ pub use stopwatch::StopWatch;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
+#[command(override_usage = "veryl [OPTIONS] <COMMAND>")]
 #[command(propagate_version = true)]
 #[clap(version(veryl_metadata::VERYL_VERSION))]
 #[clap(long_version(veryl_metadata::VERYL_VERSION))]
@@ -52,8 +55,12 @@ pub struct Opt {
     #[arg(long, global = true, hide = true)]
     pub completion: Option<CompletionShell>,
 
+    /// List all commands
+    #[arg(long)]
+    pub list: bool,
+
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -83,6 +90,8 @@ pub enum Commands {
     Test(OptTest),
     Synth(OptSynth),
     Translate(OptTranslate),
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
 }
 
 /// Translate SystemVerilog files into Veryl source
