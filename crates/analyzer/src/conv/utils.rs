@@ -2605,8 +2605,16 @@ pub fn get_component(
     sig.normalize();
     let sig = &sig;
 
-    if let Some(component) = context.get_instance_history(sig) {
-        Ok(component)
+    if let Some((component, in_generic)) = context.get_instance_history(sig) {
+        if in_generic && !context.in_generic {
+            // The IR result gotten from the cache may be incomplete
+            // if the `in_generic` flag is set.
+            // Such result should be removed from the cache and be created again.
+            context.remove_instance_history(sig);
+            get_component(context, sig, token)
+        } else {
+            Ok(component)
+        }
     } else {
         let symbol = symbol_table::get(sig.symbol).unwrap();
 
@@ -2653,7 +2661,8 @@ pub fn get_component(
                     unreachable!()
                 };
 
-                let component: IrResult<ir::Module> = Conv::conv(c, x);
+                let header_only = c.in_generic;
+                let component: IrResult<ir::Module> = Conv::conv(c, (x, header_only));
                 match component {
                     Ok(mut component) => {
                         if !c.config.retain_component_body {

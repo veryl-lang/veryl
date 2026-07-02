@@ -8,18 +8,22 @@ pub struct InstanceHistory {
     pub hierarchy: Vec<Signature>,
     /// `Arc`-wrapped so repeated `get` hands out references instead of
     /// deep-cloning the component tree — matters on testbench-heavy designs.
-    full: HashMap<Signature, Option<Arc<Component>>>,
+    full: HashMap<Signature, Option<(Arc<Component>, bool)>>,
 }
 
 impl InstanceHistory {
-    pub fn get(&self, sig: &Signature) -> Option<Arc<Component>> {
+    pub fn get(&self, sig: &Signature) -> Option<(Arc<Component>, bool)> {
         self.full.get(sig).cloned().flatten()
     }
 
-    pub fn set(&mut self, sig: &Signature, component: Arc<Component>) {
+    pub fn set(&mut self, sig: &Signature, component: Arc<Component>, in_generic: bool) {
         if let Some(x) = self.full.get_mut(sig) {
-            *x = Some(component);
+            *x = Some((component, in_generic));
         }
+    }
+
+    pub fn remove(&mut self, sig: &Signature) {
+        self.full.remove(sig);
     }
 
     pub fn get_current_signature(&self) -> Option<&Signature> {

@@ -514,12 +514,16 @@ impl Context {
         self.instance_history.get_current_signature()
     }
 
-    pub fn get_instance_history(&self, sig: &Signature) -> Option<Arc<Component>> {
+    pub fn get_instance_history(&self, sig: &Signature) -> Option<(Arc<Component>, bool)> {
         self.instance_history.get(sig)
     }
 
     pub fn set_instance_history(&mut self, sig: &Signature, component: Arc<Component>) {
-        self.instance_history.set(sig, component);
+        self.instance_history.set(sig, component, self.in_generic);
+    }
+
+    pub fn remove_instance_history(&mut self, sig: &Signature) {
+        self.instance_history.remove(sig);
     }
 
     pub fn push_hierarchy(&mut self, x: StrId) {

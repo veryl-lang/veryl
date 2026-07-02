@@ -155,6 +155,14 @@ fn conv_global_function(context: &mut Context, value: &FunctionDeclaration) {
 
 impl Conv<&ModuleDeclaration> for ir::Module {
     fn conv(context: &mut Context, value: &ModuleDeclaration) -> IrResult<Self> {
+        Conv::conv(context, (value, false))
+    }
+}
+
+impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
+    fn conv(context: &mut Context, value: (&ModuleDeclaration, bool)) -> IrResult<Self> {
+        let (module_declaration, header_only) = value;
+
         let mut declarations = vec![];
 
         // each top-level component has independent context
@@ -162,12 +170,12 @@ impl Conv<&ModuleDeclaration> for ir::Module {
         let mut context = Context::default();
         context.inherit(upper_context);
 
-        let _guard = context.conv_profile_guard(value.identifier.text());
+        let _guard = context.conv_profile_guard(module_declaration.identifier.text());
 
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::Module);
 
-        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+        if let Ok(symbol) = symbol_table::resolve(module_declaration.identifier.as_ref())
             && let SymbolKind::Module(x) = &symbol.found.kind
             && !x.is_proto
         {
@@ -182,11 +190,11 @@ impl Conv<&ModuleDeclaration> for ir::Module {
                 context.set_default_reset(path, x);
             }
         } else {
-            let token: TokenRange = value.identifier.as_ref().into();
+            let token: TokenRange = module_declaration.identifier.as_ref().into();
             return Err(ir_error!(token));
         }
 
-        if let Some(x) = &value.module_declaration_opt {
+        if let Some(x) = &module_declaration.module_declaration_opt {
             check_generic_bound(&mut context, &x.with_generic_parameter);
             let items: Vec<_> = x
                 .with_generic_parameter
@@ -198,11 +206,15 @@ impl Conv<&ModuleDeclaration> for ir::Module {
             }
         }
 
-        if let Some(x) = &value.module_declaration_opt0 {
-            check_proto(&mut context, &value.identifier, &x.scoped_identifier);
+        if let Some(x) = &module_declaration.module_declaration_opt0 {
+            check_proto(
+                &mut context,
+                &module_declaration.identifier,
+                &x.scoped_identifier,
+            );
         }
 
-        if let Some(x) = &value.module_declaration_opt1
+        if let Some(x) = &module_declaration.module_declaration_opt1
             && let Some(x) = &x.with_parameter.with_parameter_opt
         {
             let items: Vec<_> = x.with_parameter_list.as_ref().into();
@@ -211,7 +223,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
             }
         }
 
-        if let Some(x) = &value.module_declaration_opt2
+        if let Some(x) = &module_declaration.module_declaration_opt2
             && let Some(x) = &x.port_declaration.port_declaration_opt
         {
             let items: Vec<_> = x.port_declaration_list.as_ref().into();
@@ -220,14 +232,16 @@ impl Conv<&ModuleDeclaration> for ir::Module {
             }
         }
 
-        for x in &value.module_declaration_list {
-            let items: Vec<_> = x.module_group.as_ref().into();
-            for item in &items {
-                let ret: IrResult<ir::DeclarationBlock> =
-                    Conv::conv(&mut context, item.generate_item.as_ref());
+        if !header_only {
+            for x in &module_declaration.module_declaration_list {
+                let items: Vec<_> = x.module_group.as_ref().into();
+                for item in &items {
+                    let ret: IrResult<ir::DeclarationBlock> =
+                        Conv::conv(&mut context, item.generate_item.as_ref());
 
-                if let Ok(mut block) = ret {
-                    declarations.append(&mut block.0);
+                    if let Ok(mut block) = ret {
+                        declarations.append(&mut block.0);
+                    }
                 }
             }
         }
@@ -240,7 +254,7 @@ impl Conv<&ModuleDeclaration> for ir::Module {
                 &mut context,
                 &clock.0.comptime,
                 &reset.0.comptime,
-                &value.module.module_token.token,
+                &module_declaration.module.module_token.token,
             );
         }
 
@@ -261,8 +275,8 @@ impl Conv<&ModuleDeclaration> for ir::Module {
         upper_context.inherit(&mut context);
 
         Ok(ir::Module {
-            name: value.identifier.text(),
-            token: value.identifier.as_ref().into(),
+            name: module_declaration.identifier.text(),
+            token: module_declaration.identifier.as_ref().into(),
             ports,
             port_types,
             variables,
