@@ -478,7 +478,10 @@ impl Context {
         self.inst_signatures.insert(identifier.text(), sig.clone());
     }
 
-    pub fn collect_modport_signatures(&mut self, inst: &ComponentInstantiation) {
+    pub fn collect_modport_signatures(
+        &mut self,
+        inst: &ComponentInstantiation,
+    ) -> HashMap<StrId, Signature> {
         let mut signatures = HashMap::default();
         if !self.inst_signatures.is_empty()
             && let Some(ref opt2) = inst.component_instantiation_opt2
@@ -502,7 +505,8 @@ impl Context {
             }
         }
 
-        self.modport_signatures.push(signatures);
+        self.modport_signatures.push(signatures.clone());
+        signatures
     }
 
     pub fn pop_modport_signatures(&mut self) {

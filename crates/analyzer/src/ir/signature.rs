@@ -15,6 +15,13 @@ pub struct Signature {
     pub full_path: Vec<StrId>,
     pub parameters: Vec<(StrId, ValueVariant)>,
     pub generic_parameters: Vec<(StrId, GenericSymbolPath)>,
+    /// Signatures of the interface instances connected to this instance's
+    /// modport ports (port name -> interface signature). A module body is
+    /// monomorphized by the parameters of the interfaces behind its modport
+    /// ports, so they must participate in the instance cache key; otherwise
+    /// a module connected to `some_if #(W: 128)` reuses the body built for
+    /// `some_if` at its default parameters (or vice versa).
+    pub modport_signatures: Vec<(StrId, Signature)>,
 }
 
 impl Signature {
@@ -24,6 +31,7 @@ impl Signature {
             full_path: vec![],
             parameters: vec![],
             generic_parameters: vec![],
+            modport_signatures: vec![],
         }
     }
 
@@ -53,9 +61,14 @@ impl Signature {
         self.generic_parameters.push((id, value));
     }
 
+    pub fn add_modport_signature(&mut self, id: StrId, sig: Signature) {
+        self.modport_signatures.push((id, sig));
+    }
+
     pub fn normalize(&mut self) {
         self.parameters.sort();
         self.generic_parameters.sort();
+        self.modport_signatures.sort();
     }
 
     pub fn from_path(context: &mut Context, mut path: GenericSymbolPath) -> Option<Self> {

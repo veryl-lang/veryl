@@ -514,13 +514,18 @@ impl Conv<&PortDeclarationItem> for () {
                 Direction::Modport => {
                     match &r#type.kind {
                         ir::TypeKind::Modport(sig, name) => {
-                            let component = if let Some(sig) =
-                                context.get_modport_signature(&value.identifier)
-                            {
-                                get_component(context, &sig, token)?
-                            } else {
-                                get_component(context, sig, token)?
-                            };
+                            // The effective interface signature: the connected
+                            // instance's signature if the instantiation site
+                            // provided one, the port type's otherwise.
+                            let effective_sig = context
+                                .get_modport_signature(&value.identifier)
+                                .unwrap_or_else(|| sig.clone());
+                            let component = get_component(context, &effective_sig, token)?;
+                            // Register the port under its effective signature so
+                            // inner instances connecting this port (interface
+                            // pass-through) key their cache entries on it.
+                            context
+                                .insert_inst_signature(value.identifier.as_ref(), &effective_sig);
                             let base = value.identifier.text();
                             let ir::Component::Interface(component) = component.as_ref() else {
                                 return Err(ir_error!(token));
@@ -1548,9 +1553,17 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 sig.add_parameter(x.name, value.0.value.clone());
             }
         }
-
         context.push_override(overridden_params);
-        context.collect_modport_signatures(value);
+        let modport_signatures = context.collect_modport_signatures(value);
+
+        // The interfaces connected to this instance's modport ports are part of
+        // the instantiated body (their parameters size its members), so they
+        // must distinguish the instance cache entry.
+        let mut modport_signatures: Vec<_> = modport_signatures.into_iter().collect();
+        modport_signatures.sort();
+        for (port_name, modport_sig) in modport_signatures {
+            sig.add_modport_signature(port_name, modport_sig);
+        }
 
         let component = context.block(|c| get_component(c, &sig, token));
 
