@@ -45,6 +45,10 @@ jobs:
 
   gen_sv:
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_CACHE_SIZE: "3G"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -54,10 +58,26 @@ jobs:
         with:
           shared-key: gen_sv
           save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ~/.cache/sccache
+          key: sccache-gen_sv-${{ github.sha }}
+          restore-keys: sccache-gen_sv-
       - name: Run gen_sv
         run: make gen_sv
       - name: Check gen_sv
         run: git diff --exit-code
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+      - uses: actions/cache/save@v4
+        if: github.ref == 'refs/heads/master' || github.head_ref == 'ci/sccache-tarball'
+        continue-on-error: true
+        with:
+          path: ~/.cache/sccache
+          key: sccache-gen_sv-${{ github.sha }}
 
   rustfmt:
     runs-on: ubuntu-latest
@@ -71,6 +91,10 @@ jobs:
 
   clippy:
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_CACHE_SIZE: "3G"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -80,8 +104,24 @@ jobs:
         with:
           shared-key: clippy
           save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ~/.cache/sccache
+          key: sccache-clippy-${{ github.sha }}
+          restore-keys: sccache-clippy-
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+      - uses: actions/cache/save@v4
+        if: github.ref == 'refs/heads/master' || github.head_ref == 'ci/sccache-tarball'
+        continue-on-error: true
+        with:
+          path: ~/.cache/sccache
+          key: sccache-clippy-${{ github.sha }}
 
   # Build the release-verylup veryl binary once and share it via an artifact;
   # std / heliodor / cocotb consume it instead of each rebuilding (less redundant
