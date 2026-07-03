@@ -35,6 +35,7 @@ pub use stopwatch::StopWatch;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(override_usage = "veryl [OPTIONS] <COMMAND>")]
+#[command(after_help = "\n... See all commands with --list")]
 #[command(propagate_version = true)]
 #[clap(version(veryl_metadata::VERYL_VERSION))]
 #[clap(long_version(veryl_metadata::VERYL_VERSION))]

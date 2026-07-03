@@ -188,7 +188,7 @@ fn bare_cli_reports_missing_required_subcommand_usage() {
 }
 
 #[test]
-fn root_help_intercept_requires_exact_help_flag() {
+fn root_help_with_extra_argument_uses_clap_handling() {
     // Given: an executable external Veryl subcommand is available on PATH.
     let temp = tempfile::tempdir().unwrap();
     write_executable(temp.path(), "veryl-import");
@@ -203,7 +203,7 @@ fn root_help_intercept_requires_exact_help_flag() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Then: normal clap handling answers, not the augmented exact-root-help path.
+    // Then: normal clap handling answers.
     assert!(
         output.status.success(),
         "expected clap help to succeed; status: {:?}",

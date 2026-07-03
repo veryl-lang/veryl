@@ -6,8 +6,6 @@ use fern::Dispatch;
 use log::debug;
 use log::{Level, LevelFilter};
 use miette::{IntoDiagnostic, Result};
-use std::ffi::{OsStr, OsString};
-use std::io::Write;
 use std::process::ExitCode;
 use veryl_metadata::Metadata;
 
@@ -21,11 +19,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 // ---------------------------------------------------------------------------------------------------------------------
 
 fn main() -> Result<ExitCode> {
-    if root_help_requested(std::env::args_os()) {
-        print_root_help()?;
-        return Ok(ExitCode::SUCCESS);
-    }
-
     let opt = Opt::parse();
 
     if opt.list {
@@ -164,24 +157,4 @@ fn main() -> Result<ExitCode> {
     } else {
         Ok(ExitCode::FAILURE)
     }
-}
-
-fn root_help_requested(args: impl IntoIterator<Item = OsString>) -> bool {
-    let mut args = args.into_iter();
-    let _program = args.next();
-    let Some(flag) = args.next() else {
-        return false;
-    };
-
-    args.next().is_none()
-        && (flag == OsStr::new("-h") || flag == OsStr::new("--help") || flag == OsStr::new("help"))
-}
-
-fn print_root_help() -> Result<()> {
-    let mut command = Opt::command();
-    command.print_help().into_diagnostic()?;
-    std::io::stdout()
-        .write_all(b"\n\n... See all commands with --list\n")
-        .into_diagnostic()?;
-    Ok(())
 }
