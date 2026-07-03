@@ -1,0 +1,4 @@
+pub package qux_pkg {
+    const QUX_0: i64   = QUX_0_VALUE;
+    const QUX_1: bbool = QUX_1_VALUE;
+}

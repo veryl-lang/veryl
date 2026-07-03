@@ -113,6 +113,10 @@ impl Token {
         }
     }
 
+    pub fn from_external_text(text: &str) -> Self {
+        Self::new(text, 0, 0, 0, 0, TokenSource::External)
+    }
+
     pub fn generate(text: StrId, path: PathId) -> Self {
         let id = resource_table::new_token_id();
         Token {
@@ -212,6 +216,13 @@ impl VerylToken {
     pub fn new(token: Token) -> Self {
         Self {
             token,
+            comments: vec![],
+        }
+    }
+
+    pub fn from_external_text(text: &str) -> Self {
+        Self {
+            token: Token::from_external_text(text),
             comments: vec![],
         }
     }

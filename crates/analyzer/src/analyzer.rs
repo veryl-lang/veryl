@@ -10,14 +10,15 @@ use crate::namespace::Namespace;
 use crate::reference_table;
 use crate::resolved_type_table;
 use crate::scope;
-use crate::symbol::{DocComment, Symbol, SymbolKind};
+use crate::symbol::{DocComment, ProjectPropertyValueProperty, Symbol, SymbolKind};
 use crate::symbol_table;
 use crate::type_dag;
-use veryl_metadata::{Build, Lint, Metadata};
+use std::collections::BTreeMap;
+use veryl_metadata::{Build, Lint, Metadata, ProjectProperty};
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_grammar_trait::*;
-use veryl_parser::veryl_token::{Token, TokenSource};
+use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
 
 pub struct AnalyzerPass1 {
@@ -51,7 +52,7 @@ pub struct Analyzer {
 }
 
 fn insert_namespace_symbol(name: &str, public: bool) -> StrId {
-    let token = Token::new(name, 0, 0, 0, 0, TokenSource::External);
+    let token = Token::from_external_text(name);
     let symbol = Symbol::new(
         &token,
         SymbolKind::Namespace,
@@ -63,12 +64,37 @@ fn insert_namespace_symbol(name: &str, public: bool) -> StrId {
     token.text
 }
 
+fn insert_project_property_symbols(
+    prject_name: StrId,
+    properties: &BTreeMap<String, ProjectProperty>,
+) {
+    let mut namespace = Namespace::new();
+    namespace.push(prject_name);
+
+    for (prop_name, prop_value) in properties {
+        let token = Token::from_external_text(prop_name);
+        let value_property = ProjectPropertyValueProperty::new(prop_value, token.into());
+        let symbol = Symbol::new(
+            &token,
+            SymbolKind::ProjectProperty(value_property),
+            &namespace,
+            false,
+            DocComment::default(),
+        );
+        symbol_table::insert(&token, symbol);
+    }
+}
+
 impl Analyzer {
     pub fn new(metadata: &Metadata) -> Self {
-        insert_namespace_symbol(&metadata.project.name, true);
+        let prj = insert_namespace_symbol(&metadata.project.name, true);
+        insert_project_property_symbols(prj, &metadata.properties);
+
         for locks in metadata.lockfile.lock_table.values() {
             for lock in locks {
                 let prj = insert_namespace_symbol(&lock.name, lock.visible);
+                insert_project_property_symbols(prj, &lock.properties);
+
                 for lock_dep in &lock.dependencies {
                     let from = resource_table::insert_str(&lock_dep.name);
                     let to = metadata
@@ -78,8 +104,10 @@ impl Analyzer {
                         .unwrap();
 
                     let to = to.iter().find(|x| x.source == lock_dep.source).unwrap();
-                    let to = insert_namespace_symbol(&to.name, to.visible);
-                    symbol_table::add_project_local(prj, from, to);
+                    let to_prj = insert_namespace_symbol(&to.name, to.visible);
+                    insert_project_property_symbols(to_prj, &to.properties);
+
+                    symbol_table::add_project_local(prj, from, to_prj);
                 }
             }
         }

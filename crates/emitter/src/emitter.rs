@@ -6577,6 +6577,9 @@ pub fn symbol_string(
             }
             ret.push_str(&token_text);
         }
+        SymbolKind::ProjectProperty(x) => {
+            ret.push_str(&x.value.verilog_value_string());
+        }
         SymbolKind::Instance(_)
         | SymbolKind::Block
         | SymbolKind::ModportVariableMember(_)
