@@ -1,3 +1,4 @@
+use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use clap_complete::aot::Shell;
 use console::Style;
@@ -20,6 +21,11 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 fn main() -> Result<ExitCode> {
     let opt = Opt::parse();
 
+    if opt.list {
+        external_subcommand::print_command_list(Opt::command())?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
     if let Some(shell) = opt.completion {
         let shell = match shell {
             CompletionShell::Bash => Shell::Bash,
@@ -31,6 +37,15 @@ fn main() -> Result<ExitCode> {
         clap_complete::generate(shell, &mut Opt::command(), "veryl", &mut std::io::stdout());
         return Ok(ExitCode::SUCCESS);
     }
+
+    let Some(command) = opt.command else {
+        Opt::command()
+            .error(
+                ErrorKind::MissingSubcommand,
+                "'veryl' requires a subcommand but one was not provided",
+            )
+            .exit();
+    };
 
     let level = if opt.trace {
         LevelFilter::Trace
@@ -79,11 +94,16 @@ fn main() -> Result<ExitCode> {
         .apply()
         .into_diagnostic()?;
 
-    let (mut metadata, dot_build_lock) = match opt.command {
+    if let Commands::External(args) = &command {
+        return external_subcommand::dispatch(args.clone());
+    }
+
+    let (mut metadata, dot_build_lock) = match command {
         Commands::New(_) | Commands::Init(_) | Commands::Translate(_) => {
             // dummy metadata
             (Metadata::create_default("dummy").unwrap(), None)
         }
+        Commands::External(_) => unreachable!(),
         _ => {
             let metadata_path = Metadata::search_from_current()?;
             let metadata = Metadata::load(metadata_path)?;
@@ -96,7 +116,7 @@ fn main() -> Result<ExitCode> {
 
     let mut stopwatch = StopWatch::new();
 
-    let ret = match opt.command {
+    let ret = match command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec(),
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec(),
         Commands::Fmt(x) => cmd_fmt::CmdFmt::new(x).exec(&mut metadata, opt.quiet),
@@ -122,6 +142,7 @@ fn main() -> Result<ExitCode> {
         }
         Commands::Synth(x) => cmd_synth::CmdSynth::new(x).exec(&mut metadata),
         Commands::Translate(x) => cmd_translate::CmdTranslate::new(x).exec(),
+        Commands::External(_) => unreachable!(),
     };
 
     if let Some(dot_build_lock) = dot_build_lock {

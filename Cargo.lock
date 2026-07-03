@@ -5949,6 +5949,7 @@ dependencies = [
  "fern",
  "futures",
  "handlebars",
+ "libc",
  "log",
  "mdbook-driver",
  "mdbook-preprocessor",
