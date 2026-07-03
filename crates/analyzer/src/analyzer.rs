@@ -128,14 +128,22 @@ impl Analyzer {
     fn create_ir(context: &mut Context, input: &Veryl) -> (Ir, Vec<AnalyzerError>) {
         let ir: IrResult<Ir> = Conv::conv(context, input);
 
-        if let Ok(mut ir) = ir {
+        let (ir, mut errors) = if let Ok(mut ir) = ir {
             ir.eval_assign(context);
             let errors = context.drain_errors();
             (ir, errors)
         } else {
             let errors = context.drain_errors();
             (Ir::default(), errors)
+        };
+
+        // Surface a generic-evaluation recursion-limit hit (#2891) that the
+        // error-tolerant evaluation path would otherwise swallow.
+        if let Some(token) = crate::conv::utils::take_generic_eval_overflow() {
+            errors.push(AnalyzerError::infinite_recursion(&token));
         }
+
+        (ir, errors)
     }
 
     pub fn analyze_pass2(

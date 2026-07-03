@@ -13206,6 +13206,36 @@ fn infinite_recursion() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InfiniteRecursion { .. }));
+
+    // A recursive generic function whose end condition can't be resolved while
+    // evaluating the call must be reported instead of overflowing the native
+    // stack (see veryl-lang/veryl#2891).
+    let code = r#"
+    package Pkg {
+        function f::<N: u32> -> logic<N> {
+            gen M: u32 = N - 1;
+            var out: logic<N>;
+            if N == 1 {
+                out = 0;
+            } else {
+                out = {1'b0, f::<M>()};
+            }
+            return out;
+        }
+    }
+    module ModuleB {
+        let _a: logic<4> = Pkg::f::<4>();
+    }
+    "#;
+
+    // cargo test's default 2 MB stack overflows before the guard's depth limit,
+    // so run this recursive case on the larger stack like other recursion tests.
+    let errors = analyze_with_large_stack(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InfiniteRecursion { .. }))
+    );
 }
 
 #[test]
