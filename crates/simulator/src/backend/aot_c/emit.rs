@@ -374,6 +374,9 @@ impl LocalAnalysis {
 
     fn walk_reads(&mut self, e: &ProtoExpression, i: usize) {
         match e {
+            ProtoExpression::HierVariable(_) => {
+                unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+            }
             ProtoExpression::Variable {
                 var_offset,
                 dynamic_select,
@@ -483,6 +486,9 @@ impl LocalAnalysis {
 
     fn poison_expr(&mut self, e: &ProtoExpression) {
         match e {
+            ProtoExpression::HierVariable(_) => {
+                unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+            }
             ProtoExpression::Variable { var_offset, .. } => {
                 if let VarOffset::Comb(o) = var_offset {
                     self.bad.insert(*o);
@@ -732,6 +738,7 @@ fn emit_wide_const(
 /// Returns `None` (→ module bails to Cranelift) for any uncovered shape.
 fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
     match expr {
+        ProtoExpression::HierVariable(_) => None,
         ProtoExpression::Value {
             value,
             width,
@@ -1617,6 +1624,7 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
         return "(covered)".to_string();
     }
     match e {
+        ProtoExpression::HierVariable(_) => "hier_variable".to_string(),
         ProtoExpression::Variable {
             var_full_width,
             select,
@@ -3285,6 +3293,7 @@ pub fn emit_expr_root(expr: &ProtoExpression) -> Option<String> {
 
 fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> {
     match expr {
+        ProtoExpression::HierVariable(_) => None,
         ProtoExpression::Value {
             value,
             width,

@@ -9,6 +9,7 @@ use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
+use veryl_parser::resource_table::TokenId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{
     ExpressionIdentifier, GenericArgIdentifier, HierarchicalIdentifier, Identifier,
@@ -110,6 +111,34 @@ pub struct ReferenceTable {
     errors: Vec<AnalyzerError>,
     /// Alias symbols currently being expanded, to break cyclic alias chains.
     alias_stack: Vec<SymbolId>,
+    /// Begin token of the expression-position candidate path currently
+    /// being resolved. A hierarchical testbench reference is tolerated for
+    /// that exact path only, not for aliases or generic arguments resolved
+    /// recursively under it.
+    testbench_hier_root: Option<TokenId>,
+}
+
+/// A path whose first segment is a module instance inside a `#[test]` module
+/// is a hierarchical testbench reference.
+fn is_testbench_hier_ref(
+    path: &GenericSymbolPath,
+    scope: scope::ScopeId,
+    define_context: &DefineContext,
+) -> bool {
+    let Ok(symbol) = symbol_table::resolve_base_path(path, 0, (scope, define_context.clone()))
+    else {
+        return false;
+    };
+    if !matches!(symbol.found.kind, SymbolKind::Instance(_)) {
+        return false;
+    }
+    if let Some(ns_symbol) = symbol_table::get_namespace_symbol(&symbol.found.namespace)
+        && let SymbolKind::Module(x) = &ns_symbol.kind
+    {
+        x.test.is_some()
+    } else {
+        false
+    }
 }
 
 impl ReferenceTable {
@@ -371,6 +400,16 @@ impl ReferenceTable {
                 Err(err) => {
                     let single_path = path.paths.len() == 1;
                     if single_path && !path.is_resolvable() {
+                        return;
+                    }
+
+                    // Hierarchical testbench references (`dut.u_core.pc`) cross
+                    // instance boundaries, which resolution reports as Invisible.
+                    // They are validated by the IR conversion instead.
+                    if self.testbench_hier_root == Some(path.range.beg.id)
+                        && matches!(err.cause, ResolveErrorCause::Invisible)
+                        && is_testbench_hier_ref(&path, scope, define_context)
+                    {
                         return;
                     }
 
@@ -703,7 +742,9 @@ impl ReferenceTable {
                 ReferenceCandidate::ExpressionIdentifier { arg } => {
                     let token = arg.scoped_identifier.identifier().token;
                     let path: GenericSymbolPath = arg.into();
+                    self.testbench_hier_root = Some(path.range.beg.id);
                     self.check_complex_identifier(&path, &token, false);
+                    self.testbench_hier_root = None;
                     if !arg.expression_identifier_list0.is_empty() {
                         let scoped_len = arg.scoped_identifier.scoped_identifier_list.len() + 1;
                         let mut selects = vec![0usize; path.len()];

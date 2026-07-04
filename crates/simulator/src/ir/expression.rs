@@ -9,6 +9,8 @@ use num_bigint::BigUint;
 use num_traits::One;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::{MaskCache, ValueU64};
+use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExpressionContext {
@@ -296,6 +298,9 @@ impl Expression {
 impl ProtoExpression {
     pub fn gather_variable_offsets(&self, inputs: &mut Vec<VarOffset>) {
         match self {
+            ProtoExpression::HierVariable(_) => {
+                unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+            }
             ProtoExpression::Variable {
                 var_offset,
                 dynamic_select,
@@ -361,6 +366,9 @@ impl ProtoExpression {
     /// `None` for full-width or runtime-determined reads.
     pub fn gather_reads_with_ranges(&self, out: &mut Vec<(VarOffset, Option<(usize, usize)>)>) {
         match self {
+            ProtoExpression::HierVariable(_) => {
+                unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+            }
             ProtoExpression::Variable {
                 var_offset,
                 select,
@@ -427,6 +435,9 @@ impl ProtoExpression {
     /// O(N²)-avoiding base+last encoding).
     pub fn gather_variable_offsets_expanded(&self, inputs: &mut Vec<VarOffset>) {
         match self {
+            ProtoExpression::HierVariable(_) => {
+                unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+            }
             ProtoExpression::Variable {
                 var_offset,
                 dynamic_select,
@@ -490,6 +501,9 @@ impl ProtoExpression {
     /// range.
     pub fn gather_dynamic_read_ranges(&self, ranges: &mut Vec<(bool, isize, isize, usize)>) {
         match self {
+            ProtoExpression::HierVariable(_) => {
+                unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+            }
             ProtoExpression::Variable { dynamic_select, .. } => {
                 if let Some(dyn_sel) = dynamic_select {
                     dyn_sel.index_expr.gather_dynamic_read_ranges(ranges);
@@ -619,6 +633,24 @@ pub enum ProtoExpression {
         width: usize,
         expr_context: ExpressionContext,
     },
+    /// Hierarchical testbench reference into a child module instance.
+    /// Resolved to a plain `Variable` by `resolve_hier_refs` once the
+    /// module's whole `ModuleVariableMeta` tree is assembled; no later
+    /// stage (opt, backend, runtime) ever sees this variant.
+    /// Boxed so the analyzer-IR select/index payload does not inflate
+    /// `ProtoExpression` itself (deep RTL expressions recurse on it).
+    HierVariable(Box<ProtoHierVariable>),
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtoHierVariable {
+    pub inst_path: Vec<StrId>,
+    pub var_path: air::VarPath,
+    pub index: air::VarIndex,
+    pub select: air::VarSelect,
+    pub width: usize,
+    pub expr_context: ExpressionContext,
+    pub token: TokenRange,
 }
 
 impl ProtoExpression {
@@ -626,6 +658,8 @@ impl ProtoExpression {
     /// FF offsets are shifted by `ff_delta`, comb offsets by `comb_delta`.
     pub fn adjust_offsets(&mut self, ff_delta: isize, comb_delta: isize) {
         match self {
+            // No offsets embedded yet; resolution assigns them later.
+            ProtoExpression::HierVariable(_) => {}
             ProtoExpression::Variable {
                 var_offset,
                 dynamic_select,
@@ -678,6 +712,8 @@ impl ProtoExpression {
     /// `ProtoStatement::remap_offsets`.
     pub fn remap_offsets(&mut self, map: &HashMap<VarOffset, VarOffset>) {
         match self {
+            // No offsets embedded yet; resolution assigns them later.
+            ProtoExpression::HierVariable(_) => {}
             ProtoExpression::Variable {
                 var_offset,
                 dynamic_select,
@@ -730,6 +766,7 @@ impl ProtoExpression {
 
     pub fn width(&self) -> usize {
         match self {
+            ProtoExpression::HierVariable(x) => x.width,
             ProtoExpression::Variable { width, .. } => *width,
             ProtoExpression::Value { width, .. } => *width,
             ProtoExpression::Unary { width, .. } => *width,
@@ -752,6 +789,7 @@ impl ProtoExpression {
     /// at most this many significant bits via band_imm.
     pub fn effective_bits(&self) -> usize {
         match self {
+            ProtoExpression::HierVariable(x) => x.width,
             ProtoExpression::Variable { width, .. } => *width,
             ProtoExpression::Value {
                 value: Value::U64(v),
@@ -806,6 +844,7 @@ impl ProtoExpression {
 
     pub fn expr_context(&self) -> &ExpressionContext {
         match self {
+            ProtoExpression::HierVariable(x) => &x.expr_context,
             ProtoExpression::Variable { expr_context, .. } => expr_context,
             ProtoExpression::Value { expr_context, .. } => expr_context,
             ProtoExpression::Unary { expr_context, .. } => expr_context,
@@ -835,6 +874,7 @@ impl ProtoExpression {
     pub fn builds_wide_pointer(&self) -> bool {
         const W: usize = 128;
         match self {
+            ProtoExpression::HierVariable(_) => false,
             // A static ≤64-bit bit-select extracts into a register; a wide
             // (>64) or dynamic select on a wide var is interpreter-only
             // (the emitter returns None there), so it is never a producer.
@@ -941,6 +981,7 @@ impl ProtoExpression {
     /// false branch.
     pub fn is_clean_to_width(&self, target_width: usize) -> bool {
         match self {
+            ProtoExpression::HierVariable(_) => false,
             ProtoExpression::Variable {
                 width,
                 select,
@@ -1042,6 +1083,11 @@ impl ProtoExpression {
     ) -> Expression {
         unsafe {
             match self {
+                ProtoExpression::HierVariable(_) => {
+                    unreachable!(
+                        "hierarchical reference must be resolved by resolve_hier_refs first"
+                    )
+                }
                 ProtoExpression::Variable {
                     var_offset,
                     select,
@@ -1537,6 +1583,20 @@ impl Conv<&air::Expression> for ProtoExpression {
     fn conv(context: &mut Context, src: &air::Expression) -> Result<Self, SimulatorError> {
         match src {
             air::Expression::Term(x) => match x.as_ref() {
+                air::Factor::HierVariable(x) => {
+                    let width = x.comptime.r#type.total_width().ok_or_else(|| {
+                        SimulatorError::unsupported_description(&x.comptime.token)
+                    })?;
+                    Ok(ProtoExpression::HierVariable(Box::new(ProtoHierVariable {
+                        inst_path: x.inst_path.clone(),
+                        var_path: x.var_path.clone(),
+                        index: x.index.clone(),
+                        select: x.select.clone(),
+                        width,
+                        expr_context: (&x.comptime.expr_context).into(),
+                        token: x.comptime.token,
+                    })))
+                }
                 air::Factor::Variable(id, index, select, comptime) => {
                     let width = comptime.r#type.total_width().unwrap();
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
@@ -1755,6 +1815,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                         // consumers see the post-cast flag.
                         let signed = matches!(call.kind, air::SystemFunctionKind::Signed(_));
                         let ctx = match &mut inner {
+                            ProtoExpression::HierVariable(x) => &mut x.expr_context,
                             ProtoExpression::Variable { expr_context, .. }
                             | ProtoExpression::Value { expr_context, .. }
                             | ProtoExpression::Unary { expr_context, .. }

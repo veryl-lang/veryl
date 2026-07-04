@@ -102,6 +102,9 @@ struct Census {
 
 fn walk_expr_reads(expr: &ProtoExpression, c: &mut Census) {
     match expr {
+        ProtoExpression::HierVariable(_) => {
+            unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+        }
         ProtoExpression::Variable {
             var_offset,
             dynamic_select,
