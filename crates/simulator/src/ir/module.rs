@@ -2241,7 +2241,7 @@ fn cond_hoist_transform(stmts: &mut Vec<ProtoStatement>, context: &mut Context) 
                 let cond_expr = if_stmt.cond.clone().unwrap();
                 let nb = native_bytes(1);
                 let temp_offset = context.comb_total_bytes as isize;
-                context.comb_total_bytes += nb;
+                context.comb_total_bytes += value_size(nb, context.config.use_4state);
                 let temp_off = VarOffset::Comb(temp_offset);
                 let ctx = ExpressionContext {
                     width: 1,
