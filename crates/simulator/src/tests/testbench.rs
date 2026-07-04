@@ -2345,3 +2345,64 @@ fn tb_file_misuse_diagnostics() {
         "expected an arity error for `f.open()`, got: {errors:?}"
     );
 }
+
+// Regression: the cond-hoist 1-bit temp was sized without the 4-state
+// mask_xz section and overlapped the next comb slot.
+#[test]
+fn if_in_initial_cond_hoist_temp_4state() {
+    let code = r#"
+    module Sub (
+        clk: input clock,
+        rst: input reset,
+        din: input logic<4>,
+    ) {
+        #[allow(unused_variable)]
+        var internal_reg: logic<4>;
+        always_ff {
+            if_reset { internal_reg = 0; }
+            else { internal_reg = din + 1; }
+        }
+    }
+
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        din: input logic<4>,
+    ) {
+        inst u_sub: Sub (clk, rst, din);
+    }
+
+    #[test(cond_hoist_test)]
+    module cond_hoist_test {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var din: logic<4>;
+
+        inst dut: Top (clk, rst, din);
+
+        initial {
+            rst.assert();
+            din = 4'b0001;
+            clk.next();
+            if din == 4'h1 {
+                $display("ok");
+            }
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "cond_hoist_test") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let mut sim = Simulator::new(ir, None);
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+        let stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
+        let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+        let result = run_testbench(&mut sim, &tb_stmts);
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
