@@ -102,6 +102,7 @@ fn wide_operand_as_ptr(
 impl ProtoExpression {
     pub fn can_build_binary(&self) -> bool {
         match self {
+            ProtoExpression::HierVariable(_) => false,
             ProtoExpression::Variable { dynamic_select, .. } => match dynamic_select {
                 Some(dyn_sel) => {
                     dyn_sel.elem_width * dyn_sel.num_elements <= 128
@@ -234,6 +235,7 @@ impl ProtoExpression {
         skip_root_mask: bool,
     ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
         match self {
+            ProtoExpression::HierVariable(_) => None,
             ProtoExpression::Variable {
                 var_offset,
                 dynamic_select,

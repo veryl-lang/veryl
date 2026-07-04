@@ -3,6 +3,7 @@ pub(crate) mod declaration;
 pub mod derived_clock;
 mod event;
 mod expression;
+pub(crate) mod hier_ref;
 pub(crate) mod inst_layout;
 mod module;
 pub(crate) mod opt;

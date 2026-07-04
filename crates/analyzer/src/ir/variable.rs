@@ -307,8 +307,8 @@ impl fmt::Display for VarPath {
 impl std::str::FromStr for VarPath {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let id = resource_table::insert_str(s);
-        Ok(Self::new(id))
+        let ids = s.split('.').map(resource_table::insert_str).collect();
+        Ok(Self(ids))
     }
 }
 

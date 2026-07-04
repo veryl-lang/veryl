@@ -72,6 +72,13 @@ pub struct Context {
     pub in_test_module: bool,
     pub in_global_func: Option<Token>,
     pub in_if_reset: bool,
+    /// Inside an initial/final block (testbench statement context).
+    pub in_tb_block: bool,
+    /// Elaborated components of module instances declared so far in the
+    /// current module, for hierarchical references from testbench code.
+    /// Child module bodies convert in fresh contexts (`inherit` does not
+    /// carry this map), so it only holds the current module's instances.
+    pub inst_components: HashMap<StrId, Arc<Component>>,
     /// Inside an inst input-port-connection conversion; consumed by
     /// `check_compatibility` to pick the clock/reset diagnostic.
     pub in_inst_port: bool,

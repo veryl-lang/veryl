@@ -106,6 +106,9 @@ fn walk_stmt(s: &ProtoStatement, idx: usize, reads: &mut FutureReads) {
 
 fn walk_expr(expr: &ProtoExpression, idx: usize, reads: &mut FutureReads) {
     match expr {
+        ProtoExpression::HierVariable(_) => {
+            unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+        }
         ProtoExpression::Variable {
             var_offset,
             dynamic_select,

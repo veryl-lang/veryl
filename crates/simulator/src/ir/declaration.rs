@@ -1047,6 +1047,16 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 all_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
             }
 
+            // A nested test module's initial/final statements merge into the
+            // parent, where the same instance names may mean other instances;
+            // resolve them against its own child tree while its scope is
+            // current.
+            crate::ir::hier_ref::resolve_hier_refs(
+                context,
+                &mut all_event_statements,
+                &all_child_modules,
+            )?;
+
             context.in_reuse_dut = prev_in_reuse_dut;
             context.scope_contexts.pop();
 

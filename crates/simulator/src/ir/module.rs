@@ -2425,6 +2425,14 @@ impl Conv<&air::Module> for ProtoModule {
             nested_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
         }
 
+        // Hierarchical testbench references need the complete child meta
+        // tree; resolve them before any optimization or backend runs.
+        crate::ir::hier_ref::resolve_hier_refs(
+            context,
+            &mut all_event_statements,
+            &all_child_modules,
+        )?;
+
         context.scope_contexts.pop();
 
         // Build unified comb list: execution-side only.

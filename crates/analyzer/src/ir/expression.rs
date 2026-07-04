@@ -6,7 +6,7 @@ use crate::ir::ff_table::AssignTarget;
 use crate::ir::utils::convert_cast;
 use crate::ir::{
     Comptime, ExpressionContext, FfTable, FunctionCall, Op, Signature, SystemFunctionCall,
-    SystemFunctionKind, Type, TypeKind, ValueVariant, VarId, VarIndex, VarSelect,
+    SystemFunctionKind, Type, TypeKind, ValueVariant, VarId, VarIndex, VarPath, VarSelect,
 };
 use crate::symbol::{ClockDomain, Symbol, SymbolKind};
 use crate::value::{Value, ValueBigUint};
@@ -697,11 +697,26 @@ impl Expression {
 #[derive(Clone, Debug)]
 pub enum Factor {
     Variable(VarId, VarIndex, VarSelect, Comptime),
+    /// Read-only reference to a variable inside a child module instance
+    /// (e.g. `dut.u_core.pc` in a testbench initial block). Resolved to a
+    /// concrete buffer offset by the simulator after elaboration.
+    HierVariable(Box<HierVarRef>),
     Value(Comptime),
     SystemFunctionCall(SystemFunctionCall),
     FunctionCall(FunctionCall),
     Anonymous(Comptime),
     Unknown(Comptime),
+}
+
+#[derive(Clone, Debug)]
+pub struct HierVarRef {
+    /// Instance names from the referencing module down to the target module.
+    pub inst_path: Vec<StrId>,
+    /// Variable path within the target module.
+    pub var_path: VarPath,
+    pub index: VarIndex,
+    pub select: VarSelect,
+    pub comptime: Comptime,
 }
 
 impl Factor {
@@ -776,6 +791,15 @@ impl Factor {
                     is_global: comptime.is_global,
                 }
             }
+            // Select width is already applied to the comptime type at
+            // construction (eval_factor_path); no CDC check because the
+            // testbench observes across domains by design.
+            Factor::HierVariable(x) => ExpressionContext {
+                width: x.comptime.r#type.total_width().unwrap_or(0),
+                signed: x.comptime.r#type.signed,
+                is_const: false,
+                is_global: false,
+            },
             Factor::Value(x) => ExpressionContext {
                 width: x.r#type.total_width().unwrap_or(0),
                 signed: x.r#type.signed,
@@ -806,6 +830,10 @@ impl Factor {
             Factor::Variable(_, _, _, x) => {
                 x.expr_context = expr_context;
                 x.evaluated = true;
+            }
+            Factor::HierVariable(x) => {
+                x.comptime.expr_context = expr_context;
+                x.comptime.evaluated = true;
             }
             Factor::Value(x) => {
                 x.expr_context = expr_context;
@@ -873,6 +901,7 @@ impl Factor {
                     Some(value)
                 }
             }
+            Factor::HierVariable(_) => None,
             Factor::Value(x) => x.get_value().ok().cloned(),
             Factor::SystemFunctionCall(x) => x.eval_value(context),
             Factor::FunctionCall(x) => x.eval_value(context),
@@ -985,6 +1014,7 @@ impl Factor {
     pub fn comptime(&self) -> &Comptime {
         match self {
             Factor::Variable(_, _, _, x) => x,
+            Factor::HierVariable(x) => &x.comptime,
             Factor::Value(x) => x,
             Factor::SystemFunctionCall(x) => &x.comptime,
             Factor::FunctionCall(x) => &x.comptime,
@@ -996,6 +1026,7 @@ impl Factor {
     pub fn comptime_mut(&mut self) -> &mut Comptime {
         match self {
             Factor::Variable(_, _, _, x) => x,
+            Factor::HierVariable(x) => &mut x.comptime,
             Factor::Value(x) => x,
             Factor::SystemFunctionCall(x) => &mut x.comptime,
             Factor::FunctionCall(x) => &mut x.comptime,
@@ -1007,6 +1038,7 @@ impl Factor {
     pub fn token_range(&self) -> TokenRange {
         match self {
             Factor::Variable(_, _, _, x) => x.token,
+            Factor::HierVariable(x) => x.comptime.token,
             Factor::Value(x) => x.token,
             Factor::SystemFunctionCall(x) => x.comptime.token,
             Factor::FunctionCall(x) => x.comptime.token,
@@ -1021,6 +1053,13 @@ impl fmt::Display for Factor {
         let ret = match self {
             Factor::Variable(id, index, select, _) => {
                 format!("{id}{index}{select}")
+            }
+            Factor::HierVariable(x) => {
+                let mut s = String::new();
+                for seg in &x.inst_path {
+                    s.push_str(&format!("{seg}."));
+                }
+                format!("{s}{}{}{}", x.var_path, x.index, x.select)
             }
             Factor::Value(x) => {
                 if let Ok(x) = x.get_value() {

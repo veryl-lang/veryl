@@ -26,7 +26,7 @@ pub use declaration::{
     CombDeclaration, Declaration, DeclarationBlock, FfClock, FfDeclaration, FfReset,
     FinalDeclaration, InitialDeclaration, InstDeclaration, InstInput, InstOutput,
 };
-pub use expression::{ArrayLiteralItem, Expression, Factor};
+pub use expression::{ArrayLiteralItem, Expression, Factor, HierVarRef};
 pub use ff_table::FfTable;
 pub use function::{Arguments, FuncArg, FuncPath, FuncProto, Function, FunctionBody, FunctionCall};
 pub use interface::Interface;
