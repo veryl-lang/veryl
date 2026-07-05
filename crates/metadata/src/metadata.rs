@@ -339,15 +339,33 @@ impl Metadata {
         };
         let mut explicit_routed = canonical_files.as_ref().map(|v| vec![false; v.len()]);
 
-        for source in &sources {
-            let src_base = base.join(source);
+        // `examples/` is reserved; dependency source collection
+        // (`Lockfile::paths`) skips it entirely.
+        let examples_base = base.join("examples");
+        if let Some(source) = sources
+            .iter()
+            .find(|x| base.join(x).starts_with(&examples_base))
+        {
+            return Err(MetadataError::ReservedSourceDir(base.join(source)));
+        }
 
+        let mut source_dirs: Vec<(PathBuf, bool)> =
+            sources.iter().map(|x| (base.join(x), false)).collect();
+        if examples_base.exists() {
+            source_dirs.push((examples_base.clone(), true));
+        }
+
+        for (src_base, is_example) in source_dirs {
             let src_files = if let Some(cf) = canonical_files.as_ref() {
                 // Only keep files that live under this source dir; other
-                // source dirs in `sources` will pick them up.
+                // source dirs in `sources` will pick them up. Files under
+                // `examples/` belong to the examples dir only, even when a
+                // source dir contains it.
                 let mut ret = Vec::new();
                 for (i, path) in cf.iter().enumerate() {
-                    if path.starts_with(&src_base) {
+                    if path.starts_with(&src_base)
+                        && (is_example || !path.starts_with(&examples_base))
+                    {
                         ret.push(path.clone());
                         if let Some(ref mut flags) = explicit_routed {
                             flags[i] = true;
@@ -356,7 +374,12 @@ impl Metadata {
                 }
                 ret
             } else {
-                veryl_path::gather_files_with_extension(&src_base, "veryl", symlink)?
+                let mut files =
+                    veryl_path::gather_files_with_extension(&src_base, "veryl", symlink)?;
+                if !is_example {
+                    files.retain(|x| !x.starts_with(&examples_base));
+                }
+                files
             };
 
             for src in src_files {
@@ -400,6 +423,7 @@ impl Metadata {
                     src: src.to_path_buf(),
                     dst,
                     map,
+                    example: is_example,
                 });
             }
         }

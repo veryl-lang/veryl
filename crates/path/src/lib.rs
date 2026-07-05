@@ -14,6 +14,8 @@ pub struct PathSet {
     pub src: PathBuf,
     pub dst: PathBuf,
     pub map: PathBuf,
+    /// Analyzed like sources but excluded from emit and filelist.
+    pub example: bool,
 }
 
 pub fn cache_path() -> PathBuf {
