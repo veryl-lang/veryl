@@ -233,3 +233,156 @@ where
         }
     }
 }
+
+#[cfg(all(test, gitoxide_enabled, feature = "git-command"))]
+mod tests {
+    use super::*;
+    use crate::metadata::UrlPath;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    fn run_git(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "veryl")
+            .env("GIT_AUTHOR_EMAIL", "veryl")
+            .env("GIT_COMMITTER_NAME", "veryl")
+            .env("GIT_COMMITTER_EMAIL", "veryl")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn create_remote(root: &Path) -> (UrlPath, PathBuf) {
+        let remote = root.join("remote");
+        fs::create_dir(&remote).unwrap();
+        run_git(&remote, &["init", "-b", "main"]);
+        fs::write(remote.join("a.txt"), "1").unwrap();
+        run_git(&remote, &["add", "a.txt"]);
+        run_git(&remote, &["commit", "-m", "first"]);
+        let url = format!("file://{}", remote.to_string_lossy().replace('\\', "/"));
+        (UrlPath::Url(url.parse().unwrap()), remote)
+    }
+
+    fn advance_remote(remote: &Path) -> String {
+        fs::write(remote.join("b.txt"), "2").unwrap();
+        run_git(remote, &["add", "b.txt"]);
+        run_git(remote, &["commit", "-m", "second"]);
+        run_git(remote, &["rev-parse", "HEAD"])
+    }
+
+    fn check_fetch_updated_remote<C, O>(clone: C, open: O)
+    where
+        C: Fn(&UrlPath, &Path) -> Result<Git, MetadataError>,
+        O: Fn(&Path) -> Result<Git, MetadataError>,
+    {
+        let tempdir = tempfile::tempdir().unwrap();
+        let (url, remote) = create_remote(tempdir.path());
+        let clone_path = tempdir.path().join("clone");
+
+        let git = clone(&url, &clone_path).unwrap();
+        git.checkout(None).unwrap();
+
+        let new_rev = advance_remote(&remote);
+
+        let git = open(&clone_path).unwrap();
+        git.fetch().unwrap();
+        git.checkout(None).unwrap();
+        assert_eq!(git.get_revision().unwrap(), new_rev);
+    }
+
+    // Simulate a clone left by an older gitoxide backend, which wrote
+    // origin/HEAD as a direct ref pinned to the commit at clone time.
+    fn pollute_origin_head(clone_path: &Path) {
+        let old = run_git(clone_path, &["rev-parse", "refs/remotes/origin/HEAD"]);
+        run_git(
+            clone_path,
+            &["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"],
+        );
+        run_git(
+            clone_path,
+            &["update-ref", "refs/remotes/origin/HEAD", &old],
+        );
+    }
+
+    fn check_fetch_heals_direct_origin_head<O>(open: O)
+    where
+        O: Fn(&Path) -> Result<Git, MetadataError>,
+    {
+        let tempdir = tempfile::tempdir().unwrap();
+        let (url, remote) = create_remote(tempdir.path());
+        let clone_path = tempdir.path().join("clone");
+
+        gitoxide::Git::clone(&url, &clone_path).unwrap();
+        pollute_origin_head(&clone_path);
+
+        let new_rev = advance_remote(&remote);
+
+        let git = open(&clone_path).unwrap();
+        git.fetch().unwrap();
+        git.checkout(None).unwrap();
+        assert_eq!(git.get_revision().unwrap(), new_rev);
+        let target = run_git(&clone_path, &["symbolic-ref", "refs/remotes/origin/HEAD"]);
+        assert_eq!(target, "refs/remotes/origin/main");
+    }
+
+    #[test]
+    fn gitoxide_fetch_heals_direct_origin_head() {
+        check_fetch_heals_direct_origin_head(|path| gitoxide::Git::open(path).map(Git::Gitoxide));
+    }
+
+    #[test]
+    fn command_fetch_heals_direct_origin_head() {
+        check_fetch_heals_direct_origin_head(|path| command::Git::open(path).map(Git::Command));
+    }
+
+    #[test]
+    fn gitoxide_clone_writes_symbolic_origin_head() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let (url, _remote) = create_remote(tempdir.path());
+        let clone_path = tempdir.path().join("clone");
+        gitoxide::Git::clone(&url, &clone_path).unwrap();
+        let target = run_git(&clone_path, &["symbolic-ref", "refs/remotes/origin/HEAD"]);
+        assert_eq!(target, "refs/remotes/origin/main");
+    }
+
+    #[test]
+    fn gitoxide_fetch_updated_remote() {
+        check_fetch_updated_remote(
+            |url, path| gitoxide::Git::clone(url, path).map(Git::Gitoxide),
+            |path| gitoxide::Git::open(path).map(Git::Gitoxide),
+        );
+    }
+
+    #[test]
+    fn command_fetch_updated_remote() {
+        check_fetch_updated_remote(
+            |url, path| command::Git::clone(url, path).map(Git::Command),
+            |path| command::Git::open(path).map(Git::Command),
+        );
+    }
+
+    #[test]
+    fn command_fetch_updated_remote_after_gitoxide_clone() {
+        check_fetch_updated_remote(
+            |url, path| gitoxide::Git::clone(url, path).map(Git::Gitoxide),
+            |path| command::Git::open(path).map(Git::Command),
+        );
+    }
+
+    #[test]
+    fn gitoxide_fetch_updated_remote_after_command_clone() {
+        check_fetch_updated_remote(
+            |url, path| command::Git::clone(url, path).map(Git::Command),
+            |path| gitoxide::Git::open(path).map(Git::Gitoxide),
+        );
+    }
+}

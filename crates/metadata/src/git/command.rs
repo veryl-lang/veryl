@@ -122,6 +122,29 @@ impl Git {
             return Err(GitCommandError { msg, context }.into());
         }
 
+        // Older gitoxide clones wrote origin/HEAD as a direct ref pinned to the
+        // commit at clone time; repair it so it tracks the remote default branch.
+        let output = Command::new(GIT_COMMAND)
+            .args(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"])
+            .current_dir(&self.path)
+            .output()
+            .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
+        if !output.status.success() {
+            let output = Command::new(GIT_COMMAND)
+                .args(["remote", "set-head", "origin", "--auto"])
+                .current_dir(&self.path)
+                .output()
+                .map_err(|x| MetadataError::file_io(x, &PathBuf::from(GIT_COMMAND)))?;
+            if !output.status.success() {
+                let context = String::from_utf8_lossy(&output.stderr).to_string();
+                let msg = format!(
+                    "failed to update origin/HEAD: {}",
+                    self.path.to_string_lossy()
+                );
+                return Err(GitCommandError { msg, context }.into());
+            }
+        }
+
         debug!("Fetched repository ({})", self.path.to_string_lossy());
 
         Ok(())
