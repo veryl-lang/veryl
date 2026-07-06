@@ -26,7 +26,7 @@ use crate::ir::{
 };
 use crate::namespace::DefineContext;
 use crate::symbol::{
-    ClockDomain, Direction, GenericBoundKind, Symbol, SymbolKind, TbComponentKind,
+    ClockDomain, Direction, GenericBoundKind, ProtoBound, Symbol, SymbolKind, TbComponentKind,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
@@ -364,7 +364,26 @@ impl Conv<&WithGenericParameterItem> for () {
                 match y.with_generic_argument_item.as_ref() {
                     WithGenericArgumentItem::Number(_)
                     | WithGenericArgumentItem::BooleanLiteral(_) => {
-                        if !matches!(x.bound, GenericBoundKind::Proto(_)) {
+                        if let GenericBoundKind::Proto(_) = &x.bound {
+                            // A number/boolean default is only valid when the proto
+                            // bound resolves to a variable type (e.g. `M: u32 = 1`).
+                            // For a proto module/interface/package (or enum/struct/
+                            // union type bound) it is a type mismatch, matching the
+                            // call-site check in `check_generic_proto_arg`.
+                            if !matches!(
+                                x.bound.resolve_proto_bound(&symbol.found.namespace),
+                                Ok(ProtoBound::FactorType(_))
+                            ) {
+                                context.insert_error(AnalyzerError::mismatch_type(
+                                    MismatchTypeKind::GenericArgument {
+                                        name: value.identifier.text().to_string(),
+                                        expected: x.bound.to_string(),
+                                        actual: "number".into(),
+                                    },
+                                    &token,
+                                ));
+                            }
+                        } else {
                             context.insert_error(AnalyzerError::mismatch_assignment(
                                 "number",
                                 &x.bound.to_string(),
