@@ -235,7 +235,6 @@ impl Git {
             "origin/HEAD".to_string()
         };
 
-        // Resolve the revision to a commit id
         let commit_id = repo
             .rev_parse_single(dst.as_str())
             .map_err(GitoxideError::from)?;
@@ -246,7 +245,6 @@ impl Git {
             .map_err(GitoxideError::from)?;
         let tree_id = commit.tree_id().map_err(GitoxideError::from)?;
 
-        // Create index from the tree
         let mut index = repo
             .index_from_tree(&tree_id)
             .map_err(GitoxideError::from)?;
@@ -374,13 +372,11 @@ impl Git {
         let rel_path_bstring = path_to_unix_bstring(rel_path);
         let rel_path_bstr: &gix::bstr::BStr = rel_path_bstring.as_ref();
 
-        // Read the file, write it as blob to the ODB
         let file_content = std::fs::read(&abs_file).map_err(GitoxideError::from)?;
         let blob_id = repo
             .write_blob(&file_content)
             .map_err(GitoxideError::from)?;
 
-        // Get file metadata for stat
         let file_meta = std::fs::metadata(&abs_file).map_err(GitoxideError::from)?;
         let stat = stat_from_metadata(&file_meta);
         let mode = if is_executable(&file_meta) {
@@ -389,7 +385,6 @@ impl Git {
             gix::index::entry::Mode::FILE
         };
 
-        // Check if the entry already exists; if so, update it
         if let Some(idx) = index
             .entry_index_by_path_and_stage(rel_path_bstr, gix::index::entry::Stage::Unconflicted)
         {
@@ -418,7 +413,6 @@ impl Git {
     pub fn commit(&self, msg: &str) -> Result<(), MetadataError> {
         let repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
 
-        // Build tree from the current index using tree editor
         let index = open_or_create_index(&repo)?;
         let mut editor = repo
             .edit_tree(gix::ObjectId::empty_tree(repo.object_hash()))
@@ -434,7 +428,6 @@ impl Git {
 
         let tree_id = editor.write().map_err(GitoxideError::from)?;
 
-        // Get parents
         let parents: Vec<gix::ObjectId> = match repo.head_id() {
             Ok(id) => vec![id.detach()],
             Err(_) => vec![], // Initial commit, no parents

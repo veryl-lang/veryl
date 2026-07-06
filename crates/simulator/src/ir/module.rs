@@ -975,17 +975,6 @@ pub(crate) fn analyze_dependency(
     Ok((ret, None))
 }
 
-/// Compute the number of eval_comb passes required for convergence.
-///
-/// After topological sorting, some dependency edges may be "backward"
-/// (a statement reads a variable written by a later statement in the
-/// sorted order). Each backward edge requires an additional eval pass
-/// to propagate the correct value. The required number of passes is
-/// the longest chain of backward edges + 1.
-///
-/// Since backward edges always point from higher positions to lower
-/// positions, they form a DAG. A single reverse scan computes the
-/// longest chain in O(N) time.
 /// Bit range for a partial comb assignment. `None` = full-width write/read.
 /// Pair is (high_bit_inclusive, low_bit_inclusive) matching Veryl's
 /// `Assign.select` convention. Overlap: two ranges overlap if their
@@ -1572,6 +1561,11 @@ fn trace_scc_cycles(sorted: &[ProtoStatement], meta: &ModuleVariableMeta) {
     }
 }
 
+/// Number of eval_comb passes needed for the comb list to converge.
+///
+/// A backward dataflow edge (a statement reads a value written later in
+/// the sorted order) costs one extra pass; the result is the longest
+/// backward-edge chain + 1 over the statement dependency graph.
 fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
     use daggy::petgraph::Graph;
     use daggy::petgraph::algo::tarjan_scc;

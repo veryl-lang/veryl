@@ -957,10 +957,6 @@ fn synth_range_match(
     })
 }
 
-/// Flattened view of a case-like If chain: one record per arm plus the
-/// default-arm body. Arm bodies are borrowed from the analyzer IR and
-/// synthesised on demand, so any statement shape (const assign, nested
-/// case, ternary-of-constants, wire reference) is acceptable.
 /// Walk a body of (typically case-arm) statements and return the
 /// accumulated `'x`/`'z` don't-care mask per variable whose assignment
 /// rhs is a literal. Only flat `var = <literal>` (no bit-select, no

@@ -780,9 +780,6 @@ impl ProtoExpression {
     /// Returns a guaranteed upper bound on the number of significant bits
     /// in the Cranelift value produced by build_binary().
     /// Used to skip redundant truncation masks at store time.
-    /// Returns a guaranteed upper bound on the number of significant bits
-    /// in the Cranelift value produced by build_binary().
-    /// Used to skip redundant truncation masks at store time.
     ///
     /// Note: For Variable/DynamicVariable, `width` is the expression result width
     /// (equals select width when select is present), and build_binary guarantees

@@ -306,8 +306,6 @@ impl ProtoExpression {
                 let wide = read_width > 64;
 
                 // Load CSE: reuse previously loaded values for the same address.
-                // For nb==4 variables, mask cached values to 32 bits to match
-                // the I32 load + uextend behavior of fresh loads.
                 // When the cached value's cranelift type differs from what a
                 // fresh load of size `nb` would produce (e.g. I128 cached but
                 // narrow select wants I64), coerce it so downstream wide /
@@ -2580,9 +2578,7 @@ impl ProtoExpression {
                 dst
             }
             Op::Pow => {
-                // Binary exponentiation via helper calls
-                // result = 1; while exp > 0 { if exp & 1: result *= base; base *= base; exp >>= 1; }
-                // For simplicity, fall back to interpreter for wide Pow
+                // Wide Pow falls back to the interpreter.
                 return None;
             }
             _ => return None,
