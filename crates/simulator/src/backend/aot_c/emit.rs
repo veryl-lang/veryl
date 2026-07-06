@@ -2650,8 +2650,8 @@ fn fnv1a_64_hex_parts(parts: &[&str]) -> String {
 
 /// Full C source for a comb statement sequence.  Signature matches the
 /// Cranelift FuncPtr ABI: `void veryl_aot_eval(uint8_t *ff, uint8_t
-/// *comb, uint64_t *log)`.  Comb-target writes store directly;
-/// FF-target writes push WriteLogEntries like the event path.
+/// *comb, uint64_t *log, intptr_t ff_delta)`.  Comb-target writes store
+/// directly; FF-target writes push WriteLogEntries like the event path.
 pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     reset_wide_tmp();
     // Splitting the monolithic body into ~chunk_size-stmt static functions
@@ -2660,7 +2660,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     // locality).  chunk_size=0 disables splitting (single-function emit).
     // Override via VERYL_AOT_C_CHUNK_SIZE.
     //
-    // 128 (was 900): smaller chunks shrink each function's live set and spill
+    // 128: smaller chunks shrink each function's live set and spill
     // traffic; below ~50 the call/boundary overhead starts to erode the gain.
     let chunk_size: usize = std::env::var("VERYL_AOT_C_CHUNK_SIZE")
         .ok()
@@ -2742,8 +2742,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     } else {
         // Each chunk → noinline static function so gcc isolates its
         // regalloc/spill domain.  -flto can still inline if it judges
-        // the cost worthwhile, but for a typical ~800-stmt chunk it
-        // preserves the boundary.
+        // the cost worthwhile.
         for (i, cb) in chunk_bodies.iter().enumerate() {
             body.push_str(&format!(
                 "static __attribute__((noinline)) \
@@ -3264,7 +3263,6 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
         VarOffset::Ff(o) => ("ff_values", o),
         VarOffset::Comb(o) => ("comb_values", o),
     };
-    // Body: walk each ProtoStatement, fail fast on unsupported.
     // Pushes inside the body execute once per iteration: scale their
     // contribution to the reserve counters by the trip count.
     let narrow_before = EVENT_NARROW_PUSHES.with(|c| c.get());

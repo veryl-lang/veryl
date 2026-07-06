@@ -498,7 +498,7 @@ pub fn try_compile_inst_chunks(
             };
             if let Some(artifact) = artifact {
                 // NBA semantics: a read+written variable is not purely
-                // internal; keep all inputs so sort_ff_event sees the
+                // internal; keep all inputs so analyze_dependency sees the
                 // dependency.
                 let mut all_inputs = vec![];
                 let mut all_outputs = vec![];

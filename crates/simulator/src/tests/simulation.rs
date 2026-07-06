@@ -5202,8 +5202,6 @@ fn merged_comb_output_write_to_parent_ff() {
 
 // Validates that child comb → port connection → parent comb chains
 // are correctly evaluated in the unified comb list.
-// (Originally a regression test for optimize_comb DCE, which is no longer used.
-// The test remains valid as a comb chain correctness check.)
 #[test]
 fn optimize_comb_no_cascade_inline() {
     let code = r#"
@@ -5290,7 +5288,6 @@ fn optimize_comb_no_cascade_inline() {
 // Validates multi-level port connection chains with single-use
 // intermediate variables. Each level's comb must be correctly
 // included in the unified comb list.
-// (Originally a regression test for optimize_comb cascading inline.)
 #[test]
 fn optimize_comb_no_cascade_inline_multi_level() {
     let code = r#"

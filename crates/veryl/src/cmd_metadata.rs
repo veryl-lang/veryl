@@ -106,10 +106,8 @@ role = "dependency"
 
     #[test]
     fn json_format_version_1_preserves_internal_metadata_shape() {
-        // Given: project metadata with extension-owned metadata.
         let (mut metadata, _tempdir) = load_metadata();
 
-        // When: JSON metadata is formatted with legacy format version 1.
         let versioned_text = command(Format::Json, Some(1))
             .format_metadata(&mut metadata)
             .unwrap();
@@ -119,7 +117,6 @@ role = "dependency"
         let versioned_value: serde_json::Value = serde_json::from_str(&versioned_text).unwrap();
         let unversioned_value: serde_json::Value = serde_json::from_str(&unversioned_text).unwrap();
 
-        // Then: version 1 is the same legacy/internal JSON shape as unversioned JSON.
         assert_eq!(versioned_value, unversioned_value);
         assert!(versioned_value.get("format_version").is_none());
         assert!(versioned_value.get("root").is_none());
@@ -132,13 +129,10 @@ role = "dependency"
 
     #[test]
     fn json_format_version_2_emits_stable_graph_metadata_shape() {
-        // Given: project metadata with extension-owned metadata.
         let (mut metadata, _tempdir) = load_metadata();
 
-        // When: JSON metadata is formatted with stable graph format version 2.
         let text = command(Format::Json, Some(2)).format_metadata(&mut metadata);
 
-        // Then: version 2 uses the stable graph metadata contract.
         assert!(
             text.as_ref().is_ok(),
             "format version 2 should be supported: {:?}",
@@ -158,16 +152,13 @@ role = "dependency"
 
     #[test]
     fn unversioned_json_preserves_internal_metadata_shape() {
-        // Given: project metadata with extension-owned metadata.
         let (mut metadata, _tempdir) = load_metadata();
 
-        // When: JSON metadata is formatted without an explicit version.
         let text = command(Format::Json, None)
             .format_metadata(&mut metadata)
             .unwrap();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
 
-        // Then: unversioned JSON preserves the existing internal metadata shape.
         assert!(value.get("format_version").is_none());
         assert!(value.get("root").is_none());
         assert!(value.get("project").is_some());
@@ -175,16 +166,13 @@ role = "dependency"
 
     #[test]
     fn pretty_format_version_is_rejected() {
-        // Given: project metadata and pretty output with explicit format versions.
         let (mut metadata, _tempdir) = load_metadata();
 
         for version in [1, 2] {
-            // When: pretty metadata is formatted with an explicit version.
             let error = command(Format::Pretty, Some(version))
                 .format_metadata(&mut metadata)
                 .unwrap_err();
 
-            // Then: pretty format rejects every explicit version.
             assert!(
                 error
                     .to_string()
@@ -195,32 +183,26 @@ role = "dependency"
 
     #[test]
     fn unsupported_format_version_is_rejected() {
-        // Given: project metadata.
         let (mut metadata, _tempdir) = load_metadata();
 
-        // When: JSON metadata is formatted with an unsupported version.
         let error = command(Format::Json, Some(3))
             .format_metadata(&mut metadata)
             .unwrap_err();
 
-        // Then: the error reports all supported versions.
         assert!(error.to_string().contains("unsupported --format-version 3"));
         assert!(error.to_string().contains("supported versions: 1, 2"));
     }
 
     #[test]
     fn json_format_version_2_resolves_missing_lockfile() {
-        // Given: project metadata with a path dependency and no existing lockfile.
         let (mut metadata, _tempdir) = load_metadata_with_path_dependency();
         assert!(!metadata.lockfile_path.exists());
 
-        // When: JSON metadata is formatted with stable graph format version 2.
         let text = command(Format::Json, Some(2))
             .format_metadata(&mut metadata)
             .unwrap();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
 
-        // Then: version 2 creates the lockfile and emits resolved dependencies.
         assert!(metadata.lockfile_path.exists());
         assert_eq!(value["format_version"], 2);
         assert_eq!(value["root"]["metadata"], serde_json::json!({}));
@@ -237,31 +219,25 @@ role = "dependency"
 
     #[test]
     fn legacy_json_does_not_resolve_missing_lockfile() {
-        // Given: project metadata with a path dependency and no existing lockfile.
         let (mut metadata, _tempdir) = load_metadata_with_path_dependency();
         assert!(!metadata.lockfile_path.exists());
 
-        // When: legacy JSON metadata is formatted.
         let _text = command(Format::Json, Some(1))
             .format_metadata(&mut metadata)
             .unwrap();
 
-        // Then: legacy JSON keeps the existing debug behavior and does not create a lockfile.
         assert!(!metadata.lockfile_path.exists());
     }
 
     #[test]
     fn unversioned_json_does_not_resolve_missing_lockfile() {
-        // Given: project metadata with a path dependency and no existing lockfile.
         let (mut metadata, _tempdir) = load_metadata_with_path_dependency();
         assert!(!metadata.lockfile_path.exists());
 
-        // When: unversioned JSON metadata is formatted.
         let _text = command(Format::Json, None)
             .format_metadata(&mut metadata)
             .unwrap();
 
-        // Then: unversioned JSON keeps the existing debug behavior and does not create a lockfile.
         assert!(!metadata.lockfile_path.exists());
     }
 }
