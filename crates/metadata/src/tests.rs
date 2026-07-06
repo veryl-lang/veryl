@@ -223,7 +223,7 @@ version = "0.1.0"
 inner_a = {{git = "file://{repo}", project = "inner_a", version = "0.1.0"}}
 inner_b = {{git = "file://{repo}", project = "inner_b", version = "0.1.0"}}
 "#,
-        repo = repo_path.to_string_lossy().replace("\\", "/"),
+        repo = path_to_toml_str(&repo_path),
     );
     let metadata = create_project(tempdir.path(), "main", &main_toml, false);
 
@@ -241,11 +241,7 @@ fn create_project(root: &Path, name: &str, toml: &str, publish: bool) -> Metadat
     let path = root.join(name);
     fs::create_dir(&path).unwrap();
     let toml_path = path.join("Veryl.toml");
-    fs::write(
-        &toml_path,
-        toml.replace("{}", &root.to_string_lossy().replace("\\", "/")),
-    )
-    .unwrap();
+    fs::write(&toml_path, toml.replace("{}", &path_to_toml_str(root))).unwrap();
     let git_ignore_path = path.join(".gitignore");
     fs::write(&git_ignore_path, GIT_IGNORE).unwrap();
     let git = Git::init(&path).unwrap();
@@ -263,6 +259,13 @@ fn create_project(root: &Path, name: &str, toml: &str, publish: bool) -> Metadat
         metadata.publish().unwrap();
     }
     metadata
+}
+
+// Convert a path into a form that can be embedded in a TOML basic string.
+// On Windows the backslash separators would otherwise be interpreted as
+// escape sequences, so replace them with forward slashes.
+fn path_to_toml_str(path: &Path) -> String {
+    path.to_string_lossy().replace("\\", "/")
 }
 
 #[test]
@@ -880,4 +883,130 @@ dep = {path = "../dep"}
     let paths = lockfile.paths(Path::new("target")).unwrap();
     assert!(paths.iter().any(|x| x.src.ends_with("a.veryl")));
     assert!(!paths.iter().any(|x| x.src.ends_with("ex.veryl")));
+}
+
+#[test]
+fn define_global_properties() {
+    let toml = r#"
+[project]
+name = "main"
+[properties]
+foo = 32
+bar = true
+"#;
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let metadata = create_project(tempdir.path(), "main", toml, false);
+
+    assert_eq!(metadata.properties["foo"], ProjectProperty::Int(32));
+    assert_eq!(metadata.properties["bar"], ProjectProperty::Bool(true));
+}
+
+#[test]
+fn override_global_properties_of_dependencies() {
+    let tempdir = tempfile::tempdir().unwrap();
+
+    let sub_toml = r#"
+[project]
+name = "sub"
+version = "0.1.0"
+[properties]
+foo = 32
+bar = false
+"#;
+
+    create_project(tempdir.path(), "sub", sub_toml, false);
+
+    let sub_path = tempdir.path().join("sub");
+    let main_toml = format!(
+        r#"
+[project]
+name = "main"
+[dependencies]
+sub = {{
+    path = "{}",
+    properties = {{ foo = 16 }}
+}}
+"#,
+        path_to_toml_str(&sub_path)
+    );
+
+    let metadata = create_project(tempdir.path(), "main", &main_toml, false);
+    let lockfile = Lockfile::new(&metadata).unwrap();
+
+    let sub_metadata = lockfile
+        .lock_table
+        .iter()
+        .find_map(|(_, x)| x.iter().find(|x| x.name == "sub"))
+        .unwrap();
+    assert_eq!(sub_metadata.properties["foo"], ProjectProperty::Int(16));
+    assert_eq!(sub_metadata.properties["bar"], ProjectProperty::Bool(false));
+}
+
+#[test]
+fn override_unknown_global_property() {
+    let tempdir = tempfile::tempdir().unwrap();
+
+    let sub_toml = r#"
+[project]
+name = "sub"
+version = "0.1.0"
+[properties]
+foo = 32
+bar = false
+"#;
+
+    create_project(tempdir.path(), "sub", sub_toml, false);
+
+    let sub_path = tempdir.path().join("sub");
+    let main_toml = format!(
+        r#"
+[project]
+name = "main"
+[dependencies]
+sub = {{
+    path = "{}",
+    properties = {{ baz = 1 }}
+}}
+"#,
+        path_to_toml_str(&sub_path)
+    );
+
+    let metadata = create_project(tempdir.path(), "main", &main_toml, false);
+    let err = Lockfile::new(&metadata).unwrap_err();
+    assert!(matches!(err, MetadataError::UnknownProperty { .. }));
+}
+
+#[test]
+fn type_mismatch_on_global_property_override() {
+    let tempdir = tempfile::tempdir().unwrap();
+
+    let sub_toml = r#"
+[project]
+name = "sub"
+version = "0.1.0"
+[properties]
+foo = 32
+bar = false
+"#;
+
+    create_project(tempdir.path(), "sub", sub_toml, false);
+
+    let sub_path = tempdir.path().join("sub");
+    let main_toml = format!(
+        r#"
+[project]
+name = "main"
+[dependencies]
+sub = {{
+    path = "{}",
+    properties = {{ foo = true }}
+}}
+"#,
+        path_to_toml_str(&sub_path)
+    );
+
+    let metadata = create_project(tempdir.path(), "main", &main_toml, false);
+    let err = Lockfile::new(&metadata).unwrap_err();
+    assert!(matches!(err, MetadataError::MismatchType { .. }));
 }

@@ -1033,6 +1033,7 @@ pub enum SymbolKind {
     Test(TestProperty),
     Embed,
     TbComponent(TbComponentProperty),
+    ProjectProperty(ProjectPropertyValueProperty),
 }
 
 impl SymbolKind {
@@ -1126,6 +1127,7 @@ impl SymbolKind {
             SymbolKind::Test(_) => "test".to_string(),
             SymbolKind::Embed => "embed".to_string(),
             SymbolKind::TbComponent(x) => format!("testbench {}", x.kind),
+            SymbolKind::ProjectProperty(_) => "project property".to_string(),
         }
     }
 
@@ -1209,6 +1211,7 @@ impl SymbolKind {
             SymbolKind::StructMember(x) => Some(&x.r#type),
             SymbolKind::UnionMember(x) => Some(&x.r#type),
             SymbolKind::TypeDef(x) if !x.is_proto => x.r#type.as_ref(),
+            SymbolKind::ProjectProperty(x) => Some(&x.r#type),
             _ => None,
         }
     }
@@ -1222,6 +1225,7 @@ impl SymbolKind {
             SymbolKind::StructMember(x) => Some(&mut x.r#type),
             SymbolKind::UnionMember(x) => Some(&mut x.r#type),
             SymbolKind::TypeDef(x) if !x.is_proto => x.r#type.as_mut(),
+            SymbolKind::ProjectProperty(x) => Some(&mut x.r#type),
             _ => None,
         }
     }
@@ -1399,6 +1403,13 @@ impl fmt::Display for SymbolKind {
             SymbolKind::Test(_) => "test".to_string(),
             SymbolKind::Embed => "embed".to_string(),
             SymbolKind::TbComponent(x) => format!("testbench {} component", x.kind),
+            SymbolKind::ProjectProperty(x) => {
+                format!(
+                    "project property ({}) = {}",
+                    x.value.type_name(),
+                    x.value.value_string()
+                )
+            }
         };
         text.fmt(f)
     }
@@ -2891,4 +2902,32 @@ impl std::fmt::Display for TbComponentKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TbComponentProperty {
     pub kind: TbComponentKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectPropertyValueProperty {
+    pub value: veryl_metadata::ProjectProperty,
+    pub r#type: Type,
+}
+
+impl ProjectPropertyValueProperty {
+    pub fn new(value: &veryl_metadata::ProjectProperty, token: TokenRange) -> Self {
+        let kind = match value {
+            veryl_metadata::ProjectProperty::Int(_) => TypeKind::I64,
+            veryl_metadata::ProjectProperty::Bool(_) => TypeKind::BBool,
+        };
+        let r#type = Type {
+            modifier: vec![],
+            kind,
+            width: vec![],
+            array: vec![],
+            array_type: None,
+            is_const: true,
+            token,
+        };
+        Self {
+            value: value.clone(),
+            r#type,
+        }
+    }
 }

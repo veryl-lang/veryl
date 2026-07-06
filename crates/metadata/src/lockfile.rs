@@ -1,13 +1,13 @@
 use crate::git::Git;
-use crate::lockfile_compat;
 use crate::metadata::{Dependency, Metadata, UrlPath};
 use crate::metadata_error::MetadataError;
 use crate::pubfile::{Pubfile, Release};
+use crate::{ProjectProperty, lockfile_compat};
 use log::info;
 use pathdiff::diff_paths;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,9 +37,25 @@ pub struct Lockfile {
 pub struct Lock {
     pub name: String,
     pub source: LockSource,
+    #[serde(default)]
+    pub properties: BTreeMap<String, ProjectProperty>,
     pub dependencies: Vec<LockDependency>,
     #[serde(skip)]
     pub visible: bool,
+}
+
+impl Lock {
+    pub fn uuid(&self) -> Uuid {
+        match &self.source {
+            LockSource::Path(path) => {
+                let url = self.source.to_url();
+                Lockfile::gen_uuid(&url, path, "", &self.properties)
+            }
+            LockSource::Repository(repo) => {
+                Lockfile::gen_uuid(&repo.url, &repo.path, &repo.revision, &self.properties)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -246,7 +262,7 @@ impl Lockfile {
 
         for lock in &locks {
             let add = if let Some(old_locks) = old_table.get(&lock.source.to_url()) {
-                !old_locks.iter().any(|x| x.source == lock.source)
+                !old_locks.iter().any(|x| x.uuid() == lock.uuid())
             } else {
                 true
             };
@@ -265,7 +281,7 @@ impl Lockfile {
 
         for old_locks in old_table.values() {
             for old_lock in old_locks {
-                if !locks.iter().any(|x| x.source == old_lock.source) {
+                if !locks.iter().any(|x| x.uuid() == old_lock.uuid()) {
                     info!("Removing dependency ({})", old_lock.source);
                     modified = true;
                 }
@@ -360,18 +376,27 @@ impl Lockfile {
         }
     }
 
-    fn gen_uuid(url: &UrlPath, path: &Path, revision: &str) -> Result<Uuid, MetadataError> {
+    fn gen_uuid(
+        url: &UrlPath,
+        path: &Path,
+        revision: &str,
+        properties: &BTreeMap<String, ProjectProperty>,
+    ) -> Uuid {
         let mut url = url.to_string();
         url.push_str(&path.to_string_lossy());
         url.push_str(revision);
-        Ok(Uuid::new_v5(&Uuid::NAMESPACE_URL, url.as_bytes()))
+        for (name, value) in properties {
+            url.push_str(name);
+            url.push_str(&value.value_string());
+        }
+        Uuid::new_v5(&Uuid::NAMESPACE_URL, url.as_bytes())
     }
 
     fn gen_locks(
         &mut self,
         metadata: &Metadata,
         name_table: &mut HashSet<String>,
-        src_table: &mut HashMap<LockSource, String>,
+        src_table: &mut HashMap<Uuid, String>,
         root: bool,
         root_metadata: &Metadata,
     ) -> Result<Vec<Lock>, MetadataError> {
@@ -401,6 +426,30 @@ impl Lockfile {
             }
             name_table.insert(name.clone());
 
+            let mut properties: BTreeMap<_, _> = metadata.properties.clone().into_iter().collect();
+            if let Dependency::Entry(dep_entry) = dep {
+                for (prop_name, prop_value) in &dep_entry.properties {
+                    let Some(value) = properties.get_mut(prop_name) else {
+                        let err = MetadataError::UnknownProperty {
+                            property: prop_name.clone(),
+                            project: dependency.name.clone(),
+                        };
+                        return Err(err);
+                    };
+
+                    if !value.is_compatible(prop_value) {
+                        let err = MetadataError::MismatchType {
+                            name: prop_name.clone(),
+                            expected: value.type_name(),
+                            actual: prop_value.type_name(),
+                        };
+                        return Err(err);
+                    }
+
+                    *value = prop_value.clone();
+                }
+            }
+
             let mut dependencies = Vec::new();
             for (name, dep) in &metadata.dependencies {
                 let dependency =
@@ -409,7 +458,15 @@ impl Lockfile {
                 dependencies.push(dependency);
             }
 
-            if let Some(x) = src_table.get(&dependency.source) {
+            let lock = Lock {
+                name: name.clone(),
+                source: dependency.source.clone(),
+                properties,
+                dependencies,
+                visible: root,
+            };
+            let uuid = lock.uuid();
+            if let Some(x) = src_table.get(&uuid) {
                 if root {
                     return Err(MetadataError::InvalidDependency {
                         name: dependency.name.clone(),
@@ -417,15 +474,8 @@ impl Lockfile {
                     });
                 }
             } else {
-                let lock = Lock {
-                    name: name.clone(),
-                    source: dependency.source.clone(),
-                    dependencies,
-                    visible: root,
-                };
-
                 ret.push(lock);
-                src_table.insert(dependency.source.clone(), name.clone());
+                src_table.insert(uuid, name.clone());
                 dependencies_metadata.push(metadata);
             }
         }
@@ -470,7 +520,7 @@ impl Lockfile {
                         });
                     };
                     let (release, path) = self.resolve_version(url, &project, version)?;
-                    let uuid = Self::gen_uuid(url, &path, &release.revision)?;
+                    let uuid = Self::gen_uuid(url, &path, &release.revision, &BTreeMap::new());
 
                     // Path override is disabled if it is not root
                     let r#override = if root { x.path.clone() } else { None };
@@ -499,6 +549,7 @@ impl Lockfile {
                         }
                         diff_paths(path.canonicalize().unwrap(), base).unwrap()
                     };
+
                     LockSource::Path(path)
                 } else {
                     return Err(MetadataError::InvalidDependency {
@@ -559,7 +610,7 @@ impl Lockfile {
 
     fn resolve_path(url: &UrlPath) -> Result<PathBuf, MetadataError> {
         let resolve_dir = veryl_path::cache_path().join("resolve");
-        let uuid = Self::gen_uuid(url, &PathBuf::new(), "")?;
+        let uuid = Self::gen_uuid(url, &PathBuf::new(), "", &BTreeMap::new());
         Ok(resolve_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer())))
     }
 
@@ -627,14 +678,14 @@ impl Lockfile {
         revision: &str,
     ) -> Result<PathBuf, MetadataError> {
         let dependencies_dir = veryl_path::cache_path().join("dependencies");
-        let uuid = Self::gen_uuid(url, path, revision)?;
+        let uuid = Self::gen_uuid(url, path, revision, &BTreeMap::new());
         Ok(dependencies_dir.join(uuid.simple().encode_lower(&mut Uuid::encode_buffer())))
     }
 
     pub(crate) fn get_metadata(&self, source: &LockSource) -> Result<Metadata, MetadataError> {
         // try to load from local path
         let path = match source {
-            LockSource::Path(x) => Some(x.clone()),
+            LockSource::Path(path) => Some(path.clone()),
             LockSource::Repository(x) => x.r#override.clone(),
         };
         let mut searched_path = None;
@@ -774,7 +825,8 @@ impl Lockfile {
         for lock in x.projects {
             let mut dependencies = Vec::new();
             for dep in lock.dependencies {
-                let uuid = Lockfile::gen_uuid(&dep.url, &PathBuf::new(), &dep.revision)?;
+                let uuid =
+                    Lockfile::gen_uuid(&dep.url, &PathBuf::new(), &dep.revision, &BTreeMap::new());
                 let source = LockSource::Repository(Box::new(LockSourceRepository {
                     uuid,
                     url: dep.url,
@@ -792,7 +844,8 @@ impl Lockfile {
                 dependencies.push(new_dep);
             }
 
-            let uuid = Lockfile::gen_uuid(&lock.url, &PathBuf::new(), &lock.revision).unwrap();
+            let uuid =
+                Lockfile::gen_uuid(&lock.url, &PathBuf::new(), &lock.revision, &BTreeMap::new());
             let source = LockSource::Repository(Box::new(LockSourceRepository {
                 uuid,
                 url: lock.url,
@@ -807,6 +860,7 @@ impl Lockfile {
             let new_lock = Lock {
                 name: lock.name,
                 source,
+                properties: BTreeMap::new(),
                 dependencies,
                 visible: false,
             };

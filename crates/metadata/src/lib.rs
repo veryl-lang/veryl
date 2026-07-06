@@ -23,7 +23,7 @@ pub use format::{Format, NewlineStyle};
 pub use git::Git;
 pub use lint::{Case, Lint};
 pub use lockfile::{LockSource, Lockfile};
-pub use metadata::{BumpKind, Metadata, UrlPath};
+pub use metadata::{BumpKind, Metadata, ProjectProperty, UrlPath};
 pub use metadata_error::MetadataError;
 pub use metadata_output::{
     MetadataDependencyV2, MetadataOutputV2, MetadataProjectV2, MetadataSourceV2,

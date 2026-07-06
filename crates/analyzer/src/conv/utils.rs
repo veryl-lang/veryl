@@ -2564,6 +2564,20 @@ pub fn eval_factor_symbol(
 
             return Ok(ir::Factor::Value(x));
         }
+        SymbolKind::ProjectProperty(x) => {
+            let value = match &x.value {
+                veryl_metadata::ProjectProperty::Int(x) => Value::new(*x as u64, 64, true),
+                veryl_metadata::ProjectProperty::Bool(x) => {
+                    if *x {
+                        Value::new(1, 1, false)
+                    } else {
+                        Value::new(0, 1, false)
+                    }
+                }
+            };
+            let comptime = Comptime::create_value(value, symbol.found.token.into());
+            return Ok(ir::Factor::Value(comptime));
+        }
         _ => (),
     }
     Err(ir_error!(token))

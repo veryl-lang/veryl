@@ -104,6 +104,18 @@ pub enum MetadataError {
     #[diagnostic(code(MetadataError::MissingVersion), help(""))]
     #[error("Version field is required in Veryl.toml to publish")]
     MissingVersion,
+
+    #[diagnostic(code(MetadataError::UnknownProperty), help(""))]
+    #[error("property \"{property}\" is not defined in project \"{project}\"")]
+    UnknownProperty { property: String, project: String },
+
+    #[diagnostic(code(MetadataError::MismatchType), help(""))]
+    #[error("\"{name}\" is expected to \"{expected}\", but it is \"{actual}\"")]
+    MismatchType {
+        name: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 impl MetadataError {

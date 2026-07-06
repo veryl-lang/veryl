@@ -1,8 +1,9 @@
 use crate::conv::Context;
 use crate::ir::Ir;
 use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
+use std::collections::HashMap;
 use std::thread;
-use veryl_metadata::{Lint, Metadata};
+use veryl_metadata::{Lint, Metadata, ProjectProperty};
 use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
 
@@ -138,6 +139,33 @@ fn analyze_with_large_stack(code: &str) -> Vec<AnalyzerError> {
         })
         .unwrap();
     handler.join().unwrap()
+}
+
+fn analyze_with_project_properties(
+    code: &str,
+    properties: HashMap<String, ProjectProperty>,
+) -> Vec<AnalyzerError> {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    for (name, value) in properties {
+        metadata.properties.insert(name, value);
+    }
+
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    let mut errors = vec![];
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+    dbg!(&errors);
+    errors
 }
 
 #[test]
@@ -16281,4 +16309,21 @@ fn scope_tree_matches_namespace() {
         .find(|s| matches!(s.kind, SymbolKind::Module(_)))
         .unwrap();
     assert_eq!(scope::current(), top.scope);
+}
+
+#[test]
+fn project_properties() {
+    let code = r#"
+    module ModuleA {
+        const A: i64   = PROP_A;
+        const B: bbool = PROP_B;
+    }
+    "#;
+
+    let mut properties = HashMap::new();
+    properties.insert("PROP_A".to_string(), ProjectProperty::Int(32));
+    properties.insert("PROP_B".to_string(), ProjectProperty::Bool(true));
+
+    let errors = analyze_with_project_properties(code, properties);
+    assert!(errors.is_empty());
 }

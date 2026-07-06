@@ -17,7 +17,7 @@ use regex::Regex;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use spdx::Expression;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fmt;
 use std::fs;
@@ -53,6 +53,8 @@ pub struct Metadata {
     #[serde(default)]
     pub synth: Synth,
     #[serde(default)]
+    pub properties: BTreeMap<String, ProjectProperty>,
+    #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
     #[serde(default)]
     pub metadata: HashMap<String, toml::Value>,
@@ -73,6 +75,44 @@ pub struct Metadata {
     /// instead of the project path. Never read from Veryl.toml.
     #[serde(skip)]
     pub output_dir_override: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(untagged)]
+pub enum ProjectProperty {
+    Int(i64),
+    Bool(bool),
+}
+
+impl ProjectProperty {
+    pub fn is_compatible(&self, other: &ProjectProperty) -> bool {
+        matches!(
+            (self, other),
+            (ProjectProperty::Int(_), ProjectProperty::Int(_))
+                | (ProjectProperty::Bool(_), ProjectProperty::Bool(_))
+        )
+    }
+
+    pub fn type_name(&self) -> String {
+        match self {
+            ProjectProperty::Int(_) => "int".to_string(),
+            ProjectProperty::Bool(_) => "bool".to_string(),
+        }
+    }
+
+    pub fn value_string(&self) -> String {
+        match self {
+            ProjectProperty::Int(x) => x.to_string(),
+            ProjectProperty::Bool(x) => x.to_string(),
+        }
+    }
+
+    pub fn verilog_value_string(&self) -> String {
+        match self {
+            ProjectProperty::Int(x) => x.to_string(),
+            ProjectProperty::Bool(x) => (if *x { "1'b1" } else { "1'b0" }).to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -542,7 +582,7 @@ impl FromStr for Metadata {
 #[serde(deny_unknown_fields)]
 pub enum Dependency {
     Version(VersionReq),
-    Entry(DependencyEntry),
+    Entry(Box<DependencyEntry>),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -553,4 +593,6 @@ pub struct DependencyEntry {
     pub github: Option<String>,
     pub project: Option<String>,
     pub path: Option<PathBuf>,
+    #[serde(default)]
+    pub properties: HashMap<String, ProjectProperty>,
 }
