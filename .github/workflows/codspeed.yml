@@ -43,6 +43,10 @@ jobs:
           shared-key: "${{ runner.os }}-codspeed-${{ matrix.package }}-sccache"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: mozilla-actions/sccache-action@v0.0.10
+        with:
+          # stats stay in the job log via the explicit step below; keep them off
+          # the run-summary annotations
+          disable_annotations: true
       - uses: actions/cache/restore@v4
         continue-on-error: true
         with:
@@ -94,17 +98,16 @@ jobs:
           cache: false
           bins: cargo-codspeed
 
-      # rust-cache caches ~/.cargo and target/ (dependency compilation) so cargo
-      # skips deps; sccache (content-addressed) then serves the workspace crates,
-      # which rust-cache alone cannot reuse across runs (cargo's mtime fingerprints
-      # break after checkout). The key is distinct because building under sccache
-      # changes every crate's fingerprint. Master saves; PRs restore read-only.
+      # Same rust-cache + sccache split as the benchmarks job above (deps via
+      # rust-cache; workspace crates via sccache, under a distinct -sccache key).
       - uses: Swatinem/rust-cache@v2
         continue-on-error: true
         with:
           shared-key: "${{ runner.os }}-${{ runner.arch }}-codspeed-boot-sccache"
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: mozilla-actions/sccache-action@v0.0.10
+        with:
+          disable_annotations: true
       - uses: actions/cache/restore@v4
         continue-on-error: true
         with:
