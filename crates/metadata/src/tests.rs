@@ -746,3 +746,138 @@ fn lockfile_save_is_atomic() {
         r.join().unwrap();
     }
 }
+
+const EXAMPLES_TOML: &str = r#"
+[project]
+name = "test"
+version = "0.1.0"
+
+[build]
+sources = ["src"]
+target = {type = "directory", path = "target"}
+"#;
+
+fn create_metadata_with_examples() -> (Metadata, TempDir) {
+    let tempdir = tempfile::tempdir().unwrap();
+    let metadata = create_project(tempdir.path(), "test", EXAMPLES_TOML, false);
+    let project_path = metadata.project_path();
+    fs::create_dir_all(project_path.join("src")).unwrap();
+    fs::write(project_path.join("src/a.veryl"), "module A {}\n").unwrap();
+    fs::create_dir_all(project_path.join("examples")).unwrap();
+    fs::write(project_path.join("examples/ex.veryl"), "module Ex {}\n").unwrap();
+
+    (metadata, tempdir)
+}
+
+#[test]
+fn paths_include_root_examples() {
+    let (mut metadata, _tempdir) = create_metadata_with_examples();
+
+    let paths = metadata.paths::<&str>(&[], false, false).unwrap();
+    assert_eq!(paths.len(), 2);
+
+    let src = paths.iter().find(|x| x.src.ends_with("a.veryl")).unwrap();
+    let example = paths.iter().find(|x| x.src.ends_with("ex.veryl")).unwrap();
+    assert!(!src.example);
+    assert!(example.example);
+}
+
+#[test]
+fn paths_include_examples_with_default_sources() {
+    // The default `sources = [""]` walks the whole project.
+    let toml = r#"
+[project]
+name = "test"
+version = "0.1.0"
+
+[build]
+target = {type = "directory", path = "target"}
+"#;
+    let tempdir = tempfile::tempdir().unwrap();
+    let mut metadata = create_project(tempdir.path(), "test", toml, false);
+    let project_path = metadata.project_path();
+    fs::create_dir_all(project_path.join("src")).unwrap();
+    fs::write(project_path.join("src/a.veryl"), "module A {}\n").unwrap();
+    fs::create_dir_all(project_path.join("examples")).unwrap();
+    fs::write(project_path.join("examples/ex.veryl"), "module Ex {}\n").unwrap();
+
+    let paths = metadata.paths::<&str>(&[], false, false).unwrap();
+    assert_eq!(paths.len(), 2);
+
+    let src = paths.iter().find(|x| x.src.ends_with("a.veryl")).unwrap();
+    let example = paths.iter().find(|x| x.src.ends_with("ex.veryl")).unwrap();
+    assert!(!src.example);
+    assert!(example.example);
+}
+
+#[test]
+fn sources_under_examples_are_rejected() {
+    for source in ["examples", "examples/sub"] {
+        let toml = format!(
+            r#"
+[project]
+name = "test"
+version = "0.1.0"
+
+[build]
+sources = ["src", "{source}"]
+target = {{type = "directory", path = "target"}}
+"#
+        );
+        let tempdir = tempfile::tempdir().unwrap();
+        let mut metadata = create_project(tempdir.path(), "test", &toml, false);
+        let project_path = metadata.project_path();
+        fs::create_dir_all(project_path.join("src")).unwrap();
+        fs::write(project_path.join("src/a.veryl"), "module A {}\n").unwrap();
+        fs::create_dir_all(project_path.join("examples/sub")).unwrap();
+        fs::write(project_path.join("examples/ex.veryl"), "module Ex {}\n").unwrap();
+
+        let result = metadata.paths::<&str>(&[], false, false);
+        assert!(matches!(result, Err(MetadataError::ReservedSourceDir(_))));
+    }
+}
+
+#[test]
+fn paths_route_explicit_example_file() {
+    let (mut metadata, _tempdir) = create_metadata_with_examples();
+    let file = metadata.project_path().join("examples/ex.veryl");
+
+    let paths = metadata.paths(&[file], false, false).unwrap();
+    assert_eq!(paths.len(), 1);
+    assert!(paths[0].example);
+}
+
+#[test]
+fn lockfile_paths_exclude_dependency_examples() {
+    let tempdir = tempfile::tempdir().unwrap();
+
+    let dep_path = tempdir.path().join("dep");
+    fs::create_dir_all(dep_path.join("src")).unwrap();
+    fs::create_dir_all(dep_path.join("examples")).unwrap();
+    fs::write(
+        dep_path.join("Veryl.toml"),
+        r#"
+[project]
+name = "dep"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    fs::write(dep_path.join("src/a.veryl"), "module A {}\n").unwrap();
+    fs::write(dep_path.join("examples/ex.veryl"), "module Ex {}\n").unwrap();
+
+    let main_toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[dependencies]
+dep = {path = "../dep"}
+"#;
+    let metadata = create_project(tempdir.path(), "main", main_toml, false);
+
+    let lockfile = Lockfile::new(&metadata).unwrap();
+    let paths = lockfile.paths(Path::new("target")).unwrap();
+    assert!(paths.iter().any(|x| x.src.ends_with("a.veryl")));
+    assert!(!paths.iter().any(|x| x.src.ends_with("ex.veryl")));
+}

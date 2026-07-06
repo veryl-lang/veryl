@@ -56,6 +56,7 @@ pub fn paths(base_dst: &Path) -> Result<Vec<PathSet>, PathError> {
             src: src.to_path_buf(),
             dst,
             map,
+            example: false,
         });
     }
 

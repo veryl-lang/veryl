@@ -31,6 +31,15 @@ pub enum MetadataError {
     #[error("source file \"{0}\" is outside the project")]
     InvalidSourceLocation(PathBuf),
 
+    #[diagnostic(
+        code(MetadataError::ReservedSourceDir),
+        help("remove it from [build] sources")
+    )]
+    #[error(
+        "\"{0}\" cannot be used as a source directory: `examples/` is reserved and analyzed automatically for the root project"
+    )]
+    ReservedSourceDir(PathBuf),
+
     #[diagnostic(code(MetadataError::Git), help(""))]
     #[error("git operation failure: {0}")]
     Git(Box<dyn std::error::Error + Sync + Send>),

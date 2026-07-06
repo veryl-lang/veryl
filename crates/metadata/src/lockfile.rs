@@ -282,8 +282,13 @@ impl Lockfile {
             for lock in locks {
                 let metadata = self.get_metadata(&lock.source)?;
                 let path = metadata.project_path();
+                // Analyzed only for the build root (`Metadata::paths`).
+                let examples = path.join("examples");
 
                 for src in &veryl_path::gather_files_with_extension(&path, "veryl", false)? {
+                    if src.starts_with(&examples) {
+                        continue;
+                    }
                     let Ok(rel) = src.strip_prefix(&path) else {
                         return Err(MetadataError::InvalidSourceLocation(src.clone()));
                     };
@@ -297,6 +302,7 @@ impl Lockfile {
                         src: src.to_path_buf(),
                         dst,
                         map,
+                        example: false,
                     });
                 }
             }
