@@ -1264,3 +1264,36 @@ fn inst_named_port_break_is_idempotent_across_insts() {
         "expected unpadded single port in:\n{first}"
     );
 }
+
+#[test]
+fn statement_function_call_is_not_aligned() {
+    let code = r#"module ModuleA {
+    var a: logic;
+    var bb: logic;
+    initial {
+        $display("x");
+        $info("y");
+        a = 0;
+        bb = 1;
+        $finish();
+    }
+}
+"#;
+    let expect = r#"module ModuleA {
+    var a : logic;
+    var bb: logic;
+    initial {
+        $display("x");
+        $info("y");
+        a  = 0;
+        bb = 1;
+        $finish();
+    }
+}
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+}

@@ -27,8 +27,8 @@ module test_counter {
 
     initial {
         rst.assert();
-        clk.next  (10);
-        $assert   (cnt == 32'd10);
-        $finish   ();
+        clk.next(10);
+        $assert(cnt == 32'd10);
+        $finish();
     }
 }
