@@ -192,6 +192,7 @@ impl CmdTest {
             // module that runs long benefits from `cc` too.  Override with
             // VERYL_AOT_C_MIN_STMTS to restore a floor.
             aot_c_min_stmts: 0,
+            use_4state: self.opt.four_state || metadata.test.four_state,
             ..Config::default()
         };
         config.apply_env();

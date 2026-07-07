@@ -22,6 +22,8 @@ pub struct Test {
     pub include_files: Vec<PathBuf>,
     #[serde(default)]
     pub defines: Vec<String>,
+    #[serde(default)]
+    pub four_state: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

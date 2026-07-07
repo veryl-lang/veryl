@@ -1232,6 +1232,7 @@ exclude_std = true
             include_ignored: false,
             define: Vec::new(),
             no_capture: false,
+            four_state: false,
         });
         let all_pass = test.exec(&mut metadata).expect("test run should succeed");
         Analyzer::new(&metadata).clear();
