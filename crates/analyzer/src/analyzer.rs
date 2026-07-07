@@ -1,4 +1,4 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, ExceedLimitKind};
 use crate::attribute_table;
 use crate::comb_loop_detect;
 use crate::conv::{Context, Conv};
@@ -137,10 +137,16 @@ impl Analyzer {
             (Ir::default(), errors)
         };
 
-        // Surface a generic-evaluation recursion-limit hit (#2891) that the
-        // error-tolerant evaluation path would otherwise swallow.
-        if let Some(token) = crate::conv::utils::take_generic_eval_overflow() {
-            errors.push(AnalyzerError::infinite_recursion(&token));
+        // Surface a function-eval recursion-limit hit (#2891) that the
+        // error-tolerant evaluation path would otherwise swallow. It is reported
+        // as `ExceedLimit`, not `infinite_recursion`, since a finite-but-deep
+        // recursion is a depth-limit hit rather than a true cycle.
+        if let Some((token, depth)) = context.function_eval_overflow.take() {
+            errors.push(AnalyzerError::exceed_limit(
+                ExceedLimitKind::HierarchyDepth,
+                depth,
+                &token,
+            ));
         }
 
         (ir, errors)
@@ -157,6 +163,7 @@ impl Analyzer {
         context.config.retain_component_body = ir.is_some();
         context.config.instance_depth_limit = self.build_opt.instance_depth_limit;
         context.config.instance_total_limit = self.build_opt.instance_total_limit;
+        context.config.function_instance_depth_limit = self.build_opt.function_instance_depth_limit;
         context.config.evaluate_size_limit = self.build_opt.evaluate_size_limit;
         context.config.evaluate_array_limit = self.build_opt.evaluate_array_limit;
 

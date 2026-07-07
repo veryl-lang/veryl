@@ -24,6 +24,11 @@ pub struct Config {
     pub retain_component_body: bool,
     pub instance_depth_limit: usize,
     pub instance_total_limit: usize,
+    /// Separate, lower recursion limit for the comptime evaluation of recursive
+    /// generic functions. The function-eval path is far more stack-hungry per
+    /// level than module instantiation, so it needs its own bound well below
+    /// `instance_depth_limit` (see veryl-lang/veryl#2891).
+    pub function_instance_depth_limit: usize,
     pub evaluate_size_limit: usize,
     pub evaluate_array_limit: usize,
     pub defines: HashSet<StrId>,
@@ -35,6 +40,7 @@ impl Default for Config {
             retain_component_body: false,
             instance_depth_limit: 1024,
             instance_total_limit: 1024 * 1024,
+            function_instance_depth_limit: 24,
             evaluate_size_limit: 1024 * 1024,
             evaluate_array_limit: 128,
             defines: HashSet::default(),
@@ -62,6 +68,27 @@ pub struct Context {
     pub inst_signatures: HashMap<StrId, Signature>,
     pub modport_signatures: Vec<HashMap<StrId, Signature>>,
     pub instance_history: InstanceHistory,
+    /// Recursion depth of `eval_factor_path` while resolving the generic-argument
+    /// chain of a (possibly recursive) generic function. Kept on `Context` (not a
+    /// thread-local) and carried across per-call contexts via `inherit`; bounded
+    /// by `Config::function_instance_depth_limit`. See veryl-lang/veryl#2891.
+    pub function_eval_depth: usize,
+    /// First recorded function-eval recursion-limit hit (token + depth), surfaced
+    /// by `create_ir` as an `ExceedLimit` error since the eval path is
+    /// error-tolerant and would otherwise swallow it.
+    pub function_eval_overflow: Option<(TokenRange, usize)>,
+    /// Active stack of generic-function call `Signature`s currently being
+    /// evaluated, used to detect TRUE infinite recursion (the exact same
+    /// instantiation re-entered) distinctly from merely exceeding
+    /// `function_eval_depth`'s stack-safety limit. Deliberately a plain `Vec`
+    /// rather than the module `instance_history`/`InstanceHistory`: that
+    /// structure also memoizes a completed `ir::Component` per `Signature`
+    /// (`set_instance_history`), which functions have no equivalent for (they
+    /// cache by `FuncPath` in `func_paths` instead) — reusing it here without
+    /// ever completing an entry would permanently wedge it as "still active"
+    /// and falsely suppress cycle detection for later, unrelated, non-recursive
+    /// calls to the same instantiation. See veryl-lang/veryl#2891.
+    pub function_call_stack: Vec<Signature>,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
@@ -102,6 +129,9 @@ impl Context {
         std::mem::swap(&mut self.generic_maps, &mut tgt.generic_maps);
         std::mem::swap(&mut self.modport_signatures, &mut tgt.modport_signatures);
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
+        std::mem::swap(&mut self.function_eval_depth, &mut tgt.function_eval_depth);
+        std::mem::swap(&mut self.function_eval_overflow, &mut tgt.function_eval_overflow);
+        std::mem::swap(&mut self.function_call_stack, &mut tgt.function_call_stack);
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);

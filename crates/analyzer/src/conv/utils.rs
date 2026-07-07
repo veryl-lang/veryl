@@ -1918,20 +1918,6 @@ pub fn eval_struct_constructor(
     }
 }
 
-thread_local! {
-    /// Records the location of a generic-function-evaluation recursion-limit hit
-    /// (see `eval_factor_path` and veryl-lang/veryl#2891). It is surfaced by
-    /// `create_ir` because the evaluation itself runs on an error-tolerant path.
-    static EVAL_FACTOR_OVERFLOW: std::cell::Cell<Option<TokenRange>> = const { std::cell::Cell::new(None) };
-}
-
-/// Takes (and clears) a recorded generic-evaluation recursion-limit hit so the
-/// caller can emit an `infinite_recursion` error even though the evaluation ran
-/// on an error-tolerant path. See veryl-lang/veryl#2891.
-pub fn take_generic_eval_overflow() -> Option<TokenRange> {
-    EVAL_FACTOR_OVERFLOW.with(|cell| cell.take())
-}
-
 pub fn eval_factor_path(
     context: &mut Context,
     symbol_path: GenericSymbolPath,
@@ -1939,39 +1925,35 @@ pub fn eval_factor_path(
     allow_unknown_value: bool,
     token: TokenRange,
 ) -> IrResult<ir::Factor> {
-    // Guard against unbounded recursion when evaluating a recursive generic
-    // function whose end condition can't be resolved here (see
-    // veryl-lang/veryl#2891). Evaluating a generic function call expands the
-    // callee's body, which may contain another call to itself; without this the
-    // evaluator recurses until the native stack overflows and the process
-    // aborts. Instead we report `infinite_recursion` and stop. The limit is
-    // intentionally conservative so it triggers well before the stack is
-    // exhausted; genuine recursive generics are far shallower than this.
-    const EVAL_FACTOR_RECURSION_LIMIT: usize = 16;
-    thread_local! {
-        static EVAL_FACTOR_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    }
-    struct RecursionGuard;
-    impl Drop for RecursionGuard {
-        fn drop(&mut self) {
-            EVAL_FACTOR_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    // Guard against unbounded recursion when a recursive generic function's end
+    // condition can't be resolved here (see veryl-lang/veryl#2891). The
+    // generic-argument chain of a self-call (e.g. `f::<N - 1>`) is resolved
+    // eagerly during type/const evaluation, recursing once per instance; without
+    // a bound it overflows the native stack and aborts the process. The depth is
+    // tracked on `Context` (carried across the per-call contexts via `inherit`),
+    // and the hit is recorded to be surfaced by `create_ir` as an `ExceedLimit`,
+    // because this evaluation runs on an error-tolerant path where a returned
+    // `Err` may be swallowed.
+    context.function_eval_depth += 1;
+    let ret = if context.function_eval_depth > context.config.function_instance_depth_limit {
+        if context.function_eval_overflow.is_none() {
+            context.function_eval_overflow = Some((token, context.function_eval_depth));
         }
-    }
-    if EVAL_FACTOR_DEPTH.with(|depth| depth.get()) >= EVAL_FACTOR_RECURSION_LIMIT {
-        // The evaluation of a generic function call runs on an error-tolerant
-        // path where a returned `Err` (and even an inserted error) may be
-        // swallowed, so record the hit in a thread-local to be surfaced by
-        // `create_ir` as an `infinite_recursion` error.
-        EVAL_FACTOR_OVERFLOW.with(|cell| {
-            if cell.get().is_none() {
-                cell.set(Some(token));
-            }
-        });
-        return Err(ir_error!(token));
-    }
-    EVAL_FACTOR_DEPTH.with(|depth| depth.set(depth.get() + 1));
-    let _recursion_guard = RecursionGuard;
+        Err(ir_error!(token))
+    } else {
+        eval_factor_path_inner(context, symbol_path, var_path, allow_unknown_value, token)
+    };
+    context.function_eval_depth -= 1;
+    ret
+}
 
+fn eval_factor_path_inner(
+    context: &mut Context,
+    symbol_path: GenericSymbolPath,
+    var_path: VarPathSelect,
+    allow_unknown_value: bool,
+    token: TokenRange,
+) -> IrResult<ir::Factor> {
     let (path, select, _) = var_path.into();
 
     let generic_path = context.resolve_path(symbol_path);
@@ -3320,7 +3302,18 @@ pub fn function_call(
 
     let mut parent_path = generic_path.clone();
     parent_path.paths.pop();
-    let sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
+    let mut sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
+    sig.normalize();
+
+    // Detect TRUE infinite recursion (the exact same generic-function
+    // instantiation re-entered, e.g. `gen M: u32 = N;` making `f::<N>` call
+    // itself) distinctly from a merely deep-but-finite recursion, which is
+    // instead bounded by `function_eval_depth`/`function_instance_depth_limit`
+    // in `eval_factor_path`. See veryl-lang/veryl#2891.
+    if context.function_call_stack.contains(&sig) {
+        context.insert_error(AnalyzerError::infinite_recursion(&token));
+        return Err(ir_error!(token));
+    }
 
     let path: VarPathSelect = Conv::conv(context, path)?;
     let (mut base_path, select, _) = path.into();
@@ -3358,6 +3351,7 @@ pub fn function_call(
     }
 
     context.push_generic_map(map);
+    context.function_call_stack.push(sig.clone());
 
     let ret = context.block(|c| {
         let func = get_function(c, &path, token)?;
@@ -3392,6 +3386,7 @@ pub fn function_call(
     });
 
     context.pop_generic_map();
+    context.function_call_stack.pop();
     ret
 }
 

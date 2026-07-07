@@ -42,6 +42,14 @@ pub struct Build {
     pub instance_depth_limit: usize,
     #[serde(default = "default_instance_total_limit")]
     pub instance_total_limit: usize,
+    /// Recursion-depth limit for evaluating a recursive generic function's
+    /// generic-argument chain at comptime. Kept separate from and much lower
+    /// than `instance_depth_limit` because that evaluation is far more
+    /// stack-hungry per level than module instantiation (see
+    /// veryl-lang/veryl#2891); raising this past the native stack's capacity
+    /// will overflow the process instead of reporting a clean error.
+    #[serde(default = "default_function_instance_depth_limit")]
+    pub function_instance_depth_limit: usize,
     #[serde(default = "default_evaluate_size_limit")]
     pub evaluate_size_limit: usize,
     #[serde(default = "default_evaluate_array_limit")]
@@ -66,6 +74,10 @@ fn default_sources() -> Vec<PathBuf> {
 
 fn default_instance_depth_limit() -> usize {
     128
+}
+
+fn default_function_instance_depth_limit() -> usize {
+    24
 }
 
 fn default_instance_total_limit() -> usize {
