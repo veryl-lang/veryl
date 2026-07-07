@@ -33,9 +33,9 @@ module test_function_call {
 
     initial {
         rst.assert();
-        step_n    (5);
-        step_n    (5);
-        $assert   (cnt == 32'd10);
-        $finish   ();
+        step_n(5);
+        step_n(5);
+        $assert(cnt == 32'd10);
+        $finish();
     }
 }

@@ -41,12 +41,12 @@ module test_dual_clock {
     initial {
         rst_a.assert();
         rst_b.assert();
-        clk_a.next  (10);
-        $assert     (cnt_a == 32'd10);
-        $assert     (cnt_b == 32'd0);
-        clk_b.next  (5);
-        $assert     (cnt_a == 32'd10);
-        $assert     (cnt_b == 32'd5);
-        $finish     ();
+        clk_a.next(10);
+        $assert(cnt_a == 32'd10);
+        $assert(cnt_b == 32'd0);
+        clk_b.next(5);
+        $assert(cnt_a == 32'd10);
+        $assert(cnt_b == 32'd5);
+        $finish();
     }
 }

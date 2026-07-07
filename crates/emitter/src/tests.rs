@@ -1888,7 +1888,7 @@ module prj_d_module;
     end
 
     always_comb begin
-        bif.ready      = '0;
+        bif.ready = '0;
         bif.connect_if(aif.ready, aif.valid, aif.payload);
     end
 
@@ -1898,7 +1898,7 @@ module prj_d_module;
     end
 
     always_comb begin
-        dif[0].ready      = '0;
+        dif[0].ready = '0;
         dif[0].connect_if(
             .__aif_ready   (cif[0].ready  ),
             .__aif_valid   (cif[0].valid  ),
@@ -1912,7 +1912,7 @@ module prj_d_module;
     end
 
     always_comb begin
-        fif[0].ready      = '0;
+        fif[0].ready = '0;
         fif[0].connect_if(eif[0].ready, eif[0].valid, eif[0].payload);
     end
 endmodule
@@ -4123,5 +4123,33 @@ endmodule
     };
 
     println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn statement_function_call_is_not_aligned() {
+    let code = r#"module ModuleA {
+    initial {
+        $display("x");
+        $info("y");
+        $finish();
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    initial begin
+        $display("x");
+        $info("y");
+        $finish();
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
     assert_eq!(ret, expect);
 }

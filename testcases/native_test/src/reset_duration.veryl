@@ -27,9 +27,9 @@ module test_reset_explicit_duration {
 
     initial {
         rst.assert(5);
-        clk.next  (10);
-        $assert   (cnt == 32'd10);
-        $finish   ();
+        clk.next(10);
+        $assert(cnt == 32'd10);
+        $finish();
     }
 }
 
@@ -48,8 +48,8 @@ module test_reset_cycles_param {
 
     initial {
         rst.assert();
-        clk.next  (10);
-        $assert   (cnt == 32'd10);
-        $finish   ();
+        clk.next(10);
+        $assert(cnt == 32'd10);
+        $finish();
     }
 }

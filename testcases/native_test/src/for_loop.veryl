@@ -27,8 +27,8 @@ module test_for_loop {
 
     initial {
         rst.assert();
-        clk.next  (10);
-        $assert   (cnt == 32'd10);
+        clk.next(10);
+        $assert(cnt == 32'd10);
         for _i in 0..5 {
             clk.next();
         }
@@ -52,8 +52,8 @@ module test_for_loop_step {
 
     initial {
         rst.assert();
-        clk.next  (10);
-        $assert   (cnt == 32'd10);
+        clk.next(10);
+        $assert(cnt == 32'd10);
         for _i in 0..10 step += 2 {
             clk.next(2);
         }
@@ -77,8 +77,8 @@ module test_for_loop_rev {
 
     initial {
         rst.assert();
-        clk.next  (10);
-        $assert   (cnt == 32'd10);
+        clk.next(10);
+        $assert(cnt == 32'd10);
         for _i in rev 0..5 {
             clk.next();
         }
