@@ -137,7 +137,10 @@ impl Context {
         std::mem::swap(&mut self.modport_signatures, &mut tgt.modport_signatures);
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
         std::mem::swap(&mut self.function_eval_depth, &mut tgt.function_eval_depth);
-        std::mem::swap(&mut self.function_eval_overflow, &mut tgt.function_eval_overflow);
+        std::mem::swap(
+            &mut self.function_eval_overflow,
+            &mut tgt.function_eval_overflow,
+        );
         std::mem::swap(&mut self.function_call_stack, &mut tgt.function_call_stack);
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
