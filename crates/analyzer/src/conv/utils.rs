@@ -1918,6 +1918,123 @@ pub fn eval_struct_constructor(
     }
 }
 
+/// A member path whose first segment is a module instance: a hierarchical
+/// testbench reference (`dut.u_core.pc`) or one of its misuse forms.
+enum HierReference {
+    /// Instance-name path, variable path within the target module, and the
+    /// variable's type.
+    Resolved(Vec<StrId>, VarPath, Box<ir::Type>),
+    UnknownMember {
+        owner: String,
+        member: StrId,
+    },
+    /// First segment is a scalar module instance that has not been
+    /// converted yet (declared after the referencing statement).
+    NotDeclaredYet(StrId),
+    InstanceArray(StrId),
+    NotHier,
+}
+
+fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
+    let segs = &path.0;
+    if segs.len() < 2 {
+        return HierReference::NotHier;
+    }
+
+    if let Some(component) = context.inst_components.get(&segs[0]) {
+        let mut component = component.as_ref();
+        let mut inst_path = vec![segs[0]];
+        let mut i = 1;
+
+        loop {
+            let ir::Component::Module(module) = component else {
+                return HierReference::NotHier;
+            };
+
+            // The remaining segments may be a variable path in this module
+            // (multi-segment for interface-flattened members) ...
+            let var_path = VarPath::from_slice(&segs[i..]);
+            if let Some(variable) = module.variables.values().find(|v| v.path == var_path) {
+                return HierReference::Resolved(
+                    inst_path,
+                    var_path,
+                    Box::new(variable.r#type.clone()),
+                );
+            }
+
+            // ... or descend into a child module instance.
+            let child = module.declarations.iter().find_map(|x| {
+                if let ir::Declaration::Inst(inst) = x
+                    && inst.name == segs[i]
+                {
+                    Some(&inst.component)
+                } else {
+                    None
+                }
+            });
+            let Some(child) = child else {
+                let owner = inst_path
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                return HierReference::UnknownMember {
+                    owner,
+                    member: segs[i],
+                };
+            };
+            inst_path.push(segs[i]);
+            component = child.as_ref();
+            i += 1;
+            if i >= segs.len() {
+                let owner = inst_path
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                return HierReference::UnknownMember {
+                    owner,
+                    member: *segs.last().unwrap(),
+                };
+            }
+        }
+    }
+
+    // Not converted (yet); classify through the symbol table so misuse gets
+    // a diagnostic instead of a silent conversion failure.
+    let Some(namespace) = context.current_namespace() else {
+        return HierReference::NotHier;
+    };
+    let Ok(symbol) = symbol_table::resolve((segs[0], &namespace)) else {
+        return HierReference::NotHier;
+    };
+    let SymbolKind::Instance(prop) = &symbol.found.kind else {
+        return HierReference::NotHier;
+    };
+    let Ok(type_symbol) =
+        symbol_table::resolve((&prop.type_name.generic_path(), &symbol.found.namespace))
+    else {
+        return HierReference::NotHier;
+    };
+    let is_module = match &type_symbol.found.kind {
+        SymbolKind::Module(_) | SymbolKind::AliasModule(_) => true,
+        SymbolKind::GenericInstance(x) => matches!(
+            symbol_table::get(x.base).map(|x| x.kind),
+            Some(SymbolKind::Module(_))
+        ),
+        _ => false,
+    };
+    if !is_module {
+        return HierReference::NotHier;
+    }
+
+    if prop.array.is_empty() {
+        HierReference::NotDeclaredYet(segs[0])
+    } else {
+        HierReference::InstanceArray(segs[0])
+    }
+}
+
 pub fn eval_factor_path(
     context: &mut Context,
     symbol_path: GenericSymbolPath,
@@ -1967,6 +2084,15 @@ fn eval_factor_path_inner(
         context.find_path(&path)
     };
 
+    // Classified even outside initial/final blocks: reference_table
+    // suppresses invisible_identifier for these paths, so misuse inside a
+    // test module must be diagnosed here.
+    let hier = if found.is_none() && context.in_test_module {
+        classify_hier_reference(context, &path)
+    } else {
+        HierReference::NotHier
+    };
+
     if let Some((var_id, mut comptime)) = found {
         if let Some(part_select) = &comptime.part_select {
             comptime.r#type = part_select.base.clone();
@@ -2009,6 +2135,77 @@ fn eval_factor_path_inner(
                 Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
             }
         }
+    } else if let HierReference::Resolved(inst_path, var_path, r#type) = hier {
+        if !context.in_tb_block {
+            context.insert_error(AnalyzerError::invisible_identifier(
+                &path.0[1].to_string(),
+                &token,
+            ));
+            return Err(ir_error!(token));
+        }
+
+        let mut comptime = Comptime::from_type(*r#type, ClockDomain::None, token);
+
+        let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+        let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+        let width_select = eval_width_select(context, &var_path, &comptime.r#type, width_select)
+            .ok_or_else(|| ir_error!(token))?;
+
+        if array_select.is_range() {
+            Err(ir_error!(token))
+        } else {
+            let index = array_select.to_index();
+            comptime.r#type.array.drain(0..index.dimension());
+
+            if !width_select.is_empty() {
+                comptime.r#type.flatten_struct_union_enum();
+                if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
+                    comptime.r#type.set_concrete_width(width);
+                }
+            }
+            comptime.token = token;
+
+            Ok(ir::Factor::HierVariable(Box::new(ir::HierVarRef {
+                inst_path,
+                var_path,
+                index,
+                select: width_select,
+                comptime,
+            })))
+        }
+    } else if !matches!(hier, HierReference::NotHier) {
+        match hier {
+            HierReference::UnknownMember { owner, member } => {
+                context.insert_error(AnalyzerError::unknown_member(
+                    &owner,
+                    &member.to_string(),
+                    &token,
+                ));
+            }
+            HierReference::NotDeclaredYet(name) => {
+                if context.in_tb_block {
+                    context.insert_error(AnalyzerError::referring_before_definition(
+                        &name.to_string(),
+                        &token,
+                    ));
+                } else {
+                    context.insert_error(AnalyzerError::invisible_identifier(
+                        &path.0[1].to_string(),
+                        &token,
+                    ));
+                }
+            }
+            HierReference::InstanceArray(name) => {
+                context.insert_error(AnalyzerError::invalid_factor(
+                    Some(&name.to_string()),
+                    "instance array",
+                    &token,
+                    &[],
+                ));
+            }
+            HierReference::Resolved(..) | HierReference::NotHier => unreachable!(),
+        }
+        Err(ir_error!(token))
     } else if let Some(x) = generic_path.to_literal() {
         let x = x.eval_comptime(token);
         Ok(ir::Factor::Value(x))
@@ -2395,6 +2592,20 @@ pub fn eval_factor_symbol(
             };
 
             return Ok(ir::Factor::Value(x));
+        }
+        SymbolKind::ProjectProperty(x) => {
+            let value = match &x.value {
+                veryl_metadata::ProjectProperty::Int(x) => Value::new(*x as u64, 64, true),
+                veryl_metadata::ProjectProperty::Bool(x) => {
+                    if *x {
+                        Value::new(1, 1, false)
+                    } else {
+                        Value::new(0, 1, false)
+                    }
+                }
+            };
+            let comptime = Comptime::create_value(value, symbol.found.token.into());
+            return Ok(ir::Factor::Value(comptime));
         }
         _ => (),
     }

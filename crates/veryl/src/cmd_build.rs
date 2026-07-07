@@ -73,7 +73,7 @@ impl CmdBuild {
 
         let mut all_pass = true;
         for context in contexts.drain(..) {
-            if !context.skip {
+            if !context.skip && !context.path.example {
                 let path = &context.path;
                 let (dst, map) = if let Some(ref temp_dir) = temp_dir {
                     let output_dir = metadata.output_dir();
@@ -205,9 +205,10 @@ impl CmdBuild {
         let base_path = metadata.output_dir();
 
         let mut paths = Self::sort_filelist(metadata, paths, include_tests);
-        // Drop entries that were intentionally not emitted (e.g. testbench
-        // files filtered out by `--test`); their .sv may not exist on disk.
-        paths.retain(|path| !excluded.contains(&path.src));
+        // Drop entries that were intentionally not emitted (examples/, or
+        // testbench files filtered out by `--test`); their .sv may not
+        // exist on disk.
+        paths.retain(|path| !path.example && !excluded.contains(&path.src));
 
         let text = if let Target::Bundle { path } = &metadata.build.target {
             let temp_dir = temp_dir.unwrap();
@@ -276,7 +277,7 @@ impl CmdBuild {
         let target_path = base_path.join(path);
 
         let mut paths = Self::sort_filelist(metadata, paths, include_tests);
-        paths.retain(|path| !excluded.contains(&path.src));
+        paths.retain(|path| !path.example && !excluded.contains(&path.src));
 
         let mut text = String::new();
         for path in &paths {
@@ -1094,5 +1095,205 @@ exclude_std = true
             !filelist.contains("test_b.sv"),
             "filtered-out testbench (never emitted) must not be listed: {filelist}"
         );
+    }
+
+    // Instantiates the src module, so a successful analysis also proves that
+    // examples/ shares the project namespace with src/.
+    const EXAMPLE_MODULE: &str = r#"
+    module ExampleTop (
+        o_dat: output logic,
+    ) {
+        inst u: Foo;
+        assign o_dat = 0;
+    }
+    "#;
+
+    const EXAMPLE_BROKEN: &str = r#"
+    module ExampleBroken {
+        inst u: NoSuchModule;
+    }
+    "#;
+
+    const EXAMPLE_TEST: &str = r#"
+    #[test(test_example)]
+    module test_example {
+        var o: logic;
+        inst u: ExampleDut (o);
+        initial {
+            $assert(o == 0, "o must be 0");
+            $finish();
+        }
+    }
+    "#;
+
+    const EXAMPLE_DUT: &str = r#"
+    module ExampleDut (
+        o: output logic,
+    ) {
+        assign o = 0;
+    }
+    "#;
+
+    #[test]
+    fn examples_are_analyzed_but_excluded_from_emit_and_filelist() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_project(tempdir.path(), "with_examples", FilelistType::Absolute);
+        let examples = project_path.join("examples");
+        fs::create_dir_all(&examples).unwrap();
+        fs::write(examples.join("example_top.veryl"), EXAMPLE_MODULE).unwrap();
+
+        run_build(&mut metadata, None);
+
+        assert!(project_path.join("target/foo.sv").exists());
+        assert!(!project_path.join("target/example_top.sv").exists());
+        assert!(!examples.join("example_top.sv").exists());
+
+        let filelist = fs::read_to_string(project_path.join("with_examples.f")).unwrap();
+        assert!(filelist.contains("foo.sv"), "{filelist}");
+        assert!(!filelist.contains("example_top.sv"), "{filelist}");
+    }
+
+    #[test]
+    fn examples_work_with_default_sources() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let project_path = tempdir.path().join("default_sources");
+        fs::create_dir_all(project_path.join("src")).unwrap();
+        fs::write(
+            project_path.join("Veryl.toml"),
+            r#"[project]
+name = "default_sources"
+version = "0.1.0"
+
+[build]
+target = {type = "directory", path = "target"}
+filelist_type = "absolute"
+sourcemap_target = {type = "none"}
+exclude_std = true
+"#,
+        )
+        .unwrap();
+        fs::write(project_path.join("src/foo.veryl"), "module Foo {}\n").unwrap();
+        let examples = project_path.join("examples");
+        fs::create_dir_all(&examples).unwrap();
+        fs::write(examples.join("example_top.veryl"), EXAMPLE_MODULE).unwrap();
+
+        let mut metadata = Metadata::load(project_path.join("Veryl.toml")).unwrap();
+        run_build(&mut metadata, None);
+
+        assert!(project_path.join("target/src/foo.sv").exists());
+        assert!(!project_path.join("target/example_top.sv").exists());
+        assert!(!examples.join("example_top.sv").exists());
+
+        let filelist = fs::read_to_string(project_path.join("default_sources.f")).unwrap();
+        assert!(filelist.contains("foo.sv"), "{filelist}");
+        assert!(!filelist.contains("example_top.sv"), "{filelist}");
+    }
+
+    #[test]
+    fn examples_error_fails_root_check() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_project(tempdir.path(), "broken_examples", FilelistType::Absolute);
+        let examples = project_path.join("examples");
+        fs::create_dir_all(&examples).unwrap();
+        fs::write(examples.join("broken.veryl"), EXAMPLE_BROKEN).unwrap();
+
+        assert!(
+            run_check(&mut metadata).is_err(),
+            "examples of the root project must be analyzed"
+        );
+    }
+
+    #[test]
+    fn examples_test_module_runs_with_veryl_test() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, project_path) =
+            create_project(tempdir.path(), "example_test", FilelistType::Absolute);
+        fs::write(project_path.join("src/dut.veryl"), EXAMPLE_DUT).unwrap();
+        let examples = project_path.join("examples");
+        fs::create_dir_all(&examples).unwrap();
+        fs::write(examples.join("tb.veryl"), EXAMPLE_TEST).unwrap();
+
+        Analyzer::new(&metadata).clear();
+        let test = crate::cmd_test::CmdTest::new(crate::OptTest {
+            files: Vec::new(),
+            test: None,
+            sim: None,
+            wave: false,
+            backend: crate::Backend::Interpret,
+            backend_validate: None,
+            disable_ff_opt: false,
+            ignored: false,
+            include_ignored: false,
+            define: Vec::new(),
+            no_capture: false,
+        });
+        let all_pass = test.exec(&mut metadata).expect("test run should succeed");
+        Analyzer::new(&metadata).clear();
+
+        assert!(all_pass, "the example testbench must be collected and pass");
+        assert!(!project_path.join("target/tb.sv").exists());
+        let filelist = fs::read_to_string(project_path.join("example_test.f")).unwrap();
+        assert!(!filelist.contains("tb.sv"), "{filelist}");
+    }
+
+    #[test]
+    fn dependency_examples_are_not_analyzed() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+
+        // A dependency whose examples/ would fail analysis (unresolvable
+        // reference) if it were collected.
+        let dep_path = tempdir.path().join("dep");
+        fs::create_dir_all(dep_path.join("src")).unwrap();
+        fs::create_dir_all(dep_path.join("examples")).unwrap();
+        fs::write(
+            dep_path.join("Veryl.toml"),
+            r#"[project]
+name = "dep"
+version = "0.1.0"
+
+[build]
+sources = ["src"]
+target = {type = "directory", path = "target"}
+exclude_std = true
+"#,
+        )
+        .unwrap();
+        fs::write(dep_path.join("src/sub.veryl"), "module Sub {}\n").unwrap();
+        fs::write(dep_path.join("examples/broken.veryl"), EXAMPLE_BROKEN).unwrap();
+
+        let main_path = tempdir.path().join("main");
+        fs::create_dir_all(main_path.join("src")).unwrap();
+        fs::write(
+            main_path.join("Veryl.toml"),
+            r#"[project]
+name = "main"
+version = "0.1.0"
+
+[build]
+sources = ["src"]
+target = {type = "directory", path = "target"}
+exclude_std = true
+
+[dependencies]
+dep = {path = "../dep"}
+"#,
+        )
+        .unwrap();
+        fs::write(main_path.join("src/top.veryl"), "module Top {}\n").unwrap();
+
+        let mut main_metadata = Metadata::load(main_path.join("Veryl.toml")).unwrap();
+        run_check(&mut main_metadata)
+            .expect("broken examples of a dependency must not be analyzed");
+
+        // The same project checked as root does analyze its examples.
+        let mut dep_metadata = Metadata::load(dep_path.join("Veryl.toml")).unwrap();
+        assert!(run_check(&mut dep_metadata).is_err());
     }
 }

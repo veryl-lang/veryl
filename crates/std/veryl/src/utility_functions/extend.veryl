@@ -45,29 +45,29 @@ module test_extend {
     }
 
     initial {
-        a            = 0;
+        a = 0;
         u_clock.next();
-        $assert     (b == {2'b00, a});
-        $assert     (c == {2'b11, a});
-        $assert     (d == {2'b00, a});
+        $assert(b == {2'b00, a});
+        $assert(c == {2'b11, a});
+        $assert(d == {2'b00, a});
 
-        a            = 1;
+        a = 1;
         u_clock.next();
-        $assert     (b == {2'b00, a});
-        $assert     (c == {2'b11, a});
-        $assert     (d == {2'b00, a});
+        $assert(b == {2'b00, a});
+        $assert(c == {2'b11, a});
+        $assert(d == {2'b00, a});
 
-        a            = 2;
+        a = 2;
         u_clock.next();
-        $assert     (b == {2'b00, a});
-        $assert     (c == {2'b11, a});
-        $assert     (d == {2'b11, a});
+        $assert(b == {2'b00, a});
+        $assert(c == {2'b11, a});
+        $assert(d == {2'b11, a});
 
-        a            = 3;
+        a = 3;
         u_clock.next();
-        $assert     (b == {2'b00, a});
-        $assert     (c == {2'b11, a});
-        $assert     (d == {2'b11, a});
+        $assert(b == {2'b00, a});
+        $assert(c == {2'b11, a});
+        $assert(d == {2'b11, a});
 
         $finish();
     }

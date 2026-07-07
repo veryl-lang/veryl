@@ -6,8 +6,8 @@ module test_lzc_4 {
     var result: lzc_result   ;
 
     initial {
-        bits    = '0;
-        result  = lzc(bits, true);
+        bits   = '0;
+        result = lzc(bits, true);
         $assert(result.all_zero);
 
         for i in 0..4 {
@@ -17,7 +17,7 @@ module test_lzc_4 {
             bits[i] = '1;
             result  = lzc(bits, true);
 
-            exp     = 3 - i;
+            exp = 3 - i;
             $assert(!result.all_zero);
             $assert(result.count == exp);
         }
@@ -34,8 +34,8 @@ module test_lzc_8 {
     var result: lzc_result   ;
 
     initial {
-        bits    = '0;
-        result  = lzc(bits, true);
+        bits   = '0;
+        result = lzc(bits, true);
         $assert(result.all_zero);
 
         for i in 0..8 {
@@ -45,7 +45,7 @@ module test_lzc_8 {
             bits[i] = '1;
             result  = lzc(bits, true);
 
-            exp     = 7 - i;
+            exp = 7 - i;
             $assert(!result.all_zero);
             $assert(result.count == exp);
         }
@@ -62,8 +62,8 @@ module test_lzc_16 {
     var result: lzc_result    ;
 
     initial {
-        bits    = '0;
-        result  = lzc(bits, true);
+        bits   = '0;
+        result = lzc(bits, true);
         $assert(result.all_zero);
 
         for i in 0..16 {
@@ -73,7 +73,7 @@ module test_lzc_16 {
             bits[i] = '1;
             result  = lzc(bits, true);
 
-            exp     = 15 - i;
+            exp = 15 - i;
             $assert(!result.all_zero);
             $assert(result.count == exp);
         }
@@ -90,8 +90,8 @@ module test_lzc_32 {
     var result: lzc_result    ;
 
     initial {
-        bits    = '0;
-        result  = lzc(bits, true);
+        bits   = '0;
+        result = lzc(bits, true);
         $assert(result.all_zero);
 
         for i in 0..32 {
@@ -101,7 +101,7 @@ module test_lzc_32 {
             bits[i] = '1;
             result  = lzc(bits, true);
 
-            exp     = 31 - i;
+            exp = 31 - i;
             $assert(!result.all_zero);
             $assert(result.count == exp);
         }
@@ -118,8 +118,8 @@ module test_lzc_64 {
     var result: lzc_result    ;
 
     initial {
-        bits    = '0;
-        result  = lzc(bits, true);
+        bits   = '0;
+        result = lzc(bits, true);
         $assert(result.all_zero);
 
         for i in 0..64 {
@@ -129,7 +129,7 @@ module test_lzc_64 {
             bits[i] = '1;
             result  = lzc(bits, true);
 
-            exp     = 63 - i;
+            exp = 63 - i;
             $assert(!result.all_zero);
             $assert(result.count == exp);
         }
@@ -146,8 +146,8 @@ module test_lzc_128 {
     var result: lzc_result     ;
 
     initial {
-        bits    = '0;
-        result  = lzc(bits, true);
+        bits   = '0;
+        result = lzc(bits, true);
         $assert(result.all_zero);
 
         for i in 0..128 {
@@ -157,7 +157,7 @@ module test_lzc_128 {
             bits[i] = '1;
             result  = lzc(bits, true);
 
-            exp     = 127 - i;
+            exp = 127 - i;
             $assert(!result.all_zero);
             $assert(result.count == exp);
         }

@@ -26,7 +26,7 @@ use crate::ir::{
 };
 use crate::namespace::DefineContext;
 use crate::symbol::{
-    ClockDomain, Direction, GenericBoundKind, Symbol, SymbolKind, TbComponentKind,
+    ClockDomain, Direction, GenericBoundKind, ProtoBound, Symbol, SymbolKind, TbComponentKind,
 };
 use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
@@ -364,7 +364,26 @@ impl Conv<&WithGenericParameterItem> for () {
                 match y.with_generic_argument_item.as_ref() {
                     WithGenericArgumentItem::Number(_)
                     | WithGenericArgumentItem::BooleanLiteral(_) => {
-                        if !matches!(x.bound, GenericBoundKind::Proto(_)) {
+                        if let GenericBoundKind::Proto(_) = &x.bound {
+                            // A number/boolean default is only valid when the proto
+                            // bound resolves to a variable type (e.g. `M: u32 = 1`).
+                            // For a proto module/interface/package (or enum/struct/
+                            // union type bound) it is a type mismatch, matching the
+                            // call-site check in `check_generic_proto_arg`.
+                            if !matches!(
+                                x.bound.resolve_proto_bound(&symbol.found.namespace),
+                                Ok(ProtoBound::FactorType(_))
+                            ) {
+                                context.insert_error(AnalyzerError::mismatch_type(
+                                    MismatchTypeKind::GenericArgument {
+                                        name: value.identifier.text().to_string(),
+                                        expected: x.bound.to_string(),
+                                        actual: "number".into(),
+                                    },
+                                    &token,
+                                ));
+                            }
+                        } else {
                             context.insert_error(AnalyzerError::mismatch_assignment(
                                 "number",
                                 &x.bound.to_string(),
@@ -1186,7 +1205,12 @@ fn conv_function(
         let body = if let Some(block) = statement_block {
             let disable_const_opt = c.disalbe_const_opt;
             c.disalbe_const_opt = true;
+            // A function body is converted once and shared with RTL callers;
+            // testbench-only constructs must not leak into it.
+            let in_tb_block = c.in_tb_block;
+            c.in_tb_block = false;
             let statements: IrResult<ir::StatementBlock> = Conv::conv(c, block);
+            c.in_tb_block = in_tb_block;
             c.disalbe_const_opt = disable_const_opt;
 
             vec![ir::FunctionBody {
@@ -1270,18 +1294,24 @@ impl Conv<&EnumDeclaration> for () {
 
 impl Conv<&InitialDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &InitialDeclaration) -> IrResult<Self> {
-        let statements: ir::StatementBlock = Conv::conv(context, value.statement_block.as_ref())?;
+        context.in_tb_block = true;
+        let statements: IrResult<ir::StatementBlock> =
+            Conv::conv(context, value.statement_block.as_ref());
+        context.in_tb_block = false;
         Ok(ir::Declaration::Initial(ir::InitialDeclaration {
-            statements: statements.0,
+            statements: statements?.0,
         }))
     }
 }
 
 impl Conv<&FinalDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &FinalDeclaration) -> IrResult<Self> {
-        let statements: ir::StatementBlock = Conv::conv(context, value.statement_block.as_ref())?;
+        context.in_tb_block = true;
+        let statements: IrResult<ir::StatementBlock> =
+            Conv::conv(context, value.statement_block.as_ref());
+        context.in_tb_block = false;
         Ok(ir::Declaration::Final(ir::FinalDeclaration {
-            statements: statements.0,
+            statements: statements?.0,
         }))
     }
 }
@@ -1541,6 +1571,11 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 }
 
                 let name = value.identifier.text();
+                // Instance arrays are not addressable by hierarchical
+                // references; register scalar instances only.
+                if value.component_instantiation_opt0.is_none() {
+                    context.inst_components.insert(name, component_arc.clone());
+                }
                 Ok(ir::Declaration::Inst(Box::new(ir::InstDeclaration {
                     name,
                     inputs,

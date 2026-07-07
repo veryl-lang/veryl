@@ -374,6 +374,9 @@ impl LocalAnalysis {
 
     fn walk_reads(&mut self, e: &ProtoExpression, i: usize) {
         match e {
+            ProtoExpression::HierVariable(_) => {
+                unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+            }
             ProtoExpression::Variable {
                 var_offset,
                 dynamic_select,
@@ -483,6 +486,9 @@ impl LocalAnalysis {
 
     fn poison_expr(&mut self, e: &ProtoExpression) {
         match e {
+            ProtoExpression::HierVariable(_) => {
+                unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+            }
             ProtoExpression::Variable { var_offset, .. } => {
                 if let VarOffset::Comb(o) = var_offset {
                     self.bad.insert(*o);
@@ -732,6 +738,7 @@ fn emit_wide_const(
 /// Returns `None` (→ module bails to Cranelift) for any uncovered shape.
 fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
     match expr {
+        ProtoExpression::HierVariable(_) => None,
         ProtoExpression::Value {
             value,
             width,
@@ -1617,6 +1624,7 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
         return "(covered)".to_string();
     }
     match e {
+        ProtoExpression::HierVariable(_) => "hier_variable".to_string(),
         ProtoExpression::Variable {
             var_full_width,
             select,
@@ -2437,6 +2445,39 @@ fn emit_event_print(format_str: &str, args: &[ProtoExpression], newline: bool) -
     Some(s)
 }
 
+#[derive(Clone, Copy)]
+enum ExpectHint {
+    False,
+    True,
+    Off,
+}
+
+/// Split from `wrap_expect` (no env) so the emitted form is unit-testable.
+fn wrap_expect_hint(c: &str, hint: ExpectHint) -> String {
+    match hint {
+        ExpectHint::False => format!("__builtin_expect(({c}) != 0, 0)"),
+        ExpectHint::True => format!("__builtin_expect(({c}) != 0, 1)"),
+        ExpectHint::Off => c.to_string(),
+    }
+}
+
+/// Hint a narrow mux/if condition unlikely (`VERYL_AOT_C_PREDICT_FALSE`,
+/// default-on).  RTL mux/guard conditions are overwhelmingly false-biased —
+/// only one arm of a wide select wins, guards rarely fire — so predicting them
+/// false straightens the hot fall-through without a profile.  Layout-only, so
+/// results are unchanged.
+fn wrap_expect(c: &str) -> String {
+    static H: OnceLock<ExpectHint> = OnceLock::new();
+    let hint = *H.get_or_init(
+        || match std::env::var("VERYL_AOT_C_PREDICT_FALSE").as_deref() {
+            Ok("0") => ExpectHint::Off,
+            Ok("invert") => ExpectHint::True,
+            _ => ExpectHint::False,
+        },
+    );
+    wrap_expect_hint(c, hint)
+}
+
 /// Compile C source to a `.so`, dlopen it, return a handle owning the
 /// library and exposing `veryl_aot_eval`.
 ///
@@ -2609,8 +2650,8 @@ fn fnv1a_64_hex_parts(parts: &[&str]) -> String {
 
 /// Full C source for a comb statement sequence.  Signature matches the
 /// Cranelift FuncPtr ABI: `void veryl_aot_eval(uint8_t *ff, uint8_t
-/// *comb, uint64_t *log)`.  Comb-target writes store directly;
-/// FF-target writes push WriteLogEntries like the event path.
+/// *comb, uint64_t *log, intptr_t ff_delta)`.  Comb-target writes store
+/// directly; FF-target writes push WriteLogEntries like the event path.
 pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     reset_wide_tmp();
     // Splitting the monolithic body into ~chunk_size-stmt static functions
@@ -2619,7 +2660,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     // locality).  chunk_size=0 disables splitting (single-function emit).
     // Override via VERYL_AOT_C_CHUNK_SIZE.
     //
-    // 128 (was 900): smaller chunks shrink each function's live set and spill
+    // 128: smaller chunks shrink each function's live set and spill
     // traffic; below ~50 the call/boundary overhead starts to erode the gain.
     let chunk_size: usize = std::env::var("VERYL_AOT_C_CHUNK_SIZE")
         .ok()
@@ -2701,8 +2742,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     } else {
         // Each chunk → noinline static function so gcc isolates its
         // regalloc/spill domain.  -flto can still inline if it judges
-        // the cost worthwhile, but for a typical ~800-stmt chunk it
-        // preserves the boundary.
+        // the cost worthwhile.
         for (i, cb) in chunk_bodies.iter().enumerate() {
             body.push_str(&format!(
                 "static __attribute__((noinline)) \
@@ -2977,7 +3017,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                     let c = emit_expr(cond)?;
                     Some(format!(
                         "if ({c}) {{ {t} }} else {{ {f} }}",
-                        c = c,
+                        c = wrap_expect(&c),
                         t = true_body,
                         f = false_body,
                     ))
@@ -3223,7 +3263,6 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
         VarOffset::Ff(o) => ("ff_values", o),
         VarOffset::Comb(o) => ("comb_values", o),
     };
-    // Body: walk each ProtoStatement, fail fast on unsupported.
     // Pushes inside the body execute once per iteration: scale their
     // contribution to the reserve counters by the trip count.
     let narrow_before = EVENT_NARROW_PUSHES.with(|c| c.get());
@@ -3285,6 +3324,7 @@ pub fn emit_expr_root(expr: &ProtoExpression) -> Option<String> {
 
 fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> {
     match expr {
+        ProtoExpression::HierVariable(_) => None,
         ProtoExpression::Value {
             value,
             width,
@@ -3968,7 +4008,12 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         format!("(((int64_t)((uint64_t)({}) << {})) >> {})", s, shift, shift)
                     }
                 };
-                let inner = format!("(({}) ? ({}) : ({}))", c, sext(&t, t_w), sext(&f, f_w));
+                let inner = format!(
+                    "(({}) ? ({}) : ({}))",
+                    wrap_expect(&c),
+                    sext(&t, t_w),
+                    sext(&f, f_w)
+                );
                 if *width < 64 {
                     let mask = (1u64 << *width) - 1;
                     return Some(format!("(((uint64_t)({inner})) & 0x{mask:x}ULL)"));
@@ -3977,7 +4022,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             }
             let t = emit_expr_inner(true_expr, needs_clean)?;
             let f = emit_expr_inner(false_expr, needs_clean)?;
-            Some(format!("(({}) ? ({}) : ({}))", c, t, f))
+            Some(format!("(({}) ? ({}) : ({}))", wrap_expect(&c), t, f))
         }
         ProtoExpression::Concatenation {
             elements, width, ..
@@ -5850,5 +5895,18 @@ mod tests {
             !sets[1].contains(&0x10),
             "multi-chunk write must not localize"
         );
+    }
+
+    #[test]
+    fn wrap_expect_hint_forms() {
+        assert_eq!(
+            wrap_expect_hint("x & 1", ExpectHint::False),
+            "__builtin_expect((x & 1) != 0, 0)"
+        );
+        assert_eq!(
+            wrap_expect_hint("x & 1", ExpectHint::True),
+            "__builtin_expect((x & 1) != 0, 1)"
+        );
+        assert_eq!(wrap_expect_hint("x & 1", ExpectHint::Off), "x & 1");
     }
 }

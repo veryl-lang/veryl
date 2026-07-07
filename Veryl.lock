@@ -14,6 +14,8 @@ project = "veryl_sample"
 version = "0.16.0"
 revision = "df08333919cdec117aaa699ec97c5c9a2dee69b8"
 
+[projects.properties]
+
 [[projects]]
 name = "veryl_sample2"
 dependencies = []
@@ -25,6 +27,8 @@ path = ""
 project = "veryl_sample"
 version = "0.17.0"
 revision = "2f547db8a5d7c6273bf84ebbe540e315e84fe47f"
+
+[projects.properties]
 
 [[projects]]
 name = "veryl_sample3"
@@ -38,7 +42,13 @@ project = "veryl_sample"
 version = "0.18.0"
 revision = "52fc06237c5b70d42d67ea0910874ba111a6ef98"
 
+[projects.properties]
+
 [[projects]]
 name = "veryl_sample4"
 source = "testcases/sample"
 dependencies = []
+
+[projects.properties]
+QUX_0_VALUE = 16
+QUX_1_VALUE = false

@@ -1,7 +1,7 @@
 use crate::Emitter;
 use std::path::PathBuf;
 use veryl_analyzer::{Analyzer, Context, attribute_table, symbol_table};
-use veryl_metadata::{ClockType, Metadata, ResetType};
+use veryl_metadata::{ClockType, Metadata, ProjectProperty, ResetType};
 use veryl_parser::Parser;
 
 #[track_caller]
@@ -24,6 +24,42 @@ fn emit(metadata: &Metadata, code: &str) -> String {
         &PathBuf::from("test.sv.map"),
     );
     emitter.emit(&parser.veryl, code);
+    emitter.as_str().to_string()
+}
+
+#[track_caller]
+fn emit_multiple(metadata: &Metadata, inputs: &[&str]) -> String {
+    symbol_table::clear();
+    attribute_table::clear();
+
+    let parsers: Vec<_> = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, input)| {
+            let path = format!("test_{i}.veryl");
+            let parser = Parser::parse(input, &path).unwrap();
+            let analyzer = Analyzer::new(metadata);
+            analyzer.analyze_pass1("prj", &parser.veryl);
+            (parser, analyzer)
+        })
+        .collect();
+
+    Analyzer::analyze_post_pass1();
+
+    let mut context = Context::default();
+    for (parser, analyzer) in &parsers {
+        analyzer.analyze_pass2(&parser.veryl, &mut context, None);
+    }
+
+    // Emit the last input (the consumer module).
+    let (parser, _) = parsers.last().unwrap();
+    let mut emitter = Emitter::new(
+        metadata,
+        &PathBuf::from("test.veryl"),
+        &PathBuf::from("test.sv"),
+        &PathBuf::from("test.sv.map"),
+    );
+    emitter.emit(&parser.veryl, inputs.last().unwrap());
     emitter.as_str().to_string()
 }
 
@@ -1852,7 +1888,7 @@ module prj_d_module;
     end
 
     always_comb begin
-        bif.ready      = '0;
+        bif.ready = '0;
         bif.connect_if(aif.ready, aif.valid, aif.payload);
     end
 
@@ -1862,7 +1898,7 @@ module prj_d_module;
     end
 
     always_comb begin
-        dif[0].ready      = '0;
+        dif[0].ready = '0;
         dif[0].connect_if(
             .__aif_ready   (cif[0].ready  ),
             .__aif_valid   (cif[0].valid  ),
@@ -1876,7 +1912,7 @@ module prj_d_module;
     end
 
     always_comb begin
-        fif[0].ready      = '0;
+        fif[0].ready = '0;
         fif[0].connect_if(eif[0].ready, eif[0].valid, eif[0].payload);
     end
 endmodule
@@ -4013,42 +4049,6 @@ fn nested_ifdef_block_group_keeps_inner_guard() {
     );
 }
 
-#[track_caller]
-fn emit_multiple(metadata: &Metadata, inputs: &[&str]) -> String {
-    symbol_table::clear();
-    attribute_table::clear();
-
-    let parsers: Vec<_> = inputs
-        .iter()
-        .enumerate()
-        .map(|(i, input)| {
-            let path = format!("test_{i}.veryl");
-            let parser = Parser::parse(input, &path).unwrap();
-            let analyzer = Analyzer::new(metadata);
-            analyzer.analyze_pass1("prj", &parser.veryl);
-            (parser, analyzer)
-        })
-        .collect();
-
-    Analyzer::analyze_post_pass1();
-
-    let mut context = Context::default();
-    for (parser, analyzer) in &parsers {
-        analyzer.analyze_pass2(&parser.veryl, &mut context, None);
-    }
-
-    // Emit the last input (the consumer module).
-    let (parser, _) = parsers.last().unwrap();
-    let mut emitter = Emitter::new(
-        metadata,
-        &PathBuf::from("test.veryl"),
-        &PathBuf::from("test.sv"),
-        &PathBuf::from("test.sv.map"),
-    );
-    emitter.emit(&parser.veryl, inputs.last().unwrap());
-    emitter.as_str().to_string()
-}
-
 #[test]
 fn local_const_shadows_wildcard_import() {
     // A module-local `const` shadows a same-named symbol brought in by a
@@ -4091,4 +4091,65 @@ module ModuleA (
         !ret.contains("prj_mst_pkg::IDLE") && !ret.contains("prj_mst_pkg::READ"),
         "reference must not resolve to the wildcard-imported package const: {ret}"
     );
+}
+
+#[test]
+fn project_properties() {
+    let code = r#"module ModuleA {
+    const A: i64   = PROP_A;
+    const B: bbool = PROP_B;
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    localparam longint A = 32;
+    localparam bit     B = 1'b1;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata
+        .properties
+        .insert("PROP_A".to_string(), ProjectProperty::Int(32));
+    metadata
+        .properties
+        .insert("PROP_B".to_string(), ProjectProperty::Bool(true));
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn statement_function_call_is_not_aligned() {
+    let code = r#"module ModuleA {
+    initial {
+        $display("x");
+        $info("y");
+        $finish();
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    initial begin
+        $display("x");
+        $info("y");
+        $finish();
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
 }

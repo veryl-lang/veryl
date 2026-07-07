@@ -2,6 +2,10 @@
 name    = "veryl_sample"
 version = "0.1.0"
 
+[properties]
+QUX_0_VALUE = 32
+QUX_1_VALUE = false
+
 [build]
 clock_type    = "posedge"
 reset_type    = "async_low"

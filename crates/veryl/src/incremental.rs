@@ -96,8 +96,10 @@ impl Incremental {
                     .is_some_and(|x| x.tests.iter().any(|t| filter.is_none_or(|f| t.contains(f)))),
             };
 
+            // examples/ files are never emitted, so output staleness does not
+            // apply to them.
             let hit = entry.is_some_and(|x| x.hash == hash && x.fragment.is_some())
-                && (!consider_output || !Self::dst_is_stale(metadata, path))
+                && (!consider_output || path.example || !Self::dst_is_stale(metadata, path))
                 && !has_selected_test;
             if !hit {
                 miss.insert(path.src.clone());

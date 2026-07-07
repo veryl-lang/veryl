@@ -3852,10 +3852,19 @@ impl VerylWalker for Emitter {
     fn identifier_statement(&mut self, arg: &IdentifierStatement) {
         let connect_statement_emitted = self.emit_connect_statement(arg);
         if !connect_statement_emitted {
-            self.align_start(align_kind::IDENTIFIER);
+            // Aligning a call statement would pad its `(` out to the widest name.
+            let align = matches!(
+                &*arg.identifier_statement_group,
+                IdentifierStatementGroup::Assignment(_)
+            );
+            if align {
+                self.align_start(align_kind::IDENTIFIER);
+            }
             self.expression_identifier(&arg.expression_identifier);
             self.assignment_lefthand_side = Some(*arg.expression_identifier.clone());
-            self.align_finish(align_kind::IDENTIFIER);
+            if align {
+                self.align_finish(align_kind::IDENTIFIER);
+            }
             match &*arg.identifier_statement_group {
                 IdentifierStatementGroup::FunctionCall(x) => {
                     self.emit_function_call(&arg.expression_identifier, &x.function_call);
@@ -6576,6 +6585,9 @@ pub fn symbol_string(
                 }
             }
             ret.push_str(&token_text);
+        }
+        SymbolKind::ProjectProperty(x) => {
+            ret.push_str(&x.value.verilog_value_string());
         }
         SymbolKind::Instance(_)
         | SymbolKind::Block

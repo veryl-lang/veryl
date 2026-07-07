@@ -708,7 +708,8 @@ impl SymbolTable {
             | SymbolKind::Genvar
             | SymbolKind::ClockDomain
             | SymbolKind::Test(_)
-            | SymbolKind::Embed => (),
+            | SymbolKind::Embed
+            | SymbolKind::ProjectProperty(_) => (),
         }
         Ok(context)
     }

@@ -343,5 +343,6 @@ where
 
 mod derived_clock;
 mod error;
+mod hier_ref;
 mod simulation;
 mod testbench;

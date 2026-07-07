@@ -1459,9 +1459,18 @@ impl VerylWalker for Formatter {
 
     /// Semantic action for non-terminal 'IdentifierStatement'
     fn identifier_statement(&mut self, arg: &IdentifierStatement) {
-        self.align_start(align_kind::IDENTIFIER);
+        // Aligning a call statement would pad its `(` out to the widest name.
+        let align = matches!(
+            &*arg.identifier_statement_group,
+            IdentifierStatementGroup::Assignment(_)
+        );
+        if align {
+            self.align_start(align_kind::IDENTIFIER);
+        }
         self.expression_identifier(&arg.expression_identifier);
-        self.align_finish(align_kind::IDENTIFIER);
+        if align {
+            self.align_finish(align_kind::IDENTIFIER);
+        }
         match &*arg.identifier_statement_group {
             IdentifierStatementGroup::FunctionCall(x) => {
                 self.function_call(&x.function_call);

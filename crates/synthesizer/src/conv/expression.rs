@@ -209,6 +209,11 @@ fn synth_factor(
             let width = ct.r#type.total_width().unwrap_or(value.width());
             Ok(value_to_nets(value, width))
         }
+        // Testbench-only construct; never appears in synthesizable code.
+        Factor::HierVariable(x) => Err(SynthesizerError::unsupported(
+            UnsupportedKind::NonNumericValueFactor,
+            &x.comptime.token,
+        )),
         Factor::Variable(id, index, select, ct) => {
             // RAM-inferred arrays resolve `mem[addr]` to a macro read port
             // (allocated once per distinct address) instead of an element mux

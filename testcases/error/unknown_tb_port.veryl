@@ -6,6 +6,6 @@ module unknown_tb_port {
 
     initial {
         clk.next(1);
-        $finish ();
+        $finish();
     }
 }

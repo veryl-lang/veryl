@@ -14,7 +14,7 @@ use std::collections::HashSet;
 
 use crate::aig::graph::{AigEdge, AigModule, AigNode};
 use crate::ir::{
-    Cell, CellKind, FfCell, GateModule, NET_CONST0, NET_CONST1, NetDriver, NetId, NetInfo, PortDir,
+    Cell, CellKind, GateModule, NET_CONST0, NET_CONST1, NetDriver, NetId, NetInfo, PortDir,
 };
 
 /// Convert the combinational part of `gate` into an AIG. Inputs (module
@@ -142,13 +142,10 @@ pub fn aigify(gate: &GateModule) -> AigModule {
             }
         }
     }
-    for (i, ff) in gate.ffs.iter().enumerate() {
+    for ff in &gate.ffs {
         let edge = lower_net(&mut aig, gate, ff.d);
-        // Encode the FF index into the "target" net id via a negative
-        // sentinel isn't possible (NetId is unsigned); instead we keep a
-        // parallel list on the caller side. Here we stash the FF's D net
-        // so the re-emit side knows which FF to rewire.
-        let _ = i;
+        // Sinks are added in FF declaration order; aig_to_cells recovers
+        // the FF index by position.
         aig.add_sink(ff.d, edge);
     }
 
@@ -345,8 +342,3 @@ fn resolve_fanin(
         pos_net[idx].unwrap_or_else(|| panic!("AIG node {} has no positive net allocated yet", idx))
     }
 }
-
-/// Reference to silence dead_code when we extract `FfCell` just to keep
-/// the `ffs` field unchanged across the round-trip.
-#[allow(dead_code)]
-fn _keep_ffcell_type_alive(_: &FfCell) {}

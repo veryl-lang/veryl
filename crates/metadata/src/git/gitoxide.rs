@@ -97,6 +97,18 @@ pub enum GitoxideError {
     ObjectWrite(#[from] gix::object::write::Error),
 
     #[error("gitoxide error: {0}")]
+    ReferenceEdit(#[from] gix::reference::edit::Error),
+
+    #[error("gitoxide error: {0}")]
+    FindReference(#[from] gix::reference::find::existing::Error),
+
+    #[error("gitoxide error: {0}")]
+    ConfigTime(#[from] gix::config::time::Error),
+
+    #[error("gitoxide error: {0}")]
+    RefNameValidation(#[from] gix::validate::reference::name::Error),
+
+    #[error("gitoxide error: {0}")]
     Io(#[from] std::io::Error),
 
     #[error("gitoxide error: {msg}")]
@@ -140,9 +152,19 @@ impl Git {
             let (mut checkout, _outcome) = prepare
                 .fetch_then_checkout(gix::progress::Discard, &AtomicBool::new(false))
                 .map_err(GitoxideError::from)?;
-            checkout
+            let (mut repo, _outcome) = checkout
                 .main_worktree(gix::progress::Discard, &AtomicBool::new(false))
                 .map_err(GitoxideError::from)?;
+            repo.committer_or_set_generic_fallback()
+                .map_err(GitoxideError::from)?;
+
+            // gix writes `refs/remotes/<remote>/HEAD` as a direct ref pinned to
+            // the commit at clone time. Rewrite it as a symbolic ref to the
+            // default branch so it follows later fetches, like `git clone` does.
+            if let Some(head) = repo.head_name().map_err(GitoxideError::from)? {
+                set_remote_head_symbolic(&repo, head.shorten())?;
+            }
+
             debug!("Cloned repository ({url})");
         }
 
@@ -152,7 +174,11 @@ impl Git {
     }
 
     pub fn fetch(&self) -> Result<(), MetadataError> {
-        let repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
+        let mut repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
+        // Ref updates write reflog entries which require a committer,
+        // but cache clones have no user identity configured.
+        repo.committer_or_set_generic_fallback()
+            .map_err(GitoxideError::from)?;
         let remote = repo
             .find_default_remote(gix::remote::Direction::Fetch)
             .unwrap()
@@ -160,12 +186,38 @@ impl Git {
         let connection = remote
             .connect(gix::remote::Direction::Fetch)
             .map_err(GitoxideError::from)?;
+        // Ask for `HEAD` too, so the remote's current default branch is known.
+        let options = gix::remote::ref_map::Options {
+            extra_refspecs: vec![
+                gix::refspec::parse("HEAD".into(), gix::refspec::parse::Operation::Fetch)
+                    .expect("valid refspec")
+                    .to_owned(),
+            ],
+            ..Default::default()
+        };
         let prepare = connection
-            .prepare_fetch(gix::progress::Discard, Default::default())
+            .prepare_fetch(gix::progress::Discard, options)
             .map_err(GitoxideError::from)?;
-        let _outcome = prepare
+        let outcome = prepare
             .receive(gix::progress::Discard, &AtomicBool::new(false))
             .map_err(GitoxideError::from)?;
+
+        // Follow the remote's current default branch; this also repairs
+        // clones where origin/HEAD was left as a direct ref.
+        let head_target = outcome.ref_map.remote_refs.iter().find_map(|r| match r {
+            gix::protocol::handshake::Ref::Symbolic {
+                full_ref_name,
+                target,
+                ..
+            } if full_ref_name == "HEAD" => Some(target.clone()),
+            _ => None,
+        });
+        if let Some(target) = head_target
+            && let Some(branch) = target.strip_prefix(b"refs/heads/")
+        {
+            use gix::bstr::ByteSlice;
+            set_remote_head_symbolic(&repo, branch.as_bstr())?;
+        }
 
         debug!("Fetched repository ({})", self.path.to_string_lossy());
 
@@ -173,7 +225,9 @@ impl Git {
     }
 
     pub fn checkout(&self, rev: Option<&str>) -> Result<(), MetadataError> {
-        let repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
+        let mut repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
+        repo.committer_or_set_generic_fallback()
+            .map_err(GitoxideError::from)?;
 
         let dst = if let Some(rev) = rev {
             rev.to_string()
@@ -181,7 +235,6 @@ impl Git {
             "origin/HEAD".to_string()
         };
 
-        // Resolve the revision to a commit id
         let commit_id = repo
             .rev_parse_single(dst.as_str())
             .map_err(GitoxideError::from)?;
@@ -192,7 +245,6 @@ impl Git {
             .map_err(GitoxideError::from)?;
         let tree_id = commit.tree_id().map_err(GitoxideError::from)?;
 
-        // Create index from the tree
         let mut index = repo
             .index_from_tree(&tree_id)
             .map_err(GitoxideError::from)?;
@@ -239,6 +291,25 @@ impl Git {
         index
             .write(Default::default())
             .map_err(GitoxideError::from)?;
+
+        // Detach HEAD at the checked out commit, matching `git checkout <rev>`,
+        // so that get_revision and the command backend agree with the worktree.
+        {
+            use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit};
+            repo.edit_reference(RefEdit {
+                change: Change::Update {
+                    log: LogChange {
+                        message: format!("checkout: moving to {dst}").into(),
+                        ..Default::default()
+                    },
+                    expected: PreviousValue::Any,
+                    new: gix::refs::Target::Object(commit.id),
+                },
+                name: "HEAD".try_into().expect("valid ref name"),
+                deref: false,
+            })
+            .map_err(GitoxideError::from)?;
+        }
 
         debug!(
             "Checkouted repository ({} @ {})",
@@ -301,13 +372,11 @@ impl Git {
         let rel_path_bstring = path_to_unix_bstring(rel_path);
         let rel_path_bstr: &gix::bstr::BStr = rel_path_bstring.as_ref();
 
-        // Read the file, write it as blob to the ODB
         let file_content = std::fs::read(&abs_file).map_err(GitoxideError::from)?;
         let blob_id = repo
             .write_blob(&file_content)
             .map_err(GitoxideError::from)?;
 
-        // Get file metadata for stat
         let file_meta = std::fs::metadata(&abs_file).map_err(GitoxideError::from)?;
         let stat = stat_from_metadata(&file_meta);
         let mode = if is_executable(&file_meta) {
@@ -316,7 +385,6 @@ impl Git {
             gix::index::entry::Mode::FILE
         };
 
-        // Check if the entry already exists; if so, update it
         if let Some(idx) = index
             .entry_index_by_path_and_stage(rel_path_bstr, gix::index::entry::Stage::Unconflicted)
         {
@@ -345,7 +413,6 @@ impl Git {
     pub fn commit(&self, msg: &str) -> Result<(), MetadataError> {
         let repo = gix::discover(&self.path).map_err(GitoxideError::from)?;
 
-        // Build tree from the current index using tree editor
         let index = open_or_create_index(&repo)?;
         let mut editor = repo
             .edit_tree(gix::ObjectId::empty_tree(repo.object_hash()))
@@ -361,7 +428,6 @@ impl Git {
 
         let tree_id = editor.write().map_err(GitoxideError::from)?;
 
-        // Get parents
         let parents: Vec<gix::ObjectId> = match repo.head_id() {
             Ok(id) => vec![id.detach()],
             Err(_) => vec![], // Initial commit, no parents
@@ -372,6 +438,39 @@ impl Git {
 
         Ok(())
     }
+}
+
+fn set_remote_head_symbolic(
+    repo: &gix::Repository,
+    branch: &gix::bstr::BStr,
+) -> Result<(), MetadataError> {
+    use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit};
+
+    let remote = repo
+        .remote_default_name(gix::remote::Direction::Fetch)
+        .unwrap_or(std::borrow::Cow::Borrowed("origin".into()));
+    let name: gix::refs::FullName = format!("refs/remotes/{remote}/HEAD")
+        .try_into()
+        .map_err(GitoxideError::from)?;
+    let target: gix::refs::FullName = format!("refs/remotes/{remote}/{branch}")
+        .try_into()
+        .map_err(GitoxideError::from)?;
+
+    repo.edit_reference(RefEdit {
+        change: Change::Update {
+            log: LogChange {
+                message: "fetch: update remote HEAD".into(),
+                ..Default::default()
+            },
+            expected: PreviousValue::Any,
+            new: gix::refs::Target::Symbolic(target),
+        },
+        name,
+        deref: false,
+    })
+    .map_err(GitoxideError::from)?;
+
+    Ok(())
 }
 
 fn open_or_create_index(repo: &gix::Repository) -> Result<gix::index::File, MetadataError> {
