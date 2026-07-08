@@ -13250,11 +13250,6 @@ fn infinite_recursion() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InfiniteRecursion { .. }));
 
-    // A recursive generic function that calls itself with the SAME generic
-    // argument (no progress toward a base case) is a true cycle: the exact
-    // same `Signature` is re-entered. This must be reported immediately as
-    // `InfiniteRecursion`, not merely bounded by a depth limit, and must not
-    // overflow the native stack (see veryl-lang/veryl#2891).
     let code = r#"
     package Pkg {
         function f::<N: u32> -> logic<N> {
@@ -13277,11 +13272,6 @@ fn infinite_recursion() {
 
 #[test]
 fn recursive_generic_function() {
-    // A recursive generic function with a real, reachable base case must
-    // compile cleanly: each recursive call (`f::<N>` -> `f::<N-1>`) is a
-    // distinct `Signature`, and the base case (`N == 1`) is a compile-time
-    // constant that prunes the recursive branch, terminating the chain. See
-    // veryl-lang/veryl#2891.
     let code = r#"
     package Pkg {
         function f::<N: u32> -> logic<N> {
@@ -13300,15 +13290,9 @@ fn recursive_generic_function() {
     }
     "#;
 
-    // Even a correctly-terminating recursive generic function needs more
-    // native stack per level than cargo test's default 2 MB worker-thread
-    // stack allows (the CLI's normal process stack is large enough), same as
-    // the `infinite_recursion` deep-recursion cases below.
     let errors = analyze_with_large_stack(code);
     assert!(errors.is_empty());
 
-    // A deeper chain (well beyond the module-recursion depth limit's order of
-    // magnitude) must also terminate cleanly, not just a shallow one.
     let code = r#"
     package Pkg {
         function f::<N: u32> -> logic<N> {

@@ -2042,15 +2042,9 @@ pub fn eval_factor_path(
     allow_unknown_value: bool,
     token: TokenRange,
 ) -> IrResult<ir::Factor> {
-    // Guard against unbounded recursion when a recursive generic function's end
-    // condition can't be resolved here (see veryl-lang/veryl#2891). The
-    // generic-argument chain of a self-call (e.g. `f::<N - 1>`) is resolved
-    // eagerly during type/const evaluation, recursing once per instance; without
-    // a bound it overflows the native stack and aborts the process. The depth is
-    // tracked on `Context` (carried across the per-call contexts via `inherit`),
-    // and the hit is recorded to be surfaced by `create_ir` as an `ExceedLimit`,
-    // because this evaluation runs on an error-tolerant path where a returned
-    // `Err` may be swallowed.
+    // Bounds recursion when a recursive generic function's self-call can't be
+    // resolved to a base case here; otherwise it recurses until the native
+    // stack overflows.
     context.function_eval_depth += 1;
     let ret = if context.function_eval_depth > context.config.function_instance_depth_limit {
         if context.function_eval_overflow.is_none() {
@@ -3516,11 +3510,7 @@ pub fn function_call(
     let mut sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
     sig.normalize();
 
-    // Detect TRUE infinite recursion (the exact same generic-function
-    // instantiation re-entered, e.g. `gen M: u32 = N;` making `f::<N>` call
-    // itself) distinctly from a merely deep-but-finite recursion, which is
-    // instead bounded by `function_eval_depth`/`function_instance_depth_limit`
-    // in `eval_factor_path`. See veryl-lang/veryl#2891.
+    // same signature re-entered => true infinite recursion
     if context.function_call_stack.contains(&sig) {
         context.insert_error(AnalyzerError::infinite_recursion(&token));
         return Err(ir_error!(token));

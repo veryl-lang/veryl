@@ -165,10 +165,7 @@ impl Analyzer {
             (Ir::default(), errors)
         };
 
-        // Surface a function-eval recursion-limit hit (#2891) that the
-        // error-tolerant evaluation path would otherwise swallow. It is reported
-        // as `ExceedLimit`, not `infinite_recursion`, since a finite-but-deep
-        // recursion is a depth-limit hit rather than a true cycle.
+        // The eval path is error-tolerant and may swallow this, so surface it here.
         if let Some((token, depth)) = context.function_eval_overflow.take() {
             errors.push(AnalyzerError::exceed_limit(
                 ExceedLimitKind::HierarchyDepth,
