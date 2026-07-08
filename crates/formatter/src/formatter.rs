@@ -2854,9 +2854,16 @@ impl VerylWalker for Formatter {
         }
         self.space(1);
         if let Some(ref x) = arg.interface_declaration_opt0 {
-            self.r#for(&x.r#for);
-            self.space(1);
-            self.scoped_identifier(&x.scoped_identifier);
+            match &*x.interface_declaration_opt0_group {
+                InterfaceDeclarationOpt0Group::ForScopedIdentifier(x) => {
+                    self.r#for(&x.r#for);
+                    self.space(1);
+                    self.scoped_identifier(&x.scoped_identifier);
+                }
+                InterfaceDeclarationOpt0Group::InterfaceInheritance(x) => {
+                    self.interface_inheritance(&x.interface_inheritance);
+                }
+            }
             self.space(1);
         }
         if let Some(ref x) = arg.interface_declaration_opt1 {
@@ -2875,6 +2882,18 @@ impl VerylWalker for Formatter {
         );
         self.r_brace(&arg.r_brace);
         self.align_reset();
+    }
+
+    /// Semantic action for non-terminal 'InterfaceInheritance'
+    fn interface_inheritance(&mut self, arg: &InterfaceInheritance) {
+        self.inherit(&arg.inherit);
+        self.space(1);
+        self.scoped_identifier(&arg.scoped_identifier);
+        for x in &arg.interface_inheritance_list {
+            self.comma(&x.comma);
+            self.space(1);
+            self.scoped_identifier(&x.scoped_identifier);
+        }
     }
 
     /// Semantic action for non-terminal 'InterfaceGroup'

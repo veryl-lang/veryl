@@ -459,6 +459,22 @@ pub enum AnalyzerError {
         token_source: TokenSource,
     },
 
+    #[diagnostic(severity(Error),
+        code(invalid_inheritance),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("{identifier} can't be inherited because {reason}")]
+    InvalidInheritance {
+        identifier: String,
+        reason: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
     #[diagnostic(
         severity(Warning),
         code(invalid_logical_operand),
@@ -2001,6 +2017,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidForStep { input, .. } => input,
             AnalyzerError::InvalidIdentifier { input, .. } => input,
             AnalyzerError::InvalidImport { input, .. } => input,
+            AnalyzerError::InvalidInheritance { input, .. } => input,
             AnalyzerError::InvalidLogicalOperand { input, .. } => input,
             AnalyzerError::InvalidLsb { input, .. } => input,
             AnalyzerError::InvalidModifier { input, .. } => input,
@@ -2109,6 +2126,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidFactor { token_source, .. } => *token_source,
             AnalyzerError::InvalidIdentifier { token_source, .. } => *token_source,
             AnalyzerError::InvalidImport { token_source, .. } => *token_source,
+            AnalyzerError::InvalidInheritance { token_source, .. } => *token_source,
             AnalyzerError::InvalidUnsizedLiteral { token_source, .. } => *token_source,
             AnalyzerError::InvalidLogicalOperand { token_source, .. } => *token_source,
             AnalyzerError::UnsignedArithShift { token_source, .. } => *token_source,
@@ -2432,6 +2450,15 @@ impl AnalyzerError {
     }
     pub fn invalid_import(token: &TokenRange) -> Self {
         AnalyzerError::InvalidImport {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_inheritance(identifier: &str, reason: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidInheritance {
+            identifier: identifier.to_string(),
+            reason: reason.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

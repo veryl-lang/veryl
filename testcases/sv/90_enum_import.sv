@@ -101,7 +101,6 @@ interface veryl_testcase_Interface90A;
     import veryl_testcase_Package90::EnumPkg_P;
 
 
-
 endinterface
 
 interface veryl_testcase_Interface90B

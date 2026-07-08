@@ -1,11 +1,13 @@
 use crate::conv::checker::alias::{AliasType, check_alias_target};
 use crate::conv::checker::clock_domain::check_clock_domain;
-use crate::conv::checker::generic::check_generic_bound;
+use crate::conv::checker::generic::{check_generic_bound, check_generic_refereence};
 use crate::conv::checker::proto::check_proto;
 use crate::conv::utils::{check_module_with_unevaluable_generic_parameters, get_component};
 use crate::conv::{Affiliation, Context, Conv};
-use crate::ir::{self, IrResult, VarPath};
+use crate::definition_table::{self, Definition};
+use crate::ir::{self, IrResult, Signature, VarPath};
 use crate::symbol::SymbolKind;
+use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use crate::{HashMap, ir_error};
 use veryl_parser::token_range::TokenRange;
@@ -290,6 +292,110 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
     }
 }
 
+fn conv_interface(context: &mut Context, value: &InterfaceDeclaration) -> IrResult<()> {
+    if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+        && matches!(symbol.found.kind, SymbolKind::Interface(ref x) if !x.is_proto)
+    {
+        context.push_namespace(symbol.found.inner_namespace());
+    } else {
+        let token: TokenRange = value.identifier.as_ref().into();
+        return Err(ir_error!(token));
+    }
+
+    if let Some(x) = &value.interface_declaration_opt {
+        check_generic_bound(context, &x.with_generic_parameter);
+        let items: Vec<_> = x
+            .with_generic_parameter
+            .with_generic_parameter_list
+            .as_ref()
+            .into();
+        for item in items {
+            let _ret: IrResult<()> = Conv::conv(context, item);
+        }
+    }
+
+    if let Some(x) = &value.interface_declaration_opt0 {
+        match &*x.interface_declaration_opt0_group {
+            InterfaceDeclarationOpt0Group::ForScopedIdentifier(x) => {
+                check_proto(context, &value.identifier, &x.scoped_identifier);
+            }
+            InterfaceDeclarationOpt0Group::InterfaceInheritance(x) => {
+                let ancestors: Vec<&ScopedIdentifier> = x.interface_inheritance.as_ref().into();
+                for ancestor in ancestors {
+                    let path: GenericSymbolPath = ancestor.into();
+                    check_generic_refereence(context, &path);
+
+                    let _: IrResult<()> = context.block(|c| {
+                        let token: TokenRange = ancestor.into();
+                        let mut sig =
+                            Signature::from_path(c, path).ok_or_else(|| ir_error!(token))?;
+                        // Skip an ancestor that has ancestors to avoid infinite recursion
+                        // on self/cyclic inheritance.
+                        // TODO: this relies on nested inheritance being unsupported; once
+                        // it is supported, the inheritance tree must be traversed to detect
+                        // cycles instead.
+                        if symbol_table::get(sig.symbol).unwrap().kind.has_ancestors() {
+                            return Ok(());
+                        }
+
+                        sig.normalize();
+                        let definition = get_interface_definition(&sig, token)?;
+
+                        c.push_generic_map(sig.to_generic_map());
+                        let ret = conv_interface(c, &definition);
+                        c.pop_generic_map();
+
+                        ret
+                    });
+                }
+            }
+        }
+    }
+
+    if let Some(x) = &value.interface_declaration_opt1
+        && let Some(x) = &x.with_parameter.with_parameter_opt
+    {
+        let items: Vec<_> = x.with_parameter_list.as_ref().into();
+        for item in items {
+            let _ret: IrResult<()> = Conv::conv(context, item);
+        }
+    }
+
+    for x in &value.interface_declaration_list {
+        let items: Vec<_> = x.interface_group.as_ref().into();
+        for item in items {
+            match item {
+                InterfaceItem::GenerateItem(x) => {
+                    let _: IrResult<ir::DeclarationBlock> =
+                        Conv::conv(context, x.generate_item.as_ref());
+                }
+                InterfaceItem::ModportDeclaration(x) => {
+                    let _: IrResult<()> = Conv::conv(context, x.modport_declaration.as_ref());
+                }
+            }
+        }
+    }
+
+    context.pop_namespace();
+
+    Ok(())
+}
+
+fn get_interface_definition(sig: &Signature, token: TokenRange) -> IrResult<InterfaceDeclaration> {
+    if let SymbolKind::Interface(x) = symbol_table::get(sig.symbol).unwrap().kind {
+        let definition = x
+            .definition
+            .and_then(definition_table::get)
+            .ok_or_else(|| ir_error!(token))?;
+        let Definition::Interface(x) = definition.as_ref() else {
+            unreachable!()
+        };
+        Ok(x.clone())
+    } else {
+        Err(ir_error!(token))
+    }
+}
+
 impl Conv<&InterfaceDeclaration> for ir::Interface {
     fn conv(context: &mut Context, value: &InterfaceDeclaration) -> IrResult<Self> {
         // each top-level component has independent context
@@ -302,55 +408,7 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::Interface);
 
-        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
-            && matches!(symbol.found.kind, SymbolKind::Interface(ref x) if !x.is_proto)
-        {
-            context.push_namespace(symbol.found.inner_namespace());
-        } else {
-            let token: TokenRange = value.identifier.as_ref().into();
-            return Err(ir_error!(token));
-        }
-
-        if let Some(x) = &value.interface_declaration_opt {
-            check_generic_bound(&mut context, &x.with_generic_parameter);
-            let items: Vec<_> = x
-                .with_generic_parameter
-                .with_generic_parameter_list
-                .as_ref()
-                .into();
-            for item in items {
-                let _ret: IrResult<()> = Conv::conv(&mut context, item);
-            }
-        }
-
-        if let Some(x) = &value.interface_declaration_opt0 {
-            check_proto(&mut context, &value.identifier, &x.scoped_identifier);
-        }
-
-        if let Some(x) = &value.interface_declaration_opt1
-            && let Some(x) = &x.with_parameter.with_parameter_opt
-        {
-            let items: Vec<_> = x.with_parameter_list.as_ref().into();
-            for item in items {
-                let _ret: IrResult<()> = Conv::conv(&mut context, item);
-            }
-        }
-
-        for x in &value.interface_declaration_list {
-            let items: Vec<_> = x.interface_group.as_ref().into();
-            for item in items {
-                match item {
-                    InterfaceItem::GenerateItem(x) => {
-                        let _: IrResult<ir::DeclarationBlock> =
-                            Conv::conv(&mut context, x.generate_item.as_ref());
-                    }
-                    InterfaceItem::ModportDeclaration(x) => {
-                        let _: IrResult<()> =
-                            Conv::conv(&mut context, x.modport_declaration.as_ref());
-                    }
-                }
-            }
-        }
+        let ret = conv_interface(&mut context, value);
 
         let var_paths = context.drain_var_paths();
         let func_paths = context.drain_func_paths();
@@ -364,6 +422,8 @@ impl Conv<&InterfaceDeclaration> for ir::Interface {
 
         context.pop_namespace();
         upper_context.inherit(&mut context);
+
+        ret?;
 
         Ok(ir::Interface {
             name: value.identifier.text(),

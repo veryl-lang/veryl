@@ -6075,6 +6075,51 @@ fn invisible_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface b_if {
+        var b: logic;
+        modport mp_b {
+            b: input,
+        }
+    }
+    interface ab_if inherit a_if, b_if {
+        modport mp_ab {
+            a: input,
+            b: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface ab_if inherit a_if {
+        modport mp_ab {
+            a: input,
+            b: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
 }
 
 #[test]
@@ -7577,6 +7622,60 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface b_if {
+        var b: logic;
+        modport mp_b {
+            b: input,
+        }
+    }
+    interface ab_if inherit a_if, b_if {
+        modport mp_ab {
+            ..same(mp_a, mp_b)
+        }
+    }
+    module c_module (
+        ab: modport ab_if::mp_ab,
+    ) {
+        let _a: logic = ab.a;
+        let _b: logic = ab.b;
+    }
+    module d_module {
+        inst ab: ab_if;
+        assign ab.a = 0;
+        assign ab.b = 1;
+        inst c: c_module(ab: ab);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface ab_if inherit a_if {
+    }
+    module c_module {
+        inst ab: ab_if;
+        assign ab.a = 0;
+        assign ab.b = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
 }
 
 #[test]
@@ -16390,4 +16489,161 @@ fn project_properties() {
 
     let errors = analyze_with_project_properties(code, properties);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn invalid_interface_inheritance() {
+    let code = r#"
+    module ModuleA {}
+    interface InterfaceB inherit ModuleA {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidInheritance { .. }
+    ));
+
+    let code = r#"
+    proto interface InterfaceA {}
+    interface InterfaceB inherit InterfaceA {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidInheritance { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA inherit InterfaceA {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidInheritance { .. }
+    ));
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidInheritance { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA #(param A: u32 = 0) {}
+    interface InterfaceB inherit InterfaceA {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidInheritance { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {}
+    interface InterfaceB inherit InterfaceA {}
+    interface InterfaceC inherit InterfaceB {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidInheritance { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    interface InterfaceB {
+        var b: logic;
+        modport mp {
+            b: input,
+        }
+    }
+    interface InterfaceC inherit InterfaceA, InterfaceB {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidInheritance { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    interface InterfaceB inherit InterfaceA {
+        var b: logic;
+        modport mp {
+            b: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidInheritance { .. }
+    ));
+
+    let code = r#"
+    interface InterfaceA::<W: u32> {
+        var a: logic<W>;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface InterfaceB::<W: u32> {
+        var b: logic<W>;
+        modport mp_b {
+            b: input,
+        }
+    }
+    interface InterfaceC::<W: u32> inherit InterfaceA::<W>, InterfaceB::<W> {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA::<W: u32> {
+        var a: logic<W>;
+        modport mp_a {
+            a: input,
+        }
+    }
+    alias interface InterfaceA32 = InterfaceA::<32>;
+    interface InterfaceB inherit InterfaceA32 {
+        var b: logic<32>;
+        modport mp_ab {
+            a: input,
+            b: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoInterfaceA {}
+    interface InterfaceA::<IF: ProtoInterfaceA> inherit IF {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidInheritance { .. }
+    ));
 }

@@ -643,6 +643,13 @@ pub trait VerylWalker {
         after!(self, include, arg);
     }
 
+    /// Semantic action for non-terminal 'Inherit'
+    fn inherit(&mut self, arg: &Inherit) {
+        before!(self, inherit, arg);
+        self.veryl_token(&arg.inherit_token);
+        after!(self, inherit, arg);
+    }
+
     /// Semantic action for non-terminal 'Initial'
     fn initial(&mut self, arg: &Initial) {
         before!(self, initial, arg);
@@ -3012,8 +3019,15 @@ pub trait VerylWalker {
             self.with_generic_parameter(&x.with_generic_parameter);
         }
         if let Some(ref x) = arg.interface_declaration_opt0 {
-            self.r#for(&x.r#for);
-            self.scoped_identifier(&x.scoped_identifier);
+            match &*x.interface_declaration_opt0_group {
+                InterfaceDeclarationOpt0Group::ForScopedIdentifier(x) => {
+                    self.r#for(&x.r#for);
+                    self.scoped_identifier(&x.scoped_identifier);
+                }
+                InterfaceDeclarationOpt0Group::InterfaceInheritance(x) => {
+                    self.interface_inheritance(&x.interface_inheritance);
+                }
+            }
         }
         if let Some(ref x) = arg.interface_declaration_opt1 {
             self.with_parameter(&x.with_parameter);
@@ -3024,6 +3038,18 @@ pub trait VerylWalker {
         }
         self.r_brace(&arg.r_brace);
         after!(self, interface_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'InterfaceInheritance'
+    fn interface_inheritance(&mut self, arg: &InterfaceInheritance) {
+        before!(self, interface_inheritance, arg);
+        self.inherit(&arg.inherit);
+        self.scoped_identifier(&arg.scoped_identifier);
+        for x in &arg.interface_inheritance_list {
+            self.comma(&x.comma);
+            self.scoped_identifier(&x.scoped_identifier);
+        }
+        after!(self, interface_inheritance, arg);
     }
 
     /// Semantic action for non-terminal 'InterfaceGroup'

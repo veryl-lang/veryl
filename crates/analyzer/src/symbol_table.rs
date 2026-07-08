@@ -9,7 +9,9 @@ use crate::scope;
 use crate::sv_system_function;
 use crate::symbol::{
     ConnectTarget, Direction, DocComment, GenericBoundKind, GenericMap, GenericTable,
-    GenericTables, InstanceProperty, Symbol, SymbolId, SymbolKind, TestProperty, TypeKind,
+    GenericTables, InstanceProperty, ModportDefault, ModportFunctionMemberProperty,
+    ModportProperty, ModportVariableMemberProperty, Symbol, SymbolId, SymbolKind, TestProperty,
+    TypeKind,
 };
 use crate::symbol_path::{
     GenericSymbol, GenericSymbolPath, GenericSymbolPathNamespace, SymbolPath, SymbolPathNamespace,
@@ -22,6 +24,7 @@ use log::trace;
 use msb::check_msb;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 use veryl_parser::resource_table::{self, PathId, StrId};
@@ -873,7 +876,37 @@ impl SymbolTable {
                 max_depth = symbol.namespace.depth();
             }
         }
-        found
+
+        if found.is_some() {
+            return found;
+        }
+
+        if context
+            .last_found_type
+            .map(|x| self.symbol_table.get(&x).unwrap().kind.has_ancestors())
+            .unwrap_or(false)
+        {
+            for inherited_interface in scope::inherited_interface_get(context.scope) {
+                if context
+                    .define_context
+                    .exclusive(&inherited_interface.define_context)
+                {
+                    continue;
+                }
+                for id in scope::locals_get(inherited_interface.source, name) {
+                    let symbol = self.symbol_table.get(&id).unwrap();
+                    if !symbol
+                        .namespace
+                        .define_context
+                        .exclusive(&inherited_interface.source_define_context)
+                    {
+                        return Some(symbol);
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     /// Lexical name lookup over the scope tree: walk from `scope` up the parent
@@ -953,6 +986,34 @@ impl SymbolTable {
                             .namespace
                             .define_context
                             .exclusive(&wildcard.source_define_context)
+                    {
+                        let dctx = symbol.namespace.define_context.clone();
+                        tier.push(candidate(id, symbol, dctx, true));
+                    }
+                }
+            }
+            if !tier.is_empty()
+                && let Some(result) = self.container_or_stash(
+                    resolve_tier(&tier, prefer_container),
+                    prefer_container,
+                    &mut fallback,
+                )
+            {
+                return result;
+            }
+
+            // Tier 3: inherited interfaces
+            let mut tier = Vec::new();
+            for inherited_interface in scope::inherited_interface_get(scope) {
+                if query_dctx.exclusive(&inherited_interface.define_context) {
+                    continue;
+                }
+                for id in scope::locals_get(inherited_interface.source, name) {
+                    if let Some(symbol) = self.symbol_table.get(&id)
+                        && !symbol
+                            .namespace
+                            .define_context
+                            .exclusive(&inherited_interface.source_define_context)
                     {
                         let dctx = symbol.namespace.define_context.clone();
                         tier.push(candidate(id, symbol, dctx, true));
@@ -1813,6 +1874,380 @@ impl SymbolTable {
         None
     }
 
+    pub fn resolve_interfaces(&mut self) -> Vec<AnalyzerError> {
+        let mut errors = Vec::new();
+        let mut visited = Vec::new();
+
+        let interface_list: Vec<_> = self
+            .symbol_table
+            .values()
+            .filter_map(|x| {
+                if matches!(x.kind, SymbolKind::Interface(_)) {
+                    Some(x.id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        self.skip_generic_args = true;
+        for id in interface_list {
+            let if_symbol = self.get(id).unwrap();
+            self.resolve_interface(&if_symbol, &mut errors, &mut visited);
+        }
+        self.skip_generic_args = false;
+
+        errors
+    }
+
+    fn resolve_interface(
+        &mut self,
+        if_symbol: &Symbol,
+        errors: &mut Vec<AnalyzerError>,
+        visited: &mut Vec<SymbolId>,
+    ) {
+        if visited.contains(&if_symbol.id) {
+            // This interface has already been resolved.
+            return;
+        }
+        visited.push(if_symbol.id);
+
+        let mut members = BTreeMap::default();
+        let mut modports = BTreeMap::default();
+
+        self.collect_interface_members(if_symbol, true, &mut members, &mut modports);
+        self.apply_interface_inheritances(if_symbol, &mut members, &mut modports, errors, visited);
+
+        for (modport, is_own_member) in modports.values() {
+            if !is_own_member {
+                continue;
+            }
+            self.link_modport_members(*modport, &members);
+        }
+        self.link_modports(if_symbol, &members, &modports);
+    }
+
+    fn collect_interface_members(
+        &self,
+        symbol: &Symbol,
+        is_own_member: bool,
+        members: &mut BTreeMap<StrId, SymbolId>,
+        modports: &mut BTreeMap<StrId, (SymbolId, bool)>,
+    ) {
+        if let SymbolKind::Interface(x) = &symbol.kind {
+            for id in &x.members {
+                let symbol = self.symbol_table.get(id).unwrap();
+                members.insert(symbol.token.text, symbol.id);
+                if matches!(symbol.kind, SymbolKind::Modport(_)) {
+                    modports.insert(symbol.token.text, (symbol.id, is_own_member));
+                }
+            }
+        }
+    }
+
+    fn apply_interface_inheritances(
+        &mut self,
+        symbol: &Symbol,
+        members: &mut BTreeMap<StrId, SymbolId>,
+        modports: &mut BTreeMap<StrId, (SymbolId, bool)>,
+        errors: &mut Vec<AnalyzerError>,
+        visited: &mut Vec<SymbolId>,
+    ) {
+        let ancestor_paths = if let SymbolKind::Interface(x) = &symbol.kind {
+            &x.ancestors
+        } else {
+            return;
+        };
+
+        let if_namespace = symbol.inner_namespace();
+        for ancestor_path in ancestor_paths {
+            let Some(ancestor_symbol) =
+                self.resolve_ancestor_interface(ancestor_path, &if_namespace)
+            else {
+                continue;
+            };
+
+            if !self.is_valid_ancestor_interface(symbol, &ancestor_symbol, members, errors) {
+                continue;
+            }
+
+            let target_scope = scope::intern_namespace(&if_namespace);
+            let target_define_context = if_namespace.define_context.clone();
+            let source_namespace = ancestor_symbol.inner_namespace();
+            let source_scope = scope::intern_namespace(&source_namespace);
+            scope::add_inherited_interface(
+                target_scope,
+                source_scope,
+                target_define_context,
+                source_namespace.define_context.clone(),
+                ancestor_path.clone(),
+            );
+
+            // The ancestor interface needs to be resolved before collecting its members.
+            self.resolve_interface(&ancestor_symbol, errors, visited);
+            self.collect_interface_members(&ancestor_symbol, false, members, modports);
+        }
+    }
+
+    fn resolve_ancestor_interface(
+        &self,
+        ancestor_path: &GenericSymbolPath,
+        namespace: &Namespace,
+    ) -> Option<Rc<Symbol>> {
+        let Ok(symbol) = self.resolve_generic_path(ancestor_path, namespace) else {
+            return None;
+        };
+        if let SymbolKind::AliasInterface(x) = &symbol.found.kind {
+            self.resolve_ancestor_interface(&x.target, namespace)
+        } else {
+            Some(symbol.found)
+        }
+    }
+
+    fn is_valid_ancestor_interface(
+        &self,
+        if_symbol: &Symbol,
+        ancestor_symbol: &Symbol,
+        members: &BTreeMap<StrId, SymbolId>,
+        errors: &mut Vec<AnalyzerError>,
+    ) -> bool {
+        if matches!(ancestor_symbol.kind, SymbolKind::GenericParameter(_))
+            || !ancestor_symbol.is_interface(false)
+        {
+            errors.push(AnalyzerError::invalid_inheritance(
+                &ancestor_symbol.token.to_string(),
+                "it is not interface",
+                &ancestor_symbol.token.into(),
+            ));
+            return false;
+        }
+
+        if ancestor_symbol.id == if_symbol.id {
+            errors.push(AnalyzerError::invalid_inheritance(
+                &ancestor_symbol.token.to_string(),
+                "it inherits itself",
+                &ancestor_symbol.token.into(),
+            ));
+            return false;
+        }
+
+        if ancestor_symbol.kind.has_parameters() {
+            errors.push(AnalyzerError::invalid_inheritance(
+                &ancestor_symbol.token.to_string(),
+                "it is parameterized",
+                &ancestor_symbol.token.into(),
+            ));
+            return false;
+        }
+
+        let SymbolKind::Interface(ancestor_prop) = &ancestor_symbol.kind else {
+            unreachable!();
+        };
+
+        if !ancestor_prop.ancestors.is_empty() {
+            errors.push(AnalyzerError::invalid_inheritance(
+                &ancestor_symbol.token.to_string(),
+                "it inherits from other interfaces",
+                &ancestor_symbol.token.into(),
+            ));
+            return false;
+        }
+
+        for member in &ancestor_prop.members {
+            let member_symbol = self.symbol_table.get(member).unwrap();
+            if members.contains_key(&member_symbol.token.text) {
+                errors.push(AnalyzerError::invalid_inheritance(
+                    &ancestor_symbol.token.to_string(),
+                    &format!("{} is already defined", member_symbol.token.text),
+                    &ancestor_symbol.token.into(),
+                ));
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn link_modport_members(&mut self, modport: SymbolId, members: &BTreeMap<StrId, SymbolId>) {
+        let mp_symbol = self.get(modport).unwrap();
+        let SymbolKind::Modport(mp) = &mp_symbol.kind else {
+            unreachable!();
+        };
+
+        for mp_member_id in &mp.members {
+            let mut mp_member = self.get(*mp_member_id).unwrap();
+            let Some(target_id) = members.get(&mp_member.token.text) else {
+                continue;
+            };
+            match mp_member.kind {
+                SymbolKind::ModportFunctionMember(_) => {
+                    mp_member.kind =
+                        SymbolKind::ModportFunctionMember(ModportFunctionMemberProperty {
+                            function: *target_id,
+                        });
+                    self.update(mp_member);
+                }
+                SymbolKind::ModportVariableMember(x) => {
+                    mp_member.kind =
+                        SymbolKind::ModportVariableMember(ModportVariableMemberProperty {
+                            variable: *target_id,
+                            direction: x.direction,
+                        });
+                    self.update(mp_member);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn link_modports(
+        &mut self,
+        if_symbol: &Symbol,
+        members: &BTreeMap<StrId, SymbolId>,
+        modports: &BTreeMap<StrId, (SymbolId, bool)>,
+    ) {
+        for (mp_id, is_own_member) in modports.values() {
+            if !is_own_member {
+                continue;
+            }
+
+            if let Some(mut mp_symbol) = self.get(*mp_id)
+                && let SymbolKind::Modport(mp) = &mp_symbol.kind
+            {
+                let mut default_members =
+                    self.collect_modport_default_members(&mp_symbol, members, modports);
+
+                let mut members = mp.members.clone();
+                members.append(&mut default_members);
+
+                mp_symbol.kind = SymbolKind::Modport(ModportProperty {
+                    interface: if_symbol.id,
+                    members,
+                    default: mp.default.clone(),
+                });
+                self.update(mp_symbol);
+            }
+        }
+    }
+
+    fn collect_modport_default_members(
+        &mut self,
+        modport_symbol: &Symbol,
+        members: &BTreeMap<StrId, SymbolId>,
+        modports: &BTreeMap<StrId, (SymbolId, bool)>,
+    ) -> Vec<SymbolId> {
+        let symbol_table = self;
+
+        let mut ret = Vec::new();
+
+        if let SymbolKind::Modport(x) = &modport_symbol.kind
+            && let Some(default) = &x.default
+        {
+            let default_member_directions =
+                symbol_table.collect_modport_default_member_target_directions(default, modports);
+            let explicit_members: HashSet<_> = x
+                .members
+                .iter()
+                .map(|x| symbol_table.get(*x).unwrap().token.text)
+                .collect();
+            let mut default_members: Vec<_> = members
+                .iter()
+                .filter(|(text, id)| {
+                    if explicit_members.contains(text) {
+                        false
+                    } else if matches!(default, ModportDefault::Same(_)) {
+                        true
+                    } else {
+                        symbol_table
+                            .get(**id)
+                            .map(|x| matches!(x.kind, SymbolKind::Variable(_)))
+                            .unwrap_or(false)
+                    }
+                })
+                .collect();
+            // Sort by SymbolId to keep inserting order as the same as definition order
+            default_members.sort_by(|x, y| x.1.cmp(y.1));
+
+            let namespace = modport_symbol.inner_namespace();
+            for (text, id) in default_members {
+                let direction = match default {
+                    ModportDefault::Input => Some(Direction::Input),
+                    ModportDefault::Output => Some(Direction::Output),
+                    ModportDefault::Same(_) => default_member_directions.get(text).copied(),
+                    ModportDefault::Converse(_) => {
+                        default_member_directions.get(text).map(|x| x.converse())
+                    }
+                };
+                let Some(direction) = direction else {
+                    continue;
+                };
+
+                let source_path = modport_symbol.token.source.get_path().unwrap();
+                let token = Token::generate(*text, source_path);
+                scope::insert_token(token.id, source_path, &namespace);
+                symbol_table.add_reference(*id, &token);
+
+                let kind = if matches!(direction, Direction::Import) {
+                    SymbolKind::ModportFunctionMember(ModportFunctionMemberProperty {
+                        function: *id,
+                    })
+                } else {
+                    SymbolKind::ModportVariableMember(ModportVariableMemberProperty {
+                        direction,
+                        variable: *id,
+                    })
+                };
+                let symbol = Symbol::new(&token, kind, &namespace, false, DocComment::default());
+                if let Some(id) = symbol_table.insert(&token, symbol) {
+                    ret.push(id);
+                }
+            }
+        }
+
+        ret
+    }
+
+    fn collect_modport_default_member_target_directions(
+        &self,
+        default: &ModportDefault,
+        modports: &BTreeMap<StrId, (SymbolId, bool)>,
+    ) -> HashMap<StrId, Direction> {
+        let mut ret = HashMap::default();
+
+        match default {
+            ModportDefault::Same(targets) | ModportDefault::Converse(targets) => {
+                for target in targets {
+                    let Some((mp_id, _)) = modports.get(&target.text) else {
+                        continue;
+                    };
+                    let Some(mp_symbol) = self.get(*mp_id) else {
+                        continue;
+                    };
+                    let SymbolKind::Modport(mp) = mp_symbol.kind else {
+                        continue;
+                    };
+
+                    for member in &mp.members {
+                        let Some(member_symbol) = self.get(*member) else {
+                            continue;
+                        };
+
+                        if let SymbolKind::ModportVariableMember(member) = member_symbol.kind {
+                            ret.insert(member_symbol.token.text, member.direction);
+                        } else if matches!(default, ModportDefault::Same(_))
+                            && matches!(member_symbol.kind, SymbolKind::ModportFunctionMember(_))
+                        {
+                            ret.insert(member_symbol.token.text, Direction::Import);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        ret
+    }
+
     pub fn add_bind(&mut self, bind: Bind) {
         self.bind_list.push(bind);
     }
@@ -1877,7 +2312,7 @@ impl SymbolTable {
     }
 
     fn resolve_generic_path(
-        &mut self,
+        &self,
         path: &GenericSymbolPath,
         namespace: &Namespace,
     ) -> Result<ResolveResult, ResolveError> {
@@ -2809,6 +3244,11 @@ pub fn add_import(import: Import) {
 pub fn apply_import() {
     clear_resolve_caches();
     SYMBOL_TABLE.with(|f| f.borrow_mut().apply_import());
+}
+
+pub fn resolve_interfaces() -> Vec<AnalyzerError> {
+    clear_resolve_caches();
+    SYMBOL_TABLE.with(|f| f.borrow_mut().resolve_interfaces())
 }
 
 pub fn add_bind(bind: Bind) {

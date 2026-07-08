@@ -86,6 +86,7 @@ pub enum TokenType {
     Import,
     Include,
     Initial,
+    Inherit,
     Inout,
     Input,
     Inside,
@@ -180,6 +181,7 @@ impl TokenType {
                 | TokenType::Import
                 | TokenType::Include
                 | TokenType::Initial
+                | TokenType::Inherit
                 | TokenType::Inout
                 | TokenType::Input
                 | TokenType::Inside
@@ -320,6 +322,7 @@ impl From<&str> for TokenType {
             "ImportTerm" => TokenType::Import,
             "IncludeTerm" => TokenType::Include,
             "InitialTerm" => TokenType::Initial,
+            "InheritTerm" => TokenType::Inherit,
             "InoutTerm" => TokenType::Inout,
             "InputTerm" => TokenType::Input,
             "InsideTerm" => TokenType::Inside,
@@ -464,6 +467,7 @@ impl std::fmt::Display for TokenType {
             TokenType::Import => "import",
             TokenType::Include => "include",
             TokenType::Initial => "initial",
+            TokenType::Inherit => "inherit",
             TokenType::Inout => "inout",
             TokenType::Input => "input",
             TokenType::Inside => "inside",

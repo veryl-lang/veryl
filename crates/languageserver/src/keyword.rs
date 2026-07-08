@@ -36,6 +36,7 @@ pub const KEYWORDS: &[&str] = &[
     "import",
     "include",
     "initial",
+    "inherit",
     "inout",
     "input",
     "inside",

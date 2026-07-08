@@ -889,6 +889,64 @@ module ModuleB {
 }
 
 #[test]
+fn interface_inheritance() {
+    let code = r#"
+    interface a_if::<W: u32> {
+        var a: logic<W>;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface ab_if::<W1: u32, W2: u32> inherit a_if::<W1> {
+        var b: logic<W2>;
+        modport mp_ab {
+            b: input,
+            ..same(mp_a)
+        }
+    }
+    module ModuleA::<W1: u32, W2: u32> (
+        ab: modport ab_if::<W1, W2>::mp_ab,
+    ) {}
+    module ModuleB {
+        inst ab: ab_if::<16, 32>;
+        always_comb {
+            ab.a = '0;
+            ab.b = '1;
+        }
+        inst u: ModuleA::<16, 32> (ab);
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+
+
+
+}
+module ModuleB {
+  var var0(ab.a): logic<16> = 16'hxxxx;
+  var var1(ab.b): logic<32> = 32'hxxxxxxxx;
+
+  comb {
+    var0 = '0;
+    var1 = '1;
+  }
+  inst u (
+    var0 <- var0;
+    var1 <- var1;
+  ) {
+    module ModuleA {
+      input var0(ab.a): logic<16> = 16'hxxxx;
+      input var1(ab.b): logic<32> = 32'hxxxxxxxx;
+
+    }
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
 fn array() {
     let code = r#"
     package PackageA {

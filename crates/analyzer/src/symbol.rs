@@ -1238,6 +1238,14 @@ impl SymbolKind {
         }
     }
 
+    pub fn has_parameters(&self) -> bool {
+        match self {
+            SymbolKind::Module(x) if !x.is_proto => !x.parameters.is_empty(),
+            SymbolKind::Interface(x) if !x.is_proto => !x.parameters.is_empty(),
+            _ => false,
+        }
+    }
+
     pub fn get_generic_parameters(&self) -> &[SymbolId] {
         match self {
             SymbolKind::Module(x) if !x.is_proto => &x.generic_parameters,
@@ -1247,6 +1255,13 @@ impl SymbolKind {
             SymbolKind::Struct(x) => &x.generic_parameters,
             SymbolKind::Union(x) => &x.generic_parameters,
             _ => &[],
+        }
+    }
+
+    pub fn has_ancestors(&self) -> bool {
+        match self {
+            SymbolKind::Interface(x) => !x.ancestors.is_empty(),
+            _ => false,
         }
     }
 
@@ -2529,6 +2544,7 @@ pub struct InterfaceProperty {
     pub generic_parameters: Vec<SymbolId>,
     pub generic_consts: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
+    pub ancestors: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
     pub members: Vec<SymbolId>,
     // `None` for a proto interface, which has no definition.

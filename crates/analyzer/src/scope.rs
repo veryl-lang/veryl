@@ -84,6 +84,14 @@ pub struct WildcardImport {
 }
 
 #[derive(Debug, Clone)]
+pub struct InheritedInterface {
+    pub source: ScopeId,
+    pub define_context: DefineContext,
+    pub source_define_context: DefineContext,
+    pub interface_path: Rc<GenericSymbolPath>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Scope {
     pub id: ScopeId,
     pub parent: Option<ScopeId>,
@@ -95,6 +103,7 @@ pub struct Scope {
     pub imports: HashMap<StrId, SVec<ImportBinding>>,
     /// Wildcard imports local to this scope.
     pub wildcards: SVec<WildcardImport>,
+    pub inherited_interfaces: SVec<InheritedInterface>,
 }
 
 /// Explicit-parent scope tree built during pass1; `current` is the sole pass1
@@ -136,6 +145,7 @@ impl ScopeArena {
             locals: HashMap::default(),
             imports: HashMap::default(),
             wildcards: SVec::new(),
+            inherited_interfaces: SVec::new(),
         };
         Self {
             scopes: vec![root],
@@ -188,6 +198,7 @@ impl ScopeArena {
                 locals: HashMap::default(),
                 imports: HashMap::default(),
                 wildcards: SVec::new(),
+                inherited_interfaces: SVec::new(),
             });
             self.intern.insert((parent.0, name), id.0);
             id
@@ -260,6 +271,24 @@ impl ScopeArena {
                 define_context,
                 source_define_context,
                 package_path: Rc::new(package_path),
+            });
+    }
+
+    fn add_inherited_interface(
+        &mut self,
+        scope: ScopeId,
+        source: ScopeId,
+        define_context: DefineContext,
+        source_define_context: DefineContext,
+        interface_path: GenericSymbolPath,
+    ) {
+        self.scopes[scope.0 as usize]
+            .inherited_interfaces
+            .push(InheritedInterface {
+                source,
+                define_context,
+                source_define_context,
+                interface_path: Rc::new(interface_path),
             });
     }
 
@@ -554,6 +583,24 @@ pub fn add_wildcard(
     })
 }
 
+pub fn add_inherited_interface(
+    scope: ScopeId,
+    source: ScopeId,
+    define_context: DefineContext,
+    source_define_context: DefineContext,
+    interface_path: GenericSymbolPath,
+) {
+    SCOPE_ARENA.with(|f| {
+        f.borrow_mut().add_inherited_interface(
+            scope,
+            source,
+            define_context,
+            source_define_context,
+            interface_path,
+        )
+    })
+}
+
 pub fn name_path(scope: ScopeId) -> Vec<StrId> {
     SCOPE_ARENA.with(|f| f.borrow().name_path(scope))
 }
@@ -740,6 +787,16 @@ pub fn wildcards_get(scope: ScopeId) -> SVec<WildcardImport> {
             .scopes
             .get(scope.0 as usize)
             .map(|s| s.wildcards.clone())
+            .unwrap_or_default()
+    })
+}
+
+pub fn inherited_interface_get(scope: ScopeId) -> SVec<InheritedInterface> {
+    SCOPE_ARENA.with(|f| {
+        f.borrow()
+            .scopes
+            .get(scope.0 as usize)
+            .map(|s| s.inherited_interfaces.clone())
             .unwrap_or_default()
     })
 }

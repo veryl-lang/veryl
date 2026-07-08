@@ -1,0 +1,60 @@
+// interface inheritance
+
+package Package91A {
+    type T = logic<8>;
+}
+
+interface Interface91A {
+    import Package91A::*;
+
+    var a: T;
+
+    modport mp_a {
+        a: input,
+    }
+}
+
+package Package91B::<W: u32> {
+    type T = logic<W>;
+}
+
+interface Interface91B::<W: u32> {
+    import Package91B::<W>::*;
+
+    var b: T;
+
+    modport mp_b {
+        b: input,
+    }
+}
+
+package Package91C::<W: u32> {
+    type T = logic<W>;
+}
+
+interface Interface91C::<W1: u32, W2: u32> inherit Interface91A, Interface91B::<W1> {
+    import Package91C::<W2>::*;
+
+    var c: T;
+
+    modport mp_abc {
+        c: input,
+        ..same(mp_a, mp_b)
+    }
+}
+
+module Module91A::<W1: u32, W2: u32> (
+    abc: modport Interface91C::<W1, W2>::mp_abc,
+) {}
+
+module Module91B {
+    inst abc: Interface91C::<16, 32>;
+
+    always_comb {
+        abc.a = 0;
+        abc.b = 0;
+        abc.c = 0;
+    }
+
+    inst d: Module91A::<16, 32> ( abc );
+}

@@ -139,6 +139,7 @@ IfTerm                : <INITIAL, Generic                                       
 ImportTerm            : <INITIAL, Generic                                             >'import'                                                                              : Token; // Keyword: Statement
 IncludeTerm           : <INITIAL, Generic                                             >'include'                                                                             : Token; // Keyword: Structure
 InitialTerm           : <INITIAL, Generic                                             >'initial'                                                                             : Token; // Keyword: Statement
+InheritTerm           : <INITIAL, Generic                                             >'inherit'                                                                             : Token; // Keyword: Structure
 InoutTerm             : <INITIAL, Generic                                             >'inout'                                                                               : Token; // Keyword: Direction
 InputTerm             : <INITIAL, Generic                                             >'input'                                                                               : Token; // Keyword: Direction
 InsideTerm            : <INITIAL, Generic                                             >'inside'                                                                              : Token; // Keyword: Conditional
@@ -288,6 +289,7 @@ IfResetToken       : IfResetTerm       : Token Comments;
 IfToken            : IfTerm            : Token Comments;
 ImportToken        : ImportTerm        : Token Comments;
 IncludeToken       : IncludeTerm       : Token Comments;
+InheritToken       : InheritTerm       : Token Comments;
 InitialToken       : InitialTerm       : Token Comments;
 InoutToken         : InoutTerm         : Token Comments;
 InputToken         : InputTerm         : Token Comments;
@@ -446,6 +448,7 @@ IfReset       : IfResetToken       : VerylToken;
 Import        : ImportToken        : VerylToken;
 In            : InToken            : VerylToken;
 Include       : IncludeToken       : VerylToken;
+Inherit       : InheritToken       : VerylToken;
 Initial       : InitialToken       : VerylToken;
 Inout         : InoutToken         : VerylToken;
 Input         : InputToken         : VerylToken;
@@ -940,7 +943,9 @@ ModuleGroup: { Attribute } ( LBrace { ModuleGroup } RBrace | ModuleItem );
 
 ModuleItem: GenerateItem;
 
-InterfaceDeclaration: Interface Identifier [ WithGenericParameter ] [ For ScopedIdentifier ] [ WithParameter ] LBrace { InterfaceGroup } RBrace;
+InterfaceDeclaration: Interface Identifier [ WithGenericParameter ] [ ( For ScopedIdentifier ) | InterfaceInheritance ] [ WithParameter ] LBrace { InterfaceGroup } RBrace;
+
+InterfaceInheritance: Inherit ScopedIdentifier { Comma ScopedIdentifier };
 
 InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
 

@@ -454,6 +454,17 @@ group_to_item!(Generate);
 group_to_item!(Package);
 group_to_item!(Description);
 
+impl<'a> From<&'a InterfaceInheritance> for Vec<&'a ScopedIdentifier> {
+    fn from(x: &'a InterfaceInheritance) -> Self {
+        let mut ret = Vec::new();
+        ret.push(x.scoped_identifier.as_ref());
+        for x in &x.interface_inheritance_list {
+            ret.push(x.scoped_identifier.as_ref());
+        }
+        ret
+    }
+}
+
 impl Expression {
     pub fn unwrap_factor(&self) -> Option<&Factor> {
         let exp = &*self.if_expression;
