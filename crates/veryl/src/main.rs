@@ -116,6 +116,20 @@ fn main() -> Result<ExitCode> {
 
     let mut stopwatch = StopWatch::new();
 
+    // `veryl test` builds its own components; the other analyzing
+    // commands freshen their manifests here.
+    if matches!(
+        command,
+        Commands::Check(_)
+            | Commands::Build(_)
+            | Commands::Doc(_)
+            | Commands::Dump(_)
+            | Commands::Synth(_)
+            | Commands::Publish(_)
+    ) {
+        cmd_test::build_component_manifests(&metadata);
+    }
+
     let ret = match command {
         Commands::New(x) => cmd_new::CmdNew::new(x).exec(),
         Commands::Init(x) => cmd_init::CmdInit::new(x).exec(),

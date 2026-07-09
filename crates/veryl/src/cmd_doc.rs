@@ -1,6 +1,7 @@
 use crate::OptDoc;
-use crate::doc::{DocBuilder, TopLevelItem};
+use crate::doc::{ComponentItem, DocBuilder, TopLevelItem};
 use crate::pipeline::{self, AnalyzeOptions};
+use log::warn;
 use miette::Result;
 use std::collections::BTreeMap;
 use veryl_analyzer::symbol::{SymbolId, SymbolKind};
@@ -86,12 +87,52 @@ impl CmdDoc {
         let proto_modules: Vec<_> = proto_modules.into_values().collect();
         let interfaces: Vec<_> = interfaces.into_values().collect();
         let packages: Vec<_> = packages.into_values().collect();
+        let components = gather_components(metadata);
 
-        let builder = DocBuilder::new(metadata, modules, proto_modules, interfaces, packages)?;
+        let builder = DocBuilder::new(
+            metadata,
+            modules,
+            proto_modules,
+            interfaces,
+            packages,
+            components,
+        )?;
         builder.build()?;
 
         Ok(true)
     }
+}
+
+/// The project's own `[[components]]` exports, documented from their
+/// interface manifests. A package with no manifest yet (never built nor
+/// published) contributes no pages, so its exports are unknown here.
+fn gather_components(metadata: &Metadata) -> Vec<ComponentItem> {
+    if metadata.components.is_empty() {
+        return vec![];
+    }
+    let root = metadata.project_path();
+    let target_dir = root.join("target/veryl-components");
+    let mut ret = BTreeMap::new();
+    for def in &metadata.components {
+        let manifests = def.collect_manifests(&root, &target_dir);
+        if manifests.is_empty() {
+            warn!(
+                "component package ({}) has no interface manifest; its components get no pages — the build failed or cargo is unavailable (a manifest committed by `veryl publish` also works)",
+                def.path.display()
+            );
+        }
+        for (name, manifest) in manifests {
+            // First declaration wins, as everywhere exports are collected.
+            ret.entry(name.clone()).or_insert_with(|| ComponentItem {
+                // Prefixed to avoid clashing with a Veryl item of the
+                // same name.
+                file_name: format!("component_{name}"),
+                name,
+                manifest,
+            });
+        }
+    }
+    ret.into_values().collect()
 }
 
 fn fmt_generic_parameters(name: &str, params: &[SymbolId]) -> String {

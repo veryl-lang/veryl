@@ -7,16 +7,25 @@ use std::path::PathBuf;
 use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::symbol_table;
 use veryl_metadata::WaveFormFormat;
-use veryl_metadata::{FilelistType, Metadata, SimType, WaveFormTarget};
+use veryl_metadata::{ComponentBackendKind, FilelistType, Metadata, SimType, WaveFormTarget};
 use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::text_table;
-use veryl_simulator::ir::{Config, Ir, ProtoModuleCache, build_ir_cached};
+use veryl_simulator::ir::{ComponentLibrary, Config, Ir, ProtoModuleCache, build_ir_cached};
 use veryl_simulator::output_buffer;
 use veryl_simulator::simulator::Simulator;
 use veryl_simulator::simulator_error::SimulatorError;
 use veryl_simulator::testbench::{TestResult, run_native_testbench};
 use veryl_simulator::wave_dumper::WaveDumper;
 use veryl_simulator::wavedrom::{self, SignalKind, classify_signals, parse_wavedrom};
+
+/// A fresh random base seed for a test run, used when neither `--seed` nor
+/// `[test].seed` pins one. A new `RandomState` draws OS entropy at process
+/// start, so this avoids pulling in an RNG dependency.
+fn random_seed() -> u64 {
+    use std::collections::hash_map::RandomState;
+    use std::hash::BuildHasher;
+    RandomState::new().hash_one(std::process::id())
+}
 
 pub struct CmdTest {
     opt: OptTest,
@@ -103,6 +112,29 @@ impl CmdTest {
             }
         }
         let combined_defines = metadata.test.defines.clone();
+
+        // `[[components]]` cargo packages build before analysis: the analyzer
+        // reads their interface manifests, so building afterwards would
+        // leave the checks one edit behind — and a stale-manifest error
+        // would then block the very run that refreshes the manifest.
+        // Dependency components live behind the lockfile, which `Metadata`
+        // loads lazily; resolve it now (the later build reuses the result).
+        if let Err(e) = metadata.update_lockfile() {
+            warn!("Failed to update lockfile: {e}");
+        }
+        let dependency_components = match metadata.collect_dependency_components() {
+            Ok(x) => x,
+            Err(e) => {
+                warn!("Failed to collect dependency components: {e}");
+                vec![]
+            }
+        };
+        let component_libraries =
+            if !metadata.components.is_empty() || !dependency_components.is_empty() {
+                Some(build_component_libraries(metadata, &dependency_components))
+            } else {
+                None
+            };
 
         let mut ir = veryl_analyzer::ir::Ir::default();
         build.exec(
@@ -192,6 +224,11 @@ impl CmdTest {
             // module that runs long benefits from `cc` too.  Override with
             // VERYL_AOT_C_MIN_STMTS to restore a floor.
             aot_c_min_stmts: 0,
+            seed: self
+                .opt
+                .seed
+                .or(metadata.test.seed)
+                .unwrap_or_else(random_seed),
             use_4state: self.opt.four_state || metadata.test.four_state,
             ..Config::default()
         };
@@ -228,6 +265,12 @@ impl CmdTest {
         }
 
         if !pending_native.is_empty() {
+            info!("Test seed: {} (reproduce with --seed)", config.seed);
+            if let Some(libraries) = component_libraries {
+                config.component_libraries = libraries;
+                config.component_file_base = Some(metadata.project_path());
+            }
+
             let num_threads = std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1)
@@ -462,6 +505,413 @@ impl CmdTest {
     }
 }
 
+/// Freshens the project's own `[[components]]` interface manifests before
+/// analysis, so `$comp` names resolve on the first run of any analyzing
+/// command. Dependencies are left to their committed manifests, which
+/// match the locked sources by construction. A failed build drops the
+/// package's stale sidecar, so analysis falls back to the committed
+/// manifest rather than pre-edit interface data.
+pub fn build_component_manifests(metadata: &Metadata) {
+    if metadata.components.is_empty()
+        || metadata.test.component_backend == Some(ComponentBackendKind::Wasm)
+        || !cargo_available()
+    {
+        return;
+    }
+    let project_root = metadata.project_path();
+    let target_dir = project_root.join("target/veryl-components");
+    for def in &metadata.components {
+        let crate_dir = project_root.join(&def.path);
+        if !crate_dir.is_dir() {
+            continue;
+        }
+        let label = def.path.display().to_string();
+        if build_component_artifact(&label, &crate_dir, &target_dir, false).is_none()
+            && let Some(sidecar) = veryl_metadata::component_crate_name(&crate_dir)
+                .map(|n| veryl_metadata::sidecar_manifest_path(&target_dir, &n))
+        {
+            let _ = std::fs::remove_file(&sidecar);
+        }
+    }
+}
+
+fn cargo_available() -> bool {
+    std::process::Command::new("cargo")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// Builds every `[[components]]` cargo package (release, shared target
+/// dir) of the project and its direct dependencies, and returns the
+/// resolved library paths keyed by export name (`<project>::<name>` for
+/// dependency components), enumerated from the chosen artifact's manifest.
+/// Backend selection: `[test] component_backend` pins it; otherwise source
+/// when cargo is available, with a fallback to a committed `wasm =`
+/// prebuilt. A package that cannot be resolved is reported and left out,
+/// so tests using its components fail at load time with an
+/// unknown-component error.
+fn build_component_libraries(
+    metadata: &Metadata,
+    dependencies: &[veryl_metadata::DependencyComponents],
+) -> std::collections::HashMap<String, ComponentLibrary> {
+    let project_root = metadata.project_path();
+    let project_target_dir = project_root.join("target/veryl-components");
+
+    struct ComponentJob {
+        /// Package identity in messages: the declared path, prefixed by
+        /// the dependency project for dependency packages.
+        label: String,
+        /// `$comp` name prefix (`<project>::`) for dependency components.
+        prefix: String,
+        crate_dir: PathBuf,
+        target_dir: PathBuf,
+        wasm: Option<PathBuf>,
+        from_dependency: bool,
+    }
+
+    let mut jobs: Vec<ComponentJob> = Vec::new();
+    for def in &metadata.components {
+        jobs.push(ComponentJob {
+            label: def.path.display().to_string(),
+            prefix: String::new(),
+            crate_dir: project_root.join(&def.path),
+            target_dir: project_target_dir.clone(),
+            wasm: def.wasm.as_ref().map(|w| project_root.join(w)),
+            from_dependency: false,
+        });
+    }
+    for dep in dependencies {
+        for def in &dep.components {
+            jobs.push(ComponentJob {
+                label: format!("{}::{}", dep.project, def.path.display()),
+                prefix: format!("{}::", dep.project),
+                crate_dir: dep.root.join(&def.path),
+                target_dir: dep.target_dir.clone(),
+                wasm: def.wasm.as_ref().map(|w| dep.root.join(w)),
+                from_dependency: true,
+            });
+        }
+    }
+
+    let choice = metadata.test.component_backend;
+    let cargo_available = cargo_available();
+
+    let mut libraries = std::collections::HashMap::new();
+    for ComponentJob {
+        label,
+        prefix,
+        crate_dir,
+        target_dir,
+        wasm,
+        from_dependency,
+    } in jobs
+    {
+        let use_wasm = match choice {
+            Some(ComponentBackendKind::Native) => false,
+            Some(ComponentBackendKind::Wasm) => {
+                if wasm.is_none() {
+                    error!("Component package ({label}) declares no `wasm =` prebuilt binary");
+                    continue;
+                }
+                true
+            }
+            None => {
+                if cargo_available {
+                    false
+                } else if wasm.is_some() {
+                    info!("Component package ({label}): cargo not found, using the prebuilt wasm");
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+
+        // When the artifact itself yields no export list, the committed
+        // manifest names the exports instead — the names the analyzer
+        // resolved — so e.g. a wasm with stripped custom sections still
+        // loads. Collisions are first-declaration-wins, mirroring
+        // `Metadata::collect_component_manifests`, so the analyzer and
+        // the simulator agree on which package a name means.
+        let register = |libraries: &mut std::collections::HashMap<String, ComponentLibrary>,
+                        exports: Option<Vec<String>>,
+                        path: &PathBuf| {
+            let exports = exports.or_else(|| {
+                let committed = veryl_metadata::read_committed_manifests(&crate_dir)?;
+                warn!(
+                    "Component package ({label}) artifact carries no veryl manifest; using the committed manifest's export names"
+                );
+                Some(committed.into_keys().collect())
+            });
+            let Some(exports) = exports else {
+                warn!(
+                    "Component package ({label}) exports no veryl manifest; its components are unavailable"
+                );
+                return;
+            };
+            for type_name in exports {
+                let key = format!("{prefix}{type_name}");
+                if libraries.contains_key(&key) {
+                    warn!(
+                        "component `{type_name}` is exported by more than one [[components]] package; the first declaration wins"
+                    );
+                    continue;
+                }
+                libraries.insert(
+                    key,
+                    ComponentLibrary {
+                        path: path.clone(),
+                        type_name,
+                    },
+                );
+            }
+        };
+
+        if use_wasm {
+            let path = wasm.unwrap();
+            if !path.exists() {
+                error!(
+                    "Component package ({label}) prebuilt wasm not found ({}); run `veryl publish` to generate it",
+                    path.display()
+                );
+                continue;
+            }
+            // The fallback path above already announced itself.
+            if choice == Some(ComponentBackendKind::Wasm) {
+                info!("Component package ({label}): using the prebuilt wasm");
+            }
+            let Ok(bytes) = std::fs::read(&path) else {
+                error!(
+                    "Component package ({label}) prebuilt wasm is unreadable ({})",
+                    path.display()
+                );
+                continue;
+            };
+            // Freshness is best-effort: when the sources are checked out
+            // next to the prebuilt, a stale binary is worth a warning. A
+            // veryl-version-only difference matters just for the project's
+            // own components; a dependency's prebuilt cannot be
+            // regenerated by the consumer.
+            if crate_dir.is_dir()
+                && let Ok(hash) = crate::component_publish::component_source_hash(&crate_dir)
+                && let Some(stored) = veryl_metadata::wasm_custom_section(
+                    &bytes,
+                    veryl_component_sys::VRL_WASM_SOURCE_HASH_SECTION,
+                )
+            {
+                use crate::component_publish::PrebuiltFreshness;
+                match crate::component_publish::prebuilt_freshness(
+                    stored,
+                    &hash,
+                    env!("CARGO_PKG_VERSION"),
+                ) {
+                    PrebuiltFreshness::Fresh => {}
+                    PrebuiltFreshness::SourcesChanged if from_dependency => warn!(
+                        "Component package ({label}) prebuilt wasm does not match the dependency sources; the dependency needs republishing"
+                    ),
+                    PrebuiltFreshness::SourcesChanged => warn!(
+                        "Component package ({label}) prebuilt wasm is stale (sources changed); run `veryl publish` to regenerate it"
+                    ),
+                    PrebuiltFreshness::VerylVersionChanged if !from_dependency => warn!(
+                        "Component package ({label}) prebuilt wasm was generated by a different veryl version; run `veryl publish` to regenerate it"
+                    ),
+                    PrebuiltFreshness::VerylVersionChanged => {}
+                }
+            }
+            let exports = veryl_metadata::ComponentManifest::parse_all_from_wasm(&bytes)
+                .map(|m| m.into_keys().collect());
+            register(&mut libraries, exports, &path);
+            continue;
+        }
+
+        match build_component_artifact(&label, &crate_dir, &target_dir, false) {
+            Some((path, manifest_json)) => {
+                let exports = manifest_json
+                    .as_deref()
+                    .map(veryl_metadata::parse_library_manifest)
+                    .filter(|m| !m.is_empty())
+                    .map(|m| m.into_keys().collect());
+                register(&mut libraries, exports, &path);
+            }
+            None => {
+                error!("Component package ({label}) is not available due to the build failure");
+            }
+        }
+    }
+    libraries
+}
+
+fn wasm_std_available() -> bool {
+    std::process::Command::new("rustc")
+        .args([
+            "--print",
+            "target-libdir",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
+        .output()
+        .is_ok_and(|out| {
+            out.status.success()
+                && PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()).exists()
+        })
+}
+
+/// Runs `cargo build --release` for one component package and returns the
+/// path of the produced artifact — the native cdylib, or the `.wasm`
+/// binary when `wasm` is set — together with the library's aggregated
+/// manifest JSON (native builds only; a wasm binary carries it in a
+/// custom section). Failures are reported and return `None`.
+pub(crate) fn build_component_artifact(
+    name: &str,
+    crate_dir: &std::path::Path,
+    target_dir: &std::path::Path,
+    wasm: bool,
+) -> Option<(PathBuf, Option<String>)> {
+    if !crate_dir.is_dir() {
+        error!(
+            "Component ({name}) path does not exist ({})",
+            crate_dir.display()
+        );
+        return None;
+    }
+    if wasm && !wasm_std_available() {
+        error!(
+            "Component ({name}): the wasm32-unknown-unknown standard library is not installed; run `rustup target add wasm32-unknown-unknown`"
+        );
+        return None;
+    }
+    info!("Building component ({name})");
+    let mut args = vec!["build", "--release", "--message-format=json"];
+    if wasm {
+        args.extend(["--target", "wasm32-unknown-unknown"]);
+    }
+    let output = std::process::Command::new("cargo")
+        .args(&args)
+        .current_dir(crate_dir)
+        .env("CARGO_TARGET_DIR", target_dir)
+        .output();
+    let output = match output {
+        Ok(output) => output,
+        Err(e) => {
+            error!("Failed to run cargo for component ({name}): {e}");
+            return None;
+        }
+    };
+    if !output.status.success() {
+        error!("Failed to build component ({name})");
+        // In --message-format=json mode the compiler diagnostics travel on
+        // stdout as JSON; render them, or the failure is opaque (stderr
+        // carries only the "could not compile" summary).
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if let Ok(msg) = serde_json::from_str::<serde_json::Value>(line)
+                && msg["reason"] == "compiler-message"
+                && let Some(rendered) = msg["message"]["rendered"].as_str()
+            {
+                eprint!("{rendered}");
+            }
+        }
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        return None;
+    }
+    let extensions: &[&str] = if wasm {
+        &[".wasm"]
+    } else {
+        &[".so", ".dylib", ".dll"]
+    };
+    let artifact = select_component_artifact(
+        &String::from_utf8_lossy(&output.stdout),
+        &crate_dir.join("Cargo.toml"),
+        extensions,
+    );
+    if artifact.is_none() {
+        error!(
+            "Component ({name}) did not produce a cdylib; add crate-type cdylib to its Cargo.toml"
+        );
+    }
+    // Sidecar manifest for analysis-time interface checks: extracted once
+    // right after the build, while the library is fresh. Prebuilt wasm
+    // carries its manifest in a custom section instead. A library without
+    // a manifest removes any leftover sidecar, so a since-deleted export
+    // cannot survive through a stale file.
+    let mut manifest_json = None;
+    if !wasm && let Some(path) = &artifact {
+        manifest_json = veryl_simulator::component::loader::library_manifest(path);
+        if manifest_json.is_none() {
+            warn!(
+                "Component ({name}) library does not export a veryl manifest; analysis-time interface checks are disabled"
+            );
+        }
+        if let Some(sidecar) = veryl_metadata::component_crate_name(crate_dir)
+            .map(|n| veryl_metadata::sidecar_manifest_path(target_dir, &n))
+        {
+            match &manifest_json {
+                Some(json) => {
+                    if let Err(e) = std::fs::write(&sidecar, json) {
+                        warn!(
+                            "Failed to write component manifest ({}): {e}",
+                            sidecar.display()
+                        );
+                    }
+                }
+                None => {
+                    let _ = std::fs::remove_file(&sidecar);
+                }
+            }
+        }
+    }
+    artifact.map(|path| (path, manifest_json))
+}
+
+/// Picks the component package's own cdylib artifact from cargo's
+/// `--message-format=json` output, matching by manifest path so that a
+/// dependency's cdylib is never selected in its place.
+fn select_component_artifact(
+    stdout: &str,
+    manifest_path: &std::path::Path,
+    extensions: &[&str],
+) -> Option<PathBuf> {
+    let mut artifact: Option<PathBuf> = None;
+    for line in stdout.lines() {
+        let Ok(msg) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if msg["reason"] != "compiler-artifact" {
+            continue;
+        }
+        let is_own_package = msg["manifest_path"]
+            .as_str()
+            .is_some_and(|p| paths_refer_to_same_file(std::path::Path::new(p), manifest_path));
+        if !is_own_package {
+            continue;
+        }
+        let is_cdylib = msg["target"]["kind"]
+            .as_array()
+            .is_some_and(|kinds| kinds.iter().any(|k| k == "cdylib"));
+        if !is_cdylib {
+            continue;
+        }
+        if let Some(files) = msg["filenames"].as_array() {
+            for file in files {
+                if let Some(path) = file.as_str()
+                    && extensions.iter().any(|ext| path.ends_with(ext))
+                {
+                    artifact = Some(PathBuf::from(path));
+                }
+            }
+        }
+    }
+    artifact
+}
+
+fn paths_refer_to_same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    a == b
+        || match (a.canonicalize(), b.canonicalize()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn prepare_native_test(
     ir: &veryl_analyzer::ir::Ir,
@@ -604,5 +1054,54 @@ fn remap_signal_names(scenario: &mut wavedrom::WaveScenario, ports: &[(String, S
         {
             signal.name = port_name.clone();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn artifact_line(manifest: &str, kind: &str, file: &str) -> String {
+        format!(
+            r#"{{"reason":"compiler-artifact","manifest_path":"{manifest}","target":{{"kind":["{kind}"]}},"filenames":["{file}"]}}"#
+        )
+    }
+
+    #[test]
+    fn artifact_selection_ignores_dependency_cdylibs() {
+        let stdout = format!(
+            "{}\n{}\nnot json\n{}\n",
+            artifact_line("/dep/Cargo.toml", "cdylib", "/t/libdep.so"),
+            artifact_line("/pkg/Cargo.toml", "lib", "/t/libpkg.rlib"),
+            artifact_line("/pkg/Cargo.toml", "cdylib", "/t/libpkg.so"),
+        );
+        let manifest = Path::new("/pkg/Cargo.toml");
+        let extensions = &[".so", ".dylib", ".dll"];
+        assert_eq!(
+            select_component_artifact(&stdout, manifest, extensions),
+            Some(PathBuf::from("/t/libpkg.so"))
+        );
+
+        // A dependency-only cdylib must not mask the missing-cdylib error.
+        let stdout = artifact_line("/dep/Cargo.toml", "cdylib", "/t/libdep.so");
+        assert_eq!(
+            select_component_artifact(&stdout, manifest, extensions),
+            None
+        );
+    }
+
+    #[test]
+    fn artifact_selection_filters_extensions() {
+        let stdout = artifact_line("/pkg/Cargo.toml", "cdylib", "/t/pkg.wasm");
+        let manifest = Path::new("/pkg/Cargo.toml");
+        assert_eq!(
+            select_component_artifact(&stdout, manifest, &[".wasm"]),
+            Some(PathBuf::from("/t/pkg.wasm"))
+        );
+        assert_eq!(
+            select_component_artifact(&stdout, manifest, &[".so", ".dylib", ".dll"]),
+            None
+        );
     }
 }
