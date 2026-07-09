@@ -20,6 +20,9 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: ${{ matrix.rust }}
+        # wasm32 std lets the wasm component transport tests build their
+        # guest fixture; without it they skip silently.
+        targets: wasm32-unknown-unknown
     - name: Checkout
       uses: actions/checkout@v6
       with:

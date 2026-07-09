@@ -21,6 +21,7 @@ veryl_testcase.*
 /crates/metadata/std/
 /crates/std/veryl/*.f
 /crates/std/veryl/target/
+/crates/simulator/tests/fixtures/test_component/target/
 .build/
 /crates/simulator/compare/*/csrc/
 /crates/simulator/compare/*/obj_dir/
