@@ -3528,6 +3528,9 @@ pub trait VerylWalker {
 
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
+        if self.skip_description_group(arg) {
+            return;
+        }
         before!(self, description_group, arg);
         for x in &arg.description_group_list {
             self.attribute(&x.attribute);
@@ -3603,6 +3606,11 @@ pub trait VerylWalker {
 
     fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
         None
+    }
+
+    /// Returning `true` skips the group and its whole subtree.
+    fn skip_description_group(&mut self, _arg: &DescriptionGroup) -> bool {
+        false
     }
 }
 

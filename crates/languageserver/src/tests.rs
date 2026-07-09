@@ -92,6 +92,18 @@ impl TestServer {
         let res = self.recv_message().await;
         serde_json::from_str(&res).unwrap()
     }
+
+    /// Receives until a response (a message carrying `result`) arrives,
+    /// skipping interleaved notifications.
+    async fn recv_response_skipping(&mut self) -> Value {
+        loop {
+            let msg = self.recv_message().await;
+            let value: Value = serde_json::from_str(&msg).unwrap();
+            if value.get("result").is_some() {
+                return value;
+            }
+        }
+    }
 }
 
 fn build_initialize(id: i64) -> Request {
@@ -129,6 +141,66 @@ fn build_did_open(text: &str) -> Request {
     Request::build("textDocument/didOpen")
         .params(json!(params))
         .finish()
+}
+
+fn build_completion(id: i64, line: u32, character: u32) -> Request {
+    let mut path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    path.pop();
+    path.pop();
+    path.push("test.veryl");
+    let uri = Url::from_file_path(path).unwrap();
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position { line, character },
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+        context: Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(".".to_string()),
+        }),
+    };
+
+    Request::build("textDocument/completion")
+        .params(json!(params))
+        .id(id)
+        .finish()
+}
+
+#[tokio::test]
+#[ntest::timeout(60000)]
+async fn completion_tb_component_method() {
+    let mut server = TestServer::new(Backend::new);
+
+    let req = build_initialize(1);
+    server.send_request(req).await;
+    let res = server.recv_response().await;
+    assert!(res.is_ok());
+
+    let req = build_initialized();
+    server.send_request(req).await;
+    let res = server.recv_notification().await;
+    assert_eq!(res.method(), "window/logMessage");
+
+    // `clk.` and `next();` are split across lines so the line under the
+    // cursor ends with the member access under completion while the whole
+    // document still parses.
+    let code = "#[test(t)]\nmodule t {\n    inst clk: $tb::clock_gen;\n    initial {\n        clk.\n        next();\n    }\n}\n";
+    let req = build_did_open(code);
+    server.send_request(req).await;
+
+    // Cursor right after `clk.` (0-based position).
+    let req = build_completion(2, 4, 12);
+    server.send_request(req).await;
+
+    let res = server.recv_response_skipping().await;
+    let items = res["result"].as_array().unwrap();
+    assert!(
+        items.iter().any(|x| x["label"] == "next"),
+        "expected `next` in completion items, got: {items:?}",
+    );
 }
 
 #[tokio::test]

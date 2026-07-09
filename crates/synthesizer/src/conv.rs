@@ -412,7 +412,10 @@ impl ConvContext {
                         }
                     }
                 }
-                Declaration::Initial(_)
+                // External components exist only in #[test] modules,
+                // which are never synthesized.
+                Declaration::External(_)
+                | Declaration::Initial(_)
                 | Declaration::Final(_)
                 | Declaration::Unsupported(_)
                 | Declaration::Null => {}
@@ -664,6 +667,9 @@ impl ConvContext {
                 Ok(())
             }
             Declaration::Initial(_) | Declaration::Final(_) => Ok(()),
+            // External components exist only in #[test] modules, which are
+            // never synthesized.
+            Declaration::External(_) => Ok(()),
             Declaration::Unsupported(_) | Declaration::Null => Ok(()),
         }
     }
