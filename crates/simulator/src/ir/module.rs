@@ -2602,7 +2602,7 @@ impl Conv<&air::Module> for ProtoModule {
             let cond_hoist_disabled =
                 std::env::var("VERYL_COND_HOIST_DISABLE").ok().as_deref() == Some("1");
             if !cond_hoist_disabled {
-                for (_event, stmts) in all_event_statements.iter_mut() {
+                for stmts in all_event_statements.values_mut() {
                     cond_hoist_transform(stmts, context);
                 }
             }
