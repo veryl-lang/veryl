@@ -24,6 +24,7 @@ pub struct Config {
     pub retain_component_body: bool,
     pub instance_depth_limit: usize,
     pub instance_total_limit: usize,
+    pub function_instance_depth_limit: usize,
     pub evaluate_size_limit: usize,
     pub evaluate_array_limit: usize,
     pub defines: HashSet<StrId>,
@@ -35,6 +36,7 @@ impl Default for Config {
             retain_component_body: false,
             instance_depth_limit: 1024,
             instance_total_limit: 1024 * 1024,
+            function_instance_depth_limit: 24,
             evaluate_size_limit: 1024 * 1024,
             evaluate_array_limit: 128,
             defines: HashSet::default(),
@@ -62,6 +64,16 @@ pub struct Context {
     pub inst_signatures: HashMap<StrId, Signature>,
     pub modport_signatures: Vec<HashMap<StrId, Signature>>,
     pub instance_history: InstanceHistory,
+    /// Recursion depth of `eval_factor_path`, bounded by `function_instance_depth_limit`.
+    pub function_eval_depth: usize,
+    /// Recorded when `function_eval_depth`'s limit is hit, since the eval path
+    /// may swallow an inserted error.
+    pub function_eval_overflow: Option<(TokenRange, usize)>,
+    /// Active generic-function call signatures, to detect exact re-entry as
+    /// infinite recursion. Not `instance_history`: that only marks a signature
+    /// complete via `set_instance_history`, which functions never call, so it
+    /// would stay wedged as "active" forever.
+    pub function_call_stack: Vec<Signature>,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
@@ -109,6 +121,12 @@ impl Context {
         std::mem::swap(&mut self.generic_maps, &mut tgt.generic_maps);
         std::mem::swap(&mut self.modport_signatures, &mut tgt.modport_signatures);
         std::mem::swap(&mut self.instance_history, &mut tgt.instance_history);
+        std::mem::swap(&mut self.function_eval_depth, &mut tgt.function_eval_depth);
+        std::mem::swap(
+            &mut self.function_eval_overflow,
+            &mut tgt.function_eval_overflow,
+        );
+        std::mem::swap(&mut self.function_call_stack, &mut tgt.function_call_stack);
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);

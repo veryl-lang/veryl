@@ -13249,6 +13249,70 @@ fn infinite_recursion() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InfiniteRecursion { .. }));
+
+    let code = r#"
+    package Pkg {
+        function f::<N: u32> -> logic<N> {
+            gen M: u32 = N;
+            return f::<M>();
+        }
+    }
+    module ModuleB {
+        let _a: logic<4> = Pkg::f::<4>();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InfiniteRecursion { .. }))
+    );
+}
+
+#[test]
+fn recursive_generic_function() {
+    let code = r#"
+    package Pkg {
+        function f::<N: u32> -> logic<N> {
+            gen M: u32 = N - 1;
+            var out: logic<N>;
+            if N == 1 {
+                out = 0;
+            } else {
+                out = {1'b0, f::<M>()};
+            }
+            return out;
+        }
+    }
+    module ModuleB {
+        let _a: logic<4> = Pkg::f::<4>();
+    }
+    "#;
+
+    let errors = analyze_with_large_stack(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package Pkg {
+        function f::<N: u32> -> logic<N> {
+            gen M: u32 = N - 1;
+            var out: logic<N>;
+            if N == 1 {
+                out = 0;
+            } else {
+                out = {1'b0, f::<M>()};
+            }
+            return out;
+        }
+    }
+    module ModuleB {
+        let _a: logic<20> = Pkg::f::<20>();
+    }
+    "#;
+
+    let errors = analyze_with_large_stack(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

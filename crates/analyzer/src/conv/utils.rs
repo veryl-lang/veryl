@@ -2042,6 +2042,29 @@ pub fn eval_factor_path(
     allow_unknown_value: bool,
     token: TokenRange,
 ) -> IrResult<ir::Factor> {
+    // Bounds recursion when a recursive generic function's self-call can't be
+    // resolved to a base case here; otherwise it recurses until the native
+    // stack overflows.
+    context.function_eval_depth += 1;
+    let ret = if context.function_eval_depth > context.config.function_instance_depth_limit {
+        if context.function_eval_overflow.is_none() {
+            context.function_eval_overflow = Some((token, context.function_eval_depth));
+        }
+        Err(ir_error!(token))
+    } else {
+        eval_factor_path_inner(context, symbol_path, var_path, allow_unknown_value, token)
+    };
+    context.function_eval_depth -= 1;
+    ret
+}
+
+fn eval_factor_path_inner(
+    context: &mut Context,
+    symbol_path: GenericSymbolPath,
+    var_path: VarPathSelect,
+    allow_unknown_value: bool,
+    token: TokenRange,
+) -> IrResult<ir::Factor> {
     let (path, select, _) = var_path.into();
 
     let generic_path = context.resolve_path(symbol_path);
@@ -3484,7 +3507,14 @@ pub fn function_call(
 
     let mut parent_path = generic_path.clone();
     parent_path.paths.pop();
-    let sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
+    let mut sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
+    sig.normalize();
+
+    // same signature re-entered => true infinite recursion
+    if context.function_call_stack.contains(&sig) {
+        context.insert_error(AnalyzerError::infinite_recursion(&token));
+        return Err(ir_error!(token));
+    }
 
     let path: VarPathSelect = Conv::conv(context, path)?;
     let (mut base_path, select, _) = path.into();
@@ -3522,6 +3552,7 @@ pub fn function_call(
     }
 
     context.push_generic_map(map);
+    context.function_call_stack.push(sig.clone());
 
     let ret = context.block(|c| {
         let func = get_function(c, &path, token)?;
@@ -3556,6 +3587,7 @@ pub fn function_call(
     });
 
     context.pop_generic_map();
+    context.function_call_stack.pop();
     ret
 }
 

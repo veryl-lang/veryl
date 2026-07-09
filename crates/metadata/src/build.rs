@@ -42,6 +42,8 @@ pub struct Build {
     pub instance_depth_limit: usize,
     #[serde(default = "default_instance_total_limit")]
     pub instance_total_limit: usize,
+    #[serde(default = "default_function_instance_depth_limit")]
+    pub function_instance_depth_limit: usize,
     #[serde(default = "default_evaluate_size_limit")]
     pub evaluate_size_limit: usize,
     #[serde(default = "default_evaluate_array_limit")]
@@ -66,6 +68,10 @@ fn default_sources() -> Vec<PathBuf> {
 
 fn default_instance_depth_limit() -> usize {
     128
+}
+
+fn default_function_instance_depth_limit() -> usize {
+    24
 }
 
 fn default_instance_total_limit() -> usize {

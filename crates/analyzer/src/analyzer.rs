@@ -1,4 +1,4 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, ExceedLimitKind};
 use crate::attribute_table;
 use crate::comb_loop_detect;
 use crate::conv::{Context, Conv};
@@ -156,14 +156,25 @@ impl Analyzer {
     fn create_ir(context: &mut Context, input: &Veryl) -> (Ir, Vec<AnalyzerError>) {
         let ir: IrResult<Ir> = Conv::conv(context, input);
 
-        if let Ok(mut ir) = ir {
+        let (ir, mut errors) = if let Ok(mut ir) = ir {
             ir.eval_assign(context);
             let errors = context.drain_errors();
             (ir, errors)
         } else {
             let errors = context.drain_errors();
             (Ir::default(), errors)
+        };
+
+        // The eval path is error-tolerant and may swallow this, so surface it here.
+        if let Some((token, depth)) = context.function_eval_overflow.take() {
+            errors.push(AnalyzerError::exceed_limit(
+                ExceedLimitKind::HierarchyDepth,
+                depth,
+                &token,
+            ));
         }
+
+        (ir, errors)
     }
 
     pub fn analyze_pass2(
@@ -177,6 +188,7 @@ impl Analyzer {
         context.config.retain_component_body = ir.is_some();
         context.config.instance_depth_limit = self.build_opt.instance_depth_limit;
         context.config.instance_total_limit = self.build_opt.instance_total_limit;
+        context.config.function_instance_depth_limit = self.build_opt.function_instance_depth_limit;
         context.config.evaluate_size_limit = self.build_opt.evaluate_size_limit;
         context.config.evaluate_array_limit = self.build_opt.evaluate_array_limit;
 
