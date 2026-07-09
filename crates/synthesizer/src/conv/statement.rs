@@ -1136,10 +1136,9 @@ fn extract_side_cond<'a>(
     // Figure out which side is the selector vs the constant.
     let (sel, k, swapped) = if let Some(k) = try_constant(y) {
         (x.as_ref(), k, false)
-    } else if let Some(k) = try_constant(x) {
-        (y.as_ref(), k, true)
     } else {
-        return None;
+        let k = try_constant(x)?;
+        (y.as_ref(), k, true)
     };
     if anchor.is_some_and(|a| !expression_eq(a, sel)) {
         return None;

@@ -1562,7 +1562,7 @@ impl SymbolTable {
             self.reference_table.remove(id);
         }
 
-        for (_, symbols) in self.name_table.iter_mut() {
+        for symbols in self.name_table.values_mut() {
             symbols.retain(|x| !drop_list.contains(x));
         }
 

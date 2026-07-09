@@ -369,11 +369,8 @@ impl VarIndex {
     pub fn eval_value(&self, context: &mut Context) -> Option<Vec<usize>> {
         let mut ret = vec![];
         for x in &self.0 {
-            if let Some(x) = x.eval_value(context) {
-                ret.push(x.to_usize().unwrap_or(0))
-            } else {
-                return None;
-            }
+            let x = x.eval_value(context)?;
+            ret.push(x.to_usize().unwrap_or(0));
         }
         Some(ret)
     }
