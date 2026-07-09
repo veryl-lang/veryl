@@ -77,6 +77,68 @@ fn insert_method(
     let _ = symbol_table.insert(&func_token, func_symbol);
 }
 
+/// Registers `$comp::<name>` symbols for the user-defined components
+/// declared in `[[components]]` of Veryl.toml. Unlike the builtin `$tb`
+/// symbols this runs at `Analyzer::new` (when metadata is available), so it
+/// inserts through the global symbol table. Method symbols are not
+/// registered; the component interface is only known at simulator load time.
+pub fn insert_external_components(names: &[&str]) {
+    let mut ns = Namespace::new();
+    let component_token = Token::new("$comp", 0, 0, 0, 0, TokenSource::Builtin);
+    ns.push(component_token.text);
+
+    for name in names {
+        let token = Token::new(name, 0, 0, 0, 0, TokenSource::Builtin);
+        let symbol = Symbol::new(
+            &token,
+            SymbolKind::TbComponent(TbComponentProperty {
+                kind: TbComponentKind::External(token.text),
+            }),
+            &ns,
+            true,
+            DocComment::default(),
+        );
+        let _ = crate::symbol_table::insert(&token, symbol);
+    }
+}
+
+/// Registers `$comp::<project>::<name>` symbols for the components
+/// provided by a dependency. The resolution key carried by
+/// `TbComponentKind::External` is the composite `"<project>::<name>"`,
+/// which is also the key of the built library table; the project's own
+/// component keys never contain `::`, so the two sets cannot collide.
+pub fn insert_dependency_components(project: &str, names: &[&str]) {
+    let mut ns = Namespace::new();
+    let component_token = Token::new("$comp", 0, 0, 0, 0, TokenSource::Builtin);
+    ns.push(component_token.text);
+
+    let project_token = Token::new(project, 0, 0, 0, 0, TokenSource::Builtin);
+    let project_symbol = Symbol::new(
+        &project_token,
+        SymbolKind::Namespace,
+        &ns,
+        true,
+        DocComment::default(),
+    );
+    let _ = crate::symbol_table::insert(&project_token, project_symbol);
+    ns.push(project_token.text);
+
+    for name in names {
+        let token = Token::new(name, 0, 0, 0, 0, TokenSource::Builtin);
+        let key = veryl_parser::resource_table::insert_str(&format!("{project}::{name}"));
+        let symbol = Symbol::new(
+            &token,
+            SymbolKind::TbComponent(TbComponentProperty {
+                kind: TbComponentKind::External(key),
+            }),
+            &ns,
+            true,
+            DocComment::default(),
+        );
+        let _ = crate::symbol_table::insert(&token, symbol);
+    }
+}
+
 pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
     let mut ns = namespace.clone();
 

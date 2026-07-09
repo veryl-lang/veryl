@@ -1,4 +1,6 @@
-use crate::analyzer_error::{AnalyzerError, MismatchTypeKind, UnevaluableValueKind};
+use crate::analyzer_error::{
+    AnalyzerError, ComponentInterfaceMismatchKind, MismatchTypeKind, UnevaluableValueKind,
+};
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
 use crate::conv::checker::alias::{AliasType, check_alias_target};
@@ -14,28 +16,30 @@ use crate::conv::checker::modport::{check_modport, check_modport_default, check_
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
 use crate::conv::utils::{
     TypePosition, eval_array_range_assign, eval_assign_statement, eval_clock, eval_const_assign,
-    eval_expr, eval_generate_for_range, eval_reset, eval_size, eval_type, eval_variable,
-    expand_connect, expand_connect_const, get_component, get_overridden_params, get_port_connects,
-    get_return_str, insert_port_connect, try_infer_decl_type, try_infer_var_assign,
-    var_path_to_assign_destination,
+    eval_expr, eval_factor_symbol, eval_factor_symbol_external, eval_generate_for_range,
+    eval_reset, eval_size, eval_type, eval_variable, expand_connect, expand_connect_const,
+    get_component, get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
+    try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::ir::{
     self, Comptime, FuncArg, FuncPath, InstanceKind, IrResult, Shape, Signature, TypeKind,
     ValueVariant, VarId, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
 };
-use crate::namespace::DefineContext;
+use crate::namespace::{DefineContext, Namespace};
 use crate::symbol::{
     ClockDomain, Direction, GenericBoundKind, ProtoBound, Symbol, SymbolKind, TbComponentKind,
 };
-use crate::symbol_path::{GenericSymbolPath, SymbolPathNamespace};
+use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::value::Value;
-use crate::{HashMap, ir_error};
+use crate::{HashMap, HashSet, ir_error};
 use std::sync::Arc;
+use veryl_metadata::component_manifest::{ConnectionFacts, ConnectionTarget, ConnectionViolation};
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::Token;
 
 impl Conv<&GenerateItem> for ir::DeclarationBlock {
     fn conv(context: &mut Context, value: &GenerateItem) -> IrResult<Self> {
@@ -680,19 +684,55 @@ impl Conv<&VarDeclaration> for ir::Declaration {
 
             // A `$tb::file` handle is never assigned (its descriptor lives in
             // the simulator's file table), so suppress the unassigned lint as
-            // the `inst` $tb forms do.
+            // the `inst` $tb forms do. A `$comp` variable is the
+            // method-only form of a user-defined component.
             if let crate::symbol::TypeKind::UserDefined(ref ud) = x.r#type.kind
                 && let Ok(ty_symbol) =
                     symbol_table::resolve_generic_structural(&ud.path, &symbol.found.namespace)
-                && matches!(
-                    &ty_symbol.found.kind,
-                    SymbolKind::TbComponent(c) if matches!(c.kind, TbComponentKind::File)
-                )
+                && let SymbolKind::TbComponent(c) = &ty_symbol.found.kind
             {
-                attribute_table::insert(
-                    variable_token,
-                    Attribute::Allow(AllowItem::UnassignVariable),
-                );
+                match &c.kind {
+                    TbComponentKind::File => {
+                        attribute_table::insert(
+                            variable_token,
+                            Attribute::Allow(AllowItem::UnassignVariable),
+                        );
+                    }
+                    TbComponentKind::External(component) => {
+                        if !context.in_test_module {
+                            context.insert_error(AnalyzerError::invalid_tb_usage(&token));
+                            return Ok(ir::Declaration::Null);
+                        }
+                        if let Some(manifest) = crate::component_manifest_table::get(*component)
+                            && manifest.kind.as_deref() == Some("clocked")
+                        {
+                            context.insert_error(AnalyzerError::component_interface_mismatch(
+                                ComponentInterfaceMismatchKind::ClockedNeedsInst,
+                                Some(*component),
+                                &token,
+                            ));
+                        }
+                        let params =
+                            conv_component_generic_args(context, &ud.path, *component, token)?;
+                        attribute_table::insert(
+                            variable_token,
+                            Attribute::Allow(AllowItem::UnassignVariable),
+                        );
+                        eval_variable(context, &path, kind, &r#type, clock_domain, variable_token);
+                        insert_component_params(context, symbol.found.token.text, &params);
+                        return Ok(ir::Declaration::External(Box::new(
+                            ir::ExternalDeclaration {
+                                name: symbol.found.token.text,
+                                component: *component,
+                                params,
+                                connects: vec![],
+                                is_var_form: true,
+                                token,
+                            },
+                        )));
+                    }
+                    _ => {}
+                }
             }
 
             eval_variable(context, &path, kind, &r#type, clock_domain, variable_token);
@@ -1294,8 +1334,10 @@ impl Conv<&EnumDeclaration> for () {
 impl Conv<&InitialDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &InitialDeclaration) -> IrResult<Self> {
         context.in_tb_block = true;
+        context.tb_hoist = Some(Vec::new());
         let statements: IrResult<ir::StatementBlock> =
             Conv::conv(context, value.statement_block.as_ref());
+        context.tb_hoist = None;
         context.in_tb_block = false;
         Ok(ir::Declaration::Initial(ir::InitialDeclaration {
             statements: statements?.0,
@@ -1306,8 +1348,10 @@ impl Conv<&InitialDeclaration> for ir::Declaration {
 impl Conv<&FinalDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &FinalDeclaration) -> IrResult<Self> {
         context.in_tb_block = true;
+        context.tb_hoist = Some(Vec::new());
         let statements: IrResult<ir::StatementBlock> =
             Conv::conv(context, value.statement_block.as_ref());
+        context.tb_hoist = None;
         context.in_tb_block = false;
         Ok(ir::Declaration::Final(ir::FinalDeclaration {
             statements: statements?.0,
@@ -1355,6 +1399,10 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 return Ok(ir::Declaration::Null);
             }
 
+            if let TbComponentKind::External(component) = &tb_prop.kind {
+                return conv_external_component(context, value, *component);
+            }
+
             // Generate clock/reset variable for $tb component instances
             let inst_token: TokenRange = value.component_instantiation.identifier.as_ref().into();
             let inst_name = value
@@ -1367,8 +1415,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
             let type_kind = match tb_prop.kind {
                 TbComponentKind::ClockGen => ir::TypeKind::Clock,
                 TbComponentKind::ResetGen => ir::TypeKind::Reset,
-                // Rejected above: `$tb::file` cannot be instantiated with `inst`.
-                TbComponentKind::File => unreachable!(),
+                // Rejected or handled above.
+                TbComponentKind::File | TbComponentKind::External(_) => unreachable!(),
             };
             let ir_type = {
                 let mut t = ir::Type::new(type_kind);
@@ -1438,8 +1486,10 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             let type_name = match tb_prop.kind {
                                 TbComponentKind::ClockGen => "$tb::clock_gen",
                                 TbComponentKind::ResetGen => "$tb::reset_gen",
-                                // Rejected above: `$tb::file` is not an `inst`.
-                                TbComponentKind::File => unreachable!(),
+                                // Rejected or handled above.
+                                TbComponentKind::File | TbComponentKind::External(_) => {
+                                    unreachable!()
+                                }
                             };
                             context.insert_error(AnalyzerError::unknown_tb_port(
                                 type_name,
@@ -1704,6 +1754,885 @@ impl Conv<&InstDeclaration> for ir::Declaration {
             }
         }
     }
+}
+
+/// Registers an instance's numeric parameters for declared-width
+/// resolution at its method call sites.
+fn insert_component_params(
+    context: &mut Context,
+    inst: StrId,
+    params: &[(StrId, ir::ExternalParamValue)],
+) {
+    let numeric: Vec<(String, u64)> = params
+        .iter()
+        .filter_map(|(n, v)| match v {
+            ir::ExternalParamValue::Value(v) => Some((n.to_string(), v.to_u64()?)),
+            ir::ExternalParamValue::Str(_) => None,
+        })
+        .collect();
+    context.tb_component_params.insert(inst, numeric);
+}
+
+/// What an interface port's modport connection is actually bound to.
+struct GroupConnect {
+    group: StrId,
+    sig: Signature,
+    modport: StrId,
+    token: TokenRange,
+}
+
+/// Resolves the manifest's group-qualified method width parameters
+/// (`axi.DATA_WIDTH_BYTES`) against the connected interfaces; an
+/// unresolvable one is not registered and surfaces at the call site.
+fn insert_group_params(
+    context: &mut Context,
+    inst: StrId,
+    component: StrId,
+    group_sigs: &[GroupConnect],
+    token: TokenRange,
+) {
+    let Some(manifest) = crate::component_manifest_table::get(component) else {
+        return;
+    };
+    let mut wanted: Vec<(String, String)> = vec![];
+    for m in &manifest.methods {
+        if let Some(expr) = &m.ret_width {
+            expr.group_refs(&mut wanted);
+        }
+    }
+    wanted.sort();
+    wanted.dedup();
+
+    let mut resolved: Vec<(String, u64)> = vec![];
+    for (group, cname) in &wanted {
+        let Some(gc) = group_sigs.iter().find(|gc| gc.group.to_string() == *group) else {
+            continue;
+        };
+        let name = resource_table::insert_str(cname);
+        if let Some(v) = eval_group_param(context, &gc.sig, name, token) {
+            resolved.push((format!("{group}.{cname}"), v));
+        }
+    }
+    if !resolved.is_empty() {
+        context
+            .tb_component_params
+            .entry(inst)
+            .or_default()
+            .extend(resolved);
+    }
+}
+
+/// A single-segment identifier path for `name` at `template`'s source
+/// position. The token id is freshly minted: id-keyed tables must never see
+/// the synthesized segment under the original token's id.
+fn synthesize_name_path(name: StrId, template: Token, range: TokenRange) -> GenericSymbolPath {
+    let tok = Token::new(
+        &name.to_string(),
+        template.line,
+        template.column,
+        template.length,
+        template.pos,
+        template.source,
+    );
+    GenericSymbolPath {
+        paths: vec![GenericSymbol {
+            base: tok,
+            arguments: vec![],
+        }],
+        kind: crate::symbol_path::GenericSymbolPathKind::Identifier,
+        range,
+    }
+}
+
+/// Evaluates one constant visible in the interface a group is
+/// connected to. Resolution follows the interface's own visibility rules: a
+/// name that came in through `import PKG::*` evaluates against the generic
+/// argument the import names, not whichever argument declares the name.
+fn eval_group_param(
+    context: &mut Context,
+    sig: &Signature,
+    name: StrId,
+    token: TokenRange,
+) -> Option<u64> {
+    let iface = symbol_table::get(sig.symbol)?;
+    let ns = iface.inner_namespace();
+    let segs = vec![name];
+    let spn: SymbolPathNamespace = (&segs, &ns).into();
+    let found = symbol_table::resolve(&spn).ok()?;
+
+    // A constant in the interface body itself: bind the instance's generic
+    // arguments so `const WIDTH: u32 = W;` sees the argument, not the default.
+    if !found.imported {
+        let path = synthesize_name_path(name, iface.token, token);
+        return eval_resolved_const(context, path, (*found).clone(), sig.to_generic_map(), token);
+    }
+
+    let scope = crate::scope::inner_scope(iface.scope, iface.token.text);
+    for wildcard in crate::scope::wildcards_get(scope) {
+        let Some(seg) = wildcard.package_path.paths.first() else {
+            continue;
+        };
+        let Some((_, arg)) = sig
+            .generic_parameters
+            .iter()
+            .find(|(n, _)| *n == seg.base())
+        else {
+            continue;
+        };
+        let mut path = arg.clone();
+        let Some(last) = path.paths.last() else {
+            continue;
+        };
+        let member = synthesize_name_path(name, last.base, token);
+        path.paths.extend(member.paths);
+        let Ok(found) = symbol_table::resolve_generic_structural(&path, path.paths[0].base.id)
+        else {
+            continue;
+        };
+        let maps = path.to_generic_maps();
+        if let Some(v) = eval_resolved_const(context, path, (*found).clone(), maps, token) {
+            return Some(v);
+        }
+    }
+
+    // A member imported from a concrete (non-generic-argument) package
+    // evaluates directly if its definition is self-contained.
+    let path = synthesize_name_path(name, iface.token, token);
+    eval_resolved_const(context, path, (*found).clone(), sig.to_generic_map(), token)
+}
+
+fn eval_resolved_const(
+    context: &mut Context,
+    path: GenericSymbolPath,
+    symbol: crate::symbol_table::ResolveResult,
+    maps: Vec<crate::symbol::GenericMap>,
+    token: TokenRange,
+) -> Option<u64> {
+    let factor = eval_factor_symbol_external(context, path, symbol, maps, false, token);
+    if let Ok(ir::Factor::Value(comptime)) = factor
+        && comptime.is_const
+        && let ValueVariant::Numeric(v) = comptime.value
+    {
+        v.to_u64()
+    } else {
+        None
+    }
+}
+
+/// Evaluates the generic arguments of a `var` component declaration
+/// (`var g: $comp::fifo::<32, 512>;`) into named parameters, mapped
+/// positionally onto the manifest's parameter declaration order.
+fn conv_component_generic_args(
+    context: &mut Context,
+    ud_path: &crate::symbol_path::GenericSymbolPath,
+    component: StrId,
+    token: TokenRange,
+) -> IrResult<Vec<(StrId, ir::ExternalParamValue)>> {
+    let args = &ud_path.paths.last().unwrap().arguments;
+    let manifest = crate::component_manifest_table::get(component);
+
+    let Some(manifest) = manifest else {
+        if !args.is_empty() {
+            context.insert_error(AnalyzerError::component_interface_mismatch(
+                ComponentInterfaceMismatchKind::GenericParamsNeedManifest,
+                Some(component),
+                &token,
+            ));
+        }
+        return Ok(vec![]);
+    };
+    if args.len() > manifest.params.len() {
+        context.insert_error(AnalyzerError::component_interface_mismatch(
+            ComponentInterfaceMismatchKind::TooManyGenericArgs {
+                declared: manifest.params.len(),
+                supplied: args.len(),
+            },
+            Some(component),
+            &token,
+        ));
+    }
+
+    let mut params = vec![];
+    for (arg, mp) in args.iter().zip(manifest.params.iter()) {
+        let name = resource_table::insert_str(&mp.name);
+        match eval_component_generic_arg(context, arg, token)? {
+            Some(v) => params.push((name, ir::ExternalParamValue::Value(v))),
+            None => {
+                context.insert_error(AnalyzerError::unevaluable_value(
+                    UnevaluableValueKind::ParameterValue,
+                    &token,
+                ));
+            }
+        }
+    }
+
+    // Positional arguments cover a prefix; anything left must be optional.
+    for mp in &manifest.params[args.len().min(manifest.params.len())..] {
+        if !mp.optional {
+            context.insert_error(AnalyzerError::component_interface_mismatch(
+                ComponentInterfaceMismatchKind::RequiredParamMissing {
+                    param: mp.name.clone(),
+                },
+                Some(component),
+                &token,
+            ));
+        }
+    }
+    Ok(params)
+}
+
+/// Evaluates one generic argument of a `var` component declaration to a
+/// constant numeric value: numeric literals of any base, plus constant
+/// paths (local constants, package constants, enum members) resolved in
+/// the argument token's own scope. `None` means unevaluable.
+fn eval_component_generic_arg(
+    context: &mut Context,
+    arg: &GenericSymbolPath,
+    token: TokenRange,
+) -> IrResult<Option<Value>> {
+    use crate::symbol_path::GenericSymbolPathKind;
+    match arg.kind {
+        GenericSymbolPathKind::ValueLiteral if arg.paths.len() == 1 => {
+            let text = arg.paths[0].base.to_string();
+            // Boolean literals share this kind but have no numeric text.
+            if !text.starts_with(|c: char| c.is_ascii_digit() || c == '\'') {
+                return Ok(None);
+            }
+            let value: Value = text.parse().unwrap();
+            Ok(value.to_u64().map(|v| Value::new(v, 64, false)))
+        }
+        GenericSymbolPathKind::Identifier if arg.paths.len() == 1 => {
+            // A plain constant name evaluates through the ordinary
+            // expression path, which also sees the conversion context's
+            // local constants.
+            let identifier = Identifier {
+                identifier_token: veryl_parser::veryl_token::VerylToken::new(arg.paths[0].base),
+            };
+            let src: Expression = (&identifier).into();
+            let (comptime, _) = eval_expr(context, None, &src, false)?;
+            if comptime.is_const
+                && let ValueVariant::Numeric(v) = comptime.value
+            {
+                Ok(Some(v))
+            } else {
+                Ok(None)
+            }
+        }
+        GenericSymbolPathKind::Identifier => {
+            // A scoped constant path resolves in the argument token's own
+            // scope and evaluates through the ordinary factor path.
+            let Ok(symbol) = symbol_table::resolve_generic_structural(arg, arg.paths[0].base.id)
+            else {
+                return Ok(None);
+            };
+            let factor = eval_factor_symbol(context, arg.clone(), (*symbol).clone(), false, token);
+            if let Ok(ir::Factor::Value(comptime)) = factor
+                && comptime.is_const
+                && let ValueVariant::Numeric(v) = comptime.value
+            {
+                Ok(Some(v))
+            } else {
+                Ok(None)
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Converts `inst x: $comp::<name> #(...) (...)` into
+/// `ir::Declaration::External`. Parameters must be constant numeric values;
+/// port connections keep both the readable expression and, for plain
+/// variable references, the assign destination — the component decides the
+/// direction at simulator load time.
+fn conv_external_component(
+    context: &mut Context,
+    value: &InstDeclaration,
+    component: StrId,
+) -> IrResult<ir::Declaration> {
+    let ci = value.component_instantiation.as_ref();
+    let token: TokenRange = ci.identifier.as_ref().into();
+    let name = ci.identifier.text();
+
+    // Instance arrays are not supported for external components.
+    if ci.component_instantiation_opt0.is_some() {
+        context.insert_error(AnalyzerError::invalid_tb_usage(&token));
+        return Ok(ir::Declaration::Null);
+    }
+
+    // Only the `var` form takes parameters as generic arguments.
+    let type_path: GenericSymbolPath = ci.scoped_identifier.as_ref().into();
+    if type_path.paths.iter().any(|x| !x.arguments.is_empty()) {
+        context.insert_error(AnalyzerError::component_interface_mismatch(
+            ComponentInterfaceMismatchKind::InstFormUsesParen,
+            Some(component),
+            &token,
+        ));
+    }
+
+    let mut params = vec![];
+    if let Some(ref opt1) = ci.component_instantiation_opt1
+        && let Some(ref param_opt) = opt1.inst_parameter.inst_parameter_opt
+    {
+        let items: Vec<_> = param_opt.inst_parameter_list.as_ref().into();
+        for item in items {
+            // The manifest keys parameters by their unrawed name.
+            let param_name =
+                resource_table::canonical_str_id(item.identifier.identifier_token.token.text);
+            let param_token: TokenRange = item.identifier.as_ref().into();
+            let (comptime, _) = if let Some(ref opt) = item.inst_parameter_item_opt {
+                eval_expr(context, None, &opt.expression, false)?
+            } else {
+                // `#( X )` binds the same-named identifier from the
+                // enclosing scope.
+                let src: Expression = item.identifier.as_ref().into();
+                eval_expr(context, None, &src, false)?
+            };
+            if comptime.is_const
+                && let ValueVariant::Numeric(v) = comptime.value
+            {
+                let value = if comptime.r#type.is_string() {
+                    match crate::value::byte_value_to_string(&v) {
+                        Some(s) => {
+                            // Strip exactly the delimiting quotes; quote
+                            // characters inside the content survive.
+                            let s = s.strip_prefix('"').unwrap_or(&s);
+                            let s = s.strip_suffix('"').unwrap_or(s);
+                            ir::ExternalParamValue::Str(s.to_string())
+                        }
+                        None => {
+                            context.insert_error(AnalyzerError::unevaluable_value(
+                                UnevaluableValueKind::ParameterValue,
+                                &param_token,
+                            ));
+                            continue;
+                        }
+                    }
+                } else {
+                    ir::ExternalParamValue::Value(v)
+                };
+                params.push((param_name, value));
+            } else {
+                context.insert_error(AnalyzerError::unevaluable_value(
+                    UnevaluableValueKind::ParameterValue,
+                    &param_token,
+                ));
+            }
+        }
+    }
+
+    let mut connects = vec![];
+    let mut group_sigs: Vec<GroupConnect> = vec![];
+    // A written-but-failed connection has its own diagnostic and must not
+    // also be reported as unconnected.
+    let mut written: HashSet<String> = HashSet::default();
+    if let Some(ref opt2) = ci.component_instantiation_opt2
+        && let Some(ref port_opt) = opt2.inst_port.inst_port_opt
+    {
+        let items: Vec<_> = port_opt.inst_port_list.as_ref().into();
+        for item in items {
+            written.insert(
+                resource_table::canonical_str_id(item.identifier.identifier_token.token.text)
+                    .to_string(),
+            );
+            // Hierarchical references are valid in component input
+            // connections; they share the testbench-block gate.
+            let saved_tb_block = context.in_tb_block;
+            context.in_tb_block = true;
+            let connect = conv_external_connect(context, item, &mut group_sigs);
+            context.in_tb_block = saved_tb_block;
+            connects.extend(connect?);
+        }
+    }
+
+    // With a sidecar manifest available, the simulator's load-time
+    // interface checks are diagnosed here as well.
+    if let Some(manifest) = crate::component_manifest_table::get(component) {
+        if manifest.kind.as_deref() == Some("method_only") {
+            context.insert_error(AnalyzerError::component_interface_mismatch(
+                ComponentInterfaceMismatchKind::MethodOnlyNeedsVar,
+                Some(component),
+                &token,
+            ));
+        }
+        for (param_name, _) in &params {
+            if !manifest.params.is_empty() && manifest.param(&param_name.to_string()).is_none() {
+                context.insert_error(AnalyzerError::component_interface_mismatch(
+                    ComponentInterfaceMismatchKind::UnknownParam {
+                        param: param_name.to_string(),
+                    },
+                    Some(component),
+                    &token,
+                ));
+            }
+        }
+        for mp in &manifest.params {
+            if !mp.optional && !params.iter().any(|(n, _)| n.to_string() == mp.name) {
+                context.insert_error(AnalyzerError::component_interface_mismatch(
+                    ComponentInterfaceMismatchKind::RequiredParamMissing {
+                        param: mp.name.clone(),
+                    },
+                    Some(component),
+                    &token,
+                ));
+            }
+        }
+        // A group connected twice would race for the same host ports, and
+        // only the first connection's interface would be checked; the
+        // group must also be one the component declares.
+        let has_decls = !(manifest.ports.is_empty() && manifest.groups.is_empty());
+        let mut seen_groups: HashSet<StrId> = HashSet::default();
+        for gc in &group_sigs {
+            if !seen_groups.insert(gc.group) {
+                context.insert_error(AnalyzerError::component_interface_mismatch(
+                    ComponentInterfaceMismatchKind::PortMultiplyConnected {
+                        port: gc.group.to_string(),
+                    },
+                    Some(component),
+                    &gc.token,
+                ));
+            }
+            if has_decls
+                && !manifest
+                    .groups
+                    .iter()
+                    .any(|g| g.name == gc.group.to_string())
+            {
+                context.insert_error(AnalyzerError::component_interface_mismatch(
+                    ComponentInterfaceMismatchKind::UnknownGroup {
+                        group: gc.group.to_string(),
+                    },
+                    Some(component),
+                    &gc.token,
+                ));
+            }
+        }
+        // Manifests are machine-generated; a declared group without valid
+        // members would silently disable every member check.
+        for grp in &manifest.groups {
+            if grp.members.is_empty() || grp.members.iter().any(|m| m.member.is_empty()) {
+                context.insert_error(AnalyzerError::component_interface_mismatch(
+                    ComponentInterfaceMismatchKind::InvalidManifest {
+                        reason: format!("interface port `{}` declares no valid members", grp.name),
+                    },
+                    Some(component),
+                    &token,
+                ));
+            }
+        }
+        // Feeds the completeness check below.
+        let mut connected: HashSet<&str> = HashSet::default();
+        let mut connected_members: HashSet<(String, String)> = HashSet::default();
+        for connect in &connects {
+            if !has_decls {
+                break;
+            }
+            let port_name = connect.port.to_string();
+            let group = connect.group.map(|g| g.to_string());
+            let member = connect.member.map(|m| m.to_string());
+            let target =
+                manifest.connection_target(&port_name, group.as_deref(), member.as_deref());
+            let Some(target) = target else {
+                if connect.group.is_none() {
+                    context.insert_error(AnalyzerError::component_interface_mismatch(
+                        ComponentInterfaceMismatchKind::UnknownPort {
+                            port: port_name.clone(),
+                        },
+                        Some(component),
+                        &connect.token,
+                    ));
+                }
+                continue;
+            };
+            let display = match &target {
+                ConnectionTarget::Loose(port) => {
+                    // A port connected twice would race for one host port.
+                    if !connected.insert(port.name.as_str()) {
+                        context.insert_error(AnalyzerError::component_interface_mismatch(
+                            ComponentInterfaceMismatchKind::PortMultiplyConnected {
+                                port: port.name.clone(),
+                            },
+                            Some(component),
+                            &connect.token,
+                        ));
+                        continue;
+                    }
+                    port.name.clone()
+                }
+                ConnectionTarget::Member(grp, m) => {
+                    connected_members.insert((grp.name.clone(), m.member.clone()));
+                    port_name.clone()
+                }
+            };
+            // Port widths are inferred from the connection; a component
+            // validates any width constraints itself in `on_build`.
+            let facts = ConnectionFacts {
+                input: connect.input,
+                drivable: connect.output.is_some(),
+                is_clock: connect.is_clock,
+                is_reset: connect.is_reset,
+            };
+            for violation in target.check(&facts) {
+                let kind = match violation {
+                    ConnectionViolation::InvalidDirection(dir) => {
+                        ComponentInterfaceMismatchKind::InvalidPortDirection {
+                            port: display.clone(),
+                            dir,
+                        }
+                    }
+                    ConnectionViolation::NotInput => ComponentInterfaceMismatchKind::PortNotInput {
+                        port: display.clone(),
+                    },
+                    ConnectionViolation::NotDrivable => {
+                        ComponentInterfaceMismatchKind::PortNotDrivable {
+                            port: display.clone(),
+                        }
+                    }
+                    ConnectionViolation::NotClock => ComponentInterfaceMismatchKind::PortNotClock {
+                        port: display.clone(),
+                    },
+                    ConnectionViolation::NotReset => ComponentInterfaceMismatchKind::PortNotReset {
+                        port: display.clone(),
+                    },
+                    ConnectionViolation::ClockUndeclared => {
+                        ComponentInterfaceMismatchKind::ClockPortUndeclared {
+                            port: display.clone(),
+                        }
+                    }
+                    ConnectionViolation::ResetUndeclared => {
+                        ComponentInterfaceMismatchKind::ResetPortUndeclared {
+                            port: display.clone(),
+                        }
+                    }
+                };
+                context.insert_error(AnalyzerError::component_interface_mismatch(
+                    kind,
+                    Some(component),
+                    &connect.token,
+                ));
+            }
+        }
+        // Every declared port is resolved when the component is built, so a
+        // missing connection is an analysis-time error. The members of an
+        // entirely unconnected group collapse into one diagnostic.
+        // Built from the successful modport expansions, so a group whose
+        // expansion yielded zero member connects still counts as connected
+        // and its declared members are reported below.
+        let connected_groups: HashSet<String> =
+            group_sigs.iter().map(|gc| gc.group.to_string()).collect();
+        for port in &manifest.ports {
+            if connected.contains(port.name.as_str()) || written.contains(&port.name) {
+                continue;
+            }
+            let kind = match port.role.as_deref() {
+                Some(role) => ComponentInterfaceMismatchKind::RolePortUnconnected {
+                    role: role.to_string(),
+                    port: port.name.clone(),
+                },
+                None => ComponentInterfaceMismatchKind::PortUnconnected {
+                    port: port.name.clone(),
+                },
+            };
+            context.insert_error(AnalyzerError::component_interface_mismatch(
+                kind,
+                Some(component),
+                &token,
+            ));
+        }
+        for grp in &manifest.groups {
+            if !connected_groups.contains(&grp.name) {
+                if !written.contains(&grp.name) {
+                    context.insert_error(AnalyzerError::component_interface_mismatch(
+                        ComponentInterfaceMismatchKind::GroupUnconnected {
+                            group: grp.name.clone(),
+                        },
+                        Some(component),
+                        &token,
+                    ));
+                }
+                continue;
+            }
+            for m in &grp.members {
+                if !connected_members.contains(&(grp.name.clone(), m.member.clone())) {
+                    context.insert_error(AnalyzerError::component_interface_mismatch(
+                        ComponentInterfaceMismatchKind::GroupMemberUnconnected {
+                            group: grp.name.clone(),
+                            member: m.member.clone(),
+                        },
+                        Some(component),
+                        &token,
+                    ));
+                }
+            }
+        }
+        // A structurally-compatible but wrong interface on a bound group
+        // (e.g. an AXI4-Lite component on a full AXI4 bus) is rejected. The
+        // manifest's interface path is the name as the component-defining
+        // project sees it: root namespace for `$std::`, the defining
+        // project's namespace otherwise.
+        let defining_project = component
+            .to_string()
+            .split_once("::")
+            .map(|(prj, _)| resource_table::insert_str(prj))
+            .or_else(|| {
+                context
+                    .current_namespace()
+                    .and_then(|ns| ns.paths.first().copied())
+            });
+        for grp in &manifest.groups {
+            let Some(gc) = group_sigs
+                .iter()
+                .find(|gc| gc.group.to_string() == grp.name)
+            else {
+                continue;
+            };
+            let path = SymbolPath::from(grp.interface.as_str());
+            let spn: SymbolPathNamespace = (&path, &Namespace::new()).into();
+            let mut want = symbol_table::resolve(&spn).ok();
+            if want.is_none()
+                && let Some(prj) = defining_project
+            {
+                let mut ns = Namespace::new();
+                ns.push(prj);
+                let spn: SymbolPathNamespace = (&path, &ns).into();
+                want = symbol_table::resolve(&spn).ok();
+            }
+            if let Some(want) = want
+                && want.found.id != gc.sig.symbol
+            {
+                context.insert_error(AnalyzerError::component_interface_mismatch(
+                    ComponentInterfaceMismatchKind::InterfaceMismatch {
+                        group: grp.name.clone(),
+                        expected: grp.interface.clone(),
+                    },
+                    Some(component),
+                    &gc.token,
+                ));
+            }
+            if let Some(mp) = resource_table::get_str_value(gc.modport)
+                && mp != grp.modport
+            {
+                context.insert_error(AnalyzerError::component_interface_mismatch(
+                    ComponentInterfaceMismatchKind::ModportMismatch {
+                        group: grp.name.clone(),
+                        expected: grp.modport.clone(),
+                        connected: mp,
+                    },
+                    Some(component),
+                    &gc.token,
+                ));
+            }
+        }
+    }
+
+    insert_component_params(context, name, &params);
+    insert_group_params(context, name, component, &group_sigs, token);
+
+    Ok(ir::Declaration::External(Box::new(
+        ir::ExternalDeclaration {
+            name,
+            component,
+            params,
+            connects,
+            is_var_form: false,
+            token,
+        },
+    )))
+}
+
+fn conv_external_connect(
+    context: &mut Context,
+    item: &InstPortItem,
+    group_sigs: &mut Vec<GroupConnect>,
+) -> IrResult<Vec<ir::ExternalConnect>> {
+    // `port` matches the manifest (unrawed); `port_raw` names the
+    // shorthand's testbench variable.
+    let port_raw = item.identifier.identifier_token.token.text;
+    let port = resource_table::canonical_str_id(port_raw);
+    let token: TokenRange = item.identifier.as_ref().into();
+
+    let (comptime, expr, dst_paths) = if let Some(ref x) = item.inst_port_item_opt {
+        let (comptime, expr) = eval_expr(context, None, &x.expression, false)?;
+        let dst: Vec<VarPathSelect> =
+            Conv::conv(context, x.expression.as_ref()).unwrap_or_default();
+        (comptime, expr, dst)
+    } else {
+        // `( clk )` shorthand: connect the same-named testbench variable.
+        let port_path = VarPath::new(port_raw);
+        let Some((var_id, mut comptime)) = context.find_path(&port_path) else {
+            let name = resource_table::get_str_value(port_raw).unwrap_or_default();
+            context.insert_error(AnalyzerError::undefined_identifier(&name, &token));
+            return Ok(vec![]);
+        };
+        comptime.token = token;
+        let expr = ir::Expression::Term(Box::new(ir::Factor::Variable(
+            var_id,
+            VarIndex::default(),
+            VarSelect::default(),
+            comptime.clone(),
+        )));
+        let dst = vec![VarPathSelect(port_path, VarSelect::default(), token)];
+        (comptime, expr, dst)
+    };
+
+    // A modport connection expands into one connection per member with the
+    // direction fixed by the modport; a bare interface instance leaves the
+    // directions open and is rejected.
+    match &comptime.r#type.kind {
+        ir::TypeKind::Modport(_, _) => {
+            return conv_external_modport_connect(
+                context, port, &comptime, dst_paths, token, group_sigs,
+            );
+        }
+        ir::TypeKind::Instance(_, kind) if *kind == ir::InstanceKind::Interface => {
+            context.insert_error(AnalyzerError::invalid_factor(
+                None,
+                "interface connection to a component port; connect a modport",
+                &token,
+                &[],
+            ));
+            return Ok(vec![]);
+        }
+        _ => {}
+    }
+
+    // Ports are flat bit vectors; an unpacked-array connection would
+    // silently truncate to one element's width.
+    if comptime.r#type.is_array() {
+        context.insert_error(AnalyzerError::invalid_factor(
+            None,
+            "array connection to a component port",
+            &token,
+            &[],
+        ));
+        return Ok(vec![]);
+    }
+
+    // A single plain variable reference can also serve as an output
+    // destination; anything else is input-only.
+    let output = if dst_paths.len() == 1 {
+        var_path_to_assign_destination(context, dst_paths, true)
+            .into_iter()
+            .next()
+    } else {
+        None
+    };
+
+    let width = comptime.r#type.total_width().unwrap_or(0) as u32;
+    Ok(vec![ir::ExternalConnect {
+        port,
+        expr,
+        output,
+        input: true,
+        group: None,
+        member: None,
+        is_clock: comptime.r#type.is_clock(),
+        is_reset: comptime.r#type.is_reset(),
+        width,
+        token,
+    }])
+}
+
+/// Expands a modport connection into per-member connections carrying
+/// (group, member); ports bind to them via the manifest's (group, member)
+/// record. The modport is read from the component's point of view: an
+/// `input` member may only be a component input, an `output` member only a
+/// component output.
+fn conv_external_modport_connect(
+    context: &mut Context,
+    port: StrId,
+    comptime: &Comptime,
+    dst_paths: Vec<VarPathSelect>,
+    token: TokenRange,
+    group_sigs: &mut Vec<GroupConnect>,
+) -> IrResult<Vec<ir::ExternalConnect>> {
+    let Some(dst) = dst_paths.first() else {
+        return Err(ir_error!(token));
+    };
+    let ir::TypeKind::Modport(sig, modport_name) = &comptime.r#type.kind else {
+        return Err(ir_error!(token));
+    };
+    // Indexed interface-array connections are not supported.
+    if !dst.1.0.is_empty() || dst.1.1.is_some() {
+        context.insert_error(AnalyzerError::invalid_factor(
+            None,
+            "selected modport connection to a component port",
+            &token,
+            &[],
+        ));
+        return Ok(vec![]);
+    }
+    group_sigs.push(GroupConnect {
+        group: port,
+        sig: sig.clone(),
+        modport: *modport_name,
+        token,
+    });
+    let mut dst_path = dst.0.clone();
+    // The connection is written `<instance>.<modport>`; members live under
+    // the instance, so drop the modport-name segment.
+    if dst_path.0.last() == Some(modport_name) {
+        dst_path.0.pop();
+    }
+
+    let port_str = resource_table::get_str_value(port).unwrap_or_default();
+    let mut ret = vec![];
+    for (member_path, direction) in comptime.r#type.expand_modport(context, &dst_path, token)? {
+        if !direction.is_input() && !direction.is_output() {
+            continue;
+        }
+        let Some((var_id, mut member_comptime)) = context.find_path(&member_path) else {
+            context.insert_error(AnalyzerError::undefined_identifier(
+                &member_path.to_string(),
+                &token,
+            ));
+            continue;
+        };
+        member_comptime.token = token;
+
+        // Match the manifest's unrawed member names; find_path above used
+        // the raw path.
+        let member_name: Vec<String> = member_path.0[dst_path.0.len()..]
+            .iter()
+            .map(|x| resource_table::canonical_str_id(*x).to_string())
+            .collect();
+        let member_name = member_name.join(".");
+        let port_name = resource_table::insert_str(&veryl_component_sys::member_port_name(
+            &port_str,
+            &member_name,
+        ));
+        let member = resource_table::insert_str(&member_name);
+
+        let expr = ir::Expression::Term(Box::new(ir::Factor::Variable(
+            var_id,
+            VarIndex::default(),
+            VarSelect::default(),
+            member_comptime.clone(),
+        )));
+        let (output, input) = if direction.is_output() {
+            let dst = vec![VarPathSelect(member_path, VarSelect::default(), token)];
+            let output = var_path_to_assign_destination(context, dst, true)
+                .into_iter()
+                .next();
+            (output, false)
+        } else {
+            (None, true)
+        };
+
+        let width = member_comptime.r#type.total_width().unwrap_or(0) as u32;
+        ret.push(ir::ExternalConnect {
+            port: port_name,
+            expr,
+            output,
+            input,
+            group: Some(port),
+            member: Some(member),
+            is_clock: member_comptime.r#type.is_clock(),
+            is_reset: member_comptime.r#type.is_reset(),
+            width,
+            token,
+        });
+    }
+    Ok(ret)
 }
 
 impl Conv<&ConnectDeclaration> for ir::DeclarationBlock {

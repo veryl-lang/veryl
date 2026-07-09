@@ -13,28 +13,29 @@ edition.workspace     = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bimap            = "0.6.3"
-daggy            = {workspace = true}
-fxhash           = {workspace = true}
-indent           = {workspace = true}
-itertools        = "0.15.0"
-log              = {workspace = true}
-num-bigint       = {workspace = true}
-num-traits       = {workspace = true}
-paste            = {workspace = true}
-postcard         = {workspace = true}
-similar          = {workspace = true}
-smallvec         = {workspace = true}
-strnum_bitwidth  = {workspace = true}
-strum            = "0.28.0"
-strum_macros     = "0.28.0"
-serde            = {workspace = true}
-serde_json       = {workspace = true}
-toml             = {workspace = true}
-thiserror        = {workspace = true}
-vcd              = {workspace = true}
-veryl-metadata   = {version = "0.20.2", path = "../metadata"}
-veryl-parser     = {version = "0.20.2", path = "../parser"}
+bimap               = "0.6.3"
+daggy               = {workspace = true}
+fxhash              = {workspace = true}
+indent              = {workspace = true}
+itertools           = "0.15.0"
+log                 = {workspace = true}
+num-bigint          = {workspace = true}
+num-traits          = {workspace = true}
+paste               = {workspace = true}
+postcard            = {workspace = true}
+similar             = {workspace = true}
+smallvec            = {workspace = true}
+strnum_bitwidth     = {workspace = true}
+strum               = "0.28.0"
+strum_macros        = "0.28.0"
+serde               = {workspace = true}
+serde_json          = {workspace = true}
+toml                = {workspace = true}
+thiserror           = {workspace = true}
+vcd                 = {workspace = true}
+veryl-component-sys = {version = "0.1.0", path = "../component/sys"}
+veryl-metadata      = {version = "0.20.2", path = "../metadata"}
+veryl-parser        = {version = "0.20.2", path = "../parser"}
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 miette          = {workspace = true, features = ["fancy-no-syscall"]}

@@ -906,7 +906,9 @@ impl Symbol {
                 .map(|x| x.is_variable_type())
                 .unwrap_or(false),
             // `$tb::file` is a passive testbench resource declared as `var`.
-            SymbolKind::TbComponent(x) => matches!(x.kind, TbComponentKind::File),
+            SymbolKind::TbComponent(x) => {
+                matches!(x.kind, TbComponentKind::File | TbComponentKind::External(_))
+            }
             _ => false,
         }
     }
@@ -2887,6 +2889,9 @@ pub enum TbComponentKind {
     ClockGen,
     ResetGen,
     File,
+    /// User-defined verification component declared in `[[components]]` of
+    /// Veryl.toml; the payload is the component name.
+    External(StrId),
 }
 
 impl std::fmt::Display for TbComponentKind {
@@ -2895,6 +2900,7 @@ impl std::fmt::Display for TbComponentKind {
             TbComponentKind::ClockGen => write!(f, "clock_gen"),
             TbComponentKind::ResetGen => write!(f, "reset_gen"),
             TbComponentKind::File => write!(f, "file"),
+            TbComponentKind::External(name) => write!(f, "{name}"),
         }
     }
 }

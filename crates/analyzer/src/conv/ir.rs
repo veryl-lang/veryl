@@ -31,7 +31,13 @@ impl Conv<&Veryl> for ir::Ir {
         let mut components = vec![];
 
         for x in &value.veryl_list {
-            let items: Vec<_> = x.description_group.as_ref().into();
+            // Dependency testbenches are skipped in pass1, so their symbols
+            // don't exist here; exclude them from conversion as well.
+            let items: Vec<&DescriptionItem> = if context.in_dependency {
+                crate::attribute::description_items_excluding_tests(&x.description_group)
+            } else {
+                x.description_group.as_ref().into()
+            };
             for item in &items {
                 // ignore IrError of generic top-level components
                 let in_generic = context.in_generic;
@@ -233,16 +239,40 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         }
 
         if !header_only {
+            let mut items = vec![];
             for x in &module_declaration.module_declaration_list {
-                let items: Vec<_> = x.module_group.as_ref().into();
-                for item in &items {
+                let group: Vec<_> = x.module_group.as_ref().into();
+                items.extend(group);
+            }
+
+            // Module items are order-free: initial/final bodies consume
+            // state that other declarations register during conversion
+            // (component parameters, elaborated instance components), so
+            // they convert after everything else. The declaration order in
+            // the resulting IR still follows the source.
+            let is_tb_block = |item: &&ModuleItem| {
+                matches!(
+                    item.generate_item.as_ref(),
+                    GenerateItem::InitialDeclaration(_) | GenerateItem::FinalDeclaration(_)
+                )
+            };
+            let mut blocks: Vec<Vec<ir::Declaration>> = Vec::new();
+            blocks.resize_with(items.len(), Vec::new);
+            for deferred in [false, true] {
+                for (i, item) in items.iter().enumerate() {
+                    if is_tb_block(item) != deferred {
+                        continue;
+                    }
                     let ret: IrResult<ir::DeclarationBlock> =
                         Conv::conv(&mut context, item.generate_item.as_ref());
 
-                    if let Ok(mut block) = ret {
-                        declarations.append(&mut block.0);
+                    if let Ok(block) = ret {
+                        blocks[i] = block.0;
                     }
                 }
+            }
+            for mut block in blocks {
+                declarations.append(&mut block);
             }
         }
 

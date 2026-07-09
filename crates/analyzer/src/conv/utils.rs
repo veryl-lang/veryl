@@ -1,6 +1,6 @@
 use crate::analyzer_error::{
-    AnalyzerError, ExceedLimitKind, InvalidForStepKind, MismatchTypeKind, MultipleDefaultKind,
-    UnevaluableValueKind,
+    AnalyzerError, ComponentInterfaceMismatchKind, ExceedLimitKind, InvalidForStepKind,
+    MismatchTypeKind, MultipleDefaultKind, UnevaluableValueKind,
 };
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -14,8 +14,8 @@ use crate::ir::{
     VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::symbol::{
-    self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, ProtoBound, Symbol,
-    SymbolKind, TbComponentKind, TypeKind,
+    self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, GenericMap, ProtoBound,
+    Symbol, SymbolKind, TbComponentKind, TypeKind,
 };
 use crate::symbol_path::{
     GenericSymbolPath, GenericSymbolPathKind, SymbolPath, SymbolPathNamespace,
@@ -1331,10 +1331,12 @@ pub fn eval_type(
                         return Err(ir_error!(token));
                     }
                 }
-                SymbolKind::TbComponent(x) if matches!(x.kind, TbComponentKind::File) => {
-                    // The descriptor lives in the simulator's StrId-keyed file
-                    // table, so this slot is never read; back it with a
-                    // throwaway 32-bit width.
+                SymbolKind::TbComponent(x)
+                    if matches!(x.kind, TbComponentKind::File | TbComponentKind::External(_)) =>
+                {
+                    // The descriptor lives in the simulator (file table or
+                    // component instance), so this slot is never read; back
+                    // it with a throwaway 32-bit width.
                     if !context.in_test_module {
                         let token: TokenRange = path.paths[0].base.into();
                         context.insert_error(AnalyzerError::invalid_tb_usage(&token));
@@ -1793,6 +1795,34 @@ pub fn eval_function_call(
     if let Some(x) = &value.identifier_factor_opt
         && let IdentifierFactorOptGroup::FunctionCall(x) = x.identifier_factor_opt_group.as_ref()
     {
+        // A component method call in expression position hoists to its own
+        // zero-time statement; builtin $tb methods return nothing. Testbench
+        // components only exist inside #[test] modules, so the probe (one
+        // extra resolve per multi-segment call) is skipped elsewhere.
+        if context.in_test_module
+            && let Some(tb_stmt) = tb_method_call(
+                context,
+                value.expression_identifier.as_ref(),
+                &x.function_call,
+                token,
+                TbMethodCallPosition::Value,
+            )?
+        {
+            let ir::Statement::TbMethodCall(method_call) = tb_stmt else {
+                unreachable!()
+            };
+            if matches!(method_call.method, TbMethod::Component { .. }) {
+                return hoist_component_method_call(context, method_call, token);
+            }
+            context.insert_error(AnalyzerError::invalid_factor(
+                None,
+                "testbench method without return value",
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+
         let args = if let Some(x) = &x.function_call.function_call_opt {
             argument_list(context, x.argument_list.as_ref())?
         } else {
@@ -2221,30 +2251,43 @@ fn eval_factor_path_inner(
                 token,
             )
         } else {
-            // To resolve external symbol reference,
-            // use an independent context to avoid name conflict
-            let mut external_context = Context::default();
-            external_context.inherit(context);
-
-            external_context.push_generic_map(generic_path.to_generic_maps());
-            let ret = external_context.block(|c| {
-                eval_factor_symbol(
-                    c,
-                    generic_path,
-                    (*symbol).clone(),
-                    allow_unknown_value,
-                    token,
-                )
-            });
-
-            external_context.pop_generic_map();
-            context.inherit(&mut external_context);
-
-            ret
+            let maps = generic_path.to_generic_maps();
+            eval_factor_symbol_external(
+                context,
+                generic_path,
+                (*symbol).clone(),
+                maps,
+                allow_unknown_value,
+                token,
+            )
         }
     } else {
         Err(ir_error!(token))
     }
+}
+
+/// Evaluates a resolved symbol that lives outside the current module: an
+/// independent context avoids name conflicts, with the given generic
+/// arguments applied.
+pub fn eval_factor_symbol_external(
+    context: &mut Context,
+    path: GenericSymbolPath,
+    symbol: ResolveResult,
+    maps: Vec<GenericMap>,
+    allow_unknown_value: bool,
+    token: TokenRange,
+) -> IrResult<ir::Factor> {
+    let mut external_context = Context::default();
+    external_context.inherit(context);
+
+    external_context.push_generic_map(maps);
+    let ret =
+        external_context.block(|c| eval_factor_symbol(c, path, symbol, allow_unknown_value, token));
+
+    external_context.pop_generic_map();
+    context.inherit(&mut external_context);
+
+    ret
 }
 
 pub fn eval_factor_symbol(
@@ -3726,11 +3769,162 @@ pub fn parse_expression(s: &str) -> Expression {
     extractor.0.unwrap()
 }
 
+/// Where a testbench method call appears, for return-value diagnostics.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TbMethodCallPosition {
+    /// Bare statement: a declared return value would be silently dropped.
+    Statement,
+    /// Assignment or expression position: the value is consumed.
+    Value,
+}
+
+/// Converts a method call on a user-defined `$comp` component into a
+/// [`TbMethod::Component`], diagnosing the call against the interface
+/// manifest when one is present. Returns the method and the resolved return
+/// width (`None` when undeclared).
+fn conv_external_method_call(
+    context: &mut Context,
+    component: resource_table::StrId,
+    path: &GenericSymbolPath,
+    args: Option<ir::Arguments>,
+    inst_name: resource_table::StrId,
+    position: TbMethodCallPosition,
+    token: TokenRange,
+) -> IrResult<(TbMethod, Option<u32>)> {
+    // Only the exact `instance.method(...)` shape reaches the component;
+    // extra path segments or generic arguments would otherwise be silently
+    // dropped.
+    if path.paths.len() != 2 {
+        context.insert_error(AnalyzerError::component_interface_mismatch(
+            ComponentInterfaceMismatchKind::MethodCallForm,
+            Some(component),
+            &token,
+        ));
+        return Err(ir_error!(token));
+    }
+    if path.paths.iter().any(|x| !x.arguments.is_empty()) {
+        context.insert_error(AnalyzerError::component_interface_mismatch(
+            ComponentInterfaceMismatchKind::MethodNoGenericArgs,
+            Some(component),
+            &token,
+        ));
+        return Err(ir_error!(token));
+    }
+    let args: Vec<SystemFunctionInput> = match args {
+        Some(ir::Arguments::Positional(ref positional)) => positional
+            .iter()
+            .map(|arg| SystemFunctionInput(arg.0.clone()))
+            .collect(),
+        None | Some(ir::Arguments::Null) => Vec::new(),
+        // The ABI carries values only, no argument names.
+        Some(ir::Arguments::Named(_)) | Some(ir::Arguments::Mixed(..)) => {
+            context.insert_error(AnalyzerError::invalid_factor(
+                None,
+                "component method with named arguments",
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+    };
+    // The manifest keys methods by their unrawed name.
+    let method = resource_table::canonical_str_id(path.paths[path.paths.len() - 1].base.text);
+    let mut ret_width = None;
+    if let Some(manifest) = crate::component_manifest_table::get(component)
+        && !manifest.methods.is_empty()
+    {
+        let name = method.to_string();
+        match manifest.method(&name) {
+            None => {
+                context.insert_error(AnalyzerError::component_interface_mismatch(
+                    ComponentInterfaceMismatchKind::UnknownMethod {
+                        method: name.clone(),
+                    },
+                    Some(component),
+                    &token,
+                ));
+            }
+            Some(m) if m.args.len() != args.len() => {
+                context.insert_error(AnalyzerError::mismatch_function_arity(
+                    &name,
+                    m.args.len(),
+                    args.len(),
+                    &token,
+                ));
+            }
+            Some(m) => {
+                match position {
+                    TbMethodCallPosition::Statement if m.ret.is_some() => {
+                        context.insert_error(AnalyzerError::unused_return(&name, &token));
+                    }
+                    TbMethodCallPosition::Value if m.ret.is_none() => {
+                        context.insert_error(AnalyzerError::component_interface_mismatch(
+                            ComponentInterfaceMismatchKind::MethodReturnsNoValue {
+                                method: name.clone(),
+                            },
+                            Some(component),
+                            &token,
+                        ));
+                    }
+                    _ => {}
+                }
+
+                let inst_params = context
+                    .tb_component_params
+                    .get(&inst_name)
+                    .cloned()
+                    .unwrap_or_default();
+                let resolve_width =
+                    |context: &mut Context, expr: &veryl_metadata::WidthExpr, what: &str| {
+                        match veryl_metadata::eval_width_expr(expr, &inst_params) {
+                            Some(w) if w > 0 => Some(w as u32),
+                            _ => {
+                                context.insert_error(AnalyzerError::component_interface_mismatch(
+                                    ComponentInterfaceMismatchKind::UnresolvableWidth {
+                                        expr: expr.to_string(),
+                                        what: what.to_string(),
+                                    },
+                                    Some(component),
+                                    &token,
+                                ));
+                                None
+                            }
+                        }
+                    };
+                if let Some(expr) = &m.ret_width.clone() {
+                    ret_width = resolve_width(context, expr, &format!("method `{name}`'s return"));
+                    // Method return values cross the host ABI in a fixed
+                    // 8 x 64-bit word buffer; wider declared returns can never
+                    // be delivered.
+                    const METHOD_RET_MAX_WIDTH: u32 = 512;
+                    if let Some(w) = ret_width
+                        && w > METHOD_RET_MAX_WIDTH
+                    {
+                        context.insert_error(AnalyzerError::component_interface_mismatch(
+                            ComponentInterfaceMismatchKind::MethodReturnTooWide {
+                                method: name.clone(),
+                                declared: w,
+                                max: METHOD_RET_MAX_WIDTH,
+                            },
+                            Some(component),
+                            &token,
+                        ));
+                    }
+                }
+                // A `Value` argument's width is inferred from the call-site
+                // expression, so there is nothing to check here.
+            }
+        }
+    }
+    Ok((TbMethod::Component { method, args }, ret_width))
+}
+
 pub fn tb_method_call(
     context: &mut Context,
     expr_id: &ExpressionIdentifier,
     func_call: &FunctionCall,
     token: TokenRange,
+    position: TbMethodCallPosition,
 ) -> IrResult<Option<ir::Statement>> {
     let path: GenericSymbolPath = expr_id.into();
 
@@ -3753,7 +3947,9 @@ pub fn tb_method_call(
         inst_define_context,
     )) {
         Ok(s) => s,
-        Err(_) => return Ok(None),
+        Err(_) => {
+            return Ok(None);
+        }
     };
 
     // `$tb` methods are called on either an `inst` (clock_gen/reset_gen) or a
@@ -3767,18 +3963,24 @@ pub fn tb_method_call(
                 return Ok(None);
             }
         }
-        _ => return Ok(None),
+        _ => {
+            return Ok(None);
+        }
     };
 
     let type_symbol =
         match symbol_table::resolve_generic_structural(type_path, &inst_symbol.found.namespace) {
             Ok(s) => s,
-            Err(_) => return Ok(None),
+            Err(_) => {
+                return Ok(None);
+            }
         };
 
     let tb_kind = match &type_symbol.found.kind {
         SymbolKind::TbComponent(x) => &x.kind,
-        _ => return Ok(None),
+        _ => {
+            return Ok(None);
+        }
     };
 
     let method_name = resource_table::get_str_value(path.paths[path.paths.len() - 1].base.text);
@@ -3791,6 +3993,7 @@ pub fn tb_method_call(
         None
     };
 
+    let mut ret_width = None;
     let method = match (tb_kind, method_name) {
         (TbComponentKind::ClockGen, "next") => {
             let count = if let Some(ir::Arguments::Positional(ref positional)) = args
@@ -3859,13 +4062,124 @@ pub fn tb_method_call(
         }
         (TbComponentKind::File, "close") => TbMethod::FileClose,
         (TbComponentKind::File, "flush") => TbMethod::FileFlush,
+        // Any method name is accepted on a user-defined component; the
+        // component validates it at run time. With a manifest present the
+        // name and arity are also diagnosed here.
+        (TbComponentKind::External(component), _) => {
+            let (method, rw) = conv_external_method_call(
+                context, *component, &path, args, inst_name, position, token,
+            )?;
+            ret_width = rw;
+            method
+        }
         _ => return Err(ir_error!(token)),
     };
 
     Ok(Some(ir::Statement::TbMethodCall(TbMethodCall {
         inst: inst_name,
         method,
+        ret: None,
+        ret_strict: false,
+        ret_width,
     })))
+}
+
+/// Hoists a component method call out of an expression: the call runs as
+/// its own zero-time statement immediately before the enclosing testbench
+/// statement, its return value lands in a synthetic temporary, and the
+/// expression reads the temporary. The temporary carries the declared
+/// return width when the manifest provides one; otherwise it is 64 bits
+/// and a wider return fails at run time (the direct assignment form
+/// `x = inst.method(...)` then carries the declared width of `x`).
+pub fn hoist_component_method_call(
+    context: &mut Context,
+    mut method_call: TbMethodCall,
+    token: TokenRange,
+) -> IrResult<ir::Expression> {
+    if context.tb_hoist.is_none() {
+        context.insert_error(AnalyzerError::invalid_factor(
+            None,
+            "component method call outside testbench statements",
+            &token,
+            &[],
+        ));
+        return Err(ir_error!(token));
+    }
+
+    let width = method_call.ret_width.unwrap_or(64) as usize;
+    let name = format!("__tb_method_ret_{}", context.tb_hoist_count);
+    context.tb_hoist_count += 1;
+    let path = VarPath::new(resource_table::insert_str(&name));
+    let mut r#type = ir::Type::new(ir::TypeKind::Bit);
+    r#type.set_concrete_width(Shape::new(vec![Some(width)]));
+
+    let comptime = Comptime::from_type(r#type.clone(), ClockDomain::None, token);
+    let id = context.insert_var_path(path.clone(), comptime.clone());
+    let array_limit = context.config.evaluate_array_limit;
+    let variable = Variable::new(
+        id,
+        path.clone(),
+        VarKind::Variable,
+        r#type,
+        vec![Value::new_x(width, false)],
+        context.get_affiliation(),
+        &token,
+        array_limit,
+    );
+    context.insert_variable(id, variable);
+
+    method_call.ret = Some(Box::new(ir::AssignDestination {
+        id,
+        path,
+        index: VarIndex::default(),
+        select: VarSelect::default(),
+        comptime: comptime.clone(),
+        token,
+    }));
+    method_call.ret_strict = true;
+    context
+        .tb_hoist
+        .as_mut()
+        .unwrap()
+        .push(ir::Statement::TbMethodCall(method_call));
+
+    Ok(ir::Expression::Term(Box::new(ir::Factor::Variable(
+        id,
+        VarIndex::default(),
+        VarSelect::default(),
+        comptime,
+    ))))
+}
+
+/// Extracts the sole `receiver.method(...)` call of an expression, when the
+/// expression is exactly one identifier factor with a function call. Used to
+/// intercept component method calls in assignment position.
+pub fn single_function_call_factor(
+    expr: &Expression,
+) -> Option<(&ExpressionIdentifier, &FunctionCall)> {
+    let if_expr = &*expr.if_expression;
+    if !if_expr.if_expression_list.is_empty() {
+        return None;
+    }
+    let e01 = &*if_expr.expression01;
+    if !e01.expression01_list.is_empty() {
+        return None;
+    }
+    let e02 = &*e01.expression02;
+    if !e02.expression02_list.is_empty() || e02.expression02_opt.is_some() {
+        return None;
+    }
+    if let Factor::IdentifierFactor(x) = e02.factor.as_ref()
+        && let Some(opt) = &x.identifier_factor.identifier_factor_opt
+        && let IdentifierFactorOptGroup::FunctionCall(call) =
+            opt.identifier_factor_opt_group.as_ref()
+    {
+        return Some((
+            x.identifier_factor.expression_identifier.as_ref(),
+            call.function_call.as_ref(),
+        ));
+    }
+    None
 }
 
 #[cfg(test)]

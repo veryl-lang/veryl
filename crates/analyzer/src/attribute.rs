@@ -4,7 +4,9 @@ use std::fmt;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use veryl_parser::resource_table::{self, StrId};
-use veryl_parser::veryl_grammar_trait::AttributeOpt;
+use veryl_parser::veryl_grammar_trait::{
+    AttributeOpt, DescriptionGroup, DescriptionGroupGroup, DescriptionItem,
+};
 use veryl_parser::veryl_token::Token;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,6 +256,39 @@ impl Pattern {
 }
 
 thread_local!(static PAT: RefCell<Pattern> = RefCell::new(Pattern::new()));
+
+/// Syntactic check usable before attributes are registered in the
+/// attribute_table.
+pub fn has_test_attribute(group: &DescriptionGroup) -> bool {
+    PAT.with_borrow(|pat| {
+        group
+            .description_group_list
+            .iter()
+            .any(|x| x.attribute.identifier.identifier_token.token.text == pat.test)
+    })
+}
+
+/// Flattens a description group like `From<&DescriptionGroup> for
+/// Vec<&DescriptionItem>`, but drops `#[test]`-marked subgroups.
+pub fn description_items_excluding_tests(group: &DescriptionGroup) -> Vec<&DescriptionItem> {
+    fn collect<'a>(group: &'a DescriptionGroup, ret: &mut Vec<&'a DescriptionItem>) {
+        if has_test_attribute(group) {
+            return;
+        }
+        match &*group.description_group_group {
+            DescriptionGroupGroup::LBraceDescriptionGroupGroupListRBrace(x) => {
+                for x in &x.description_group_group_list {
+                    collect(&x.description_group, ret);
+                }
+            }
+            DescriptionGroupGroup::DescriptionItem(x) => ret.push(&x.description_item),
+        }
+    }
+
+    let mut ret = Vec::new();
+    collect(group, &mut ret);
+    ret
+}
 
 impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
     type Error = AttributeError;

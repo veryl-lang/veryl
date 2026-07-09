@@ -1,8 +1,9 @@
-use crate::analyzer_error::MismatchTypeKind;
+use crate::analyzer_error::{ComponentInterfaceMismatchKind, MismatchTypeKind};
 use crate::conv::utils::{
-    TypePosition, argument_list, build_for_range, build_for_statement, case_patterns,
-    eval_array_range_assign, eval_assign_statement, eval_expr, eval_variable, expand_connect,
-    expand_connect_const, function_call, get_return_str, switch_condition, tb_method_call,
+    TbMethodCallPosition, TypePosition, argument_list, build_for_range, build_for_statement,
+    case_patterns, eval_array_range_assign, eval_assign_statement, eval_expr, eval_variable,
+    expand_connect, expand_connect_const, function_call, get_return_str,
+    hoist_component_method_call, single_function_call_factor, switch_condition, tb_method_call,
     try_infer_decl_type, try_infer_var_assign,
 };
 use crate::conv::{Context, Conv};
@@ -37,9 +38,42 @@ impl Conv<&StatementBlock> for ir::StatementBlock {
     }
 }
 
+/// Runs `f` with a fresh testbench hoist sink and splices the component
+/// method calls hoisted out of the converted construct in front of its
+/// statements. Giving each statement-level construct its own sink keeps
+/// hoists inside loop/branch bodies attached to the statement they came
+/// from (re-executed per iteration), not the enclosing block. No-op
+/// outside initial/final blocks (no sink installed).
+fn with_tb_hoist_sink(
+    context: &mut Context,
+    f: impl FnOnce(&mut Context) -> IrResult<ir::StatementBlock>,
+) -> IrResult<ir::StatementBlock> {
+    let saved = match context.tb_hoist.take() {
+        Some(outer) => {
+            context.tb_hoist = Some(Vec::new());
+            Some(outer)
+        }
+        None => None,
+    };
+
+    let result = f(context);
+
+    let Some(outer) = saved else {
+        return result;
+    };
+    let hoisted = std::mem::replace(context.tb_hoist.as_mut().unwrap(), outer);
+    let mut block = result?;
+    if !hoisted.is_empty() {
+        block.0.splice(0..0, hoisted);
+    }
+    Ok(block)
+}
+
 impl Conv<&StatementBlockItem> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &StatementBlockItem) -> IrResult<Self> {
-        match value {
+        // The sink covers the whole item, so `let`/`var` initializers and
+        // concatenation assignments hoist like plain statements.
+        with_tb_hoist_sink(context, |context| match value {
             StatementBlockItem::VarDeclaration(x) => {
                 let _: ir::Declaration = Conv::conv(context, x.var_declaration.as_ref())?;
                 Ok(ir::StatementBlock::default())
@@ -57,7 +91,7 @@ impl Conv<&StatementBlockItem> for ir::StatementBlock {
             StatementBlockItem::ConcatenationAssignment(x) => {
                 Conv::conv(context, x.concatenation_assignment.as_ref())
             }
-        }
+        })
     }
 }
 
@@ -197,6 +231,80 @@ impl Conv<&Statement> for ir::StatementBlock {
     }
 }
 
+/// Handles `dst = inst.method(...)`, where the RHS is a component method
+/// call returning a value across the host boundary. `Ok(Some(_))` means the
+/// assignment was such a call and is fully converted; `Ok(None)` means it is
+/// an ordinary assignment the caller should convert normally.
+fn conv_tb_method_call_assignment(
+    context: &mut Context,
+    dst_expr: &ExpressionIdentifier,
+    value_expr: &Expression,
+    token: TokenRange,
+) -> IrResult<Option<ir::StatementBlock>> {
+    let Some((receiver, call)) = single_function_call_factor(value_expr) else {
+        return Ok(None);
+    };
+    let Some(tb_stmt) =
+        tb_method_call(context, receiver, call, token, TbMethodCallPosition::Value)?
+    else {
+        return Ok(None);
+    };
+    let ir::Statement::TbMethodCall(mut method_call) = tb_stmt else {
+        unreachable!()
+    };
+    if !matches!(method_call.method, ir::TbMethod::Component { .. }) {
+        // Builtin $tb methods return nothing; report the assignment as an
+        // unsupported use.
+        context.insert_error(AnalyzerError::invalid_factor(
+            None,
+            "testbench method without return value",
+            &token,
+            &[],
+        ));
+        return Err(ir_error!(token));
+    }
+
+    let dst: VarPathSelect = Conv::conv(context, dst_expr)?;
+    let Some(dst) = dst.to_assign_destination(context, false) else {
+        return Err(ir_error!(token));
+    };
+    if let Some(w) = method_call.ret_width
+        && let Some(dst_width) = dst.total_width(context)
+        && dst_width != w as usize
+    {
+        context.insert_error(AnalyzerError::component_interface_mismatch(
+            ComponentInterfaceMismatchKind::MethodReturnWidth {
+                returned: w as usize,
+                destination: dst_width,
+            },
+            None,
+            &token,
+        ));
+    }
+    // A plain destination receives the return value directly, carrying its
+    // full declared width. Indexed/selected destinations go through the
+    // expression-position hoist (a temporary plus an ordinary assignment,
+    // which handles selects).
+    if dst.index.0.is_empty() && dst.select.0.is_empty() && dst.select.1.is_none() {
+        method_call.ret = Some(Box::new(dst));
+        return Ok(Some(ir::StatementBlock(vec![ir::Statement::TbMethodCall(
+            method_call,
+        )])));
+    }
+    let temp = hoist_component_method_call(context, method_call, token)?;
+    let width = dst
+        .total_width(context)
+        .and_then(|x| context.check_size(x, token));
+    Ok(Some(ir::StatementBlock(vec![ir::Statement::Assign(
+        ir::AssignStatement {
+            dst: vec![dst],
+            width,
+            expr: temp,
+            token,
+        },
+    )])))
+}
+
 impl Conv<&IdentifierStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &IdentifierStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.semicolon.semicolon_token).into();
@@ -211,6 +319,18 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
             IdentifierStatementGroup::Assignment(x) => {
                 match x.assignment.assignment_group.as_ref() {
                     AssignmentGroup::Equ(_) => {
+                        // `x = inst.method(...)`: a component method call in
+                        // assignment position returns a value through the
+                        // host boundary; intercept before expression eval.
+                        if let Some(block) = conv_tb_method_call_assignment(
+                            context,
+                            expr,
+                            &x.assignment.expression,
+                            token,
+                        )? {
+                            return Ok(block);
+                        }
+
                         let inferred = if let Ok(symbol) = symbol_table::resolve(expr) {
                             try_infer_var_assign(
                                 context,
@@ -332,6 +452,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                     value.expression_identifier.as_ref(),
                     &x.function_call,
                     token,
+                    TbMethodCallPosition::Statement,
                 )? {
                     return Ok(ir::StatementBlock(vec![tb_stmt]));
                 }
@@ -794,7 +915,11 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
 
         for item in &value.case_statement_list {
             let body: ir::StatementBlock = match item.case_item.case_item_group0.as_ref() {
-                CaseItemGroup0::Statement(x) => Conv::conv(context, x.statement.as_ref())?,
+                // A bare statement arm has no StatementBlockItem wrapper, so
+                // it needs its own hoist sink here.
+                CaseItemGroup0::Statement(x) => {
+                    with_tb_hoist_sink(context, |c| Conv::conv(c, x.statement.as_ref()))?
+                }
                 CaseItemGroup0::StatementBlock(x) => {
                     Conv::conv(context, x.statement_block.as_ref())?
                 }
@@ -853,7 +978,11 @@ impl Conv<&SwitchStatement> for ir::StatementBlock {
 
         for item in &value.switch_statement_list {
             let true_side: ir::StatementBlock = match item.switch_item.switch_item_group0.as_ref() {
-                SwitchItemGroup0::Statement(x) => Conv::conv(context, x.statement.as_ref())?,
+                // A bare statement arm has no StatementBlockItem wrapper, so
+                // it needs its own hoist sink here.
+                SwitchItemGroup0::Statement(x) => {
+                    with_tb_hoist_sink(context, |c| Conv::conv(c, x.statement.as_ref()))?
+                }
                 SwitchItemGroup0::StatementBlock(x) => {
                     Conv::conv(context, x.statement_block.as_ref())?
                 }

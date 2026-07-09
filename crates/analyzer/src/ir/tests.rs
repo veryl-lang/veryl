@@ -1486,8 +1486,8 @@ fn interface_function() {
     var11 = var3;
   }
   func var13(if_a.FuncA) -> var14 {
-    var15 = var0;
-    var14 = var0;
+    var15 = var1;
+    var14 = var1;
   }
 
   comb {

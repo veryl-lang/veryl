@@ -23,9 +23,9 @@ pub use comptime::{
     TypeKindMember, TypeKindStruct, TypeKindUnion, ValueVariant,
 };
 pub use declaration::{
-    CombDeclaration, Declaration, DeclarationBlock, FfClock, FfDeclaration, FfReset,
-    FinalDeclaration, InitialDeclaration, InstDeclaration, InstInput, InstOutput,
-    qualified_prefix_len,
+    CombDeclaration, Declaration, DeclarationBlock, ExternalConnect, ExternalDeclaration,
+    ExternalParamValue, FfClock, FfDeclaration, FfReset, FinalDeclaration, InitialDeclaration,
+    InstDeclaration, InstInput, InstOutput, qualified_prefix_len,
 };
 pub use expression::{ArrayLiteralItem, Expression, Factor, HierVarRef};
 pub use ff_table::FfTable;
