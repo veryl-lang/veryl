@@ -279,6 +279,15 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
                     walk_expr_reads(e, c);
                 }
             }
+            // Component method arguments are reads for the same reason as
+            // file-write arguments.
+            ProtoTbMethodKind::Component { args, .. } => {
+                for a in args {
+                    if let crate::ir::statement::ProtoComponentArg::Expr(e) = a {
+                        walk_expr_reads(e, c);
+                    }
+                }
+            }
             ProtoTbMethodKind::FileOpen { .. }
             | ProtoTbMethodKind::FileClose
             | ProtoTbMethodKind::FileFlush => {}

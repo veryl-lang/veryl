@@ -23,7 +23,7 @@ use veryl_analyzer::ir as air;
 use veryl_analyzer::ir::{
     AssertKind, SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant,
 };
-use veryl_analyzer::ir::{ControlFlow, FunctionCall};
+use veryl_analyzer::ir::{ControlFlow, FunctionCall, VarId};
 use veryl_analyzer::value::{MaskCache, Value as AnalyzerValue};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -146,6 +146,32 @@ pub enum ProtoTbMethodKind {
     },
     FileClose,
     FileFlush,
+    Component {
+        method: StrId,
+        args: Vec<ProtoComponentArg>,
+        /// Assignment form: destination variable for the return value.
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+}
+
+/// How a component method's returned width is validated before it lands
+/// in the destination variable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetWidthCheck {
+    /// Direct assignment to a user variable: truncated to its width.
+    Dst,
+    /// Undeclared width into a hoist temporary: at most 64 bits.
+    Max64,
+    /// Declared width: the returned value must match exactly.
+    Exact(u32),
+}
+
+/// Argument of a user-defined component method call: string literals are
+/// extracted at conv time, everything else stays an evaluatable expression.
+#[derive(Clone, Debug)]
+pub enum ProtoComponentArg {
+    Str(String),
+    Expr(ProtoExpression),
 }
 
 #[derive(Clone)]
@@ -168,6 +194,18 @@ pub enum TbMethodKind {
     },
     FileClose,
     FileFlush,
+    Component {
+        method: StrId,
+        args: Vec<ComponentArg>,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+}
+
+/// Pointer-bound form of [`ProtoComponentArg`].
+#[derive(Clone)]
+pub enum ComponentArg {
+    Str(String),
+    Expr(Expression),
 }
 
 #[derive(Clone)]
@@ -931,6 +969,13 @@ impl ProtoStatement {
                         a.adjust_offsets(ff_delta, comb_delta);
                     }
                 }
+                ProtoTbMethodKind::Component { args, .. } => {
+                    for a in args {
+                        if let ProtoComponentArg::Expr(e) = a {
+                            e.adjust_offsets(ff_delta, comb_delta);
+                        }
+                    }
+                }
                 ProtoTbMethodKind::FileOpen { .. }
                 | ProtoTbMethodKind::FileClose
                 | ProtoTbMethodKind::FileFlush => {}
@@ -1081,6 +1126,13 @@ impl ProtoStatement {
                 ProtoTbMethodKind::FileWrite { args, .. } => {
                     for a in args {
                         a.remap_offsets(map);
+                    }
+                }
+                ProtoTbMethodKind::Component { args, .. } => {
+                    for a in args {
+                        if let ProtoComponentArg::Expr(e) = a {
+                            e.remap_offsets(map);
+                        }
                     }
                 }
                 ProtoTbMethodKind::FileOpen { .. }
@@ -1941,6 +1993,28 @@ impl ProtoStatement {
                         }
                         ProtoTbMethodKind::FileClose => TbMethodKind::FileClose,
                         ProtoTbMethodKind::FileFlush => TbMethodKind::FileFlush,
+                        ProtoTbMethodKind::Component { method, args, ret } => {
+                            let args = args
+                                .iter()
+                                .map(|a| match a {
+                                    ProtoComponentArg::Str(s) => ComponentArg::Str(s.clone()),
+                                    ProtoComponentArg::Expr(e) => {
+                                        ComponentArg::Expr(e.apply_values_ptr(
+                                            ff_values_ptr,
+                                            ff_len,
+                                            comb_values_ptr,
+                                            comb_len,
+                                            use_4state,
+                                        ))
+                                    }
+                                })
+                                .collect();
+                            TbMethodKind::Component {
+                                method: *method,
+                                args,
+                                ret: *ret,
+                            }
+                        }
                     };
                     Statement::TbMethodCall {
                         inst: *inst,
@@ -2442,6 +2516,13 @@ fn extract_string_value(expr: &air::Expression) -> Option<String> {
     None
 }
 
+/// Strips exactly the delimiting quotes of a string-literal token (one
+/// leading, one trailing); quote characters inside the content survive.
+fn strip_string_quotes(s: &str) -> &str {
+    let s = s.strip_prefix('"').unwrap_or(s);
+    s.strip_suffix('"').unwrap_or(s)
+}
+
 impl Conv<&air::Statement> for Vec<ProtoStatement> {
     fn conv(context: &mut Context, src: &air::Statement) -> Result<Self, SimulatorError> {
         let mut result = match src {
@@ -2584,6 +2665,50 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     }
                     air::TbMethod::FileClose => ProtoTbMethodKind::FileClose,
                     air::TbMethod::FileFlush => ProtoTbMethodKind::FileFlush,
+                    air::TbMethod::Component { method, args } => {
+                        let args = args
+                            .iter()
+                            .map(|a| {
+                                if is_string_literal(&a.0)
+                                    && let Some(s) = extract_string_value(&a.0)
+                                {
+                                    Ok(ProtoComponentArg::Str(strip_string_quotes(&s).to_string()))
+                                } else {
+                                    let expr: ProtoExpression = Conv::conv(context, &a.0)?;
+                                    Ok(ProtoComponentArg::Expr(expr))
+                                }
+                            })
+                            .collect::<Result<Vec<_>, SimulatorError>>()?;
+                        let ret = match &x.ret {
+                            None => None,
+                            Some(dst) => {
+                                if dst.index.0.is_empty()
+                                    && dst.select.0.is_empty()
+                                    && dst.select.1.is_none()
+                                {
+                                    let check = if let Some(w) = x.ret_width {
+                                        RetWidthCheck::Exact(w)
+                                    } else if x.ret_strict {
+                                        RetWidthCheck::Max64
+                                    } else {
+                                        RetWidthCheck::Dst
+                                    };
+                                    Some((dst.id, check))
+                                } else {
+                                    // Only a plain variable can receive a
+                                    // method return value.
+                                    return Err(SimulatorError::unsupported_description(
+                                        &dst.token,
+                                    ));
+                                }
+                            }
+                        };
+                        ProtoTbMethodKind::Component {
+                            method: *method,
+                            args,
+                            ret,
+                        }
+                    }
                 };
                 vec![ProtoStatement::TbMethodCall {
                     inst: x.inst,

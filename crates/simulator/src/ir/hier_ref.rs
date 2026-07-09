@@ -138,6 +138,13 @@ fn resolve_stmt(
                     resolve_expr(arg, context, children)?;
                 }
             }
+            crate::ir::statement::ProtoTbMethodKind::Component { args, .. } => {
+                for arg in args {
+                    if let crate::ir::statement::ProtoComponentArg::Expr(e) = arg {
+                        resolve_expr(e, context, children)?;
+                    }
+                }
+            }
             crate::ir::statement::ProtoTbMethodKind::FileOpen { .. }
             | crate::ir::statement::ProtoTbMethodKind::FileClose
             | crate::ir::statement::ProtoTbMethodKind::FileFlush => {}
@@ -154,7 +161,7 @@ fn resolve_stmt(
     Ok(())
 }
 
-fn resolve_expr(
+pub(crate) fn resolve_expr(
     expr: &mut ProtoExpression,
     context: &mut Context,
     children: &[ModuleVariableMeta],

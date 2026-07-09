@@ -5,6 +5,7 @@ use crate::ir::declaration::{stable_topo_sort, stable_topo_sort_with_blocks};
 use crate::ir::derived_clock::{
     DerivedClockSchedule, build_schedule as build_derived_clock_schedule, extract_eval_proto_stmts,
 };
+use crate::ir::external::{ExternalComponentInst, ProtoExternalComponent};
 use crate::ir::inst_layout::InstLayout;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
@@ -69,6 +70,12 @@ pub struct Module {
     /// when `Config::aot_c_event` is set).  Empty when no backend
     /// covered the event.
     pub whole_events: HashMap<Event, Arc<dyn CompiledWhole>>,
+    /// User-defined component instances (`$comp::<name>`), driven by
+    /// the simulator around event evaluation.
+    pub external_components: Vec<ExternalComponentInst>,
+    /// Top-level variables written by RTL statements; component outputs
+    /// must not overlap them (sole-driver check at load time).
+    pub rtl_driven: crate::HashSet<air::VarId>,
 }
 
 pub struct ProtoModule {
@@ -101,6 +108,10 @@ pub struct ProtoModule {
     /// See `Module::whole_events`.  Built in `conv()`, shared
     /// (`Arc::clone`) with every `Module` from `instantiate()`.
     pub whole_events: HashMap<Event, Arc<dyn CompiledWhole>>,
+    /// See `Module::external_components` (pre-pointer-binding form).
+    pub external_components: Vec<ProtoExternalComponent>,
+    /// See `Module::rtl_driven`.
+    pub rtl_driven: crate::HashSet<air::VarId>,
 }
 
 fn create_buffers(
@@ -313,6 +324,14 @@ impl ProtoModule {
             nontrivial_comb_scc: self.nontrivial_comb_scc,
             whole_comb: self.whole_comb.clone(),
             whole_events: self.whole_events.clone(),
+            external_components: self
+                .external_components
+                .iter()
+                .map(|x| unsafe {
+                    x.instantiate(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state)
+                })
+                .collect(),
+            rtl_driven: self.rtl_driven.clone(),
         }
     }
 
@@ -2403,6 +2422,7 @@ impl Conv<&air::Module> for ProtoModule {
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
         let mut nested_derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)> = vec![];
+        let mut all_external_components: Vec<ProtoExternalComponent> = vec![];
 
         for decl in declarations {
             let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
@@ -2417,6 +2437,7 @@ impl Conv<&air::Module> for ProtoModule {
             all_post_comb_fns.extend(proto_decl.post_comb_fns);
             all_child_modules.extend(proto_decl.child_modules);
             nested_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
+            all_external_components.extend(proto_decl.external_components);
         }
 
         // Hierarchical testbench references need the complete child meta
@@ -2426,6 +2447,42 @@ impl Conv<&air::Module> for ProtoModule {
             &mut all_event_statements,
             &all_child_modules,
         )?;
+
+        // Component input connections may also reference DUT internals.
+        for external in &mut all_external_components {
+            for connect in &mut external.connects {
+                crate::ir::hier_ref::resolve_expr(&mut connect.expr, context, &all_child_modules)?;
+                // A hierarchical clock/reset connection carries no VarId at
+                // conv time; recover the event key from the resolved offset.
+                // A nested derived clock matches its re-keyed candidate id;
+                // a child port aliased onto a testbench variable matches the
+                // top-scope variable that fires the event.
+                if (connect.is_clock || connect.is_reset)
+                    && connect.event_var.is_none()
+                    && let crate::ir::expression::ProtoExpression::Variable {
+                        var_offset,
+                        select: None,
+                        ..
+                    } = &connect.expr
+                {
+                    connect.event_var = nested_derived_clock_candidates
+                        .iter()
+                        .find(|(_, offset, _)| offset == var_offset)
+                        .map(|(vid, _, _)| *vid)
+                        .or_else(|| {
+                            context
+                                .scope()
+                                .variable_meta
+                                .iter()
+                                .find_map(|(vid, meta)| {
+                                    (meta.elements.len() == 1
+                                        && meta.elements[0].current == *var_offset)
+                                        .then_some(*vid)
+                                })
+                        });
+                }
+            }
+        }
 
         context.scope_contexts.pop();
 
@@ -2526,6 +2583,15 @@ impl Conv<&air::Module> for ProtoModule {
             for (_, off, _) in &nested_derived_clock_candidates {
                 protect.insert(*off);
             }
+            // Component input connections read these offsets, but they
+            // appear in no statement list — protect them from DCE.
+            for external in &all_external_components {
+                for connect in &external.connects {
+                    let mut ins = vec![];
+                    connect.expr.gather_variable_offsets(&mut ins);
+                    protect.extend(ins);
+                }
+            }
             // Multi-pass DCE default ON: iterate to fixpoint so that
             // cascaded drops (a dst becomes dead once its only consumer
             // was itself dropped) are caught in subsequent passes.  Opt
@@ -2581,6 +2647,45 @@ impl Conv<&air::Module> for ProtoModule {
             unified_sorted
         } else {
             unified_sorted
+        };
+
+        // Top-level variables written by RTL (post-DCE), for the sole-driver
+        // check on component outputs at load time.
+        let rtl_driven: crate::HashSet<air::VarId> = if all_external_components.is_empty() {
+            crate::HashSet::default()
+        } else {
+            let mut write_offsets: crate::HashSet<VarOffset> = crate::HashSet::default();
+            let mut ins = vec![];
+            let mut outs = vec![];
+            for (event, stmts) in &all_event_statements {
+                // Testbench-side writes (e.g. initialization in `initial`)
+                // are not RTL drivers; a component may drive such a
+                // variable.
+                if matches!(event, Event::Initial | Event::Final) {
+                    continue;
+                }
+                for stmt in stmts {
+                    ins.clear();
+                    outs.clear();
+                    stmt.gather_variable_offsets(&mut ins, &mut outs);
+                    write_offsets.extend(outs.drain(..));
+                }
+            }
+            for stmt in &unified_sorted {
+                ins.clear();
+                outs.clear();
+                stmt.gather_variable_offsets(&mut ins, &mut outs);
+                write_offsets.extend(outs.drain(..));
+            }
+            variable_meta
+                .iter()
+                .filter(|(_, meta)| {
+                    meta.elements
+                        .iter()
+                        .any(|e| write_offsets.contains(&e.current))
+                })
+                .map(|(vid, _)| *vid)
+                .collect()
         };
 
         // Snapshot before JIT consumes it: the whole-comb backend below needs
@@ -2994,6 +3099,8 @@ impl Conv<&air::Module> for ProtoModule {
             nontrivial_comb_scc,
             whole_comb,
             whole_events,
+            external_components: all_external_components,
+            rtl_driven,
         })
     }
 }
