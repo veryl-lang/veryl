@@ -1,5 +1,7 @@
 mod build;
 mod build_info;
+mod component;
+pub mod component_manifest;
 mod doc;
 mod format;
 mod git;
@@ -16,14 +18,22 @@ mod synth;
 mod test;
 #[cfg(test)]
 mod tests;
+mod wasm_section;
 pub use build::{Build, BuiltinType, ClockType, FilelistType, ResetType, SourceMapTarget, Target};
 pub use build_info::BuildInfo;
+pub use component::{
+    Component, component_crate_name, read_committed_manifests, sidecar_manifest_path,
+};
+pub use component_manifest::{
+    COMMITTED_MANIFEST_FILE, ComponentManifest, WidthExpr, eval_width_expr, parse_library_manifest,
+    parse_width_expr,
+};
 pub use doc::Doc;
 pub use format::{Format, NewlineStyle};
 pub use git::Git;
 pub use lint::{Case, Lint};
-pub use lockfile::{LockSource, Lockfile};
-pub use metadata::{BumpKind, Metadata, ProjectProperty, UrlPath};
+pub use lockfile::{DependencyComponents, LockSource, Lockfile};
+pub use metadata::{BumpKind, Metadata, ProjectProperty, UrlPath, check_project_name};
 pub use metadata_error::MetadataError;
 pub use metadata_output::{
     MetadataDependencyV2, MetadataOutputV2, MetadataProjectV2, MetadataSourceV2,
@@ -33,6 +43,7 @@ pub use pubfile::{Pubfile, Release};
 pub use publish::Publish;
 pub use semver;
 pub use synth::{Library, Synth};
-pub use test::{SimType, Test, WaveFormFormat, WaveFormTarget};
+pub use test::{ComponentBackendKind, SimType, Test, WaveFormFormat, WaveFormTarget};
+pub use wasm_section::{append_wasm_custom_section, wasm_custom_section};
 
 include!(concat!(env!("OUT_DIR"), "/veryl_version.rs"));

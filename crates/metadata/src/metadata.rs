@@ -1,5 +1,6 @@
 use crate::build::{Build, Target};
 use crate::build_info::BuildInfo;
+use crate::component::Component;
 use crate::doc::Doc;
 use crate::format::Format;
 use crate::git::Git;
@@ -54,6 +55,8 @@ pub struct Metadata {
     pub synth: Synth,
     #[serde(default)]
     pub properties: BTreeMap<String, ProjectProperty>,
+    #[serde(default)]
+    pub components: Vec<Component>,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
     #[serde(default)]
@@ -137,7 +140,8 @@ impl fmt::Display for UrlPath {
 static VALID_PROJECT_NAME: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[a-zA-Z_][0-9a-zA-Z_]*$").unwrap());
 
-fn check_project_name(name: &str) -> Result<(), MetadataError> {
+/// Validates a project or component name: identifiers only, `__` reserved.
+pub fn check_project_name(name: &str) -> Result<(), MetadataError> {
     if !VALID_PROJECT_NAME.is_match(name) {
         return Err(MetadataError::InvalidProjectName(name.to_string()));
     }
@@ -240,6 +244,10 @@ impl Metadata {
             info!(
                 "Committing metadata ({})",
                 self.pubfile_path.to_string_lossy()
+            );
+        } else {
+            warn!(
+                "Please git add and commit Veryl.pub (set `publish_commit = true` in [publish] to automate this)"
             );
         }
 
@@ -565,6 +573,78 @@ obj_dir/
 
     pub fn doc_path(&self) -> PathBuf {
         self.metadata_path.parent().unwrap().join(&self.doc.path)
+    }
+
+    /// Collects `[[components]]` declared by direct dependencies. Requires a
+    /// loaded lockfile; the dependency checkouts are already present when
+    /// this is called from the build/test flow.
+    pub fn collect_dependency_components(
+        &self,
+    ) -> Result<Vec<crate::lockfile::DependencyComponents>, MetadataError> {
+        self.lockfile.collect_components()
+    }
+
+    /// Collects the interface manifests of this project's and its direct
+    /// dependencies' components, keyed like the `$comp` symbols
+    /// (`<name>` / `<project>::<name>`). The names are the packages'
+    /// `veryl_component_export!` export names, enumerated per
+    /// `[[components]]` entry (see [`Component::collect_manifests`] for
+    /// the source priority). On a name collision the earlier entry wins.
+    pub fn collect_component_manifests(
+        &self,
+    ) -> Vec<(String, crate::component_manifest::ComponentManifest)> {
+        // Enumerates one project's entries with first-declaration-wins
+        // dedup; the same policy must hold wherever exports are collected
+        // (`veryl test` mirrors it when registering libraries).
+        fn collect_project(
+            components: &[crate::Component],
+            root: &Path,
+            target_dir: &Path,
+            project: Option<&str>,
+            ret: &mut Vec<(String, crate::component_manifest::ComponentManifest)>,
+        ) {
+            let mut seen = std::collections::HashSet::new();
+            for def in components {
+                for (name, manifest) in def.collect_manifests(root, target_dir) {
+                    if seen.insert(name.clone()) {
+                        let key = match project {
+                            Some(project) => format!("{project}::{name}"),
+                            None => name,
+                        };
+                        ret.push((key, manifest));
+                    } else {
+                        let scope = project
+                            .map(|p| format!(" of dependency `{p}`"))
+                            .unwrap_or_default();
+                        log::warn!(
+                            "component `{name}` is exported by more than one [[components]] package{scope}; the first declaration wins"
+                        );
+                    }
+                }
+            }
+        }
+
+        let mut ret = vec![];
+        // An in-memory metadata (no backing Veryl.toml) has no project
+        // directory to read manifests from.
+        if self.metadata_path.as_os_str().is_empty() {
+            return ret;
+        }
+        let root = self.project_path();
+        let target_dir = root.join("target/veryl-components");
+        collect_project(&self.components, &root, &target_dir, None, &mut ret);
+        if let Ok(deps) = self.collect_dependency_components() {
+            for dep in &deps {
+                collect_project(
+                    &dep.components,
+                    &dep.root,
+                    &dep.target_dir,
+                    Some(&dep.project),
+                    &mut ret,
+                );
+            }
+        }
+        ret
     }
 }
 

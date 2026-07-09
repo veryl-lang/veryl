@@ -2,7 +2,7 @@ use crate::git::Git;
 use crate::*;
 use semver::Version;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 const GIT_IGNORE: &str = r#"
@@ -23,6 +23,17 @@ target = {type = "source"}
 
 [format]
 indent_width = 4
+
+[[components]]
+path = "models/rv_iss"
+
+[[components]]
+path = "models/golden"
+wasm = "prebuilt/golden.wasm"
+
+[test]
+seed = 42
+component_backend = "wasm"
 "#;
 
 const EXTENSION_EXTERNAL_TOOL_TOML: &str = r#"
@@ -287,6 +298,14 @@ fn check_toml() {
     assert!(metadata.build.reset_low_prefix.is_none());
     assert_eq!(metadata.build.reset_low_suffix.unwrap(), "_n");
     assert_eq!(metadata.format.indent_width, 4);
+    assert_eq!(metadata.test.seed, Some(42));
+    assert_eq!(metadata.components.len(), 2);
+    let rv_iss = &metadata.components[0];
+    assert_eq!(rv_iss.path, PathBuf::from("models/rv_iss"));
+    assert!(rv_iss.wasm.is_none());
+    let golden = &metadata.components[1];
+    assert_eq!(golden.path, PathBuf::from("models/golden"));
+    assert_eq!(golden.wasm, Some(PathBuf::from("prebuilt/golden.wasm")));
 }
 
 #[test]
@@ -294,8 +313,15 @@ fn four_state_defaults_off_and_parses() {
     let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();
     assert!(!metadata.test.four_state);
 
-    let toml = format!("{TEST_TOML}\n[test]\nfour_state = true\n");
-    let metadata: Metadata = toml::from_str(&toml).unwrap();
+    let toml = r#"
+[project]
+name = "test"
+version = "0.1.0"
+
+[test]
+four_state = true
+"#;
+    let metadata: Metadata = toml::from_str(toml).unwrap();
     assert!(metadata.test.four_state);
 }
 
@@ -688,6 +714,71 @@ fn lockfile() {
     let _ = lockfile.clear_cache();
 }
 
+const VIP_TOML: &str = r#"
+[project]
+name = "vip"
+version = "0.1.0"
+
+[publish]
+bump_commit = true
+publish_commit = true
+
+[[components]]
+path = "models/mirror"
+
+[dependencies]
+trans = {git = "file://{}/trans", version = "0.1.0"}
+"#;
+
+const TRANS_TOML: &str = r#"
+[project]
+name = "trans"
+version = "0.1.0"
+
+[publish]
+bump_commit = true
+publish_commit = true
+
+[[components]]
+path = "models/hidden"
+"#;
+
+#[test]
+fn collect_dependency_components() {
+    let main_toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[dependencies]
+the_vip = {git = "file://{}/vip", project = "vip", version = "0.1.0"}
+"#;
+
+    let tempdir = tempfile::tempdir().unwrap();
+    create_project(tempdir.path(), "trans", TRANS_TOML, true);
+    create_project(tempdir.path(), "vip", VIP_TOML, true);
+    let mut metadata = create_project(tempdir.path(), "main", main_toml, false);
+
+    metadata.lockfile = Lockfile::new(&metadata).unwrap();
+    let deps = metadata.collect_dependency_components().unwrap();
+
+    // Only the direct dependency's components are collected, under its
+    // alias name; the transitive `trans` component stays hidden.
+    assert_eq!(deps.len(), 1);
+    let dep = &deps[0];
+    assert_eq!(dep.project, "the_vip");
+    assert_eq!(dep.components.len(), 1);
+    assert_eq!(dep.components[0].path, PathBuf::from("models/mirror"));
+    assert!(dep.root.join("Veryl.toml").exists());
+    // Repository dependencies build into the revision-keyed shared cache.
+    assert!(
+        dep.target_dir
+            .starts_with(veryl_path::cache_path().join("components"))
+    );
+
+    let _ = metadata.lockfile.clear_cache();
+}
+
 #[test]
 fn lockfile_inner_projects() {
     let (metadata, _tempdir) = create_metadata_inner_repo();
@@ -1019,4 +1110,69 @@ sub = {{
     let metadata = create_project(tempdir.path(), "main", &main_toml, false);
     let err = Lockfile::new(&metadata).unwrap_err();
     assert!(matches!(err, MetadataError::MismatchType { .. }));
+}
+
+#[test]
+fn unpublished_dependency_error() {
+    let unpub_toml = r#"
+[project]
+name = "unpub"
+version = "0.1.0"
+"#;
+    let main_toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[dependencies]
+unpub = {git = "file://{}/unpub", version = "0.1.0"}
+"#;
+
+    let tempdir = tempfile::tempdir().unwrap();
+    create_project(tempdir.path(), "unpub", unpub_toml, false);
+    let metadata = create_project(tempdir.path(), "main", main_toml, false);
+
+    let err = Lockfile::new(&metadata).unwrap_err();
+    assert!(matches!(err, MetadataError::UnpublishedDependency { .. }));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("dependency `unpub` has no published release"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn version_only_dependency_error() {
+    let toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[dependencies]
+bare = "1.0"
+"#;
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let toml_path = tempdir.path().join("Veryl.toml");
+    fs::write(&toml_path, toml).unwrap();
+    let metadata = Metadata::load(&toml_path).unwrap();
+
+    let err = Lockfile::new(&metadata).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("bare") && msg.contains("version-only dependencies are not supported yet"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn project_name_validation() {
+    assert!(check_project_name("valid_name").is_ok());
+    assert!(check_project_name("_leading").is_ok());
+    assert!(check_project_name("Name1").is_ok());
+    assert!(check_project_name("kebab-case").is_err());
+    assert!(check_project_name("1leading").is_err());
+    assert!(check_project_name("").is_err());
+    assert!(check_project_name("has space").is_err());
+    assert!(check_project_name("__reserved").is_err());
 }
