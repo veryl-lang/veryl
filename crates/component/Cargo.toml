@@ -1,0 +1,17 @@
+[package]
+name                  = "veryl-component"
+version               = "0.20.2"
+authors.workspace     = true
+repository.workspace  = true
+keywords.workspace    = true
+categories.workspace  = true
+license.workspace     = true
+readme.workspace      = true
+description.workspace = true
+edition.workspace     = true
+
+[dependencies]
+anyhow                 = {workspace = true}
+smallvec               = {workspace = true}
+veryl-component-macros = {version = "0.20.2", path = "macros"}
+veryl-component-sys    = {version = "0.20.2", path = "sys"}
