@@ -14,7 +14,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [veryl-tests, veryl-simulator]
+        include:
+          # veryl-tests (parse/format/analyze) is LTO-sensitive, so keep the
+          # fat-LTO `bench` default.
+          - package: veryl-tests
+            build_args: ""
+          # The simulator's hot loop is JIT-compiled native code that LTO
+          # barely touches; build it lto=false (release-verylup) to skip the
+          # fat-LTO link that OOM-kills the 2-core runner via wasmtime+cranelift.
+          - package: veryl-simulator
+            build_args: "--profile release-verylup"
 
     name: Run benchmarks
     runs-on: ubuntu-latest
@@ -55,7 +64,7 @@ jobs:
           restore-keys: sccache-codspeed-${{ matrix.package }}-
 
       - name: Build the benchmark target(s)
-        run: cargo codspeed build -p ${{ matrix.package }} --bench benchmark
+        run: cargo codspeed build -p ${{ matrix.package }} --bench benchmark ${{ matrix.build_args }}
 
       - name: sccache stats
         if: always()
@@ -128,8 +137,9 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-aot-c-${{ github.sha }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-aot-c-
 
-      # release-verylup (lto=false) avoids the slow fat-LTO link the default
-      # `bench` profile forces; boot-only, so the `benchmarks` job keeps its baseline.
+      # release-verylup (lto=false) avoids the slow fat-LTO link the `bench`
+      # profile forces; the JIT'd simulation loop is unaffected by LTO. Matches
+      # the simulator build in the benchmarks job above.
       - name: Build the benchmark target
         run: cargo codspeed build -p veryl-simulator --bench heliodor_boot --profile release-verylup
 
