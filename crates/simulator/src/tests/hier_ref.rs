@@ -291,10 +291,10 @@ fn hier_ref_unknown_member_diagnosed() {
 }
 
 #[test]
-fn hier_ref_before_inst_declaration_diagnosed() {
-    // The referenced instance must be converted before the reference;
-    // a use above the declaration gets an explicit diagnostic instead of
-    // a silent conversion failure.
+fn hier_ref_before_inst_declaration_works() {
+    // Module items are order-free: initial blocks convert after the other
+    // declarations, so a hierarchical reference above the instance
+    // declaration resolves normally.
     let code = format!(
         r#"
     {HIER_DUT}
@@ -318,13 +318,9 @@ fn hier_ref_before_inst_declaration_diagnosed() {
     }}
     "#
     );
-    let errors = analyze_errors(&code);
-    assert!(
-        errors
-            .iter()
-            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. })),
-        "expected referring_before_definition, got: {errors:?}"
-    );
+    for (config, result, _) in run_hier_test(&code) {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
 }
 
 #[test]

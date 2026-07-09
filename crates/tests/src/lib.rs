@@ -289,7 +289,7 @@ mod emitter {
         for (i, (input, result)) in parse_results.iter().enumerate() {
             let (src, dst, map) = &file_paths[i];
 
-            let mut emitter = Emitter::new(&metadata, src, dst, map);
+            let mut emitter = Emitter::new(&metadata, &metadata.project.name, src, dst, map);
             emitter.emit(&result.veryl, input);
 
             let out_code = emitter.as_str();
