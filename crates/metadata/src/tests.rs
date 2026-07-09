@@ -290,6 +290,16 @@ fn check_toml() {
 }
 
 #[test]
+fn four_state_defaults_off_and_parses() {
+    let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();
+    assert!(!metadata.test.four_state);
+
+    let toml = format!("{TEST_TOML}\n[test]\nfour_state = true\n");
+    let metadata: Metadata = toml::from_str(&toml).unwrap();
+    assert!(metadata.test.four_state);
+}
+
+#[test]
 fn synth_ram_thresholds_default_and_override() {
     // Omitted RAM thresholds fall back to the built-in defaults.
     let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();

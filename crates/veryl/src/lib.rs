@@ -247,6 +247,11 @@ pub struct OptTest {
     /// skipped automatically when tests run on a single worker.
     #[arg(long, alias = "nocapture")]
     pub no_capture: bool,
+
+    /// Run native tests in four-state (X/Z) mode. Also settable via
+    /// `[test].four_state`.
+    #[arg(long = "4state")]
+    pub four_state: bool,
 }
 
 /// Native-simulator code-generation backend selected by `veryl test --backend`.
