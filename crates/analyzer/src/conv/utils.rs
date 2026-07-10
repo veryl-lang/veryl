@@ -1,6 +1,6 @@
 use crate::analyzer_error::{
-    AnalyzerError, ComponentInterfaceMismatchKind, ExceedLimitKind, InvalidForStepKind,
-    MismatchTypeKind, MultipleDefaultKind, UnevaluableValueKind,
+    AnalyzerError, ComponentInterfaceMismatchKind, ExceedLimitKind, InvalidForRangeKind,
+    InvalidForStepKind, MismatchTypeKind, MultipleDefaultKind, UnevaluableValueKind,
 };
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -241,7 +241,18 @@ fn eval_range_inner(
         ));
     }
     let beg = if beg_comptime.is_const {
-        let val = beg_comptime.get_value()?.to_usize().unwrap_or(0);
+        let value = beg_comptime.get_value()?;
+        // A strictly negative bound (signed value <= 0, nonzero payload)
+        // would wrap through to_usize into a huge unsigned ForBound.
+        if value.is_semantically_not_positive() && value.is_positive() {
+            let token: TokenRange = range.into();
+            context.insert_error(AnalyzerError::invalid_for_range(
+                InvalidForRangeKind::NegativeBound,
+                &token,
+            ));
+            return Err(ir_error!(token));
+        }
+        let val = value.to_usize().unwrap_or(0);
         ir::ForBound::Const(val)
     } else {
         ir::ForBound::Expression(Box::new(beg))
@@ -257,7 +268,16 @@ fn eval_range_inner(
             ));
         }
         let end = if end_comptime.is_const {
-            let val = end_comptime.get_value()?.to_usize().unwrap_or(0);
+            let value = end_comptime.get_value()?;
+            if value.is_semantically_not_positive() && value.is_positive() {
+                let token: TokenRange = range.into();
+                context.insert_error(AnalyzerError::invalid_for_range(
+                    InvalidForRangeKind::NegativeBound,
+                    &token,
+                ));
+                return Err(ir_error!(token));
+            }
+            let val = value.to_usize().unwrap_or(0);
             ir::ForBound::Const(val)
         } else {
             ir::ForBound::Expression(Box::new(end))

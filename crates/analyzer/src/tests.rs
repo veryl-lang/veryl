@@ -17612,3 +17612,88 @@ fn negative_for_step() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn negative_for_range() {
+    use crate::analyzer_error::InvalidForRangeKind;
+    // A negative const range bound wraps through to_usize into a huge
+    // unsigned ForBound: the analyzer silently elaborated 0 iterations
+    // while the emitted SV iterates normally.
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            var s: logic<32>;
+            s = 0;
+            for i in -2..2 {
+                s += 1;
+            }
+            o = s;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            AnalyzerError::InvalidForRange {
+                kind: InvalidForRangeKind::NegativeBound,
+                ..
+            }
+        )),
+        "{errors:?}"
+    );
+
+    // Generate-for variant.
+    let code = r#"
+    module ModuleB (
+        o: output logic<4>,
+    ) {
+        for i in -2..2 :g {
+            assign o[i + 2] = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            AnalyzerError::InvalidForRange {
+                kind: InvalidForRangeKind::NegativeBound,
+                ..
+            }
+        )),
+        "{errors:?}"
+    );
+
+    // Non-negative bounds stay accepted.
+    let code = r#"
+    module ModuleC (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            var s: logic<32>;
+            s = 0;
+            for i in 0..2 {
+                s += 1;
+            }
+            o = s;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors.iter().any(|e| matches!(
+            e,
+            AnalyzerError::InvalidForRange {
+                kind: InvalidForRangeKind::NegativeBound,
+                ..
+            }
+        )),
+        "{errors:?}"
+    );
+}

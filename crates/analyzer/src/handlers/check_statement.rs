@@ -1,4 +1,4 @@
-use crate::analyzer_error::AnalyzerError;
+use crate::analyzer_error::{AnalyzerError, InvalidForRangeKind};
 use crate::attribute::Attribute;
 use crate::attribute_table;
 use veryl_parser::ParolError;
@@ -123,7 +123,10 @@ impl VerylGrammarTrait for CheckStatement {
                 self.statement_depth_in_loop += 1;
                 if arg.range.range_opt.is_none() {
                     let token: TokenRange = arg.range.as_ref().into();
-                    self.errors.push(AnalyzerError::invalid_for_range(&token));
+                    self.errors.push(AnalyzerError::invalid_for_range(
+                        InvalidForRangeKind::BareExpression,
+                        &token,
+                    ));
                 }
             }
             HandlerPoint::After => self.statement_depth_in_loop -= 1,
@@ -136,7 +139,10 @@ impl VerylGrammarTrait for CheckStatement {
             && arg.range.range_opt.is_none()
         {
             let token: TokenRange = arg.range.as_ref().into();
-            self.errors.push(AnalyzerError::invalid_for_range(&token));
+            self.errors.push(AnalyzerError::invalid_for_range(
+                InvalidForRangeKind::BareExpression,
+                &token,
+            ));
         }
         Ok(())
     }
