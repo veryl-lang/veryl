@@ -12,6 +12,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 struct Instance<T> {
     api: *const sys::VrlHostApi,
     inner: T,
+    // Queried once at create: the simulation's state-ness never changes, so
+    // hooks skip the per-call X/Z mask work under a two-state run.
+    four_state: bool,
 }
 
 /// # Safety
@@ -39,7 +42,14 @@ pub unsafe extern "C" fn create<T: Component>(
         T::new(&mut build)
     }));
     match result {
-        Ok(Ok(inner)) => Box::into_raw(Box::new(Instance { api, inner })) as *mut c_void,
+        Ok(Ok(inner)) => {
+            let four_state = unsafe { ((*api).is_4state)(ctx) != 0 };
+            Box::into_raw(Box::new(Instance {
+                api,
+                inner,
+                four_state,
+            })) as *mut c_void
+        }
         Ok(Err(e)) => {
             unsafe { host_fail(ctx, api, &format!("{e:#}")) };
             std::ptr::null_mut()
@@ -67,8 +77,9 @@ unsafe fn run_hook<T: Component>(
 ) -> i32 {
     let instance = unsafe { &mut *(state as *mut Instance<T>) };
     let api = instance.api;
+    let four_state = instance.four_state;
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let mut sim = unsafe { SimCtx::new(ctx, api) };
+        let mut sim = unsafe { SimCtx::new(ctx, api, four_state) };
         hook(&mut instance.inner, &mut sim)
     }));
     match result {
@@ -154,6 +165,7 @@ pub unsafe extern "C" fn call_method<T: Component>(
 ) -> i32 {
     let instance = unsafe { &mut *(state as *mut Instance<T>) };
     let api = instance.api;
+    let four_state = instance.four_state;
     let result = catch_unwind(AssertUnwindSafe(|| {
         let name = unsafe { name.as_str() };
         let args: Vec<Value> = if nargs == 0 {
@@ -164,7 +176,7 @@ pub unsafe extern "C" fn call_method<T: Component>(
                 .map(|v| unsafe { Value::from_vrl(v) })
                 .collect()
         };
-        let mut sim = unsafe { SimCtx::new(ctx, api) };
+        let mut sim = unsafe { SimCtx::new(ctx, api, four_state) };
         let value = instance.inner.method(name, &args, &mut sim)?;
         write_return(value, unsafe { &mut *ret })
     }));

@@ -48,9 +48,9 @@ impl Component for Accumulator {
     }
 
     fn on_clock(&mut self, ctx: &mut SimCtx) -> CompResult<()> {
-        let d = ctx.read(self.d).as_u64()?;
+        let d = ctx.read_u64(self.d);
         self.acc = self.acc.wrapping_add(d) & 0xffff_ffff;
-        ctx.write(self.q, self.acc);
+        ctx.write_u64(self.q, self.acc);
         Ok(())
     }
 }

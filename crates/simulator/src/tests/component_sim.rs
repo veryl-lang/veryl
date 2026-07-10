@@ -36,6 +36,35 @@ impl Component for Mirror {
     }
 }
 
+/// Wide (> 64-bit) clocked mirror driving the direct word-copy staging and
+/// write-back through the sim, using the guest `read_words`/`write_words` path.
+struct WideMirror {
+    d: InputPort,
+    q: OutputPort,
+    buf: Vec<u64>,
+}
+
+impl Component for WideMirror {
+    const KIND: ComponentKind = ComponentKind::Clocked;
+
+    fn new(ctx: &mut BuildCtx) -> CompResult<Self> {
+        ctx.clock("clk")?;
+        let d = ctx.input("d")?;
+        let q = ctx.output("q")?;
+        Ok(Self {
+            buf: vec![0; d.words()],
+            d,
+            q,
+        })
+    }
+
+    fn on_clock(&mut self, ctx: &mut SimCtx) -> CompResult<()> {
+        ctx.read_words(self.d, &mut self.buf);
+        ctx.write_words(self.q, &self.buf);
+        Ok(())
+    }
+}
+
 /// Writes a fixed initial value in `on_init`; has no clock.
 struct Init {
     out: OutputPort,
@@ -632,6 +661,7 @@ impl Component for NoClock {
 }
 
 static MIRROR: sys::VrlComponentVTable = export::vtable::<Mirror>();
+static WIDE_MIRROR: sys::VrlComponentVTable = export::vtable::<WideMirror>();
 static INIT: sys::VrlComponentVTable = export::vtable::<Init>();
 static FAILER: sys::VrlComponentVTable = export::vtable::<Failer>();
 static FINISHER: sys::VrlComponentVTable = export::vtable::<Finisher>();
@@ -656,6 +686,7 @@ static PLAIN_CLK: sys::VrlComponentVTable = export::vtable::<PlainClk>();
 
 const COMPONENTS: &[&str] = &[
     "mirror",
+    "wide_mirror",
     "init",
     "failer",
     "finisher",
@@ -699,6 +730,7 @@ fn register_manifested(name: &str, vt: &'static sys::VrlComponentVTable, manifes
 
 static REGISTER: LazyLock<()> = LazyLock::new(|| {
     register_static_component("mirror", &MIRROR);
+    register_static_component("wide_mirror", &WIDE_MIRROR);
     register_static_component("init", &INIT);
     register_static_component("failer", &FAILER);
     register_static_component("finisher", &FINISHER);
@@ -935,6 +967,52 @@ fn component_mirrors_rtl_ff_semantics() {
             $assert(q_comp == 1, "component mirrors previous cnt");
             clk.next();
             $assert(q_rtl == q_comp, "component == rtl");
+            $finish();
+        }
+    }
+    "#;
+    assert_all_pass(&run_component_test(code, "comp_test"));
+}
+
+#[test]
+fn wide_component_mirrors_across_word_boundary() {
+    // A > 64-bit connection stages and writes back through the direct
+    // word-copy paths (no BigUint). The stride sets bits in both words so the
+    // high word is exercised, and `write_words` masks the top word to 100 bits.
+    let code = r#"
+    module WideCounter (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<100>,
+    ) {
+        always_ff {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt = cnt + 100'h4_0000_0000_0000_0001;
+            }
+        }
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<100>;
+        var q_comp: logic<100>;
+
+        inst dut: WideCounter (clk, rst, cnt);
+        inst m: $comp::wide_mirror (clk, d: cnt, q: q_comp);
+
+        initial {
+            rst.assert();
+            clk.next();
+            $assert(q_comp == 0, "wide component saw pre-edge cnt");
+            clk.next();
+            $assert(q_comp == 100'h4_0000_0000_0000_0001, "wide mirror of previous cnt");
+            clk.next();
+            $assert(q_comp == 100'h8_0000_0000_0000_0002, "wide mirror continues");
             $finish();
         }
     }

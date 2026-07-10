@@ -44,6 +44,9 @@ struct MockPort {
     width: u32,
     words: Vec<u64>,
     mask_xz: Vec<u64>,
+    /// Set by the direct scalar write path so its pointer is valid; the mock
+    /// reads output words directly, so the flag is otherwise unused.
+    dirty: bool,
 }
 
 struct MockTraceVar {
@@ -123,6 +126,7 @@ impl MockSim {
             width,
             words: vec![0; words_for(width)],
             mask_xz: vec![0; words_for(width)],
+            dirty: false,
         });
     }
 
@@ -175,7 +179,7 @@ impl MockSim {
     /// Drives one `on_clock` hook (increments `cycle`).
     pub fn clock<T: Component>(&mut self, component: &mut T) -> Result<()> {
         self.cycle += 1;
-        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API) };
+        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API, self.four_state) };
         component.on_clock(&mut ctx)
     }
 
@@ -189,19 +193,19 @@ impl MockSim {
 
     /// Drives one `on_reset` hook.
     pub fn reset<T: Component>(&mut self, component: &mut T) -> Result<()> {
-        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API) };
+        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API, self.four_state) };
         component.on_reset(&mut ctx)
     }
 
     /// Drives the `on_init` hook.
     pub fn init<T: Component>(&mut self, component: &mut T) -> Result<()> {
-        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API) };
+        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API, self.four_state) };
         component.on_init(&mut ctx)
     }
 
     /// Drives the `on_finish` hook.
     pub fn finish<T: Component>(&mut self, component: &mut T) -> Result<()> {
-        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API) };
+        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API, self.four_state) };
         component.on_finish(&mut ctx)
     }
 
@@ -212,7 +216,7 @@ impl MockSim {
         name: &str,
         args: &[Value],
     ) -> Result<Value> {
-        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API) };
+        let mut ctx = unsafe { SimCtx::new(self.as_ctx(), &MOCK_API, self.four_state) };
         component.method(name, args, &mut ctx)
     }
 
@@ -318,6 +322,30 @@ extern "C" fn mock_write_output(
             std::ptr::copy_nonoverlapping(mask_xz, port.mask_xz.as_mut_ptr(), n);
         }
     }
+}
+
+extern "C" fn mock_port_direct(
+    ctx: *mut sys::VrlCtx,
+    idx: u32,
+    out: *mut sys::VrlPortDirect,
+) -> u32 {
+    let sim = unsafe { mock(ctx) };
+    let Some(port) = sim.ports.get_mut(idx as usize) else {
+        return 0;
+    };
+    let dirty = if port.dir == Dir::Output {
+        &mut port.dirty as *mut bool as *mut u8
+    } else {
+        std::ptr::null_mut()
+    };
+    unsafe {
+        *out = sys::VrlPortDirect {
+            words: port.words.as_mut_ptr(),
+            mask_xz: port.mask_xz.as_mut_ptr(),
+            dirty,
+        }
+    };
+    1
 }
 
 extern "C" fn mock_is_4state(ctx: *mut sys::VrlCtx) -> u32 {
@@ -529,6 +557,7 @@ static MOCK_API: sys::VrlHostApi = sys::VrlHostApi {
     trace_var: mock_trace_var,
     trace_write: mock_trace_write,
     is_4state: mock_is_4state,
+    port_direct: mock_port_direct,
 };
 
 #[cfg(test)]
@@ -887,6 +916,99 @@ mod tests {
         let mut sim = MockSim::new().clock_port("clk").input("d", 8);
         let err = sim.build::<Edged>().unwrap_err();
         assert!(err.to_string().contains("no reset port named `rst_n`"));
+    }
+
+    struct ScalarMirror {
+        d: InputPort,
+        q: OutputPort,
+    }
+
+    impl Component for ScalarMirror {
+        const KIND: ComponentKind = ComponentKind::Clocked;
+
+        fn new(ctx: &mut BuildCtx) -> Result<Self> {
+            ctx.clock("clk")?;
+            Ok(Self {
+                d: ctx.input("d")?,
+                q: ctx.output("q")?,
+            })
+        }
+
+        fn on_clock(&mut self, ctx: &mut SimCtx) -> Result<()> {
+            let v = ctx.read_u64(self.d);
+            ctx.write_u64(self.q, v.wrapping_add(0x100));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn scalar_u64_fast_path_reads_and_masks_to_width() {
+        let mut sim = MockSim::new()
+            .clock_port("clk")
+            .input("d", 8)
+            .output("q", 8);
+        let mut c = sim.build::<ScalarMirror>().unwrap();
+        sim.set("d", Value::from_u64(0x2a, 8));
+        sim.clock(&mut c).unwrap();
+        // read_u64 saw 0x2a; write_u64(0x12a) masks back to the 8-bit width.
+        assert_eq!(sim.get("q").as_u64().unwrap(), 0x2a);
+    }
+
+    struct WideMirror {
+        d: InputPort,
+        q: OutputPort,
+        buf: Vec<u64>,
+    }
+
+    impl Component for WideMirror {
+        const KIND: ComponentKind = ComponentKind::Clocked;
+
+        fn new(ctx: &mut BuildCtx) -> Result<Self> {
+            ctx.clock("clk")?;
+            let d = ctx.input("d")?;
+            let q = ctx.output("q")?;
+            Ok(Self {
+                d,
+                q,
+                buf: vec![0; d.words()],
+            })
+        }
+
+        fn on_clock(&mut self, ctx: &mut SimCtx) -> Result<()> {
+            ctx.read_words(self.d, &mut self.buf);
+            ctx.write_words(self.q, &self.buf);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn wide_words_fast_path_roundtrips_and_masks_top_word() {
+        let mut sim = MockSim::new()
+            .clock_port("clk")
+            .input("d", 100)
+            .output("q", 100);
+        let mut c = sim.build::<WideMirror>().unwrap();
+        // 100-bit value across two words; the high word carries bits above 100
+        // that write_words must mask off (100 - 64 = 36 kept bits).
+        sim.set(
+            "d",
+            Value::from_bits(
+                [0xdead_beef_cafe_f00d, 0xffff_ffff_ffff_ffff]
+                    .into_iter()
+                    .collect(),
+                Default::default(),
+                100,
+            ),
+        );
+        sim.clock(&mut c).unwrap();
+        let expected = Value::from_bits(
+            [0xdead_beef_cafe_f00d, 0x0000_000f_ffff_ffff]
+                .into_iter()
+                .collect(),
+            Default::default(),
+            100,
+        );
+        assert_eq!(sim.get("q"), expected);
     }
 
     #[derive(veryl_component::Component, Debug)]

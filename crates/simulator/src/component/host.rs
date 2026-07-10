@@ -195,14 +195,6 @@ impl HostContext {
             .collect()
     }
 
-    pub fn output_words_idx(&self, idx: u32) -> &[u64] {
-        &self.ports[idx as usize].words
-    }
-
-    pub fn output_mask_xz_idx(&self, idx: u32) -> &[u64] {
-        &self.ports[idx as usize].mask_xz
-    }
-
     pub fn output_dirty_idx(&self, idx: u32) -> bool {
         self.ports[idx as usize].dirty
     }
@@ -374,6 +366,25 @@ impl HostContext {
 
     pub(crate) fn svc_is_4state(&self) -> bool {
         self.use_4state
+    }
+
+    /// Direct pointers into a port's staging buffers. The buffers are sized
+    /// once in `add_port_role` and only ever copied into afterwards, so the
+    /// pointers stay valid for the instance's lifetime. Outputs also expose
+    /// their dirty flag, which a direct writer sets in place of the
+    /// `svc_write_output` path.
+    pub(crate) fn svc_port_direct(&mut self, idx: u32) -> Option<sys::VrlPortDirect> {
+        let port = self.ports.get_mut(idx as usize)?;
+        let dirty = if port.dir == PortDir::Output {
+            &mut port.dirty as *mut bool as *mut u8
+        } else {
+            std::ptr::null_mut()
+        };
+        Some(sys::VrlPortDirect {
+            words: port.words.as_mut_ptr(),
+            mask_xz: port.mask_xz.as_mut_ptr(),
+            dirty,
+        })
     }
 
     pub(crate) fn svc_param(&self, name: &str) -> Option<&HostValue> {
@@ -576,6 +587,19 @@ extern "C" fn host_is_4state(ctx: *mut sys::VrlCtx) -> u32 {
     u32::from(unsafe { host(ctx) }.svc_is_4state())
 }
 
+extern "C" fn host_port_direct(
+    ctx: *mut sys::VrlCtx,
+    idx: u32,
+    out: *mut sys::VrlPortDirect,
+) -> u32 {
+    let host = unsafe { host(ctx) };
+    let Some(direct) = host.svc_port_direct(idx) else {
+        return 0;
+    };
+    unsafe { *out = direct };
+    1
+}
+
 extern "C" fn host_param_get(
     ctx: *mut sys::VrlCtx,
     name: sys::VrlStr,
@@ -692,6 +716,7 @@ static HOST_API: sys::VrlHostApi = sys::VrlHostApi {
     trace_var: host_trace_var,
     trace_write: host_trace_write,
     is_4state: host_is_4state,
+    port_direct: host_port_direct,
 };
 
 /// Capacity of the method return buffer; larger than the 64-bit values the

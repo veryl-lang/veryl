@@ -174,6 +174,12 @@ unsafe extern "C" fn trace_write(_: *mut sys::VrlCtx, handle: i32, words: *const
     unsafe { host::trace_write(handle, words) }
 }
 
+unsafe extern "C" fn port_direct(_: *mut sys::VrlCtx, _: u32, _: *mut sys::VrlPortDirect) -> u32 {
+    // The wasm sandbox cannot share host memory, so the guest always uses the
+    // copy path (`read_input` / `write_output`).
+    0
+}
+
 static HOST_API: sys::VrlHostApi = sys::VrlHostApi {
     size: size_of::<sys::VrlHostApi>(),
     port_index,
@@ -196,6 +202,7 @@ static HOST_API: sys::VrlHostApi = sys::VrlHostApi {
     trace_var,
     trace_write,
     is_4state,
+    port_direct,
 };
 
 /// One live component instance; its box pointer is the `u32` handle

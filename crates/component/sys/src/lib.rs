@@ -158,6 +158,33 @@ impl VrlValue {
     }
 }
 
+/// Direct pointers into a port's host-side buffers, filled by
+/// [`VrlHostApi::port_direct`]. They let a hot path read or write a port
+/// without a per-access indirect host call. Only the in-process (native)
+/// transport can share host memory; other transports report no direct access.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct VrlPortDirect {
+    /// Port value words (LSB-first), sized by the port width.
+    pub words: *mut u64,
+    /// Four-state mask parallel to `words`; a set bit is X or Z.
+    pub mask_xz: *mut u64,
+    /// Output ports only: the dirty flag the host reads when applying
+    /// outputs. A direct writer must set it (`1`) itself, since it bypasses
+    /// [`VrlHostApi::write_output`]. Null for input ports.
+    pub dirty: *mut u8,
+}
+
+impl VrlPortDirect {
+    pub fn null() -> Self {
+        Self {
+            words: core::ptr::null_mut(),
+            mask_xz: core::ptr::null_mut(),
+            dirty: core::ptr::null_mut(),
+        }
+    }
+}
+
 /// Host services table passed to `create` and retained by the guest wrapper.
 /// Append-only: new entries go at the end and `size` tells the guest how far
 /// the table extends.
@@ -211,6 +238,12 @@ pub struct VrlHostApi {
     /// Nonzero when the simulation is four-state, so input masks and driven X/Z
     /// are meaningful. A component gates its X/Z checks on this.
     pub is_4state: unsafe extern "C" fn(*mut VrlCtx) -> u32,
+    /// Fills `out` with direct pointers into the port's host buffers and
+    /// returns 1, or returns 0 when the transport cannot share host memory
+    /// (e.g. the wasm sandbox). The pointers stay valid for the instance's
+    /// lifetime, so the guest caches them at `create` time and then reads or
+    /// writes the buffers without a per-access host call.
+    pub port_direct: unsafe extern "C" fn(*mut VrlCtx, idx: u32, out: *mut VrlPortDirect) -> u32,
 }
 
 /// Least [`VrlHostApi::size`] that includes the trace entries. Derived from
@@ -218,6 +251,12 @@ pub struct VrlHostApi {
 /// future entries does not change it.
 pub const VRL_HOST_API_TRACE_SIZE: usize = std::mem::offset_of!(VrlHostApi, trace_write)
     + size_of::<unsafe extern "C" fn(*mut VrlCtx, i32, *const u64)>();
+
+/// Least [`VrlHostApi::size`] that includes [`VrlHostApi::port_direct`]. A
+/// guest checks its `size` against this before caching direct port pointers,
+/// so a host that omits the entry falls back to the copy path.
+pub const VRL_HOST_API_DIRECT_SIZE: usize = std::mem::offset_of!(VrlHostApi, port_direct)
+    + size_of::<unsafe extern "C" fn(*mut VrlCtx, u32, *mut VrlPortDirect) -> u32>();
 
 #[cfg(test)]
 mod tests {
@@ -237,6 +276,12 @@ mod tests {
     fn trace_size_covers_trace_entries_only() {
         assert!(VRL_HOST_API_TRACE_SIZE <= size_of::<VrlHostApi>());
         assert!(VRL_HOST_API_TRACE_SIZE > std::mem::offset_of!(VrlHostApi, trace_var));
+    }
+
+    #[test]
+    fn direct_size_covers_port_direct() {
+        assert_eq!(VRL_HOST_API_DIRECT_SIZE, size_of::<VrlHostApi>());
+        assert!(VRL_HOST_API_DIRECT_SIZE > std::mem::offset_of!(VrlHostApi, port_direct));
     }
 }
 

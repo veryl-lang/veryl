@@ -7,6 +7,7 @@ use crate::HashMap;
 use crate::component::host::{ExternalInstance, HostContext, HostValue, PortDir, PortRole};
 use crate::component::loader::{ComponentError, lookup_component_backend};
 use crate::ir::ModuleVariables;
+use crate::ir::variable::{read_payload, write_payload};
 use crate::ir::{Event, Expression, Ir, VarId};
 use num_bigint::BigUint;
 use veryl_analyzer::value::{MaskCache, Value, ValueBigUint, ValueU64};
@@ -27,10 +28,10 @@ pub struct RuntimeComponent {
     /// manifest. Native runs never block file access, so undeclared use is
     /// surfaced as a warning to catch it before the wasm form refuses it.
     file_declared: Option<bool>,
-    /// Inputs staged before every hook: (host port idx, expression, width).
-    inputs: Vec<(u32, Expression, u32)>,
-    /// Dirty outputs written back after hooks: (host port idx, destination).
-    outputs: Vec<(u32, VarId)>,
+    /// Inputs staged before every hook: (host port idx, source, width).
+    inputs: Vec<(u32, InputSource, u32)>,
+    /// Dirty outputs written back after hooks.
+    outputs: Vec<OutputBinding>,
     /// Host input-port index of each connected clock/reset event, for
     /// `fired_clock` and the event maps.
     pub clock_events: Vec<(Event, u32)>,
@@ -40,6 +41,110 @@ pub struct RuntimeComponent {
     /// Reused by `stage_inputs` so staging allocates no words per port/step.
     words_scratch: Vec<u64>,
     mask_scratch: Vec<u64>,
+}
+
+/// How an input port's value is produced each step. A direct read of a plain
+/// variable copies straight from the DUT's storage into the port, skipping the
+/// interpreter `Expression` and the `Value` intermediate; anything else falls
+/// back to evaluating the expression. `DirectScalar` handles the ≤ 64-bit case
+/// with a single word; `DirectWide` copies the whole native-width payload.
+enum InputSource {
+    // `ptr` reads the DUT source; `dst_words`/`dst_mask` are the host staging
+    // buffers, filled by `cache_port_buffers` once the port table is final.
+    DirectScalar {
+        ptr: *const u8,
+        native_bytes: usize,
+        dst_words: *mut u64,
+        dst_mask: *mut u64,
+    },
+    // Wide (> 64-bit) plain variable: the DUT storage and the port buffer share
+    // the same LSB-first word layout, so `native_bytes` bytes copy straight
+    // across (payload, then the X/Z mask under a four-state run) with no
+    // `BigUint` marshalling.
+    DirectWide {
+        ptr: *const u8,
+        native_bytes: usize,
+        dst_words: *mut u64,
+        dst_mask: *mut u64,
+    },
+    Expr(Expression),
+}
+
+/// A component output written back into DUT storage after hooks. The
+/// destination pointer and layout are resolved from `var_id` on first use and
+/// cached, mirroring the precomputed input pointer so the write-back needs no
+/// per-cycle variable lookup. The pointer addresses the run-stable flat
+/// buffers, so it stays valid once resolved.
+struct OutputBinding {
+    // Host output port index, for the dirty check and the untouched-port filter.
+    idx: u32,
+    // DUT signal driven by the port; resolves the destination once.
+    var_id: VarId,
+    dest: *mut u8,
+    native_bytes: usize,
+    width: usize,
+    // The guest's output buffer and its X/Z mask, filled by
+    // `cache_port_buffers` and read in place so the write-back skips the
+    // bounds-checked slice accessors. The `dirty` flag is an embedded field
+    // (moves with `ports` Vec growth), so it stays an index lookup.
+    src_words: *const u64,
+    src_mask: *const u64,
+}
+
+impl OutputBinding {
+    fn new(idx: u32, var_id: VarId) -> Self {
+        Self {
+            idx,
+            var_id,
+            dest: std::ptr::null_mut(),
+            native_bytes: 0,
+            width: 0,
+            src_words: std::ptr::null(),
+            src_mask: std::ptr::null(),
+        }
+    }
+}
+
+impl InputSource {
+    fn classify(expr: Expression) -> Self {
+        if let Expression::Variable {
+            value,
+            native_bytes,
+            select: None,
+            dynamic_select: None,
+            ..
+        } = &expr
+        {
+            if matches!(native_bytes, 1 | 2 | 4 | 8) {
+                return InputSource::DirectScalar {
+                    ptr: *value,
+                    native_bytes: *native_bytes,
+                    dst_words: std::ptr::null_mut(),
+                    dst_mask: std::ptr::null_mut(),
+                };
+            }
+            // Wide native widths are whole 64-bit words, matching the port
+            // buffer, so they copy directly like the scalar case.
+            if native_bytes % 8 == 0 {
+                return InputSource::DirectWide {
+                    ptr: *value,
+                    native_bytes: *native_bytes,
+                    dst_words: std::ptr::null_mut(),
+                    dst_mask: std::ptr::null_mut(),
+                };
+            }
+        }
+        InputSource::Expr(expr)
+    }
+}
+
+/// Low-`width` bits set (all bits for `width >= 64`).
+fn width_mask(width: usize) -> u64 {
+    if width >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << width) - 1
+    }
 }
 
 fn str_of(id: resource_table::StrId) -> String {
@@ -411,12 +516,16 @@ pub fn build_components(
                     PortRole::Data
                 };
                 let in_idx = host.add_port_role(&port_name, PortDir::Input, role, connect.width);
-                inputs.push((in_idx, connect.expr.clone(), connect.width));
+                inputs.push((
+                    in_idx,
+                    InputSource::classify(connect.expr.clone()),
+                    connect.width,
+                ));
                 in_idx
             });
             let out_idx = connect.output.map(|var_id| {
                 let out_idx = host.add_port(&port_name, PortDir::Output, connect.width);
-                outputs.push((out_idx, var_id));
+                outputs.push(OutputBinding::new(out_idx, var_id));
                 out_idx
             });
             // A clock/reset input without an event source would never
@@ -563,11 +672,38 @@ pub fn build_components(
             }
         }
         // Output ports the component asked for keep only those bindings.
-        outputs.retain(|(idx, _)| host.port_touched(*idx));
+        outputs.retain(|o| host.port_touched(o.idx));
         inputs.retain(|(idx, _, _)| host.port_touched(*idx));
 
+        // The port table is now final, so its buffers no longer move; cache
+        // each staging buffer for the hot paths to dereference directly.
+        for (idx, source, _) in &mut inputs {
+            let (dst_words, dst_mask) = match source {
+                InputSource::DirectScalar {
+                    dst_words,
+                    dst_mask,
+                    ..
+                }
+                | InputSource::DirectWide {
+                    dst_words,
+                    dst_mask,
+                    ..
+                } => (dst_words, dst_mask),
+                InputSource::Expr(_) => continue,
+            };
+            let d = host.svc_port_direct(*idx).expect("port exists");
+            *dst_words = d.words;
+            *dst_mask = d.mask_xz;
+        }
+        for out in &mut outputs {
+            let d = host.svc_port_direct(out.idx).expect("port exists");
+            out.src_words = d.words.cast_const();
+            out.src_mask = d.mask_xz.cast_const();
+        }
+
         // A component output must be the destination's only driver.
-        for (_, var_id) in &outputs {
+        for out in &outputs {
+            let var_id = &out.var_id;
             let var_name = ir
                 .module_variables
                 .variables
@@ -624,16 +760,53 @@ impl RuntimeComponent {
     /// always zero, so its per-step computation and copy are skipped.
     pub fn stage_inputs(&mut self, mask_cache: &mut MaskCache) {
         let use_4state = self.host.use_4state;
-        for (idx, expr, width) in &self.inputs {
-            let value = expr.eval(mask_cache);
-            let nwords = (*width as usize).div_ceil(64).max(1);
-            value_to_words_into(&value, nwords, &mut self.words_scratch);
-            if use_4state {
-                value_to_mask_xz_into(&value, nwords, &mut self.mask_scratch);
-                self.host
-                    .set_input_masked(*idx, &self.words_scratch, &self.mask_scratch);
-            } else {
-                self.host.set_input(*idx, &self.words_scratch);
+        for (idx, source, width) in &self.inputs {
+            match source {
+                InputSource::DirectScalar {
+                    ptr,
+                    native_bytes,
+                    dst_words,
+                    dst_mask,
+                } => {
+                    // Two-state runs leave the mask at its initial zero.
+                    let payload = read_payload(*ptr, *native_bytes);
+                    unsafe {
+                        *(*dst_words) = payload;
+                        if use_4state {
+                            *(*dst_mask) = read_payload((*ptr).add(*native_bytes), *native_bytes);
+                        }
+                    }
+                }
+                InputSource::DirectWide {
+                    ptr,
+                    native_bytes,
+                    dst_words,
+                    dst_mask,
+                } => {
+                    // Two-state runs leave the mask at its initial zero.
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(*ptr, *dst_words as *mut u8, *native_bytes);
+                        if use_4state {
+                            std::ptr::copy_nonoverlapping(
+                                (*ptr).add(*native_bytes),
+                                *dst_mask as *mut u8,
+                                *native_bytes,
+                            );
+                        }
+                    }
+                }
+                InputSource::Expr(expr) => {
+                    let value = expr.eval(mask_cache);
+                    let nwords = (*width as usize).div_ceil(64).max(1);
+                    value_to_words_into(&value, nwords, &mut self.words_scratch);
+                    if use_4state {
+                        value_to_mask_xz_into(&value, nwords, &mut self.mask_scratch);
+                        self.host
+                            .set_input_masked(*idx, &self.words_scratch, &self.mask_scratch);
+                    } else {
+                        self.host.set_input(*idx, &self.words_scratch);
+                    }
+                }
             }
         }
     }
@@ -709,30 +882,49 @@ impl RuntimeComponent {
     /// true when anything was written (the caller marks comb dirty).
     pub fn apply_outputs(&mut self, variables: &mut ModuleVariables, use_4state: bool) -> bool {
         let mut wrote = false;
-        for (idx, var_id) in &self.outputs {
-            if !self.host.output_dirty_idx(*idx) {
+        for out in &mut self.outputs {
+            if !self.host.output_dirty_idx(out.idx) {
                 continue;
             }
-            let Some(var) = variables.variables.get_mut(var_id) else {
-                continue;
-            };
-            // Two-state mode carries no X/Z, so skip the mask read (and the
-            // wide-value mask reconstruction it would drive).
-            let mask_xz = if use_4state {
-                self.host.output_mask_xz_idx(*idx)
+            // Resolve the run-stable destination pointer and layout once, then
+            // reuse them so the write-back skips the per-cycle variable lookup.
+            if out.dest.is_null() {
+                let Some(var) = variables.variables.get(&out.var_id) else {
+                    continue;
+                };
+                out.dest = var.current_values[0];
+                out.native_bytes = var.native_bytes;
+                out.width = var.width;
+            }
+            let ptr = out.dest;
+            if out.width <= 64 && matches!(out.native_bytes, 1 | 2 | 4 | 8) {
+                let mask = width_mask(out.width);
+                let payload = unsafe { *out.src_words } & mask;
+                write_payload(ptr, out.native_bytes, payload);
+                if use_4state {
+                    let mask_xz = unsafe { *out.src_mask } & mask;
+                    let mask_ptr = unsafe { ptr.add(out.native_bytes) };
+                    write_payload(mask_ptr, out.native_bytes, mask_xz);
+                }
             } else {
-                &[]
-            };
-            let mut value =
-                words_to_value_masked(self.host.output_words_idx(*idx), mask_xz, var.width as u32);
-            value.trunc(var.width);
-            unsafe {
-                crate::ir::write_native_value(
-                    var.current_values[0],
-                    var.native_bytes,
-                    use_4state,
-                    &value,
-                );
+                // Wide destination: the port buffer and DUT storage share the
+                // LSB-first word layout and the payload is already masked to the
+                // width (by `write_words` or `to_port_words`), so copy it across
+                // directly. Two-state storage has no mask slot.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        out.src_words as *const u8,
+                        ptr,
+                        out.native_bytes,
+                    );
+                    if use_4state {
+                        std::ptr::copy_nonoverlapping(
+                            out.src_mask as *const u8,
+                            ptr.add(out.native_bytes),
+                            out.native_bytes,
+                        );
+                    }
+                }
             }
             wrote = true;
         }
