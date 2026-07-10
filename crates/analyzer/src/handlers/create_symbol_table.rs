@@ -1411,10 +1411,16 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
             let parameter_connects = self.parameter_connects.drain().collect();
             let port_connects = self.port_connects.drain().collect();
+            let affiliation = self.affiliation.last().cloned().unwrap();
             let clock_domain = if let Some(ref x) = inst.component_instantiation_opt {
                 self.insert_clock_domain(&x.clock_domain)
+            } else if affiliation == Affiliation::Module {
+                // Interface members inherit this domain, and None is
+                // compatible with every domain — default to Implicit like
+                // unannotated vars so crossings through an interface are
+                // still inferred/checked. Module instances ignore it.
+                SymClockDomain::Implicit
             } else {
-                // Clock domain will be updated to 'Implicit' if the instance is for an interface
                 SymClockDomain::None
             };
             let property = InstanceProperty {

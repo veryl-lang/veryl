@@ -17001,3 +17001,61 @@ fn comb_loop_through_disjoint_bits() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn clock_domain_interface_instance() {
+    // An unannotated interface instance defaulted to ClockDomain::None,
+    // which is compatible with everything — so its members laundered any
+    // crossing. It now defaults to Implicit like unannotated vars.
+    let code = r#"
+    interface InterfaceA {
+        var d: logic<8>;
+        modport mp {
+            d: input,
+        }
+    }
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic<8>,
+        o_b    : output 'b logic<8>,
+    ) {
+        inst bus0: InterfaceA;
+        assign bus0.d = i_a;
+        assign o_b = bus0.d;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Same-domain traffic through an unannotated interface stays accepted.
+    let code = r#"
+    interface InterfaceA {
+        var d: logic<8>;
+        modport mp {
+            d: input,
+        }
+    }
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_a    : input  'a logic<8>,
+        o_a    : output 'a logic<8>,
+    ) {
+        inst bus0: InterfaceA;
+        assign bus0.d = i_a;
+        assign o_a = bus0.d;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
