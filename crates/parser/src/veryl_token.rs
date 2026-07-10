@@ -289,8 +289,13 @@ impl ExpressionIdentifier {
     }
 }
 
-static COMMENT_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:(?ms)/\u{2a}.*?\u{2a}/))").unwrap());
+// The block-comment part must match the lexer's CommentsTerm (veryl.par)
+// exactly: a body that can never contain `*/`. On a lexer/splitter mismatch
+// the text between matches is silently dropped.
+static COMMENT_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:/\u{2a}(?:[^\u{2a}]|\u{2a}+[^\u{2a}/])*\u{2a}+/))")
+        .unwrap()
+});
 
 fn split_comment_token(token: Token) -> Vec<Token> {
     let mut line = token.line;
