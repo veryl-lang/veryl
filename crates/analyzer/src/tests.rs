@@ -18618,3 +18618,68 @@ module M {
     let errors = analyze();
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn orphan_else_across_scopes() {
+    // The ifdef/elsif/else attribute state persisted across attribute-group
+    // lists and nesting levels, so an orphan #[else] chained to an #[ifdef]
+    // in a previous module or an enclosing scope and emitted an unmatched
+    // `else into the SV output.
+    let code = r#"
+    module ModuleA {
+        #[ifdef(A)]
+        let _x: logic = 1'b0;
+        let _z: logic = 1'b0;
+    }
+    module ModuleB {
+        #[else]
+        let _y: logic = 1'b0;
+        let _w: logic = 1'b0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::AmbiguousElsif { .. })),
+        "{errors:?}"
+    );
+
+    // Nested scope: an outer #[ifdef] must not legitimize an inner #[else].
+    let code = r#"
+    #[ifdef(DEF_X)]
+    module ModuleA {
+        #[else]
+        let _a: logic = 1;
+        let _b: logic = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::AmbiguousElsif { .. })),
+        "{errors:?}"
+    );
+
+    // A well-formed chain in one list stays accepted.
+    let code = r#"
+    module ModuleA {
+        #[ifdef(A)]
+        let _x: logic = 1'b0;
+        #[else]
+        let _y: logic = 1'b0;
+        let _z: logic = 1'b0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::AmbiguousElsif { .. })),
+        "{errors:?}"
+    );
+}
