@@ -19078,3 +19078,55 @@ fn aot_c_unary_masked_in_wide_context() {
         );
     }
 }
+
+#[test]
+fn op_assign_struct_member_reads_member() {
+    // The read side of an op-assign built by VarPathSelect::to_expression
+    // ignored comptime.part_select, so `s.hi += 1` read the base struct's
+    // low bits (the LAST member) instead of `hi`, computing s.lo + 1.
+    let code = r#"
+    module Top (
+        clk : input  clock,
+        rst : input  reset,
+        o_hi: output logic<16>,
+        o_lo: output logic<16>,
+    ) {
+        struct s_t {
+            hi: logic<16>,
+            lo: logic<16>,
+        }
+        var s: s_t;
+        always_ff {
+            if_reset {
+                s.hi = 16'h1111;
+                s.lo = 16'h000a;
+            } else {
+                s.hi += 1;
+            }
+        }
+        assign o_hi = s.hi;
+        assign o_lo = s.lo;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_hi").unwrap(),
+            Value::new(0x1114, 16, false),
+            "hi config={config:?}"
+        );
+        assert_eq!(
+            sim.get("o_lo").unwrap(),
+            Value::new(0x000a, 16, false),
+            "lo config={config:?}"
+        );
+    }
+}
