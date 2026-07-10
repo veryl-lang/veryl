@@ -130,6 +130,9 @@ pub struct AssignDynamicStatement {
     /// Unpacked (dst_base = next slot) keeps the store for multi-RMW forwarding.
     /// Mirrors AssignStatement::ff_is_packed.
     pub ff_is_packed: bool,
+    /// Sign-extend the RHS to dst_width before the store (see
+    /// ProtoExpression::store_sign_extend_from).
+    pub rhs_sign_extend: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1717,6 +1720,8 @@ impl ProtoStatement {
                         expr,
                         ff_log_base_current_offset,
                         ff_is_packed,
+                        rhs_sign_extend: x.rhs_select.is_none()
+                            && x.expr.store_sign_extend_from(x.dst_width).is_some(),
                     })
                 }
                 ProtoStatement::If(x) => Statement::If(x.apply_values_ptr(
@@ -2058,6 +2063,9 @@ pub struct AssignStatement {
     /// next slot, direct write is the intermediate state for cache
     /// forwarding).
     pub ff_is_packed: bool,
+    /// Sign-extend the RHS to dst_width before the store (see
+    /// ProtoExpression::store_sign_extend_from).
+    pub rhs_sign_extend: bool,
 }
 
 impl AssignStatement {
@@ -2065,6 +2073,11 @@ impl AssignStatement {
         let value = self.expr.eval(mask_cache);
         let value = if let Some((beg, end)) = self.rhs_select {
             value.select(beg, end)
+        } else {
+            value
+        };
+        let value = if self.rhs_sign_extend && value.width() < self.dst_width {
+            value.expand(self.dst_width, true).into_owned()
         } else {
             value
         };
@@ -2179,6 +2192,11 @@ impl AssignDynamicStatement {
         let value = self.expr.eval(mask_cache);
         let value = if let Some((beg, end)) = self.rhs_select {
             value.select(beg, end)
+        } else {
+            value
+        };
+        let value = if self.rhs_sign_extend && value.width() < self.dst_width {
+            value.expand(self.dst_width, true).into_owned()
         } else {
             value
         };
@@ -2373,6 +2391,8 @@ impl ProtoAssignStatement {
                 expr,
                 ff_log_offset,
                 ff_is_packed,
+                rhs_sign_extend: self.rhs_select.is_none()
+                    && self.expr.store_sign_extend_from(self.dst_width).is_some(),
             }
         }
     }

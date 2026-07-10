@@ -87,6 +87,11 @@ impl ProtoAssignDynamicStatement {
         if !self.expr.can_build_binary() || !self.dst_index_expr.can_build_binary() {
             return false;
         }
+        // Sign-extension of a bare narrow signed RHS at the store is
+        // handled only by the interpreter for dynamic-index destinations.
+        if self.rhs_select.is_none() && self.expr.store_sign_extend_from(self.dst_width).is_some() {
+            return false;
+        }
         if let Some(dyn_sel) = &self.dynamic_select {
             let full_width = dyn_sel.elem_width * dyn_sel.num_elements;
             if full_width > 128 || !dyn_sel.index_expr.can_build_binary() {
@@ -857,6 +862,14 @@ impl ProtoAssignStatement {
         if !self.expr.can_build_binary() {
             return false;
         }
+        // The wide (>128-bit) flat-buffer store path can't sign-extend a
+        // narrow signed RHS; run on the interpreter instead.
+        if self.dst_width > 128
+            && self.rhs_select.is_none()
+            && self.expr.store_sign_extend_from(self.dst_width).is_some()
+        {
+            return false;
+        }
         if let Some(dyn_sel) = &self.dynamic_select
             && (dyn_sel.elem_width * dyn_sel.num_elements > 128
                 || !dyn_sel.index_expr.can_build_binary())
@@ -989,6 +1002,34 @@ impl ProtoAssignStatement {
                 && builder.func.dfg.value_type(mxz) == I128
             {
                 mask_xz = Some(builder.ins().ireduce(I64, mxz));
+            }
+        }
+
+        // A bare signed RHS narrower than the destination sign-extends to
+        // the assignment width (see ProtoExpression::store_sign_extend_from;
+        // matches the interpreter store and the emitted SV).  Extend in the
+        // register, then re-mask so bits above dst_width stay clear for the
+        // plain store / load-cache forwarding; the select paths clip to
+        // their window afterwards.  A sign-extended mask_xz replicates an X
+        // sign bit, mirroring Value::expand.
+        if rhs_window.is_none()
+            && let Some(from_w) = self.expr.store_sign_extend_from(self.dst_width)
+        {
+            let reg_bits: usize = if wide { 128 } else { 64 };
+            let sh = (reg_bits - from_w) as i64;
+            let mask = gen_mask_for_width(self.dst_width);
+            let sext = |builder: &mut FunctionBuilder, v| {
+                let v = builder.ins().ishl_imm(v, sh);
+                let v = builder.ins().sshr_imm(v, sh);
+                if self.dst_width < reg_bits {
+                    band_const(builder, v, mask, wide)
+                } else {
+                    v
+                }
+            };
+            payload = sext(builder, payload);
+            if let Some(m) = mask_xz {
+                mask_xz = Some(sext(builder, m));
             }
         }
 
