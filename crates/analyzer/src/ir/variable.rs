@@ -1,6 +1,7 @@
 use crate::BigUint;
 use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
 use crate::conv::Context;
+use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::utils::eval_width_select;
 use crate::ir::{
     AssignDestination, Comptime, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind,
@@ -46,11 +47,25 @@ impl VarPathSelect {
         context: &mut Context,
         ignore_error: bool,
     ) -> Option<AssignDestination> {
-        let (path, select, token) = self.into();
+        let (path, mut select, token) = self.into();
 
         if let Some((id, mut comptime)) = context.find_path(&path) {
             if let Some(part_select) = &comptime.part_select {
                 comptime.r#type = part_select.base.clone();
+            }
+
+            // A write index/select from another domain is the same mux CDC
+            // as the data-dependent read (Factor::Variable::gather_context);
+            // check each select expression against the destination's domain.
+            if !ignore_error {
+                let select_exprs = select
+                    .0
+                    .iter_mut()
+                    .chain(select.1.as_mut().map(|(_, expr)| expr));
+                for expr in select_exprs {
+                    let x = expr.eval_comptime(context, None);
+                    check_clock_domain(context, &comptime, x, &token.beg);
+                }
             }
 
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
