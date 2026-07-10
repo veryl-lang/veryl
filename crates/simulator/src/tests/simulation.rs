@@ -19418,3 +19418,51 @@ fn const_value_signedness_follows_declared_type() {
         );
     }
 }
+
+#[test]
+fn explicit_enum_member_width_is_enum_width() {
+    // An explicit-valued enum member used to carry its defining
+    // expression's width in the IR (32 for `A = 1`, 3 for `A = 3'd1`),
+    // while the emitted SV casts every member to the enum width
+    // ($bits(logic[8-1:0])'(1)): {2{E_A}} is 16'h0101 and $bits is 8.
+    let code = r#"
+    module Top (
+        v : output logic<16>,
+        w : output logic<32>,
+        v2: output logic<16>,
+    ) {
+        enum E: logic<8> {
+            A = 1,
+            B,
+        }
+        enum F: logic<8> {
+            A = 3'd1,
+        }
+        const W: u32 = $bits(E::A);
+        assign v = {E::A repeat 2};
+        assign w = W;
+        assign v2 = {F::A repeat 2};
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("v").unwrap(),
+            Value::new(0x0101, 16, false),
+            "v config={config:?}"
+        );
+        assert_eq!(
+            sim.get("w").unwrap(),
+            Value::new(8, 32, false),
+            "w config={config:?}"
+        );
+        assert_eq!(
+            sim.get("v2").unwrap(),
+            Value::new(0x0101, 16, false),
+            "v2 config={config:?}"
+        );
+    }
+}

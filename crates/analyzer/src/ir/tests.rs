@@ -1729,8 +1729,8 @@ fn enum_test() {
   comb {
     var0 = 2'h0;
     var1 = 2'h1;
-    var2 = 32'sh00000007;
-    var3 = 32'sh00000002;
+    var2 = 3'h7;
+    var3 = 3'h2;
   }
 }
 "#;
