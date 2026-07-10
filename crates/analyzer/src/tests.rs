@@ -18104,3 +18104,43 @@ fn maybe_driver_cross_process_conflict() {
     "#
     ));
 }
+
+#[test]
+fn partially_driven_output_port() {
+    // The partially-driven dead-bits exemption also swallowed output
+    // ports, whose bits are read externally by definition — `o[7:4]`
+    // stayed X in the emitted SV with zero diagnostics.
+    let code = r#"
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        assign o[3:0] = 4'h5;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnassignVariable { .. })),
+        "{errors:?}"
+    );
+
+    // Fully driven outputs stay accepted.
+    let code = r#"
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        assign o[3:0] = 4'h5;
+        assign o[7:4] = 4'ha;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::UnassignVariable { .. })),
+        "{errors:?}"
+    );
+}
