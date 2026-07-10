@@ -1007,8 +1007,10 @@ impl Op {
                 }
             }
             Op::BitAnd => {
-                let x = resize(x, width, false);
-                let y = resize(y, width, false);
+                // LRM 11.8.2: sign-extend operands to the expression width when
+                // the propagated type is signed (matches the arithmetic arms / Cranelift).
+                let x = resize(x, width, signed);
+                let y = resize(y, width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -1034,8 +1036,8 @@ impl Op {
                 }
             }
             Op::BitOr => {
-                let x = x.expand(width, false);
-                let y = y.expand(width, false);
+                let x = x.expand(width, signed);
+                let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -1061,8 +1063,8 @@ impl Op {
                 }
             }
             Op::BitXor => {
-                let x = x.expand(width, false);
-                let y = y.expand(width, false);
+                let x = x.expand(width, signed);
+                let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
@@ -1084,8 +1086,8 @@ impl Op {
                 }
             }
             Op::BitXnor => {
-                let x = x.expand(width, false);
-                let y = y.expand(width, false);
+                let x = x.expand(width, signed);
+                let y = y.expand(width, signed);
 
                 match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {

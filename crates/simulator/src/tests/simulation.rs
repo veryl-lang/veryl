@@ -19507,3 +19507,42 @@ fn sized_all_bit_literal_operand_width() {
         );
     }
 }
+
+#[test]
+fn bitwise_ops_sign_extend_operands() {
+    // Op::eval_value_binary widened bitwise operands with use_sign=false,
+    // zero-extending narrower signed operands. LRM 11.8.2 sign-extends
+    // when the propagated type is signed (iverilog: ffffffff80000021),
+    // and the Cranelift backend already did via expand_sign.
+    let code = r#"
+    module Top (
+        a: input  signed logic<32>,
+        b: input  signed logic<8>,
+        r: output logic<64>,
+        c: output logic<32>,
+    ) {
+        const M1: i8  = -1;
+        const A1: i32 = M1 & -1;
+        assign r = a ^ b;
+        assign c = A1;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x7fff_ffff, 32, true));
+        sim.set("b", Value::new(0xde, 8, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new(0xffff_ffff_8000_0021, 64, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("c").unwrap(),
+            Value::new(0xffff_ffff, 32, false),
+            "A1 config={config:?}"
+        );
+    }
+}
