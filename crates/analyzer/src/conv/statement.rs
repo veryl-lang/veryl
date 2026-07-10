@@ -427,6 +427,42 @@ fn check_true_false(comptime: &Comptime) -> (bool, bool) {
     }
 }
 
+/// Short-circuiting `check_true_false`: also folds a branch made dead by a
+/// constant-decisive `||`/`&&` operand when the whole condition is not constant
+/// (e.g. the `i >= 4` arms of an unrolled `if i >= 4 || sig`), so a dead arm's
+/// out-of-range select never reaches the range check or the simulator.
+/// Returns `(true_side_only, false_side_only)`.
+fn eval_cond_true_false(context: &mut Context, cond: &ir::Expression) -> (bool, bool) {
+    if let ir::Expression::Binary(x, op, y, _) = cond {
+        match op {
+            ir::Op::LogicOr => {
+                let (xt, xf) = eval_cond_true_false(context, x);
+                let (yt, yf) = eval_cond_true_false(context, y);
+                return (xt || yt, xf && yf);
+            }
+            ir::Op::LogicAnd => {
+                let (xt, xf) = eval_cond_true_false(context, x);
+                let (yt, yf) = eval_cond_true_false(context, y);
+                return (xt && yt, xf || yf);
+            }
+            _ => {}
+        }
+    }
+    // Leaf: mirror `check_true_false` (no `is_xz` guard) so `if`, `if_reset`,
+    // and fully-constant conditions fold x/z the same way.
+    if cond.comptime().is_const
+        && let Some(value) = cond.eval_value(context)
+    {
+        if value.to_usize().unwrap_or(0) != 0 {
+            (true, false)
+        } else {
+            (false, true)
+        }
+    } else {
+        (false, false)
+    }
+}
+
 impl Conv<&IfStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &IfStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.r#if.if_token).into();
@@ -441,7 +477,7 @@ impl Conv<&IfStatement> for ir::StatementBlock {
             context.insert_error(AnalyzerError::invalid_logical_operand(false, &token));
         }
 
-        let (true_side_only, false_side_only) = check_true_false(&comptime);
+        let (true_side_only, false_side_only) = eval_cond_true_false(context, &cond);
 
         let true_side = if false_side_only {
             vec![]
@@ -466,7 +502,7 @@ impl Conv<&IfStatement> for ir::StatementBlock {
                 context.insert_error(AnalyzerError::invalid_logical_operand(false, &token));
             }
 
-            let (true_side_only, false_side_only) = check_true_false(&comptime);
+            let (true_side_only, false_side_only) = eval_cond_true_false(context, &cond);
 
             // If this `else if` is false_side_only, this iteration should be skipped.
             if false_side_only {

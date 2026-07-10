@@ -11042,6 +11042,65 @@ fn unknown_tb_port() {
 }
 
 #[test]
+fn out_of_range_select_in_dead_branch() {
+    // A dead-branch out-of-range select must not be reported, even when the
+    // guard mixes a constant-decisive term (`i >: 3`) with a runtime one: for
+    // i >= 4 the `else` is dead and the short-circuit fold drops it.
+    let code = r#"
+    module ModuleA (
+        i_sel: input  logic    ,
+        i_d:   input  logic<80>,
+        o:     output logic<17>,
+    ) {
+        var w: logic<17> [8];
+        always_comb {
+            for i in 0..8 {
+                if i >: 3 || i_sel {
+                    w[i] = 0;
+                } else {
+                    w[i] = i_d[17 * i+:17];
+                }
+            }
+        }
+        assign o = w[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidSelect { .. }))
+    );
+
+    // A reachable out-of-range select (guarded only by a runtime signal) is
+    // still reported.
+    let code = r#"
+    module ModuleA (
+        i_sel: input  logic    ,
+        i_d:   input  logic<80>,
+        o:     output logic    ,
+    ) {
+        var w: logic;
+        always_comb {
+            w = 0;
+            if i_sel {
+                w = i_d[135];
+            }
+        }
+        assign o = w;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidSelect { .. }))
+    );
+}
+
+#[test]
 fn invalid_select() {
     let code = r#"
     module ModuleA {
