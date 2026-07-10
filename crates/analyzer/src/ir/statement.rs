@@ -659,11 +659,14 @@ impl AssignDestination {
                             }
 
                             let maybe = !is_const | assign_context.is_system_verilog();
+                            // Exclude SV connects: the direction may be a read.
+                            let dynamic = !is_const && !assign_context.is_system_verilog();
                             let _ = assign_table.insert_assign(
                                 &variable,
                                 index,
                                 mask.clone(),
                                 maybe,
+                                dynamic,
                                 self.token,
                             );
                         }
