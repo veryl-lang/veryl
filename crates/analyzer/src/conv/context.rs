@@ -69,6 +69,9 @@ pub struct Context {
     /// Recorded when `function_eval_depth`'s limit is hit, since the eval path
     /// may swallow an inserted error.
     pub function_eval_overflow: Option<(TokenRange, usize)>,
+    /// Recorded when a comptime for loop exceeds evaluate_size_limit; skipping
+    /// its body would silently fold consts to their pre-loop values.
+    pub comptime_for_overflow: Option<TokenRange>,
     /// Active generic-function call signatures, to detect exact re-entry as
     /// infinite recursion. Not `instance_history`: that only marks a signature
     /// complete via `set_instance_history`, which functions never call, so it
@@ -154,6 +157,10 @@ impl Context {
         std::mem::swap(
             &mut self.function_eval_overflow,
             &mut tgt.function_eval_overflow,
+        );
+        std::mem::swap(
+            &mut self.comptime_for_overflow,
+            &mut tgt.comptime_for_overflow,
         );
         std::mem::swap(&mut self.function_call_stack, &mut tgt.function_call_stack);
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);

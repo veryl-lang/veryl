@@ -195,12 +195,23 @@ impl FunctionCall {
 
         let disable_const_opt = context.disalbe_const_opt;
         context.disalbe_const_opt = true;
+        let prior_overflow = context.comptime_for_overflow.take();
         for x in &func.statements {
             x.eval_value(context);
+        }
+        let overflowed = context.comptime_for_overflow.is_some();
+        if let Some(x) = prior_overflow {
+            context.comptime_for_overflow.get_or_insert(x);
         }
         context.disalbe_const_opt = disable_const_opt;
 
         // TODO get outputs
+
+        // A skipped over-limit for loop leaves the return value at its
+        // pre-loop state; treat the call as unevaluable instead.
+        if overflowed {
+            return None;
+        }
 
         if let Some(x) = &func.ret {
             let variable = context.variables.get(x)?;
