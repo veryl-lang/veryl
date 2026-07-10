@@ -85,3 +85,26 @@ fmt_veryl:
 
 flamegraph:
 	cargo bench --bench benchmark -- --profile-time=5
+
+# crates.io release. The veryl-component family is versioned independently, so
+# release it separately; when both changed, release it first (veryl-simulator
+# depends on it).
+#
+# These are dry-runs by default; pass EXECUTE=1 to actually release
+# (e.g. `make release-veryl-patch EXECUTE=1`).
+
+RELEASE_EXECUTE := $(if $(EXECUTE),--execute)
+
+.PHONY: release-veryl-patch release-veryl-minor release-component-patch release-component-minor
+
+release-veryl-patch:
+	cargo release patch --exclude veryl-component --exclude veryl-component-sys --exclude veryl-component-macros $(RELEASE_EXECUTE)
+
+release-veryl-minor:
+	cargo release minor --exclude veryl-component --exclude veryl-component-sys --exclude veryl-component-macros $(RELEASE_EXECUTE)
+
+release-component-patch:
+	cargo release patch -p veryl-component-sys -p veryl-component-macros -p veryl-component $(RELEASE_EXECUTE)
+
+release-component-minor:
+	cargo release minor -p veryl-component-sys -p veryl-component-macros -p veryl-component $(RELEASE_EXECUTE)

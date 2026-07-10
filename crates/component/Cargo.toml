@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-component"
-version               = "0.20.2"
+version               = "0.1.0"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -10,8 +10,12 @@ readme.workspace      = true
 description.workspace = true
 edition.workspace     = true
 
+[package.metadata.release]
+# Block the release if the public API broke without a version bump.
+pre-release-hook = ["cargo", "semver-checks", "check-release", "--package", "veryl-component"]
+
 [dependencies]
 anyhow                 = {workspace = true}
 smallvec               = {workspace = true}
-veryl-component-macros = {version = "0.20.2", path = "macros"}
-veryl-component-sys    = {version = "0.20.2", path = "sys"}
+veryl-component-macros = {version = "0.1.0", path = "macros"}
+veryl-component-sys    = {version = "0.1.0", path = "sys"}

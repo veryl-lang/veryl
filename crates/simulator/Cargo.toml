@@ -26,7 +26,7 @@ num-traits          = {workspace = true}
 toml                = {workspace = true}
 vcd                 = {workspace = true}
 veryl-analyzer      = {version = "0.20.2", path = "../analyzer"}
-veryl-component-sys = {version = "0.20.2", path = "../component/sys"}
+veryl-component-sys = {version = "0.1.0", path = "../component/sys"}
 veryl-metadata      = {version = "0.20.2", path = "../metadata"}
 veryl-parser        = {version = "0.20.2", path = "../parser"}
 veryl-path          = {version = "0.20.2", path = "../path"}
@@ -43,7 +43,7 @@ wasmtime       = {version = "46.0", default-features = false, features = ["runti
 [dev-dependencies]
 criterion       = {workspace = true}
 mimalloc        = "0.1"
-veryl-component = {version = "0.20.2", path = "../component"}
+veryl-component = {version = "0.1.0", path = "../component"}
 wellen          = "0.25.5"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]

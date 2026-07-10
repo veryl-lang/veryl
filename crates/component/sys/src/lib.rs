@@ -16,6 +16,11 @@ use std::ffi::c_void;
 /// Incremented on any breaking layout change. Checked at load time.
 pub const VRL_COMPONENT_ABI_VERSION: u32 = 1;
 
+/// The component crate family's version, for tooling that pins a matching
+/// `veryl-component` dependency (e.g. the `veryl new --component` scaffold).
+/// The family is released in lockstep, so this stands in for every member.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Host-port name of an interface-group member: the key generated guest
 /// code resolves and the host synthesizes when expanding a modport
 /// connection. Changing the format is an ABI break, like any other.

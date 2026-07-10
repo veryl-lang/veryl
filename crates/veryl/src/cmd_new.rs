@@ -82,7 +82,9 @@ impl CmdNew {
         // project-name rules apply.
         veryl_metadata::check_project_name(&name).into_diagnostic()?;
         let type_name = to_pascal_case(&name);
-        let version = env!("CARGO_PKG_VERSION");
+        // Pin the component crate family's own version, which is independent of
+        // the Veryl language version this binary reports.
+        let version = veryl_component_sys::VERSION;
 
         let cargo_toml = format!(
             r#"[package]
