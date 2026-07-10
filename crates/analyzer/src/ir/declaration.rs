@@ -10,6 +10,22 @@ use std::sync::Arc;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
+/// How many leading segments of `segs` a node's qualified path -- its generate
+/// prefix `hierarchy` then `name` -- consumes, or `None` if `segs` does not start
+/// with it. A plain node has no prefix and consumes one segment. Shared by the
+/// analyzer's reference classification and the simulator's meta walk so both
+/// match alike.
+pub fn qualified_prefix_len(hierarchy: &[StrId], name: StrId, segs: &[StrId]) -> Option<usize> {
+    if hierarchy.len() < segs.len()
+        && segs[..hierarchy.len()] == *hierarchy
+        && segs[hierarchy.len()] == name
+    {
+        Some(hierarchy.len() + 1)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct DeclarationBlock(pub Vec<Declaration>);
 
@@ -228,6 +244,10 @@ impl fmt::Display for InstOutput {
 #[derive(Clone)]
 pub struct InstDeclaration {
     pub name: StrId,
+    /// Generate-block prefix addressing this instance, e.g. `["g_leaf[0]"]`;
+    /// empty for a plain instance. Each segment is a combined `label[index]`, the
+    /// same form generate variables use in their `VarPath`.
+    pub hierarchy: Vec<StrId>,
     pub inputs: Vec<InstInput>,
     pub outputs: Vec<InstOutput>,
     /// `Arc`-shared: without it, repeated instantiations of the same generic
@@ -265,7 +285,14 @@ impl InstDeclaration {
 
 impl fmt::Display for InstDeclaration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ret = format!("inst {} (\n", self.name);
+        let qualified = self
+            .hierarchy
+            .iter()
+            .map(|x| x.to_string())
+            .chain(std::iter::once(self.name.to_string()))
+            .collect::<Vec<_>>()
+            .join(".");
+        let mut ret = format!("inst {} (\n", qualified);
 
         for x in &self.inputs {
             let text = format!("{};\n", x);

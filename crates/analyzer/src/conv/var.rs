@@ -1,11 +1,16 @@
 use crate::analyzer_error::InvalidSelectKind;
 use crate::conv::checker::separator::check_separator;
-use crate::conv::{Context, Conv};
+use crate::conv::{Context, Conv, generate_block_label};
 use crate::ir::{self, IrResult, VarPath, VarPathSelect, VarSelect, VarSelectOp};
+use crate::namespace::Namespace;
+use crate::symbol::{Symbol, SymbolKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath};
+use crate::symbol_table;
 use crate::{AnalyzerError, ir_error};
+use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::Token;
 
 impl Conv<&Identifier> for VarPath {
     fn conv(_context: &mut Context, value: &Identifier) -> IrResult<Self> {
@@ -97,6 +102,62 @@ impl Conv<&ScopedIdentifier> for VarPathSelect {
     }
 }
 
+/// Folds a `g_leaf[0]` generate-block hop into one combined `label[index]`
+/// segment, the form the IR stores the block under (and the block's genvar
+/// variable path uses). Returns the folded name and the block's inner namespace,
+/// or `None` if the hop is not a constant-index generate block.
+///
+/// `block_scope`, the previous hop's block namespace, distinguishes the first
+/// block of a chain -- reached across an instance boundary, so the symbol table
+/// reports it invisible and it must be recovered from the reference path -- from
+/// a nested block, which lives in `block_scope` past that boundary.
+fn fold_generate_block_index(
+    context: &mut Context,
+    generic_path: &GenericSymbolPath,
+    block_scope: Option<&Namespace>,
+    base_token: &Token,
+    selects: &[ExpressionIdentifierList0List],
+) -> Option<(StrId, Namespace)> {
+    // A generate block has one index dimension and no range.
+    let [select] = selects else {
+        return None;
+    };
+    if select.select.select_opt.is_some() {
+        return None;
+    }
+
+    let block: Symbol = if let Some(scope) = block_scope {
+        (*symbol_table::resolve((base_token.text, scope)).ok()?.found).clone()
+    } else {
+        let i = generic_path.paths.len() - 1;
+        let symbol = match symbol_table::resolve_base_path(generic_path, i, base_token.id) {
+            Ok(symbol) => (*symbol.found).clone(),
+            Err(err) => *err.last_found?,
+        };
+        // `last_found` is wherever the invisible walk stopped; require it to be
+        // this segment so a deeper hop is not read as the block it stopped at.
+        if symbol.token.text != base_token.text {
+            return None;
+        }
+        symbol
+    };
+    if !matches!(block.kind, SymbolKind::Block) {
+        return None;
+    }
+
+    // Generate elaboration is static, so the subscript must be constant.
+    let mut index: ir::Expression = Conv::conv(context, select.select.expression.as_ref()).ok()?;
+    let comptime = index.eval_comptime(context, None);
+    if !comptime.is_const {
+        return None;
+    }
+    let index = comptime.get_value().ok()?.to_usize()?;
+    Some((
+        generate_block_label(base_token.text, index),
+        block.inner_namespace(),
+    ))
+}
+
 impl Conv<&ExpressionIdentifier> for VarPathSelect {
     fn conv(context: &mut Context, value: &ExpressionIdentifier) -> IrResult<Self> {
         check_separator(context, value);
@@ -136,12 +197,34 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
             context.inc_select_dim();
         }
 
+        let mut block_scope: Option<Namespace> = None;
         for x in &value.expression_identifier_list0 {
-            path.push(x.identifier.identifier_token.token.text);
+            let base_token = x.identifier.identifier_token.token;
+            path.push(base_token.text);
             generic_path.paths.push(GenericSymbol {
-                base: x.identifier.identifier_token.token,
+                base: base_token,
                 arguments: vec![],
             });
+
+            // Generate-block hops only occur in cross-instance references, valid
+            // only in a test module; gating there keeps the lookup off the hot
+            // path for ordinary RTL member accesses.
+            if context.in_test_module
+                && !x.expression_identifier_list0_list.is_empty()
+                && let Some((folded, inner)) = fold_generate_block_index(
+                    context,
+                    &generic_path,
+                    block_scope.as_ref(),
+                    &base_token,
+                    &x.expression_identifier_list0_list,
+                )
+            {
+                *path.0.last_mut().unwrap() = folded;
+                block_scope = Some(inner);
+                continue;
+            }
+            block_scope = None;
+
             context
                 .select_paths
                 .push((path.clone(), generic_path.clone()));

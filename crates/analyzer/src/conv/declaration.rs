@@ -311,8 +311,7 @@ impl Conv<&GenerateForDeclaration> for ir::DeclarationBlock {
         let mut ret = ir::DeclarationBlock::default();
 
         for i in range {
-            let label = format!("{}[{}]", label, i);
-            let label = resource_table::insert_str(&label);
+            let label = crate::conv::generate_block_label(label, i);
 
             let index = value.identifier.text();
             let path = VarPath::new(index);
@@ -1578,6 +1577,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 }
                 Ok(ir::Declaration::Inst(Box::new(ir::InstDeclaration {
                     name,
+                    hierarchy: context.current_hierarchy().to_vec(),
                     inputs,
                     outputs,
                     component: component_arc,
@@ -1695,6 +1695,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 let component = Arc::new(ir::Component::SystemVerilog(component));
                 Ok(ir::Declaration::Inst(Box::new(ir::InstDeclaration {
                     name,
+                    hierarchy: context.current_hierarchy().to_vec(),
                     inputs: vec![],
                     outputs: vec![],
                     component,

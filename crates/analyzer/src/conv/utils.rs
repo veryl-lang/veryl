@@ -1962,17 +1962,16 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
                 );
             }
 
-            // ... or descend into a child module instance.
+            // ... or descend into the child instance whose qualified path
+            // (generate prefix then name) begins the remaining segments.
             let child = module.declarations.iter().find_map(|x| {
-                if let ir::Declaration::Inst(inst) = x
-                    && inst.name == segs[i]
-                {
-                    Some(&inst.component)
-                } else {
-                    None
-                }
+                let ir::Declaration::Inst(inst) = x else {
+                    return None;
+                };
+                let consumed = ir::qualified_prefix_len(&inst.hierarchy, inst.name, &segs[i..])?;
+                Some((&inst.component, consumed))
             });
-            let Some(child) = child else {
+            let Some((child, consumed)) = child else {
                 let owner = inst_path
                     .iter()
                     .map(|x| x.to_string())
@@ -1983,9 +1982,9 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
                     member: segs[i],
                 };
             };
-            inst_path.push(segs[i]);
+            inst_path.extend_from_slice(&segs[i..i + consumed]);
             component = child.as_ref();
-            i += 1;
+            i += consumed;
             if i >= segs.len() {
                 let owner = inst_path
                     .iter()

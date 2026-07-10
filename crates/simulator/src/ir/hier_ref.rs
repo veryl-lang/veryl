@@ -40,9 +40,22 @@ fn find_target<'a>(
 ) -> Option<&'a VariableMeta> {
     let mut level = children;
     let mut module: Option<&ModuleVariableMeta> = None;
-    for seg in inst_path {
-        module = level.iter().find(|m| m.name == *seg);
-        level = &module?.children;
+    // Walk inst_path, consuming each node's qualified path (prefix then name).
+    let mut i = 0;
+    while i < inst_path.len() {
+        let mut consumed = 0;
+        let found = level.iter().find(|m| {
+            match air::qualified_prefix_len(&m.hierarchy, m.name, &inst_path[i..]) {
+                Some(n) => {
+                    consumed = n;
+                    true
+                }
+                None => false,
+            }
+        })?;
+        i += consumed;
+        module = Some(found);
+        level = &found.children;
     }
     module?.variable_meta.values().find(|m| m.path == *var_path)
 }
