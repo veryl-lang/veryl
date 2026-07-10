@@ -642,7 +642,7 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
-        severity(Warning),
+        severity(Error),
         code(invalid_select),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())

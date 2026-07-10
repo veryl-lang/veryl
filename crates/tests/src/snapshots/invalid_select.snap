@@ -4,7 +4,7 @@ expression: out
 ---
 invalid_select (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_select)
 
-  ⚠ invalid select caused by out of range [2] > 2
+  × invalid select caused by out of range [2] > 2
    ╭─[../../testcases/error/invalid_select.veryl:3:27]
  2 │     let _a: logic<2> = 1;
  3 │     let _b: logic    = _a[2];
