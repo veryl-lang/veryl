@@ -1366,18 +1366,16 @@ impl Emitter {
     fn emit_statement_block(&mut self, arg: &StatementBlock, begin_kw: &str, end_kw: &str) {
         self.token_will_push(&arg.l_brace.l_brace_token.replace(begin_kw));
 
-        let statement_block_list: Vec<_> = arg
-            .statement_block_list
-            .iter()
-            .map(|x| Into::<Vec<_>>::into(x.statement_block_group.as_ref()))
-            .collect();
-
         let mut base = 0;
         let mut n_newlines = 0;
-        for x in &statement_block_list {
-            for x in x {
-                (base, n_newlines) = self.emit_declaration_in_statement_block(x, base, n_newlines);
-            }
+        let mut suppress_newline = false;
+        for x in &arg.statement_block_list {
+            (base, n_newlines) = self.hoist_declarations_in_group(
+                &x.statement_block_group,
+                base,
+                n_newlines,
+                &mut suppress_newline,
+            );
         }
 
         let mut n_newlines = 0;
@@ -1392,6 +1390,72 @@ impl Emitter {
         }
         self.newline_list_post(arg.statement_block_list.is_empty());
         self.token(&arg.r_brace.r_brace_token.replace(end_kw));
+    }
+
+    /// Phase-1 hoist of let/var/const declarations to the block top, keeping
+    /// each group's `ifdef/`elsif/`else/`endif guards: flattening them would
+    /// emit both arms of an #[ifdef]/#[else] pair unguarded into one scope.
+    fn hoist_declarations_in_group(
+        &mut self,
+        group: &StatementBlockGroup,
+        mut base: usize,
+        mut n_newlines: usize,
+        suppress_newline: &mut bool,
+    ) -> (usize, usize) {
+        let items: Vec<&StatementBlockItem> = group.into();
+        let has_declaration = items.iter().any(|x| {
+            !matches!(
+                x,
+                StatementBlockItem::Statement(_) | StatementBlockItem::ConcatenationAssignment(_)
+            )
+        });
+        if !has_declaration {
+            return (base, n_newlines);
+        }
+
+        let ifdef_attributes: Vec<_> = group
+            .statement_block_group_list
+            .iter()
+            .filter(|x| is_conditional_attribute(&x.attribute))
+            .collect();
+
+        for (j, x) in ifdef_attributes.iter().enumerate() {
+            if j == 0 && !*suppress_newline {
+                self.newline_list(n_newlines);
+                n_newlines += 1;
+                base += 1;
+            }
+            self.attribute(&x.attribute);
+        }
+        if !ifdef_attributes.is_empty() {
+            *suppress_newline = true;
+        }
+
+        match &*group.statement_block_group_group {
+            StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => {
+                for x in &x.statement_block_group_group_list {
+                    (base, n_newlines) = self.hoist_declarations_in_group(
+                        &x.statement_block_group,
+                        base,
+                        n_newlines,
+                        suppress_newline,
+                    );
+                }
+            }
+            StatementBlockGroupGroup::StatementBlockItem(x) => {
+                (base, n_newlines) = self.emit_declaration_in_statement_block(
+                    x.statement_block_item.as_ref(),
+                    base,
+                    n_newlines,
+                    suppress_newline,
+                );
+            }
+        }
+
+        for _ in ifdef_attributes {
+            self.attribute_end();
+        }
+        (base, n_newlines)
     }
 
     /// Emit one `StatementBlockGroup`, opening its conditional attributes once
@@ -1470,6 +1534,7 @@ impl Emitter {
         arg: &StatementBlockItem,
         base: usize,
         n_newlines: usize,
+        suppress_newline: &mut bool,
     ) -> (usize, usize) {
         if matches!(
             arg,
@@ -1478,7 +1543,11 @@ impl Emitter {
             return (base, n_newlines);
         }
 
-        self.newline_list(n_newlines);
+        if *suppress_newline {
+            *suppress_newline = false;
+        } else {
+            self.newline_list(n_newlines);
+        }
         self.clear_adjust_line();
         match arg {
             StatementBlockItem::VarDeclaration(x) => {
