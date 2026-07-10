@@ -1447,6 +1447,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         let child_module_meta = ModuleVariableMeta {
             name: src.name,
+            hierarchy: src.hierarchy.clone(),
             variable_meta: child_variable_meta,
             children: all_child_modules,
         };

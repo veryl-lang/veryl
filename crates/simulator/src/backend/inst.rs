@@ -218,6 +218,7 @@ fn reloc_module_meta(
 ) -> ModuleVariableMeta {
     ModuleVariableMeta {
         name: mm.name,
+        hierarchy: mm.hierarchy.clone(),
         variable_meta: mm
             .variable_meta
             .iter()

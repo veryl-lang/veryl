@@ -551,6 +551,12 @@ impl Context {
         self.hierarchical_functions.push(vec![]);
     }
 
+    /// The current generate-block prefix (e.g. `["g_leaf[0]"]`), the same prefix
+    /// applied to variable paths and to `InstDeclaration::hierarchy`.
+    pub fn current_hierarchy(&self) -> &[StrId] {
+        &self.hierarchy
+    }
+
     pub fn pop_hierarchy(&mut self) {
         self.hierarchy.pop();
         let drops = self.hierarchical_variables.pop();

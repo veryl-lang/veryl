@@ -482,6 +482,9 @@ pub fn create_variable_meta(
 #[derive(Clone, Debug)]
 pub struct ModuleVariableMeta {
     pub name: StrId,
+    /// Generate-block prefix addressing this node (e.g. `["g_leaf[0]"]`), from
+    /// `air::InstDeclaration::hierarchy`; empty for a plain instance or the top.
+    pub hierarchy: Vec<StrId>,
     pub variable_meta: HashMap<VarId, VariableMeta>,
     pub children: Vec<ModuleVariableMeta>,
 }

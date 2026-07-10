@@ -2865,6 +2865,7 @@ impl Conv<&air::Module> for ProtoModule {
 
         let module_variable_meta = ModuleVariableMeta {
             name: src.name,
+            hierarchy: vec![],
             variable_meta,
             children: all_child_modules,
         };
