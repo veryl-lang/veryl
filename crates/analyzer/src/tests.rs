@@ -17425,3 +17425,75 @@ fn literal_width_prefix_overflow() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn loop_variable_select_width() {
+    // A for-loop induction variable is const during IR unrolling, so a
+    // part-select width depending on it passed the check — but the emitted
+    // SV keeps a runtime `for`, where such a width is illegal (Verilator:
+    // "Expecting expression to be constant").
+    let code = r#"
+    module ModuleA (
+        o_w: output logic<32>,
+    ) {
+        always_comb {
+            o_w = 0;
+            for i in 0..4 {
+                o_w[i * 8 +: i + 1] = 8'hbb;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. })),
+        "{errors:?}"
+    );
+
+    // Colon-range bounds depending on the loop variable are illegal too.
+    let code = r#"
+    module ModuleB (
+        o_w: output logic<32>,
+    ) {
+        always_comb {
+            o_w = 0;
+            for i in 0..4 {
+                o_w[i * 8 + 7 : i * 8] = 8'hbb;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. })),
+        "{errors:?}"
+    );
+
+    // A const width with a loop-variable base offset is legal SV `+:`.
+    let code = r#"
+    module ModuleC (
+        o_w: output logic<32>,
+    ) {
+        always_comb {
+            o_w = 0;
+            for i in 0..4 {
+                o_w[i * 8 +: 8] = 8'hbb;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. })),
+        "{errors:?}"
+    );
+}
