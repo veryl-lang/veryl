@@ -560,6 +560,14 @@ pub fn check_assign_clock_domain(
     {
         check_clock_domain(context, &dst_comptime_for_cdc, &clock, &token.beg);
     }
+
+    // A statement condition gates the write like a mux select: a foreign-
+    // domain if/case/switch condition over this destination is the same
+    // CDC as the expression form (`x = if c {..}`), which the ternary
+    // path already reports.
+    for cond in context.condition_domains.clone() {
+        check_clock_domain(context, &dst_comptime_for_cdc, &cond, &token.beg);
+    }
 }
 
 pub fn eval_assign_statement(

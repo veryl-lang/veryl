@@ -107,6 +107,10 @@ pub struct Context {
     /// `check_compatibility` to pick the clock/reset diagnostic.
     pub in_inst_port: bool,
     pub current_clock: Option<Comptime>,
+    /// Comptimes of the enclosing if/case/switch statement conditions: a
+    /// condition gates the writes below it like a mux select, so its clock
+    /// domain is checked against each assignment destination.
+    pub condition_domains: Vec<Comptime>,
     pub mask_cache: MaskCache,
     pub tb_reset_cycles: HashMap<StrId, Expression>,
     pub tb_clock_period: HashMap<StrId, Expression>,
@@ -128,6 +132,19 @@ pub struct Context {
 }
 
 impl Context {
+    /// Run `f` with `cond` on the statement-condition stack (popped before
+    /// `?` can skip it).
+    pub fn with_condition_domain<T>(
+        &mut self,
+        cond: Comptime,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        self.condition_domains.push(cond);
+        let ret = f(self);
+        self.condition_domains.pop();
+        ret
+    }
+
     pub fn inherit(&mut self, tgt: &mut Context) {
         std::mem::swap(&mut self.overrides, &mut tgt.overrides);
         std::mem::swap(&mut self.generic_maps, &mut tgt.generic_maps);
