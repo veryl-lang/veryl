@@ -239,11 +239,17 @@ pub struct FfCell {
 /// One synchronous write port of a [`RamBlock`]. `data`/`addr`/`enable` are
 /// driven by surrounding logic; the write commits on the RAM's clock edge when
 /// `enable` is high. `addr`/`data` are LSB-first.
+///
+/// `mask`, when `Some(m)` (`m.len() == data.len()`), is a byte-/bit-write-enable:
+/// bit `i` is written where `m[i]` is high, retained otherwise. `None` is an
+/// unconditional whole-word write. Inferred from a read-modify-write (see
+/// `conv::ram::match_masked_write`); either way it is one write port.
 #[derive(Clone)]
 pub struct RamWritePort {
     pub addr: Vec<NetId>,
     pub data: Vec<NetId>,
     pub enable: NetId,
+    pub mask: Option<Vec<NetId>>,
 }
 
 /// One read port of a [`RamBlock`]. `data` nets are *outputs* — the RAM drives
@@ -293,6 +299,9 @@ impl GateModule {
                 wp.addr.iter().for_each(|&n| f(n));
                 wp.data.iter().for_each(|&n| f(n));
                 f(wp.enable);
+                if let Some(mask) = &wp.mask {
+                    mask.iter().for_each(|&n| f(n));
+                }
             }
             for rp in &ram.read_ports {
                 rp.addr.iter().for_each(|&n| f(n));
@@ -310,6 +319,9 @@ impl GateModule {
                 wp.addr.iter_mut().for_each(&mut f);
                 wp.data.iter_mut().for_each(&mut f);
                 f(&mut wp.enable);
+                if let Some(mask) = &mut wp.mask {
+                    mask.iter_mut().for_each(&mut f);
+                }
             }
             for rp in &mut ram.read_ports {
                 rp.addr.iter_mut().for_each(&mut f);

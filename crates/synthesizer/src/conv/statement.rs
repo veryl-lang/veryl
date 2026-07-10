@@ -30,6 +30,15 @@ fn process_statement(
 ) -> Result<(), SynthesizerError> {
     match stmt {
         Statement::Assign(a) => {
+            // Byte-write-enable fold: record a masked RMW as one masked write
+            // port (see `ram::match_masked_write`), not a write + retention read.
+            if a.dst.len() == 1 && ctx.ram_vars.contains_key(&a.dst[0].id) {
+                let dst = &a.dst[0];
+                if let Some((d_expr, m_expr)) = ram::match_masked_write(dst.id, &dst.index, &a.expr)
+                {
+                    return record_masked_ram_write(ctx, dst, d_expr, m_expr, current);
+                }
+            }
             if a.dst.len() > 1 {
                 // Concat-LHS `{d, e, ...} = a` — slice MSB-first so dst[0]
                 // gets the high bits.
@@ -133,7 +142,45 @@ fn record_ram_write(
     data.resize(cand.width, NET_CONST0);
     let enable = current_write_enable(ctx);
     if let Some(builder) = ctx.ram_builders.get_mut(&dst.id) {
-        builder.writes.push(RamWritePort { addr, data, enable });
+        builder.writes.push(RamWritePort {
+            addr,
+            data,
+            enable,
+            mask: None,
+        });
+    }
+    Ok(())
+}
+
+/// Records a masked RAM write as a single port carrying byte-enable `mask`; only
+/// `d`/`m` are synthesized, the retention read folds into the mask. Detection is
+/// [`ram::match_masked_write`], shared with port counting.
+fn record_masked_ram_write(
+    ctx: &mut ConvContext,
+    dst: &air::AssignDestination,
+    d_expr: &air::Expression,
+    m_expr: &air::Expression,
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+) -> Result<(), SynthesizerError> {
+    let cand = ctx.ram_vars[&dst.id];
+    let idx_expr =
+        dst.index.0.first().ok_or_else(|| {
+            SynthesizerError::internal(format!("RAM write {} has no index", dst.id))
+        })?;
+    let idx_bits = arith::index_bits_for(cand.depth);
+    let addr = synthesize_expr(ctx, idx_expr, current, idx_bits)?;
+    let mut data = synthesize_expr(ctx, d_expr, current, cand.width)?;
+    data.resize(cand.width, NET_CONST0);
+    let mut mask = synthesize_expr(ctx, m_expr, current, cand.width)?;
+    mask.resize(cand.width, NET_CONST0);
+    let enable = current_write_enable(ctx);
+    if let Some(builder) = ctx.ram_builders.get_mut(&dst.id) {
+        builder.writes.push(RamWritePort {
+            addr,
+            data,
+            enable,
+            mask: Some(mask),
+        });
     }
     Ok(())
 }
