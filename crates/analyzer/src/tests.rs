@@ -17758,3 +17758,59 @@ fn comptime_for_over_size_limit() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn out_of_range_select_assign() {
+    // A const-function assignment through an out-of-range bit/part-select
+    // reached ValueU64::assign with end >= 64, overflowing the shift and
+    // panicking in debug builds *before* the invalid_select diagnostic could
+    // fire. Dropping the out-of-range write lets analysis finish and report it.
+    let code = r#"
+    module ModuleA {
+        function f () -> logic<8> {
+            var v: logic<8>;
+            v = 8'd0;
+            v[70] = 1'b1;
+            return v;
+        }
+        const B: logic<8> = f();
+        var y: logic<8>;
+        always_comb {
+            y = B;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidSelect { .. })),
+        "{errors:?}"
+    );
+
+    // Part-select variant.
+    let code = r#"
+    module ModuleA {
+        function f () -> logic<8> {
+            var v: logic<8>;
+            v = 8'd0;
+            v[71:64] = 8'hff;
+            return v;
+        }
+        const B: logic<8> = f();
+        var y: logic<8>;
+        always_comb {
+            y = B;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidSelect { .. })),
+        "{errors:?}"
+    );
+}

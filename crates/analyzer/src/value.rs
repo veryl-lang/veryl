@@ -306,6 +306,11 @@ impl ValueU64 {
     }
 
     pub fn assign(&mut self, mut value: Self, beg: usize, end: usize) {
+        // A write at/after bit 64 is outside a <=64-bit value; the native
+        // `<<= end` would overflow. Out-of-range writes are dropped (cf. select()).
+        if end >= 64 {
+            return;
+        }
         value.payload <<= end;
         value.mask_xz <<= end;
 
