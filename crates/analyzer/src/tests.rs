@@ -16930,3 +16930,27 @@ fn invalid_mixin_interface() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidMixin { .. }));
 }
+
+#[test]
+fn pow_with_wide_exponent() {
+    // `**` converted its exponent with Value::to_usize, which is None for
+    // every BigUint — so a >64-bit exponent operand const-folded to X and
+    // widths derived from it silently lost their downstream checks.
+    let code = r#"
+    module ModuleA {
+        const Q: u32 = 2 ** 65'd10;
+        var y: logic<Q>;
+        var b: logic;
+        assign y = 0;
+        assign b = y[5000];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidSelect { .. })),
+        "{errors:?}"
+    );
+}

@@ -1646,7 +1646,10 @@ impl Op {
                     };
                 }
 
-                let y = y.to_usize();
+                // Like the shift arms, accept a >64-bit exponent value
+                // (Value::to_usize is None for every BigUint): non-x/z wide
+                // exponents convert, saturating at usize::MAX.
+                let y = y.to_shift_amount();
 
                 match x.as_ref() {
                     Value::U64(x) => {
