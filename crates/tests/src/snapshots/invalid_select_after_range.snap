@@ -4,7 +4,7 @@ expression: out
 ---
 invalid_select (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_select)
 
-  ⚠ invalid select caused by select after range is not allowed
+  × invalid select caused by select after range is not allowed
    ╭─[../../testcases/error/invalid_select_after_range.veryl:3:24]
  2 │     var a : logic<8>;
  3 │     let _b: logic    = a[3:0][0];
