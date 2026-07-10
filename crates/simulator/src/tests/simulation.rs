@@ -18871,3 +18871,48 @@ fn bare_signed_rhs_sign_extends_at_dynamic_store() {
         );
     }
 }
+
+#[test]
+fn binary_xnor_result_masked() {
+    // ~(x^y) sets every bit above the width even for clean operands, but
+    // is_clean_to_width claimed binary XNOR of clean operands clean and the
+    // Cranelift root-mask list skipped it, so the JIT/AOT-C backends stored
+    // and compared the dirty high bits (33-bit dst: ffffffffb instead of
+    // 1b7507d58; the interpreter and iverilog agree on the latter).
+    let code = r#"
+    module Top (
+        a: input  logic<33>,
+        b: input  logic<33>,
+        r: output logic<33>,
+        c: output logic,
+    ) {
+        assign r = a ~^ b;
+        assign c = (a ~^ b) == 33'h1b7507d58;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set(
+            "a",
+            Value::new_biguint(BigUint::from(0x107e30f11u64), 33, false),
+        );
+        sim.set(
+            "b",
+            Value::new_biguint(BigUint::from(0x14f4c8db6u64), 33, false),
+        );
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new_biguint(BigUint::from(0x1b7507d58u64), 33, false),
+            "r config={config:?}"
+        );
+        assert_eq!(
+            sim.get("c").unwrap(),
+            Value::new(1, 1, false),
+            "c config={config:?}"
+        );
+    }
+}

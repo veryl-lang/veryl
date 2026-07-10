@@ -843,7 +843,7 @@ impl ProtoExpression {
                 | Op::LogicAnd
                 | Op::LogicOr => 1,
                 Op::BitAnd => x.effective_bits().min(y.effective_bits()),
-                Op::BitOr | Op::BitXor | Op::BitXnor => x.effective_bits().max(y.effective_bits()),
+                Op::BitOr | Op::BitXor => x.effective_bits().max(y.effective_bits()),
                 _ => *width,
             },
             ProtoExpression::Concatenation { width, .. } => *width,
@@ -1066,9 +1066,11 @@ impl ProtoExpression {
                 Op::BitAnd => {
                     x.is_clean_to_width(target_width) || y.is_clean_to_width(target_width)
                 }
-                Op::BitOr | Op::BitXor | Op::BitXnor => {
+                Op::BitOr | Op::BitXor => {
                     x.is_clean_to_width(target_width) && y.is_clean_to_width(target_width)
                 }
+                // ~(x^y) sets every bit above the width even for clean
+                // operands, so binary XNOR is never clean.
                 Op::LogicShiftR => x.is_clean_to_width(target_width),
                 _ => false,
             },

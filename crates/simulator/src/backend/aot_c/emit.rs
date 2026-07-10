@@ -3994,9 +3994,24 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         ))
                     }
                 }
-                Op::BitXnor => Some(format!("(~(({}) ^ ({})))", xs, ys)),
-                Op::BitNand => Some(format!("(~(({}) & ({})))", xs, ys)),
-                Op::BitNor => Some(format!("(~(({}) | ({})))", xs, ys)),
+                // `~` sets every bit above the width; mask when a consumer
+                // reads the high bits (mirrors the unary BitNot emission).
+                Op::BitXnor | Op::BitNand | Op::BitNor => {
+                    let inner = match op {
+                        Op::BitXnor => format!("(~(({xs}) ^ ({ys})))"),
+                        Op::BitNand => format!("(~(({xs}) & ({ys})))"),
+                        Op::BitNor => format!("(~(({xs}) | ({ys})))"),
+                        _ => unreachable!(),
+                    };
+                    let w = expr_context.width;
+                    if needs_clean && w > 0 && w < 64 {
+                        Some(format!("(({inner}) & 0x{:x}ULL)", (1u64 << w) - 1))
+                    } else if needs_clean && w > 64 && w < 128 {
+                        Some(mask_u128(&inner, w))
+                    } else {
+                        Some(inner)
+                    }
+                }
                 // `As` is the type-cast op; the analyzer uses it to mark
                 // a Binary{x, As, y_type} where y_type is a Type expression
                 // (not a value).  At eval time the value passes through

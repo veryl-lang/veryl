@@ -1356,6 +1356,7 @@ impl ProtoExpression {
                             | Op::LogicShiftL
                             | Op::ArithShiftL
                             | Op::ArithShiftR
+                            | Op::BitXnor
                     )
                 {
                     payload = band_const(
