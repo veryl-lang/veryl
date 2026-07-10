@@ -1149,6 +1149,40 @@ impl Emitter {
         }
     }
 
+    /// Pop any trailing `[Hardline, `endif]` pairs (one per group `attribute_end`)
+    /// so a separator can be emitted before the endif chain; re-emit with `.rev()`.
+    fn pop_trailing_endif_chain(&mut self) -> Vec<Doc> {
+        if matches!(self.mode, Mode::Align) {
+            return Vec::new();
+        }
+        let buf = self.doc_buffer.last_mut().unwrap();
+        let mut popped: Vec<Doc> = Vec::new();
+        loop {
+            let len = buf.len();
+            if len < 2 {
+                break;
+            }
+            let is_endif = match &buf[len - 1] {
+                Doc::Text(s) => s.as_ref() == "`endif",
+                _ => false,
+            };
+            if !is_endif {
+                break;
+            }
+            let is_hard = matches!(&buf[len - 2], Doc::Hardline);
+            if !is_hard {
+                break;
+            }
+            let endif = buf.pop().unwrap();
+            let hardline = buf.pop().unwrap();
+            // Push in reverse pair order so the final iter().rev() yields
+            // the original [Hardline, Text] sequence.
+            popped.push(endif);
+            popped.push(hardline);
+        }
+        popped
+    }
+
     fn attribute_end(&mut self) {
         match self.attribute.pop() {
             Some(AttributeType::Ifdef) => {
@@ -2931,39 +2965,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Comma'
     fn comma(&mut self, arg: &Comma) {
-        // If the trailing Doc nodes are a sequence of
-        // `[Hardline, Doc::Text("`endif")]` pairs (one per `attribute_end`
-        // emitted for this group), pop them, emit the comma, then re-emit
-        // them so the comma sits on the line before the endif chain.
-        if matches!(self.mode, Mode::Align) {
-            self.veryl_token(&arg.comma_token);
-            return;
-        }
-        let buf = self.doc_buffer.last_mut().unwrap();
-        let mut popped: Vec<Doc> = Vec::new();
-        loop {
-            let len = buf.len();
-            if len < 2 {
-                break;
-            }
-            let is_endif = match &buf[len - 1] {
-                Doc::Text(s) => s.as_ref() == "`endif",
-                _ => false,
-            };
-            if !is_endif {
-                break;
-            }
-            let is_hard = matches!(&buf[len - 2], Doc::Hardline);
-            if !is_hard {
-                break;
-            }
-            let endif = buf.pop().unwrap();
-            let hardline = buf.pop().unwrap();
-            // Push in reverse pair order so the final iter().rev() yields
-            // the original [Hardline, Text] sequence.
-            popped.push(endif);
-            popped.push(hardline);
-        }
+        let popped = self.pop_trailing_endif_chain();
         self.veryl_token(&arg.comma_token);
         for d in popped.into_iter().rev() {
             self.emit_doc(d);
@@ -5314,16 +5316,27 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'StructUnionList'
     fn struct_union_list(&mut self, arg: &StructUnionList) {
+        // The ';' separators must land inside a member's `ifdef guard, like
+        // comma() does — after `endif the preprocessor would keep a stray
+        // ';' when the define is off.
         self.struct_union_group(&arg.struct_union_group);
         for x in &arg.struct_union_list_list {
+            let popped = self.pop_trailing_endif_chain();
             self.token(&x.comma.comma_token.replace(";"));
+            for d in popped.into_iter().rev() {
+                self.emit_doc(d);
+            }
             self.newline();
             self.struct_union_group(&x.struct_union_group);
         }
+        let popped = self.pop_trailing_endif_chain();
         if let Some(ref x) = arg.struct_union_list_opt {
             self.token(&x.comma.comma_token.replace(";"));
         } else {
             self.str(";");
+        }
+        for d in popped.into_iter().rev() {
+            self.emit_doc(d);
         }
     }
 
