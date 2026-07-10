@@ -17148,3 +17148,90 @@ fn clock_domain_const_array_index() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn clock_domain_concatenation_lhs() {
+    // A concatenation LHS built its AssignStatement directly, skipping
+    // eval_assign_statement's clock-domain checks entirely.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic<8>,
+        o_b    : output 'b logic<4>,
+        o_b2   : output 'b logic<4>,
+    ) {
+        assign {o_b, o_b2} = i_a;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Statement form inside always_comb.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic<8>,
+        o_b    : output 'b logic<4>,
+        o_b2   : output 'b logic<4>,
+    ) {
+        always_comb {
+            {o_b, o_b2} = i_a;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // dst-vs-clock check in always_ff.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_b    : input  'b logic<8>,
+        o_b    : output 'b logic<4>,
+        o_b2   : output 'b logic<4>,
+    ) {
+        always_ff (i_clk_a) {
+            {o_b, o_b2} = i_b;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Same-domain concatenation LHS stays accepted.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_a    : input  'a logic<8>,
+        o_a    : output 'a logic<4>,
+        o_a2   : output 'a logic<4>,
+    ) {
+        assign {o_a, o_a2} = i_a;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
