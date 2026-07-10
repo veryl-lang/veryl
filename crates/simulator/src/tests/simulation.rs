@@ -19365,3 +19365,56 @@ fn compare_mixed_value_representation() {
         );
     }
 }
+
+#[test]
+fn const_value_signedness_follows_declared_type() {
+    // eval_const_assign stored the RHS literal's signed flag: a bare decimal
+    // is 32-bit signed and a based literal unsigned, so `const A2: u8 = 200`
+    // compared like -56 and `const S8: i8 = 8'hc8` refused to sign-extend.
+    // iverilog on the emitted SV folds H=200, M=200, T1=1, T2=-28.
+    let code = r#"
+    module Top (
+        o1: output logic<32>,
+        o2: output logic<32>,
+        o3: output logic<32>,
+        o4: output logic<32>,
+    ) {
+        const A2: u8 = 200;
+        const H : i32 = if A2 == -56 ? 100 : 200;
+        const M : i32 = if 1 ? A2 : -1000;
+        const S8: i8 = 8'hc8;
+        const T1: i32 = if S8 <: 0 ? 1 : 2;
+        const T2: i32 = S8 / 2;
+        assign o1 = H;
+        assign o2 = M;
+        assign o3 = T1;
+        assign o4 = T2;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o1").unwrap(),
+            Value::new(200, 32, false),
+            "H config={config:?}"
+        );
+        assert_eq!(
+            sim.get("o2").unwrap(),
+            Value::new(200, 32, false),
+            "M config={config:?}"
+        );
+        assert_eq!(
+            sim.get("o3").unwrap(),
+            Value::new(1, 32, false),
+            "T1 config={config:?}"
+        );
+        assert_eq!(
+            sim.get("o4").unwrap(),
+            Value::new(0xffff_ffe4, 32, false),
+            "T2 config={config:?}"
+        );
+    }
+}

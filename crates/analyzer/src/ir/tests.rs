@@ -331,7 +331,7 @@ fn generate_if() {
     "#;
 
     let exp = r#"module ModuleA {
-  param var0(N): bit<32> = 32'sh00000001;
+  param var0(N): bit<32> = 32'h00000001;
   let var1(g.b): logic = 1'hx;
 
   comb {
@@ -339,7 +339,7 @@ fn generate_if() {
   }
 }
 module ModuleB {
-  param var0(N): bit<32> = 32'sh00000000;
+  param var0(N): bit<32> = 32'h00000000;
   let var1(g.a): logic = 1'hx;
 
   comb {
@@ -364,7 +364,7 @@ fn generate_for() {
     "#;
 
     let exp = r#"module ModuleA {
-  param var0(N): bit<32> = 32'sh00000004;
+  param var0(N): bit<32> = 32'h00000004;
   const var1(g[0].i): bit<32> = 32'h00000000;
   let var2(g[0].a): logic = 1'hx;
   const var3(g[1].i): bit<32> = 32'h00000001;
@@ -845,7 +845,7 @@ fn interface() {
     "#;
 
     let exp = r#"module ModuleA {
-  param var0(WIDTH): bit<32> = 32'sh00000008;
+  param var0(WIDTH): bit<32> = 32'h00000008;
   input var1(a.a): logic<8> = 8'hxx;
   output var6(b.a): logic<8> = 8'hxx;
 
@@ -853,9 +853,9 @@ fn interface() {
   }
 }
 module ModuleB {
-  param var0(a.WIDTH): bit<32> = 32'sh00000080;
+  param var0(a.WIDTH): bit<32> = 32'h00000080;
   var var1(a.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
-  param var5(b.WIDTH): bit<32> = 32'sh00000080;
+  param var5(b.WIDTH): bit<32> = 32'h00000080;
   var var6(b.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
 
   comb {
@@ -866,7 +866,7 @@ module ModuleB {
     var6 -> var6;
   ) {
     module ModuleA {
-      param var0(WIDTH): bit<32> = 32'sh00000080;
+      param var0(WIDTH): bit<32> = 32'h00000080;
       input var1(a.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
       output var6(b.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
       const var11([0].i): signed bit<32> = 32'sh00000000;
@@ -1151,7 +1151,7 @@ fn function() {
     "#;
 
     let exp = r#"module ModuleA {
-  const var0(A): bit<32> = 32'sh00000008;
+  const var0(A): bit<32> = 32'h00000008;
   var var2(func.return): bit<32> = 32'h00000008;
   const var3(B): bit<32> = 32'h00000008;
   func var1(func) -> var2 {
@@ -1230,7 +1230,7 @@ fn function() {
     "#;
 
     let exp = r#"module ModuleA {
-  param var0(W): bit<32> = 32'sh00000008;
+  param var0(W): bit<32> = 32'h00000008;
   input var1(a): logic<8> = 8'hxx;
   input var2(b): logic<8> = 8'hxx;
   input var3(c): logic<8> = 8'hxx;
@@ -2599,7 +2599,7 @@ fn assignment_operator_with_array_index() {
     "#;
 
     let exp = r#"module Top {
-  param var0(N): bit<32> = 32'sh00000004;
+  param var0(N): bit<32> = 32'h00000004;
   input var1[0](a): logic = 1'hx;
   input var1[1](a): logic = 1'hx;
   input var1[2](a): logic = 1'hx;
@@ -2853,7 +2853,7 @@ fn cast_operation() {
     "#;
 
     let exp = r#"module ModuleA {
-  const var0(W): bit<32> = 32'sh00000020;
+  const var0(W): bit<32> = 32'h00000020;
   const var2(A): bit<32> = 32'hffffffff;
   const var3(B): bit<32> = 32'hffffffff;
   const var4(C): bit<32> = 32'hffffffff;
@@ -2877,11 +2877,11 @@ fn cast_operation() {
     "#;
 
     let exp = r#"module ModuleA {
-  const var0(W): bit<32> = 32'sh00000008;
-  const var2(A): bit<32> = 8'hff;
-  const var3(B): bit<32> = 8'hff;
-  const var4(C): bit<32> = 8'hff;
-  const var5(D): bit<32> = 8'hff;
+  const var0(W): bit<32> = 32'h00000008;
+  const var2(A): bit<32> = 32'h000000ff;
+  const var3(B): bit<32> = 32'h000000ff;
+  const var4(C): bit<32> = 32'h000000ff;
+  const var5(D): bit<32> = 32'h000000ff;
 
 }
 "#;
@@ -2901,7 +2901,7 @@ fn cast_operation() {
     "#;
 
     let exp = r#"module ModuleA {
-  const var0(W): bit<32> = 32'sh00000040;
+  const var0(W): bit<32> = 32'h00000040;
   const var2(A): bit<64> = 64'h00000000ffffffff;
   const var3(B): bit<64> = 64'h00000000ffffffff;
   const var4(C): bit<64> = 64'h00000000ffffffff;

@@ -830,6 +830,8 @@ fn fit_array_elements(mut values: Vec<Value>, r#type: &ir::Type) -> Vec<Value> {
             } else if value.width() < total_width {
                 *value = value.expand(total_width, value.signed()).into_owned();
             }
+            // Adopt the destination type's signedness (see eval_const_assign).
+            value.set_signed(r#type.signed);
         }
     }
     values
@@ -881,7 +883,16 @@ pub fn eval_const_assign(
                             .r#type
                             .total_width()
                             .ok_or_else(|| ir_error!(token))?;
+                        // Normalize the stored value to the declared type:
+                        // extend by the RHS value's own signedness, then adopt
+                        // the type's signed flag — downstream folds (==, <:,
+                        // /, ternary, casts) trust the flag, and a stray RHS
+                        // flag diverges from the emitted SV.
+                        if value.width() < total_width && value.width() != 0 {
+                            value = value.expand(total_width, value.signed()).into_owned();
+                        }
                         value.trunc(total_width);
+                        value.set_signed(r#type.signed);
                     }
 
                     let array_limit = context.config.evaluate_array_limit;
