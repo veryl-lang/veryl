@@ -17102,3 +17102,49 @@ fn clock_domain_lhs_select() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn clock_domain_const_array_index() {
+    // Reading a const lookup table with a foreign-domain index is the same
+    // mux CDC as a variable read, but the comptime.evaluated guard skipped
+    // the index check for consts/params.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        idx_a  : input  'a logic<2>,
+        o_b    : output 'b logic<8>,
+    ) {
+        const TABLE: logic<8> [4] = '{8'h11, 8'h22, 8'h33, 8'h44};
+        assign o_b = TABLE[idx_a];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Same-domain const table reads stay accepted.
+    let code = r#"
+    module ModuleA (
+        i_clk_b: input  'b clock,
+        idx_b  : input  'b logic<2>,
+        o_b    : output 'b logic<8>,
+    ) {
+        const TABLE: logic<8> [4] = '{8'h11, 8'h22, 8'h33, 8'h44};
+        assign o_b = TABLE[idx_b];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
