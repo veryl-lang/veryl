@@ -16954,3 +16954,50 @@ fn pow_with_wide_exponent() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn comb_loop_through_disjoint_bits() {
+    // A combinational cycle through two disjoint bits of the same variable
+    // was never detected: the same-(VarId, idx) guard required the read and
+    // write masks to overlap, dropping every cross-bit edge (Verilator
+    // flags the emitted SV with UNOPTFLAT).
+    let code = r#"
+    module ModuleA (
+        o_y: output logic<4>,
+    ) {
+        assign o_y[1] = o_y[2];
+        assign o_y[2] = o_y[1];
+        assign o_y[0] = 1'b0;
+        assign o_y[3] = 1'b0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:?}"
+    );
+
+    // An acyclic cross-bit chain stays accepted.
+    let code = r#"
+    module ModuleA (
+        i  : input  logic,
+        o_y: output logic<4>,
+    ) {
+        assign o_y[0] = i;
+        assign o_y[1] = o_y[0];
+        assign o_y[2] = o_y[1];
+        assign o_y[3] = o_y[2];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:?}"
+    );
+}
