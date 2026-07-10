@@ -2998,8 +2998,14 @@ impl ProtoExpression {
                 if returns_wide_pointer(expr) {
                     // Widen a short branch to `nb` before `emit_wide_select`
                     // strides it (mixed-width case arms: a 136-bit branch → a
-                    // 256-bit dst).
-                    widen_wide_ptr(builder, val, calc_native_bytes(expr.width()), nb)
+                    // 256-bit dst). Size by `materialized_width`, not `width()`,
+                    // which is 0 for a sentinel branch (see `materialized_width`).
+                    widen_wide_ptr(
+                        builder,
+                        val,
+                        calc_native_bytes(expr.materialized_width()),
+                        nb,
+                    )
                 } else {
                     let slot = alloc_wide_zero(builder, nb);
                     builder.ins().store(MemFlagsData::trusted(), val, slot, 0);

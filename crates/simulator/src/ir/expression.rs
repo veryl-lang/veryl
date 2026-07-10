@@ -777,6 +777,23 @@ impl ProtoExpression {
         }
     }
 
+    /// The width at which `build_binary` materializes this node — same as
+    /// [`width`](Self::width) except for the unsized all-bit sentinel
+    /// (`'0`/`'1`/`'x`/`'z`, a `Value::U64` with width 0), which fills
+    /// `max(expr_context.width, width)`. Consumers that stride the materialized
+    /// buffer (`builds_wide_pointer`, the wide-ternary `to_wide_ptr`) must key on
+    /// this; the sentinel's raw `width` is 0 and would truncate its high words.
+    pub fn materialized_width(&self) -> usize {
+        match self {
+            ProtoExpression::Value {
+                value: Value::U64(ValueU64 { width: 0, .. }),
+                width,
+                expr_context,
+            } => (*width).max(expr_context.width),
+            _ => self.width(),
+        }
+    }
+
     /// Returns a guaranteed upper bound on the number of significant bits
     /// in the Cranelift value produced by build_binary().
     /// Used to skip redundant truncation masks at store time.
@@ -885,7 +902,9 @@ impl ProtoExpression {
                 *var_full_width > W
                     && !(select.is_some() && dynamic_select.is_none() && *width <= 64)
             }
-            ProtoExpression::Value { width, .. } => *width > W,
+            // The all-bit sentinel materializes wider than its 0 `width` field
+            // (see `materialized_width`); key on that.
+            ProtoExpression::Value { .. } => self.materialized_width() > W,
             ProtoExpression::Concatenation { width, .. } => *width > W,
             ProtoExpression::Ternary {
                 width,
