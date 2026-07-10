@@ -852,7 +852,9 @@ impl Conv<&AllBit> for Comptime {
 
         let mut r#type = Type::new(kind);
         r#type.signed = true;
-        r#type.set_concrete_width(Shape::new(vec![Some(0)]));
+        // A width-prefixed all-bit literal (10'1) has a concrete width; only
+        // the bare '0/'1/'x/'z sentinel keeps the width-0 fill marker.
+        r#type.set_concrete_width(Shape::new(vec![Some(value.width())]));
 
         Ok(Comptime {
             value: ValueVariant::Numeric(value),

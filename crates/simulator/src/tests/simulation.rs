@@ -19466,3 +19466,44 @@ fn explicit_enum_member_width_is_enum_width() {
         );
     }
 }
+
+#[test]
+fn sized_all_bit_literal_operand_width() {
+    // A width-prefixed all-bit literal (10'1) carried the width-0 unsized
+    // sentinel in its IR type, so an operator around it in a
+    // self-determined position evaluated at the other operand's width:
+    // {1'b1, 10'1 + 1'b1} computed a 1-bit add (wrap to 0) instead of the
+    // 10-bit 12'h400 the emitted SV produces (iverilog: 400/7fe/7ff).
+    let code = r#"
+    module Top (
+        z1: output logic<12>,
+        z2: output logic<12>,
+        z3: output logic<12>,
+    ) {
+        assign z1 = {1'b1, 10'1 + 1'b1};
+        assign z2 = {1'b1, 10'1 << 1};
+        assign z3 = {1'b1, ~10'0};
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("z1").unwrap(),
+            Value::new(0x400, 12, false),
+            "z1 config={config:?}"
+        );
+        assert_eq!(
+            sim.get("z2").unwrap(),
+            Value::new(0x7fe, 12, false),
+            "z2 config={config:?}"
+        );
+        assert_eq!(
+            sim.get("z3").unwrap(),
+            Value::new(0x7ff, 12, false),
+            "z3 config={config:?}"
+        );
+    }
+}
