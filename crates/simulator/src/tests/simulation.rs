@@ -18916,3 +18916,32 @@ fn binary_xnor_result_masked() {
         );
     }
 }
+
+#[test]
+fn pow_result_masked_for_inline_consumer() {
+    // The Cranelift root-mask list excluded Pow (with a stale comment
+    // claiming the interpreter doesn't mask it — pow_mod_width computes
+    // modulo 2^width), so a comparison against a ** result saw the
+    // unmasked product: (8'd200 ** 2) == 8'd64 is true (40000 % 256 = 64;
+    // interpreter and iverilog agree).
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        r: output logic,
+    ) {
+        assign r = (a ** 8'd2) == 8'd64;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(200, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new(1, 1, false),
+            "config={config:?}"
+        );
+    }
+}
