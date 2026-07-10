@@ -19682,3 +19682,71 @@ fn bitwise_ops_sign_extend_operands() {
         );
     }
 }
+
+#[test]
+fn for_loop_break_honored() {
+    // A const-bound for was unrolled into a flat statement list, where a
+    // runtime-conditional `if x[i] { break; }` had no enclosing loop left
+    // to leave — every iteration ran (o=104 instead of 102; the emitted SV
+    // honors the break).
+    let code = r#"
+    module Top (
+        x: input  logic<4>,
+        o: output logic<32>,
+    ) {
+        always_comb {
+            var s: logic<32>;
+            s = 0;
+            for i in 0..4 {
+                if x[i] {
+                    break;
+                }
+                s += 1;
+            }
+            o = s + 100;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("x", Value::new(0b0100, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(102, 32, false),
+            "config={config:?}"
+        );
+    }
+
+    // A const-foldable break condition keeps working on the runtime path.
+    let code = r#"
+    module Top (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            var s: logic<32>;
+            s = 0;
+            for i in 0..10 {
+                if i >: 2 {
+                    break;
+                }
+                s += 1;
+            }
+            o = s;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(3, 32, false),
+            "const-break config={config:?}"
+        );
+    }
+}
