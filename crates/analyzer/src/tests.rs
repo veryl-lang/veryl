@@ -17497,3 +17497,56 @@ fn loop_variable_select_width() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn negative_for_step() {
+    // A negative additive step wraps through to_usize into a huge unsigned
+    // step: the analyzer unrolled one iteration while the emitted SV
+    // decrements an int for ~2^31 iterations. Reject it like step += 0.
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            var s: logic<32>;
+            s = 0;
+            for i in 0..10 step += -1 {
+                s += 1;
+            }
+            o = s;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
+        "{errors:?}"
+    );
+
+    // A positive step stays accepted.
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        always_comb {
+            var s: logic<32>;
+            s = 0;
+            for i in 0..10 step += 2 {
+                s += 1;
+            }
+            o = s;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
+        "{errors:?}"
+    );
+}

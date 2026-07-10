@@ -1644,7 +1644,9 @@ fn build_for_range_inner(
     if let Some((op, expr)) = step {
         let mut step_expr: ir::Expression = Conv::conv(context, expr)?;
         let step_comptime = step_expr.eval_comptime(context, None);
-        let step_val = step_comptime.get_value()?.to_usize().unwrap_or(0);
+        let step_value = step_comptime.get_value()?;
+        let step_val = step_value.to_usize().unwrap_or(0);
+        let step_negative = step_value.is_semantically_not_positive() && step_val != 0;
         let op: ir::Op = Conv::conv(context, op)?;
 
         if matches!(op, ir::Op::Add) {
@@ -1655,6 +1657,14 @@ fn build_for_range_inner(
                 let token: TokenRange = expr.into();
                 context.insert_error(AnalyzerError::invalid_for_step(
                     InvalidForStepKind::ZeroStep,
+                    &token,
+                ));
+                return Err(ir_error!(token));
+            }
+            if step_negative {
+                let token: TokenRange = expr.into();
+                context.insert_error(AnalyzerError::invalid_for_step(
+                    InvalidForStepKind::NeverAdvances,
                     &token,
                 ));
                 return Err(ir_error!(token));
