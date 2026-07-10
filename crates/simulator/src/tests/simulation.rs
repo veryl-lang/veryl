@@ -18991,3 +18991,51 @@ fn wide_arith_shift_right_unsigned_is_logical() {
         );
     }
 }
+
+#[test]
+fn reduction_xnor_is_even_parity() {
+    // The Cranelift unary ~^ arm compared the popcount to zero, returning
+    // 1 only for an all-zero operand; reduction XNOR is 1 iff the popcount
+    // is even (8'h03 -> 1, 8'h07 -> 0; interpreter and iverilog agree).
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        w : input  logic<70>,
+        r : output logic,
+        rw: output logic,
+    ) {
+        assign r = ~^a;
+        assign rw = ~^w;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    for (a, w_bits, exp_r, exp_rw) in [
+        (0x03u64, 2u32, 1u64, 1u64),
+        (0x07u64, 3u32, 0u64, 0u64),
+        (0x00u64, 0u32, 1u64, 1u64),
+    ] {
+        // w = low `w_bits` ones spread across the 70-bit value.
+        let mut w = BigUint::from(0u32);
+        for i in 0..w_bits {
+            w |= BigUint::from(1u32) << (i * 33);
+        }
+        for config in Config::all() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::new(a, 8, false));
+            sim.set("w", Value::new_biguint(w.clone(), 70, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("r").unwrap(),
+                Value::new(exp_r, 1, false),
+                "a={a:#x} config={config:?}"
+            );
+            assert_eq!(
+                sim.get("rw").unwrap(),
+                Value::new(exp_rw, 1, false),
+                "w_bits={w_bits} config={config:?}"
+            );
+        }
+    }
+}

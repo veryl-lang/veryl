@@ -657,17 +657,19 @@ impl ProtoExpression {
                         }
                     }
                     Op::BitXnor => {
+                        // Reduction XNOR is 1 iff the popcount is EVEN (the
+                        // complement of reduction XOR), not iff it is zero.
                         if x_wide {
                             let (lo, hi) = builder.ins().isplit(x_payload);
                             let p_lo = builder.ins().popcnt(lo);
                             let p_hi = builder.ins().popcnt(hi);
                             let total = builder.ins().iadd(p_lo, p_hi);
-                            let x1 = builder.ins().icmp_imm(IntCC::Equal, total, 0);
-                            builder.ins().uextend(I64, x1)
+                            let parity = builder.ins().urem_imm(total, 2);
+                            builder.ins().bxor_imm(parity, 1)
                         } else {
                             let x0 = builder.ins().popcnt(x_payload);
-                            let x1 = builder.ins().icmp_imm(IntCC::Equal, x0, 0);
-                            builder.ins().uextend(I64, x1)
+                            let parity = builder.ins().urem_imm(x0, 2);
+                            builder.ins().bxor_imm(parity, 1)
                         }
                     }
                     _ => return None,
