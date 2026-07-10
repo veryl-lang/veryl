@@ -18945,3 +18945,49 @@ fn pow_result_masked_for_inline_consumer() {
         );
     }
 }
+
+#[test]
+fn wide_arith_shift_right_unsigned_is_logical() {
+    // In a >128-bit expression context the JIT/AOT-C wide path always
+    // called the sign-filling ashr helper; `>>>` on an unsigned operand is
+    // a logical shift (16'h825d >>> 4 = 0x0825, not 0xf825; interpreter
+    // and iverilog agree). A signed operand keeps the arithmetic fill.
+    let code = r#"
+    module Top (
+        a : input  logic<16>,
+        s : input  signed logic<16>,
+        r : output logic<192>,
+        rs: output logic<192>,
+    ) {
+        var w: logic<192>;
+        var ws: signed logic<192>;
+        assign w = '1;
+        assign ws = '1;
+        assign r = w & (a >>> 4);
+        assign rs = ws & (s >>> 4);
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let ones192 = (BigUint::from(1u32) << 192u32) - BigUint::from(1u32);
+    // iverilog: rs = fff...f825 (sign fill down to bit 12).
+    let exp_rs = (&ones192 ^ BigUint::from(0xfffu32)) + BigUint::from(0x825u32);
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x825d, 16, false));
+        sim.set("s", Value::new(0x825d, 16, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new_biguint(BigUint::from(0x0825u32), 192, false),
+            "r config={config:?}"
+        );
+        // s is signed: >>> sign-fills to the 192-bit context width.
+        assert_eq!(
+            sim.get("rs").unwrap(),
+            Value::new_biguint(exp_rs.clone(), 192, false),
+            "rs config={config:?}"
+        );
+    }
+}

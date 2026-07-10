@@ -1059,17 +1059,23 @@ fn emit_wide_binary(
             })
         }
         Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR | Op::ArithShiftR => {
-            let x_ref = emit_wide_operand(x, op_nb, pre)?;
+            // `>>>` in an unsigned context is a logical shift (mirrors the
+            // Cranelift narrow path and the interpreter); in a signed
+            // context x is sign-extended to the full op_nb buffer and the
+            // fill comes from the buffer's top bit.
+            let is_ashr = matches!(op, Op::ArithShiftR) && expr_context.signed;
+            let x_ref = emit_wide_operand_signed(x, op_nb, is_ashr, pre)?;
             let amount = wide_shift_amount(y, pre)?;
             let fname = match op {
                 Op::LogicShiftL | Op::ArithShiftL => "shl",
                 Op::LogicShiftR => "lshr",
+                Op::ArithShiftR if !expr_context.signed => "lshr",
                 Op::ArithShiftR => "ashr",
                 _ => unreachable!(),
             };
-            // shl/lshr take plain nb; ashr packs the OPERAND width.
-            let last = if matches!(op, Op::ArithShiftR) {
-                format!("{}u", wpack(op_nb, x.width()))
+            // shl/lshr take plain nb; ashr packs the buffer width.
+            let last = if is_ashr {
+                format!("{}u", wpack(op_nb, op_nb * 8))
             } else {
                 format!("{op_nb}u")
             };
