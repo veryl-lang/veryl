@@ -19039,3 +19039,42 @@ fn reduction_xnor_is_even_parity() {
         }
     }
 }
+
+#[test]
+fn aot_c_unary_masked_in_wide_context() {
+    // A unary ~/- over a ≤64-bit operand evaluated in a 65..128-bit context
+    // was emitted as a dirty int64 by the AOT-C backend: promoted to
+    // __uint128_t it sign-extends past the context width, so comparisons
+    // reading the high bits miscompiled (eq/en = 0 instead of 1).
+    let code = r#"
+    module Top (
+        a : input  logic<32>,
+        eq: output logic,
+        en: output logic,
+    ) {
+        var b: logic<100>;
+        var c: logic<100>;
+        assign b = ~{68'd0, a};
+        assign c = 100'd0 - {68'd0, a};
+        assign eq = b == ~a;
+        assign en = c == -a;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(5, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("eq").unwrap(),
+            Value::new(1, 1, false),
+            "eq config={config:?}"
+        );
+        assert_eq!(
+            sim.get("en").unwrap(),
+            Value::new(1, 1, false),
+            "en config={config:?}"
+        );
+    }
+}
