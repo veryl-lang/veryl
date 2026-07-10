@@ -3911,6 +3911,11 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         "(((__uint128_t)({ys})) >= 64 ? 0 : (({xs}) {c_op} ({ys})))"
                     )));
                 }
+                // C integer division by zero is UB (traps under -O3); yield 0
+                // to match the interpreter and the Cranelift lowering.
+                if matches!(op, Op::Div | Op::Rem) {
+                    return Some(format!("(({ys}) == 0 ? 0 : (({xs}) {c_op} ({ys})))"));
+                }
                 return Some(wmask(format!("(({}) {} ({}))", xs, c_op, ys)));
             }
             match op {

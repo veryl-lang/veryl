@@ -18644,3 +18644,66 @@ fn scalar_read_during_write_is_read_old() {
         }
     }
 }
+
+#[test]
+fn unsigned_div_rem_by_zero() {
+    // Verilog `x / 0` and `x % 0` yield 0 in 2-state simulation. The AOT-C
+    // backend used to emit bare C `/` / `%` for unsigned operands, so a zero
+    // divisor was UB and the -O3-compiled code trapped, killing the process.
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        b: input  logic<32>,
+        q: output logic<32>,
+        r: output logic<32>,
+    ) {
+        assign q = a / b;
+        assign r = a % b;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(7, 32, false));
+        sim.set("b", Value::new(0, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // 4-state division by zero yields all-X per the LRM.
+        let exp = if config.use_4state {
+            Value::new_x(32, false)
+        } else {
+            Value::new(0, 32, false)
+        };
+        assert_eq!(sim.get("q").unwrap(), exp, "q config={config:?}");
+        assert_eq!(sim.get("r").unwrap(), exp, "r config={config:?}");
+    }
+
+    // 65..128-bit unsigned operands divide in __uint128_t and trapped the
+    // same way.
+    let code = r#"
+    module Top (
+        a: input  logic<100>,
+        b: input  logic<100>,
+        q: output logic<100>,
+        r: output logic<100>,
+    ) {
+        assign q = a / b;
+        assign r = a % b;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(7, 100, false));
+        sim.set("b", Value::new(0, 100, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let exp = if config.use_4state {
+            Value::new_x(100, false)
+        } else {
+            Value::new(0, 100, false)
+        };
+        assert_eq!(sim.get("q").unwrap(), exp, "wide q config={config:?}");
+        assert_eq!(sim.get("r").unwrap(), exp, "wide r config={config:?}");
+    }
+}
