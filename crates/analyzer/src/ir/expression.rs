@@ -109,6 +109,16 @@ impl Expression {
         }
     }
 
+    /// A base-less literal is 32-bit in Veryl but emitted verbatim as an
+    /// unsized SV literal, which LRM 11.4.12 forbids in a concatenation.
+    pub(crate) fn check_concat_operand_baseless(&self, context: &mut Context) {
+        if let Expression::Term(x) = self
+            && let Some(token) = x.baseless_literal_token()
+        {
+            context.insert_error(AnalyzerError::invalid_unsized_literal(token));
+        }
+    }
+
     pub fn gather_context(&mut self, context: &mut Context) -> ExpressionContext {
         match self {
             Expression::Term(x) => x.gather_context(context),
@@ -881,6 +891,25 @@ impl Factor {
                         && matches!(comptime.r#type.kind, TypeKind::Bit | TypeKind::Logic) =>
                 {
                     Some(&comptime.token)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Detected by token text (digits/underscores only), since base-less-ness
+    /// is not preserved on the folded type.
+    pub fn baseless_literal_token(&self) -> Option<&TokenRange> {
+        match self {
+            Factor::Value(comptime) => match &comptime.value {
+                ValueVariant::Numeric(v) if v.width() != 0 => {
+                    let text = comptime.token.beg.to_string();
+                    if !text.is_empty() && text.chars().all(|c| c.is_ascii_digit() || c == '_') {
+                        Some(&comptime.token)
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
             },
