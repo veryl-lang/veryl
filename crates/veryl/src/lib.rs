@@ -13,6 +13,7 @@ pub mod cmd_metadata;
 pub mod cmd_migrate;
 pub mod cmd_new;
 pub mod cmd_publish;
+pub mod cmd_register;
 pub mod cmd_synth;
 pub mod cmd_test;
 pub mod cmd_translate;
@@ -85,6 +86,7 @@ pub enum Commands {
     Clean(OptClean),
     Update(OptUpdate),
     Publish(OptPublish),
+    Register(OptRegister),
     Migrate(OptMigrate),
     Doc(OptDoc),
     Metadata(OptMetadata),
@@ -183,6 +185,14 @@ pub struct OptPublish {
     /// Bump version
     #[arg(long)]
     pub bump: Option<BumpKind>,
+}
+
+/// Register the current project with the Veryl registry
+#[derive(Args)]
+pub struct OptRegister {
+    /// Register without the confirmation prompt
+    #[arg(long)]
+    pub yes: bool,
 }
 
 /// Migrate breaking changes from the previous version

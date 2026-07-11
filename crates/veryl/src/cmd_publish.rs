@@ -98,6 +98,8 @@ impl CmdPublish {
 
         metadata.publish()?;
 
+        crate::cmd_register::maybe_register(metadata);
+
         Ok(true)
     }
 }

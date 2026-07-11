@@ -145,6 +145,7 @@ fn main() -> Result<ExitCode> {
         Commands::Clean(x) => cmd_clean::CmdClean::new(x).exec(&mut metadata),
         Commands::Update(x) => cmd_update::CmdUpdate::new(x).exec(&mut metadata),
         Commands::Publish(x) => cmd_publish::CmdPublish::new(x).exec(&mut metadata),
+        Commands::Register(x) => cmd_register::CmdRegister::new(x).exec(&metadata),
         Commands::Migrate(x) => cmd_migrate::CmdMigrate::new(x).exec(&mut metadata, opt.quiet),
         Commands::Doc(x) => cmd_doc::CmdDoc::new(x).exec(&mut metadata),
         Commands::Metadata(x) => cmd_metadata::CmdMetadata::new(x).exec(&mut metadata),
