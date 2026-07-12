@@ -829,4 +829,11 @@ pub interface axi4_stream_if::<PKG: axi4_stream_prototype> {
 
         ..converse(transmitter)
     }
+
+    modport monitor {
+
+        t_ack: import,
+
+        ..input
+    }
 }
