@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 use veryl_aligner::{Aligner, Location, PadKind, align_kind};
+use veryl_analyzer::attribute;
 use veryl_analyzer::attribute::Attribute as Attr;
 use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncodingItem, FormatItem};
 use veryl_analyzer::attribute_table;
@@ -58,6 +59,7 @@ pub struct Emitter {
     // ----- Configuration ---------------------------------------------------
     mode: Mode,
     project_name: Option<StrId>,
+    in_dependency: bool,
     build_opt: Build,
     format_opt: Format,
     newline: &'static str,
@@ -137,6 +139,7 @@ impl Default for Emitter {
         Self {
             mode: Mode::Build,
             project_name: None,
+            in_dependency: false,
             build_opt: Build::default(),
             format_opt: Format::default(),
             newline: "\n",
@@ -247,11 +250,20 @@ fn should_skip_import(arg: &ScopedIdentifier, is_wildcard: bool) -> bool {
 }
 
 impl Emitter {
-    pub fn new(metadata: &Metadata, src_path: &Path, dst_path: &Path, map_path: &Path) -> Self {
+    /// `src_prj` is the project the emitted source belongs to; it differs
+    /// from `metadata.project.name` for dependency sources.
+    pub fn new(
+        metadata: &Metadata,
+        src_prj: &str,
+        src_path: &Path,
+        dst_path: &Path,
+        map_path: &Path,
+    ) -> Self {
         let source_map = SourceMap::new(src_path, dst_path, map_path);
 
         Self {
             project_name: Some(metadata.project.name.as_str().into()),
+            in_dependency: src_prj != metadata.project.name,
             build_opt: metadata.build.clone(),
             format_opt: metadata.format.clone(),
             aligner: Aligner::new(),
@@ -6161,6 +6173,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
+        // Dependency testbenches are skipped in the consumer's analysis, so
+        // their symbols don't exist; skip their emission as well.
+        if self.in_dependency && attribute::has_test_attribute(arg) {
+            return;
+        }
         for x in &arg.description_group_list {
             self.attribute(&x.attribute);
         }
@@ -6224,7 +6241,11 @@ impl VerylWalker for Emitter {
                     self.newline();
                 }
                 for x in &arg.veryl_list {
-                    let items: Vec<_> = x.description_group.as_ref().into();
+                    let items: Vec<&DescriptionItem> = if self.in_dependency {
+                        attribute::description_items_excluding_tests(&x.description_group)
+                    } else {
+                        x.description_group.as_ref().into()
+                    };
                     for item in items {
                         if let DescriptionItem::ImportDeclaration(x) = item {
                             self.file_scope_import

@@ -4,6 +4,7 @@ use crate::ir::{
     AssignDestination, Component, Comptime, Expression, FfTable, Statement, VarId, VarIndex,
     VarSelect,
 };
+use crate::value::Value;
 use indent::indent_all_by;
 use std::fmt;
 use std::sync::Arc;
@@ -40,6 +41,7 @@ pub enum Declaration {
     Comb(CombDeclaration),
     Ff(Box<FfDeclaration>),
     Inst(Box<InstDeclaration>),
+    External(Box<ExternalDeclaration>),
     Initial(InitialDeclaration),
     Final(FinalDeclaration),
     Unsupported(TokenRange),
@@ -68,6 +70,7 @@ impl Declaration {
             Declaration::Comb(x) => x.eval_assign(context, assign_table),
             Declaration::Ff(x) => x.eval_assign(context, assign_table),
             Declaration::Inst(x) => x.eval_assign(context, assign_table),
+            Declaration::External(x) => x.eval_assign(context, assign_table),
             Declaration::Initial(x) => x.eval_assign(context, assign_table),
             Declaration::Final(x) => x.eval_assign(context, assign_table),
             Declaration::Unsupported(_) => (),
@@ -86,6 +89,7 @@ impl Declaration {
             Declaration::Ff(x) => x.gather_ff(context, table, decl),
             Declaration::Comb(x) => x.gather_ff_comb(context, table, decl),
             Declaration::Inst(x) => x.gather_ff(context, table, decl),
+            Declaration::External(x) => x.gather_ff(context, table, decl),
             _ => {}
         }
     }
@@ -97,11 +101,103 @@ impl fmt::Display for Declaration {
             Declaration::Comb(x) => x.fmt(f),
             Declaration::Ff(x) => x.fmt(f),
             Declaration::Inst(x) => x.fmt(f),
+            Declaration::External(x) => x.fmt(f),
             Declaration::Initial(x) => x.fmt(f),
             Declaration::Final(x) => x.fmt(f),
             Declaration::Unsupported(_) => "/* unsupported */".fmt(f),
             Declaration::Null => "".fmt(f),
         }
+    }
+}
+
+/// Instance of a user-defined verification component
+/// (`inst x: $comp::<name>`). Port directions are unknown until the
+/// simulator loads the component, so each connection keeps both the readable
+/// expression (input use) and, when it is a plain variable reference, the
+/// assign destination (output use).
+#[derive(Clone)]
+pub struct ExternalDeclaration {
+    pub name: StrId,
+    /// Component export name (`$comp::<name>`).
+    pub component: StrId,
+    pub params: Vec<(StrId, ExternalParamValue)>,
+    pub connects: Vec<ExternalConnect>,
+    /// True for the method-only form (`var g: $comp::x;`),
+    /// false for `inst`. Checked against the component's declared kind at
+    /// load time.
+    pub is_var_form: bool,
+    pub token: TokenRange,
+}
+
+/// Elaboration-time parameter of a user-defined component.
+#[derive(Clone, Debug)]
+pub enum ExternalParamValue {
+    Value(Value),
+    Str(String),
+}
+
+#[derive(Clone)]
+pub struct ExternalConnect {
+    pub port: StrId,
+    pub expr: Expression,
+    /// Present when the connection is a plain variable reference, making
+    /// the port usable as a component output.
+    pub output: Option<AssignDestination>,
+    /// Whether the port is offered to the component as an input. False
+    /// only for modport members whose direction fixes them as outputs.
+    pub input: bool,
+    /// The connection name a modport-expanded member came from. Members
+    /// of a group pass the unused-port check as long as the component
+    /// uses at least one of them.
+    pub group: Option<StrId>,
+    /// The interface member name of a modport-expanded connection; ports
+    /// are matched to it by the manifest's (group, member) record.
+    pub member: Option<StrId>,
+    pub is_clock: bool,
+    pub is_reset: bool,
+    pub width: u32,
+    pub token: TokenRange,
+}
+
+impl ExternalDeclaration {
+    /// Direction is unknown until load time; treat plain-variable
+    /// connections like SystemVerilog blackbox ports (may be read or
+    /// driven).
+    pub fn eval_assign(&self, context: &mut Context, assign_table: &mut AssignTable) {
+        for connect in &self.connects {
+            if let Some(dst) = &connect.output {
+                dst.eval_assign(context, assign_table, AssignContext::SystemVerilog);
+            }
+        }
+    }
+
+    /// See [`InstDeclaration::gather_ff`]: register the variables read by
+    /// connection expressions as comb-context reads.
+    pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
+        for connect in &self.connects {
+            connect.expr.gather_ff(context, table, decl, None, false);
+        }
+    }
+}
+
+impl fmt::Display for ExternalDeclaration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "external {}: {} {{", self.name, self.component)?;
+        for (name, value) in &self.params {
+            writeln!(
+                f,
+                "{}",
+                indent_all_by(4, format!("param {name}: {value:?}"))
+            )?;
+        }
+        for connect in &self.connects {
+            writeln!(
+                f,
+                "{}",
+                indent_all_by(4, format!("{}: {}", connect.port, connect.expr))
+            )?;
+        }
+        write!(f, "}}")
     }
 }
 

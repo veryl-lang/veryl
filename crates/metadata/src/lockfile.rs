@@ -166,6 +166,21 @@ pub struct LockDependency {
     pub source: LockSource,
 }
 
+/// The `[[components]]` provided by a resolved dependency.
+#[derive(Clone, Debug)]
+pub struct DependencyComponents {
+    /// Project name as seen from the root project (`lock.name`, so a
+    /// dependency alias is reflected).
+    pub project: String,
+    /// Root directory of the dependency project (checkout cache or local path).
+    pub root: PathBuf,
+    /// Cargo target directory for building the components. Repository
+    /// dependencies use a revision-keyed shared cache so identical revisions
+    /// are built once across projects.
+    pub target_dir: PathBuf,
+    pub components: Vec<crate::Component>,
+}
+
 impl Lockfile {
     pub fn projects(&self) -> Vec<&Lock> {
         let mut ret = self
@@ -324,6 +339,43 @@ impl Lockfile {
             }
         }
 
+        Ok(ret)
+    }
+
+    /// Collects `[[components]]` declared by direct (visible) dependencies.
+    /// Transitive dependencies are skipped, matching the visibility of
+    /// dependency symbols.
+    pub fn collect_components(&self) -> Result<Vec<DependencyComponents>, MetadataError> {
+        let mut ret = Vec::new();
+
+        for locks in self.lock_table.values() {
+            for lock in locks {
+                if !lock.visible {
+                    continue;
+                }
+                let metadata = self.get_metadata(&lock.source)?;
+                if metadata.components.is_empty() {
+                    continue;
+                }
+                let root = metadata.project_path();
+                let target_dir = match &lock.source {
+                    LockSource::Repository(x) => veryl_path::cache_path()
+                        .join("components")
+                        .join(x.uuid.simple().to_string()),
+                    // A path dependency is a local project; share its own
+                    // component target directory.
+                    LockSource::Path(_) => root.join("target/veryl-components"),
+                };
+                ret.push(DependencyComponents {
+                    project: lock.name.clone(),
+                    root,
+                    target_dir,
+                    components: metadata.components.clone(),
+                });
+            }
+        }
+
+        ret.sort_by(|a, b| a.project.cmp(&b.project));
         Ok(ret)
     }
 
@@ -499,7 +551,10 @@ impl Lockfile {
     ) -> Result<LockDependency, MetadataError> {
         Ok(match dep {
             Dependency::Version(_) => {
-                unimplemented!();
+                return Err(MetadataError::InvalidDependency {
+                    name: name.to_string(),
+                    cause: "version-only dependencies are not supported yet; specify `git`, `github`, or `path`".to_string(),
+                });
             }
             Dependency::Entry(x) => {
                 let url = if let Some(git) = &x.git {
@@ -656,6 +711,11 @@ impl Lockfile {
         };
 
         let toml = path.join(&prj_path).join("Veryl.pub");
+        if !toml.exists() {
+            return Err(MetadataError::UnpublishedDependency {
+                name: project.to_string(),
+            });
+        }
         let mut pubfile = Pubfile::load(toml)?;
 
         pubfile.releases.sort_by(|a, b| b.version.cmp(&a.version));

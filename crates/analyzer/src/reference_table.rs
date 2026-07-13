@@ -2,7 +2,7 @@ use crate::AnalyzerError;
 use crate::generic_inference_table;
 use crate::namespace::{DefineContext, Namespace};
 use crate::scope;
-use crate::symbol::{Direction, GenericMap, Symbol, SymbolId, SymbolKind};
+use crate::symbol::{Direction, GenericMap, Symbol, SymbolId, SymbolKind, TbComponentKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
 use crate::symbol_table;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
@@ -274,6 +274,20 @@ impl ReferenceTable {
                 Ok(symbol) => {
                     self.check_pacakge_reference(&symbol.found, &path.range);
                     symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
+
+                    // A user-defined component takes its parameters as
+                    // generic arguments in the `var` form; they are
+                    // validated against the interface manifest, not against
+                    // generic parameter declarations (it has none). The
+                    // builtin `$tb` components take no generic arguments and
+                    // keep the arity check.
+                    if matches!(
+                        symbol.found.kind,
+                        SymbolKind::TbComponent(ref x)
+                            if matches!(x.kind, TbComponentKind::External(_))
+                    ) {
+                        continue;
+                    }
 
                     // Check number of arguments
                     let params = symbol.found.generic_parameters();

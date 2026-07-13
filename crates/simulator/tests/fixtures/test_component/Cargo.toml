@@ -1,0 +1,13 @@
+[package]
+name = "test_component"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+veryl-component = { path = "../../../../component" }
+
+# Standalone package: keep it out of the enclosing cargo workspace.
+[workspace]

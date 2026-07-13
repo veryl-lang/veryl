@@ -12,14 +12,14 @@ use tower_lsp_server::ls_types::Uri as Url;
 use tower_lsp_server::ls_types::*;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::symbol::SymbolKind as VerylSymbolKind;
-use veryl_analyzer::symbol::{Symbol, TypeKind};
+use veryl_analyzer::symbol::{Symbol, TbComponentKind, TypeKind};
 use veryl_analyzer::symbol_path::{SymbolPath, SymbolPathNamespace};
 use veryl_analyzer::{
-    Analyzer, AnalyzerError, Context, attribute_table, definition_table, fragment_cache, scope,
-    symbol_table, unsafe_table,
+    Analyzer, AnalyzerError, Context, attribute_table, component_manifest_table, definition_table,
+    fragment_cache, scope, symbol_table, unsafe_table,
 };
 use veryl_formatter::Formatter;
-use veryl_metadata::Metadata;
+use veryl_metadata::{ComponentManifest, Metadata};
 use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::text_table;
 use veryl_parser::veryl_token::Token;
@@ -1093,9 +1093,209 @@ fn get_member(symbol: &Symbol) -> Vec<CompletionItem> {
                 items.push(item);
             }
         }
+        VerylSymbolKind::TbComponent(x) => {
+            if let TbComponentKind::External(key) = x.kind {
+                if let Some(manifest) = component_manifest_table::get(key) {
+                    items.append(&mut component_method_items(&manifest));
+                }
+            } else {
+                // Builtin component methods are registered as function
+                // symbols under the component's namespace.
+                let mut namespace = symbol.namespace.clone();
+                namespace.push(symbol.token.text);
+                for method in symbol_table::get_all() {
+                    if method.namespace.paths == namespace.paths
+                        && matches!(method.kind, VerylSymbolKind::Function(_))
+                    {
+                        let label = method.token.text.to_string();
+                        let item = CompletionItem {
+                            label: label.clone(),
+                            kind: Some(CompletionItemKind::METHOD),
+                            detail: Some(format!("{}", method.kind)),
+                            insert_text: Some(label),
+                            ..Default::default()
+                        };
+                        items.push(item);
+                    }
+                }
+            }
+        }
         _ => (),
     }
     items
+}
+
+fn component_method_items(manifest: &ComponentManifest) -> Vec<CompletionItem> {
+    manifest
+        .methods
+        .iter()
+        .map(|method| {
+            let args: Vec<_> = method
+                .args
+                .iter()
+                .map(|arg| format!("{}: {}", arg.name, arg.ty))
+                .collect();
+            let documentation = method.doc.as_ref().map(|doc| {
+                Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: doc.clone(),
+                })
+            });
+            let ret = method.ret_suffix();
+            CompletionItem {
+                label: method.name.clone(),
+                kind: Some(CompletionItemKind::METHOD),
+                detail: Some(format!("{}({}){}", method.name, args.join(", "), ret)),
+                documentation,
+                insert_text: Some(method.name.clone()),
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
+/// Instantiation text for an external component: method-only components are
+/// declared with `var`, clocked ones with `inst` and port connections.
+/// Required parameters are included so the inserted text names everything
+/// that must be filled in.
+fn component_new_text(name: &str, manifest: Option<&ComponentManifest>) -> String {
+    if let Some(manifest) = manifest
+        && manifest.kind.as_deref() == Some("method_only")
+    {
+        let args = generic_arg_placeholders(manifest);
+        if args.is_empty() {
+            format!("{name};")
+        } else {
+            format!("{name}::<{args}>;")
+        }
+    } else {
+        let mut params = String::new();
+        let mut ports = String::new();
+        if let Some(manifest) = manifest {
+            for param in manifest.params.iter().filter(|x| !x.optional) {
+                params.push_str(&format!("{}: , ", param.name));
+            }
+            for port in &manifest.ports {
+                ports.push_str(&format!("{}, ", port.name));
+            }
+            // Group members connect through one `<group>: ` connection.
+            for group in &manifest.groups {
+                ports.push_str(&format!("{}: , ", group.name));
+            }
+        }
+        if params.is_empty() {
+            format!("{name} ({ports});")
+        } else {
+            format!("{name} #({params}) ({ports});")
+        }
+    }
+}
+
+/// Positional generic arguments of a `var` component declaration must cover
+/// every required parameter; parameter names stand in as placeholders.
+fn generic_arg_placeholders(manifest: &ComponentManifest) -> String {
+    match manifest.params.iter().rposition(|x| !x.optional) {
+        Some(last_required) => manifest.params[..=last_required]
+            .iter()
+            .map(|x| x.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        None => String::new(),
+    }
+}
+
+fn component_documentation(symbol: &Symbol) -> Option<Documentation> {
+    let VerylSymbolKind::TbComponent(x) = &symbol.kind else {
+        return None;
+    };
+    let TbComponentKind::External(key) = x.kind else {
+        return None;
+    };
+    let manifest = component_manifest_table::get(key)?;
+    Some(Documentation::MarkupContent(MarkupContent {
+        kind: MarkupKind::Markdown,
+        value: manifest_markdown(&manifest),
+    }))
+}
+
+fn manifest_markdown(manifest: &ComponentManifest) -> String {
+    fn doc_suffix(doc: &Option<String>) -> String {
+        doc.as_ref().map(|x| format!(" — {x}")).unwrap_or_default()
+    }
+
+    let mut ret = String::new();
+    if let Some(doc) = &manifest.doc {
+        ret.push_str(doc);
+        ret.push('\n');
+    }
+    if let Some(kind) = &manifest.kind {
+        ret.push_str(&format!("{kind} component\n"));
+    } else {
+        ret.push_str("component kind is not declared; both `inst` and `var` forms may apply\n");
+    }
+    if !manifest.ports.is_empty() {
+        ret.push_str("\n**Ports**\n");
+        for port in &manifest.ports {
+            // A role names the Veryl type directly (always 1 bit); data-port
+            // widths are inferred from the connection.
+            let ty = match port.role.as_deref() {
+                Some(role) => role.to_string(),
+                None => port.dir.clone(),
+            };
+            ret.push_str(&format!(
+                "- `{}`: {}{}\n",
+                port.name,
+                ty,
+                doc_suffix(&port.doc)
+            ));
+        }
+    }
+    for group in &manifest.groups {
+        ret.push_str(&format!(
+            "\n**Interface `{}`** ({}.{})\n",
+            group.name, group.interface, group.modport
+        ));
+        for m in &group.members {
+            ret.push_str(&format!(
+                "- `{}`: {}{}\n",
+                m.member,
+                m.dir,
+                doc_suffix(&m.doc)
+            ));
+        }
+    }
+    if !manifest.params.is_empty() {
+        ret.push_str("\n**Params**\n");
+        for param in &manifest.params {
+            let optional = if param.optional { " (optional)" } else { "" };
+            ret.push_str(&format!(
+                "- `{}`: {}{}{}\n",
+                param.name,
+                param.ty,
+                optional,
+                doc_suffix(&param.doc)
+            ));
+        }
+    }
+    if !manifest.methods.is_empty() {
+        ret.push_str("\n**Methods**\n");
+        for method in &manifest.methods {
+            let args: Vec<_> = method
+                .args
+                .iter()
+                .map(|arg| format!("{}: {}", arg.name, arg.ty))
+                .collect();
+            let ret_ty = method.ret_suffix();
+            ret.push_str(&format!(
+                "- `{}({}){}`{}\n",
+                method.name,
+                args.join(", "),
+                ret_ty,
+                doc_suffix(&method.doc)
+            ));
+        }
+    }
+    ret
 }
 
 fn completion_member(url: &Url, line: usize, column: usize, text: &str) -> Vec<CompletionItem> {
@@ -1118,11 +1318,22 @@ fn completion_member(url: &Url, line: usize, column: usize, text: &str) -> Vec<C
                 }
             }
             VerylSymbolKind::Variable(x) => {
-                if let TypeKind::UserDefined(x) = &x.r#type.kind
-                    && let Some(id) = x.symbol
+                if let TypeKind::UserDefined(x) = &x.r#type.kind {
+                    if let Some(id) = x.symbol {
+                        let symbol = symbol_table::get(id).unwrap();
+                        items.append(&mut get_member(&symbol));
+                    } else if let Ok(type_symbol) =
+                        symbol_table::resolve_generic_structural(&x.path, &symbol.found.namespace)
+                    {
+                        items.append(&mut get_member(&type_symbol.found));
+                    }
+                }
+            }
+            VerylSymbolKind::Instance(x) => {
+                if let Ok(type_symbol) =
+                    symbol_table::resolve_generic_structural(&x.type_name, &symbol.found.namespace)
                 {
-                    let symbol = symbol_table::get(id).unwrap();
-                    items.append(&mut get_member(&symbol));
+                    items.append(&mut get_member(&type_symbol.found));
                 }
             }
             _ => (),
@@ -1151,13 +1362,26 @@ fn completion_symbol(
         } else {
             false
         };
+        // External components live under `$comp::(<project>::)?`, which
+        // is deeper than the top-level filter allows for the dependency form.
+        let external_component = matches!(
+            &symbol.kind,
+            VerylSymbolKind::TbComponent(x) if matches!(x.kind, TbComponentKind::External(_))
+        );
 
-        if top_level_item || current_item {
+        if top_level_item || current_item || external_component {
             let prefix = if symbol.namespace.paths.is_empty()
                 || symbol.namespace.paths[0] == prj
                 || current_item
             {
                 "".to_string()
+            } else if external_component {
+                symbol
+                    .namespace
+                    .paths
+                    .iter()
+                    .map(|x| format!("{x}::"))
+                    .collect()
             } else {
                 format!("{}::", symbol.namespace.paths[0])
             };
@@ -1177,6 +1401,19 @@ fn completion_symbol(
                 VerylSymbolKind::Package(ref x) if !x.is_proto => {
                     let text = format!("{}{}::", prefix, symbol.token.text);
                     (text, Some(CompletionItemKind::MODULE))
+                }
+                VerylSymbolKind::TbComponent(ref x) => {
+                    if let TbComponentKind::External(key) = x.kind {
+                        let manifest = component_manifest_table::get(key);
+                        let text = component_new_text(
+                            &format!("{}{}", prefix, symbol.token.text),
+                            manifest.as_deref(),
+                        );
+                        (text, Some(CompletionItemKind::CLASS))
+                    } else {
+                        let text = format!("{}{}", prefix, symbol.token.text);
+                        (text, None)
+                    }
                 }
                 VerylSymbolKind::Port(_)
                 | VerylSymbolKind::Variable(_)
@@ -1207,7 +1444,7 @@ fn completion_symbol(
                 };
                 Some(Documentation::MarkupContent(content))
             } else {
-                None
+                component_documentation(&symbol)
             };
 
             let item = CompletionItem {
@@ -1312,5 +1549,178 @@ pub mod semantic_legend {
 
     pub fn get_token_modifiers() -> Vec<SemanticTokenModifier> {
         vec![]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use veryl_metadata::component_manifest::{
+        ManifestGroup, ManifestMember, ManifestMethod, ManifestParam, ManifestPort,
+    };
+
+    fn manifest() -> ComponentManifest {
+        ComponentManifest {
+            kind: Some("clocked".to_string()),
+            doc: Some("Golden model checker.".to_string()),
+            ports: vec![
+                ManifestPort {
+                    name: "clk".to_string(),
+                    dir: "input".to_string(),
+                    role: Some("clock".to_string()),
+                    doc: Some("Sampling clock.".to_string()),
+                },
+                ManifestPort {
+                    name: "q".to_string(),
+                    dir: "output".to_string(),
+                    role: None,
+                    doc: None,
+                },
+            ],
+            params: vec![ManifestParam {
+                name: "XLEN".to_string(),
+                ty: "u64".to_string(),
+                optional: false,
+                doc: None,
+            }],
+            methods: vec![ManifestMethod {
+                name: "load".to_string(),
+                args: vec![ManifestParam {
+                    name: "path".to_string(),
+                    ty: "str".to_string(),
+                    optional: false,
+                    doc: None,
+                }],
+                ret: Some("u64".to_string()),
+                ret_width: None,
+                doc: Some("Load an ELF file.".to_string()),
+            }],
+            requires: vec![],
+            groups: vec![],
+        }
+    }
+
+    #[test]
+    fn component_method_completion() {
+        let items = component_method_items(&manifest());
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].label, "load");
+        assert_eq!(items[0].detail.as_deref(), Some("load(path: str) -> u64"));
+        assert_eq!(items[0].insert_text.as_deref(), Some("load"));
+        let Some(Documentation::MarkupContent(doc)) = &items[0].documentation else {
+            panic!("expected markdown documentation");
+        };
+        assert_eq!(doc.value, "Load an ELF file.");
+    }
+
+    #[test]
+    fn component_inst_text() {
+        let text = component_new_text("$comp::x", Some(&manifest()));
+        assert_eq!(text, "$comp::x #(XLEN: , ) (clk, q, );");
+
+        let mut method_only = manifest();
+        method_only.kind = Some("method_only".to_string());
+        let text = component_new_text("$comp::x", Some(&method_only));
+        assert_eq!(text, "$comp::x::<XLEN>;");
+
+        let text = component_new_text("$comp::x", None);
+        assert_eq!(text, "$comp::x ();");
+    }
+
+    #[test]
+    fn component_inst_text_collapses_port_groups() {
+        let mut grouped = manifest();
+        grouped.params.clear();
+        grouped.groups.push(ManifestGroup {
+            name: "axi".to_string(),
+            interface: "$std::axi4_if".to_string(),
+            modport: "monitor".to_string(),
+            members: vec![
+                ManifestMember {
+                    member: "awvalid".to_string(),
+                    dir: "input".to_string(),
+                    doc: None,
+                },
+                ManifestMember {
+                    member: "awready".to_string(),
+                    dir: "input".to_string(),
+                    doc: None,
+                },
+            ],
+        });
+        let text = component_new_text("$comp::x", Some(&grouped));
+        assert_eq!(text, "$comp::x (clk, q, axi: , );");
+    }
+
+    #[test]
+    fn component_inst_text_optional_params() {
+        let mut optional = manifest();
+        optional.params[0].optional = true;
+        let text = component_new_text("$comp::x", Some(&optional));
+        assert_eq!(text, "$comp::x (clk, q, );");
+
+        optional.kind = Some("method_only".to_string());
+        let text = component_new_text("$comp::x", Some(&optional));
+        assert_eq!(text, "$comp::x;");
+
+        // Positional generic arguments must reach the last required
+        // parameter, spanning optional ones before it.
+        optional.params.push(ManifestParam {
+            name: "DEPTH".to_string(),
+            ty: "u64".to_string(),
+            optional: false,
+            doc: None,
+        });
+        let text = component_new_text("$comp::x", Some(&optional));
+        assert_eq!(text, "$comp::x::<XLEN, DEPTH>;");
+    }
+
+    #[test]
+    fn external_component_member_completion() {
+        use veryl_analyzer::symbol::{DocComment, TbComponentProperty};
+        use veryl_parser::veryl_token::TokenSource;
+
+        let key = resource_table::insert_str("golden");
+        component_manifest_table::insert(key, manifest());
+
+        let token = Token::new("golden", 0, 0, 0, 0, TokenSource::Builtin);
+        let symbol = Symbol::new(
+            &token,
+            VerylSymbolKind::TbComponent(TbComponentProperty {
+                kind: TbComponentKind::External(key),
+            }),
+            &Namespace::new(),
+            true,
+            DocComment::default(),
+        );
+
+        let items = get_member(&symbol);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].label, "load");
+
+        assert!(component_documentation(&symbol).is_some());
+    }
+
+    #[test]
+    fn component_manifest_markdown() {
+        let markdown = manifest_markdown(&manifest());
+        assert!(markdown.starts_with("Golden model checker.\n"));
+        assert!(markdown.contains("clocked component"));
+        assert!(markdown.contains("- `clk`: clock — Sampling clock."));
+        assert!(markdown.contains("- `q`: output\n"));
+        assert!(markdown.contains("- `XLEN`: u64\n"));
+        assert!(markdown.contains("- `load(path: str) -> u64` — Load an ELF file."));
+    }
+
+    #[test]
+    fn component_manifest_markdown_undeclared_fields() {
+        let mut manifest = manifest();
+        manifest.kind = None;
+        manifest.ports[0].role = None;
+        manifest.params[0].optional = true;
+        let markdown = manifest_markdown(&manifest);
+        assert!(markdown.contains("component kind is not declared"));
+        assert!(markdown.contains("- `clk`: input — Sampling clock."));
+        assert!(markdown.contains("- `XLEN`: u64 (optional)\n"));
     }
 }

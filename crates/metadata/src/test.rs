@@ -22,8 +22,25 @@ pub struct Test {
     pub include_files: Vec<PathBuf>,
     #[serde(default)]
     pub defines: Vec<String>,
+    /// Base seed for per-instance component seeds. Unset draws a fresh random
+    /// seed each `veryl test` run; set a value (or pass --seed) to reproduce one.
+    #[serde(default)]
+    pub seed: Option<u64>,
     #[serde(default)]
     pub four_state: bool,
+    /// Pins the verification-component transport. Unset: build from source
+    /// when cargo is available, fall back to a committed prebuilt wasm
+    /// otherwise.
+    #[serde(default)]
+    pub component_backend: Option<ComponentBackendKind>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ComponentBackendKind {
+    #[serde(rename = "native")]
+    Native,
+    #[serde(rename = "wasm")]
+    Wasm,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

@@ -760,7 +760,7 @@ pub enum AnalyzerError {
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
-    #[error("$tb component can only be used inside a test module")]
+    #[error("$tb/$comp components can only be used inside a test module")]
     InvalidTbUsage {
         #[source_code]
         input: MultiSources,
@@ -796,6 +796,23 @@ pub enum AnalyzerError {
     UnknownTbPort {
         name: String,
         port: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(component_interface_mismatch),
+        help("{help}"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("{kind}")]
+    ComponentInterfaceMismatch {
+        kind: ComponentInterfaceMismatchKind,
+        help: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -2071,6 +2088,7 @@ impl AnalyzerError {
             AnalyzerError::UnknownParam { input, .. } => input,
             AnalyzerError::UnknownPort { input, .. } => input,
             AnalyzerError::UnknownTbPort { input, .. } => input,
+            AnalyzerError::ComponentInterfaceMismatch { input, .. } => input,
             AnalyzerError::UnknownUnsafe { input, .. } => input,
             AnalyzerError::UnresolvableGenericExpression { input, .. } => input,
             AnalyzerError::UnsignedArithShift { input, .. } => input,
@@ -2130,6 +2148,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidTbUsage { token_source, .. } => *token_source,
             AnalyzerError::MissingTbPort { token_source, .. } => *token_source,
             AnalyzerError::UnknownTbPort { token_source, .. } => *token_source,
+            AnalyzerError::ComponentInterfaceMismatch { token_source, .. } => *token_source,
             AnalyzerError::InvalidTest { token_source, .. } => *token_source,
             AnalyzerError::InvalidTypeDeclaration { token_source, .. } => *token_source,
             AnalyzerError::InvisibleIndentifier { token_source, .. } => *token_source,
@@ -2624,6 +2643,27 @@ impl AnalyzerError {
         AnalyzerError::UnknownTbPort {
             name: name.into(),
             port: port.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn component_interface_mismatch(
+        kind: ComponentInterfaceMismatchKind,
+        component: Option<StrId>,
+        token: &TokenRange,
+    ) -> Self {
+        let mut help = "check the component's interface manifest".to_string();
+        // A `<project>::<name>` key marks a dependency-provided component,
+        // whose manifest reflects the locked dependency version.
+        if component.is_some_and(|x| x.to_string().contains("::")) {
+            help.push_str(
+                "; the interface comes from the locked dependency version — if the dependency was updated, run `veryl update` (and the dependency may need republishing)",
+            );
+        }
+        AnalyzerError::ComponentInterfaceMismatch {
+            kind,
+            help,
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -3176,6 +3216,106 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
+}
+
+/// The specific way a `$comp` instantiation or method call disagrees with
+/// the component's interface manifest. Carried by
+/// [`AnalyzerError::ComponentInterfaceMismatch`] so each mismatch has a
+/// distinct, testable value instead of an ad-hoc message string.
+#[derive(Error, Debug, PartialEq, Eq)]
+pub enum ComponentInterfaceMismatchKind {
+    #[error(
+        "the method returns {returned} bit(s) but the destination is {destination} bit(s) wide"
+    )]
+    MethodReturnWidth { returned: usize, destination: usize },
+    #[error(
+        "generic parameters require the component's interface manifest (build the component once, or commit its prebuilt wasm)"
+    )]
+    GenericParamsNeedManifest,
+    #[error(
+        "the component declares {declared} parameter(s), but {supplied} generic argument(s) are supplied"
+    )]
+    TooManyGenericArgs { declared: usize, supplied: usize },
+    #[error("required parameter `{param}` is not given")]
+    RequiredParamMissing { param: String },
+    #[error("this is a clocked component; declare it with `inst`, not `var`")]
+    ClockedNeedsInst,
+    #[error("the inst form takes parameters with `#()`, not generic arguments")]
+    InstFormUsesParen,
+    #[error("this is a method-only component; declare it with `var`, not `inst`")]
+    MethodOnlyNeedsVar,
+    #[error("the component declares no parameter named `{param}`")]
+    UnknownParam { param: String },
+    #[error("the component declares no port named `{port}`")]
+    UnknownPort { port: String },
+    #[error(
+        "port `{port}` is declared as an input but the modport connection only allows driving it"
+    )]
+    PortNotInput { port: String },
+    #[error("port `{port}` is declared as an output but the connection cannot be driven")]
+    PortNotDrivable { port: String },
+    #[error("port `{port}` is declared as a clock but the connected expression is not a clock")]
+    PortNotClock { port: String },
+    #[error("port `{port}` is declared as a reset but the connected expression is not a reset")]
+    PortNotReset { port: String },
+    #[error(
+        "the `{port}` connection is a clock but the component does not declare the port as a clock (a ClockPort field)"
+    )]
+    ClockPortUndeclared { port: String },
+    #[error(
+        "the `{port}` connection is a reset but the component does not declare the port as a reset (a ResetPort field)"
+    )]
+    ResetPortUndeclared { port: String },
+    #[error("{role} port `{port}` is not connected")]
+    RolePortUnconnected { role: String, port: String },
+    #[error("port `{port}` is not connected")]
+    PortUnconnected { port: String },
+    #[error("port `{port}` is connected more than once")]
+    PortMultiplyConnected { port: String },
+    #[error("port `{port}` has invalid direction `{dir}` in the component's manifest")]
+    InvalidPortDirection { port: String, dir: String },
+    #[error("the component declares no interface port named `{group}`")]
+    UnknownGroup { group: String },
+    #[error("the component's manifest is invalid: {reason}")]
+    InvalidManifest { reason: String },
+    #[error(
+        "port `{group}.{member}` is not connected — the interface connected to `{group}` has no member `{member}`"
+    )]
+    GroupMemberUnconnected { group: String, member: String },
+    #[error("interface port `{group}` is not connected")]
+    GroupUnconnected { group: String },
+    #[error("component method calls take the form `instance.method(...)`")]
+    MethodCallForm,
+    #[error("component methods take no generic arguments")]
+    MethodNoGenericArgs,
+    #[error("the component declares no method named `{method}`")]
+    UnknownMethod { method: String },
+    #[error("method `{method}` returns no value")]
+    MethodReturnsNoValue { method: String },
+    #[error(
+        "cannot resolve the declared width `{expr}` of {what} (unknown parameter or invalid expression)"
+    )]
+    UnresolvableWidth { expr: String, what: String },
+    #[error(
+        "method `{method}` declares a {declared}-bit return value, but the ABI supports at most {max} bits"
+    )]
+    MethodReturnTooWide {
+        method: String,
+        declared: u32,
+        max: u32,
+    },
+    #[error(
+        "interface port `{group}` is bound to interface `{expected}`, but a different interface is connected"
+    )]
+    InterfaceMismatch { group: String, expected: String },
+    #[error(
+        "interface port `{group}` is bound to modport `{expected}`, but modport `{connected}` is connected"
+    )]
+    ModportMismatch {
+        group: String,
+        expected: String,
+        connected: String,
+    },
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

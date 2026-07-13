@@ -3,6 +3,7 @@ use crate::backend::inst::{
 };
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
+use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
 use crate::ir::module::{BitRange, gather_bit_aware_outputs, ranges_overlap};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
@@ -635,6 +636,8 @@ pub struct ProtoDeclaration {
     /// Bubbled up through `Inst` declarations so the top module sees every
     /// derived clock across the hierarchy, not just its own locals.
     pub derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)>,
+    /// User-defined component instances declared at this level.
+    pub external_components: Vec<ProtoExternalComponent>,
 }
 
 impl Conv<&air::Declaration> for ProtoDeclaration {
@@ -657,6 +660,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     post_comb_fns: vec![],
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
+                    external_components: vec![],
                 })
             }
             air::Declaration::Ff(x) => {
@@ -689,6 +693,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     post_comb_fns: vec![],
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
+                    external_components: vec![],
                 })
             }
             air::Declaration::Inst(x) => Conv::conv(context, x.as_ref()),
@@ -720,6 +725,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     post_comb_fns: vec![],
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
+                    external_components: vec![],
                 })
             }
             air::Declaration::Final(x) => {
@@ -736,10 +742,70 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     post_comb_fns: vec![],
                     child_modules: vec![],
                     derived_clock_candidates: vec![],
+                    external_components: vec![],
                 })
             }
             air::Declaration::Unsupported(token) => {
                 Err(SimulatorError::unsupported_description(token))
+            }
+            air::Declaration::External(x) => {
+                let mut connects = vec![];
+                for c in &x.connects {
+                    let expr: ProtoExpression = Conv::conv(context, &c.expr)?;
+                    // Only a plain (unindexed, unselected) variable
+                    // connection can serve as a component output.
+                    let output = c.output.as_ref().and_then(|dst| {
+                        (dst.index.0.is_empty()
+                            && dst.select.0.is_empty()
+                            && dst.select.1.is_none())
+                        .then_some(dst.id)
+                    });
+                    // Clock/reset events fire on the connected variable;
+                    // input-only (modport) connections carry it in the
+                    // expression rather than `output`. Hierarchical
+                    // references have no VarId here; their event key is
+                    // recovered after hier resolution in module conv.
+                    let event_var = output.or_else(|| {
+                        if !(c.is_clock || c.is_reset) {
+                            return None;
+                        }
+                        if let air::Expression::Term(term) = &c.expr
+                            && let air::Factor::Variable(var_id, _, _, _) = term.as_ref()
+                        {
+                            Some(*var_id)
+                        } else {
+                            None
+                        }
+                    });
+                    connects.push(ProtoExternalConnect {
+                        port: c.port,
+                        expr,
+                        output,
+                        input: c.input,
+                        group: c.group,
+                        member: c.member,
+                        event_var,
+                        is_clock: c.is_clock,
+                        is_reset: c.is_reset,
+                        width: c.width,
+                        token: c.token,
+                    });
+                }
+                Ok(ProtoDeclaration {
+                    event_statements: HashMap::default(),
+                    comb_statements: vec![],
+                    post_comb_fns: vec![],
+                    child_modules: vec![],
+                    derived_clock_candidates: vec![],
+                    external_components: vec![ProtoExternalComponent {
+                        name: x.name,
+                        component: x.component,
+                        params: x.params.clone(),
+                        connects,
+                        is_var_form: x.is_var_form,
+                        token: x.token,
+                    }],
+                })
             }
             air::Declaration::Null => Ok(ProtoDeclaration {
                 event_statements: HashMap::default(),
@@ -747,6 +813,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 post_comb_fns: vec![],
                 child_modules: vec![],
                 derived_clock_candidates: vec![],
+                external_components: vec![],
             }),
         }
     }
@@ -1458,6 +1525,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             post_comb_fns: all_post_comb_fns,
             child_modules: vec![child_module_meta],
             derived_clock_candidates: all_derived_clock_candidates,
+            external_components: vec![],
         })
     }
 }

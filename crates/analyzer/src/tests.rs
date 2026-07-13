@@ -16450,3 +16450,139 @@ fn project_properties() {
     let errors = analyze_with_project_properties(code, properties);
     assert!(errors.is_empty());
 }
+
+#[track_caller]
+fn analyze_as_dependency(code: &str) -> Vec<AnalyzerError> {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"dep.veryl").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    context.set_project_name("dep");
+    let mut ir = Ir::default();
+
+    let mut errors = vec![];
+    errors.append(&mut analyzer.analyze_pass1("dep", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+    dbg!(&errors);
+    errors
+}
+
+#[test]
+fn dependency_test_module_skipped() {
+    // A dependency's testbench referencing its own component by bare name
+    // resolves only in the dependency's context; the consumer must skip it.
+    let code = r#"
+    module ModuleA {}
+
+    #[test(test_dep)]
+    module test_dep {
+        inst c: $comp::edge_checker;
+
+        initial {
+            $finish();
+        }
+    }
+    "#;
+
+    let errors = analyze_as_dependency(code);
+    assert!(errors.is_empty());
+
+    // The skipped testbench is not collected as a runnable test.
+    assert!(symbol_table::get_tests("dep").is_empty());
+    assert!(symbol_table::get_tests("prj").is_empty());
+
+    // The dependency's non-test module is still analyzed.
+    assert!(
+        symbol_table::get_all()
+            .iter()
+            .any(|s| s.token.to_string() == "ModuleA")
+    );
+
+    // The same source in the project itself is analyzed as before.
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
+}
+
+/// Analyze `code` with `components` registered as `$comp::<name>` but no
+/// interface manifest seeded, so only the manifest-independent interface
+/// checks fire.
+#[track_caller]
+fn analyze_with_components(code: &str, components: &[&str]) -> Vec<AnalyzerError> {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    crate::component_manifest_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    crate::tb_component::insert_external_components(components);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    let mut errors = vec![];
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+    dbg!(&errors);
+    errors
+}
+
+fn has_interface_mismatch(
+    errors: &[AnalyzerError],
+    expected: crate::analyzer_error::ComponentInterfaceMismatchKind,
+) -> bool {
+    errors.iter().any(|e| {
+        matches!(
+            e,
+            AnalyzerError::ComponentInterfaceMismatch { kind, .. } if *kind == expected
+        )
+    })
+}
+
+#[test]
+fn component_generic_args_need_manifest() {
+    use crate::analyzer_error::ComponentInterfaceMismatchKind;
+
+    let code = r#"
+    #[test(t)]
+    module t {
+        var m: $comp::widget::<8>;
+        initial {
+            $finish();
+        }
+    }
+    "#;
+    let errors = analyze_with_components(code, &["widget"]);
+    assert!(has_interface_mismatch(
+        &errors,
+        ComponentInterfaceMismatchKind::GenericParamsNeedManifest
+    ));
+}
+
+#[test]
+fn component_inst_form_rejects_generic_args() {
+    use crate::analyzer_error::ComponentInterfaceMismatchKind;
+
+    let code = r#"
+    #[test(t)]
+    module t {
+        inst m: $comp::widget::<8> ();
+        initial {
+            $finish();
+        }
+    }
+    "#;
+    let errors = analyze_with_components(code, &["widget"]);
+    assert!(has_interface_mismatch(
+        &errors,
+        ComponentInterfaceMismatchKind::InstFormUsesParen
+    ));
+}

@@ -19,47 +19,12 @@ fn emit(metadata: &Metadata, code: &str) -> String {
 
     let mut emitter = Emitter::new(
         metadata,
+        "prj",
         &PathBuf::from("test.veryl"),
         &PathBuf::from("test.sv"),
         &PathBuf::from("test.sv.map"),
     );
     emitter.emit(&parser.veryl, code);
-    emitter.as_str().to_string()
-}
-
-#[track_caller]
-fn emit_multiple(metadata: &Metadata, inputs: &[&str]) -> String {
-    symbol_table::clear();
-    attribute_table::clear();
-
-    let parsers: Vec<_> = inputs
-        .iter()
-        .enumerate()
-        .map(|(i, input)| {
-            let path = format!("test_{i}.veryl");
-            let parser = Parser::parse(input, &path).unwrap();
-            let analyzer = Analyzer::new(metadata);
-            analyzer.analyze_pass1("prj", &parser.veryl);
-            (parser, analyzer)
-        })
-        .collect();
-
-    Analyzer::analyze_post_pass1();
-
-    let mut context = Context::default();
-    for (parser, analyzer) in &parsers {
-        analyzer.analyze_pass2(&parser.veryl, &mut context, None);
-    }
-
-    // Emit the last input (the consumer module).
-    let (parser, _) = parsers.last().unwrap();
-    let mut emitter = Emitter::new(
-        metadata,
-        &PathBuf::from("test.veryl"),
-        &PathBuf::from("test.sv"),
-        &PathBuf::from("test.sv.map"),
-    );
-    emitter.emit(&parser.veryl, inputs.last().unwrap());
     emitter.as_str().to_string()
 }
 
@@ -4047,6 +4012,43 @@ fn nested_ifdef_block_group_keeps_inner_guard() {
         a_pos < b_pos && b_pos < inner && inner < first_endif,
         "inner statement guarded by both: {ret}"
     );
+}
+
+#[track_caller]
+fn emit_multiple(metadata: &Metadata, inputs: &[&str]) -> String {
+    symbol_table::clear();
+    attribute_table::clear();
+
+    let parsers: Vec<_> = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, input)| {
+            let path = format!("test_{i}.veryl");
+            let parser = Parser::parse(input, &path).unwrap();
+            let analyzer = Analyzer::new(metadata);
+            analyzer.analyze_pass1("prj", &parser.veryl);
+            (parser, analyzer)
+        })
+        .collect();
+
+    Analyzer::analyze_post_pass1();
+
+    let mut context = Context::default();
+    for (parser, analyzer) in &parsers {
+        analyzer.analyze_pass2(&parser.veryl, &mut context, None);
+    }
+
+    // Emit the last input (the consumer module).
+    let (parser, _) = parsers.last().unwrap();
+    let mut emitter = Emitter::new(
+        metadata,
+        "prj",
+        &PathBuf::from("test.veryl"),
+        &PathBuf::from("test.sv"),
+        &PathBuf::from("test.sv.map"),
+    );
+    emitter.emit(&parser.veryl, inputs.last().unwrap());
+    emitter.as_str().to_string()
 }
 
 #[test]

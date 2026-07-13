@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 use veryl_analyzer::symbol::{ClockDomain, ParameterKind, Symbol, SymbolKind};
 use veryl_analyzer::symbol_table;
-use veryl_metadata::{Metadata, MetadataError};
+use veryl_metadata::{ComponentManifest, Metadata, MetadataError};
 use veryl_parser::veryl_token::Token;
 
 const SUMMARY_TMPL: &str = r###"
@@ -41,6 +41,13 @@ const SUMMARY_TMPL: &str = r###"
   {{#each packages}}
   - [{{this.0}}]({{this.1}}.md)
   {{/each}}
+
+{{#if components}}
+- [Components](components.md)
+  {{#each components}}
+  - [{{this.0}}]({{this.1}}.md)
+  {{/each}}
+{{/if}}
 "###;
 
 #[derive(Serialize)]
@@ -51,6 +58,7 @@ struct SummaryData {
     proto_modules: Vec<(String, String)>,
     interfaces: Vec<(String, String)>,
     packages: Vec<(String, String)>,
+    components: Vec<(String, String)>,
 }
 
 const INDEX_TMPL: &str = r###"
@@ -84,6 +92,7 @@ const INDEX_TMPL: &str = r###"
 {{#include proto_modules.md}}
 {{#include interfaces.md}}
 {{#include packages.md}}
+{{#include components.md}}
 {{{{/raw}}}}
 "###;
 
@@ -344,6 +353,160 @@ struct PackageData {
     description: String,
 }
 
+const COMPONENT_TMPL: &str = r#"
+## {{name}}
+
+{{description}}
+
+{{#if kind}}
+<p><span class="hljs-keyword">{{kind}}</span> component</p>
+{{/if}}
+
+{{#if parameters}}
+### Parameters
+---
+
+<table class="table_list">
+<tbody>
+{{#each parameters}}
+<tr>
+    <th class="table_list_item">{{this.name}}</th>
+    <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
+    <td class="table_list_item">{{#if this.optional}}optional{{else}}required{{/if}}</td>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/if}}
+
+{{#if ports}}
+### Ports
+---
+
+<table class="table_list">
+<tbody>
+{{#each ports}}
+<tr>
+    <th class="table_list_item">{{this.name}}</th>
+    <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span></td>
+    <td class="table_list_item"><span class="hljs-type">{{this.width}}</span></td>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/if}}
+
+{{#if groups}}
+### Interfaces
+---
+
+{{#each groups}}
+<p><code>{{this.name}}</code> — <span class="hljs-type">{{this.interface}}</span>.<span class="hljs-keyword">{{this.modport}}</span></p>
+<table class="table_list">
+<tbody>
+{{#each this.members}}
+<tr>
+    <th class="table_list_item">{{this.name}}</th>
+    <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span></td>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/each}}
+{{/if}}
+
+{{#if methods}}
+### Methods
+---
+
+<table class="table_list">
+<tbody>
+{{#each methods}}
+<tr>
+    <th class="table_list_item"><code>{{this.signature}}</code></th>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/if}}
+
+{{#if requires}}
+### Requires
+---
+
+<table class="table_list">
+<tbody>
+{{#each requires}}
+<tr>
+    <th class="table_list_item">{{this}}</th>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/if}}
+
+{{#if usage}}
+### Usage
+---
+
+<pre><code class="language-veryl">{{usage}}</code></pre>
+{{/if}}
+"#;
+
+#[derive(Serialize)]
+struct ComponentData {
+    name: String,
+    description: String,
+    kind: Option<String>,
+    parameters: Vec<ComponentParameterData>,
+    ports: Vec<ComponentPortData>,
+    groups: Vec<ComponentGroupData>,
+    methods: Vec<ComponentMethodData>,
+    requires: Vec<String>,
+    usage: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ComponentParameterData {
+    name: String,
+    typ: String,
+    optional: bool,
+    description: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ComponentPortData {
+    name: String,
+    direction: String,
+    width: String,
+    description: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ComponentGroupData {
+    name: String,
+    interface: String,
+    modport: String,
+    members: Vec<ComponentMemberData>,
+}
+
+#[derive(Serialize)]
+struct ComponentMemberData {
+    name: String,
+    direction: String,
+    description: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ComponentMethodData {
+    signature: String,
+    description: Option<String>,
+}
+
 pub struct DocBuilder {
     metadata: Metadata,
     #[allow(dead_code)]
@@ -355,6 +518,7 @@ pub struct DocBuilder {
     proto_modules: Vec<TopLevelItem>,
     interfaces: Vec<TopLevelItem>,
     packages: Vec<TopLevelItem>,
+    components: Vec<ComponentItem>,
 }
 
 #[derive(Clone)]
@@ -364,6 +528,15 @@ pub struct TopLevelItem {
     pub symbol: Symbol,
 }
 
+/// A user-defined verification component export of a `[[components]]`
+/// package, documented from its interface manifest.
+#[derive(Clone)]
+pub struct ComponentItem {
+    pub name: String,
+    pub file_name: String,
+    pub manifest: ComponentManifest,
+}
+
 impl DocBuilder {
     pub fn new(
         metadata: &Metadata,
@@ -371,6 +544,7 @@ impl DocBuilder {
         proto_modules: Vec<TopLevelItem>,
         interfaces: Vec<TopLevelItem>,
         packages: Vec<TopLevelItem>,
+        components: Vec<ComponentItem>,
     ) -> Result<Self> {
         let temp_dir = tempfile::tempdir().into_diagnostic()?;
         let root_dir = temp_dir.path().to_path_buf();
@@ -389,6 +563,7 @@ impl DocBuilder {
             proto_modules,
             interfaces,
             packages,
+            components,
         })
     }
 
@@ -401,6 +576,7 @@ impl DocBuilder {
         self.build_component("proto_modules.md", self.build_proto_modules())?;
         self.build_component("interfaces.md", self.build_interfaces())?;
         self.build_component("packages.md", self.build_packages())?;
+        self.build_component("components.md", self.build_components())?;
 
         for x in &self.modules {
             let file = format!("{}.md", x.file_name);
@@ -420,6 +596,11 @@ impl DocBuilder {
         for x in &self.packages {
             let file = format!("{}.md", x.file_name);
             self.build_component(&file, self.build_package(&x.html_name, &x.symbol))?;
+        }
+
+        for x in &self.components {
+            let file = format!("{}.md", x.file_name);
+            self.build_component(&file, build_component_page(x))?;
         }
 
         let mut cfg = Config::default();
@@ -526,6 +707,12 @@ impl DocBuilder {
             .cloned()
             .map(|x| (x.html_name, x.file_name))
             .collect();
+        let components: Vec<_> = self
+            .components
+            .iter()
+            .cloned()
+            .map(|x| (x.name, x.file_name))
+            .collect();
         let data = SummaryData {
             name: self.metadata.project.name.clone(),
             version: format!(
@@ -540,6 +727,7 @@ impl DocBuilder {
             proto_modules,
             interfaces,
             packages,
+            components,
         };
 
         let mut handlebars = Handlebars::new();
@@ -644,6 +832,36 @@ impl DocBuilder {
 
         let data = ListData {
             name: "Packages".to_string(),
+            items,
+        };
+
+        let mut handlebars = Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
+        handlebars.render_template(LIST_TMPL, &data).unwrap()
+    }
+
+    fn build_components(&self) -> String {
+        if self.components.is_empty() {
+            return String::new();
+        }
+        let items: Vec<_> = self
+            .components
+            .iter()
+            .map(|x| ListItem {
+                file_name: x.file_name.clone(),
+                html_name: x.name.clone(),
+                description: x
+                    .manifest
+                    .doc
+                    .as_deref()
+                    .and_then(|d| d.lines().next())
+                    .unwrap_or_default()
+                    .to_string(),
+            })
+            .collect();
+
+        let data = ListData {
+            name: "Components".to_string(),
             items,
         };
 
@@ -851,5 +1069,261 @@ fn get_comment_from_token(token: &Token) -> Option<String> {
         Some(symbol.found.doc_comment.format(false))
     } else {
         None
+    }
+}
+
+fn build_component_page(item: &ComponentItem) -> String {
+    let manifest = &item.manifest;
+
+    let parameters: Vec<_> = manifest
+        .params
+        .iter()
+        .map(|x| ComponentParameterData {
+            name: x.name.clone(),
+            typ: x.ty.clone(),
+            optional: x.optional,
+            description: x.doc.clone(),
+        })
+        .collect();
+    let ports: Vec<_> = manifest
+        .ports
+        .iter()
+        .map(|x| ComponentPortData {
+            name: x.name.clone(),
+            direction: x.dir.clone(),
+            // A role names the Veryl type directly; data-port widths are
+            // inferred from the connection, so none is shown.
+            width: match x.role.as_deref() {
+                Some(role) => role.to_string(),
+                None => String::new(),
+            },
+            description: x.doc.clone(),
+        })
+        .collect();
+    let groups: Vec<_> = manifest
+        .groups
+        .iter()
+        .map(|g| ComponentGroupData {
+            name: g.name.clone(),
+            interface: g.interface.clone(),
+            modport: g.modport.clone(),
+            members: g
+                .members
+                .iter()
+                .map(|m| ComponentMemberData {
+                    name: m.member.clone(),
+                    direction: m.dir.clone(),
+                    description: m.doc.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+    let methods: Vec<_> = manifest
+        .methods
+        .iter()
+        .map(|x| {
+            let args: Vec<_> = x
+                .args
+                .iter()
+                .map(|a| format!("{}: {}", a.name, a.ty))
+                .collect();
+            let ret = x.ret_suffix();
+            ComponentMethodData {
+                signature: format!("{}({}){}", x.name, args.join(", "), ret),
+                description: x.doc.clone(),
+            }
+        })
+        .collect();
+
+    let data = ComponentData {
+        name: item.name.clone(),
+        description: manifest.doc.clone().unwrap_or_default(),
+        kind: manifest.kind.clone(),
+        parameters,
+        ports,
+        groups,
+        methods,
+        requires: manifest.requires.clone(),
+        usage: component_usage(&item.name, manifest),
+    };
+
+    let mut handlebars = Handlebars::new();
+    handlebars.register_escape_fn(handlebars::no_escape);
+    handlebars.render_template(COMPONENT_TMPL, &data).unwrap()
+}
+
+/// Usage snippet on a component's doc page, including every required
+/// parameter; `None` when the manifest does not declare the component's
+/// kind.
+fn component_usage(name: &str, manifest: &ComponentManifest) -> Option<String> {
+    match manifest.kind.as_deref() {
+        Some("clocked") => {
+            let params: Vec<_> = manifest
+                .params
+                .iter()
+                .filter(|x| !x.optional)
+                .map(|x| x.name.clone())
+                .collect();
+            let params = if params.is_empty() {
+                String::new()
+            } else {
+                format!("#( {} ) ", params.join(", "))
+            };
+            let mut ports: Vec<_> = manifest.ports.iter().map(|x| x.name.clone()).collect();
+            ports.extend(manifest.groups.iter().map(|g| format!("{}: ", g.name)));
+            Some(format!(
+                "inst u0: $comp::{} {}({});",
+                name,
+                params,
+                ports.join(", ")
+            ))
+        }
+        Some("method_only") => {
+            // Positional generic arguments must reach the last required
+            // parameter; parameter names stand in as placeholders.
+            let args = match manifest.params.iter().rposition(|x| !x.optional) {
+                Some(last_required) => manifest.params[..=last_required]
+                    .iter()
+                    .map(|x| x.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                None => String::new(),
+            };
+            if args.is_empty() {
+                Some(format!("var u0: $comp::{name};"))
+            } else {
+                Some(format!("var u0: $comp::{name}::<{args}>;"))
+            }
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use veryl_metadata::component_manifest::{ManifestParam, ManifestPort};
+
+    fn manifest() -> ComponentManifest {
+        ComponentManifest {
+            kind: Some("clocked".to_string()),
+            doc: Some("Golden model checker.".to_string()),
+            ports: vec![
+                ManifestPort {
+                    name: "clk".to_string(),
+                    dir: "input".to_string(),
+                    role: Some("clock".to_string()),
+                    doc: None,
+                },
+                ManifestPort {
+                    name: "q".to_string(),
+                    dir: "output".to_string(),
+                    role: None,
+                    doc: None,
+                },
+            ],
+            params: vec![
+                ManifestParam {
+                    name: "XLEN".to_string(),
+                    ty: "u64".to_string(),
+                    optional: false,
+                    doc: None,
+                },
+                ManifestParam {
+                    name: "TRACE".to_string(),
+                    ty: "bool".to_string(),
+                    optional: true,
+                    doc: None,
+                },
+            ],
+            methods: vec![],
+            requires: vec![],
+            groups: vec![],
+        }
+    }
+
+    #[test]
+    fn component_usage_snippet() {
+        let manifest = manifest();
+        assert_eq!(
+            component_usage("golden", &manifest).as_deref(),
+            Some("inst u0: $comp::golden #( XLEN ) (clk, q);")
+        );
+
+        let mut method_only = manifest.clone();
+        method_only.kind = Some("method_only".to_string());
+        assert_eq!(
+            component_usage("golden", &method_only).as_deref(),
+            Some("var u0: $comp::golden::<XLEN>;")
+        );
+
+        let mut no_required = manifest.clone();
+        no_required.params[0].optional = true;
+        assert_eq!(
+            component_usage("golden", &no_required).as_deref(),
+            Some("inst u0: $comp::golden (clk, q);")
+        );
+        no_required.kind = Some("method_only".to_string());
+        assert_eq!(
+            component_usage("golden", &no_required).as_deref(),
+            Some("var u0: $comp::golden;")
+        );
+
+        let mut unspecified = manifest;
+        unspecified.kind = None;
+        assert_eq!(component_usage("golden", &unspecified), None);
+    }
+
+    #[test]
+    fn component_page() {
+        let item = ComponentItem {
+            name: "golden".to_string(),
+            file_name: "component_golden".to_string(),
+            manifest: manifest(),
+        };
+        let page = build_component_page(&item);
+        assert!(page.contains("<th class=\"table_list_item\">XLEN</th>"));
+        assert!(page.contains("<td class=\"table_list_item\">required</td>"));
+        assert!(page.contains("<td class=\"table_list_item\">optional</td>"));
+        // Width 0 means "not declared" and renders as an empty cell.
+        assert!(page.contains("<span class=\"hljs-type\"></span>"));
+        assert!(page.contains("inst u0: $comp::golden #( XLEN ) (clk, q);"));
+    }
+
+    #[test]
+    fn component_page_renders_interface_groups() {
+        use veryl_metadata::component_manifest::{ManifestGroup, ManifestMember};
+        let mut grouped = manifest();
+        grouped.groups.push(ManifestGroup {
+            name: "axi".to_string(),
+            interface: "$std::axi4_if".to_string(),
+            modport: "monitor".to_string(),
+            members: vec![ManifestMember {
+                member: "awvalid".to_string(),
+                dir: "input".to_string(),
+                doc: Some("Write-address valid.".to_string()),
+            }],
+        });
+        let item = ComponentItem {
+            name: "checker".to_string(),
+            file_name: "component_checker".to_string(),
+            manifest: grouped,
+        };
+        let page = build_component_page(&item);
+        assert!(page.contains("### Interfaces"), "{page}");
+        assert!(
+            page.contains("<code>axi</code> — <span class=\"hljs-type\">$std::axi4_if</span>.<span class=\"hljs-keyword\">monitor</span>"),
+            "{page}"
+        );
+        assert!(
+            page.contains("<th class=\"table_list_item\">awvalid</th>"),
+            "{page}"
+        );
+        assert!(page.contains("Write-address valid."), "{page}");
+        // The usage snippet includes the group connection.
+        assert!(
+            page.contains("inst u0: $comp::checker #( XLEN ) (clk, q, axi: );"),
+            "{page}"
+        );
     }
 }

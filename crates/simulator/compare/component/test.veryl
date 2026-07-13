@@ -1,0 +1,31 @@
+module Counter (
+    clk: input  clock    ,
+    rst: input  reset    ,
+    cnt: output logic<32>,
+) {
+    always_ff {
+        if_reset {
+            cnt = 0;
+        } else {
+            cnt += 1;
+        }
+    }
+}
+
+#[test(comp_test)]
+module comp_test {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen(clk);
+
+    var cnt: logic<32>;
+    var q  : logic<32>;
+
+    inst dut: Counter          (clk, rst, cnt );
+    inst acc: $comp::accumulator (clk, d: cnt, q);
+
+    initial {
+        rst.assert();
+        clk.next(1000000);
+        $finish();
+    }
+}

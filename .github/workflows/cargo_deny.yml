@@ -23,3 +23,14 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check licenses
+      # The simulator's cranelift and wasmtime must stay on the same release
+      # train (cranelift 0.133 <-> wasmtime 46); diverging silently compiles
+      # cranelift-codegen twice.
+      - name: Check cranelift/wasmtime version lockstep
+        run: |
+          count=$(grep -c '^name = "cranelift-codegen"$' Cargo.lock || true)
+          if [ "$count" -ne 1 ]; then
+            echo "cranelift-codegen resolved to $count versions;"
+            echo "align the cranelift and wasmtime versions in crates/simulator/Cargo.toml"
+            exit 1
+          fi

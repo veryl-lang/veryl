@@ -209,6 +209,18 @@ impl ForRange {
 pub struct TbMethodCall {
     pub inst: StrId,
     pub method: TbMethod,
+    /// Assignment form (`x = inst.method(...)`): the destination receiving
+    /// the method's return value. Only component methods return values.
+    /// Boxed to keep the `Statement` enum small.
+    pub ret: Option<Box<AssignDestination>>,
+    /// True when `ret` is a synthetic hoist temporary: a return value
+    /// wider than the temporary would be silently truncated, so the run
+    /// fails instead.
+    pub ret_strict: bool,
+    /// Declared return width resolved against the instance's parameters;
+    /// sizes the hoist temporary and is enforced against the value the
+    /// component actually returns.
+    pub ret_width: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -230,6 +242,13 @@ pub enum TbMethod {
     },
     FileClose,
     FileFlush,
+    /// Zero-time method call on a user-defined component. The method name
+    /// and arguments are unchecked here; the component validates them at
+    /// run time.
+    Component {
+        method: StrId,
+        args: Vec<SystemFunctionInput>,
+    },
 }
 
 impl Statement {
@@ -297,7 +316,15 @@ impl Statement {
                     s.eval_assign(context, assign_table, assign_context, base_tables);
                 }
             }
-            Statement::TbMethodCall(_) | Statement::Break => (),
+            Statement::TbMethodCall(x) => {
+                // A component method's return value drives its destination
+                // like an assignment; without this the destination variable
+                // reads as never assigned.
+                if let Some(ret) = &x.ret {
+                    ret.eval_assign(context, assign_table, assign_context);
+                }
+            }
+            Statement::Break => (),
             Statement::Unsupported(_) => (),
             Statement::Null => (),
         }
@@ -413,6 +440,10 @@ impl fmt::Display for Statement {
                 }
                 TbMethod::FileClose => write!(f, "{}.close();", x.inst),
                 TbMethod::FileFlush => write!(f, "{}.flush();", x.inst),
+                TbMethod::Component { method, args } => {
+                    let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
+                    write!(f, "{}.{method}({});", x.inst, args_str.join(", "))
+                }
             },
             Statement::For(x) => {
                 let range_op = if let ForRange::Reverse { .. } = &x.range {

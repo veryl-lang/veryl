@@ -88,7 +88,7 @@ impl CmdBuild {
                     (path.dst.clone(), path.map.clone())
                 };
 
-                let mut emitter = Emitter::new(metadata, &path.src, &dst, &map);
+                let mut emitter = Emitter::new(metadata, &path.prj, &path.src, &dst, &map);
                 emitter.emit(&context.parser.veryl, &context.input);
 
                 let dst_dir = dst.parent().unwrap();
@@ -1232,6 +1232,7 @@ exclude_std = true
             include_ignored: false,
             define: Vec::new(),
             no_capture: false,
+            seed: None,
             four_state: false,
         });
         let all_pass = test.exec(&mut metadata).expect("test run should succeed");

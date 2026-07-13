@@ -3,6 +3,7 @@ pub(crate) mod declaration;
 pub mod derived_clock;
 mod event;
 mod expression;
+pub(crate) mod external;
 pub(crate) mod hier_ref;
 pub(crate) mod inst_layout;
 mod module;
@@ -18,13 +19,17 @@ pub use declaration::ProtoDeclaration;
 pub use derived_clock::{DerivedClock, DerivedClockSchedule};
 pub use event::Event;
 pub use expression::{Expression, ExpressionContext, ProtoDynamicBitSelect, ProtoExpression};
+pub use external::{
+    ExternalComponentInst, ExternalConnectInst, ProtoExternalComponent, ProtoExternalConnect,
+};
 pub use module::{Module, ProtoModule};
 pub use statement::{
-    CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ProtoAssignDynamicStatement,
-    ProtoAssignStatement, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement,
-    ProtoStatement, ProtoStatementBlock, ProtoStatements, ProtoSystemFunctionCall, RuntimeForBound,
-    RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, format_assert_message,
-    format_output, parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
+    CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
+    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoComponentArg, ProtoForBound,
+    ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement, ProtoStatementBlock,
+    ProtoStatements, ProtoSystemFunctionCall, RetWidthCheck, RuntimeForBound, RuntimeForRange,
+    Statement, SystemFunctionCall, TbMethodKind, format_assert_message, format_output,
+    parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
 };
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
@@ -108,6 +113,28 @@ pub struct Ir {
     /// when `Config::aot_c_event` is set and the emitter covered every
     /// event stmt.
     pub whole_events: HashMap<Event, Arc<dyn CompiledWhole>>,
+    /// User-defined component instances (`$comp::<name>`), fired by
+    /// the simulator around event evaluation.
+    pub external_components: Vec<ExternalComponentInst>,
+    /// Base seed for per-instance component seeds (from `[test] seed` or
+    /// `--seed`).
+    pub seed: u64,
+    /// Resolved component libraries, keyed by export name. Missing
+    /// entries fall back to the in-process static registry.
+    pub component_libraries: std::collections::HashMap<String, ComponentLibrary>,
+    /// Base directory for component file I/O (the project root). Relative
+    /// reads resolve against it; relative writes go to a per-test output
+    /// directory beneath it. `None` leaves paths process-CWD relative.
+    pub component_file_base: Option<std::path::PathBuf>,
+    /// See `Module::rtl_driven`.
+    pub rtl_driven: crate::HashSet<VarId>,
+}
+
+/// A built component library on disk and the type name to look up in it.
+#[derive(Clone, Debug)]
+pub struct ComponentLibrary {
+    pub path: std::path::PathBuf,
+    pub type_name: String,
 }
 
 impl Ir {
@@ -139,6 +166,11 @@ impl Ir {
             aot_c_validate: config.aot_c_validate,
             aot_c_validate_stride: config.aot_c_validate_stride,
             whole_events: module.whole_events,
+            external_components: module.external_components,
+            seed: config.seed,
+            component_libraries: config.component_libraries.clone(),
+            component_file_base: config.component_file_base.clone(),
+            rtl_driven: module.rtl_driven,
         };
         // Bake the WriteLogBuffer's heap-stable address into every
         // JIT-dispatched Compiled/CompiledBatch so emitted code can perform
@@ -620,6 +652,14 @@ pub struct Config {
     /// process), not the parallel unit-test harness — hence default off, enabled
     /// only by `apply_env`.
     pub dut_reuse: bool,
+    /// Base seed for user-defined component instances (from `[test] seed`
+    /// or `--seed`).
+    pub seed: u64,
+    /// Component libraries built by `veryl test`, keyed by export name
+    /// name. Missing entries fall back to the static registry.
+    pub component_libraries: std::collections::HashMap<String, ComponentLibrary>,
+    /// See `Ir::component_file_base`.
+    pub component_file_base: Option<std::path::PathBuf>,
 }
 
 impl Config {

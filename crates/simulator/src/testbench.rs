@@ -1,8 +1,9 @@
 use crate::HashMap;
 use crate::assert_buffer;
 use crate::ir::{
-    Event, Expression, Ir, ModuleVariables, RuntimeForRange, Statement, SystemFunctionCall,
-    TbMethodKind, Value, VarId, VarPath, format_assert_message, format_output, write_native_value,
+    ComponentArg, Event, Expression, Ir, ModuleVariables, RuntimeForRange, Statement,
+    SystemFunctionCall, TbMethodKind, Value, VarId, VarPath, format_assert_message, format_output,
+    write_native_value,
 };
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
@@ -53,6 +54,15 @@ pub enum TestbenchStatement {
     FileClose { handle: StrId },
     /// `f.flush()`.
     FileFlush { handle: StrId },
+    /// Zero-time method call on a user-defined component
+    /// (`iss.load("x.elf")`).
+    ComponentMethod {
+        inst: StrId,
+        method: StrId,
+        args: Vec<ComponentArg>,
+        /// Assignment form: destination variable for the return value.
+        ret: Option<(VarId, crate::ir::RetWidthCheck)>,
+    },
     /// if-else (may contain next inside)
     If {
         condition: Expression,
@@ -143,11 +153,13 @@ fn collect_tb_insts(
                         reset_insts.push(*inst);
                     }
                 }
-                // File handles drive no clock/reset event.
+                // File handles and component methods drive no clock/reset
+                // event.
                 TbMethodKind::FileOpen { .. }
                 | TbMethodKind::FileWrite { .. }
                 | TbMethodKind::FileClose
-                | TbMethodKind::FileFlush => {}
+                | TbMethodKind::FileFlush
+                | TbMethodKind::Component { .. } => {}
             },
             Statement::For(for_stmt) => {
                 collect_tb_insts(&for_stmt.body, clock_insts, reset_insts);
@@ -304,6 +316,12 @@ fn convert_stmt(
             },
             TbMethodKind::FileClose => TestbenchStatement::FileClose { handle: *inst },
             TbMethodKind::FileFlush => TestbenchStatement::FileFlush { handle: *inst },
+            TbMethodKind::Component { method, args, ret } => TestbenchStatement::ComponentMethod {
+                inst: *inst,
+                method: *method,
+                args: args.clone(),
+                ret: *ret,
+            },
         },
         Statement::SystemFunctionCall(SystemFunctionCall::Assert {
             kind,
@@ -380,11 +398,32 @@ pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestR
     assert_buffer::reset();
     crate::file_table::reset();
     let result: TestResult = exec(sim, stmts).into();
+    // End-of-test component hooks may still record failures.
+    sim.finish_components();
+    let component_failures = sim.take_component_failures();
     crate::file_table::finalize();
-    match (result, assert_buffer::take_failure()) {
-        (TestResult::Fail(msg), _) => TestResult::Fail(msg),
-        (TestResult::Pass, Some(msg)) => TestResult::Fail(msg),
-        (TestResult::Pass, None) => TestResult::Pass,
+    for component in &sim.components {
+        for path in &component.host.touched_files {
+            log::debug!("component `{}` touched file: {path}", component.name);
+        }
+    }
+    // Component failures (typically from `on_finish`) are appended to an
+    // already-failing result rather than dropped.
+    let failure = match (result, assert_buffer::take_failure()) {
+        (TestResult::Fail(msg), _) => Some(msg),
+        (TestResult::Pass, assert_failure) => assert_failure,
+    };
+    let result = match failure {
+        None if component_failures.is_empty() => TestResult::Pass,
+        None => TestResult::Fail(component_failures.join("\n")),
+        Some(msg) if component_failures.is_empty() => TestResult::Fail(msg),
+        Some(msg) => TestResult::Fail(format!("{msg}\n{}", component_failures.join("\n"))),
+    };
+    // Component behavior may be seed-dependent; make failures reproducible.
+    match result {
+        TestResult::Fail(msg) if sim.components.is_empty() => TestResult::Fail(msg),
+        TestResult::Fail(msg) => TestResult::Fail(format!("{msg}\n(seed: {})", sim.ir.seed)),
+        pass => pass,
     }
 }
 
@@ -408,8 +447,19 @@ pub fn run_native_testbench_capped(
     module_name: String,
     max_cycles: Option<u64>,
 ) -> Result<TestResult, SimulatorError> {
-    let mut sim = Simulator::new(ir, dump);
+    // The dump attaches after `init_components` so component trace
+    // variables (registered during `create`) land in the waveform header.
+    let mut sim = Simulator::new(ir, None);
     sim.cycle_limit = max_cycles;
+    // Component load/create errors are per-test failures, not simulator
+    // errors.
+    let seed = sim.ir.seed;
+    if let Err(err) = sim.init_components(seed, &module_name) {
+        return Ok(TestResult::Fail(err.to_string()));
+    }
+    if let Some(dump) = dump {
+        sim.attach_dump(dump);
+    }
     let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
@@ -517,6 +567,7 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                 1
             };
             let has_dump = sim.dump.is_some();
+            let has_components = !sim.components.is_empty();
             for _ in 0..n {
                 if has_dump && let Some(id) = clock.var_id() {
                     sim.set_var_by_id(&id, Value::new(1, 1, false));
@@ -530,6 +581,16 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                     sim.dump_variables();
                 }
                 sim.time += low_time;
+                // Component-requested termination, checked at cycle end
+                // (after commit and dump).
+                if has_components {
+                    if sim.components_failed() {
+                        return ExecResult::Fail(sim.take_component_failures().join("\n"));
+                    }
+                    if sim.component_finish_requested() {
+                        return ExecResult::Finished;
+                    }
+                }
                 // Stop once the optional clock-cycle cap is reached.
                 if let Some(limit) = sim.cycle_limit {
                     sim.cycle_count += 1;
@@ -712,6 +773,57 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
         TestbenchStatement::FileFlush { handle } => {
             crate::file_table::flush_handle(*handle);
             ExecResult::Continue
+        }
+        TestbenchStatement::ComponentMethod {
+            inst,
+            method,
+            args,
+            ret,
+        } => {
+            sim.ensure_comb_updated();
+            let mut host_args = Vec::with_capacity(args.len());
+            for arg in args {
+                match arg {
+                    ComponentArg::Str(s) => {
+                        host_args.push(crate::component::host::HostValue::Str(s.clone()))
+                    }
+                    ComponentArg::Expr(e) => {
+                        let value = e.eval(&mut sim.mask_cache);
+                        host_args.push(crate::component::runtime::host_value_from(&value));
+                    }
+                }
+            }
+            match sim.call_component_method(*inst, *method, &host_args) {
+                Ok(value) => {
+                    if let Some((ret, check)) = ret {
+                        if let crate::component::host::HostValue::Bits { width, .. } = &value {
+                            match check {
+                                crate::ir::RetWidthCheck::Exact(w) if width != w => {
+                                    return ExecResult::Fail(format!(
+                                        "component method `{method}` declares a {w}-bit return value but returned {width} bits"
+                                    ));
+                                }
+                                crate::ir::RetWidthCheck::Max64 if *width > 64 => {
+                                    return ExecResult::Fail(format!(
+                                        "component method `{method}` returned {width} bits; the expression form carries at most 64 — assign it directly (`x = inst.{method}(...);`) or declare the width with #[ret_width(..)]"
+                                    ));
+                                }
+                                _ => {}
+                            }
+                        }
+                        match crate::component::runtime::host_value_to_value(&value) {
+                            Some(value) => sim.set_var_by_id(ret, value),
+                            None => {
+                                return ExecResult::Fail(format!(
+                                    "component method `{method}` returned no value"
+                                ));
+                            }
+                        }
+                    }
+                    ExecResult::Continue
+                }
+                Err(msg) => ExecResult::Fail(msg),
+            }
         }
         TestbenchStatement::Finish => ExecResult::Finished,
     }

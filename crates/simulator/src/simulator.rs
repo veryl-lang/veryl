@@ -1,4 +1,6 @@
 use crate::backend::CompiledWhole;
+use crate::component::loader::ComponentError;
+use crate::component::runtime::{RuntimeComponent, build_components};
 use crate::ir::write_log::{
     WriteLogBuffer, clear_event_write_log, ff_commit_from_log, set_event_write_log,
 };
@@ -62,6 +64,14 @@ pub struct Simulator {
     /// Env-gated `VERYL_STEP_WATCH=path1,path2` debug watch: resolved
     /// variable pointers printed at each phase of `step_with_derived_clocks`.
     watch_vars: Vec<WatchVar>,
+    /// User-defined component instances, created by `init_components`.
+    pub components: Vec<RuntimeComponent>,
+    /// True while the IR declares components but `init_components` has not
+    /// run; stepping in that state would silently skip every hook.
+    components_pending: bool,
+    /// Waveform handles for component trace variables:
+    /// (handle, component index, trace variable index).
+    trace_dump_vars: Vec<(crate::wave_dumper::VarHandle, usize, usize)>,
 }
 
 struct WatchVar {
@@ -112,6 +122,7 @@ impl WriteLogDiag {
 impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
         let n_derived = ir.derived_clock_schedule.clocks.len();
+        let components_pending = !ir.external_components.is_empty();
         let mut ret = Self {
             ir,
             time: 0,
@@ -132,6 +143,9 @@ impl Simulator {
             cycle_limit: None,
             cycle_count: 0,
             watch_vars: Vec::new(),
+            components: Vec::new(),
+            components_pending,
+            trace_dump_vars: Vec::new(),
         };
 
         if std::env::var("VERYL_DERIVED_CLOCK_DUMP").as_deref() == Ok("1") {
@@ -422,6 +436,14 @@ impl Simulator {
     }
 
     pub fn step(&mut self, event: &Event) {
+        // A missing init_components call would let the run pass vacuously
+        // (no hook ever fires); catch that bug in debug builds without
+        // paying an assert on every step.
+        debug_assert!(
+            !self.components_pending,
+            "simulator has user-defined components but init_components was not called"
+        );
+
         #[cfg(feature = "profile")]
         {
             self.profile.step_count += 1;
@@ -469,8 +491,143 @@ impl Simulator {
     /// caller is responsible for `set_event_write_log`, `settle_comb`,
     /// and `dump_variables`.
     fn step_event_inner(&mut self, event: &Event) {
+        let has_components = !self.components.is_empty();
+        if has_components {
+            self.stage_components(event);
+        }
         self.eval_event_stmts(event);
         self.commit_event_log();
+        if has_components {
+            self.fire_components(event);
+        }
+    }
+
+    /// Loads and creates every user-defined component in the IR, then runs
+    /// `on_init` so initial output values are visible from the first
+    /// settle. A returned error is a test failure.
+    pub fn init_components(
+        &mut self,
+        seed_base: u64,
+        test_name: &str,
+    ) -> Result<(), ComponentError> {
+        self.components_pending = false;
+        if self.ir.external_components.is_empty() {
+            return Ok(());
+        }
+        let mut components = build_components(&self.ir, seed_base, test_name)?;
+        for c in &mut components {
+            c.on_init();
+            c.drain_logs();
+            c.apply_outputs(&mut self.ir.module_variables, self.ir.use_4state);
+        }
+        self.comb_dirty = true;
+        for c in &components {
+            if c.host.failed() {
+                let mut msgs = vec![];
+                for c in &mut components {
+                    msgs.extend(c.host.take_failures());
+                }
+                return Err(ComponentError::InitFailed {
+                    messages: msgs.join("\n"),
+                });
+            }
+        }
+        self.components = components;
+        Ok(())
+    }
+
+    /// Stages pre-edge input values for every component listening to
+    /// `event`. Must run before `commit_event_log`.
+    fn stage_components(&mut self, event: &Event) {
+        if self.components.is_empty() {
+            return;
+        }
+        let mut components = std::mem::take(&mut self.components);
+        for c in &mut components {
+            if c.listens_to(event) {
+                c.stage_inputs(&mut self.mask_cache);
+            }
+        }
+        self.components = components;
+    }
+
+    /// Fires component hooks for `event` and writes dirty outputs back.
+    /// Must run after `commit_event_log` (the same edge's RTL then never
+    /// observes component outputs — NBA semantics).
+    fn fire_components(&mut self, event: &Event) {
+        if self.components.is_empty() {
+            return;
+        }
+        let mut components = std::mem::take(&mut self.components);
+        let mut wrote = false;
+        for c in &mut components {
+            if c.listens_to(event) {
+                c.fire(event, self.time);
+                c.drain_logs();
+                wrote |= c.apply_outputs(&mut self.ir.module_variables, self.ir.use_4state);
+            }
+        }
+        self.components = components;
+        if wrote {
+            self.comb_dirty = true;
+        }
+    }
+
+    pub fn component_finish_requested(&self) -> bool {
+        self.components.iter().any(|c| c.host.finish_requested())
+    }
+
+    pub fn components_failed(&self) -> bool {
+        self.components.iter().any(|c| c.host.failed())
+    }
+
+    pub fn take_component_failures(&mut self) -> Vec<String> {
+        let mut msgs = vec![];
+        for c in &mut self.components {
+            msgs.extend(c.host.take_failures());
+        }
+        msgs
+    }
+
+    /// Zero-time method call on a component instance. An `Err` carries the
+    /// failure messages the component reported (the test fails
+    /// immediately).
+    pub fn call_component_method(
+        &mut self,
+        inst: veryl_parser::resource_table::StrId,
+        method: veryl_parser::resource_table::StrId,
+        args: &[crate::component::host::HostValue],
+    ) -> Result<crate::component::host::HostValue, String> {
+        let Some(idx) = self.components.iter().position(|c| c.name_id == inst) else {
+            let name = veryl_parser::resource_table::get_str_value(inst).unwrap_or_default();
+            return Err(format!("unknown component instance `{name}`"));
+        };
+        let method_name = veryl_parser::resource_table::get_str_value(method).unwrap_or_default();
+        let mut components = std::mem::take(&mut self.components);
+        let c = &mut components[idx];
+        c.host.time = self.time;
+        let result = c.instance.call_method(&mut c.host, &method_name, args);
+        c.drain_logs();
+        let failures = c.host.take_failures();
+        self.components = components;
+        match result {
+            Some(value) if failures.is_empty() => Ok(value),
+            // Both `ctx.fail` during the call and a component error stop
+            // the test immediately.
+            None if failures.is_empty() => Err(format!("component method `{method_name}` failed")),
+            _ => Err(failures.join("\n")),
+        }
+    }
+
+    /// Fires `on_finish` on every component (end-of-test checks may still
+    /// fail the test).
+    pub fn finish_components(&mut self) {
+        let mut components = std::mem::take(&mut self.components);
+        for c in &mut components {
+            c.on_finish();
+            c.drain_logs();
+        }
+        self.components = components;
     }
 
     /// Evaluate `event_statements[event]` into the write log without
@@ -648,6 +805,11 @@ impl Simulator {
             }
         }
 
+        self.stage_components(event);
+        for &i in &pre_fire {
+            let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+            self.stage_components(&Event::Clock(vid));
+        }
         self.eval_event_stmts(event);
         for &i in &pre_fire {
             let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
@@ -658,6 +820,11 @@ impl Simulator {
             fired_mask[i] = true;
         }
         self.commit_event_log();
+        self.fire_components(event);
+        for &i in &pre_fire {
+            let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+            self.fire_components(&Event::Clock(vid));
+        }
         if watch_enabled {
             self.dump_watch("after_master_event");
         }
@@ -914,6 +1081,7 @@ impl Simulator {
         if let Some(dump) = &mut self.dump {
             dump.begin_dumpvars();
             dump.dump_all_vars(&self.dump_vars, self.ir.use_4state);
+            Self::dump_trace_vars(dump, &self.trace_dump_vars, &self.components);
             dump.end_dumpvars();
         }
     }
@@ -927,13 +1095,49 @@ impl Simulator {
             let dump = self.dump.as_mut().unwrap();
             dump.timestamp(self.time);
             dump.dump_all_vars(&self.dump_vars, self.ir.use_4state);
+            Self::dump_trace_vars(dump, &self.trace_dump_vars, &self.components);
         }
     }
 
+    fn dump_trace_vars(
+        dump: &mut WaveDumper,
+        trace_dump_vars: &[(crate::wave_dumper::VarHandle, usize, usize)],
+        components: &[RuntimeComponent],
+    ) {
+        for &(handle, comp_idx, trace_idx) in trace_dump_vars {
+            let var = &components[comp_idx].host.trace_vars[trace_idx];
+            let mut value = crate::component::runtime::words_to_value(&var.words, var.width);
+            // Excess high bits written by the component must not leak
+            // into the waveform.
+            value.trunc(var.width as usize);
+            dump.change_vector(handle, &value);
+        }
+    }
+
+    /// Sets up waveform dumping. Called via `Simulator::new` when no
+    /// components are involved; the native-test flow calls `attach_dump`
+    /// after `init_components` instead, so component trace variables
+    /// (registered during `create`) make it into the header.
     fn setup_dump(&mut self, mut dumper: WaveDumper) {
         dumper.timescale();
         dumper.setup_module(&self.ir.module_variables, &mut self.dump_vars);
+        for (comp_idx, comp) in self.components.iter().enumerate() {
+            if comp.host.trace_vars.is_empty() {
+                continue;
+            }
+            dumper.add_module(&comp.name);
+            for (trace_idx, var) in comp.host.trace_vars.iter().enumerate() {
+                let handle = dumper.add_wire(var.width, &var.name);
+                self.trace_dump_vars.push((handle, comp_idx, trace_idx));
+            }
+            dumper.upscope();
+        }
         dumper.finish_header();
         self.dump = Some(dumper);
+    }
+
+    /// See `setup_dump`; the public entry used after `init_components`.
+    pub fn attach_dump(&mut self, dumper: WaveDumper) {
+        self.setup_dump(dumper);
     }
 }

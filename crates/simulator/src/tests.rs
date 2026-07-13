@@ -341,6 +341,8 @@ where
     }
 }
 
+mod component;
+mod component_sim;
 mod derived_clock;
 mod error;
 mod hier_ref;

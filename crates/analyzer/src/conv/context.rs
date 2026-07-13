@@ -82,10 +82,22 @@ pub struct Context {
     pub in_generic: bool,
     pub allow_component_as_factor: bool,
     pub in_test_module: bool,
+    pub in_dependency: bool,
     pub in_global_func: Option<Token>,
     pub in_if_reset: bool,
     /// Inside an initial/final block (testbench statement context).
     pub in_tb_block: bool,
+    /// Sink for component method calls hoisted out of the current
+    /// testbench statement's expressions; `Some` only while initial/final
+    /// statements convert. Each hoisted call runs as its own zero-time
+    /// statement immediately before the enclosing one.
+    pub tb_hoist: Option<Vec<crate::ir::Statement>>,
+    /// Names hoist temporaries uniquely within a module.
+    pub tb_hoist_count: usize,
+    /// Resolved numeric parameters of the external component instances
+    /// declared so far, for evaluating declared method width expressions.
+    pub tb_component_params:
+        crate::HashMap<veryl_parser::resource_table::StrId, Vec<(String, u64)>>,
     /// Elaborated components of module instances declared so far in the
     /// current module, for hierarchical references from testbench code.
     /// Child module bodies convert in fresh contexts (`inherit` does not
@@ -140,6 +152,10 @@ impl Context {
 
     pub fn set_project_name(&mut self, project_name: &str) {
         self.project_name = Some(project_name.to_string());
+    }
+
+    pub fn project_name(&self) -> Option<&str> {
+        self.project_name.as_deref()
     }
 
     pub fn enable_conv_profiler(&mut self) {

@@ -39,7 +39,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
-          targets: ${{ matrix.target }}
+          # wasm32 std lets the wasm component transport tests build their
+          # guest fixture; without it they skip silently.
+          targets: ${{ matrix.target }}, wasm32-unknown-unknown
       # rust-cache caches ~/.cargo and target/ (dependency compilation) so cargo
       # skips deps; sccache (content-addressed) then serves the workspace crates,
       # which rust-cache alone cannot reuse across runs (cargo's mtime fingerprints

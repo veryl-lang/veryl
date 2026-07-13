@@ -23,6 +23,7 @@ use veryl_parser::veryl_walker::{Handler, VerylWalker};
 
 pub struct AnalyzerPass1 {
     handlers: Pass1Handlers,
+    is_dependency: bool,
 }
 
 impl AnalyzerPass1 {
@@ -34,6 +35,7 @@ impl AnalyzerPass1 {
     ) -> Self {
         AnalyzerPass1 {
             handlers: Pass1Handlers::new(build_opt, lint_opt, is_dependency, project_name),
+            is_dependency,
         }
     }
 }
@@ -41,6 +43,13 @@ impl AnalyzerPass1 {
 impl VerylWalker for AnalyzerPass1 {
     fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
         Some(self.handlers.get_handlers())
+    }
+
+    // Dependency testbenches are not part of the consumer's design, like
+    // dependency tests in cargo. Their symbols may not even resolve in the
+    // consumer's context (e.g. bare `$comp` names).
+    fn skip_description_group(&mut self, arg: &DescriptionGroup) -> bool {
+        self.is_dependency && crate::attribute::has_test_attribute(arg)
     }
 }
 
@@ -89,7 +98,27 @@ impl Analyzer {
     pub fn new(metadata: &Metadata) -> Self {
         let prj = insert_namespace_symbol(&metadata.project.name, true);
         insert_project_property_symbols(prj, &metadata.properties);
-
+        // A package whose manifest is not available (never built nor
+        // published) contributes no symbols; references then fail to
+        // resolve as usual. Export names are validated to be identifiers
+        // during collection, so a `::` can only be a dependency prefix.
+        let manifests = metadata.collect_component_manifests();
+        let mut own_names: Vec<&str> = vec![];
+        let mut dep_names: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for (key, _) in &manifests {
+            match key.split_once("::") {
+                None => own_names.push(key),
+                Some((project, name)) => dep_names.entry(project).or_default().push(name),
+            }
+        }
+        crate::tb_component::insert_external_components(&own_names);
+        for (project, names) in &dep_names {
+            crate::tb_component::insert_dependency_components(project, names);
+        }
+        for (key, manifest) in manifests {
+            let key = resource_table::insert_str(&key);
+            crate::component_manifest_table::insert(key, manifest);
+        }
         for locks in metadata.lockfile.lock_table.values() {
             for lock in locks {
                 let prj = insert_namespace_symbol(&lock.name, lock.visible);
@@ -186,6 +215,9 @@ impl Analyzer {
         let mut ret = Vec::new();
 
         context.config.retain_component_body = ir.is_some();
+        context.in_dependency = context
+            .project_name()
+            .is_some_and(|x| x != self.project_name);
         context.config.instance_depth_limit = self.build_opt.instance_depth_limit;
         context.config.instance_total_limit = self.build_opt.instance_total_limit;
         context.config.function_instance_depth_limit = self.build_opt.function_instance_depth_limit;
@@ -213,6 +245,7 @@ impl Analyzer {
 
     pub fn clear(&self) {
         attribute_table::clear();
+        crate::component_manifest_table::clear();
         msb_table::clear();
         // `symbol_table::clear` also resets the scope arena (it re-registers
         // builtins that intern their scopes), keeping the two tables in sync.

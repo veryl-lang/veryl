@@ -9,7 +9,8 @@ use crate::scope;
 use crate::sv_system_function;
 use crate::symbol::{
     ConnectTarget, Direction, DocComment, GenericBoundKind, GenericMap, GenericTable,
-    GenericTables, InstanceProperty, Symbol, SymbolId, SymbolKind, TestProperty, TypeKind,
+    GenericTables, InstanceProperty, Symbol, SymbolId, SymbolKind, TbComponentKind, TestProperty,
+    TypeKind,
 };
 use crate::symbol_path::{
     GenericSymbol, GenericSymbolPath, GenericSymbolPathNamespace, SymbolPath, SymbolPathNamespace,
@@ -303,6 +304,12 @@ impl SymbolTable {
 
             match &symbol.found.kind {
                 SymbolKind::SystemVerilog => context.sv_member = true,
+                // A user-defined component's interface is only known at
+                // simulator load time; accept any member like a
+                // SystemVerilog blackbox.
+                SymbolKind::TbComponent(x) if matches!(x.kind, TbComponentKind::External(_)) => {
+                    context.sv_member = true
+                }
                 SymbolKind::Parameter(x) if !x.is_proto => {
                     if matches!(x.r#type.kind, TypeKind::Type) {
                         let value = x.value.as_ref().unwrap();
@@ -348,8 +355,17 @@ impl SymbolTable {
             SymbolKind::GenericInstance(_) => self.trace_generic_instance(context, &found),
             SymbolKind::GenericParameter(_) => self.trace_generic_parameter(context, &found),
             _ => {
-                if matches!(found.kind, SymbolKind::SystemVerilog) {
-                    context.sv_member = true;
+                match &found.kind {
+                    SymbolKind::SystemVerilog => context.sv_member = true,
+                    // External component members are only known at simulator
+                    // load time; accept any member like a SystemVerilog
+                    // blackbox.
+                    SymbolKind::TbComponent(x)
+                        if matches!(x.kind, TbComponentKind::External(_)) =>
+                    {
+                        context.sv_member = true
+                    }
+                    _ => {}
                 }
                 context.set_inner(&found);
                 context.last_found_type = Some(found.id);
@@ -671,9 +687,19 @@ impl SymbolTable {
             SymbolKind::AliasPackage(x) => {
                 context = self.trace_type_path(context, &x.target)?;
             }
-            SymbolKind::Enum(_) | SymbolKind::Namespace | SymbolKind::TbComponent(_) => {
+            SymbolKind::Enum(_) | SymbolKind::Namespace => {
                 context.set_inner(found);
                 context.inner = true;
+            }
+            SymbolKind::TbComponent(x) => {
+                context.set_inner(found);
+                context.inner = true;
+                // External components have no method symbols (the interface
+                // is known only at simulator load time); accept any member
+                // like a SystemVerilog blackbox.
+                if matches!(x.kind, TbComponentKind::External(_)) {
+                    context.sv_member = true;
+                }
             }
             SymbolKind::SystemVerilog => {
                 context.set_inner(found);
@@ -1309,11 +1335,15 @@ impl SymbolTable {
 
             // A segment whose arguments do not mangle to a distinct name (none, or
             // unresolved generic parameters) carries no instantiation — the mangled
-            // walk resolves its base, so the structural walk does too. Otherwise
-            // navigate to the instance through the structural index keyed by
-            // (enclosing scope, base template, arguments), the identity the mangled
-            // name encodes.
-            let found: &'a Rc<Symbol> = if segment.mangled() == segment.base() {
+            // walk resolves its base, so the structural walk does too. A testbench
+            // component also resolves to its base: its generic arguments are
+            // instance parameters validated against the interface manifest, not a
+            // monomorphization. Otherwise navigate to the instance through the
+            // structural index keyed by (enclosing scope, base template,
+            // arguments), the identity the mangled name encodes.
+            let found: &'a Rc<Symbol> = if segment.mangled() == segment.base()
+                || matches!(base.kind, SymbolKind::TbComponent(_))
+            {
                 base
             } else {
                 // When the base template is reached through a generic-instance
@@ -2265,7 +2295,7 @@ impl ResolveContext<'_> {
     }
 }
 
-const DEFINED_NAMESPACES: [&str; 3] = ["$sv", "$std", "$tb"];
+const DEFINED_NAMESPACES: [&str; 4] = ["$sv", "$std", "$tb", "$comp"];
 
 // Refer IEEE Std 1800-2023 Table B.1 - Reserved keywords
 // This list must be sorted to enable binary search

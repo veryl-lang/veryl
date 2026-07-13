@@ -85,6 +85,15 @@ pub enum MetadataError {
     #[error("{project} @ {url} is not found")]
     ProjectNotFound { url: UrlPath, project: String },
 
+    #[diagnostic(
+        code(MetadataError::UnpublishedDependency),
+        help(
+            "run `veryl publish` in the dependency to create Veryl.pub; for local development, a path dependency (`{name} = {{ path = \"...\" }}`) does not require publishing"
+        )
+    )]
+    #[error("dependency `{name}` has no published release (Veryl.pub not found in the repository)")]
+    UnpublishedDependency { name: String },
+
     #[diagnostic(code(MetadataError::InvalidDependency), help(""))]
     #[error("dependency to {name} is invalid because {cause}")]
     InvalidDependency { name: String, cause: String },

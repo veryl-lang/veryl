@@ -17,6 +17,7 @@ pub mod cmd_synth;
 pub mod cmd_test;
 pub mod cmd_translate;
 pub mod cmd_update;
+pub mod component_publish;
 pub mod context;
 pub mod diff;
 pub mod doc;
@@ -119,6 +120,11 @@ pub struct OptTranslate {
 #[derive(Args)]
 pub struct OptNew {
     pub path: PathBuf,
+
+    /// Create a user-defined verification component (a Rust cargo package
+    /// usable as `$comp::<name>`) instead of a Veryl project
+    #[arg(long)]
+    pub component: bool,
 }
 
 /// Create a new project in an existing directory
@@ -247,6 +253,12 @@ pub struct OptTest {
     /// skipped automatically when tests run on a single worker.
     #[arg(long, alias = "nocapture")]
     pub no_capture: bool,
+
+    /// Base seed for user-defined component instances. Unset (and no
+    /// `[test].seed`) draws a fresh random seed each run; pass a value to
+    /// reproduce a previous run. Overrides `[test].seed` in Veryl.toml.
+    #[arg(long)]
+    pub seed: Option<u64>,
 
     /// Run native tests in four-state (X/Z) mode. Also settable via
     /// `[test].four_state`.
