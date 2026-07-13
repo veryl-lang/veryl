@@ -377,6 +377,94 @@ fn hier_ref_instance_array_diagnosed() {
     );
 }
 
+// A generate-for block stores its children under a `label[index]` segment
+// (e.g. `g_leaf[0]`); a testbench reference must fold that hop to reach the
+// instance inside. Each iteration is given a distinct value so a wrong fold
+// (or one that collapses every index to the same instance) is observable.
+const GEN_HIER_DUT: &str = r#"
+    module GLeaf (
+        clk  : input clock    ,
+        i_val: input logic<32>,
+    ) {
+        #[allow(unused_variable)]
+        var mem: logic<32>;
+        always_ff {
+            mem = i_val;
+        }
+    }
+
+    module GMid (
+        clk: input clock,
+    ) {
+        for i in 0..2 :g_leaf {
+            inst u_leaf: GLeaf (clk, i_val: 32'hcafe_0000 + i);
+        }
+    }
+
+    module GDeepTop (
+        clk: input clock,
+    ) {
+        inst u_mid: GMid (clk);
+    }
+"#;
+
+fn gen_hier_testbench(dut_type: &str, body: &str) -> String {
+    format!(
+        r#"
+    {GEN_HIER_DUT}
+
+    #[test(hier_test)]
+    module hier_test {{
+        inst clk: $tb::clock_gen;
+
+        inst dut: {dut_type} (clk);
+
+        initial {{
+            clk.next();
+            {body}
+            $finish();
+        }}
+    }}
+    "#
+    )
+}
+
+#[test]
+fn hier_ref_generate_block_direct() {
+    // Generate block directly under the DUT: `dut.g_leaf[0].u_leaf.mem`.
+    let code = gen_hier_testbench(
+        "GMid",
+        r#"
+            $assert(dut.g_leaf[0].u_leaf.mem == 32'hcafe_0000, "g0");
+            $assert(dut.g_leaf[1].u_leaf.mem == 32'hcafe_0001, "g1");
+        "#,
+    );
+    let results = run_hier_test(&code);
+    assert!(!results.is_empty());
+    for (config, result, _) in results {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn hier_ref_generate_block_through_inst() {
+    // Generate block one plain-instance hop below the DUT:
+    // `dut.u_mid.g_leaf[0].u_leaf.mem`. The hop must descend into the plain
+    // instance's module before the generate label can be folded.
+    let code = gen_hier_testbench(
+        "GDeepTop",
+        r#"
+            $assert(dut.u_mid.g_leaf[0].u_leaf.mem == 32'hcafe_0000, "g0");
+            $assert(dut.u_mid.g_leaf[1].u_leaf.mem == 32'hcafe_0001, "g1");
+        "#,
+    );
+    let results = run_hier_test(&code);
+    assert!(!results.is_empty());
+    for (config, result, _) in results {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
 #[test]
 fn hier_ref_nested_test_module_resolves_locally() {
     // A test module instantiated inside another test module carries its own
