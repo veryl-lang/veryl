@@ -102,32 +102,17 @@ impl Conv<&ScopedIdentifier> for VarPathSelect {
     }
 }
 
-/// Folds a `g_leaf[0]` generate-block hop into one combined `label[index]`
-/// segment, the form the IR stores the block under (and the block's genvar
-/// variable path uses). Returns the folded name and the block's inner namespace,
-/// or `None` if the hop is not a constant-index generate block.
-///
-/// `block_scope`, the previous hop's block namespace, distinguishes the first
-/// block of a chain -- reached across an instance boundary, so the symbol table
-/// reports it invisible and it must be recovered from the reference path -- from
-/// a nested block, which lives in `block_scope` past that boundary.
-fn fold_generate_block_index(
-    context: &mut Context,
+/// Resolves one hop segment of a hierarchical reference. Within a known `scope`
+/// (the previous hop's inner namespace) the lookup is direct; the first hop
+/// crosses an instance boundary the symbol table treats as invisible, so its
+/// target is recovered from where that walk stopped.
+fn resolve_hop_symbol(
     generic_path: &GenericSymbolPath,
-    block_scope: Option<&Namespace>,
+    scope: Option<&Namespace>,
     base_token: &Token,
-    selects: &[ExpressionIdentifierList0List],
-) -> Option<(StrId, Namespace)> {
-    // A generate block has one index dimension and no range.
-    let [select] = selects else {
-        return None;
-    };
-    if select.select.select_opt.is_some() {
-        return None;
-    }
-
-    let block: Symbol = if let Some(scope) = block_scope {
-        (*symbol_table::resolve((base_token.text, scope)).ok()?.found).clone()
+) -> Option<Symbol> {
+    if let Some(scope) = scope {
+        Some((*symbol_table::resolve((base_token.text, scope)).ok()?.found).clone())
     } else {
         let i = generic_path.paths.len() - 1;
         let symbol = match symbol_table::resolve_base_path(generic_path, i, base_token.id) {
@@ -135,13 +120,39 @@ fn fold_generate_block_index(
             Err(err) => *err.last_found?,
         };
         // `last_found` is wherever the invisible walk stopped; require it to be
-        // this segment so a deeper hop is not read as the block it stopped at.
-        if symbol.token.text != base_token.text {
-            return None;
-        }
-        symbol
+        // this segment so a deeper hop is not read as the node it stopped at.
+        (symbol.token.text == base_token.text).then_some(symbol)
+    }
+}
+
+/// The inner namespace of the module an instance instantiates, so a plain
+/// instance hop (`u_mid`) can be descended before resolving a generate block
+/// below it (`u_mid.g_leaf[0]`).
+fn instance_module_scope(inst: &Symbol) -> Option<Namespace> {
+    let SymbolKind::Instance(prop) = &inst.kind else {
+        return None;
     };
+    let type_symbol =
+        symbol_table::resolve((&prop.type_name.generic_path(), &inst.namespace)).ok()?;
+    Some(type_symbol.found.inner_namespace())
+}
+
+/// Folds a `g_leaf[0]` generate-block hop into one `label[index]` segment, the
+/// form the IR stores the block (and its genvar variable path) under.
+fn fold_generate_block_index(
+    context: &mut Context,
+    block: &Symbol,
+    base_token: &Token,
+    selects: &[ExpressionIdentifierList0List],
+) -> Option<StrId> {
     if !matches!(block.kind, SymbolKind::Block) {
+        return None;
+    }
+    // A generate block has one index dimension and no range.
+    let [select] = selects else {
+        return None;
+    };
+    if select.select.select_opt.is_some() {
         return None;
     }
 
@@ -152,10 +163,7 @@ fn fold_generate_block_index(
         return None;
     }
     let index = comptime.get_value().ok()?.to_usize()?;
-    Some((
-        generate_block_label(base_token.text, index),
-        block.inner_namespace(),
-    ))
+    Some(generate_block_label(base_token.text, index))
 }
 
 impl Conv<&ExpressionIdentifier> for VarPathSelect {
@@ -197,7 +205,7 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
             context.inc_select_dim();
         }
 
-        let mut block_scope: Option<Namespace> = None;
+        let mut current_scope: Option<Namespace> = None;
         for x in &value.expression_identifier_list0 {
             let base_token = x.identifier.identifier_token.token;
             path.push(base_token.text);
@@ -206,24 +214,33 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
                 arguments: vec![],
             });
 
-            // Generate-block hops only occur in cross-instance references, valid
-            // only in a test module; gating there keeps the lookup off the hot
-            // path for ordinary RTL member accesses.
-            if context.in_test_module
+            // Cross-instance hops only appear in test modules; gating the lookups
+            // there keeps them off the hot path for ordinary RTL member accesses.
+            let hop = if context.in_test_module {
+                resolve_hop_symbol(&generic_path, current_scope.as_ref(), &base_token)
+            } else {
+                None
+            };
+
+            // Generate-block hop: absorb `[0]` into the segment, then descend so a
+            // nested generate hop resolves in the block's scope.
+            if let Some(symbol) = &hop
                 && !x.expression_identifier_list0_list.is_empty()
-                && let Some((folded, inner)) = fold_generate_block_index(
+                && let Some(folded) = fold_generate_block_index(
                     context,
-                    &generic_path,
-                    block_scope.as_ref(),
+                    symbol,
                     &base_token,
                     &x.expression_identifier_list0_list,
                 )
             {
                 *path.0.last_mut().unwrap() = folded;
-                block_scope = Some(inner);
+                current_scope = Some(symbol.inner_namespace());
                 continue;
             }
-            block_scope = None;
+
+            // Plain-instance hop: descend into the instantiated module so a
+            // following generate hop resolves there; any other node ends the chain.
+            current_scope = hop.as_ref().and_then(instance_module_scope);
 
             context
                 .select_paths
