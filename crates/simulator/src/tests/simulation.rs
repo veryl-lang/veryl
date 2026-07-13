@@ -18012,3 +18012,391 @@ fn wide_concat_long_repeat_no_stack_overflow() {
         }
     }
 }
+
+// ── Read-during-write NBA semantics for arrays (memories) ──
+// A registered read of an array element and a same-edge write to that element in
+// another always_ff must both sample the pre-edge (current) state (read-OLD), per
+// IEEE NBA. Verilator is read-OLD; a sim that applies a dynamic-index array write
+// in place during evaluation (read-NEW) silently masks every such hazard.
+
+/// UNPACKED (multi-RMW) dynamic-index FF: an element receiving >=2 partial writes
+/// per event stays dual-slot so the second partial write forwards the first's
+/// result. The ff_is_packed skip must NOT apply here (dst_base = next slot), so
+/// this exercises the path the fix leaves unchanged — a regression here would show
+/// as a lost partial write (composition broken) or a broken read-OLD.
+#[test]
+fn multi_rmw_dynamic_index_composes_and_read_is_old() {
+    let code = r#"
+    module Top (
+        i_clk   : input  '_ clock,
+        i_rst   : input  '_ reset,
+        i_idx   : input  '_ logic<2>,
+        o_rlo   : output    logic<8>,
+        o_mlo   : output    logic<8>,
+        o_mhi   : output    logic<8>,
+    ) {
+        var mem  : logic<16> [4];
+        var rdata: logic<16>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                mem[0] = 0;
+                mem[1] = 0;
+                mem[2] = 0;
+                mem[3] = 0;
+            } else {
+                // Two partial writes to the SAME element in one event (multi-RMW):
+                // the high-byte write must see the low-byte write's element and
+                // compose, not clobber it.
+                mem[i_idx][7:0]  = mem[i_idx][7:0] + 1;
+                mem[i_idx][15:8] = mem[i_idx][15:8] + 2;
+            }
+        }
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                rdata = 0;
+            } else {
+                rdata = mem[i_idx];
+            }
+        }
+        assign o_rlo = rdata[7:0];
+        assign o_mlo = mem[i_idx][7:0];
+        assign o_mhi = mem[i_idx][15:8];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_idx", Value::new(0, 2, false));
+        sim.step(&rst);
+        for n in 1..=5u8 {
+            sim.step(&clk);
+            // Both partial writes compose: low byte = n, high byte = 2n.
+            assert_eq!(
+                sim.get("o_mlo").unwrap(),
+                Value::new(n as u64, 8, false),
+                "multi-RMW low byte must compose [jit={} aot_c={}]",
+                config.use_jit,
+                config.aot_c,
+            );
+            assert_eq!(
+                sim.get("o_mhi").unwrap(),
+                Value::new((2 * n) as u64, 8, false),
+                "multi-RMW high byte must compose (not clobbered) [jit={} aot_c={}]",
+                config.use_jit,
+                config.aot_c,
+            );
+            // The separate read block still sees read-OLD.
+            assert_eq!(
+                sim.get("o_rlo").unwrap(),
+                Value::new((n - 1) as u64, 8, false),
+                "multi-RMW read block must be read-OLD [jit={} aot_c={}]",
+                config.use_jit,
+                config.aot_c,
+            );
+        }
+    }
+}
+
+/// `rdata <= mem[0]` in one block, `mem[0] <= mem[0] + 1` in another. After N
+/// clocks rdata must lag mem[0] by one (read-OLD): rdata == mem[0] - 1.
+#[test]
+fn array_read_during_write_is_read_old() {
+    let code = r#"
+    module Top (
+        i_clk  : input  '_ clock,
+        i_rst  : input  '_ reset,
+        o_rdata: output    logic<8>,
+        o_mem0 : output    logic<8>,
+    ) {
+        var mem  : logic<8> [4];
+        var rdata: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                rdata = 0;
+            } else {
+                rdata = mem[0];
+            }
+        }
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                mem[0] = 0;
+                mem[1] = 0;
+                mem[2] = 0;
+                mem[3] = 0;
+            } else {
+                mem[0] = mem[0] + 1;
+            }
+        }
+        assign o_rdata = rdata;
+        assign o_mem0  = mem[0];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.step(&rst);
+        // After reset: mem[0]=0, rdata=0.
+        for n in 1..=5u8 {
+            sim.step(&clk);
+            // mem[0] was (n-1) before this edge, so it becomes n; rdata (read-OLD)
+            // captures the pre-edge mem[0] = (n-1).
+            let mem0 = sim.get("o_mem0").unwrap();
+            let rdata = sim.get("o_rdata").unwrap();
+            assert_eq!(
+                mem0,
+                Value::new(n as u64, 8, false),
+                "mem[0] must be {n} after {n} clocks",
+            );
+            assert_eq!(
+                rdata,
+                Value::new((n - 1) as u64, 8, false),
+                "read-during-write must be read-OLD: rdata must lag mem[0] by one \
+                 (expected {}, read-NEW would give {n})",
+                n - 1,
+            );
+        }
+    }
+}
+
+/// Same as above but with the WRITE block declared BEFORE the read block and a
+/// masked read-modify-write (`mem[i] = (mem[i] & ~msk) | (data & msk)`) — this is
+/// heliodor's dcache data layout (the byte-write-enable write block precedes the
+/// registered read block). If block-declaration order or the self-referential RMW
+/// makes the sim apply the write in place before the read block runs, the read
+/// goes read-NEW here while the read-first ordering above stays read-OLD.
+#[test]
+fn array_rmw_write_before_read_is_read_old() {
+    let code = r#"
+    module Top (
+        i_clk  : input  '_ clock,
+        i_rst  : input  '_ reset,
+        o_rdata: output    logic<8>,
+        o_mem0 : output    logic<8>,
+    ) {
+        var mem  : logic<8> [4];
+        var rdata: logic<8>;
+        // WRITE block first (masked RMW), like heliodor's dcache data_k.
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                mem[0] = 0;
+                mem[1] = 0;
+                mem[2] = 0;
+                mem[3] = 0;
+            } else {
+                mem[0] = (mem[0] & 8'hf0) | (((mem[0] & 8'h0f) + 1) & 8'h0f);
+            }
+        }
+        // READ block second.
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                rdata = 0;
+            } else {
+                rdata = mem[0];
+            }
+        }
+        assign o_rdata = rdata;
+        assign o_mem0  = mem[0];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.step(&rst);
+        for n in 1..=5u8 {
+            sim.step(&clk);
+            assert_eq!(sim.get("o_mem0").unwrap(), Value::new(n as u64, 8, false));
+            assert_eq!(
+                sim.get("o_rdata").unwrap(),
+                Value::new((n - 1) as u64, 8, false),
+                "masked-RMW write-before-read must still be read-OLD",
+            );
+        }
+    }
+}
+
+/// Dynamic (combinational, input-driven) index for both read and write — the
+/// heliodor case (rd1_index / d1_idx are combinational). A simulator that treats
+/// a constant-index element as a scalar FF (write-logged, read-OLD) but a
+/// dynamic-index array as a memory updated IN PLACE would read-NEW here only.
+#[test]
+fn array_dynamic_index_read_during_write_is_read_old() {
+    let code = r#"
+    module Top (
+        i_clk   : input  '_ clock,
+        i_rst   : input  '_ reset,
+        i_idx   : input  '_ logic<2>,
+        o_rdata : output    logic<8>,
+        o_memval: output    logic<8>,
+    ) {
+        var mem  : logic<8> [4];
+        var rdata: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                mem[0] = 0;
+                mem[1] = 0;
+                mem[2] = 0;
+                mem[3] = 0;
+            } else {
+                mem[i_idx] = mem[i_idx] + 1;
+            }
+        }
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                rdata = 0;
+            } else {
+                rdata = mem[i_idx];
+            }
+        }
+        assign o_rdata  = rdata;
+        assign o_memval = mem[i_idx];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_idx", Value::new(0, 2, false));
+        sim.step(&rst);
+        for n in 1..=5u8 {
+            sim.step(&clk);
+            assert_eq!(sim.get("o_memval").unwrap(), Value::new(n as u64, 8, false));
+            assert_eq!(
+                sim.get("o_rdata").unwrap(),
+                Value::new((n - 1) as u64, 8, false),
+                "dynamic-index read-during-write must be read-OLD (read-NEW would give {n}) \
+                 [backend jit={} aot_c={}]",
+                config.use_jit,
+                config.aot_c,
+            );
+        }
+    }
+}
+
+/// Wide (>64-bit) dynamic-index element, the heliodor dcache case (data_k is
+/// `logic<512>[...]`). Exercises the wide FF-write emit path (interpret
+/// `emit_ff_log` wide / AOT-C `emit_event_ff_assign_dynamic_wide` / Cranelift
+/// wide) which a narrow test cannot reach.
+#[test]
+fn wide_array_dynamic_index_read_during_write_is_read_old() {
+    let code = r#"
+    module Top (
+        i_clk   : input  '_ clock,
+        i_rst   : input  '_ reset,
+        i_idx   : input  '_ logic<2>,
+        o_rlo   : output    logic<64>,
+        o_mlo   : output    logic<64>,
+    ) {
+        var mem  : logic<128> [4];
+        var rdata: logic<128>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                mem[0] = 0;
+                mem[1] = 0;
+                mem[2] = 0;
+                mem[3] = 0;
+            } else {
+                mem[i_idx] = mem[i_idx] + 1;
+            }
+        }
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                rdata = 0;
+            } else {
+                rdata = mem[i_idx];
+            }
+        }
+        assign o_rlo = rdata[63:0];
+        assign o_mlo = mem[i_idx][63:0];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_idx", Value::new(0, 2, false));
+        sim.step(&rst);
+        for n in 1..=5u8 {
+            sim.step(&clk);
+            assert_eq!(sim.get("o_mlo").unwrap(), Value::new(n as u64, 64, false));
+            assert_eq!(
+                sim.get("o_rlo").unwrap(),
+                Value::new((n - 1) as u64, 64, false),
+                "wide dynamic-index read-during-write must be read-OLD \
+                 [backend jit={} aot_c={}]",
+                config.use_jit,
+                config.aot_c,
+            );
+        }
+    }
+}
+
+/// The scalar analogue, as a control: a registered read of a plain (non-array)
+/// FF while it is written the same edge is already read-OLD via the write log.
+/// If this passes but the array test fails, the bug is specific to array writes
+/// bypassing the write log.
+#[test]
+fn scalar_read_during_write_is_read_old() {
+    let code = r#"
+    module Top (
+        i_clk  : input  '_ clock,
+        i_rst  : input  '_ reset,
+        o_rdata: output    logic<8>,
+        o_val  : output    logic<8>,
+    ) {
+        var val  : logic<8>;
+        var rdata: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                rdata = 0;
+            } else {
+                rdata = val;
+            }
+        }
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                val = 0;
+            } else {
+                val = val + 1;
+            }
+        }
+        assign o_rdata = rdata;
+        assign o_val   = val;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.step(&rst);
+        for n in 1..=5u8 {
+            sim.step(&clk);
+            assert_eq!(sim.get("o_val").unwrap(), Value::new(n as u64, 8, false));
+            assert_eq!(
+                sim.get("o_rdata").unwrap(),
+                Value::new((n - 1) as u64, 8, false),
+                "scalar read-during-write must be read-OLD",
+            );
+        }
+    }
+}

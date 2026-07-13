@@ -124,6 +124,12 @@ pub struct AssignDynamicStatement {
     /// `None` outside the FF-2state-narrow emit gate (see
     /// `apply_values_ptr`).
     pub ff_log_base_current_offset: Option<u32>,
+    /// `dst_base` is the FF current slot (packed, single-slot array). eval_step
+    /// then skips the in-place write so another block's same-edge read stays
+    /// read-OLD (NBA), not read-NEW; the write-log commit delivers the value.
+    /// Unpacked (dst_base = next slot) keeps the store for multi-RMW forwarding.
+    /// Mirrors AssignStatement::ff_is_packed.
+    pub ff_is_packed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1667,6 +1673,9 @@ impl ProtoStatement {
                     } else {
                         None
                     };
+                    // is_ff() so a comb-target dynamic write keeps its in-place store.
+                    let ff_is_packed =
+                        x.dst_base.is_ff() && (x.dst_base.raw() == x.dst_ff_current_base_offset);
                     let dst_index_expr = x.dst_index_expr.apply_values_ptr(
                         ff_values_ptr,
                         ff_len,
@@ -1707,6 +1716,7 @@ impl ProtoStatement {
                         rhs_select: x.rhs_select,
                         expr,
                         ff_log_base_current_offset,
+                        ff_is_packed,
                     })
                 }
                 ProtoStatement::If(x) => Statement::If(x.apply_values_ptr(
@@ -2208,9 +2218,11 @@ impl AssignDynamicStatement {
                 )
             };
             current.assign(value, beg, end);
-            unsafe {
-                write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
-            };
+            if !self.ff_is_packed {
+                unsafe {
+                    write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
+                };
+            }
             push_log(&current);
         } else if let Some((beg, end)) = self.select {
             let mut current = unsafe {
@@ -2223,14 +2235,20 @@ impl AssignDynamicStatement {
                 )
             };
             current.assign(value, beg, end);
-            unsafe {
-                write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
-            };
+            if !self.ff_is_packed {
+                unsafe {
+                    write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &current)
+                };
+            }
             push_log(&current);
         } else {
             let mut value = value;
             value.trunc(self.dst_width);
-            unsafe { write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &value) };
+            if !self.ff_is_packed {
+                unsafe {
+                    write_native_value(dst, self.dst_native_bytes, self.dst_use_4state, &value)
+                };
+            }
             push_log(&value);
         }
     }
