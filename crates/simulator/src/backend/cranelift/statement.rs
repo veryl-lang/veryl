@@ -563,9 +563,11 @@ impl ProtoAssignDynamicStatement {
         let stride_val = builder.ins().iconst(I64, self.dst_stride as i64);
         let byte_offset = builder.ins().imul(clamped, stride_val);
 
-        // Always store into `dst_base`, matching the dynamic interpret path;
-        // for a packed FF this is idempotent with the log push to the same slot.
-        {
+        // Packed: skip the in-place store; the wide log push below delivers it
+        // read-OLD (NBA). Not "idempotent with the log" — it landed mid-event, so a
+        // same-event reader saw read-NEW. Unpacked keeps it for multi-RMW forwarding.
+        let ff_is_packed = self.dst_base.raw() == self.dst_ff_current_base_offset;
+        if !ff_is_packed {
             let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
             let addr = builder.ins().iadd(context.ff_values, base);
             let addr = builder.ins().iadd(addr, byte_offset);

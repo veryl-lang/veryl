@@ -2036,20 +2036,32 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
         )
     };
     let push = emit_log_push("_woff", "_wval", nb);
+    // Packed: skip the in-place store; the log push delivers it read-OLD (NBA).
+    // See AssignDynamicStatement::ff_is_packed. Unpacked keeps it.
+    let ff_is_packed = dst_base_raw == cur_base;
+    let store = if ff_is_packed {
+        String::new()
+    } else {
+        format!(
+            "*(({ct}*)(ff_values + {wbase:#x} + (intptr_t){stride} * (intptr_t)_idx)) = ({ct})_wval; ",
+            ct = cty,
+            wbase = dst_base_raw,
+            stride = a.dst_stride,
+        )
+    };
     Some(format!(
         "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
             uint64_t _wval = {pay}; \
-            *(({ct}*)(ff_values + {wbase:#x} + (intptr_t){stride} * (intptr_t)_idx)) = ({ct})_wval; \
+            {store}\
             unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
             {push} }});",
         idx = idx,
         max = max_idx,
         pay = payload,
-        ct = cty,
-        wbase = dst_base_raw,
-        stride = a.dst_stride,
+        store = store,
         cbase = cur_base,
+        stride = a.dst_stride,
         push = push,
     ))
 }
@@ -2091,14 +2103,20 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
         src = r.addr,
         p = wpack(nb, a.dst_width),
     ));
-    // Always store into `dst_base`, matching the dynamic interpret path; for a
-    // packed FF this is idempotent with the log push to the same slot.
-    let store = format!(
-        "vw_copy((uint8_t*)(ff_values + {wbase:#x} + (intptr_t){stride} * (intptr_t)_idx), \
-                 (const uint8_t*)_w{d}, {nb}u); ",
-        wbase = dst_base_raw,
-        stride = a.dst_stride,
-    );
+    // Packed: skip the in-place store; the wide log push below delivers it
+    // read-OLD (NBA). Not "idempotent with the log" — it landed mid-event, so a
+    // same-event reader saw read-NEW. Unpacked keeps it for multi-RMW forwarding.
+    let ff_is_packed = dst_base_raw == cur_base;
+    let store = if ff_is_packed {
+        String::new()
+    } else {
+        format!(
+            "vw_copy((uint8_t*)(ff_values + {wbase:#x} + (intptr_t){stride} * (intptr_t)_idx), \
+                     (const uint8_t*)_w{d}, {nb}u); ",
+            wbase = dst_base_raw,
+            stride = a.dst_stride,
+        )
+    };
     let push = emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), "_woff", nb);
     Some(format!(
         "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
