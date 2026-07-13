@@ -2648,6 +2648,108 @@ fn single_port_memory_infers_ram() {
 }
 
 #[test]
+fn byte_write_enable_folds_retention_read() {
+    // A read-modify-write `mem[a] = (mem[a] & ~m) | (d & m)` is a byte-write-
+    // enable: the retention read `mem[a]` supplies the "keep old bits" input and
+    // must fold into the write port's mask, NOT allocate a second read port. So
+    // this lookup-plus-RMW array is 1R1W (one lookup read + one masked write),
+    // not 2R1W (lookup read + retention read + write).
+    let code = r#"
+        module Bwe (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            wmask: input  logic<32> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = (mem[waddr] & ~wmask) | (wdata & wmask);
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Bwe");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+
+    assert_eq!(m.ram_blocks.len(), 1, "expected one inferred RAM block");
+    let ram = &m.ram_blocks[0];
+    assert_eq!(ram.depth, 64);
+    assert_eq!(ram.width, 32);
+    // The retention read folded into the mask → still 1 read (the lookup) + 1
+    // masked write. Without the fold this array would be 2R1W.
+    assert_eq!(
+        ram.read_ports.len(),
+        1,
+        "retention read must fold into the byte-enable, not a 2nd read port"
+    );
+    assert_eq!(ram.write_ports.len(), 1);
+    let wp = &ram.write_ports[0];
+    let mask = wp
+        .mask
+        .as_ref()
+        .expect("masked write must carry a byte-enable");
+    assert_eq!(mask.len(), ram.width, "mask width must equal data width");
+    assert_eq!(m.ffs.len(), 0, "RAM array must not expand to flip-flops");
+}
+
+#[test]
+fn byte_write_enable_frees_a_read_port_near_the_limit() {
+    // RAM_MAX_READ_PORTS is 16. With 16 distinct lookup reads the array is
+    // exactly at the limit; a masked write's retention read would be a 17th
+    // distinct read address and push it over, collapsing the array to
+    // flip-flops. Because the retention read folds into the byte-enable, the
+    // count stays 16 and the array still infers as a 16R1W RAM.
+    let n = 16;
+    let mut raddr_ports = String::new();
+    let mut read_expr = String::new();
+    for i in 0..n {
+        raddr_ports.push_str(&format!("            ra{i}: input  logic<6>  ,\n"));
+        if i > 0 {
+            read_expr.push_str(" ^ ");
+        }
+        read_expr.push_str(&format!("mem[ra{i}]"));
+    }
+    let code = format!(
+        r#"
+        module BweLimit (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<32> ,
+            wmask: input  logic<32> ,
+{raddr_ports}            rdata: output logic<32> ,
+        ) {{
+            var mem: logic<32> [64];
+            always_ff (clk) {{
+                if we {{
+                    mem[waddr] = (mem[waddr] & ~wmask) | (wdata & wmask);
+                }}
+            }}
+            assign rdata = {read_expr};
+        }}
+    "#
+    );
+    let (ir, top) = analyze(&code, "BweLimit");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(
+        m.ram_blocks.len(),
+        1,
+        "16 lookups + a folded retention read must still infer as RAM, not flops"
+    );
+    assert_eq!(m.ram_blocks[0].read_ports.len(), 16);
+    assert_eq!(m.ram_blocks[0].write_ports.len(), 1);
+    assert!(m.ram_blocks[0].write_ports[0].mask.is_some());
+    assert_eq!(m.ffs.len(), 0, "array must not expand to flip-flops");
+}
+
+#[test]
 fn reset_array_stays_flip_flops_by_default() {
     // Real SRAM has no reset, so a reset array is always kept as flip-flops; an
     // array meant to be SRAM is written reset-less in the RTL.
@@ -3116,6 +3218,7 @@ fn ram_block_area_timing_power_and_dump() {
                 addr: vec![0; ADDR_W],
                 data: vec![0; WIDTH],
                 enable: 0,
+                mask: None,
             }],
         }],
     };

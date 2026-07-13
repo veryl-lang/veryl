@@ -836,6 +836,10 @@ impl ConvContext {
                         addr: wp.addr.iter().map(|&n| remap(n)).collect(),
                         data: wp.data.iter().map(|&n| remap(n)).collect(),
                         enable: remap(wp.enable),
+                        mask: wp
+                            .mask
+                            .as_ref()
+                            .map(|m| m.iter().map(|&n| remap(n)).collect()),
                     })
                     .collect(),
             };

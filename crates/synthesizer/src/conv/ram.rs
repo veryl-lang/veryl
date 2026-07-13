@@ -429,6 +429,74 @@ fn write_factor_sig(s: &mut String, factor: &Factor) {
     }
 }
 
+/// If `expr` is a masked read-modify-write of RAM `vid` at `wr_index` —
+/// `(vid[wr_index] & ~m) | (d & m)`, each `&`/`|` commuting — return `(d, m)`.
+/// The retention read `vid[wr_index]` folds into the mask, so it costs no read
+/// port and a lookup-plus-RMW array stays 1R1W. Port counting (`read_pattern_ok`)
+/// and building (`conv::statement`) both call this, so they agree on which reads
+/// are retention reads.
+pub(crate) fn match_masked_write<'a>(
+    vid: air::VarId,
+    wr_index: &air::VarIndex,
+    expr: &'a Expression,
+) -> Option<(&'a Expression, &'a Expression)> {
+    let Expression::Binary(a, air::Op::BitOr, b, _) = expr else {
+        return None;
+    };
+    match_masked_arms(vid, wr_index, a, b).or_else(|| match_masked_arms(vid, wr_index, b, a))
+}
+
+/// `retain` = `vid[wr_index] & ~m`, `write` = `d & m`. The two masks must be
+/// structurally identical, else it isn't a clean masked write — some bits would
+/// be both kept and written, or neither.
+fn match_masked_arms<'a>(
+    vid: air::VarId,
+    wr_index: &air::VarIndex,
+    retain: &'a Expression,
+    write: &'a Expression,
+) -> Option<(&'a Expression, &'a Expression)> {
+    let Expression::Binary(ra, air::Op::BitAnd, rb, _) = retain else {
+        return None;
+    };
+    let notm: &Expression = if is_self_read(vid, wr_index, ra) {
+        rb
+    } else if is_self_read(vid, wr_index, rb) {
+        ra
+    } else {
+        return None;
+    };
+    let Expression::Unary(air::Op::BitNot, m_retain, _) = notm else {
+        return None;
+    };
+    let Expression::Binary(wa, air::Op::BitAnd, wb, _) = write else {
+        return None;
+    };
+    let m_sig = addr_signature(m_retain);
+    if addr_signature(wb) == m_sig {
+        Some((wa, wb))
+    } else if addr_signature(wa) == m_sig {
+        Some((wb, wa))
+    } else {
+        None
+    }
+}
+
+/// `expr` is exactly `vid[wr_index]`: a whole-word self-read at the write's own
+/// index, no bit/part select.
+fn is_self_read(vid: air::VarId, wr_index: &air::VarIndex, expr: &Expression) -> bool {
+    let Expression::Term(factor) = expr else {
+        return false;
+    };
+    let Factor::Variable(id, index, select, _) = &**factor else {
+        return false;
+    };
+    *id == vid
+        && select.is_empty()
+        && index.0.len() == 1
+        && wr_index.0.len() == 1
+        && addr_signature(&index.0[0]) == addr_signature(&wr_index.0[0])
+}
+
 /// `mem[addr]` with a single dynamic index dimension and no bit/part select.
 fn is_dynamic_whole_word(dst: &AssignDestination) -> bool {
     dst.index.0.len() == 1
@@ -540,8 +608,21 @@ fn for_each_read_in_dsts(dsts: &[AssignDestination], vid: air::VarId, f: &mut Re
 fn for_each_read_in_stmt(stmt: &Statement, vid: air::VarId, f: &mut ReadVisitor) {
     match stmt {
         Statement::Assign(a) => {
-            for_each_read_in_expr(&a.expr, vid, f);
-            for_each_read_in_dsts(&a.dst, vid, f);
+            // A masked write folds its retention read into the mask (see
+            // `match_masked_write`), so count only `d`/`m`/dst, not that read. A
+            // genuine read at the same index elsewhere is still a distinct
+            // factor and counted.
+            if a.dst.len() == 1
+                && a.dst[0].id == vid
+                && let Some((d, m)) = match_masked_write(vid, &a.dst[0].index, &a.expr)
+            {
+                for_each_read_in_expr(d, vid, f);
+                for_each_read_in_expr(m, vid, f);
+                for_each_read_in_dsts(&a.dst, vid, f);
+            } else {
+                for_each_read_in_expr(&a.expr, vid, f);
+                for_each_read_in_dsts(&a.dst, vid, f);
+            }
         }
         Statement::If(i) => {
             for_each_read_in_expr(&i.cond, vid, f);

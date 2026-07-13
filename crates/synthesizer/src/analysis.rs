@@ -560,7 +560,8 @@ pub fn compute_timing_top_n(
                 .addr
                 .iter()
                 .chain(wp.data.iter())
-                .chain(std::iter::once(&wp.enable));
+                .chain(std::iter::once(&wp.enable))
+                .chain(wp.mask.iter().flatten());
             for &net in inputs {
                 endpoints.push((
                     arrival[net as usize],
