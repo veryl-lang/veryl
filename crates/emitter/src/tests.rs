@@ -3271,6 +3271,73 @@ endmodule
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+function count_ones::<N: p32> (
+    x: input logic<N>,
+) -> logic<8> {
+    var n: logic<8>;
+    n = 0;
+    for i in 0..N {
+        if x[i] == 1 {
+            n = n + 1;
+        }
+    }
+    return n;
+}
+function helper (
+    x: input logic<16>,
+) -> logic<8> {
+    return count_ones::<16>(x);
+}
+module User (
+    i_x: input  logic<16>,
+    o_n: output logic<8> ,
+) {
+    always_comb {
+        o_n = helper(i_x);
+    }
+}
+    "#;
+
+    let expect = r#"
+
+
+module prj_User (
+    input  var logic [16-1:0] i_x,
+    output var logic [8-1:0]  o_n
+);
+    always_comb begin
+        o_n = helper(i_x);
+    end
+
+    function automatic logic [8-1:0] __count_ones__16(
+        input var logic [16-1:0] x
+    ) ;
+        logic [8-1:0] n;
+        n = 0;
+        for (int i = 0; i < 16; i++) begin
+            if (x[i] == 1) begin
+                n = n + 1;
+            end
+        end
+        return n;
+    endfunction
+    function automatic logic [8-1:0] helper(
+        input var logic [16-1:0] x
+    ) ;
+        return __count_ones__16(x);
+    endfunction
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]

@@ -369,6 +369,19 @@ impl ReferenceTable {
                     }
 
                     if (params.len() + n_args) == 0 {
+                        if symbol.found.is_global_function() {
+                            // A non-generic global function may call generic global functions.
+                            // `insert_subordinate_generic_instances` is used to connect the current namespace
+                            // and such functions.
+                            let namespace = scope::namespace(scope, define_context);
+                            Self::insert_subordinate_generic_instances(
+                                &namespace,
+                                &symbol.found,
+                                None,
+                                &generic_maps,
+                                None,
+                            );
+                        }
                         continue;
                     }
 
@@ -481,7 +494,7 @@ impl ReferenceTable {
         Self::insert_subordinate_generic_instances(
             namespace,
             target,
-            &symbol,
+            Some(&symbol),
             generic_maps,
             affiliation_symbol,
         );
@@ -519,7 +532,7 @@ impl ReferenceTable {
     fn insert_subordinate_generic_instances(
         namespace: &Namespace,
         target: &Symbol,
-        inst_symbol: &Symbol,
+        inst_symbol: Option<&Symbol>,
         generic_maps: &[GenericMap],
         affiliation_symbol: Option<&Symbol>,
     ) {
@@ -566,7 +579,7 @@ impl ReferenceTable {
                         target_namespace,
                         &path_symbol.found,
                         &mut generic_maps.to_vec(),
-                        Some(inst_symbol),
+                        inst_symbol,
                     );
                 }
             }
