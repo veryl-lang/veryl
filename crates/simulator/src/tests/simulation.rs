@@ -1466,6 +1466,118 @@ fn wide_dual_slot_dyn_array_rmw_writeloss() {
 }
 
 #[test]
+fn wide_masked_rmw_allones_literal_mask() {
+    // The install path of the byte-write-enable array uses mask = the all-ones
+    // literal `'1` (via `if sel ? '1 : partial`), so `arr[idx] = (arr[idx] & ~'1)
+    // | (din & '1)` must be a FULL overwrite. If `'1` is mis-sized in a wide
+    // context, `~'1` is not all-zeros and the install leaks old bits.
+    let code = r#"
+    module Top (
+        clk:  input  clock,
+        we:   input  logic,
+        sel:  input  logic,
+        idx:  input  logic<4>,
+        din:  input  logic<512>,
+        msk:  input  logic<512>,
+        dout: output logic<512>,
+    ) {
+        var arr: logic<512> [16];
+        let m: logic<512> = if sel ? '1 : msk;
+        always_ff {
+            if we {
+                arr[idx] = (arr[idx] & ~m) | (din & m);
+            }
+        }
+        assign dout = arr[idx];
+    }
+    "#;
+    let all_ones: num_bigint::BigUint =
+        (num_bigint::BigUint::from(1u8) << 512usize) - num_bigint::BigUint::from(1u8);
+    let d0: num_bigint::BigUint = (num_bigint::BigUint::from(1u8) << 511usize)
+        | (num_bigint::BigUint::from(1u8) << 200usize)
+        | num_bigint::BigUint::from(0xDEADu32);
+    let d1: num_bigint::BigUint =
+        (num_bigint::BigUint::from(1u8) << 400usize) | num_bigint::BigUint::from(0xBEEFu32);
+    for config in Config::all().into_iter().filter(|c| !c.use_4state) {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("idx", Value::new(5, 4, false));
+        sim.set("we", Value::new(1, 1, false));
+        // Seed arr[5] = d0 with a real (partial-shaped but full) mask.
+        sim.set("sel", Value::new(0, 1, false));
+        sim.set("msk", Value::new_biguint(all_ones.clone(), 512, false));
+        sim.set("din", Value::new_biguint(d0.clone(), 512, false));
+        sim.step(&clk);
+        // Install-style full overwrite via mask = '1.
+        sim.set("sel", Value::new(1, 1, false));
+        sim.set("din", Value::new_biguint(d1.clone(), 512, false));
+        sim.step(&clk);
+        sim.set("we", Value::new(0, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("dout").unwrap(),
+            Value::new_biguint(d1.clone(), 512, false),
+            "'1 mask install leaked old bits (not a full overwrite) ({config:?})"
+        );
+    }
+}
+
+#[test]
+fn wide_unbased_all_ones_ternary_branch() {
+    // Regression: a wide (>128-bit) unbased all-ones literal `'1` as a TERNARY
+    // BRANCH. The JIT/AOT-C `build_binary` materializes the all-bit sentinel at
+    // `max(expr_context.width, width)` (a wide pointer here), but the
+    // `builds_wide_pointer` predicate keyed only on the Value's `width` field
+    // (0 for an unsized literal) said "scalar" — so `to_wide_ptr` stored the wide
+    // value as a scalar and dropped its high words, yielding a partial `'1`
+    // (low bits set, high bits zero). Direct `'1` and `~'1` were fine; only the
+    // ternary branch tripped the mismatch. Cranelift and cc both consult the
+    // predicate, so both were wrong; the interpreter was correct.
+    let code = r#"
+    module Top (
+        sel:    input  logic,
+        a:      input  logic<512>,
+        direct: output logic<512>,
+        tern:   output logic<512>,
+        notd:   output logic<512>,
+    ) {
+        let md: logic<512> = '1;
+        let mt: logic<512> = if sel ? '1 : a;
+        assign direct = md;
+        assign tern   = mt;
+        assign notd   = ~md;
+    }
+    "#;
+    let all_ones: num_bigint::BigUint =
+        (num_bigint::BigUint::from(1u8) << 512usize) - num_bigint::BigUint::from(1u8);
+    for config in Config::all().into_iter().filter(|c| !c.use_4state) {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("sel", Value::new(1, 1, false));
+        sim.set("a", Value::new(0, 512, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("tern").unwrap(),
+            Value::new_biguint(all_ones.clone(), 512, false),
+            "wide `'1` ternary branch lost its high words ({config:?})"
+        );
+        assert_eq!(
+            sim.get("direct").unwrap(),
+            Value::new_biguint(all_ones.clone(), 512, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("notd").unwrap(),
+            Value::new(0, 512, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
 fn nested_array_index_const_array() {
     // Regression for a nested array index `mem[A[idx]]` with a const array
     // `A`: the const-symbol read `A[idx]` was wrongly flagged as a compile-time
