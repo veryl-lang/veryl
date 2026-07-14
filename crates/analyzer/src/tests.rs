@@ -11398,6 +11398,30 @@ fn invalid_select() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::NonConstantSelectWidth { .. }))
     );
+
+    let code = r#"
+    package a_pkg::<A_VALUE: u32> {
+        const A: u32 = A_VALUE;
+    }
+    package b_pkg {
+        alias package a = a_pkg::<2>;
+    }
+    interface c_if {
+        var c: logic;
+        modport mp {
+            c: output,
+        }
+    }
+    module e_module {
+        const N: u32 = b_pkg::a::A;
+        inst c: c_if[N];
+        connect c[0].mp <> 0;
+        connect c[1].mp <> 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
