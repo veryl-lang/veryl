@@ -30,7 +30,7 @@ pub enum Statement {
     If(IfStatement),
     IfReset(IfResetStatement),
     Case(CaseStatement),
-    For(ForStatement),
+    For(Box<ForStatement>),
     SystemFunctionCall(Box<SystemFunctionCall>),
     FunctionCall(Box<FunctionCall>),
     TbMethodCall(TbMethodCall),

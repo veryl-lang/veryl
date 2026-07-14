@@ -1775,7 +1775,7 @@ pub fn build_for_statement(
 
     let body: ir::StatementBlock = Conv::conv(context, value.statement_block.as_ref())?;
 
-    Ok(ir::StatementBlock(vec![ir::Statement::For(
+    Ok(ir::StatementBlock(vec![ir::Statement::For(Box::new(
         ir::ForStatement {
             var_id: loop_var_id,
             var_name,
@@ -1784,7 +1784,7 @@ pub fn build_for_statement(
             body: body.0,
             token,
         },
-    )]))
+    ))]))
 }
 
 pub fn eval_function_call(
@@ -1942,7 +1942,11 @@ pub fn eval_struct_constructor(
         }
 
         let comptime = Box::new(Comptime::create_unknown(token));
-        Ok(ir::Expression::StructConstructor(r#type, ret, comptime))
+        Ok(ir::Expression::StructConstructor(
+            Box::new(r#type),
+            ret,
+            comptime,
+        ))
     } else {
         unreachable!();
     }

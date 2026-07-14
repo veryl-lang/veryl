@@ -27,7 +27,7 @@ pub enum Expression {
     ),
     Concatenation(Vec<(Expression, Option<Expression>)>, Box<Comptime>),
     ArrayLiteral(Vec<ArrayLiteralItem>, Box<Comptime>),
-    StructConstructor(Type, Vec<(StrId, Expression)>, Box<Comptime>),
+    StructConstructor(Box<Type>, Vec<(StrId, Expression)>, Box<Comptime>),
 }
 
 impl Expression {
@@ -257,7 +257,7 @@ impl Expression {
                     comptime.clock_domain = comptime.clock_domain.merge(&expr.clock_domain);
                 }
 
-                comptime.r#type = r#type.clone();
+                comptime.r#type = r#type.as_ref().clone();
                 comptime.is_const = is_const;
                 comptime.is_global = is_global;
                 comptime.evaluated = true;
