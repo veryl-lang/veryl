@@ -343,7 +343,7 @@ fn expand_derive(input: DeriveInput) -> syn::Result<TokenStream2> {
     let mut has_clock_port = false;
     // #[interface] fields, spliced into the manifest by const
     // concatenation.
-    let mut groups: Vec<(String, Type)> = Vec::new();
+    let mut groups: Vec<(String, Type, Option<String>)> = Vec::new();
     // Port and group names share the connection-item namespace, so
     // duplicates are rejected here where both declarations are visible.
     let mut port_names: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -378,7 +378,7 @@ fn expand_derive(input: DeriveInput) -> syn::Result<TokenStream2> {
             let ty = field.ty.clone();
             inits.push(quote!(#field_ident:
                 <#ty as ::veryl_component::VerylInterface>::resolve(ctx, #group)?));
-            groups.push((group, ty));
+            groups.push((group, ty, doc));
             continue;
         }
 
@@ -502,11 +502,14 @@ fn expand_derive(input: DeriveInput) -> syn::Result<TokenStream2> {
     // Splicing another type's consts needs const concatenation; a component
     // without interface fields keeps the plain literal.
     let mut decl_parts: Vec<TokenStream2> = vec![quote!(#decl_prefix)];
-    for (i, (group, ty)) in groups.iter().enumerate() {
+    for (i, (group, ty, doc)) in groups.iter().enumerate() {
         let head = format!(
-            r#"{}{{"name":"{}","interface":""#,
+            r#"{}{{"name":"{}"{}"interface":""#,
             if i == 0 { "" } else { "," },
             json_escape(group),
+            doc.as_ref()
+                .map(|d| format!(r#","doc":"{}","#, json_escape(d)))
+                .unwrap_or_else(|| ",".to_string()),
         );
         decl_parts.push(quote!(#head));
         decl_parts.push(quote!(<#ty as ::veryl_component::VerylInterface>::INTERFACE_PATH));

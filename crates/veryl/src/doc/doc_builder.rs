@@ -87,13 +87,20 @@ const INDEX_TMPL: &str = r###"
 </tbody>
 </table>
 
-{{{{raw}}}}
-{{#include modules.md}}
-{{#include proto_modules.md}}
-{{#include interfaces.md}}
-{{#include packages.md}}
-{{#include components.md}}
-{{{{/raw}}}}
+{{#each catalog}}
+<h2>{{this.name}}</h2>
+
+<table class="table_list">
+<tbody>
+{{#each this.items}}
+<tr>
+    <th class="table_list_item"><a href="{{this.file_name}}.html">{{this.html_name}}</a></th>
+    <td class="table_list_item">{{this.description}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+{{/each}}
 "###;
 
 #[derive(Serialize)]
@@ -103,10 +110,11 @@ struct IndexData {
     version: String,
     repository: Option<String>,
     license: Option<String>,
+    catalog: Vec<ListData>,
 }
 
 const LIST_TMPL: &str = r###"
-## {{name}}
+# {{name}}
 ---
 
 <table class="table_list">
@@ -136,7 +144,7 @@ struct ListItem {
 }
 
 const MODULE_TMPL: &str = r#"
-## {{name}}
+# {{name}}
 
 {{description}}
 
@@ -243,7 +251,7 @@ struct PortData {
 }
 
 const PROTO_MODULE_TMPL: &str = r#"
-## {{name}}
+# {{name}}
 
 {{description}}
 
@@ -311,7 +319,7 @@ struct ProtoModuleData {
 }
 
 const INTERFACE_TMPL: &str = r#"
-## {{name}}
+# {{name}}
 
 {{description}}
 
@@ -341,7 +349,7 @@ struct InterfaceData {
 }
 
 const PACKAGE_TMPL: &str = r###"
-## {{name}}
+# {{name}}
 
 {{description}}
 
@@ -354,13 +362,13 @@ struct PackageData {
 }
 
 const COMPONENT_TMPL: &str = r#"
-## {{name}}
-
-{{description}}
+# {{name}}
 
 {{#if kind}}
-<p><span class="hljs-keyword">{{kind}}</span> component</p>
+<p class="doc_subtitle"><span class="hljs-keyword">{{kind}}</span> component</p>
 {{/if}}
+
+{{description}}
 
 {{#if parameters}}
 ### Parameters
@@ -398,40 +406,18 @@ const COMPONENT_TMPL: &str = r#"
 </table>
 {{/if}}
 
-{{#if groups}}
-### Interfaces
----
-
-{{#each groups}}
-<p><code>{{this.name}}</code> — <span class="hljs-type">{{this.interface}}</span>.<span class="hljs-keyword">{{this.modport}}</span></p>
-<table class="table_list">
-<tbody>
-{{#each this.members}}
-<tr>
-    <th class="table_list_item">{{this.name}}</th>
-    <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span></td>
-    <td class="table_list_item">{{this.description}}</td>
-</tr>
-{{/each}}
-</tbody>
-</table>
-{{/each}}
-{{/if}}
-
 {{#if methods}}
 ### Methods
 ---
 
-<table class="table_list">
-<tbody>
 {{#each methods}}
-<tr>
-    <th class="table_list_item"><code>{{this.signature}}</code></th>
-    <td class="table_list_item">{{this.description}}</td>
-</tr>
+<h4 class="method_sig">{{this.signature}}</h4>
+<div class="method_desc">
+
+{{this.description}}
+
+</div>
 {{/each}}
-</tbody>
-</table>
 {{/if}}
 
 {{#if requires}}
@@ -464,7 +450,6 @@ struct ComponentData {
     kind: Option<String>,
     parameters: Vec<ComponentParameterData>,
     ports: Vec<ComponentPortData>,
-    groups: Vec<ComponentGroupData>,
     methods: Vec<ComponentMethodData>,
     requires: Vec<String>,
     usage: Option<String>,
@@ -483,21 +468,6 @@ struct ComponentPortData {
     name: String,
     direction: String,
     width: String,
-    description: Option<String>,
-}
-
-#[derive(Serialize)]
-struct ComponentGroupData {
-    name: String,
-    interface: String,
-    modport: String,
-    members: Vec<ComponentMemberData>,
-}
-
-#[derive(Serialize)]
-struct ComponentMemberData {
-    name: String,
-    direction: String,
     description: Option<String>,
 }
 
@@ -646,6 +616,22 @@ impl DocBuilder {
     border: unset;
     background-color: var(--bg);
 }
+
+.doc_subtitle {
+    margin-top: -0.6em;
+    opacity: 0.75;
+    font-size: 0.9em;
+}
+
+.method_sig {
+    font-family: var(--mono-font-family, monospace);
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.method_desc {
+    margin-left: 1.5em;
+}
         "##;
 
         let file = self.theme_dir.join("custom.css");
@@ -749,6 +735,7 @@ impl DocBuilder {
             description: self.metadata.project.description.clone(),
             repository: self.metadata.project.repository.clone(),
             license: self.metadata.project.license.clone(),
+            catalog: self.catalog(),
         };
 
         let mut handlebars = Handlebars::new();
@@ -756,96 +743,19 @@ impl DocBuilder {
         Ok(handlebars.render_template(INDEX_TMPL, &data).unwrap())
     }
 
-    fn build_modules(&self) -> String {
-        let items: Vec<_> = self
-            .modules
+    fn top_level_items(items: &[TopLevelItem]) -> Vec<ListItem> {
+        items
             .iter()
             .map(|x| ListItem {
                 file_name: x.file_name.clone(),
                 html_name: x.html_name.clone(),
                 description: x.symbol.doc_comment.format(true),
             })
-            .collect();
-
-        let data = ListData {
-            name: "Modules".to_string(),
-            items,
-        };
-
-        let mut handlebars = Handlebars::new();
-        handlebars.register_escape_fn(handlebars::no_escape);
-        handlebars.render_template(LIST_TMPL, &data).unwrap()
+            .collect()
     }
 
-    fn build_proto_modules(&self) -> String {
-        let items: Vec<_> = self
-            .proto_modules
-            .iter()
-            .map(|x| ListItem {
-                file_name: x.file_name.clone(),
-                html_name: x.html_name.clone(),
-                description: x.symbol.doc_comment.format(true),
-            })
-            .collect();
-
-        let data = ListData {
-            name: "Module Prototypes".to_string(),
-            items,
-        };
-
-        let mut handlebars = Handlebars::new();
-        handlebars.register_escape_fn(handlebars::no_escape);
-        handlebars.render_template(LIST_TMPL, &data).unwrap()
-    }
-
-    fn build_interfaces(&self) -> String {
-        let items: Vec<_> = self
-            .interfaces
-            .iter()
-            .map(|x| ListItem {
-                file_name: x.file_name.clone(),
-                html_name: x.html_name.clone(),
-                description: x.symbol.doc_comment.format(true),
-            })
-            .collect();
-
-        let data = ListData {
-            name: "Interfaces".to_string(),
-            items,
-        };
-
-        let mut handlebars = Handlebars::new();
-        handlebars.register_escape_fn(handlebars::no_escape);
-        handlebars.render_template(LIST_TMPL, &data).unwrap()
-    }
-
-    fn build_packages(&self) -> String {
-        let items: Vec<_> = self
-            .packages
-            .iter()
-            .map(|x| ListItem {
-                file_name: x.file_name.clone(),
-                html_name: x.html_name.clone(),
-                description: x.symbol.doc_comment.format(true),
-            })
-            .collect();
-
-        let data = ListData {
-            name: "Packages".to_string(),
-            items,
-        };
-
-        let mut handlebars = Handlebars::new();
-        handlebars.register_escape_fn(handlebars::no_escape);
-        handlebars.render_template(LIST_TMPL, &data).unwrap()
-    }
-
-    fn build_components(&self) -> String {
-        if self.components.is_empty() {
-            return String::new();
-        }
-        let items: Vec<_> = self
-            .components
+    fn component_items(&self) -> Vec<ListItem> {
+        self.components
             .iter()
             .map(|x| ListItem {
                 file_name: x.file_name.clone(),
@@ -858,16 +768,64 @@ impl DocBuilder {
                     .unwrap_or_default()
                     .to_string(),
             })
-            .collect();
+            .collect()
+    }
 
+    /// Index-page catalog; the sidebar's list pages show the same data.
+    fn catalog(&self) -> Vec<ListData> {
+        [
+            ("Modules", Self::top_level_items(&self.modules)),
+            (
+                "Module Prototypes",
+                Self::top_level_items(&self.proto_modules),
+            ),
+            ("Interfaces", Self::top_level_items(&self.interfaces)),
+            ("Packages", Self::top_level_items(&self.packages)),
+            ("Components", self.component_items()),
+        ]
+        .into_iter()
+        .filter(|(_, items)| !items.is_empty())
+        .map(|(name, items)| ListData {
+            name: name.to_string(),
+            items,
+        })
+        .collect()
+    }
+
+    fn render_list(name: &str, items: Vec<ListItem>) -> String {
         let data = ListData {
-            name: "Components".to_string(),
+            name: name.to_string(),
             items,
         };
-
         let mut handlebars = Handlebars::new();
         handlebars.register_escape_fn(handlebars::no_escape);
         handlebars.render_template(LIST_TMPL, &data).unwrap()
+    }
+
+    fn build_modules(&self) -> String {
+        Self::render_list("Modules", Self::top_level_items(&self.modules))
+    }
+
+    fn build_proto_modules(&self) -> String {
+        Self::render_list(
+            "Module Prototypes",
+            Self::top_level_items(&self.proto_modules),
+        )
+    }
+
+    fn build_interfaces(&self) -> String {
+        Self::render_list("Interfaces", Self::top_level_items(&self.interfaces))
+    }
+
+    fn build_packages(&self) -> String {
+        Self::render_list("Packages", Self::top_level_items(&self.packages))
+    }
+
+    fn build_components(&self) -> String {
+        if self.components.is_empty() {
+            return String::new();
+        }
+        Self::render_list("Components", self.component_items())
     }
 
     fn build_module(&self, name: &str, symbol: &Symbol) -> String {
@@ -1085,7 +1043,7 @@ fn build_component_page(item: &ComponentItem) -> String {
             description: x.doc.clone(),
         })
         .collect();
-    let ports: Vec<_> = manifest
+    let mut ports: Vec<_> = manifest
         .ports
         .iter()
         .map(|x| ComponentPortData {
@@ -1100,34 +1058,27 @@ fn build_component_page(item: &ComponentItem) -> String {
             description: x.doc.clone(),
         })
         .collect();
-    let groups: Vec<_> = manifest
-        .groups
-        .iter()
-        .map(|g| ComponentGroupData {
-            name: g.name.clone(),
-            interface: g.interface.clone(),
-            modport: g.modport.clone(),
-            members: g
-                .members
-                .iter()
-                .map(|m| ComponentMemberData {
-                    name: m.member.clone(),
-                    direction: m.dir.clone(),
-                    description: m.doc.clone(),
-                })
-                .collect(),
-        })
-        .collect();
+    ports.extend(manifest.groups.iter().map(|g| ComponentPortData {
+        name: g.name.clone(),
+        direction: "modport".to_string(),
+        width: format!("{}.{}", g.interface, g.modport),
+        description: g.doc.clone(),
+    }));
     let methods: Vec<_> = manifest
         .methods
         .iter()
         .map(|x| {
+            // ret_suffix stays plain for the language server; rebuilt here to colour the types.
             let args: Vec<_> = x
                 .args
                 .iter()
-                .map(|a| format!("{}: {}", a.name, a.ty))
+                .map(|a| format!("{}: <span class=\"hljs-type\">{}</span>", a.name, a.ty))
                 .collect();
-            let ret = x.ret_suffix();
+            let ret = match (&x.ret, &x.ret_width) {
+                (Some(t), Some(w)) => format!(" -> <span class=\"hljs-type\">{t}[{w}]</span>"),
+                (Some(t), None) => format!(" -> <span class=\"hljs-type\">{t}</span>"),
+                (None, _) => String::new(),
+            };
             ComponentMethodData {
                 signature: format!("{}({}){}", x.name, args.join(", "), ret),
                 description: x.doc.clone(),
@@ -1141,7 +1092,6 @@ fn build_component_page(item: &ComponentItem) -> String {
         kind: manifest.kind.clone(),
         parameters,
         ports,
-        groups,
         methods,
         requires: manifest.requires.clone(),
         usage: component_usage(&item.name, manifest),
@@ -1303,6 +1253,7 @@ mod tests {
                 dir: "input".to_string(),
                 doc: Some("Write-address valid.".to_string()),
             }],
+            doc: Some("AXI4 monitor bus.".to_string()),
         });
         let item = ComponentItem {
             name: "checker".to_string(),
@@ -1310,16 +1261,21 @@ mod tests {
             manifest: grouped,
         };
         let page = build_component_page(&item);
-        assert!(page.contains("### Interfaces"), "{page}");
+        assert!(!page.contains("### Interfaces"), "{page}");
         assert!(
-            page.contains("<code>axi</code> — <span class=\"hljs-type\">$std::axi4_if</span>.<span class=\"hljs-keyword\">monitor</span>"),
+            page.contains("<th class=\"table_list_item\">axi</th>"),
             "{page}"
         );
         assert!(
-            page.contains("<th class=\"table_list_item\">awvalid</th>"),
+            page.contains("<span class=\"hljs-keyword\">modport</span>"),
             "{page}"
         );
-        assert!(page.contains("Write-address valid."), "{page}");
+        assert!(
+            page.contains("<span class=\"hljs-type\">$std::axi4_if.monitor</span>"),
+            "{page}"
+        );
+        assert!(page.contains("AXI4 monitor bus."), "{page}");
+        assert!(!page.contains("awvalid"), "{page}");
         // The usage snippet includes the group connection.
         assert!(
             page.contains("inst u0: $comp::checker #( XLEN ) (clk, q, axi: );"),

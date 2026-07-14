@@ -27,6 +27,7 @@ pub struct ManifestGroup {
     pub interface: String,
     pub modport: String,
     pub members: Vec<ManifestMember>,
+    pub doc: Option<String>,
 }
 
 /// One interface member a group binds; the connected interface must
@@ -363,6 +364,7 @@ impl ComponentManifest {
                                     .collect()
                             })
                             .unwrap_or_default(),
+                        doc: doc_of(g),
                     })
                     .collect()
             })
