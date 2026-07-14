@@ -2096,7 +2096,8 @@ fn eval_factor_path_inner(
 ) -> IrResult<ir::Factor> {
     let (path, select, _) = var_path.into();
 
-    let generic_path = context.resolve_path(symbol_path);
+    let mut generic_path = context.resolve_path(symbol_path);
+    generic_path.unalias(None);
     check_generic_refereence(context, &generic_path);
 
     let found = if let Some(path) = generic_path.to_var_path()
