@@ -4077,6 +4077,81 @@ fn interface_array_modport_index() {
 }
 
 #[test]
+fn interface_parameter_override() {
+    // `inst u: Bus #(W: 16)`: the parameter override must size the interface
+    // members, including inside child modules that receive the interface via a
+    // modport port (directly or passed through another module's modport port).
+    // Earlier, the instance cache keyed a component only on its own parameters,
+    // so a child module built against the default-width interface was reused
+    // for a differently-parameterized one, truncating members.
+    let code = r#"
+    interface Bus #(
+        param W: u32 = 8,
+    ) {
+        var data: logic<W>;
+        modport master {
+            data: output,
+        }
+        modport slave {
+            data: input,
+        }
+    }
+
+    module Producer (
+        bus: modport Bus::master,
+    ) {
+        always_comb {
+            bus.data = '1;
+        }
+    }
+
+    module Leaf (
+        bus: modport Bus::slave,
+        out_data: output logic<16>,
+    ) {
+        assign out_data = bus.data as 16;
+    }
+
+    module Passthru (
+        bus: modport Bus::slave,
+        out_data: output logic<16>,
+    ) {
+        inst u_leaf: Leaf (
+            bus: bus,
+            out_data: out_data,
+        );
+    }
+
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        out_narrow: output logic<16>,
+        out_wide: output logic<16>,
+    ) {
+        inst u_bus8: Bus;
+        inst u_bus16: Bus #( W: 16 );
+
+        inst u_p8: Producer ( bus: u_bus8 );
+        inst u_p16: Producer ( bus: u_bus16 );
+
+        inst u_c8: Passthru ( bus: u_bus8, out_data: out_narrow );
+        inst u_c16: Passthru ( bus: u_bus16, out_data: out_wide );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let narrow = sim.get("out_narrow").unwrap();
+        let wide = sim.get("out_wide").unwrap();
+        assert_eq!(narrow, Value::new(0x00FF, 16, false));
+        assert_eq!(wide, Value::new(0xFFFF, 16, false));
+    }
+}
+
+#[test]
 fn interface_function() {
     let code = r#"
     interface BusIf {
