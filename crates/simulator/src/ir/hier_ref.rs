@@ -10,7 +10,7 @@ use crate::ir::context::Context;
 use crate::ir::event::Event;
 use crate::ir::expression::ProtoExpression;
 use crate::ir::statement::{ProtoForBound, ProtoForRange, ProtoSystemFunctionCall};
-use crate::ir::variable::{ModuleVariableMeta, VariableMeta};
+use crate::ir::variable::{ModuleVariableMeta, VarOffset, VariableMeta};
 use crate::simulator_error::SimulatorError;
 use veryl_analyzer::ir as air;
 use veryl_parser::resource_table::StrId;
@@ -172,28 +172,6 @@ pub(crate) fn resolve_expr(
             let Some(meta) = find_target(children, &hier.inst_path, &hier.var_path) else {
                 return Err(SimulatorError::unsupported_description(token));
             };
-            let scope = context.scope();
-
-            // Index/select expressions must be compile-time constants;
-            // runtime-value indexing would need the dynamic-select machinery.
-            let idx_vals = hier
-                .index
-                .eval_value(&mut scope.analyzer_context)
-                .ok_or_else(|| SimulatorError::unsupported_description(token))?;
-            let elem_index = meta
-                .r#type
-                .array
-                .calc_index(&idx_vals)
-                .ok_or_else(|| SimulatorError::unsupported_description(token))?;
-            let select_val = if hier.select.is_empty() {
-                None
-            } else {
-                Some(
-                    hier.select
-                        .eval_value(&mut scope.analyzer_context, &meta.r#type, false)
-                        .ok_or_else(|| SimulatorError::unsupported_description(token))?,
-                )
-            };
 
             let kind_width = meta.r#type.kind.width().unwrap_or(1);
             let var_full_width = kind_width
@@ -203,19 +181,76 @@ pub(crate) fn resolve_expr(
                     .iter()
                     .map(|d| d.unwrap_or(1))
                     .product::<usize>();
-            let element = meta
-                .elements
-                .get(elem_index)
-                .ok_or_else(|| SimulatorError::unsupported_description(token))?;
 
-            *expr = ProtoExpression::Variable {
-                var_offset: element.current,
-                select: select_val,
-                dynamic_select: None,
-                width: hier.width,
-                var_full_width,
-                expr_context: hier.expr_context,
+            // A dynamic bit-select on a hierarchical reference is unsupported.
+            let select_val = {
+                let scope = context.scope();
+                if hier.select.is_empty() {
+                    None
+                } else {
+                    Some(
+                        hier.select
+                            .eval_value(&mut scope.analyzer_context, &meta.r#type, false)
+                            .ok_or_else(|| SimulatorError::unsupported_description(token))?,
+                    )
+                }
             };
+
+            if hier.index.is_const() {
+                let scope = context.scope();
+                let idx_vals = hier
+                    .index
+                    .eval_value(&mut scope.analyzer_context)
+                    .ok_or_else(|| SimulatorError::unsupported_description(token))?;
+                let elem_index = meta
+                    .r#type
+                    .array
+                    .calc_index(&idx_vals)
+                    .ok_or_else(|| SimulatorError::unsupported_description(token))?;
+                let element = meta
+                    .elements
+                    .get(elem_index)
+                    .ok_or_else(|| SimulatorError::unsupported_description(token))?;
+
+                *expr = ProtoExpression::Variable {
+                    var_offset: element.current,
+                    select: select_val,
+                    dynamic_select: None,
+                    width: hier.width,
+                    var_full_width,
+                    expr_context: hier.expr_context,
+                };
+            } else {
+                // Runtime index: mirror the non-hierarchical dynamic path.
+                let (base_current, stride, is_ff) = meta
+                    .dynamic_index_info()
+                    .map(|(base_current, _base_next, stride, is_ff)| (base_current, stride, is_ff))
+                    .ok_or_else(|| SimulatorError::unsupported_description(token))?;
+                let num_elements = meta.elements.len();
+                let element_native_bytes = meta.native_bytes;
+                let array_shape = meta.r#type.array.clone();
+                let mut index_proto = crate::ir::expression::build_linear_index_expr(
+                    context,
+                    &array_shape,
+                    &hier.index,
+                )?;
+                // This node is already behind the walk, so a hierarchical
+                // reference nested in the index (`mem[dut.other.sig]`) is
+                // resolved explicitly here.
+                resolve_expr(&mut index_proto, context, children)?;
+
+                *expr = ProtoExpression::DynamicVariable {
+                    base_offset: VarOffset::new(is_ff, base_current),
+                    stride,
+                    element_native_bytes,
+                    index_expr: Box::new(index_proto),
+                    num_elements,
+                    select: select_val,
+                    dynamic_select: None,
+                    width: hier.width,
+                    expr_context: hier.expr_context,
+                };
+            }
         }
         ProtoExpression::Variable { dynamic_select, .. } => {
             if let Some(dyn_sel) = dynamic_select {
