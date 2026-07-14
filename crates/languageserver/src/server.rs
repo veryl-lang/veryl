@@ -1647,6 +1647,7 @@ mod tests {
                     doc: None,
                 },
             ],
+            doc: None,
         });
         let text = component_new_text("$comp::x", Some(&grouped));
         assert_eq!(text, "$comp::x (clk, q, axi: , );");
