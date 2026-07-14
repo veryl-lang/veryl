@@ -465,6 +465,135 @@ fn hier_ref_generate_block_through_inst() {
     }
 }
 
+// A hierarchical read whose element index is a runtime value (a testbench
+// loop variable) must evaluate the index at simulation time, not fold it to
+// a compile-time constant. Each element carries a distinct value so a wrong
+// fold (which collapses every read to element 0) is caught for k >= 1.
+const DYN_IDX_DUT: &str = r#"
+    module DLeaf (
+        clk: input clock,
+    ) {
+        #[allow(unused_variable)]
+        var mem: logic<32> [4];
+        always_ff {
+            mem[0] = 32'hcafe_0000;
+            mem[1] = 32'hcafe_0001;
+            mem[2] = 32'hcafe_0002;
+            mem[3] = 32'hcafe_0003;
+        }
+    }
+
+    module DGenMid (
+        clk: input clock,
+    ) {
+        for g in 0..2 :g_leaf {
+            inst u_leaf: DLeaf (clk);
+        }
+    }
+
+    module DPlainMid (
+        clk: input clock,
+    ) {
+        inst u_leaf: DLeaf (clk);
+    }
+
+    module DTop (
+        clk: input clock,
+    ) {
+        inst u_gen  : DGenMid   (clk);
+        inst u_plain: DPlainMid (clk);
+    }
+"#;
+
+#[test]
+fn hier_ref_dynamic_index_generate_and_plain() {
+    // Covers both a generate-nested leaf and a plain leaf.
+    let code = format!(
+        r#"
+    {DYN_IDX_DUT}
+
+    #[test(hier_test)]
+    module hier_test {{
+        inst clk: $tb::clock_gen;
+        inst dut: DTop (clk);
+
+        initial {{
+            clk.next();
+            for k in 0..4 {{
+                var vg: logic<32>;
+                var vp: logic<32>;
+                vg = dut.u_gen.g_leaf[0].u_leaf.mem[k];
+                vp = dut.u_plain.u_leaf.mem[k];
+                $assert(vg == 32'hcafe_0000 + k, "gen dynamic index");
+                $assert(vp == 32'hcafe_0000 + k, "plain dynamic index");
+            }}
+            $finish();
+        }}
+    }}
+    "#
+    );
+    let results = run_hier_test(&code);
+    assert!(!results.is_empty());
+    for (config, result, _) in results {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn hier_ref_dynamic_index_from_hierarchical_reference() {
+    // The index is itself a hierarchical reference (`mem[dut...idx]`); the
+    // reference nested in it must be resolved, not left as a placeholder.
+    let dut = r#"
+    module DLeaf (
+        clk: input clock,
+    ) {
+        #[allow(unused_variable)]
+        var mem: logic<32> [4];
+        always_ff {
+            mem[0] = 32'hcafe_0000;
+            mem[1] = 32'hcafe_0001;
+            mem[2] = 32'hcafe_0002;
+            mem[3] = 32'hcafe_0003;
+        }
+    }
+
+    module IdxTop (
+        clk: input clock,
+    ) {
+        #[allow(unused_variable)]
+        var sel: logic<2>;
+        always_ff {
+            sel = 2'd2;
+        }
+        inst u_leaf: DLeaf (clk);
+    }
+    "#;
+    let code = format!(
+        r#"
+    {dut}
+
+    #[test(hier_test)]
+    module hier_test {{
+        inst clk: $tb::clock_gen;
+        inst dut: IdxTop (clk);
+
+        initial {{
+            clk.next();
+            var v: logic<32>;
+            v = dut.u_leaf.mem[dut.sel];
+            $assert(v == 32'hcafe_0002, "index via hierarchical reference");
+            $finish();
+        }}
+    }}
+    "#
+    );
+    let results = run_hier_test(&code);
+    assert!(!results.is_empty());
+    for (config, result, _) in results {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
 #[test]
 fn hier_ref_nested_test_module_resolves_locally() {
     // A test module instantiated inside another test module carries its own
