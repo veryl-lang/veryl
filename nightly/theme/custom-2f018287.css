@@ -1,0 +1,33 @@
+
+.affix {
+    font-weight: bold;
+    font-size: 1.8em;
+}
+
+.table_list {
+    margin-left: 0;
+    margin-right: auto;
+}
+
+.table_list_item {
+    text-align: left;
+    border: unset;
+    background-color: var(--bg);
+}
+
+.doc_subtitle {
+    margin-top: -0.6em;
+    opacity: 0.75;
+    font-size: 0.9em;
+}
+
+.method_sig {
+    font-family: var(--mono-font-family, monospace);
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.method_desc {
+    margin-left: 1.5em;
+}
+        
