@@ -7272,7 +7272,7 @@ pub struct CommentsOpt {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CommentsTerm {
-    pub comments_term: crate::veryl_token::Token, /* (?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*\/?([^/]|[^*]/)*\*\/))\s*)+ */
+    pub comments_term: crate::veryl_token::Token, /* (?:(?:(?://.*(?:\r\n|\r|\n))|(?:/\*(?:[^*]|\*+[^*\/])*\*+/))\s*)+ */
 }
 
 ///
@@ -14753,7 +14753,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 0:
     ///
-    /// `CommentsTerm: <INITIAL, EmbedHeader, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:(?ms)/\*/?([^/]|[^*]/)*\*/))\s*)+" : Token;`
+    /// `CommentsTerm: <INITIAL, EmbedHeader, Generic, Attr>"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:/\*(?:[^*]|\*+[^*/])*\*+/))\s*)+" : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn comments_term(&mut self, comments_term: &ParseTreeType<'t>) -> Result<()> {

@@ -394,3 +394,15 @@ fn parse_error_shows_source_text_for_error_token() {
     assert_eq!(se.to_string(), "Unexpected token: '['");
     assert_eq!(se.error_location.offset(), code.find('[').unwrap());
 }
+
+#[test]
+fn block_comment_ends_at_first_close() {
+    // `*/` immediately followed by `/` used to extend the comment match to
+    // the next `*/` anywhere later in the file, silently lexing the code in
+    // between into a comment (split_comment_token then dropped it from the
+    // token stream entirely).  A block comment ends at its first `*/`, so
+    // the stray `/ typo` is a syntax error, matching C/SystemVerilog.
+    failure("assign o = 1; /* note *// typo\n initial { } /* end */");
+    // A real division right after a block comment still lexes.
+    success("assign o = a /* x *// b; /* y */");
+}
