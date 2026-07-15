@@ -12,4 +12,6 @@ pub struct Project {
     pub description: Option<String>,
     pub license: Option<String>,
     pub repository: Option<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
 }
