@@ -54,6 +54,7 @@ impl Backend for CraneliftBackend {
         Some(Arc::new(ChunkArtifact {
             func,
             keepalive: Some(Box::new(mmap)),
+            content_fp: None,
         }))
     }
 }

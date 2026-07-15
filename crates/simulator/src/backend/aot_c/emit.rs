@@ -5538,6 +5538,7 @@ mod tests {
         Arc::new(ChunkArtifact {
             func: stub,
             keepalive: None,
+            content_fp: None,
         })
     }
 

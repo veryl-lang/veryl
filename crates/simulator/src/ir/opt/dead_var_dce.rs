@@ -299,6 +299,48 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
 /// Collect the dead-droppable set: comb VarOffsets that have zero
 /// reads anywhere in `slices` and whose only writes are local
 /// full-width `Assign`s.  No-op (empty set) when the env knob is off.
+/// Hash of the DCE-relevant liveness of `slices`: the per-comb-offset read /
+/// full-write / partial-write flags plus the runtime-indexed array ranges —
+/// exactly the inputs `collect_dead_offsets` reads. Used to key the whole-comb
+/// pipeline cache on the event statements' contribution to dead-var DCE without
+/// pinning to their full content (per-test constants, `$readmemh` paths, and
+/// `$display` strings vary between tests but don't change which offsets are
+/// dead). FF offsets/ranges are excluded since dead-var DCE only drops comb.
+pub fn census_digest(slices: &[&[ProtoStatement]]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut c = Census::default();
+    for slice in slices {
+        for s in *slice {
+            walk_stmt_liveness(s, &mut c);
+        }
+    }
+    let mut offs: Vec<(isize, bool, bool, bool)> = c
+        .live
+        .iter()
+        .filter(|(off, _)| !off.is_ff())
+        .map(|(off, l)| {
+            (
+                off.raw(),
+                l.reads != 0,
+                l.full_writes != 0,
+                l.partial_writes != 0 || l.inherited_writes != 0,
+            )
+        })
+        .collect();
+    offs.sort_unstable();
+    let mut ranges: Vec<(isize, usize, isize)> = c
+        .ranges
+        .iter()
+        .filter(|r| !r.base.is_ff())
+        .map(|r| (r.base.raw(), r.num, r.stride))
+        .collect();
+    ranges.sort_unstable();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    offs.hash(&mut h);
+    ranges.hash(&mut h);
+    h.finish()
+}
+
 pub fn collect_dead_offsets(slices: &[&[ProtoStatement]]) -> HashSet<VarOffset> {
     if !enabled() {
         return HashSet::default();

@@ -31,11 +31,13 @@ use veryl_parser::token_range::TokenRange;
 /// Per-statement dependency: (input offsets, output offsets).
 pub type StmtDep = (Vec<VarOffset>, Vec<VarOffset>);
 
+#[derive(Clone)]
 pub enum ProtoStatementBlock {
     Interpreted(Vec<ProtoStatement>),
     Compiled(Arc<ChunkArtifact>),
 }
 
+#[derive(Clone)]
 pub struct ProtoStatements(pub Vec<ProtoStatementBlock>);
 
 impl ProtoStatements {
@@ -756,7 +758,7 @@ pub struct ProtoAssignDynamicStatement {
 
 /// Reused compiled block from a cached module instance.  Byte deltas
 /// let the same compiled code run with adjusted ff/comb base pointers.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CompiledBlockStatement {
     pub artifact: Arc<ChunkArtifact>,
     pub ff_delta_bytes: isize,
@@ -772,6 +774,37 @@ pub struct CompiledBlockStatement {
     /// Pre-JIT originals, expanded by `analyze_dependency` when a
     /// CompiledBlock causes a false cycle.
     pub original_stmts: Vec<ProtoStatement>,
+}
+
+// `stmt_deps` and `original_stmts` are excluded from `Debug`: both are derived
+// deterministically from the compiled statements, and `artifact`'s `content_fp`
+// (a fingerprint of exactly those statements — see `try_compile_chunk`) already
+// identifies them. Excluding them keeps the `Debug`-derived chunk / whole-comb
+// fingerprints from redundantly deep-walking the pre-JIT originals nested in
+// every block, which dominated the per-test key cost. Sound because a matching
+// `content_fp` implies matching `original_stmts`. The exhaustive destructure
+// makes adding a codegen-affecting field a compile error here.
+impl std::fmt::Debug for CompiledBlockStatement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let CompiledBlockStatement {
+            artifact,
+            ff_delta_bytes,
+            comb_delta_bytes,
+            input_offsets,
+            output_offsets,
+            ff_canonical_offsets,
+            stmt_deps: _,
+            original_stmts: _,
+        } = self;
+        f.debug_struct("CompiledBlockStatement")
+            .field("artifact", artifact)
+            .field("ff_delta_bytes", ff_delta_bytes)
+            .field("comb_delta_bytes", comb_delta_bytes)
+            .field("input_offsets", input_offsets)
+            .field("output_offsets", output_offsets)
+            .field("ff_canonical_offsets", ff_canonical_offsets)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2285,7 +2318,7 @@ impl AssignDynamicStatement {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ProtoAssignStatement {
     pub dst: VarOffset,
     pub dst_width: usize,
@@ -2299,6 +2332,37 @@ pub struct ProtoAssignStatement {
     pub dst_ff_current_offset: isize,
     /// Source location from the original assign statement.
     pub token: TokenRange,
+}
+
+// `token` is a per-test source position (differs even between otherwise
+// identical assigns), so it is excluded from `Debug`. That makes the
+// `Debug`-derived chunk / whole-comb fingerprints token-agnostic: two structurally
+// identical assigns from different source locations hash the same, which is
+// sound because `token` never affects codegen (it feeds diagnostics only).
+// The exhaustive destructure makes adding a field a compile error here, so a
+// new codegen-affecting field can never be silently dropped from the hash.
+impl std::fmt::Debug for ProtoAssignStatement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ProtoAssignStatement {
+            dst,
+            dst_width,
+            select,
+            dynamic_select,
+            rhs_select,
+            expr,
+            dst_ff_current_offset,
+            token: _,
+        } = self;
+        f.debug_struct("ProtoAssignStatement")
+            .field("dst", dst)
+            .field("dst_width", dst_width)
+            .field("select", select)
+            .field("dynamic_select", dynamic_select)
+            .field("rhs_select", rhs_select)
+            .field("expr", expr)
+            .field("dst_ff_current_offset", dst_ff_current_offset)
+            .finish()
+    }
 }
 
 impl ProtoAssignStatement {

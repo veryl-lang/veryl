@@ -44,28 +44,69 @@ impl std::fmt::Write for FingerprintWriter {
     }
 }
 
+impl FingerprintWriter {
+    fn new() -> Self {
+        let mut w = FingerprintWriter {
+            a: DefaultHasher::new(),
+            b: DefaultHasher::new(),
+        };
+        // Seed the second half so the two 64-bit lanes are independent.
+        w.b.write_u64(0x9E37_79B9_7F4A_7C15);
+        w
+    }
+
+    fn add_u8(&mut self, v: u8) {
+        self.a.write_u8(v);
+        self.b.write_u8(v);
+    }
+
+    /// Fold `{value:?}` into both lanes without materialising the string.
+    fn add_debug(&mut self, value: &dyn std::fmt::Debug) {
+        use std::fmt::Write;
+        let _ = write!(self, "{value:?}");
+    }
+
+    fn finish(self) -> u128 {
+        ((self.a.finish() as u128) << 64) | self.b.finish() as u128
+    }
+}
+
 /// Structural 128-bit fingerprint of a chunk. `Debug` carries every field of
 /// every statement, so this never drifts out of sync with the IR the way a
 /// hand-written per-variant hash would — a missed field there would be a silent
-/// false-hit miscompile. Collision odds at ~10^4 unique chunks are ~2^-100.
+/// false-hit miscompile. `ProtoAssignStatement`'s `token` and `ChunkArtifact`'s
+/// `func` address are excluded from `Debug`, so the fingerprint is token- and
+/// pointer-agnostic (both are codegen-irrelevant). Collision odds at ~10^4
+/// unique chunks are ~2^-100.
 fn chunk_fingerprint(
     use_4state: bool,
     contains_compiled_block: bool,
     stmts: &[ProtoStatement],
 ) -> u128 {
-    use std::fmt::Write;
-    let mut w = FingerprintWriter {
-        a: DefaultHasher::new(),
-        b: DefaultHasher::new(),
-    };
-    // Seed the second half so the two 64-bit lanes are independent.
-    w.b.write_u64(0x9E37_79B9_7F4A_7C15);
-    w.a.write_u8(use_4state as u8);
-    w.b.write_u8(use_4state as u8);
-    w.a.write_u8(contains_compiled_block as u8);
-    w.b.write_u8(contains_compiled_block as u8);
-    let _ = write!(w, "{stmts:?}");
-    ((w.a.finish() as u128) << 64) | w.b.finish() as u128
+    let mut w = FingerprintWriter::new();
+    w.add_u8(use_4state as u8);
+    w.add_u8(contains_compiled_block as u8);
+    w.add_debug(&stmts);
+    w.finish()
+}
+
+/// Structural fingerprint of a whole comb statement list plus the extra inputs
+/// that determine the sort/DCE/JIT pipeline result: `use_4state` (codegen) and
+/// `extra` (a caller-supplied digest of the event-statement liveness census and
+/// the DCE protect set — the pieces of dead-var DCE that depend on state outside
+/// the comb list). Token- and pointer-agnostic like `chunk_fingerprint`.
+pub(crate) fn whole_comb_fingerprint(
+    use_4state: bool,
+    stmts: &[ProtoStatement],
+    extra: u128,
+) -> u128 {
+    let mut w = FingerprintWriter::new();
+    w.add_u8(use_4state as u8);
+    w.add_debug(&stmts);
+    // Domain-separate the extra digest from the statement bytes.
+    w.add_u8(0xE5);
+    w.add_debug(&extra);
+    w.finish()
 }
 
 /// Ordered collection of backends.  Whole-module backends should come
@@ -138,11 +179,18 @@ impl BackendRegistry {
         }
         // Compile outside the lock; a concurrent peer may compile the same
         // chunk, but both artifacts are equivalent so the last insert wins.
-        let artifact = self
+        let mut artifact = self
             .backends
             .iter_mut()
             .find_map(|b| b.compile_chunk(ctx, stmts));
-        if let Some(artifact) = &artifact {
+        if let Some(artifact) = &mut artifact {
+            // Stamp the fingerprint so a fingerprint over a parent chunk (or
+            // whole comb) that embeds this as a nested CompiledBlock prints a
+            // stable, content-derived id rather than the `func` address. The
+            // Arc is fresh here (refcount 1), so `get_mut` always succeeds.
+            if let Some(a) = Arc::get_mut(artifact) {
+                a.content_fp = Some(key);
+            }
             CHUNK_ARTIFACT_CACHE
                 .lock()
                 .unwrap()

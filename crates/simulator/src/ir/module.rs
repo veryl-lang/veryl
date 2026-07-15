@@ -1,5 +1,6 @@
 use crate::backend::inst::next_test_top_id;
 use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole};
+use crate::ir::comb_pipeline_cache;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::{stable_topo_sort, stable_topo_sort_with_blocks};
 use crate::ir::derived_clock::{
@@ -507,6 +508,173 @@ fn pass_diag_phase(phase: &str) {
     if std::env::var("VERYL_PASS_DIAG").is_ok() {
         log::info!("pass_diag: analyze_dependency exit = {phase}");
     }
+}
+
+/// Structural key for the whole comb pipeline: the comb list's fingerprint
+/// folded with a digest of the event statements and DCE protect set. Those two
+/// are the only inputs, besides the comb list, that dead-var DCE reads, so a key
+/// match guarantees the memoised pipeline reproduces the exact result. Token-
+/// and pointer-agnostic (see `ProtoAssignStatement`/`ChunkArtifact` `Debug`).
+fn comb_pipeline_key(
+    use_4state: bool,
+    unified: &[ProtoStatement],
+    events: &HashMap<Event, Vec<ProtoStatement>>,
+    protect: &HashSet<VarOffset>,
+) -> u128 {
+    use crate::backend::registry::whole_comb_fingerprint;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    // Event digest: only the liveness the dead-var DCE actually reads, not the
+    // full event content — otherwise per-test constants / `$readmemh` paths /
+    // `$display` strings (which don't change deadness) would make every test a
+    // miss. Pooled across all events (DCE sees them as one joint census).
+    let event_slices: Vec<&[ProtoStatement]> = events.values().map(|v| v.as_slice()).collect();
+    let evt = dead_var_dce::census_digest(&event_slices);
+    // Protect digest: hash the sorted offsets (order-independent, collision-safe).
+    let mut prot_offs: Vec<isize> = protect.iter().map(|o| o.raw()).collect();
+    prot_offs.sort_unstable();
+    let mut h = DefaultHasher::new();
+    evt.hash(&mut h);
+    prot_offs.hash(&mut h);
+    whole_comb_fingerprint(use_4state, unified, h.finish() as u128)
+}
+
+/// Run the comb pipeline: `analyze_dependency` → `reorder_by_level` →
+/// `dce_aggressive` → dead-var DCE → `try_jit_no_cache`. Mutates
+/// `all_event_statements` in place with the dead-var drop (mirroring the miss
+/// path); the returned `dead_offsets` let a cache hit reproduce that drop.
+fn run_comb_pipeline(
+    context: &mut Context,
+    unified: Vec<ProtoStatement>,
+    all_event_statements: &mut HashMap<Event, Vec<ProtoStatement>>,
+    protect: &HashSet<VarOffset>,
+    module_name: StrId,
+) -> Result<comb_pipeline_cache::CombPipeline, SimulatorError> {
+    let (unified_sorted, passes_hint) = analyze_dependency(unified)?;
+    // No DCE/inlining: unified list includes internal child comb that would be incorrectly removed.
+    // reorder_by_level preserves the sort's dependency relations (readers
+    // stay relative to their version writers via the RAW/WAR leveling), so
+    // an exact pass hint derived from the schedule remains valid.
+    let unified_sorted = reorder_by_level(unified_sorted);
+    let required_comb_passes =
+        passes_hint.unwrap_or_else(|| compute_required_passes(&unified_sorted));
+    if passes_hint.is_some() && std::env::var("VERYL_PASS_DIAG").is_ok() {
+        log::info!(
+            "pass_diag: exact hint {} passes (positional metric would give {})",
+            required_comb_passes,
+            compute_required_passes(&unified_sorted)
+        );
+    }
+
+    // A non-trivial SCC in the expanded dataflow view is either
+    // structurally-cyclic-but-logically-false feedback (the multi-pass
+    // settle resolves it) or duplicate ProtoStatements from an IR
+    // assembly bug.  Under the positional metric the settled kind
+    // always leaves a counted backward edge, so SCC + single-pass can
+    // only be the duplicate bug.  Exact-hint paths are exempt (a
+    // strict block-aware schedule legitimately settles a false SCC in
+    // one pass); the test-local `nontrivial_comb_scc == 0` assertions
+    // cover the historical duplicate scenarios there.
+    //
+    // Skip the (heavy: Tarjan + per-stmt I/O scan) computation in
+    // release-without-tests since the assert is a no-op there and the
+    // field is only consumed by tests.
+    let nontrivial_comb_scc = if cfg!(any(debug_assertions, test)) {
+        compute_scc_stats(&unified_sorted).0
+    } else {
+        0
+    };
+    debug_assert!(
+        nontrivial_comb_scc == 0 || passes_hint.is_some() || required_comb_passes > 1,
+        "ProtoModule {:?}: {} nontrivial SCC(s) in unified_sorted but a \
+         single-pass schedule — this indicates duplicate ProtoStatements \
+         in the simulator IR.",
+        module_name,
+        nontrivial_comb_scc,
+    );
+
+    let unified_sorted = dce_aggressive(unified_sorted);
+
+    // Dead Variable DCE: drop full-width `Assign`s whose dst has zero
+    // consumers anywhere in this module's pre-JIT comb stmts and every
+    // event stmt set.  Complements `dup_assign_dce` (which handles the
+    // overwriting-store case) by killing writes that nobody reads in
+    // the first place — typical residue of `comb_to_ff_hoist` leaving
+    // the original comb-side Variable dead once the FF consumes the
+    // hoisted expression.  Env-gated by `VERYL_DEAD_VAR_DCE`, default
+    // ON; opt out with `VERYL_DEAD_VAR_DCE=0`.  `protect` is built by the
+    // caller (it feeds the cache key too).  The union of every pass's dead
+    // set is returned so a cache hit can re-apply it to another test's events.
+    let mut dead_union: HashSet<VarOffset> = HashSet::default();
+    let unified_sorted = if dead_var_dce::enabled() {
+        // Multi-pass DCE default ON: iterate to fixpoint so that
+        // cascaded drops (a dst becomes dead once its only consumer
+        // was itself dropped) are caught in subsequent passes.  Opt
+        // out via `VERYL_DEAD_VAR_DCE_MULTI=0`.
+        let multi_pass = std::env::var("VERYL_DEAD_VAR_DCE_MULTI").ok().as_deref() != Some("0");
+        let mut unified_sorted = unified_sorted;
+        let mut total_dropped = 0usize;
+        let mut pass = 0usize;
+        loop {
+            let mut slices: Vec<&[ProtoStatement]> =
+                Vec::with_capacity(1 + all_event_statements.len());
+            slices.push(unified_sorted.as_slice());
+            for stmts in all_event_statements.values() {
+                slices.push(stmts.as_slice());
+            }
+            let mut dead = dead_var_dce::collect_dead_offsets(&slices);
+            for p in protect {
+                dead.remove(p);
+            }
+            if dead.is_empty() {
+                break;
+            }
+            pass += 1;
+            let (rewritten, dropped_here) = dead_var_dce::apply_counting(unified_sorted, &dead);
+            unified_sorted = rewritten;
+            let mut total_dropped_here = dropped_here;
+            for stmts in all_event_statements.values_mut() {
+                let taken = std::mem::take(stmts);
+                let (new_stmts, d) = dead_var_dce::apply_counting(taken, &dead);
+                *stmts = new_stmts;
+                total_dropped_here += d;
+            }
+            let dead_len = dead.len();
+            dead_union.extend(dead);
+            if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
+                eprintln!(
+                    "[DeadVarDce] module={} pass={} dead_set={} dropped_stmts={}",
+                    module_name, pass, dead_len, total_dropped_here,
+                );
+            }
+            total_dropped += total_dropped_here;
+            if total_dropped_here == 0 || !multi_pass {
+                break;
+            }
+        }
+        if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
+            eprintln!(
+                "[DeadVarDce] module={} total_passes={} total_dropped={}",
+                module_name, pass, total_dropped,
+            );
+        }
+        unified_sorted
+    } else {
+        unified_sorted
+    };
+
+    // Snapshot before JIT consumes it: the whole-comb backend needs the
+    // pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
+    let pre_jit_stmts = Arc::new(unified_sorted.clone());
+    let comb_statements = try_jit_no_cache(context, unified_sorted);
+    Ok(comb_pipeline_cache::CombPipeline {
+        pre_jit_stmts,
+        required_comb_passes,
+        comb_statements,
+        dead_offsets: dead_union.into_iter().collect(),
+        nontrivial_comb_scc,
+    })
 }
 
 /// Returns the scheduled statements plus an exact required-pass hint when the
@@ -2425,7 +2593,7 @@ impl Conv<&air::Module> for ProtoModule {
         let mut all_external_components: Vec<ProtoExternalComponent> = vec![];
 
         for decl in declarations {
-            let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
+            let mut proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
             for (event, mut stmts) in proto_decl.event_statements {
                 all_event_statements
@@ -2433,7 +2601,10 @@ impl Conv<&air::Module> for ProtoModule {
                     .and_modify(|v| v.append(&mut stmts))
                     .or_insert(stmts);
             }
-            all_comb_statements.append(&mut proto_decl.comb_statements.clone());
+            // Move (not clone): `proto_decl` is dropped after this iteration, so
+            // draining its comb list avoids a full deep-copy of the child subtree
+            // — the DUT's bulk — on every test.
+            all_comb_statements.append(&mut proto_decl.comb_statements);
             all_post_comb_fns.extend(proto_decl.post_comb_fns);
             all_child_modules.extend(proto_decl.child_modules);
             nested_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);
@@ -2497,74 +2668,18 @@ impl Conv<&air::Module> for ProtoModule {
             .chain(all_post_comb_fns)
             .collect();
 
-        let (unified_sorted, passes_hint) = analyze_dependency(unified)?;
-        // No DCE/inlining: unified list includes internal child comb that would be incorrectly removed.
-        // reorder_by_level preserves the sort's dependency relations (readers
-        // stay relative to their version writers via the RAW/WAR leveling), so
-        // an exact pass hint derived from the schedule remains valid.
-        let unified_sorted = reorder_by_level(unified_sorted);
-        let required_comb_passes =
-            passes_hint.unwrap_or_else(|| compute_required_passes(&unified_sorted));
-        if passes_hint.is_some() && std::env::var("VERYL_PASS_DIAG").is_ok() {
-            log::info!(
-                "pass_diag: exact hint {} passes (positional metric would give {})",
-                required_comb_passes,
-                compute_required_passes(&unified_sorted)
-            );
-        }
-
-        // A non-trivial SCC in the expanded dataflow view is either
-        // structurally-cyclic-but-logically-false feedback (the multi-pass
-        // settle resolves it) or duplicate ProtoStatements from an IR
-        // assembly bug.  Under the positional metric the settled kind
-        // always leaves a counted backward edge, so SCC + single-pass can
-        // only be the duplicate bug.  Exact-hint paths are exempt (a
-        // strict block-aware schedule legitimately settles a false SCC in
-        // one pass); the test-local `nontrivial_comb_scc == 0` assertions
-        // cover the historical duplicate scenarios there.
-        //
-        // Skip the (heavy: Tarjan + per-stmt I/O scan) computation in
-        // release-without-tests since the assert is a no-op there and the
-        // field is only consumed by tests.
-        let nontrivial_comb_scc = if cfg!(any(debug_assertions, test)) {
-            compute_scc_stats(&unified_sorted).0
-        } else {
-            0
-        };
-        debug_assert!(
-            nontrivial_comb_scc == 0 || passes_hint.is_some() || required_comb_passes > 1,
-            "ProtoModule {:?}: {} nontrivial SCC(s) in unified_sorted but a \
-             single-pass schedule — this indicates duplicate ProtoStatements \
-             in the simulator IR.",
-            src.name,
-            nontrivial_comb_scc,
-        );
-
-        let unified_sorted = dce_aggressive(unified_sorted);
-
-        // Dead Variable DCE: drop full-width `Assign`s whose dst has zero
-        // consumers anywhere in this module's pre-JIT comb stmts and every
-        // event stmt set.  Complements `dup_assign_dce` (which handles the
-        // overwriting-store case) by killing writes that nobody reads in
-        // the first place — typical residue of `comb_to_ff_hoist` leaving
-        // the original comb-side Variable dead once the FF consumes the
-        // hoisted expression.  Env-gated by `VERYL_DEAD_VAR_DCE`, default
-        // ON; opt out with `VERYL_DEAD_VAR_DCE=0`.
-        let unified_sorted = if dead_var_dce::enabled() {
-            // Protect every offset that doesn't back a let-bound local.
-            // `comb_to_ff_hoist` only rewrites VarKind::Let, so the dead
-            // residue we want DCE to drop is always Let-kind.  User-
-            // declared `var`s and module ports may have no in-module
-            // reader yet still be live externally (port wiring at the
-            // parent, or `Simulator::get_var(...)` from a testbench
-            // harness), so keep them out of the candidate set.
+        // Dead-var DCE protect set (also folded into the cache key): offsets
+        // that must survive DCE.  `comb_to_ff_hoist` only rewrites `VarKind::Let`,
+        // so the dead residue DCE targets is always Let-kind; user `var`s and
+        // ports may have no in-module reader yet be live externally (parent port
+        // wiring, or `Simulator::get_var` from a harness), and clock-typed lets
+        // (derived clocks) are read only through `always_ff` sensitivity — both
+        // are kept out of the candidate set.  Built here once so the key and the
+        // miss-path pipeline share it.
+        let dce_protect: HashSet<VarOffset> = if dead_var_dce::enabled() {
             use veryl_analyzer::ir::VarKind;
-            let mut protect: crate::HashSet<VarOffset> = crate::HashSet::default();
+            let mut protect: HashSet<VarOffset> = HashSet::default();
             for (vid, var) in &src.variables {
-                // Clock-typed lets are protected too: derived clocks have
-                // no in-module stmt reader (only `always_ff` sensitivity,
-                // invisible to the dataflow graph), so DCE would drop the
-                // assignment and starve `partial_settle`.
                 let is_let = matches!(var.kind, VarKind::Let);
                 let is_clock = var.r#type.is_clock();
                 if is_let && !is_clock {
@@ -2576,15 +2691,13 @@ impl Conv<&air::Module> for ProtoModule {
                     }
                 }
             }
-            // Same protection for clock vars declared inside child
-            // instances: their only in-IR reader is the `always_ff`
-            // sensitivity (invisible to DCE), and dropping the writer
-            // would starve the derived-clock partial-settle.
+            // Child-instance clock vars: only reader is `always_ff` sensitivity
+            // (invisible to DCE); dropping the writer starves partial_settle.
             for (_, off, _) in &nested_derived_clock_candidates {
                 protect.insert(*off);
             }
-            // Component input connections read these offsets, but they
-            // appear in no statement list — protect them from DCE.
+            // Component input connections read these offsets but appear in no
+            // statement list.
             for external in &all_external_components {
                 for connect in &external.connects {
                     let mut ins = vec![];
@@ -2592,62 +2705,61 @@ impl Conv<&air::Module> for ProtoModule {
                     protect.extend(ins);
                 }
             }
-            // Multi-pass DCE default ON: iterate to fixpoint so that
-            // cascaded drops (a dst becomes dead once its only consumer
-            // was itself dropped) are caught in subsequent passes.  Opt
-            // out via `VERYL_DEAD_VAR_DCE_MULTI=0`.
-            let multi_pass = std::env::var("VERYL_DEAD_VAR_DCE_MULTI").ok().as_deref() != Some("0");
-            let mut unified_sorted = unified_sorted;
-            let mut total_dropped = 0usize;
-            let mut pass = 0usize;
-            loop {
-                let mut slices: Vec<&[ProtoStatement]> =
-                    Vec::with_capacity(1 + all_event_statements.len());
-                slices.push(unified_sorted.as_slice());
-                for stmts in all_event_statements.values() {
-                    slices.push(stmts.as_slice());
-                }
-                let mut dead = dead_var_dce::collect_dead_offsets(&slices);
-                for p in &protect {
-                    dead.remove(p);
-                }
-                if dead.is_empty() {
-                    break;
-                }
-                pass += 1;
-                let (rewritten, dropped_here) = dead_var_dce::apply_counting(unified_sorted, &dead);
-                unified_sorted = rewritten;
-                let mut total_dropped_here = dropped_here;
-                for stmts in all_event_statements.values_mut() {
-                    let taken = std::mem::take(stmts);
-                    let (new_stmts, d) = dead_var_dce::apply_counting(taken, &dead);
-                    *stmts = new_stmts;
-                    total_dropped_here += d;
-                }
-                if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
-                    eprintln!(
-                        "[DeadVarDce] module={} pass={} dead_set={} dropped_stmts={}",
-                        src.name,
-                        pass,
-                        dead.len(),
-                        total_dropped_here,
-                    );
-                }
-                total_dropped += total_dropped_here;
-                if total_dropped_here == 0 || !multi_pass {
-                    break;
-                }
-            }
-            if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
-                eprintln!(
-                    "[DeadVarDce] module={} total_passes={} total_dropped={}",
-                    src.name, pass, total_dropped,
-                );
-            }
-            unified_sorted
+            protect
         } else {
-            unified_sorted
+            HashSet::default()
         };
+
+        // Whole comb pipeline (analyze_dependency + reorder + DCE + JIT),
+        // memoised across tests that share a DUT.  A hit returns the pre-JIT
+        // stmts, pass count, compiled comb, and the dead-var offset set — the
+        // last re-applied to this test's events so they match the miss path
+        // exactly (dead offsets are read nowhere, so the drop is value-neutral).
+        // Single-flight (see `comb_pipeline_cache`); gated to `dut_reuse`.
+        let key = comb_pipeline_key(
+            context.config.use_4state,
+            &unified,
+            &all_event_statements,
+            &dce_protect,
+        );
+        let cached: Arc<comb_pipeline_cache::CombPipeline> =
+            match comb_pipeline_cache::try_get_or_claim(key, context.config.dut_reuse) {
+                comb_pipeline_cache::Outcome::Hit(cached) => {
+                    // The pipeline (incl. the in-place event DCE) did not run for
+                    // this test; reproduce the dead-var drop on its events.
+                    let dead: HashSet<VarOffset> = cached.dead_offsets.iter().copied().collect();
+                    if !dead.is_empty() {
+                        for stmts in all_event_statements.values_mut() {
+                            let taken = std::mem::take(stmts);
+                            *stmts = dead_var_dce::apply_counting(taken, &dead).0;
+                        }
+                    }
+                    cached
+                }
+                // Compute (single-flight claim) or Disabled (reuse off): run the
+                // pipeline once (it DCEs the events in place), then publish via
+                // the guard or just wrap the result.
+                other => {
+                    let result = run_comb_pipeline(
+                        context,
+                        unified,
+                        &mut all_event_statements,
+                        &dce_protect,
+                        src.name,
+                    )?;
+                    match other {
+                        comb_pipeline_cache::Outcome::Compute(guard) => guard.store(result),
+                        _ => Arc::new(result),
+                    }
+                }
+            };
+        // `pre_jit_stmts` is shared read-only downstream (Arc, no deep clone);
+        // `comb_statements` is cloned into the ProtoModule (mostly `Arc::clone`s
+        // of compiled chunks).
+        let pre_jit_stmts = Arc::clone(&cached.pre_jit_stmts);
+        let required_comb_passes = cached.required_comb_passes;
+        let comb_statements = cached.comb_statements.clone();
+        let nontrivial_comb_scc = cached.nontrivial_comb_scc;
 
         // Top-level variables written by RTL (post-DCE), for the sole-driver
         // check on component outputs at load time.
@@ -2671,7 +2783,7 @@ impl Conv<&air::Module> for ProtoModule {
                     write_offsets.extend(outs.drain(..));
                 }
             }
-            for stmt in &unified_sorted {
+            for stmt in pre_jit_stmts.iter() {
                 ins.clear();
                 outs.clear();
                 stmt.gather_variable_offsets(&mut ins, &mut outs);
@@ -2687,11 +2799,6 @@ impl Conv<&air::Module> for ProtoModule {
                 .map(|(vid, _)| *vid)
                 .collect()
         };
-
-        // Snapshot before JIT consumes it: the whole-comb backend below needs
-        // the pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
-        let pre_jit_stmts = unified_sorted.clone();
-        let comb_statements = try_jit_no_cache(context, unified_sorted);
 
         // Cond-hoist transform (disable with VERYL_COND_HOIST_DISABLE=1):
         // For each top-level `if cond { body }` whose body contains a
