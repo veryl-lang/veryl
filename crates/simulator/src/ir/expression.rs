@@ -1083,6 +1083,36 @@ impl ProtoExpression {
         }
     }
 
+    /// SystemVerilog evaluates an assignment RHS at the destination
+    /// (context) width, so a bare narrower signed RHS sign-extends at the
+    /// store. Operator nodes already extend their operands to the context
+    /// width during evaluation; only leaf reads and literals reach the
+    /// store at their natural width. Bit/part-selects are unsigned per the
+    /// LRM, so selected leaves are exempt. Returns the width to extend
+    /// from when extension is required. All backends must key their store
+    /// paths on this predicate identically.
+    pub fn store_sign_extend_from(&self, dst_width: usize) -> Option<usize> {
+        let (width, signed) = match self {
+            ProtoExpression::Variable {
+                width,
+                select: None,
+                dynamic_select: None,
+                expr_context,
+                ..
+            }
+            | ProtoExpression::DynamicVariable {
+                width,
+                select: None,
+                dynamic_select: None,
+                expr_context,
+                ..
+            } => (*width, expr_context.signed),
+            ProtoExpression::Value { value, width, .. } => (*width, value.signed()),
+            _ => return None,
+        };
+        (signed && width > 0 && width < dst_width).then_some(width)
+    }
+
     /// # Safety
     /// `ff_values_ptr` and `comb_values_ptr` must point to valid buffers.
     // `ff_len` / `comb_len` are used by the debug_assert! bounds checks

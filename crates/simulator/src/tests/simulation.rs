@@ -18707,3 +18707,167 @@ fn unsigned_div_rem_by_zero() {
         assert_eq!(sim.get("r").unwrap(), exp, "wide r config={config:?}");
     }
 }
+
+#[test]
+fn bare_signed_rhs_sign_extends_at_store() {
+    // SystemVerilog evaluates an assignment RHS at the destination width,
+    // so a bare narrower signed RHS sign-extends (iverilog: fffffffb).
+    // All native backends used to zero-extend a leaf-variable RHS — only
+    // operator nodes extended their operands to the context width.  An
+    // unsigned RHS zero-extends and a part-select is unsigned per the LRM.
+    let code = r#"
+    module Top (
+        c    : input  signed logic<8>,
+        cu   : input  logic<8>,
+        r_u  : output logic<32>,
+        r_s  : output signed logic<32>,
+        r_su : output signed logic<32>,
+        r_sel: output logic<32>,
+    ) {
+        assign r_u = c;
+        assign r_s = c;
+        assign r_su = cu;
+        assign r_sel = c[7:4];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("c", Value::new(0xfb, 8, true));
+        sim.set("cu", Value::new(0xfb, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("r_u").unwrap(),
+            Value::new(0xffff_fffb, 32, false),
+            "r_u config={config:?}"
+        );
+        // sim.get returns the raw storage value (unsigned flag).
+        assert_eq!(
+            sim.get("r_s").unwrap(),
+            Value::new(0xffff_fffb, 32, false),
+            "r_s config={config:?}"
+        );
+        assert_eq!(
+            sim.get("r_su").unwrap(),
+            Value::new(0xfb, 32, false),
+            "r_su config={config:?}"
+        );
+        assert_eq!(
+            sim.get("r_sel").unwrap(),
+            Value::new(0xf, 32, false),
+            "r_sel config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn bare_signed_rhs_sign_extends_at_ff_store() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        c  : input  signed logic<8>,
+        r  : output logic<32>,
+    ) {
+        always_ff {
+            if_reset {
+                r = 0;
+            } else {
+                r = c;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+        sim.set("c", Value::new(0xfb, 8, true));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new(0xffff_fffb, 32, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn bare_signed_rhs_sign_extends_at_wide_store() {
+    // 65..128-bit dst takes the __uint128_t register path; >128-bit takes
+    // the flat-buffer path (interpreter fallback on the JIT backends).
+    let code = r#"
+    module Top (
+        c : input  signed logic<100>,
+        r : output logic<128>,
+        r2: output logic<200>,
+    ) {
+        assign r = c;
+        assign r2 = c;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let c = (BigUint::from(1u32) << 99u32) + BigUint::from(5u32);
+    let exp = |total: usize| {
+        // bits 99..total-1 set (sign fill), low bits = 5
+        let fill = ((BigUint::from(1u32) << total) - BigUint::from(1u32))
+            ^ ((BigUint::from(1u32) << 99u32) - BigUint::from(1u32));
+        fill + BigUint::from(5u32)
+    };
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("c", Value::new_biguint(c.clone(), 100, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new_biguint(exp(128), 128, false),
+            "r config={config:?}"
+        );
+        assert_eq!(
+            sim.get("r2").unwrap(),
+            Value::new_biguint(exp(200), 200, false),
+            "r2 config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn bare_signed_rhs_sign_extends_at_dynamic_store() {
+    let code = r#"
+    module Top (
+        idx: input  logic<2>,
+        c  : input  signed logic<8>,
+        o  : output logic<32>,
+    ) {
+        var arr: logic<32> [4];
+
+        always_comb {
+            arr[0] = 0;
+            arr[1] = 0;
+            arr[2] = 0;
+            arr[3] = 0;
+            arr[idx] = c;
+        }
+        assign o = arr[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("idx", Value::new(1, 2, false));
+        sim.set("c", Value::new(0xfb, 8, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0xffff_fffb, 32, false),
+            "config={config:?}"
+        );
+    }
+}

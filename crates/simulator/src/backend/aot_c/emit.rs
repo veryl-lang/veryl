@@ -2789,6 +2789,13 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
 pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
     match stmt {
         ProtoStatement::Assign(a) => {
+            // A bare signed RHS narrower than the destination sign-extends at
+            // the store (see ProtoExpression::store_sign_extend_from); not
+            // implemented in the C emitter — bail to Cranelift, which extends
+            // in-register.
+            if a.rhs_select.is_none() && a.expr.store_sign_extend_from(a.dst_width).is_some() {
+                return None;
+            }
             // Route every FF write through the shadow-slot + WriteLogEntry path
             // (matching Cranelift) — a bare shadow store is never committed, so
             // the value is lost.  Needed in the comb path too: the is_ff
@@ -3047,6 +3054,11 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             Some(format!("{{ {} }}", inner))
         }
         ProtoStatement::AssignDynamic(a) => {
+            // Narrow signed bare RHS sign-extends at the store; bail to the
+            // Cranelift/interpreter path (see the Assign arm above).
+            if a.rhs_select.is_none() && a.expr.store_sign_extend_from(a.dst_width).is_some() {
+                return None;
+            }
             // Event-path dynamic FF write (e.g. register file by rd index):
             // direct element store + WriteLogEntry push.
             if event_mode() && a.dst_base.is_ff() {
