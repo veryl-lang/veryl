@@ -1343,10 +1343,10 @@ impl ProtoExpression {
                 // Width-growing op results can leave dirty bits at/above the
                 // width; harmless once stored but corrupt an in-register
                 // consumer (icmp, expand_sign's MSB probe). The interpreter
-                // masks these, so match it. Pow is excluded — the interpreter
-                // does NOT mask Pow, so masking here would diverge instead.
-                // `skip_root_mask` elides this when the consumer is a plain
-                // store, which re-masks to dst_width anyway.
+                // masks these (Pow included: pow_mod_width computes modulo
+                // 2^width), so match it. `skip_root_mask` elides this when
+                // the consumer is a plain store, which re-masks to dst_width
+                // anyway.
                 if !skip_root_mask
                     && matches!(
                         op,
@@ -1357,6 +1357,7 @@ impl ProtoExpression {
                             | Op::ArithShiftL
                             | Op::ArithShiftR
                             | Op::BitXnor
+                            | Op::Pow
                     )
                 {
                     payload = band_const(
