@@ -202,6 +202,63 @@ fn interp_wide_struct_bit_field_rhs_no_spill() {
 }
 
 #[test]
+fn dynamic_index_wide_element_subslice_op() {
+    // A runtime index into a 65..128-bit array element (loaded as I128 on the
+    // x86-64 JIT), then a narrow sub-slice and an op on it.  The DynamicVariable
+    // lowering branched its extraction on the result width, so a <=64-bit slice
+    // ran I64 ops on the I128 payload and returned I128 where an I64 was
+    // expected — mixing the two in the downstream `==`/`+` tripped x64 lowering
+    // (isle.rs:289).  <=64-bit and >128-bit elements took other paths and were
+    // unaffected.
+    let code = r#"
+    module Top (
+        idx: input  logic<3>  ,
+        d  : input  logic<100>,
+        eq : output logic     ,
+        sum: output logic<8>  ,
+        hi : output logic<8>  ,
+    ) {
+        var arr: logic<100> [8];
+        always_comb {
+            for k in 0..8 {
+                arr[k] = d + k;
+            }
+        }
+        assign eq  = arr[idx][2:0] == 3'd5;
+        assign sum = arr[idx][7:0] + 8'd1;
+        assign hi  = arr[idx][71:64];         // straddles the 64-bit boundary
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        // arr[3] = 0x34_0000_0000_0000_1122 + 3 = 0x34_0000_0000_0000_1125
+        sim.set("idx", Value::new(3, 3, false));
+        sim.set(
+            "d",
+            Value::from_u128(0x34_0000_0000_0000_1122, 0, 100, false),
+        );
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("eq").unwrap(),
+            Value::new(1, 1, false),
+            "eq config={config:?}"
+        );
+        assert_eq!(
+            sim.get("sum").unwrap(),
+            Value::new(0x26, 8, false),
+            "sum config={config:?}"
+        );
+        assert_eq!(
+            sim.get("hi").unwrap(),
+            Value::new(0x34, 8, false),
+            "hi config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn shift_loc_wdata_256_all_offsets() {
     // Reproduces pe_pkg::shift_loc_wdata from the sarugaku PE (the 0127_x_sdw_loc
     // testcase): a 64-bit datum is byte-rotated into a 256-bit line at byte

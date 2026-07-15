@@ -2032,7 +2032,6 @@ impl ProtoExpression {
                 ..
             } => {
                 let nb = *element_native_bytes;
-                let wide = *width > 64;
                 let (idx_payload, _idx_mask_xz) = index_expr.build_binary(context, builder)?;
 
                 // Clamp index to [0, num_elements - 1]
@@ -2113,25 +2112,50 @@ impl ProtoExpression {
                     None
                 };
 
+                // The payload is I128 iff the element loaded as 16 bytes, so the
+                // extraction must branch on the payload width, not the result
+                // width.  A narrow result is reduced back to I64 — gated on
+                // `*width`, the value the caller reads via `.width()` to pick the
+                // operand type — so the produced type matches the caller even if
+                // `window`/`select_width` diverge from the reported width.
+                let payload_wide = nb == 16;
                 if let Some(dyn_sel) = dynamic_select {
                     let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
                     let mask = gen_mask_for_width(dyn_sel.window);
                     payload = builder.ins().ushr(payload, shift);
-                    payload = band_const(builder, payload, mask, wide);
+                    payload = band_const(builder, payload, mask, payload_wide);
                     if context.use_4state {
                         let mxz = mask_xz.unwrap();
                         let mxz = builder.ins().ushr(mxz, shift);
-                        mask_xz = Some(band_const(builder, mxz, mask, wide));
+                        mask_xz = Some(band_const(builder, mxz, mask, payload_wide));
+                    }
+                    if payload_wide && *width <= 64 {
+                        payload = builder.ins().ireduce(I64, payload);
+                        if let Some(mxz) = mask_xz {
+                            mask_xz = Some(builder.ins().ireduce(I64, mxz));
+                        }
                     }
                 } else if let Some((beg, end)) = select {
                     let select_width = beg - end + 1;
-                    if wide {
+                    if payload_wide {
                         let mask = gen_mask_128(select_width);
-                        payload = builder.ins().ushr_imm(payload, *end as i64);
+                        if *end != 0 {
+                            payload = builder.ins().ushr_imm(payload, *end as i64);
+                        }
                         payload = apply_mask_128(builder, payload, mask);
                         if context.use_4state {
-                            let x = builder.ins().ushr_imm(mask_xz.unwrap(), *end as i64);
+                            let x = if *end != 0 {
+                                builder.ins().ushr_imm(mask_xz.unwrap(), *end as i64)
+                            } else {
+                                mask_xz.unwrap()
+                            };
                             mask_xz = Some(apply_mask_128(builder, x, mask));
+                        }
+                        if *width <= 64 {
+                            payload = builder.ins().ireduce(I64, payload);
+                            if let Some(mxz) = mask_xz {
+                                mask_xz = Some(builder.ins().ireduce(I64, mxz));
+                            }
                         }
                     } else {
                         let mask = ValueU64::gen_mask(select_width);
