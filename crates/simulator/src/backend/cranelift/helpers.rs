@@ -165,10 +165,9 @@ pub(crate) fn build_dynamic_select_shift(
 
 // ── Wide (>128-bit) helper utilities ────────────────────────────────
 
-/// Width requires pointer-based wide representation (> 128 bit).
-pub(crate) fn is_wide_ptr(width: usize) -> bool {
-    width > 128
-}
+/// Register-vs-pointer boundary; defined in `ir::variable` so this backend and
+/// `builds_wide_pointer` share one source of truth.
+pub(crate) use crate::ir::variable::is_wide_ptr;
 
 pub(crate) fn alloc_wide_zero(builder: &mut FunctionBuilder, nb: usize) -> CraneliftValue {
     let ptr = alloc_wide_slot(builder, nb);
@@ -459,6 +458,114 @@ pub(crate) fn emit_wide_bit_select_read_narrow(
         result = builder.ins().band_imm(result, mask);
     }
     result
+}
+
+/// Read a 64-bit window of a wide value at an arbitrary compile-time bit
+/// offset: bits `[bit_start ..= bit_start + 63]` of the value at `ptr`.  A word
+/// at/beyond `src_words` folds to a zero const, so bits past the source read as
+/// zero with no runtime bounds check.
+fn read_shifted_word(
+    builder: &mut FunctionBuilder,
+    ptr: CraneliftValue,
+    bit_start: usize,
+    src_words: usize,
+) -> CraneliftValue {
+    let flags = MemFlagsData::trusted();
+    let word = bit_start / 64;
+    let bit = (bit_start % 64) as i64;
+    let lo = if word < src_words {
+        builder.ins().load(I64, flags, ptr, (word * 8) as i32)
+    } else {
+        builder.ins().iconst(I64, 0)
+    };
+    let mut result = if bit == 0 {
+        lo
+    } else {
+        builder.ins().ushr_imm(lo, bit)
+    };
+    if bit != 0 {
+        let hi = if word + 1 < src_words {
+            builder.ins().load(I64, flags, ptr, ((word + 1) * 8) as i32)
+        } else {
+            builder.ins().iconst(I64, 0)
+        };
+        let hi_part = builder.ins().ishl_imm(hi, 64 - bit);
+        result = builder.ins().bor(result, hi_part);
+    }
+    result
+}
+
+/// Extract bits `[end ..= beg]` (`width` in `65..=128`) of the wide value at
+/// `ptr` into an I128 register — not a pointer, since the value form must match
+/// `is_wide_ptr(width)` (register for `width <= 128`).
+pub(crate) fn emit_wide_bit_select_read_i128(
+    builder: &mut FunctionBuilder,
+    ptr: CraneliftValue,
+    src_full_width: usize,
+    beg: usize,
+    end: usize,
+    width: usize,
+) -> CraneliftValue {
+    debug_assert!(beg >= end && width == beg - end + 1 && width > 64 && width <= 128);
+    let src_words = calc_native_bytes(src_full_width) / 8;
+    let w0 = read_shifted_word(builder, ptr, end, src_words);
+    let mut w1 = read_shifted_word(builder, ptr, end + 64, src_words);
+    let hi_bits = width - 64;
+    if hi_bits < 64 {
+        w1 = builder.ins().band_imm(w1, ((1u64 << hi_bits) - 1) as i64);
+    }
+    builder.ins().iconcat(w0, w1)
+}
+
+/// Extract bits `[end ..= beg]` (`width` > 128) of the wide value at `ptr` into
+/// a fresh slot and return the pointer.  `src_full_width` bounds the source word
+/// count; the caller treats the result as a wide pointer per `builds_wide_pointer`.
+pub(crate) fn emit_wide_bit_select_read_wide(
+    builder: &mut FunctionBuilder,
+    ptr: CraneliftValue,
+    src_full_width: usize,
+    beg: usize,
+    end: usize,
+    width: usize,
+) -> CraneliftValue {
+    debug_assert!(beg >= end && width == beg - end + 1 && width > 128);
+    let flags = MemFlagsData::trusted();
+    let src_words = calc_native_bytes(src_full_width) / 8;
+    let result_nb = calc_native_bytes(width);
+    let result_words = result_nb / 8;
+    let dst = alloc_wide_slot(builder, result_nb);
+    for j in 0..result_words {
+        let mut w = read_shifted_word(builder, ptr, end + j * 64, src_words);
+        // Only the top result word can be partial; lower words are full.
+        let valid_bits = width - j * 64;
+        if valid_bits < 64 {
+            let mask = ((1u64 << valid_bits) - 1) as i64;
+            w = builder.ins().band_imm(w, mask);
+        }
+        builder.ins().store(flags, w, dst, (j * 8) as i32);
+    }
+    dst
+}
+
+/// Static bit-select `[end ..= beg]` of a wide (>128-bit) source, dispatched to
+/// the value form `is_wide_ptr(width)` expects.  The one place the
+/// width→representation split lives; shared by the Variable and DynamicVariable
+/// select paths.
+pub(crate) fn emit_wide_bit_select_read(
+    builder: &mut FunctionBuilder,
+    base: CraneliftValue,
+    src_full_width: usize,
+    beg: usize,
+    end: usize,
+    width: usize,
+) -> CraneliftValue {
+    if width <= 64 {
+        emit_wide_bit_select_read_narrow(builder, base, beg, end, width)
+    } else if is_wide_ptr(width) {
+        emit_wide_bit_select_read_wide(builder, base, src_full_width, beg, end, width)
+    } else {
+        emit_wide_bit_select_read_i128(builder, base, src_full_width, beg, end, width)
+    }
 }
 
 /// `rhs_select`: `dst = (src >> end) & mask(width)` for a wide source, into a

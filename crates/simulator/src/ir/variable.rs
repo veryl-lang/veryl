@@ -58,6 +58,15 @@ pub fn native_bytes(width: usize) -> usize {
     }
 }
 
+/// The single authority for register-vs-pointer representation: a value wider
+/// than a native register (`native_bytes > 16`, i.e. > 128 bit) is materialised
+/// as a pointer into flat LE-u64 storage rather than an I64/I128 scalar.  Both
+/// the IR-layer `builds_wide_pointer` predicate and the Cranelift backend key
+/// their pointer/scalar dispatch on this, so they cannot drift apart.
+pub fn is_wide_ptr(width: usize) -> bool {
+    native_bytes(width) > 16
+}
+
 /// Inst-boundary cache-line padding for FF storage.  When
 /// `VERYL_FF_CACHELINE_PAD=1`, each child module's FF allocation is
 /// rounded up to the next 64-byte boundary, eliminating false sharing
