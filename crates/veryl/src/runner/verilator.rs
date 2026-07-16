@@ -187,11 +187,15 @@ impl Runner for Verilator {
             }
         }
 
+        let top_name = test.to_string();
+
         let rt = Runtime::new().unwrap();
 
         rt.block_on(async {
             let compile = new_cmd("verilator")
                 .args(&opt)
+                .arg("--top-module")
+                .arg(&top_name)
                 .arg("-f")
                 .arg(metadata.filelist_path())
                 .arg("-o")
