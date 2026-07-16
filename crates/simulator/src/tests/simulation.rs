@@ -970,6 +970,166 @@ fn wide_256_narrow_select() {
 }
 
 #[test]
+fn wide_256_wide_result_select() {
+    // Static wide-result (>64-bit) bit-select of a wide (>128-bit) value:
+    // 65-128-bit results are I128 registers, >128-bit results wide-slot
+    // pointers.  Covers word-aligned, straddling, and high-word selects,
+    // validated against the interpreter via Config::all().
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        a:  input  logic<256>,
+        w0: output logic<80> ,
+        w1: output logic<128>,
+        w2: output logic<160>,
+        w3: output logic<200>,
+    ) {
+        assign w0 = a[95:16];   // 80-bit,  unaligned, straddles word 0/1
+        assign w1 = a[191:64];  // 128-bit, word-aligned start
+        assign w2 = a[223:64];  // 160-bit, word-aligned start
+        assign w3 = a[210:11];  // 200-bit, unaligned start
+    }
+    "#;
+
+    // Distinct bytes across all 32 source bytes so high-word reads matter.
+    let bytes: Vec<u8> = (0..32u8)
+        .map(|i| i.wrapping_mul(37).wrapping_add(3))
+        .collect();
+    let a = BigUint::from_bytes_le(&bytes);
+    let slice = |beg: usize, end: usize| -> BigUint {
+        let w = beg - end + 1;
+        (&a >> end) & ((BigUint::from(1u8) << w) - 1u8)
+    };
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new_biguint(a.clone(), 256, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        for (name, beg, end, width) in [
+            ("w0", 95, 16, 80),
+            ("w1", 191, 64, 128),
+            ("w2", 223, 64, 160),
+            ("w3", 210, 11, 200),
+        ] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new_biguint(slice(beg, end), width, false),
+                "{name} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_dynamic_elem_wide_result_select() {
+    // Runtime-indexed read of a wide (>128-bit) array element then a static
+    // wide-result bit-select (DynamicVariable wide-element branch: runtime
+    // address, compile-time select).  Validated against the interpreter via
+    // Config::all().
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        e0:  input  logic<200>,
+        e1:  input  logic<200>,
+        idx: input  logic<1> ,
+        o:   output logic<100>,
+    ) {
+        var arr: logic<200> [2];
+        always_comb {
+            arr[0] = e0;
+            arr[1] = e1;
+        }
+        assign o = arr[idx][149:50]; // 100-bit wide-result select, dynamic idx
+    }
+    "#;
+
+    let e0 = (BigUint::from(0x0123_4567_89AB_CDEFu64) << 128u32)
+        | (BigUint::from(0xFEDC_BA98_7654_3210u64) << 64u32)
+        | BigUint::from(0x0F1E_2D3C_4B5A_6978u64);
+    let e1 = (BigUint::from(0xAAAA_BBBB_CCCC_DDDDu64) << 128u32)
+        | (BigUint::from(0x1111_2222_3333_4444u64) << 64u32)
+        | BigUint::from(0x5555_6666_7777_8888u64);
+    let slice = |v: &BigUint| -> BigUint { (v >> 50u32) & ((BigUint::from(1u8) << 100u32) - 1u8) };
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("e0", Value::new_biguint(e0.clone(), 200, false));
+        sim.set("e1", Value::new_biguint(e1.clone(), 200, false));
+        for (j, src) in [(0u64, &e0), (1u64, &e1)] {
+            sim.set("idx", Value::new(j, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new_biguint(slice(src), 100, false),
+                "idx={j} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_select_65_128_as_operand() {
+    // A 65-128-bit select of a wide value used as an OPERAND of a same-width
+    // op.  Its form must be an I128 register: with all widths <= 128 the binary
+    // dispatch takes the register path, so a pointer here would be read as an
+    // integer.  Regression guard — a pointer form here miscompiled the load
+    // datapath.
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        a: input  logic<256>,
+        b: input  logic<80> ,
+        c: input  logic<100>,
+        x: output logic<80> ,
+        y: output logic<100>,
+    ) {
+        assign x = a[95:16] ^ b;    // 80-bit  select as XOR operand
+        assign y = a[179:80] + c;   // 100-bit select as ADD operand
+    }
+    "#;
+
+    let bytes: Vec<u8> = (0..32u8)
+        .map(|i| i.wrapping_mul(53).wrapping_add(7))
+        .collect();
+    let a = BigUint::from_bytes_le(&bytes);
+    let b = BigUint::from(0x0102_0304_0506_0708u64) | (BigUint::from(0x1112u16) << 64u32);
+    let c = BigUint::from(0xABCD_1234_5678_9AB0u64) | (BigUint::from(0x0F1E_2D3Cu32) << 64u32);
+    let mask = |w: usize| (BigUint::from(1u8) << w) - 1u8;
+    let sel = |beg: usize, end: usize| (&a >> end) & mask(beg - end + 1);
+    let x_exp = (&sel(95, 16) ^ &b) & mask(80);
+    let y_exp = (&sel(179, 80) + &c) & mask(100);
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new_biguint(a.clone(), 256, false));
+        sim.set("b", Value::new_biguint(b.clone(), 80, false));
+        sim.set("c", Value::new_biguint(c.clone(), 100, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            sim.get("x").unwrap(),
+            Value::new_biguint(x_exp.clone(), 80, false),
+            "x {config:?}"
+        );
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new_biguint(y_exp.clone(), 100, false),
+            "y {config:?}"
+        );
+    }
+}
+
+#[test]
 fn wide_256_select_store() {
     // Wide-dst bit-select WRITE (RMW) on a 256-bit FF, exercised as a
     // multi-RMW chain (`f = lo; f[71:64] = b;`) so the select-RMW reads the

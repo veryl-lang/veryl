@@ -254,25 +254,33 @@ impl ProtoExpression {
                     };
                     let ptr = builder.ins().iadd_imm(base_addr, var_offset.raw() as i64);
 
-                    // Static narrow bit-select (≤64-bit result) of a wide
-                    // value: extract the range into a register.  Wide-result
-                    // selects (>64-bit) and dynamic bit-selects on a wide
-                    // value still fall back to the interpreter (rare).
+                    // Static bit-select of a wide value; the result form matches
+                    // `is_wide_ptr(width)` (see `emit_wide_bit_select_read`).  A
+                    // dynamic bit-select on a wide value stays on the
+                    // interpreter (rare).
                     if let Some((beg, end)) = *select {
-                        if dynamic_select.is_none() && *width <= 64 {
-                            use super::helpers::emit_wide_bit_select_read_narrow;
-                            let payload =
-                                emit_wide_bit_select_read_narrow(builder, ptr, beg, end, *width);
+                        if dynamic_select.is_none() {
+                            use super::helpers::emit_wide_bit_select_read;
+                            let read = |builder: &mut FunctionBuilder, base| {
+                                emit_wide_bit_select_read(
+                                    builder,
+                                    base,
+                                    *var_full_width,
+                                    beg,
+                                    end,
+                                    *width,
+                                )
+                            };
+                            let payload = read(builder, ptr);
                             let mask_xz = if context.use_4state {
                                 let mask_base = builder.ins().iadd_imm(ptr, nb as i64);
-                                Some(emit_wide_bit_select_read_narrow(
-                                    builder, mask_base, beg, end, *width,
-                                ))
+                                Some(read(builder, mask_base))
                             } else {
                                 None
                             };
                             return Some((payload, mask_xz));
                         }
+                        // Dynamic bit-select on a wide value: interpreter-only.
                         return None;
                     }
                     if dynamic_select.is_some() {
@@ -2061,12 +2069,12 @@ impl ProtoExpression {
                 let addr = builder.ins().iadd(base_addr, static_offset);
                 let addr = builder.ins().iadd(addr, byte_offset);
 
-                // Wide element (>16 native bytes): the array slot holds a wide
-                // value at `addr` (it cannot be loaded into an I64/I128).
-                // No select → return the pointer (4-state mask half at
-                // `addr + nb`).  Static narrow (≤64-bit) select → extract into a
-                // register.  Wide-result selects and dynamic bit-selects on a
-                // wide element still fall back to the interpreter (rare).
+                // Wide element (>16 native bytes): the slot holds a wide value
+                // at `addr` that can't be loaded into an I64/I128.  No select →
+                // return the pointer (4-state mask half at `addr + nb`); a
+                // static select's form matches `is_wide_ptr(width)` (see
+                // `emit_wide_bit_select_read`).  A dynamic bit-select stays on
+                // the interpreter (rare).
                 if nb > 16 {
                     if select.is_none() && dynamic_select.is_none() {
                         let mask_xz = if context.use_4state {
@@ -2078,16 +2086,15 @@ impl ProtoExpression {
                     }
                     if dynamic_select.is_none()
                         && let Some((beg, end)) = *select
-                        && *width <= 64
                     {
-                        use super::helpers::emit_wide_bit_select_read_narrow;
-                        let payload =
-                            emit_wide_bit_select_read_narrow(builder, addr, beg, end, *width);
+                        use super::helpers::emit_wide_bit_select_read;
+                        let read = |builder: &mut FunctionBuilder, base| {
+                            emit_wide_bit_select_read(builder, base, nb * 8, beg, end, *width)
+                        };
+                        let payload = read(builder, addr);
                         let mask_xz = if context.use_4state {
                             let mask_base = builder.ins().iadd_imm(addr, nb as i64);
-                            Some(emit_wide_bit_select_read_narrow(
-                                builder, mask_base, beg, end, *width,
-                            ))
+                            Some(read(builder, mask_base))
                         } else {
                             None
                         };

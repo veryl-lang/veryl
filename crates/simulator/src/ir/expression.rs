@@ -1,7 +1,7 @@
 use crate::HashMap;
 use crate::ir::context::{Context, Conv};
 use crate::ir::variable::{
-    VarOffset, native_bytes as calc_native_bytes, read_native_value, value_size,
+    VarOffset, is_wide_ptr, native_bytes as calc_native_bytes, read_native_value, value_size,
 };
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
@@ -886,12 +886,11 @@ impl ProtoExpression {
     /// 1473, Ternary 1615, DynamicVariable 1716.  The AOT-C emitter consults
     /// it at the Binary/Unary wide branches and the leaf load/value sites.
     pub fn builds_wide_pointer(&self) -> bool {
-        const W: usize = 128;
         match self {
             ProtoExpression::HierVariable(_) => false,
-            // A static ≤64-bit bit-select extracts into a register; a wide
-            // (>64) or dynamic select on a wide var is interpreter-only
-            // (the emitter returns None there), so it is never a producer.
+            // A static bit-select with a ≤128-bit result extracts into a
+            // register, so only a >128-bit result is a pointer.  A dynamic
+            // select on a wide var is interpreter-only, so never a producer.
             ProtoExpression::Variable {
                 var_full_width,
                 select,
@@ -899,22 +898,27 @@ impl ProtoExpression {
                 width,
                 ..
             } => {
-                *var_full_width > W
-                    && !(select.is_some() && dynamic_select.is_none() && *width <= 64)
+                is_wide_ptr(*var_full_width)
+                    && !(select.is_some() && dynamic_select.is_none() && !is_wide_ptr(*width))
             }
             // The all-bit sentinel materializes wider than its 0 `width` field
             // (see `materialized_width`); key on that.
-            ProtoExpression::Value { .. } => self.materialized_width() > W,
-            ProtoExpression::Concatenation { width, .. } => *width > W,
+            ProtoExpression::Value { .. } => is_wide_ptr(self.materialized_width()),
+            ProtoExpression::Concatenation { width, .. } => is_wide_ptr(*width),
             ProtoExpression::Ternary {
                 width,
                 true_expr,
                 false_expr,
                 ..
-            } => *width > W || true_expr.width() > W || false_expr.width() > W,
-            // Cranelift keys this on the element's native byte size (>16),
-            // i.e. an element wider than 128 bits — not on the post-select
-            // `width`.
+            } => {
+                is_wide_ptr(*width)
+                    || is_wide_ptr(true_expr.width())
+                    || is_wide_ptr(false_expr.width())
+            }
+            // Keys on the element's native byte size (>16 = the byte-domain
+            // form of `is_wide_ptr`), not the post-select `width`.  Like
+            // Variable: a ≤128-bit select result is a register, only >128 a
+            // pointer.
             ProtoExpression::DynamicVariable {
                 element_native_bytes,
                 select,
@@ -923,7 +927,7 @@ impl ProtoExpression {
                 ..
             } => {
                 *element_native_bytes > 16
-                    && !(select.is_some() && dynamic_select.is_none() && *width <= 64)
+                    && !(select.is_some() && dynamic_select.is_none() && !is_wide_ptr(*width))
             }
             // Reductions (IS_REDUCTION) collapse to a 1-bit register.
             // NOTE: use `expr_context.width` (the EVALUATION width that
@@ -948,7 +952,7 @@ impl ProtoExpression {
                         | Op::LogicNot
                         | Op::BitXor
                         | Op::BitXnor
-                ) && (expr_context.width > W || x.width() > W)
+                ) && (is_wide_ptr(expr_context.width) || is_wide_ptr(x.width()))
             }
             // Comparisons / logic (IS_CMP_OR_LOGIC) collapse to a 1-bit
             // register.  EqWildcard/NeWildcard are excluded unconditionally:
@@ -976,7 +980,9 @@ impl ProtoExpression {
                         | Op::LessEq
                         | Op::LogicAnd
                         | Op::LogicOr
-                ) && (expr_context.width > W || x.width() > W || y.width() > W)
+                ) && (is_wide_ptr(expr_context.width)
+                    || is_wide_ptr(x.width())
+                    || is_wide_ptr(y.width()))
             }
         }
     }
