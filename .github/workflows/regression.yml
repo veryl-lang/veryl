@@ -32,7 +32,11 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       CARGO_INCREMENTAL: "0"
-      SCCACHE_CACHE_SIZE: "3G"
+      # ~0.5G holds one full build closure; 1G adds a generation of headroom.
+      # Bigger only hoards stale object versions and pushes the repo over the
+      # 30GB cache quota, evicting the rust-cache generations that let cargo
+      # skip dependency compilation entirely.
+      SCCACHE_CACHE_SIZE: "1G"
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
     steps:
       - uses: actions/checkout@v6
@@ -122,7 +126,7 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       CARGO_INCREMENTAL: "0"
-      SCCACHE_CACHE_SIZE: "3G"
+      SCCACHE_CACHE_SIZE: "1G"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable

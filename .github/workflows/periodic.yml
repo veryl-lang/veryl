@@ -31,3 +31,65 @@ jobs:
       run: |
         cargo update
         cargo test
+
+  # Detect when the SCCACHE_CACHE_SIZE cap used by regression.yml / codspeed.yml
+  # is about to become too small. The cap only needs to hold one full build
+  # closure; this job builds that closure cold (no cache reuse) and fails if its
+  # compressed size nears the cap, so the cap can be raised before hit rate drops.
+  sccache-working-set:
+    name: Check sccache working set vs cap
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache
+      # No eviction here: measure the true closure size, then compare it to the
+      # cap the real CI jobs run with.
+      SCCACHE_CACHE_SIZE: "30G"
+      CAP_MIB: "1024"
+      WARN_PCT: "80"
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+    - name: Setup sccache
+      uses: mozilla-actions/sccache-action@v0.0.10
+      with:
+        disable_annotations: true
+    - name: Force local-disk backend
+      # so the du below measures a real on-disk closure, not the GHA backend
+      run: echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+    - name: Cold build under sccache
+      # No rust-cache / no sccache restore: SCCACHE_DIR starts empty, so its size
+      # after the build is exactly one full dependency+workspace closure.
+      run: cargo test --no-run --locked
+    - name: Compare closure to cap
+      run: |
+        mib=$(( $(du -sb "$SCCACHE_DIR" | cut -f1) / 1024 / 1024 ))
+        thr=$(( CAP_MIB * WARN_PCT / 100 ))
+        echo "sccache working set: ${mib} MiB (cap ${CAP_MIB} MiB, warn at ${thr} MiB)"
+        if [ "$mib" -gt "$thr" ]; then
+          echo "::error title=sccache cap too small::working set ${mib} MiB exceeds ${WARN_PCT}% of the ${CAP_MIB} MiB SCCACHE_CACHE_SIZE. Raise SCCACHE_CACHE_SIZE in regression.yml and codspeed.yml."
+          exit 1
+        fi
+
+  # Independent of any single cache: warn when total repo cache usage nears the
+  # 30GB quota, which is when GitHub starts evicting least-recently-used caches
+  # (including the rust-cache generations that let cargo skip dependency builds).
+  cache-quota:
+    name: Warn if repo cache usage nears the 30GB quota
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+    - name: Check cache usage
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gb=$(( $(gh api repos/${{ github.repository }}/actions/cache/usage --jq '.active_caches_size_in_bytes') / 1000000000 ))
+        echo "repo actions cache: ${gb} GB / 30 GB"
+        if [ "$gb" -gt 27 ]; then
+          echo "::error title=cache quota near limit::${gb} GB of the 30 GB Actions cache quota in use; GitHub is evicting least-recently-used caches (including rust-cache generations, which slows CI)."
+          exit 1
+        fi
