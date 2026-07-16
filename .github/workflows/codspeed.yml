@@ -96,9 +96,7 @@ jobs:
     name: Run heliodor boot benchmark (walltime)
     runs-on: codspeed-macro
     env:
-      RUSTC_WRAPPER: sccache
       CARGO_INCREMENTAL: "0"
-      SCCACHE_CACHE_SIZE: "1G"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -111,22 +109,15 @@ jobs:
           cache: false
           bins: cargo-codspeed
 
-      # Same rust-cache + sccache split as the benchmarks job above (deps via
-      # rust-cache; workspace crates via sccache, under a distinct -sccache key).
+      # rust-cache handles dependency compilation (cargo skips deps on a hit).
+      # sccache is intentionally not used here: on this Macro Runner its per-sha
+      # cache re-uploads ~0.5GB every master run (~270s) for only marginal
+      # workspace-crate reuse, which rust-cache already covers via the deps.
       - uses: Swatinem/rust-cache@v2
         continue-on-error: true
         with:
-          shared-key: "${{ runner.os }}-${{ runner.arch }}-codspeed-boot-sccache"
+          shared-key: "${{ runner.os }}-${{ runner.arch }}-codspeed-boot"
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: mozilla-actions/sccache-action@v0.0.10
-        with:
-          disable_annotations: true
-      - uses: actions/cache/restore@v4
-        continue-on-error: true
-        with:
-          path: ~/.cache/sccache
-          key: sccache-codspeed-boot-${{ github.sha }}
-          restore-keys: sccache-codspeed-boot-
 
       # The simulator stores compiled aot_c .so files content-addressed under
       # ~/.cache/veryl/aot_c; without this cache every run pays the full gcc
@@ -146,17 +137,6 @@ jobs:
       # the simulator build in the benchmarks job above.
       - name: Build the benchmark target
         run: cargo codspeed build -p veryl-simulator --bench heliodor_boot --profile release-verylup
-
-      - name: sccache stats
-        if: always()
-        run: sccache --show-stats
-
-      - uses: actions/cache/save@v4
-        if: github.ref == 'refs/heads/master'
-        continue-on-error: true
-        with:
-          path: ~/.cache/sccache
-          key: sccache-codspeed-boot-${{ github.sha }}
 
       - name: Run the benchmark
         uses: CodSpeedHQ/action@v4
