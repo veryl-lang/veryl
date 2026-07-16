@@ -515,20 +515,22 @@ pub fn eval_size(
     }
 }
 
-pub fn eval_assign_statement(
+/// Per-destination clock/CDC checks for an assignment: invalid clock
+/// assignment, Implicit-domain inference, dst-vs-RHS and dst-vs-always_ff
+/// clock domain. Shared by the scalar path (eval_assign_statement) and the
+/// concatenation-LHS paths, which build their AssignStatement directly.
+pub fn check_assign_clock_domain(
     context: &mut Context,
     dst: &mut ir::AssignDestination,
-    expr: &mut (ir::Comptime, ir::Expression),
-    token: TokenRange,
-) -> IrResult<Vec<ir::Statement>> {
-    let (comptime, expr) = expr;
-
+    comptime: &ir::Comptime,
+    token: &TokenRange,
+) {
     if (dst.comptime.r#type.is_clock() || dst.comptime.r#type.is_reset())
         && context.is_affiliated(Affiliation::AlwaysFf)
     {
         context.insert_error(AnalyzerError::invalid_clock_assignment(
             &dst.comptime.r#type.to_string(),
-            &token,
+            token,
         ));
     }
 
@@ -558,6 +560,17 @@ pub fn eval_assign_statement(
     {
         check_clock_domain(context, &dst_comptime_for_cdc, &clock, &token.beg);
     }
+}
+
+pub fn eval_assign_statement(
+    context: &mut Context,
+    dst: &mut ir::AssignDestination,
+    expr: &mut (ir::Comptime, ir::Expression),
+    token: TokenRange,
+) -> IrResult<Vec<ir::Statement>> {
+    let (comptime, expr) = expr;
+
+    check_assign_clock_domain(context, dst, comptime, &token);
 
     let width = dst.total_width(context);
     let mut ret = vec![];

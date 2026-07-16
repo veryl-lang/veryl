@@ -1,8 +1,8 @@
 use crate::analyzer_error::{ComponentInterfaceMismatchKind, MismatchTypeKind};
 use crate::conv::utils::{
     TbMethodCallPosition, TypePosition, argument_list, build_for_range, build_for_statement,
-    case_patterns, eval_array_range_assign, eval_assign_statement, eval_expr, eval_variable,
-    expand_connect, expand_connect_const, function_call, get_return_str,
+    case_patterns, check_assign_clock_domain, eval_array_range_assign, eval_assign_statement,
+    eval_expr, eval_variable, expand_connect, expand_connect_const, function_call, get_return_str,
     hoist_component_method_call, single_function_call_factor, switch_condition, tb_method_call,
     try_infer_decl_type, try_infer_var_assign,
 };
@@ -199,7 +199,10 @@ impl Conv<&ConcatenationAssignment> for ir::StatementBlock {
             t
         };
 
-        let (_, expr) = eval_expr(context, Some(r#type), &value.expression, false)?;
+        let (comptime, expr) = eval_expr(context, Some(r#type), &value.expression, false)?;
+        for d in &mut dst {
+            check_assign_clock_domain(context, d, &comptime, &token);
+        }
         let statement = ir::Statement::Assign(ir::AssignStatement {
             dst,
             width,

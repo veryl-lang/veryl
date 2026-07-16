@@ -15,11 +15,11 @@ use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
 use crate::conv::utils::{
-    TypePosition, eval_array_range_assign, eval_assign_statement, eval_clock, eval_const_assign,
-    eval_expr, eval_factor_symbol, eval_factor_symbol_external, eval_generate_for_range,
-    eval_reset, eval_size, eval_type, eval_variable, expand_connect, expand_connect_const,
-    get_component, get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
-    try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
+    TypePosition, check_assign_clock_domain, eval_array_range_assign, eval_assign_statement,
+    eval_clock, eval_const_assign, eval_expr, eval_factor_symbol, eval_factor_symbol_external,
+    eval_generate_for_range, eval_reset, eval_size, eval_type, eval_variable, expand_connect,
+    expand_connect_const, get_component, get_overridden_params, get_port_connects, get_return_str,
+    insert_port_connect, try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::definition_table::{self, Definition};
@@ -1014,7 +1014,10 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                     t
                 };
 
-                let (_, expr) = eval_expr(context, Some(r#type), &value.expression, false)?;
+                let (comptime, expr) = eval_expr(context, Some(r#type), &value.expression, false)?;
+                for d in &mut dst {
+                    check_assign_clock_domain(context, d, &comptime, &token);
+                }
                 let statement = ir::Statement::Assign(ir::AssignStatement {
                     dst,
                     width,
