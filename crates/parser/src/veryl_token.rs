@@ -553,6 +553,7 @@ token_with_comments!(In);
 token_with_comments!(Let);
 token_with_comments!(Logic);
 token_with_comments!(Lsb);
+token_with_comments!(Mixin);
 token_with_comments!(Modport);
 token_with_comments!(Module);
 token_with_comments!(Msb);

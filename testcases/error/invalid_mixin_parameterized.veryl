@@ -1,0 +1,6 @@
+interface invalid_mixin_parameterized_source #(
+    param A: u32 = 1,
+) {}
+interface invalid_mixin_parameterized {
+    mixin invalid_mixin_parameterized_source;
+}

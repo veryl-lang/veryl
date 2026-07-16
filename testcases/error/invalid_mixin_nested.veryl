@@ -1,0 +1,7 @@
+interface invalid_mixin_nested_a {}
+interface invalid_mixin_nested_b {
+    mixin invalid_mixin_nested_a;
+}
+interface invalid_mixin_nested {
+    mixin invalid_mixin_nested_b;
+}

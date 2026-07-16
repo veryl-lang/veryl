@@ -22,6 +22,7 @@ use crate::conv::utils::{
     try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
+use crate::definition_table::{self, Definition};
 use crate::ir::{
     self, Comptime, FuncArg, FuncPath, InstanceKind, IrResult, Shape, Signature, TypeKind,
     ValueVariant, VarId, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect, Variable,
@@ -2677,6 +2678,58 @@ impl Conv<&ConnectDeclaration> for ir::DeclarationBlock {
         let ret = ir::Declaration::Comb(ret);
         Ok(ir::DeclarationBlock(vec![ret]))
     }
+}
+
+impl Conv<&MixinDeclaration> for () {
+    fn conv(context: &mut Context, value: &MixinDeclaration) -> IrResult<Self> {
+        let token: TokenRange = value.scoped_identifier.as_ref().into();
+        let source_path: GenericSymbolPath = value.scoped_identifier.as_ref().into();
+        check_generic_refereence(context, &source_path);
+
+        let Some(mut sig) = Signature::from_path(context, source_path) else {
+            return Err(ir_error!(token));
+        };
+        sig.normalize();
+
+        let symbol = symbol_table::get(sig.symbol).unwrap();
+        if symbol.kind.has_mixin_sources() {
+            // Skip a mixin source that has mixin sources to avoid infinite
+            // recursion on self/cyclic mixin.
+            // TODO: this relies on nested mixin being unsupported; once it is
+            // supported, the mixin tree must be traversed to detect cycles
+            // instead.
+            return Ok(());
+        }
+
+        match &symbol.kind {
+            SymbolKind::Interface(x) if !x.is_proto => {
+                mixin_interface(context, &symbol, &sig, token)
+            }
+            _ => Err(ir_error!(token)),
+        }
+    }
+}
+
+fn mixin_interface(
+    context: &mut Context,
+    symbol: &Symbol,
+    sig: &Signature,
+    token: TokenRange,
+) -> IrResult<()> {
+    let definition = symbol
+        .kind
+        .get_definition()
+        .and_then(definition_table::get)
+        .ok_or_else(|| ir_error!(token))?;
+    let Definition::Interface(definition) = definition.as_ref() else {
+        unreachable!();
+    };
+
+    context.push_generic_map(sig.to_generic_map());
+    let ret: IrResult<()> = Conv::conv(context, definition);
+    context.pop_generic_map();
+
+    ret
 }
 
 impl Conv<&UnsafeBlock> for ir::DeclarationBlock {

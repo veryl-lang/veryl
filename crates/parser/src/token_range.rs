@@ -393,6 +393,7 @@ impl_token_range_singular!(Interface);
 impl_token_range_singular!(Let);
 impl_token_range_singular!(Logic);
 impl_token_range_singular!(Lsb);
+impl_token_range_singular!(Mixin);
 impl_token_range_singular!(Modport);
 impl_token_range_singular!(Module);
 impl_token_range_singular!(Msb);
@@ -1333,6 +1334,12 @@ impl_token_range!(FunctionDeclaration, function, statement_block);
 impl_token_range!(ImportDeclaration, import, semicolon);
 
 // ----------------------------------------------------------------------------
+// Mixin
+// ----------------------------------------------------------------------------
+
+impl_token_range!(MixinDeclaration, mixin, semicolon);
+
+// ----------------------------------------------------------------------------
 // Unsafe
 // ----------------------------------------------------------------------------
 
@@ -1347,7 +1354,12 @@ impl_token_range_group!(ModuleGroup, ModuleItem);
 impl_token_range!(ModuleItem, generate_item);
 impl_token_range!(InterfaceDeclaration, interface, r_brace);
 impl_token_range_group!(InterfaceGroup, InterfaceItem);
-impl_token_range_enum!(InterfaceItem, generate_item, modport_declaration);
+impl_token_range_enum!(
+    InterfaceItem,
+    generate_item,
+    mixin_declaration,
+    modport_declaration
+);
 
 impl From<&GenerateIfDeclaration> for TokenRange {
     fn from(value: &GenerateIfDeclaration) -> Self {

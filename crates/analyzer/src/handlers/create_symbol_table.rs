@@ -12,7 +12,6 @@ use crate::reference_table::{self, ReferenceCandidate};
 use crate::scope;
 use crate::symbol::ClockDomain as SymClockDomain;
 use crate::symbol::Direction as SymDirection;
-use crate::symbol::ModportDefault as SymModportDefault;
 use crate::symbol::Type as SymType;
 use crate::symbol::{
     Affiliation, AliasInterfaceProperty, AliasModuleProperty, AliasPackageProperty, ConnectTarget,
@@ -95,14 +94,12 @@ pub struct CreateSymbolTable {
     default_clock_candidates: Vec<SymbolId>,
     default_reset: Option<SymbolId>,
     defualt_reset_candidates: Vec<SymbolId>,
-    interface_members: HashMap<StrId, SymbolId>,
-    modport_member_ids: Vec<SymbolId>,
-    modport_ids: Vec<SymbolId>,
     exist_clock_without_domain: bool,
     in_proto: bool,
     in_import: bool,
     file_scope_import_item: Vec<GenericSymbolPathNamespace>,
     file_scope_import_wildcard: Vec<GenericSymbolPathNamespace>,
+    mixin_sources: Vec<GenericSymbolPath>,
     is_public: bool,
     identifier_factor_names: Vec<ExpressionIdentifier>,
     in_named_argument: Vec<bool>,
@@ -413,180 +410,6 @@ impl CreateSymbolTable {
             };
             symbol_table::add_import(import);
         }
-    }
-
-    fn push_interface_member(&mut self, identifier: &Identifier, symbol_id: SymbolId) {
-        if self
-            .affiliation
-            .last()
-            .map(|x| matches!(x, Affiliation::Interface))
-            .unwrap_or(false)
-        {
-            let text = identifier.text();
-            self.interface_members.insert(text, symbol_id);
-        }
-    }
-
-    fn link_modport_members(&self) {
-        for id in &self.modport_member_ids {
-            let mut mp_member = symbol_table::get(*id).unwrap();
-            match mp_member.kind {
-                SymbolKind::ModportFunctionMember(_) => {
-                    if let Some(id) = self.interface_members.get(&mp_member.token.text) {
-                        let property = ModportFunctionMemberProperty { function: *id };
-                        let kind = SymbolKind::ModportFunctionMember(property);
-                        mp_member.kind = kind;
-                        symbol_table::update(mp_member);
-                    }
-                }
-                SymbolKind::ModportVariableMember(x) => {
-                    if let Some(id) = self.interface_members.get(&mp_member.token.text) {
-                        let mut property = x;
-                        property.variable = *id;
-                        let kind = SymbolKind::ModportVariableMember(property);
-                        mp_member.kind = kind;
-                        symbol_table::update(mp_member);
-                    }
-                }
-                _ => (),
-            }
-        }
-    }
-
-    fn expand_modport_default_member(&mut self, interface_id: SymbolId) {
-        let interface_namesapce = symbol_table::get(interface_id)
-            .map(|x| x.inner_namespace())
-            .unwrap();
-        for id in &self.modport_ids.clone() {
-            let mut mp = symbol_table::get(*id).unwrap();
-            if let SymbolKind::Modport(ref x) = mp.kind {
-                // add default members
-                let mut members = x.members.clone();
-                members.append(&mut self.get_modport_default_members(&mp, &interface_namesapce));
-
-                let property = ModportProperty {
-                    interface: interface_id,
-                    members,
-                    default: x.default.clone(),
-                };
-                let kind = SymbolKind::Modport(property);
-                mp.kind = kind;
-                symbol_table::update(mp);
-            }
-        }
-    }
-
-    fn get_modport_default_members(
-        &mut self,
-        mp: &Symbol,
-        interface_namesapce: &Namespace,
-    ) -> Vec<SymbolId> {
-        let mut ret = Vec::new();
-
-        if let SymbolKind::Modport(ref x) = mp.kind
-            && let Some(ref default) = x.default
-        {
-            let default_member_directions = Self::collect_modport_default_member_target_directions(
-                default,
-                interface_namesapce,
-            );
-            let explicit_members: HashSet<_> = x
-                .members
-                .iter()
-                .map(|x| symbol_table::get(*x).unwrap().token.text)
-                .collect();
-            let mut default_members: Vec<_> = self
-                .interface_members
-                .iter()
-                .filter(|(text, id)| {
-                    if explicit_members.contains(text) {
-                        false
-                    } else if matches!(default, SymModportDefault::Same(_)) {
-                        true
-                    } else {
-                        let symbol = symbol_table::get(**id).unwrap();
-                        matches!(symbol.kind, SymbolKind::Variable(_))
-                    }
-                })
-                .collect();
-
-            // Sort by SymbolId to keep inserting order as the same as definition order
-            default_members.sort_by(|x, y| x.1.cmp(y.1));
-
-            let namespace = mp.inner_namespace();
-            for (text, id) in default_members {
-                let direction = match default {
-                    SymModportDefault::Input => Some(SymDirection::Input),
-                    SymModportDefault::Output => Some(SymDirection::Output),
-                    SymModportDefault::Same(_) => default_member_directions.get(text).copied(),
-                    SymModportDefault::Converse(_) => {
-                        default_member_directions.get(text).map(|x| x.converse())
-                    }
-                };
-                let Some(direction) = direction else {
-                    continue;
-                };
-
-                let path = mp.token.source.get_path().unwrap();
-                let token = Token::generate(*text, path);
-                scope::insert_token(token.id, path, &namespace);
-                symbol_table::add_reference(*id, &token);
-
-                let kind = if matches!(direction, SymDirection::Import) {
-                    let property = ModportFunctionMemberProperty { function: *id };
-                    SymbolKind::ModportFunctionMember(property)
-                } else {
-                    let property = ModportVariableMemberProperty {
-                        direction,
-                        variable: *id,
-                    };
-                    SymbolKind::ModportVariableMember(property)
-                };
-                let symbol = Symbol::new(&token, kind, &namespace, false, DocComment::default());
-                if let Some(id) = symbol_table::insert(&token, symbol) {
-                    ret.push(id);
-                }
-            }
-        }
-
-        ret
-    }
-
-    fn collect_modport_default_member_target_directions(
-        default: &SymModportDefault,
-        namespace: &Namespace,
-    ) -> HashMap<StrId, SymDirection> {
-        let mut ret: HashMap<_, _> = HashMap::new();
-
-        match default {
-            SymModportDefault::Same(targets) | SymModportDefault::Converse(targets) => {
-                for target in targets {
-                    let Ok(mp_symbol) = symbol_table::resolve((target, namespace)) else {
-                        continue;
-                    };
-                    let SymbolKind::Modport(ref modport) = mp_symbol.found.kind else {
-                        continue;
-                    };
-
-                    for member in &modport.members {
-                        let Some(member_symbol) = symbol_table::get(*member) else {
-                            continue;
-                        };
-
-                        if let SymbolKind::ModportVariableMember(member) = member_symbol.kind {
-                            ret.insert(member_symbol.token.text, member.direction);
-                        } else if matches!(default, SymModportDefault::Same(_))
-                            && matches!(member_symbol.kind, SymbolKind::ModportFunctionMember(_))
-                        {
-                            ret.insert(member_symbol.token.text, SymDirection::Import);
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        ret
     }
 
     fn push_declaration_item(&mut self, id: SymbolId) {
@@ -1171,7 +994,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
             {
                 self.push_declaration_item(id);
                 self.push_default_clock_reset(&arg.identifier.identifier_token.token, id, &kind);
-                self.push_interface_member(&arg.identifier, id);
             }
         }
         Ok(())
@@ -1299,7 +1121,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         self.insert_symbol(&item.identifier.identifier_token.token, kind, false)
                     {
                         members.push(id);
-                        self.modport_member_ids.push(id);
                     }
                 }
 
@@ -1345,7 +1166,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     self.insert_symbol(&arg.identifier.identifier_token.token, kind, false)
                 {
                     self.push_declaration_item(id);
-                    self.modport_ids.push(id);
                     self.pop_type_dag_cand(Some((id, Context::Modport, false)));
                 } else {
                     self.pop_type_dag_cand(None);
@@ -2003,7 +1823,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     SymbolKind::Function(property),
                     false,
                 ) {
-                    self.push_interface_member(&arg.identifier, id);
                     self.push_declaration_item(id);
                     self.pop_type_dag_cand(Some((id, Context::Function, false)));
                     if affiliation == Affiliation::ProjectNamespace {
@@ -2045,6 +1864,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 }
             }
             HandlerPoint::After => self.in_import = false,
+        }
+        Ok(())
+    }
+
+    fn mixin_declaration(&mut self, arg: &MixinDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+            self.mixin_sources.push(path);
         }
         Ok(())
     }
@@ -2234,10 +2061,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.generic_context.push();
                 self.parameters.push(Vec::new());
                 self.affiliation.push(Affiliation::Interface);
-                self.interface_members.clear();
-                self.modport_member_ids.clear();
-                self.modport_ids.clear();
-
                 self.apply_file_scope_import();
                 self.push_type_dag_cand();
             }
@@ -2246,6 +2069,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.affiliation.pop();
 
                 let (generic_parameters, generic_consts) = self.generic_context.pop();
+                let mixin_sources: Vec<_> = self.mixin_sources.drain(..).collect();
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
 
                 let proto = if let Some(x) = arg.interface_declaration_opt0.as_ref() {
@@ -2267,6 +2091,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     generic_parameters,
                     generic_consts,
                     generic_references: vec![],
+                    mixin_sources,
                     parameters,
                     members: self.declaration_items.drain(..).collect(),
                     definition: Some(definition),
@@ -2276,8 +2101,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     SymbolKind::Interface(property),
                     self.is_public,
                 ) {
-                    self.link_modport_members();
-                    self.expand_modport_default_member(id);
                     self.pop_type_dag_cand(Some((id, Context::Interface, true)));
                     self.insert_reference_functions(id);
                 } else {
@@ -2456,18 +2279,16 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     generic_parameters: vec![],
                     generic_consts: vec![],
                     generic_references: vec![],
+                    mixin_sources: vec![],
                     parameters,
                     members: self.declaration_items.drain(..).collect(),
                     definition: None,
                 };
-                if let Some(interface_id) = self.insert_symbol(
+                self.insert_symbol(
                     &arg.identifier.identifier_token.token,
                     SymbolKind::Interface(property),
                     self.is_public,
-                ) {
-                    self.link_modport_members();
-                    self.expand_modport_default_member(interface_id);
-                }
+                );
             }
         }
         Ok(())
@@ -2625,7 +2446,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     SymbolKind::Function(property),
                     false,
                 ) {
-                    self.push_interface_member(&arg.identifier, id);
                     self.push_declaration_item(id);
                 }
             }

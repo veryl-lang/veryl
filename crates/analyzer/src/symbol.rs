@@ -1240,6 +1240,14 @@ impl SymbolKind {
         }
     }
 
+    pub fn has_parameters(&self) -> bool {
+        match self {
+            SymbolKind::Module(x) if !x.is_proto => !x.parameters.is_empty(),
+            SymbolKind::Interface(x) if !x.is_proto => !x.parameters.is_empty(),
+            _ => false,
+        }
+    }
+
     pub fn get_generic_parameters(&self) -> &[SymbolId] {
         match self {
             SymbolKind::Module(x) if !x.is_proto => &x.generic_parameters,
@@ -1249,6 +1257,20 @@ impl SymbolKind {
             SymbolKind::Struct(x) => &x.generic_parameters,
             SymbolKind::Union(x) => &x.generic_parameters,
             _ => &[],
+        }
+    }
+
+    pub fn get_mixin_sources(&self) -> &[GenericSymbolPath] {
+        match self {
+            SymbolKind::Interface(x) => &x.mixin_sources,
+            _ => &[],
+        }
+    }
+
+    pub fn has_mixin_sources(&self) -> bool {
+        match self {
+            SymbolKind::Interface(x) => !x.mixin_sources.is_empty(),
+            _ => false,
         }
     }
 
@@ -2531,6 +2553,7 @@ pub struct InterfaceProperty {
     pub generic_parameters: Vec<SymbolId>,
     pub generic_consts: Vec<SymbolId>,
     pub generic_references: Vec<GenericSymbolPath>,
+    pub mixin_sources: Vec<GenericSymbolPath>,
     pub parameters: Vec<Parameter>,
     pub members: Vec<SymbolId>,
     // `None` for a proto interface, which has no definition.

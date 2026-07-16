@@ -1141,7 +1141,6 @@ package prj___Pkg__32;
 endpackage
 interface prj___IfA____Pkg__32;
     import prj___Pkg__32::*;
-
     prj___Pkg__32::Foo foo;
     prj___Pkg__32::Bar bar;
     modport mp (
@@ -4220,5 +4219,350 @@ endmodule
 
     let ret = emit(&metadata, code);
 
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn mixin_interface() {
+    let code = r#"
+interface a_if {
+    var a: logic;
+    modport mp_a {
+        a: input,
+    }
+}
+interface b_if {
+    mixin a_if;
+}
+module c_module (
+    b: modport b_if::mp_a,
+) {
+    let _a: logic = b.a;
+}
+module d_module {
+    inst b: b_if;
+    assign b.a = 0;
+    inst c: c_module(b);
+}
+"#;
+
+    let expect = r#"interface prj_a_if;
+    logic a;
+    modport mp_a (
+        input a
+    );
+endinterface
+interface prj_b_if;
+    logic a;
+    modport mp_a (
+        input a
+    );
+
+endinterface
+module prj_c_module (
+    prj_b_if.mp_a b
+);
+    logic _a; always_comb _a = b.a;
+endmodule
+module prj_d_module;
+    prj_b_if b   ();
+    always_comb b.a = 0;
+    prj_c_module c (
+        .b (b)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"
+interface a_if::<W: u32> {
+    var a: logic<W>;
+    modport mp_a {
+        a: input,
+    }
+}
+interface b_if::<W: u32> {
+    mixin a_if::<W>;
+}
+module c_module::<W: u32> (
+    b: modport b_if::<W>::mp_a,
+) {
+    let _a: logic = b.a;
+}
+module d_module {
+    inst b: b_if::<8>;
+    assign b.a = 0;
+    inst c: c_module::<8>(b);
+}
+"#;
+
+    let expect = r#"interface prj___a_if__8;
+    logic [8-1:0] a;
+    modport mp_a (
+        input a
+    );
+endinterface
+interface prj___b_if__8;
+    logic [8-1:0] a;
+    modport mp_a (
+        input a
+    );
+
+endinterface
+module prj___c_module__8 (
+    prj___b_if__8.mp_a b
+);
+    logic _a; always_comb _a = b.a;
+endmodule
+module prj_d_module;
+    prj___b_if__8 b   ();
+    always_comb b.a = 0;
+    prj___c_module__8 c (
+        .b (b)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"
+    package a_pkg {
+        type T = logic<8>;
+    }
+    interface a_if {
+        import a_pkg::*;
+        const A: u32 = 1;
+        var a: T<A>;
+        modport mp_a {
+            a: input,
+        }
+    }
+    package b_pkg::<W: u32> {
+        type T = logic<W>;
+    }
+    interface b_if::<W: u32> {
+        import b_pkg::<W>::*;
+        const B: u32 = 2;
+        var b: T<B>;
+        modport mp_b {
+            b: input,
+        }
+    }
+    package c_pkg::<W: u32> {
+        type T = logic<W>;
+    }
+    interface abc_if::<W1: u32, W2: u32> {
+        mixin a_if;
+        mixin b_if::<W1>;
+        import c_pkg::<W2>::*;
+        const C: u32 = 3;
+        var c: T<C>;
+        modport mp_abc {
+            c: input,
+            ..same(mp_a, mp_b)
+        }
+    }
+    module d_module::<W1: u32, W2: u32> (
+        abc: modport abc_if::<W1, W2>::mp_abc,
+    ) {}
+    module e_module {
+        inst abc: abc_if::<16, 32>;
+        always_comb {
+            abc.a = 0;
+            abc.b = 0;
+            abc.c = 0;
+        }
+        inst d: d_module::<16, 32>(abc);
+    }
+    "#;
+
+    let expect = r#"package prj_a_pkg;
+    typedef logic [8-1:0] T;
+endpackage
+interface prj_a_if;
+    import prj_a_pkg::*;
+    localparam int unsigned         A = 1;
+    T            [A-1:0] a;
+    modport mp_a (
+        input a
+    );
+endinterface
+package prj___b_pkg__16;
+    typedef logic [16-1:0] T;
+endpackage
+interface prj___b_if__16;
+    import prj___b_pkg__16::*;
+    localparam int unsigned               B = 2;
+    T            [B-1:0] b;
+    modport mp_b (
+        input b
+    );
+endinterface
+package prj___c_pkg__32;
+    typedef logic [32-1:0] T;
+endpackage
+interface prj___abc_if__16__32;
+    import prj___c_pkg__32::*;
+    localparam int unsigned         A = 1;
+    prj_a_pkg::T [A-1:0] a;
+    modport mp_a (
+        input a
+    );
+
+    localparam int unsigned               B = 2;
+    prj___b_pkg__16::T [B-1:0] b;
+    modport mp_b (
+        input b
+    );
+
+    localparam int unsigned         C = 3;
+    T            [C-1:0] c;
+    modport mp_abc (
+        input c,
+        input a,
+        input b
+    );
+endinterface
+module prj___d_module__16__32 (
+    prj___abc_if__16__32.mp_abc abc
+);
+endmodule
+module prj_e_module;
+    prj___abc_if__16__32 abc ();
+    always_comb begin
+        abc.a = 0;
+        abc.b = 0;
+        abc.c = 0;
+    end
+    prj___d_module__16__32 d (
+        .abc (abc)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"
+interface ab_if::<W: u32> {
+    var a: logic<W>;
+    var b: logic<W>;
+    function get_a() -> logic<W> {
+        return a;
+    }
+    function get_ab() -> logic<2, W> {
+        return {b, get_a()};
+    }
+    modport mp_ab {
+        a     : input ,
+        b     : input ,
+        get_a : import,
+        get_ab: import,
+    }
+}
+interface abc_if::<W: u32> {
+    mixin ab_if::<W>;
+    var c: logic<W>;
+    function get_abc() -> logic<3, W> {
+        return {c, get_ab()};
+    }
+    modport mp_abc {
+        c      : input ,
+        get_abc: import,
+        ..same(mp_ab)
+    }
+}
+alias interface abc_8_if = abc_if::<8>;
+"#;
+
+    let expect = r#"interface prj___ab_if__8;
+    logic [8-1:0] a;
+    logic [8-1:0] b;
+    function automatic logic [8-1:0] get_a() ;
+        return a;
+    endfunction
+    function automatic logic [2-1:0][8-1:0] get_ab() ;
+        return {b, get_a()};
+    endfunction
+    modport mp_ab (
+        input  a     ,
+        input  b     ,
+        import get_a ,
+        import get_ab
+    );
+endinterface
+interface prj___abc_if__8;
+    logic [8-1:0] a;
+    logic [8-1:0] b;
+    function automatic logic [8-1:0] get_a() ;
+        return a;
+    endfunction
+    function automatic logic [2-1:0][8-1:0] get_ab() ;
+        return {b, get_a()};
+    endfunction
+    modport mp_ab (
+        input  a     ,
+        input  b     ,
+        import get_a ,
+        import get_ab
+    );
+
+    logic [8-1:0] c;
+    function automatic logic [3-1:0][8-1:0] get_abc() ;
+        return {c, get_ab()};
+    endfunction
+    modport mp_abc (
+        input  c      ,
+        import get_abc,
+        input  a      ,
+        input  b      ,
+        import get_a  ,
+        import get_ab \
+    );
+endinterface
+
+//# sourceMappingURL=test.sv.map
+"#;
+    let expect = expect.to_string().replace("\\", "");
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }

@@ -1,0 +1,3 @@
+interface invalid_mixin_itself {
+    mixin invalid_mixin_itself;
+}

@@ -84,6 +84,14 @@ pub struct WildcardImport {
 }
 
 #[derive(Debug, Clone)]
+pub struct Mixin {
+    pub source: ScopeId,
+    pub define_context: DefineContext,
+    pub source_define_context: DefineContext,
+    pub source_path: Rc<GenericSymbolPath>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Scope {
     pub id: ScopeId,
     pub parent: Option<ScopeId>,
@@ -95,6 +103,7 @@ pub struct Scope {
     pub imports: HashMap<StrId, SVec<ImportBinding>>,
     /// Wildcard imports local to this scope.
     pub wildcards: SVec<WildcardImport>,
+    pub mixins: SVec<Mixin>,
 }
 
 /// Explicit-parent scope tree built during pass1; `current` is the sole pass1
@@ -136,6 +145,7 @@ impl ScopeArena {
             locals: HashMap::default(),
             imports: HashMap::default(),
             wildcards: SVec::new(),
+            mixins: SVec::new(),
         };
         Self {
             scopes: vec![root],
@@ -168,6 +178,24 @@ impl ScopeArena {
         self.generic_delegations.get(&scope).copied()
     }
 
+    fn get_mixin_target_scope(&self, query_scope: ScopeId, source: ScopeId) -> Option<ScopeId> {
+        fn is_mixin_source(scope: &Scope, source: ScopeId) -> bool {
+            scope.mixins.iter().any(|m| m.source == source)
+        }
+
+        let mut current = Some(query_scope);
+        while let Some(id) = current
+            && let Some(scope) = self.scopes.get(id.0 as usize)
+        {
+            if is_mixin_source(scope, source) {
+                return current;
+            }
+            current = scope.parent;
+        }
+
+        None
+    }
+
     fn intern_child(&mut self, parent: ScopeId, name: StrId, kind: ScopeKind) -> ScopeId {
         let name = resource_table::canonical_str_id(name);
         if let Some(&id) = self.intern.get(&(parent.0, name)) {
@@ -188,6 +216,7 @@ impl ScopeArena {
                 locals: HashMap::default(),
                 imports: HashMap::default(),
                 wildcards: SVec::new(),
+                mixins: SVec::new(),
             });
             self.intern.insert((parent.0, name), id.0);
             id
@@ -261,6 +290,22 @@ impl ScopeArena {
                 source_define_context,
                 package_path: Rc::new(package_path),
             });
+    }
+
+    fn add_mixin_source(
+        &mut self,
+        scope: ScopeId,
+        source: ScopeId,
+        define_context: DefineContext,
+        source_define_context: DefineContext,
+        source_path: GenericSymbolPath,
+    ) {
+        self.scopes[scope.0 as usize].mixins.push(Mixin {
+            source,
+            define_context,
+            source_define_context,
+            source_path: Rc::new(source_path),
+        });
     }
 
     fn set_kind_owner(&mut self, scope: ScopeId, kind: ScopeKind, owner: SymbolId) {
@@ -467,6 +512,10 @@ pub fn generic_delegation(scope: ScopeId) -> Option<ScopeId> {
     SCOPE_ARENA.with(|f| f.borrow().generic_delegation(scope))
 }
 
+pub fn get_mixin_target_scope(query_scope: ScopeId, source: ScopeId) -> Option<ScopeId> {
+    SCOPE_ARENA.with(|f| f.borrow().get_mixin_target_scope(query_scope, source))
+}
+
 /// Read-only structural child lookup: the existing scope named `name` directly
 /// under `parent`, or `None` if absent. Unlike `intern_child`, never creates a
 /// scope.
@@ -550,6 +599,24 @@ pub fn add_wildcard(
             define_context,
             source_define_context,
             package_path,
+        )
+    })
+}
+
+pub fn add_mixin_source(
+    scope: ScopeId,
+    source: ScopeId,
+    define_context: DefineContext,
+    source_define_context: DefineContext,
+    source_path: GenericSymbolPath,
+) {
+    SCOPE_ARENA.with(|f| {
+        f.borrow_mut().add_mixin_source(
+            scope,
+            source,
+            define_context,
+            source_define_context,
+            source_path,
         )
     })
 }
@@ -740,6 +807,16 @@ pub fn wildcards_get(scope: ScopeId) -> SVec<WildcardImport> {
             .scopes
             .get(scope.0 as usize)
             .map(|s| s.wildcards.clone())
+            .unwrap_or_default()
+    })
+}
+
+pub fn mixin_get(scope: ScopeId) -> SVec<Mixin> {
+    SCOPE_ARENA.with(|f| {
+        f.borrow()
+            .scopes
+            .get(scope.0 as usize)
+            .map(|s| s.mixins.clone())
             .unwrap_or_default()
     })
 }

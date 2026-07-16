@@ -1,0 +1,14 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_mixin (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_mixin)
+
+  × invalid_mixin_itself can't be mixed-in because it mixes in itself
+   ╭─[../../testcases/error/invalid_mixin_itself.veryl:1:11]
+ 1 │ interface invalid_mixin_itself {
+   ·           ──────────┬─────────
+   ·                     ╰── Error location
+ 2 │     mixin invalid_mixin_itself;
+   ╰────
+  help:

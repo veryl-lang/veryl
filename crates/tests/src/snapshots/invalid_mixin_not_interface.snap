@@ -1,0 +1,14 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_mixin (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_mixin)
+
+  × invalid_mixin_not_interface_module can't be mixed-in because it is not interface
+   ╭─[../../testcases/error/invalid_mixin_not_interface.veryl:1:8]
+ 1 │ module invalid_mixin_not_interface_module {}
+   ·        ─────────────────┬────────────────
+   ·                         ╰── Error location
+ 2 │ interface invalid_mixin_not_interface {
+   ╰────
+  help:

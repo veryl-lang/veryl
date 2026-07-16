@@ -148,6 +148,7 @@ InTerm                : <INITIAL, Generic                                       
 LetTerm               : <INITIAL, Generic                                             >'let'                                                                                 : Token; // Keyword: Statement
 LogicTerm             : <INITIAL, Generic                                             >'logic'                                                                               : Token; // Keyword: Type
 LsbTerm               : <INITIAL, Generic                                             >'lsb'                                                                                 : Token; // Keyword: Literal
+MixinTerm             : <INITIAL, Generic                                             >'mixin'                                                                               : Token; // Keyword: Statement
 ModportTerm           : <INITIAL, Generic                                             >'modport'                                                                             : Token; // Keyword: Structure
 ModuleTerm            : <INITIAL, Generic                                             >'module'                                                                              : Token; // Keyword: Structure
 MsbTerm               : <INITIAL, Generic                                             >'msb'                                                                                 : Token; // Keyword: Literal
@@ -298,6 +299,7 @@ InToken            : InTerm            : Token Comments;
 LetToken           : LetTerm           : Token Comments;
 LogicToken         : LogicTerm         : Token Comments;
 LsbToken           : LsbTerm           : Token Comments;
+MixinToken         : MixinTerm         : Token Comments;
 ModportToken       : ModportTerm       : Token Comments;
 ModuleToken        : ModuleTerm        : Token Comments;
 MsbToken           : MsbTerm           : Token Comments;
@@ -455,6 +457,7 @@ Interface     : InterfaceToken     : VerylToken;
 Let           : LetToken           : VerylToken;
 Logic         : LogicToken         : VerylToken;
 Lsb           : LsbToken           : VerylToken;
+Mixin         : MixinToken         : VerylToken;
 Modport       : ModportToken       : VerylToken;
 Module        : ModuleToken        : VerylToken;
 Msb           : MsbToken           : VerylToken;
@@ -925,6 +928,12 @@ FunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclarat
 ImportDeclaration: Import ScopedIdentifier [ ColonColon Star ] Semicolon;
 
 // ----------------------------------------------------------------------------
+// Mixin
+// ----------------------------------------------------------------------------
+
+MixinDeclaration: Mixin ScopedIdentifier Semicolon;
+
+// ----------------------------------------------------------------------------
 // Unsafe
 // ----------------------------------------------------------------------------
 
@@ -944,7 +953,7 @@ InterfaceDeclaration: Interface Identifier [ WithGenericParameter ] [ For Scoped
 
 InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
 
-InterfaceItem: GenerateItem | ModportDeclaration;
+InterfaceItem: GenerateItem | MixinDeclaration | ModportDeclaration;
 
 GenerateIfDeclaration: If Expression GenerateNamedBlock { Else If Expression GenerateOptionalNamedBlock } [ Else GenerateOptionalNamedBlock ];
 

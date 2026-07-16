@@ -95,6 +95,7 @@ pub enum TokenType {
     Let,
     Logic,
     Lsb,
+    Mixin,
     Modport,
     Module,
     Msb,
@@ -189,6 +190,7 @@ impl TokenType {
                 | TokenType::Let
                 | TokenType::Logic
                 | TokenType::Lsb
+                | TokenType::Mixin
                 | TokenType::Modport
                 | TokenType::Module
                 | TokenType::Msb
@@ -329,6 +331,7 @@ impl From<&str> for TokenType {
             "LetTerm" => TokenType::Let,
             "LogicTerm" => TokenType::Logic,
             "LsbTerm" => TokenType::Lsb,
+            "MixinTerm" => TokenType::Mixin,
             "ModportTerm" => TokenType::Modport,
             "ModuleTerm" => TokenType::Module,
             "MsbTerm" => TokenType::Msb,
@@ -473,6 +476,7 @@ impl std::fmt::Display for TokenType {
             TokenType::Let => "let",
             TokenType::Logic => "logic",
             TokenType::Lsb => "lsb",
+            TokenType::Mixin => "mixin",
             TokenType::Modport => "modport",
             TokenType::Module => "module",
             TokenType::Msb => "msb",

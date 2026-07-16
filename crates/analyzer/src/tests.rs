@@ -6075,6 +6075,54 @@ fn invisible_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface b_if {
+        var b: logic;
+        modport mp_b {
+            b: input,
+        }
+    }
+    interface ab_if {
+        mixin a_if;
+        mixin b_if;
+        modport mp_ab {
+            a: input,
+            b: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface ab_if {
+        mixin a_if;
+        modport mp_ab {
+            a: input,
+            b: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
 }
 
 #[test]
@@ -7572,6 +7620,126 @@ fn unknown_member() {
             _b.foo = 0;
             _b.bar = 1;
         }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp_a {
+            a: output,
+        }
+    }
+    interface b_if {
+        var b: logic;
+        modport mp_b {
+            b: output,
+        }
+    }
+    interface ab_if {
+        mixin a_if;
+        mixin b_if;
+    }
+    module c_module (
+        a: modport ab_if::mp_a,
+        b: modport ab_if::mp_b,
+    ) {
+        assign a.a = 0;
+        assign b.b = 0;
+    }
+    module d_module {
+        inst ab: ab_if;
+        let _a: logic = ab.a;
+        let _b: logic = ab.b;
+        inst c: c_module (a: ab, b: ab);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface b_if {
+        var b: logic;
+        modport mp_b {
+            b: input,
+        }
+    }
+    interface ab_if {
+        mixin a_if;
+        mixin b_if;
+        modport mp_ab {
+            ..same(mp_a, mp_b)
+        }
+    }
+    module c_module (
+        ab: modport ab_if::mp_ab,
+    ) {
+        let _a: logic = ab.a;
+        let _b: logic = ab.b;
+    }
+    module d_module {
+        inst ab: ab_if;
+        assign ab.a = 0;
+        assign ab.b = 1;
+        inst c: c_module(ab: ab);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface a_if {
+        var a: logic;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface ab_if {
+        mixin a_if;
+    }
+    module c_module {
+        inst ab: ab_if;
+        assign ab.a = 0;
+        assign ab.b = 1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMember { .. }));
+
+    let code = r#"
+    interface ab_if {
+        var a: logic;
+        var b: logic;
+        modport slave_a {
+            a: input,
+        }
+        modport slave_b {
+            b: input,
+        }
+        modport slave {
+            ..same(slave_a, slave_b)
+        }
+        modport master {
+            ..converse(slave)
+        }
+    }
+    module c_module (
+        ab: modport ab_if::master,
+    ) {
+        assign ab.a = 0;
+        assign ab.b = 0;
     }
     "#;
 
@@ -16609,4 +16777,156 @@ fn component_inst_form_rejects_generic_args() {
         &errors,
         ComponentInterfaceMismatchKind::InstFormUsesParen
     ));
+}
+
+#[test]
+fn invalid_mixin_interface() {
+    let code = r#"
+    module ModuleA {}
+    interface InterfaceB {
+        mixin ModuleA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidMixin { .. }));
+
+    let code = r#"
+    proto interface InterfaceA {}
+    interface InterfaceB {
+        mixin InterfaceA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidMixin { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        mixin InterfaceA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidMixin { .. }));
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidMixin { .. }));
+
+    let code = r#"
+    interface InterfaceA #(param A: u32 = 0) {}
+    interface InterfaceB {
+        mixin InterfaceA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidMixin { .. }));
+
+    let code = r#"
+    interface InterfaceA {}
+    interface InterfaceB {
+        mixin InterfaceA;
+    }
+    interface InterfaceC {
+        mixin InterfaceB;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidMixin { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    interface InterfaceB {
+        var b: logic;
+        modport mp {
+            b: input,
+        }
+    }
+    interface InterfaceC {
+        mixin InterfaceA;
+        mixin InterfaceB;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidMixin { .. }));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    interface InterfaceB {
+        mixin InterfaceA;
+        var b: logic;
+        modport mp {
+            b: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidMixin { .. }));
+
+    let code = r#"
+    interface InterfaceA::<W: u32> {
+        var a: logic<W>;
+        modport mp_a {
+            a: input,
+        }
+    }
+    interface InterfaceB::<W: u32> {
+        var b: logic<W>;
+        modport mp_b {
+            b: input,
+        }
+    }
+    interface InterfaceC::<W: u32> {
+        mixin InterfaceA::<W>;
+        mixin InterfaceB::<W>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    interface InterfaceA::<W: u32> {
+        var a: logic<W>;
+        modport mp_a {
+            a: input,
+        }
+    }
+    alias interface InterfaceA32 = InterfaceA::<32>;
+    interface InterfaceB {
+        mixin InterfaceA32;
+        var b: logic<32>;
+        modport mp_ab {
+            a: input,
+            b: input,
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto interface ProtoInterfaceA {}
+    interface InterfaceA::<IF: ProtoInterfaceA> {
+        mixin IF;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidMixin { .. }));
 }
