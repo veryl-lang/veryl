@@ -600,13 +600,26 @@ impl Conv<&PortDeclarationItem> for () {
                 None
             };
 
-            if let Some((value, comptime)) = default_value {
-                let mut comptime = comptime.clone();
-                comptime.value = ValueVariant::Numeric(value.clone());
-                comptime.r#type = r#type.clone();
+            if let Some((value, _)) = default_value {
+                // The default seeds the port's *storage* (used when an instance
+                // leaves the port unconnected), but the port itself must stay a
+                // runtime variable: the module IR is shared by every instance,
+                // and a connected instance overrides the default. Registering
+                // the default as the port's comptime value would const-fold
+                // expressions over the port to the default for all instances.
+                let comptime = Comptime::from_type(r#type.clone(), clock_domain, variable_token);
 
                 // TODO for array
                 let id = context.insert_var_path(path.clone(), comptime);
+
+                for x in r#type.expand_struct_union(&path, &[], None) {
+                    let r#type = x.part_select.last().unwrap().r#type.clone();
+                    let mut comptime = Comptime::from_type(r#type, clock_domain, variable_token);
+                    let path = x.path.clone();
+                    comptime.part_select = Some(x);
+                    context.insert_var_path_with_id(path, id, comptime);
+                }
+
                 let array_limit = context.config.evaluate_array_limit;
                 let variable = Variable::new(
                     id,
