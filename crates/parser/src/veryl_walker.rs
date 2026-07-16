@@ -706,6 +706,13 @@ pub trait VerylWalker {
         after!(self, lsb, arg);
     }
 
+    /// Semantic action for non-terminal 'Mixin'
+    fn mixin(&mut self, arg: &Mixin) {
+        before!(self, mixin, arg);
+        self.veryl_token(&arg.mixin_token);
+        after!(self, mixin, arg);
+    }
+
     /// Semantic action for non-terminal 'Modport'
     fn modport(&mut self, arg: &Modport) {
         before!(self, modport, arg);
@@ -2934,6 +2941,14 @@ pub trait VerylWalker {
         after!(self, import_declaration, arg);
     }
 
+    /// Semantic action for non-terminal 'MixinDeclaration'
+    fn mixin_declaration(&mut self, arg: &MixinDeclaration) {
+        before!(self, mixin_declaration, arg);
+        self.mixin(&arg.mixin);
+        self.scoped_identifier(&arg.scoped_identifier);
+        after!(self, mixin_declaration, arg);
+    }
+
     /// Semantic action for non-terminal 'UnsafeBlock'
     fn unsafe_block(&mut self, arg: &UnsafeBlock) {
         before!(self, unsafe_block, arg);
@@ -3052,6 +3067,7 @@ pub trait VerylWalker {
         before!(self, interface_item, arg);
         match arg {
             InterfaceItem::GenerateItem(x) => self.generate_item(&x.generate_item),
+            InterfaceItem::MixinDeclaration(x) => self.mixin_declaration(&x.mixin_declaration),
             InterfaceItem::ModportDeclaration(x) => {
                 self.modport_declaration(&x.modport_declaration)
             }

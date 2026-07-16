@@ -1,0 +1,16 @@
+interface invalid_mixin_duplicated_member_a {
+    var a: logic;
+    modport mp {
+        a: input,
+    }
+}
+interface invalid_mixin_duplicated_member_b {
+    var b: logic;
+    modport mp {
+        b: input,
+    }
+}
+interface invalid_mixin_duplicated_member {
+    mixin invalid_mixin_duplicated_member_a;
+    mixin invalid_mixin_duplicated_member_b;
+}

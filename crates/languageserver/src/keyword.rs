@@ -45,6 +45,7 @@ pub const KEYWORDS: &[&str] = &[
     "let",
     "logic",
     "lsb",
+    "mixin",
     "modport",
     "module",
     "msb",

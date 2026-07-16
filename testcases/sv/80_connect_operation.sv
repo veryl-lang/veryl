@@ -13,7 +13,6 @@ endpackage
 interface veryl_testcase_Interface80A;
     import veryl_testcase_Package80::Command;
 
-
     logic   command_ready;
     logic   command_valid;
     Command command      ;
@@ -28,7 +27,6 @@ endinterface
 interface veryl_testcase_Interface80B;
     import veryl_testcase_Package80::Status;
 
-
     logic  status_ready;
     logic  status_valid;
     Status status      ;
@@ -42,7 +40,6 @@ endinterface
 
 interface veryl_testcase_Interface80C;
     import veryl_testcase_Package80::Command;
-
 
     logic   command_ready;
     logic   command_valid;

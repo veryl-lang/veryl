@@ -1,0 +1,4 @@
+module invalid_mixin_not_interface_module {}
+interface invalid_mixin_not_interface {
+    mixin invalid_mixin_not_interface_module;
+}

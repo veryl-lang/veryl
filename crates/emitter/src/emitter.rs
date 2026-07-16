@@ -95,6 +95,7 @@ pub struct Emitter {
     duplicated_index: usize,
     keep_tail_newline: bool,
     skip_comment: bool,
+    emit_package_prefix: bool,
 
     // ----- Walker context flags ("are we currently inside X?") -------------
     in_always_ff: bool,
@@ -159,6 +160,7 @@ impl Default for Emitter {
             duplicated_index: 0,
             keep_tail_newline: false,
             skip_comment: false,
+            emit_package_prefix: false,
 
             in_always_ff: false,
             in_direction_modport: false,
@@ -2160,6 +2162,7 @@ impl Emitter {
             build_opt: self.build_opt.clone(),
             in_import: false,
             in_direction_modport: false,
+            emit_package_prefix: false,
             generic_map: target_map.clone(),
             bound_namespace: self.bound_namespace.clone(),
         };
@@ -2436,6 +2439,113 @@ impl Emitter {
         } else {
             self.argument_expression(&arg.argument_expression);
         }
+    }
+
+    fn emit_imports_in_interface(&mut self, import_declarations: &[ImportDeclaration]) {
+        if import_declarations.is_empty() {
+            return;
+        }
+
+        for (i, x) in import_declarations.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.emit_import_declaration(x, true);
+        }
+    }
+
+    fn emit_interface_body(
+        &mut self,
+        arg: &InterfaceDeclaration,
+        symbol: &Symbol,
+        import_declarations: &[ImportDeclaration],
+        in_mixin: bool,
+    ) {
+        let emit_bodies = !arg.interface_declaration_list.is_empty();
+        let emit_imports = !import_declarations.is_empty() && !symbol.kind.has_parameters();
+        let push_indent = !in_mixin && (emit_bodies || emit_imports);
+
+        if push_indent {
+            self.newline_push();
+        }
+
+        if emit_imports {
+            self.emit_imports_in_interface(import_declarations);
+            self.clear_adjust_line();
+        }
+
+        for (i, x) in arg.interface_declaration_list.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.interface_group(&x.interface_group);
+        }
+        self.emit_global_functions(symbol);
+
+        if push_indent {
+            self.newline_pop();
+        } else if !in_mixin {
+            self.newline();
+        }
+    }
+
+    fn emit_mixin_interface(&mut self, source_symbol: &Symbol, source_path: &GenericSymbolPath) {
+        let (source_id, source_def, has_mixin_sources) = match &source_symbol.kind {
+            SymbolKind::Interface(x) => (
+                source_symbol.id,
+                x.definition,
+                source_symbol.kind.has_mixin_sources(),
+            ),
+            SymbolKind::GenericInstance(x) => {
+                if let Some(base) = symbol_table::get(x.base)
+                    && let SymbolKind::Interface(x) = &base.kind
+                {
+                    (base.id, x.definition, base.kind.has_mixin_sources())
+                } else {
+                    unreachable!()
+                }
+            }
+            _ => unreachable!(),
+        };
+
+        if has_mixin_sources {
+            // Skip a mixin source that has mixin sources to avoid infinite recursion on
+            // self/cyclic mixin.
+            // TODO: this relies on nested mixin being unsupported; once it is
+            // supported, the mixin tree must be traversed to detect cycles instead.
+            return;
+        }
+
+        let source_def = definition_table::get(source_def.unwrap()).unwrap();
+        let Definition::Interface(source_def) = source_def.as_ref() else {
+            unreachable!();
+        };
+
+        let source_map_valid = {
+            let mut maps = source_path.to_generic_maps();
+            if let Some(map) = maps.pop() {
+                self.push_generic_map(map);
+                true
+            } else {
+                false
+            }
+        };
+
+        let src_line = self.src_line;
+        let emit_package_prefix = self.emit_package_prefix;
+        self.emit_package_prefix = true;
+        self.clear_adjust_line();
+
+        let source_symbol = symbol_table::get(source_id).unwrap();
+        self.emit_interface_body(source_def, &source_symbol, &[], true);
+
+        if source_map_valid {
+            self.pop_generic_map();
+        }
+
+        self.src_line = src_line;
+        self.emit_package_prefix = emit_package_prefix;
+        self.align_reset();
     }
 
     fn emit_modport_default_member(&mut self, arg: &ModportDeclaration) {
@@ -5650,6 +5760,20 @@ impl VerylWalker for Emitter {
         }
     }
 
+    /// Semantic action for non-terminal 'MixinDeclaration'
+    fn mixin_declaration(&mut self, arg: &MixinDeclaration) {
+        let path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
+
+        let (source_symbol, source_path) = self.resolve_generic_path(&path, None);
+        let source_symbol = source_symbol.unwrap();
+
+        if source_symbol.found.is_interface(false) {
+            self.emit_mixin_interface(&source_symbol.found, &source_path);
+        } else {
+            unreachable!();
+        }
+    }
+
     /// Semantic action for non-terminal 'UnsafeBlock'
     fn unsafe_block(&mut self, arg: &UnsafeBlock) {
         for (i, x) in arg.unsafe_block_list.iter().enumerate() {
@@ -5787,7 +5911,6 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'InterfaceDeclaration'
     fn interface_declaration(&mut self, arg: &InterfaceDeclaration) {
         let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let empty_header = arg.interface_declaration_opt1.is_none();
 
         let maps = self.get_generic_maps(&symbol.found);
         for (i, map) in maps.iter().enumerate() {
@@ -5813,14 +5936,9 @@ impl VerylWalker for Emitter {
 
             let mut import_declarations = self.file_scope_import.clone();
             import_declarations.append(&mut arg.collect_import_declarations());
-            if !import_declarations.is_empty() && !empty_header {
+            if !import_declarations.is_empty() && symbol.found.kind.has_parameters() {
                 self.newline_push();
-                for (i, x) in import_declarations.iter().enumerate() {
-                    if i != 0 {
-                        self.newline();
-                    }
-                    self.emit_import_declaration(x, true);
-                }
+                self.emit_imports_in_interface(&import_declarations);
                 self.newline_pop();
             }
 
@@ -5830,19 +5948,9 @@ impl VerylWalker for Emitter {
                 }
                 self.with_parameter(&x.with_parameter);
             }
+
             self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
-            for (i, x) in arg.interface_declaration_list.iter().enumerate() {
-                self.newline_list(i);
-                if i == 0 && !import_declarations.is_empty() && empty_header {
-                    for x in &import_declarations {
-                        self.emit_import_declaration(x, true);
-                        self.newline();
-                    }
-                }
-                self.interface_group(&x.interface_group);
-            }
-            self.emit_global_functions(&symbol.found);
-            self.newline_list_post(arg.interface_declaration_list.is_empty());
+            self.emit_interface_body(arg, &symbol.found, &import_declarations, false);
             self.token(&arg.r_brace.r_brace_token.replace("endinterface"));
 
             self.pop_generic_map();
@@ -6285,6 +6393,7 @@ pub struct SymbolContext {
     pub build_opt: Build,
     pub in_import: bool,
     pub in_direction_modport: bool,
+    pub emit_package_prefix: bool,
     pub generic_map: Vec<GenericMap>,
     pub bound_namespace: Option<Namespace>,
 }
@@ -6301,6 +6410,7 @@ impl From<&mut Emitter> for SymbolContext {
             build_opt: value.build_opt.clone(),
             in_import: value.in_import,
             in_direction_modport: value.in_direction_modport,
+            emit_package_prefix: value.emit_package_prefix,
             generic_map,
             bound_namespace: value.bound_namespace.clone(),
         }
@@ -6474,25 +6584,22 @@ pub fn symbol_string(
         | SymbolKind::Union(_)
         | SymbolKind::TypeDef(_)
         | SymbolKind::Enum(_) => {
-            let visible = if let Some(bound_namespace) = &context.bound_namespace {
-                bound_namespace.included(symbol_namespace)
-                    || namespace.included(symbol_namespace)
-                    || scope::is_imported(
-                        &namespace,
-                        symbol.id,
-                        symbol.token.text,
-                        &symbol.namespace.define_context,
-                    )
+            let visible_local = if let Some(bound_namespace) = &context.bound_namespace {
+                bound_namespace.included(symbol_namespace) || namespace.included(symbol_namespace)
             } else {
                 namespace.included(symbol_namespace)
-                    || scope::is_imported(
-                        &namespace,
-                        symbol.id,
-                        symbol.token.text,
-                        &symbol.namespace.define_context,
-                    )
             };
-            if (scope_depth == 1) & visible & !context.in_import {
+            let is_imported = if context.emit_package_prefix {
+                false
+            } else {
+                scope::is_imported(
+                    &namespace,
+                    symbol.id,
+                    symbol.token.text,
+                    &symbol.namespace.define_context,
+                )
+            };
+            if (scope_depth == 1) & (visible_local | is_imported) & !context.in_import {
                 ret.push_str(&token_text);
             } else {
                 ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));
@@ -6529,13 +6636,17 @@ pub fn symbol_string(
         }
         SymbolKind::GenericInstance(x) => {
             let base = symbol_table::get(x.base).unwrap();
-            let visible = namespace.included(&base.namespace)
-                || scope::is_imported(
+            let visible_local = namespace.included(&base.namespace);
+            let is_imported = if context.emit_package_prefix {
+                false
+            } else {
+                scope::is_imported(
                     &namespace,
                     base.id,
                     base.token.text,
                     &base.namespace.define_context,
-                );
+                )
+            };
             let top_level = matches!(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
@@ -6543,7 +6654,8 @@ pub fn symbol_string(
             let global_func = base.namespace.paths[0] != context.project_name.unwrap()
                 && base.is_global_function();
 
-            let add_namespace = (scope_depth >= 2) | !visible | top_level | global_func;
+            let add_namespace =
+                (scope_depth >= 2) | !(visible_local | is_imported) | top_level | global_func;
             if add_namespace {
                 ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));
             }

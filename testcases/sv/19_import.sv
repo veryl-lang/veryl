@@ -70,7 +70,6 @@ interface veryl_testcase_Interface19A;
     import veryl_testcase_PackageA::A;
     import veryl_testcase_PackageA::*;
 
-
 endinterface
 
 interface veryl_testcase_Interface19B

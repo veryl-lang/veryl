@@ -2762,6 +2762,14 @@ impl VerylWalker for Formatter {
         self.semicolon(&arg.semicolon);
     }
 
+    /// Semantic action for non-terminal 'MixinDeclaration'
+    fn mixin_declaration(&mut self, arg: &MixinDeclaration) {
+        self.mixin(&arg.mixin);
+        self.space(1);
+        self.scoped_identifier(&arg.scoped_identifier);
+        self.semicolon(&arg.semicolon);
+    }
+
     /// Semantic action for non-terminal 'UnsafeBlock'
     fn unsafe_block(&mut self, arg: &UnsafeBlock) {
         self.r#unsafe(&arg.r#unsafe);
