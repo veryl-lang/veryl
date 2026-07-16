@@ -225,11 +225,24 @@ impl VarPathSelect {
         select.split(comptime.r#type.array.dims()).0.is_range()
     }
 
-    pub fn to_expression(self, context: &Context) -> Option<Expression> {
+    pub fn to_expression(self, context: &mut Context) -> Option<Expression> {
         let (path, select, token) = self.into();
 
         if let Some((id, mut comptime)) = context.find_path(&path) {
+            // A struct/union member path resolves to the base variable's id
+            // with a part_select offset; rebase the type and map the
+            // member-relative select into base coordinates (mirrors
+            // eval_factor_path_inner) — otherwise the read targets the base
+            // variable's low bits instead of the member.
+            if let Some(part_select) = &comptime.part_select {
+                comptime.r#type = part_select.base.clone();
+            }
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+            let width_select = if let Some(part_select) = &comptime.part_select {
+                part_select.to_base_select(context, &width_select)?
+            } else {
+                width_select
+            };
             comptime.r#type.array.drain(0..array_select.dimension());
 
             // Same const-with-dynamic-index guard as `eval_factor_path`.
