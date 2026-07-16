@@ -17059,3 +17059,46 @@ fn clock_domain_interface_instance() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn clock_domain_lhs_select() {
+    // A write index/select from another domain is the same mux CDC as the
+    // data-dependent read, which is already checked on the RHS.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        idx_a  : input  'a logic<3>,
+        i_b    : input  'b logic,
+        o_b    : output 'b logic<8>,
+    ) {
+        assign o_b[idx_a] = i_b;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Same-domain write select stays accepted.
+    let code = r#"
+    module ModuleA (
+        i_clk_b: input  'b clock,
+        idx_b  : input  'b logic<3>,
+        i_b    : input  'b logic,
+        o_b    : output 'b logic<8>,
+    ) {
+        assign o_b[idx_b] = i_b;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
