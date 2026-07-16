@@ -2156,8 +2156,10 @@ fn eval_factor_path_inner(
                 Ok(ir::Factor::Value(comptime))
             } else {
                 // Params arrive with evaluated=true (set by eval_expr), which
-                // would make gather_context skip applying the select width.
-                if !width_select.is_empty() {
+                // would make gather_context skip applying the select width —
+                // and skip the index/select clock-domain check, laundering a
+                // foreign-domain index into a const lookup table.
+                if !width_select.is_empty() || !index.is_const() {
                     comptime.evaluated = false;
                 }
                 Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
