@@ -47,6 +47,9 @@ pub(crate) mod dead_var_dce {
     pub fn enabled() -> bool {
         false
     }
+    pub fn census_digest(_slices: &[&[ProtoStatement]]) -> u64 {
+        0
+    }
     pub fn collect_dead_offsets(_slices: &[&[ProtoStatement]]) -> HashSet<VarOffset> {
         HashSet::default()
     }

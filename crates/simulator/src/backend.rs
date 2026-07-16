@@ -109,14 +109,23 @@ pub struct ChunkArtifact {
     /// Backing resources (mmap, .so handle, ...) the runtime must keep
     /// alive while `func` is callable.
     pub keepalive: Option<Box<dyn Send + Sync>>,
+    /// Stable content fingerprint of the statements this chunk was compiled
+    /// from, stamped by `try_compile_chunk`. `Debug` prints this instead of
+    /// the (run-varying) `func` address so a fingerprint over statements
+    /// containing nested `CompiledBlock`s is deterministic across tests yet
+    /// still distinguishes chunks with different code. `None` before a stamp
+    /// (non-`dut_reuse` path); `Debug` then falls back to the address.
+    pub content_fp: Option<u128>,
 }
 
 impl std::fmt::Debug for ChunkArtifact {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChunkArtifact")
-            .field("func", &(self.func as *const ()))
-            .field("keepalive", &self.keepalive.is_some())
-            .finish()
+        let mut s = f.debug_struct("ChunkArtifact");
+        match self.content_fp {
+            Some(fp) => s.field("content_fp", &fp),
+            None => s.field("func", &(self.func as *const ())),
+        };
+        s.field("keepalive", &self.keepalive.is_some()).finish()
     }
 }
 

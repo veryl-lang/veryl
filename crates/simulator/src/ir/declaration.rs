@@ -1100,7 +1100,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             context.in_reuse_dut = prev_in_reuse_dut || !alias_enabled;
 
             for decl in child_decls {
-                let proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
+                let mut proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
                 for (event, mut stmts) in proto_decl.event_statements {
                     all_event_statements
@@ -1108,7 +1108,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         .and_modify(|v| v.append(&mut stmts))
                         .or_insert(stmts);
                 }
-                all_comb_statements.append(&mut proto_decl.comb_statements.clone());
+                // Move, not clone: `proto_decl` is dropped after this iteration.
+                all_comb_statements.append(&mut proto_decl.comb_statements);
                 all_post_comb_fns.extend(proto_decl.post_comb_fns);
                 all_child_modules.extend(proto_decl.child_modules);
                 all_derived_clock_candidates.extend(proto_decl.derived_clock_candidates);

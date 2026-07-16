@@ -1,3 +1,4 @@
+pub(crate) mod comb_pipeline_cache;
 pub(crate) mod context;
 pub(crate) mod declaration;
 pub mod derived_clock;
