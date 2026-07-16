@@ -1156,7 +1156,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 };
 
                 let property = ModportProperty {
-                    // Dummy SymbolId, the actual value is inserted at interface_declaration
+                    // Unresolved sentinel; link_modports (analyze_post_pass1) fills in the id
                     interface: SymbolId(0),
                     members,
                     default,

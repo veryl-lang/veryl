@@ -14,6 +14,8 @@ pub struct DefinitionId(pub usize);
 
 thread_local!(static DEFINITION_ID: RefCell<usize> = const { RefCell::new(0) });
 
+/// IDs start at 1: 0 is reserved as the unresolved-reference sentinel
+/// (the fragment codec relies on this).
 pub fn new_definition_id() -> DefinitionId {
     DEFINITION_ID.with(|f| {
         let mut ret = f.borrow_mut();
