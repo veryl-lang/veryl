@@ -17235,3 +17235,89 @@ fn clock_domain_concatenation_lhs() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn clock_domain_statement_condition() {
+    // An if/case condition gates the register write like a mux select. The
+    // expression form (`r = if i_a { i_b } else { r };`) is reported, but
+    // the statement form dropped the condition's clock domain entirely.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic,
+        i_b    : input  'b logic<8>,
+        o_b    : output 'b logic<8>,
+    ) {
+        var r: 'b logic<8>;
+        always_ff (i_clk_b) {
+            if i_a {
+                r = i_b;
+            }
+        }
+        assign o_b = r;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Case-statement form.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic<2>,
+        i_b    : input  'b logic<8>,
+        o_b    : output 'b logic<8>,
+    ) {
+        var r: 'b logic<8>;
+        always_ff (i_clk_b) {
+            case i_a {
+                2'd0: r = i_b;
+                default: {}
+            }
+        }
+        assign o_b = r;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Same-domain conditions stay accepted.
+    let code = r#"
+    module ModuleA (
+        i_clk_b: input  'b clock,
+        i_en   : input  'b logic,
+        i_b    : input  'b logic<8>,
+        o_b    : output 'b logic<8>,
+    ) {
+        var r: 'b logic<8>;
+        always_ff (i_clk_b) {
+            if i_en {
+                r = i_b;
+            }
+        }
+        assign o_b = r;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}

@@ -606,9 +606,11 @@ impl Conv<&IfStatement> for ir::StatementBlock {
         let true_side = if false_side_only {
             vec![]
         } else {
-            let true_side: ir::StatementBlock =
-                Conv::conv(context, value.statement_block.as_ref())?;
-            true_side.0
+            let true_side: IrResult<ir::StatementBlock> = context
+                .with_condition_domain(comptime.clone(), |c| {
+                    Conv::conv(c, value.statement_block.as_ref())
+                });
+            true_side?.0
         };
 
         if true_side_only {
@@ -633,8 +635,11 @@ impl Conv<&IfStatement> for ir::StatementBlock {
                 continue;
             }
 
-            let true_side: ir::StatementBlock = Conv::conv(context, x.statement_block.as_ref())?;
-            let true_side = true_side.0;
+            let true_side: IrResult<ir::StatementBlock> = context
+                .with_condition_domain(comptime.clone(), |c| {
+                    Conv::conv(c, x.statement_block.as_ref())
+                });
+            let true_side = true_side?.0;
 
             let statement = ir::Statement::If(ir::IfStatement {
                 cond,
@@ -660,8 +665,11 @@ impl Conv<&IfStatement> for ir::StatementBlock {
         if let Some(x) = &value.if_statement_opt
             && !else_if_break
         {
-            let block: ir::StatementBlock = Conv::conv(context, x.statement_block.as_ref())?;
-            let mut block = block.0;
+            let block: IrResult<ir::StatementBlock> = context
+                .with_condition_domain(comptime.clone(), |c| {
+                    Conv::conv(c, x.statement_block.as_ref())
+                });
+            let mut block = block?.0;
 
             if let Some(x) = false_side.last_mut() {
                 if let ir::Statement::If(x) = x {
@@ -911,22 +919,26 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
         }
 
         let mut tgt: ir::Expression = Conv::conv(context, value.expression.as_ref())?;
-        tgt.eval_comptime(context, None);
+        let tgt_comptime = tgt.eval_comptime(context, None).clone();
 
         let mut arms: Vec<ir::CaseArm> = Vec::new();
         let mut default: Vec<ir::Statement> = Vec::new();
 
         for item in &value.case_statement_list {
-            let body: ir::StatementBlock = match item.case_item.case_item_group0.as_ref() {
-                // A bare statement arm has no StatementBlockItem wrapper, so
-                // it needs its own hoist sink here.
-                CaseItemGroup0::Statement(x) => {
-                    with_tb_hoist_sink(context, |c| Conv::conv(c, x.statement.as_ref()))?
-                }
-                CaseItemGroup0::StatementBlock(x) => {
-                    Conv::conv(context, x.statement_block.as_ref())?
-                }
-            };
+            let body: IrResult<ir::StatementBlock> =
+                context.with_condition_domain(tgt_comptime.clone(), |c| {
+                    match item.case_item.case_item_group0.as_ref() {
+                        // A bare statement arm has no StatementBlockItem wrapper, so
+                        // it needs its own hoist sink here.
+                        CaseItemGroup0::Statement(x) => {
+                            with_tb_hoist_sink(c, |c| Conv::conv(c, x.statement.as_ref()))
+                        }
+                        CaseItemGroup0::StatementBlock(x) => {
+                            Conv::conv(c, x.statement_block.as_ref())
+                        }
+                    }
+                });
+            let body = body?;
             match item.case_item.case_item_group.as_ref() {
                 CaseItemGroup::CaseCondition(x) => {
                     let patterns = case_patterns(context, x.case_condition.as_ref())?;
@@ -980,23 +992,38 @@ impl Conv<&SwitchStatement> for ir::StatementBlock {
         let mut default: Vec<ir::Statement> = Vec::new();
 
         for item in &value.switch_statement_list {
-            let true_side: ir::StatementBlock = match item.switch_item.switch_item_group0.as_ref() {
-                // A bare statement arm has no StatementBlockItem wrapper, so
-                // it needs its own hoist sink here.
-                SwitchItemGroup0::Statement(x) => {
-                    with_tb_hoist_sink(context, |c| Conv::conv(c, x.statement.as_ref()))?
+            let cond = match item.switch_item.switch_item_group.as_ref() {
+                SwitchItemGroup::SwitchCondition(x) => {
+                    let mut cond = switch_condition(context, x.switch_condition.as_ref())?;
+                    cond.eval_comptime(context, None);
+                    Some(cond)
                 }
-                SwitchItemGroup0::StatementBlock(x) => {
-                    Conv::conv(context, x.statement_block.as_ref())?
-                }
+                SwitchItemGroup::Defaul(_) => None,
             };
 
-            match item.switch_item.switch_item_group.as_ref() {
-                SwitchItemGroup::SwitchCondition(x) => {
-                    let cond = switch_condition(context, x.switch_condition.as_ref())?;
+            let convert = |c: &mut Context| -> IrResult<ir::StatementBlock> {
+                match item.switch_item.switch_item_group0.as_ref() {
+                    // A bare statement arm has no StatementBlockItem wrapper, so
+                    // it needs its own hoist sink here.
+                    SwitchItemGroup0::Statement(x) => {
+                        with_tb_hoist_sink(c, |c| Conv::conv(c, x.statement.as_ref()))
+                    }
+                    SwitchItemGroup0::StatementBlock(x) => {
+                        Conv::conv(c, x.statement_block.as_ref())
+                    }
+                }
+            };
+            let true_side = if let Some(cond) = &cond {
+                context.with_condition_domain(cond.comptime().clone(), convert)?
+            } else {
+                convert(context)?
+            };
+
+            match cond {
+                Some(cond) => {
                     arms.push((cond, true_side.0, item.switch_item.as_ref().into()));
                 }
-                SwitchItemGroup::Defaul(_) => {
+                None => {
                     // Parser enforces at most one default.
                     if default.is_empty() {
                         default = true_side.0;
