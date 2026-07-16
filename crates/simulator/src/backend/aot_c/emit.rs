@@ -3557,6 +3557,15 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     if needs_clean && expr_context.width > 0 && expr_context.width < 64 {
                         let mask = (1u64 << expr_context.width) - 1;
                         Some(format!("(({}) & 0x{:x}ULL)", inner, mask))
+                    } else if needs_clean && expr_context.width > 64 && expr_context.width < 128 {
+                        // 65..128-bit context over a ≤64-bit operand: the
+                        // int64 result sign-extends through the __uint128_t
+                        // promotion (supplying the ones in [xw..width) for
+                        // ~/-), then the mask trims [width..128).
+                        Some(mask_u128(
+                            &format!("((__uint128_t)(__int128_t)({inner}))"),
+                            expr_context.width,
+                        ))
                     } else {
                         Some(inner)
                     }
