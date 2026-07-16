@@ -2127,16 +2127,19 @@ impl Conv<&air::Expression> for ProtoExpression {
                         false
                     }
                 }
+                // Value::new keeps the representation canonical (BigUint
+                // for w > 64) — a wide ValueU64 breaks the same-repr
+                // matches in the interpreter's op arms (unreachable!()).
                 let zero_result = |w: usize, ec: ExpressionContext| -> ProtoExpression {
                     ProtoExpression::Value {
-                        value: Value::U64(ValueU64::new(0, w, ec.signed)),
+                        value: Value::new(0, w, ec.signed),
                         width: w,
                         expr_context: ec,
                     }
                 };
                 let one_result = |w: usize, ec: ExpressionContext| -> ProtoExpression {
                     ProtoExpression::Value {
-                        value: Value::U64(ValueU64::new(1, w, ec.signed)),
+                        value: Value::new(1, w, ec.signed),
                         width: w,
                         expr_context: ec,
                     }

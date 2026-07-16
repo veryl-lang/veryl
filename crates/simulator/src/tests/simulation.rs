@@ -19334,3 +19334,34 @@ fn op_assign_struct_member_reads_member() {
         );
     }
 }
+
+#[test]
+fn compare_mixed_value_representation() {
+    // A wide subexpression resized down to <=64 bits could stay in the
+    // BigUint representation, and the interpreter's comparison arms only
+    // match same-representation pairs — `a <= (16'h0 & w)` panicked with
+    // "entered unreachable code" (JIT backends computed r=0 fine).
+    let code = r#"
+    module Top (
+        a: input  logic<63>,
+        w: input  logic<192>,
+        r: output logic,
+    ) {
+        assign r = a <= (16'h0 & w);
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(1, 63, false));
+        sim.set("w", Value::new_biguint(BigUint::from(0u32), 192, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new(0, 1, false),
+            "config={config:?}"
+        );
+    }
+}
