@@ -11,6 +11,16 @@ const BINARY_CHARS: [char; 6] = ['0', '1', 'x', 'z', 'X', 'Z'];
 const OCTAL_CHARS: [char; 12] = ['0', '1', '2', '3', '4', '5', '6', '7', 'x', 'z', 'X', 'Z'];
 const DECIMAL_CHARS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
+/// True when the literal's width prefix does not fit the u32 width field
+/// (e.g. `4294967297'h1`), which would otherwise truncate modulo 2^32.
+fn width_prefix_overflows(text: &str) -> bool {
+    let Some((prefix, _)) = text.split_once('\'') else {
+        return false;
+    };
+    let prefix: String = prefix.chars().filter(|c| *c != '_').collect();
+    !prefix.is_empty() && prefix.parse::<u32>().is_err()
+}
+
 fn is_zero_width_literal(text: &str) -> bool {
     let Some((width, _)) = text.split_once('\'') else {
         return false;
@@ -105,6 +115,13 @@ impl VerylGrammarTrait for CreateLiteralTable {
                 ));
             }
 
+            if width_prefix_overflows(&text) {
+                self.errors.push(AnalyzerError::too_large_number(
+                    u32::MAX as usize,
+                    &token.into(),
+                ));
+            }
+
             let literal = Literal::Value(value);
             literal_table::insert(id, literal);
 
@@ -169,6 +186,12 @@ impl VerylGrammarTrait for CreateLiteralTable {
             if is_zero_width_literal(&token.to_string()) {
                 self.errors
                     .push(AnalyzerError::zero_width_number(&token.into()));
+            }
+            if width_prefix_overflows(&token.to_string()) {
+                self.errors.push(AnalyzerError::too_large_number(
+                    u32::MAX as usize,
+                    &token.into(),
+                ));
             }
             let value: Value = arg.into();
             let literal = Literal::Value(value);

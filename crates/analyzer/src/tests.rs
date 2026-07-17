@@ -17362,3 +17362,66 @@ fn baseless_literal_in_concatenation() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn literal_width_prefix_overflow() {
+    // A width prefix beyond u32 was silently truncated modulo 2^32
+    // (4294967297'h1 became IR width 1) while the emitter passes the
+    // literal through verbatim.
+    let code = r#"
+    module ModuleA {
+        const A: logic<8> = 4294967297'h1;
+        var y: logic<8>;
+        always_comb {
+            y = A + 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::TooLargeNumber { .. })),
+        "{errors:?}"
+    );
+
+    // An all-bit literal with an overflowing prefix is rejected too;
+    // a parse-overflow prefix (beyond usize) as well.
+    let code = r#"
+    module ModuleA {
+        const A: logic<8> = 99999999999999999999'1;
+        var y: logic<8>;
+        always_comb {
+            y = A + 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::TooLargeNumber { .. })),
+        "{errors:?}"
+    );
+
+    // Sane widths stay accepted.
+    let code = r#"
+    module ModuleA {
+        const A: logic<8> = 8'h12;
+        var y: logic<8>;
+        always_comb {
+            y = A + 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::TooLargeNumber { .. })),
+        "{errors:?}"
+    );
+}
