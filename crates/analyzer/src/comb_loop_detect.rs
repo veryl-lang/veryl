@@ -464,12 +464,10 @@ fn build_module_graph(
                 if !is_module_scope_var(dst_id_idx.0, &module.variables) {
                     continue;
                 }
-                // Same `(VarId, idx)`: only undominated reads can close a
-                // cycle through this declaration (`a = 0; a = a + 1` must
-                // not). Disjoint bits still form real multi-bit cycles
-                // (`o_y[1] = o_y[2]; o_y[2] = o_y[1];`), so the read and
-                // write masks need not overlap — the bit-partition ranges
-                // keep `a[1] = a[0]` from becoming a self-edge.
+                // Same `(VarId, idx)`: only undominated reads can close a cycle through
+                // this declaration (`a = 0; a = a + 1` must not). Disjoint bits still form
+                // real multi-bit cycles (`o_y[1] = o_y[2]; o_y[2] = o_y[1]`), so read/write
+                // masks need not overlap — the bit-partition ranges stop `a[1] = a[0]` self-edges.
                 let mut effective_read = effective_read.clone();
                 if src_id_idx == dst_id_idx {
                     let undom = undom_per_decl

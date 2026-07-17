@@ -1059,10 +1059,9 @@ fn emit_wide_binary(
             })
         }
         Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR | Op::ArithShiftR => {
-            // `>>>` in an unsigned context is a logical shift (mirrors the
-            // Cranelift narrow path and the interpreter); in a signed
-            // context x is sign-extended to the full op_nb buffer and the
-            // fill comes from the buffer's top bit.
+            // `>>>` in an unsigned context is a logical shift (mirrors Cranelift
+            // and the interpreter); signed, x is sign-extended to the full op_nb
+            // buffer so the fill comes from the buffer's top bit.
             let is_ashr = matches!(op, Op::ArithShiftR) && expr_context.signed;
             let x_ref = emit_wide_operand_signed(x, op_nb, is_ashr, pre)?;
             let amount = wide_shift_amount(y, pre)?;
@@ -2795,10 +2794,8 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
 pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
     match stmt {
         ProtoStatement::Assign(a) => {
-            // A bare signed RHS narrower than the destination sign-extends at
-            // the store (see ProtoExpression::store_sign_extend_from); not
-            // implemented in the C emitter — bail to Cranelift, which extends
-            // in-register.
+            // A bare narrow signed RHS sign-extends at the store
+            // (store_sign_extend_from); not done in the C emitter — bail to Cranelift.
             if a.rhs_select.is_none() && a.expr.store_sign_extend_from(a.dst_width).is_some() {
                 return None;
             }
@@ -3558,10 +3555,10 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         let mask = (1u64 << expr_context.width) - 1;
                         Some(format!("(({}) & 0x{:x}ULL)", inner, mask))
                     } else if needs_clean && expr_context.width > 64 && expr_context.width < 128 {
-                        // 65..128-bit context over a ≤64-bit operand: the
-                        // int64 result sign-extends through the __uint128_t
-                        // promotion (supplying the ones in [xw..width) for
-                        // ~/-), then the mask trims [width..128).
+                        // 65..128-bit context over a ≤64-bit operand: the int64
+                        // result sign-extends through the __uint128_t promotion
+                        // (the ones in [xw..width) for ~/-), then the mask trims
+                        // [width..128).
                         Some(mask_u128(
                             &format!("((__uint128_t)(__int128_t)({inner}))"),
                             expr_context.width,
