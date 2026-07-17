@@ -508,6 +508,7 @@ impl Op {
             // Concatenation operands and the replication count are
             // self-determined; an unbased unsized literal can't be sized here.
             expr.check_self_determined_unsized(context);
+            expr.check_concat_operand_baseless(context);
             if let Some(repeat) = repeat {
                 repeat.check_self_determined_unsized(context);
             }

@@ -13441,7 +13441,7 @@ fn exceed_limit() {
 
     let code = r#"
     module ModuleA {
-        let _a: logic = {1 repeat 10000000};
+        let _a: logic = {1'b1 repeat 10000000};
     }
     "#;
 
@@ -17318,6 +17318,47 @@ fn clock_domain_statement_condition() {
         !errors
             .iter()
             .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn baseless_literal_in_concatenation() {
+    // A base-less literal is 32-bit in Veryl but emitted verbatim, so the
+    // SV output contains an unsized concatenation operand — illegal per
+    // LRM 11.4.12 (iverilog rejects it).
+    let code = r#"
+    module ModuleA {
+        let a: logic<4> = 4'd1;
+        var y: logic<8>;
+        assign y = {a, 123};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidUnsizedLiteral { .. })),
+        "{errors:?}"
+    );
+
+    // Sized operands and base-less replication counts stay accepted.
+    let code = r#"
+    module ModuleA {
+        let a: logic<4> = 4'd1;
+        var y: logic<12>;
+        assign y = {a, 8'd123};
+        var z: logic<8>;
+        assign z = {a repeat 2};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidUnsizedLiteral { .. })),
         "{errors:?}"
     );
 }
