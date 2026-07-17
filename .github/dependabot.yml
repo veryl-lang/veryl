@@ -3,6 +3,11 @@ updates:
 - package-ecosystem: cargo
   directory: "/"
   schedule:
-    interval: daily
+    interval: weekly
+    day: "monday"
     time: "20:00"
   open-pull-requests-limit: 10
+  # batch minor/patch bumps so the CI cache is invalidated once per week, not per crate
+  groups:
+    minor-patch:
+      update-types: ["minor", "patch"]
