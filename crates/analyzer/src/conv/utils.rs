@@ -2504,7 +2504,26 @@ pub fn eval_factor_symbol(
                 EnumMemberValue::ExplicitValue(x, _) => {
                     let (mut x, _) = eval_expr(context, None, x, false)?;
                     x.token = token;
-                    Some(ir::Factor::Value(x))
+                    // Coerce to the enum width like the ImplicitValue arm:
+                    // the defining expression's own width (32 for a bare
+                    // literal) would otherwise become the member's IR width,
+                    // while the emitted SV casts every member to enum width.
+                    // Untyped enums keep width 0 in EnumProperty; leave those
+                    // at the expression's own evaluation.
+                    if r#enum.width > 0
+                        && let Ok(value) = x.get_value()
+                    {
+                        let mut value = value.clone();
+                        if value.width() < r#enum.width {
+                            value = value.expand(r#enum.width, value.signed()).into_owned();
+                        }
+                        value.trunc(r#enum.width);
+                        // Match the ImplicitValue arm's unsigned values.
+                        value.set_signed(false);
+                        Some(ir::Factor::create_value(value, token))
+                    } else {
+                        Some(ir::Factor::Value(x))
+                    }
                 }
                 EnumMemberValue::UnevaluableValue => None,
             };
