@@ -43,8 +43,10 @@ which          = "8.0"
 [dev-dependencies]
 serde_json     = {workspace = true}
 tempfile       = {workspace = true}
+# enable gitoxide for this crate's own git tests under isolated `cargo test -p`
+veryl-metadata = {path = ".", features = ["git-gitoxide"]}
 
 [features]
-default      = ["git-command", "git-gitoxide"]
+default      = ["git-command"]
 git-command  = []
 git-gitoxide = ["dep:gix"]

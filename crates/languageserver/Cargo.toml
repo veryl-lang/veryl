@@ -30,7 +30,7 @@ tower-lsp-server  = "0.23.0"
 veryl-analyzer    = {version = "0.20.2", path = "../analyzer"}
 veryl-cache       = {version = "0.20.2", path = "../cache"}
 veryl-formatter   = {version = "0.20.2", path = "../formatter"}
-veryl-metadata    = {version = "0.20.2", path = "../metadata"}
+veryl-metadata    = {version = "0.20.2", path = "../metadata", features = ["git-gitoxide"]}
 veryl-parser      = {version = "0.20.2", path = "../parser"}
 veryl-path        = {version = "0.20.2", path = "../path"}
 

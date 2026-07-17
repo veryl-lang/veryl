@@ -6257,6 +6257,7 @@ dependencies = [
  "url",
  "uuid",
  "veryl-component-sys",
+ "veryl-metadata",
  "veryl-parser",
  "veryl-path",
  "veryl-std",
