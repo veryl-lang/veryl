@@ -1005,13 +1005,10 @@ impl ProtoAssignStatement {
             }
         }
 
-        // A bare signed RHS narrower than the destination sign-extends to
-        // the assignment width (see ProtoExpression::store_sign_extend_from;
-        // matches the interpreter store and the emitted SV).  Extend in the
-        // register, then re-mask so bits above dst_width stay clear for the
-        // plain store / load-cache forwarding; the select paths clip to
-        // their window afterwards.  A sign-extended mask_xz replicates an X
-        // sign bit, mirroring Value::expand.
+        // A bare narrow signed RHS sign-extends to the assignment width
+        // (store_sign_extend_from; matches the interpreter and emitted SV).
+        // Extend in-register, then re-mask so bits above dst_width stay clear.
+        // A sign-extended mask_xz replicates an X sign bit, like Value::expand.
         if rhs_window.is_none()
             && let Some(from_w) = self.expr.store_sign_extend_from(self.dst_width)
         {

@@ -515,10 +515,9 @@ pub fn eval_size(
     }
 }
 
-/// Per-destination clock/CDC checks for an assignment: invalid clock
-/// assignment, Implicit-domain inference, dst-vs-RHS and dst-vs-always_ff
-/// clock domain. Shared by the scalar path (eval_assign_statement) and the
-/// concatenation-LHS paths, which build their AssignStatement directly.
+/// Per-destination clock/CDC checks for an assignment (invalid clock assign,
+/// Implicit-domain inference, dst-vs-RHS and dst-vs-always_ff domain). Shared
+/// by the scalar and concatenation-LHS paths, which build AssignStatement directly.
 pub fn check_assign_clock_domain(
     context: &mut Context,
     dst: &mut ir::AssignDestination,
@@ -561,10 +560,9 @@ pub fn check_assign_clock_domain(
         check_clock_domain(context, &dst_comptime_for_cdc, &clock, &token.beg);
     }
 
-    // A statement condition gates the write like a mux select: a foreign-
-    // domain if/case/switch condition over this destination is the same
-    // CDC as the expression form (`x = if c {..}`), which the ternary
-    // path already reports.
+    // A statement condition gates the write like a mux select: a foreign-domain
+    // if/case/switch condition is the same CDC as the expression form
+    // (`x = if c {..}`) that the ternary path already reports.
     for cond in context.condition_domains.clone() {
         check_clock_domain(context, &dst_comptime_for_cdc, &cond, &token.beg);
     }
@@ -883,11 +881,10 @@ pub fn eval_const_assign(
                             .r#type
                             .total_width()
                             .ok_or_else(|| ir_error!(token))?;
-                        // Normalize the stored value to the declared type:
-                        // extend by the RHS value's own signedness, then adopt
-                        // the type's signed flag — downstream folds (==, <:,
-                        // /, ternary, casts) trust the flag, and a stray RHS
-                        // flag diverges from the emitted SV.
+                        // Normalize to the declared type: extend by the RHS's own
+                        // signedness, then adopt the type's signed flag — downstream folds
+                        // (==, <:, /, ternary, casts) trust it, and a stray RHS flag
+                        // diverges from the emitted SV.
                         if value.width() < total_width && value.width() != 0 {
                             value = value.expand(total_width, value.signed()).into_owned();
                         }
@@ -2504,12 +2501,10 @@ pub fn eval_factor_symbol(
                 EnumMemberValue::ExplicitValue(x, _) => {
                     let (mut x, _) = eval_expr(context, None, x, false)?;
                     x.token = token;
-                    // Coerce to the enum width like the ImplicitValue arm:
-                    // the defining expression's own width (32 for a bare
-                    // literal) would otherwise become the member's IR width,
-                    // while the emitted SV casts every member to enum width.
-                    // Untyped enums keep width 0 in EnumProperty; leave those
-                    // at the expression's own evaluation.
+                    // Coerce to the enum width like the ImplicitValue arm: otherwise the
+                    // expression's own width (32 for a bare literal) becomes the member's
+                    // IR width, while the emitted SV casts every member to enum width.
+                    // Untyped enums keep width 0 in EnumProperty, so leave those alone.
                     if r#enum.width > 0
                         && let Ok(value) = x.get_value()
                     {

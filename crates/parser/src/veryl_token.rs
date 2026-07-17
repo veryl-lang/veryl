@@ -290,8 +290,7 @@ impl ExpressionIdentifier {
 }
 
 // The block-comment part must match the lexer's CommentsTerm (veryl.par)
-// exactly: a body that can never contain `*/`. On a lexer/splitter mismatch
-// the text between matches is silently dropped.
+// exactly, or text between matches is silently dropped.
 static COMMENT_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"((?://.*(?:\r\n|\r|\n|$))|(?:/\u{2a}(?:[^\u{2a}]|\u{2a}+[^\u{2a}/])*\u{2a}+/))")
         .unwrap()

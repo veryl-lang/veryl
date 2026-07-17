@@ -244,11 +244,10 @@ impl VarPathSelect {
         let (path, select, token) = self.into();
 
         if let Some((id, mut comptime)) = context.find_path(&path) {
-            // A struct/union member path resolves to the base variable's id
-            // with a part_select offset; rebase the type and map the
-            // member-relative select into base coordinates (mirrors
-            // eval_factor_path_inner) — otherwise the read targets the base
-            // variable's low bits instead of the member.
+            // A struct/union member path resolves to the base variable's id with a
+            // part_select offset; rebase the type and remap the member-relative select
+            // into base coords (like eval_factor_path_inner), else the read hits the
+            // base's low bits, not the member.
             if let Some(part_select) = &comptime.part_select {
                 comptime.r#type = part_select.base.clone();
             }

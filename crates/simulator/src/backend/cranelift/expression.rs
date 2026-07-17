@@ -2601,12 +2601,11 @@ impl ProtoExpression {
             Op::ArithShiftR => {
                 let amount = builder.ins().load(I64, MemFlagsData::trusted(), y_ptr, 0);
                 let dst = alloc_wide_slot(builder, op_nb);
-                // `>>>` in an unsigned context is a logical shift (mirrors
-                // the narrow path and the interpreter). In a signed context
-                // marshal_wide_operand already sign-extended x to the full
-                // op_nb buffer, so the fill comes from the buffer's top bit
-                // (a fill from x's own width would leave the extension bits
-                // unshifted).
+                // `>>>` in an unsigned context is a logical shift (mirrors the
+                // narrow path and the interpreter). Signed, marshal_wide_operand
+                // already sign-extended x to the full op_nb buffer, so the fill
+                // comes from the buffer's top bit (x's own width would leave the
+                // extension bits unshifted).
                 if expr_context.signed {
                     let packed = wide_ops::pack_nb_width(op_nb, op_nb * 8);
                     let packed_val = builder.ins().iconst(I32, packed as i64);
