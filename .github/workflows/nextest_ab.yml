@@ -1,0 +1,35 @@
+name: Nextest A/B
+
+# Temporary: compares the builtin `cargo test` harness against `cargo nextest run`
+# on the SAME pre-built test binaries (same runner, same commit). The two run
+# steps' durations (recorded by GitHub) are the measurement. nextest is installed
+# via `cargo install` and no bash is used, to avoid the Windows partner-runner
+# bash-startup flake (actions/partner-runner-images#169). Delete once decided.
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  nextest-ab:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macOS-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nextest-ab
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
+      # Build every test binary once so both runners execute identical artifacts;
+      # the two run steps below then time pure test execution, not compilation.
+      - name: Build test binaries
+        run: cargo test --no-run --locked
+      - name: builtin cargo test
+        continue-on-error: true
+        run: cargo test --locked
+      - name: cargo nextest run
+        run: cargo nextest run --locked
