@@ -63,6 +63,9 @@ veryl-synthesizer   = {version = "0.20.2", path = "../synthesizer"}
 veryl-translator    = {version = "0.20.2", path = "../translator"}
 
 [features]
+# opt-in, not a metadata default, so builds without it (benchmarks) skip gix
+default = ["git-gitoxide"]
+git-gitoxide = ["veryl-metadata/git-gitoxide"]
 # Forwards to the simulator's profile feature and enables the per-test
 # build-vs-run split report in `cmd_test` (PROFILE_SPLIT line).
 profile = ["veryl-simulator/profile"]

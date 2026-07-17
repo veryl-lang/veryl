@@ -15,7 +15,8 @@ veryl-metadata  = {version = "0.20.2", path = "../metadata"}
 veryl-parser    = {version = "0.20.2", path = "../parser"}
 veryl-path      = {version = "0.20.2", path = "../path"}
 veryl-simulator = {version = "0.20.2", path = "../simulator"}
-veryl           = {version = "0.20.2", path = "../veryl"}
+# skip veryl's gitoxide in benchmark builds (a full `cargo test` unifies it back in)
+veryl           = {version = "0.20.2", path = "../veryl", default-features = false}
 
 [dev-dependencies]
 criterion = {workspace = true}
