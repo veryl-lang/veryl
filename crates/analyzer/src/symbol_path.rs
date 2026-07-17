@@ -422,6 +422,15 @@ impl GenericSymbolPath {
         self.paths.is_empty()
     }
 
+    pub fn append(&mut self, base: &Token, arguments: &[GenericSymbolPath]) {
+        let generic_symbol = GenericSymbol {
+            base: *base,
+            arguments: arguments.to_vec(),
+        };
+        self.paths.push(generic_symbol);
+        self.range.end = *base;
+    }
+
     pub fn base_path(&self, i: usize) -> SymbolPath {
         let path: Vec<_> = self
             .paths

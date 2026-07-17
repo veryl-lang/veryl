@@ -2498,6 +2498,105 @@ endmodule
 }
 
 #[test]
+fn multiple_import_declaration() {
+    // `ModuleA` uses a multi-item brace import, `ModuleB` a single-item one.
+    let code = r#"package Pkg {
+  type A = logic;
+  type B = logic;
+  type C = logic;
+}
+module ModuleA {
+  import Pkg::{A, B, C};
+  var _a: A;
+  var _b: B;
+  var _c: C;
+}
+module ModuleB {
+  import Pkg::{A};
+  var _a: A;
+}
+"#;
+
+    // `pkg::{a, b}` expands to a comma-separated SystemVerilog import list and
+    // stays flat when it fits within `max_width`; `pkg::{a}` to a single import.
+    let expect = r#"package prj_Pkg;
+    typedef logic A;
+    typedef logic B;
+    typedef logic C;
+endpackage
+module prj_ModuleA;
+    import prj_Pkg::A, prj_Pkg::B, prj_Pkg::C;
+
+    A _a;
+    B _b;
+    C _c;
+endmodule
+module prj_ModuleB;
+    import prj_Pkg::A;
+
+    A _a;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    // The list wraps (one item per line, indented) once it no longer fits,
+    // like a function-call argument list.
+    let expect = r#"package prj_Pkg;
+    typedef logic A;
+    typedef logic B;
+    typedef logic C;
+endpackage
+module prj_ModuleA;
+    import prj_Pkg::A,
+        prj_Pkg::B,
+        prj_Pkg::C;
+
+    A _a;
+    B _b;
+    C _c;
+endmodule
+module prj_ModuleB;
+    import prj_Pkg::A;
+
+    A _a;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata.format.max_width = 20;
+    let ret = emit(&metadata, code);
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"module ModuleA {
+    import $sv::Pkg::{A, B};
+    var _a: $sv::A;
+    var _b: $sv::B;
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    import Pkg::A, Pkg::B;
+
+    A _a;
+    B _b;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn bind_declaration() {
     let code = r#"
 proto package ProtoPkg {

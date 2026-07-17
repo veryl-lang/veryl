@@ -2757,9 +2757,45 @@ impl VerylWalker for Formatter {
         self.scoped_identifier(&arg.scoped_identifier);
         if let Some(ref x) = arg.import_declaration_opt {
             self.colon_colon(&x.colon_colon);
-            self.star(&x.star);
+            match x.import_declaration_opt_group.as_ref() {
+                ImportDeclarationOptGroup::Star(x) => self.star(&x.star),
+                ImportDeclarationOptGroup::MultipleImportList(x) => {
+                    self.multiple_import_list(&x.multiple_import_list)
+                }
+            }
         }
         self.semicolon(&arg.semicolon);
+    }
+
+    /// Semantic action for non-terminal 'MultipleImportList'
+    fn multiple_import_list(&mut self, arg: &MultipleImportList) {
+        // Width-driven stacked-or-flat layout.
+        self.group_begin();
+        self.l_brace(&arg.l_brace);
+        self.group_nest_begin();
+        self.soft_break();
+        self.multiple_import_item(&arg.multiple_import_item);
+        for x in &arg.multiple_import_list_list {
+            self.comma(&x.comma);
+            self.soft_line();
+            self.multiple_import_item(&x.multiple_import_item);
+        }
+        // `if_break(",")` keeps the trailing comma break-only (so a collapsed
+        // import isn't `pkg::{a, b,}`). The source comma's trailing comments
+        // are emitted separately so a `// ...` before `}` survives.
+        self.emit_doc(doc::if_break(","));
+        if let Some(ref x) = arg.multiple_import_list_opt {
+            self.emit_trailing_comments(&x.comma.comma_token, false);
+        }
+        self.group_nest_end();
+        self.soft_break();
+        self.r_brace(&arg.r_brace);
+        self.group_end();
+    }
+
+    /// Semantic action for non-terminal 'MultipleImportItem'
+    fn multiple_import_item(&mut self, arg: &MultipleImportItem) {
+        self.identifier(&arg.identifier);
     }
 
     /// Semantic action for non-terminal 'MixinDeclaration'

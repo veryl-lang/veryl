@@ -1843,6 +1843,22 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn import_declaration(&mut self, arg: &ImportDeclaration) -> Result<(), ParolError> {
+        fn add_import(
+            handler: &mut CreateSymbolTable,
+            path: GenericSymbolPathNamespace,
+            import: SymImport,
+        ) {
+            if handler.affiliation.is_empty() {
+                if import.wildcard {
+                    handler.file_scope_import_wildcard.push(path);
+                } else {
+                    handler.file_scope_import_item.push(path);
+                }
+            } else {
+                symbol_table::add_import(import);
+            }
+        }
+
         match self.point {
             HandlerPoint::Before => {
                 self.in_import = true;
@@ -1850,22 +1866,43 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let namespace = self.get_namespace(&arg.scoped_identifier.identifier().token);
                 let path: GenericSymbolPath = arg.scoped_identifier.as_ref().into();
                 let path: GenericSymbolPathNamespace = (&path, &namespace).into();
-                let wildcard = arg.import_declaration_opt.is_some();
 
-                let import = SymImport {
-                    path: path.clone(),
-                    namespace: path.1.clone(),
-                    wildcard,
-                };
+                if let Some(ref x) = arg.import_declaration_opt {
+                    match x.import_declaration_opt_group.as_ref() {
+                        ImportDeclarationOptGroup::Star(_) => {
+                            let import = SymImport {
+                                path: path.clone(),
+                                namespace: path.1.clone(),
+                                wildcard: true,
+                            };
+                            add_import(self, path, import);
+                        }
+                        ImportDeclarationOptGroup::MultipleImportList(x) => {
+                            let item_list: Vec<_> = x.multiple_import_list.as_ref().into();
+                            for x in item_list {
+                                reference_table::add((arg.scoped_identifier.as_ref(), x).into());
 
-                if self.affiliation.is_empty() {
-                    if wildcard {
-                        self.file_scope_import_wildcard.push(path);
-                    } else {
-                        self.file_scope_import_item.push(path);
+                                let mut item_path = path.clone();
+                                item_path
+                                    .0
+                                    .append(&x.identifier.identifier_token.token, &[]);
+
+                                let import = SymImport {
+                                    path: item_path.clone(),
+                                    namespace: item_path.1.clone(),
+                                    wildcard: false,
+                                };
+                                add_import(self, item_path, import);
+                            }
+                        }
                     }
                 } else {
-                    symbol_table::add_import(import);
+                    let import = SymImport {
+                        path: path.clone(),
+                        namespace: path.1.clone(),
+                        wildcard: false,
+                    };
+                    add_import(self, path, import);
                 }
             }
             HandlerPoint::After => self.in_import = false,

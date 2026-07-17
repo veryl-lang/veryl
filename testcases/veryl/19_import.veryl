@@ -3,6 +3,7 @@ import $sv::PackageA::*;
 
 package PackageA {
     const A: u32 = 1;
+    const B: u32 = 2;
 }
 
 module Module19A {
@@ -62,4 +63,10 @@ interface Interface19B #(
 package Package19 {
     import PackageA::A;
     import PackageA::*;
+}
+
+module Module19E {
+    import PackageA::{A, B};
+    let _a: u32 = A;
+    let _b: u32 = B;
 }

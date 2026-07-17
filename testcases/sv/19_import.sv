@@ -5,6 +5,7 @@ package veryl_testcase_PackageA;
     import PackageA::A;
     import PackageA::*;
     localparam int unsigned A = 1;
+    localparam int unsigned B = 2;
 endpackage
 
 module veryl_testcase_Module19A;
@@ -92,4 +93,13 @@ package veryl_testcase_Package19;
 
 
 endpackage
+
+module veryl_testcase_Module19E;
+    import PackageA::A;
+    import PackageA::*;
+    import veryl_testcase_PackageA::A, veryl_testcase_PackageA::B;
+
+    int unsigned _a; always_comb _a = A;
+    int unsigned _b; always_comb _b = B;
+endmodule
 //# sourceMappingURL=../map/19_import.sv.map

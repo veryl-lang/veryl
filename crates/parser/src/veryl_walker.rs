@@ -2935,10 +2935,38 @@ pub trait VerylWalker {
         self.scoped_identifier(&arg.scoped_identifier);
         if let Some(ref x) = arg.import_declaration_opt {
             self.colon_colon(&x.colon_colon);
-            self.star(&x.star);
+            match x.import_declaration_opt_group.as_ref() {
+                ImportDeclarationOptGroup::Star(x) => self.star(&x.star),
+                ImportDeclarationOptGroup::MultipleImportList(x) => {
+                    self.multiple_import_list(&x.multiple_import_list)
+                }
+            }
         }
         self.semicolon(&arg.semicolon);
         after!(self, import_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'MultipleImportList'
+    fn multiple_import_list(&mut self, arg: &MultipleImportList) {
+        before!(self, multiple_import_list, arg);
+        self.l_brace(&arg.l_brace);
+        self.multiple_import_item(&arg.multiple_import_item);
+        for x in &arg.multiple_import_list_list {
+            self.comma(&x.comma);
+            self.multiple_import_item(&x.multiple_import_item);
+        }
+        if let Some(ref x) = arg.multiple_import_list_opt {
+            self.comma(&x.comma);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, multiple_import_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'MultipleImportItem'
+    fn multiple_import_item(&mut self, arg: &MultipleImportItem) {
+        before!(self, multiple_import_item, arg);
+        self.identifier(&arg.identifier);
+        after!(self, multiple_import_item, arg);
     }
 
     /// Semantic action for non-terminal 'MixinDeclaration'
