@@ -38,7 +38,7 @@ memmap2        = "0.9.9"
 target-lexicon = "0.13.4"
 # Must track cranelift above (cranelift 0.133 <-> wasmtime 46) or
 # cranelift-codegen compiles twice; CI (cargo_deny) enforces it.
-wasmtime       = {version = "46.0", default-features = false, features = ["runtime", "cranelift", "std"]}
+wasmtime       = {version = "47.0", default-features = false, features = ["runtime", "cranelift", "std"]}
 
 [dev-dependencies]
 criterion       = {workspace = true}
