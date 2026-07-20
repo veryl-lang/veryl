@@ -542,6 +542,66 @@ fn comb_pipeline_key(
 
 /// Run the comb pipeline: `analyze_dependency` → `reorder_by_level` →
 /// `dce_aggressive` → dead-var DCE → `try_jit_no_cache`. Mutates
+/// Temporary diagnostic (VERYL_STMT_ORDER_DUMP=1): dump the stmt
+/// order at a pipeline stage to localize run-to-run nondeterminism.
+pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoStatement]) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("VERYL_STMT_ORDER_DUMP").as_deref() == Ok("1")) {
+        return;
+    }
+    fn dump_one(module_name: StrId, tag: &str, path: &str, s: &ProtoStatement) {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        let tok = s
+            .token()
+            .map(|t| format!("{}:{}", t.beg.source, t.beg.line))
+            .unwrap_or_default();
+        let kind = match s {
+            ProtoStatement::Assign(_) => "Assign",
+            ProtoStatement::AssignDynamic(_) => "AssignDyn",
+            ProtoStatement::If(_) => "If",
+            ProtoStatement::Case(_) => "Case",
+            ProtoStatement::For(_) => "For",
+            ProtoStatement::Break => "Break",
+            ProtoStatement::SystemFunctionCall(_) => "SysFn",
+            ProtoStatement::CompiledBlock(_) => "CB",
+            ProtoStatement::SequentialBlock(_) => "SeqBlock",
+            ProtoStatement::TbMethodCall { .. } => "TbMethod",
+        };
+        eprintln!("[stmtord] {module_name} {tag} {path} {kind} tok={tok} out={outs:?} in={ins:?}");
+        match s {
+            ProtoStatement::SequentialBlock(inner) => {
+                for (j, t) in inner.iter().enumerate() {
+                    dump_one(module_name, tag, &format!("{path}.{j}"), t);
+                }
+            }
+            ProtoStatement::If(x) => {
+                for (j, t) in x.true_side.iter().enumerate() {
+                    dump_one(module_name, tag, &format!("{path}.t{j}"), t);
+                }
+                for (j, t) in x.false_side.iter().enumerate() {
+                    dump_one(module_name, tag, &format!("{path}.f{j}"), t);
+                }
+            }
+            ProtoStatement::Case(x) => {
+                for (a, arm) in x.arms.iter().enumerate() {
+                    for (j, t) in arm.body.iter().enumerate() {
+                        dump_one(module_name, tag, &format!("{path}.a{a}.{j}"), t);
+                    }
+                }
+                for (j, t) in x.default.iter().enumerate() {
+                    dump_one(module_name, tag, &format!("{path}.d{j}"), t);
+                }
+            }
+            _ => {}
+        }
+    }
+    for (i, s) in stmts.iter().enumerate() {
+        dump_one(module_name, tag, &format!("{i}"), s);
+    }
+}
+
 /// `all_event_statements` in place with the dead-var drop (mirroring the miss
 /// path); the returned `dead_offsets` let a cache hit reproduce that drop.
 fn run_comb_pipeline(
@@ -551,12 +611,15 @@ fn run_comb_pipeline(
     protect: &HashSet<VarOffset>,
     module_name: StrId,
 ) -> Result<comb_pipeline_cache::CombPipeline, SimulatorError> {
+    dump_stmt_order("conv", module_name, &unified);
     let (unified_sorted, passes_hint) = analyze_dependency(unified)?;
+    dump_stmt_order("post-topo", module_name, &unified_sorted);
     // No DCE/inlining: unified list includes internal child comb that would be incorrectly removed.
     // reorder_by_level preserves the sort's dependency relations (readers
     // stay relative to their version writers via the RAW/WAR leveling), so
     // an exact pass hint derived from the schedule remains valid.
     let unified_sorted = reorder_by_level(unified_sorted);
+    dump_stmt_order("post-level", module_name, &unified_sorted);
     let required_comb_passes =
         passes_hint.unwrap_or_else(|| compute_required_passes(&unified_sorted));
     if passes_hint.is_some() && std::env::var("VERYL_PASS_DIAG").is_ok() {
