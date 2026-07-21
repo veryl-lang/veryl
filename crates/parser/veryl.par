@@ -925,7 +925,11 @@ FunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclarat
 // Import
 // ----------------------------------------------------------------------------
 
-ImportDeclaration: Import ScopedIdentifier [ ColonColon Star ] Semicolon;
+ImportDeclaration: Import ScopedIdentifier [ ColonColon ( Star | MultipleImportList )] Semicolon;
+
+MultipleImportList: LBrace MultipleImportItem { Comma MultipleImportItem } [ Comma ] RBrace;
+
+MultipleImportItem: Identifier;
 
 // ----------------------------------------------------------------------------
 // Mixin

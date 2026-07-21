@@ -233,20 +233,20 @@ fn enum_list_has_conditional_attribute(list: &EnumList) -> bool {
 // SV `import` only accepts `package::symbol` or `package::*`, so suppress
 // imports whose target is an enum (wildcard), an enum member or an alias
 // outside a package — emitting them would produce invalid SystemVerilog.
-fn should_skip_import(arg: &ScopedIdentifier, is_wildcard: bool) -> bool {
+fn should_skip_import(arg: &ScopedIdentifier, import_members: bool) -> bool {
     let Ok(symbol) = symbol_table::resolve(arg) else {
         return false;
     };
     match &symbol.found.kind {
-        SymbolKind::Enum(_) if is_wildcard => true,
-        SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled if !is_wildcard => symbol
+        SymbolKind::Enum(_) if import_members => true,
+        SymbolKind::EnumMember(_) | SymbolKind::EnumMemberMangled if !import_members => symbol
             .found
             .get_parent()
             .and_then(|enum_sym| enum_sym.get_parent())
             .is_none_or(|grandparent| !grandparent.is_package(true)),
         SymbolKind::AliasModule(_)
         | SymbolKind::AliasInterface(_)
-        | SymbolKind::AliasPackage(_) => !is_wildcard,
+        | SymbolKind::AliasPackage(_) => !import_members,
         _ => false,
     }
 }
@@ -1223,8 +1223,9 @@ impl Emitter {
     }
 
     fn emit_import_declaration(&mut self, arg: &ImportDeclaration, moved: bool) {
-        let is_wildcard = arg.import_declaration_opt.is_some();
-        if should_skip_import(&arg.scoped_identifier, is_wildcard) {
+        // Both `pkg::*` and `pkg::{a, b}` import members out of the base scope.
+        let import_members = arg.import_declaration_opt.is_some();
+        if should_skip_import(&arg.scoped_identifier, import_members) {
             return;
         }
 
@@ -1236,33 +1237,24 @@ impl Emitter {
         self.in_import = true;
         self.import(&arg.import);
         self.space(1);
-        // A wildcard targets a package, but a same-named member shadows it and
-        // would emit an invalid `pkg::member::*`. Emit the package as `pkg::*`.
-        let shadowing_package = is_wildcard
-            .then(|| symbol_table::resolve(&*arg.scoped_identifier).ok())
-            .flatten()
-            .filter(|x| !x.found.is_package(true))
-            .and_then(|x| x.found.get_parent_package());
-        if let Some(package) = shadowing_package {
-            let context: SymbolContext = self.into();
-            let text = symbol_string(
-                arg.scoped_identifier.identifier(),
-                &package,
-                &package.namespace,
-                &[package.id],
-                &GenericTables::default(),
-                &context,
-                1,
-            );
-            self.identifier(&Identifier {
-                identifier_token: arg.scoped_identifier.identifier().replace(&text),
-            });
-        } else {
-            self.scoped_identifier(&arg.scoped_identifier);
-        }
-        if let Some(ref x) = arg.import_declaration_opt {
-            self.colon_colon(&x.colon_colon);
-            self.star(&x.star);
+        match arg
+            .import_declaration_opt
+            .as_ref()
+            .map(|x| (x, x.import_declaration_opt_group.as_ref()))
+        {
+            Some((x, ImportDeclarationOptGroup::Star(star))) => {
+                self.emit_wildcard_import(&arg.scoped_identifier, &x.colon_colon, &star.star);
+            }
+            Some((x, ImportDeclarationOptGroup::MultipleImportList(list))) => {
+                self.emit_multiple_import(
+                    &arg.scoped_identifier,
+                    &x.colon_colon,
+                    &list.multiple_import_list,
+                );
+            }
+            None => {
+                self.scoped_identifier(&arg.scoped_identifier);
+            }
         }
         if moved {
             self.skip_comment = true;
@@ -1276,6 +1268,78 @@ impl Emitter {
         if moved {
             self.src_line = src_line;
         }
+    }
+
+    // `import pkg::*;`. A wildcard targets a package, but a same-named member
+    // shadows it and would emit an invalid `pkg::member::*`. Emit the package
+    // as `pkg::*`.
+    fn emit_wildcard_import(
+        &mut self,
+        base: &ScopedIdentifier,
+        colon_colon: &ColonColon,
+        star: &Star,
+    ) {
+        let shadowing_package = symbol_table::resolve(base)
+            .ok()
+            .filter(|x| !x.found.is_package(true))
+            .and_then(|x| x.found.get_parent_package());
+        if let Some(package) = shadowing_package {
+            let context: SymbolContext = self.into();
+            let text = symbol_string(
+                base.identifier(),
+                &package,
+                &package.namespace,
+                &[package.id],
+                &GenericTables::default(),
+                &context,
+                1,
+            );
+            self.identifier(&Identifier {
+                identifier_token: base.identifier().replace(&text),
+            });
+        } else {
+            self.scoped_identifier(base);
+        }
+        self.colon_colon(colon_colon);
+        self.star(star);
+    }
+
+    // `import pkg::{a, b};` is emitted as a comma-separated SystemVerilog import
+    // list (`import pkg::a, pkg::b;`). Whether the whole declaration is skipped
+    // is decided from the base by `should_skip_import`, treating it as a limited
+    // wildcard, so no per-item filtering is needed here.
+    fn emit_multiple_import(
+        &mut self,
+        base: &ScopedIdentifier,
+        colon_colon: &ColonColon,
+        list: &MultipleImportList,
+    ) {
+        // Width-driven: the list stays flat when it fits and wraps (one item
+        // per line, indented) otherwise, like a function-call argument list.
+        let items: Vec<&MultipleImportItem> = list.into();
+        self.group_begin();
+        self.group_nest_begin();
+        for (i, item) in items.iter().enumerate() {
+            if i != 0 {
+                self.str(",");
+                self.soft_line();
+            }
+            let mut scoped_identifier = base.clone();
+            scoped_identifier
+                .scoped_identifier_list
+                .push(ScopedIdentifierList {
+                    colon_colon: Box::new(colon_colon.clone()),
+                    identifier: item.identifier.clone(),
+                    scoped_identifier_opt0: None,
+                });
+            // The base package repeats per item; mark all but the first as
+            // duplicated so their comments / source mappings are not re-emitted.
+            self.force_duplicated = i != 0;
+            self.scoped_identifier(&scoped_identifier);
+            self.force_duplicated = false;
+        }
+        self.group_nest_end();
+        self.group_end();
     }
 
     fn emit_generate_named_block(&mut self, arg: &GenerateNamedBlock, prefix: &str) {

@@ -6461,6 +6461,68 @@ fn undefined_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package ab_pkg {
+        type A = logic;
+        type B = logic;
+    }
+    module c_module {
+        import ab_pkg::{A, B};
+        let _a: A = 0;
+        let _b: B = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    package ab_pkg {
+        type A = logic;
+        type B = logic;
+    }
+    module c_module {
+        import ab_pkg::{A};
+        let _a: A = 0;
+        let _b: B = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
+
+    let code = r#"
+    package abc_pkg {
+        type A = logic;
+        type B = logic;
+    }
+    module d_module {
+        import abc_pkg::{A, B, C};
+        let _a: A = 0;
+        let _b: B = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::UndefinedIdentifier { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        import $sv::ab_pkg::{A, B};
+        let _a: $sv::A = 0;
+        let _b: $sv::B = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

@@ -13,7 +13,8 @@ use veryl_parser::resource_table::TokenId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{
     ExpressionIdentifier, GenericArgIdentifier, HierarchicalIdentifier, Identifier,
-    InstParameterItem, InstPortItem, ModportItem, ScopedIdentifier, StructConstructorItem,
+    InstParameterItem, InstPortItem, ModportItem, MultipleImportItem, ScopedIdentifier,
+    StructConstructorItem,
 };
 use veryl_parser::veryl_token::{Token, TokenSource, is_anonymous_text};
 
@@ -34,6 +35,10 @@ pub enum ReferenceCandidate {
     },
     GenericArgIdentifier {
         arg: GenericArgIdentifier,
+    },
+    ImportItem {
+        base: ScopedIdentifier,
+        arg: Identifier,
     },
     ModportItem {
         arg: ModportItem,
@@ -84,6 +89,16 @@ impl From<&ExpressionIdentifier> for ReferenceCandidate {
 impl From<&GenericArgIdentifier> for ReferenceCandidate {
     fn from(value: &GenericArgIdentifier) -> Self {
         Self::GenericArgIdentifier { arg: value.clone() }
+    }
+}
+
+impl From<(&ScopedIdentifier, &MultipleImportItem)> for ReferenceCandidate {
+    fn from(value: (&ScopedIdentifier, &MultipleImportItem)) -> Self {
+        let (base, item) = value;
+        Self::ImportItem {
+            base: base.clone(),
+            arg: item.identifier.as_ref().clone(),
+        }
     }
 }
 
@@ -790,6 +805,15 @@ impl ReferenceTable {
                 ReferenceCandidate::GenericArgIdentifier { arg } => {
                     let token = arg.scoped_identifier.identifier().token;
                     self.check_complex_identifier(&arg.into(), &token, false);
+                }
+                ReferenceCandidate::ImportItem { base, arg } => {
+                    let Ok(base_symbol) = symbol_table::resolve(base) else {
+                        continue;
+                    };
+
+                    let path: SymbolPathNamespace =
+                        (arg, &base_symbol.found.inner_namespace()).into();
+                    self.check_simple_identifier(&path, &arg.into(), None);
                 }
                 ReferenceCandidate::ModportItem { arg } => {
                     let mut path: SymbolPathNamespace = arg.identifier.as_ref().into();

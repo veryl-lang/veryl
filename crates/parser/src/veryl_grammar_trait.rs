@@ -448,6 +448,7 @@ list_to_item!(Concatenation);
 list_to_item!(AssignConcatenation);
 list_to_item!(ArrayLiteral);
 list_to_item!(StructConstructor);
+list_to_item!(MultipleImport);
 group_to_item!(Module);
 group_to_item!(Interface);
 group_to_item!(Generate);

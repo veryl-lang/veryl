@@ -420,6 +420,48 @@ fn max_width_keeps_short_ternary_flat() {
 }
 
 #[test]
+fn multiple_import_list_layout() {
+    // A short multi-item import collapses back onto one line regardless of the
+    // source layout.
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata.format.max_width = 120;
+
+    let code = r#"module M {
+    import Pkg::{
+        A,
+        B,
+        C,
+    };
+}
+"#;
+    let expect = r#"module M {
+    import Pkg::{A, B, C};
+}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+
+    // A long import wraps with one item per line, indented, with a break-only
+    // trailing comma.
+    metadata.format.max_width = 20;
+
+    let code = r#"module M {
+    import Pkg::{A, B, C};
+}
+"#;
+    let expect = r#"module M {
+    import Pkg::{
+        A,
+        B,
+        C,
+    };
+}
+"#;
+    let ret = format(&metadata, code);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn max_width_breaks_concatenation() {
     let mut metadata = Metadata::create_default("prj").unwrap();
     metadata.format.max_width = 30;
