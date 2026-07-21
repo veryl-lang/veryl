@@ -41,6 +41,14 @@ pub fn dce_aggressive(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
                 if_stmt.false_side = dce_aggressive(if_stmt.false_side);
                 ProtoStatement::If(if_stmt)
             }
+            ProtoStatement::Case(mut case_stmt) => {
+                pending.clear();
+                for arm in &mut case_stmt.arms {
+                    arm.body = dce_aggressive(std::mem::take(&mut arm.body));
+                }
+                case_stmt.default = dce_aggressive(std::mem::take(&mut case_stmt.default));
+                ProtoStatement::Case(case_stmt)
+            }
             ProtoStatement::For(mut for_stmt) => {
                 pending.clear();
                 for_stmt.body = dce_aggressive(for_stmt.body);

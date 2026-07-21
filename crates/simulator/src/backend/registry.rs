@@ -336,6 +336,7 @@ fn classify_proto_stmt(s: &ProtoStatement) -> String {
             )
         }
         ProtoStatement::If(_) => "If".to_string(),
+        ProtoStatement::Case(_) => "Case".to_string(),
         ProtoStatement::For(_) => "For".to_string(),
         ProtoStatement::Break => "Break".to_string(),
         ProtoStatement::SystemFunctionCall(_) => "SysFn".to_string(),

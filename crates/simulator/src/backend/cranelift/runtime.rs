@@ -393,6 +393,13 @@ fn proto_contains_compiled_block(stmts: &[ProtoStatement]) -> bool {
             proto_contains_compiled_block(&if_stmt.true_side)
                 || proto_contains_compiled_block(&if_stmt.false_side)
         }
+        ProtoStatement::Case(case_stmt) => {
+            case_stmt
+                .arms
+                .iter()
+                .any(|arm| proto_contains_compiled_block(&arm.body))
+                || proto_contains_compiled_block(&case_stmt.default)
+        }
         ProtoStatement::For(for_stmt) => proto_contains_compiled_block(&for_stmt.body),
         _ => false,
     })

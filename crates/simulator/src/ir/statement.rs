@@ -266,6 +266,7 @@ pub enum Statement {
     Assign(AssignStatement),
     AssignDynamic(AssignDynamicStatement),
     If(IfStatement),
+    Case(CaseStatement),
     For(ForStatement),
     Break,
     /// `(artifact.func)(ff, comb, log_buf)` — `log_buf` filled in by
@@ -323,6 +324,16 @@ pub fn patch_stmt_log_buf(s: &mut Statement, log_buf: *mut u8) {
                 patch_stmt_log_buf(s, log_buf);
             }
         }
+        Statement::Case(case_stmt) => {
+            for arm in &mut case_stmt.arms {
+                for s in &mut arm.body {
+                    patch_stmt_log_buf(s, log_buf);
+                }
+            }
+            for s in &mut case_stmt.default {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
         Statement::For(for_stmt) => {
             for s in &mut for_stmt.body {
                 patch_stmt_log_buf(s, log_buf);
@@ -362,6 +373,7 @@ impl Statement {
                 ControlFlow::Continue
             }
             Statement::If(x) => x.eval_step(mask_cache),
+            Statement::Case(x) => x.eval_step(mask_cache),
             Statement::For(x) => {
                 let r = &x.range;
                 let start = r.start.eval(mask_cache);
@@ -451,6 +463,7 @@ impl Statement {
             Statement::Assign(x) => x.gather_variable(inputs, outputs),
             Statement::AssignDynamic(x) => x.gather_variable(inputs, outputs),
             Statement::If(x) => x.gather_variable(inputs, outputs),
+            Statement::Case(x) => x.gather_variable(inputs, outputs),
             Statement::For(x) => {
                 for s in &x.body {
                     s.gather_variable(inputs, outputs);
@@ -885,6 +898,7 @@ pub enum ProtoStatement {
     Assign(ProtoAssignStatement),
     AssignDynamic(ProtoAssignDynamicStatement),
     If(ProtoIfStatement),
+    Case(ProtoCaseStatement),
     For(ProtoForStatement),
     Break,
     SystemFunctionCall(ProtoSystemFunctionCall),
@@ -932,6 +946,17 @@ impl ProtoStatement {
                     s.adjust_offsets(ff_delta, comb_delta);
                 }
                 for s in &mut x.false_side {
+                    s.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &mut x.arms {
+                    arm.cond.adjust_offsets(ff_delta, comb_delta);
+                    for s in &mut arm.body {
+                        s.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
+                for s in &mut x.default {
                     s.adjust_offsets(ff_delta, comb_delta);
                 }
             }
@@ -1041,6 +1066,16 @@ impl ProtoStatement {
                     s.collect_written_offsets(out);
                 }
             }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    for s in &arm.body {
+                        s.collect_written_offsets(out);
+                    }
+                }
+                for s in &x.default {
+                    s.collect_written_offsets(out);
+                }
+            }
             ProtoStatement::SystemFunctionCall(x) => {
                 if let ProtoSystemFunctionCall::Readmemh { elements, .. } = x {
                     for elem in elements {
@@ -1097,6 +1132,17 @@ impl ProtoStatement {
                     s.remap_offsets(map);
                 }
                 for s in &mut x.false_side {
+                    s.remap_offsets(map);
+                }
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &mut x.arms {
+                    arm.cond.remap_offsets(map);
+                    for s in &mut arm.body {
+                        s.remap_offsets(map);
+                    }
+                }
+                for s in &mut x.default {
                     s.remap_offsets(map);
                 }
             }
@@ -1246,6 +1292,17 @@ impl ProtoStatement {
                     s.gather_variable_offsets(inputs, outputs);
                 }
             }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    arm.cond.gather_variable_offsets(inputs);
+                    for s in &arm.body {
+                        s.gather_variable_offsets(inputs, outputs);
+                    }
+                }
+                for s in &x.default {
+                    s.gather_variable_offsets(inputs, outputs);
+                }
+            }
             ProtoStatement::SystemFunctionCall(x) => match x {
                 ProtoSystemFunctionCall::Display { args, .. }
                 | ProtoSystemFunctionCall::Write { args, .. } => {
@@ -1360,6 +1417,17 @@ impl ProtoStatement {
                     s.gather_reads_with_ranges(out);
                 }
             }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    arm.cond.gather_reads_with_ranges(out);
+                    for s in &arm.body {
+                        s.gather_reads_with_ranges(out);
+                    }
+                }
+                for s in &x.default {
+                    s.gather_reads_with_ranges(out);
+                }
+            }
             ProtoStatement::SystemFunctionCall(x) => match x {
                 ProtoSystemFunctionCall::Display { args, .. }
                 | ProtoSystemFunctionCall::Write { args, .. } => {
@@ -1466,6 +1534,17 @@ impl ProtoStatement {
                     s.gather_variable_offsets_expanded(inputs, outputs);
                 }
             }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    arm.cond.gather_variable_offsets_expanded(inputs);
+                    for s in &arm.body {
+                        s.gather_variable_offsets_expanded(inputs, outputs);
+                    }
+                }
+                for s in &x.default {
+                    s.gather_variable_offsets_expanded(inputs, outputs);
+                }
+            }
             ProtoStatement::SystemFunctionCall(x) => match x {
                 ProtoSystemFunctionCall::Display { args, .. }
                 | ProtoSystemFunctionCall::Write { args, .. } => {
@@ -1567,6 +1646,17 @@ impl ProtoStatement {
                     s.gather_dynamic_read_ranges(ranges);
                 }
             }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    arm.cond.gather_dynamic_read_ranges(ranges);
+                    for s in &arm.body {
+                        s.gather_dynamic_read_ranges(ranges);
+                    }
+                }
+                for s in &x.default {
+                    s.gather_dynamic_read_ranges(ranges);
+                }
+            }
             ProtoStatement::SystemFunctionCall(x) => match x {
                 ProtoSystemFunctionCall::Display { args, .. }
                 | ProtoSystemFunctionCall::Write { args, .. } => {
@@ -1641,6 +1731,16 @@ impl ProtoStatement {
                     result.extend(s.gather_ff_canonical_offsets());
                 }
                 for s in &x.false_side {
+                    result.extend(s.gather_ff_canonical_offsets());
+                }
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    for s in &arm.body {
+                        result.extend(s.gather_ff_canonical_offsets());
+                    }
+                }
+                for s in &x.default {
                     result.extend(s.gather_ff_canonical_offsets());
                 }
             }
@@ -1758,6 +1858,13 @@ impl ProtoStatement {
                     })
                 }
                 ProtoStatement::If(x) => Statement::If(x.apply_values_ptr(
+                    ff_values_ptr,
+                    ff_len,
+                    comb_values_ptr,
+                    comb_len,
+                    use_4state,
+                )),
+                ProtoStatement::Case(x) => Statement::Case(x.apply_values_ptr(
                     ff_values_ptr,
                     ff_len,
                     comb_values_ptr,
@@ -2471,20 +2578,10 @@ pub struct IfStatement {
 
 impl IfStatement {
     pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
-        let cond = if let Some(x) = &self.cond {
-            let cond = x.eval(mask_cache);
-            match &cond {
-                Value::U64(x) => (x.payload & !x.mask_xz) != 0,
-                Value::BigUint(x) => {
-                    use veryl_analyzer::value::biguint_to_u128;
-                    let payload = biguint_to_u128(&x.payload);
-                    let mask_xz = biguint_to_u128(&x.mask_xz);
-                    (payload & !mask_xz) != 0
-                }
-            }
-        } else {
-            false
-        };
+        let cond = self
+            .cond
+            .as_ref()
+            .is_some_and(|x| value_is_true(&x.eval(mask_cache)));
 
         if cond {
             for x in &self.true_side {
@@ -2511,6 +2608,68 @@ impl IfStatement {
             x.gather_variable(inputs, outputs);
         }
         for x in &self.false_side {
+            x.gather_variable(inputs, outputs);
+        }
+    }
+}
+
+/// A branch/arm condition is taken when its value has any set bit that is not
+/// masked X/Z (matches Verilog's "non-zero, non-X" truth test).
+fn value_is_true(v: &Value) -> bool {
+    match v {
+        Value::U64(x) => (x.payload & !x.mask_xz) != 0,
+        Value::BigUint(x) => {
+            use veryl_analyzer::value::biguint_to_u128;
+            let payload = biguint_to_u128(&x.payload);
+            let mask_xz = biguint_to_u128(&x.mask_xz);
+            (payload & !mask_xz) != 0
+        }
+    }
+}
+
+/// Multiway branch, kept flat (not a nested `If` chain) so a large `case`
+/// doesn't build a statement tree deep enough to overflow the recursive
+/// conv/eval/emit passes.
+#[derive(Clone)]
+pub struct CaseStatement {
+    pub arms: Vec<CaseArm>,
+    pub default: Vec<Statement>,
+}
+
+#[derive(Clone)]
+pub struct CaseArm {
+    pub cond: Expression,
+    pub body: Vec<Statement>,
+}
+
+impl CaseStatement {
+    pub fn eval_step(&self, mask_cache: &mut MaskCache) -> ControlFlow {
+        for arm in &self.arms {
+            if value_is_true(&arm.cond.eval(mask_cache)) {
+                for x in &arm.body {
+                    if x.eval_step(mask_cache) == ControlFlow::Break {
+                        return ControlFlow::Break;
+                    }
+                }
+                return ControlFlow::Continue;
+            }
+        }
+        for x in &self.default {
+            if x.eval_step(mask_cache) == ControlFlow::Break {
+                return ControlFlow::Break;
+            }
+        }
+        ControlFlow::Continue
+    }
+
+    pub fn gather_variable(&self, inputs: &mut Vec<*const u8>, outputs: &mut Vec<*const u8>) {
+        for arm in &self.arms {
+            arm.cond.gather_variable(inputs, outputs);
+            for x in &arm.body {
+                x.gather_variable(inputs, outputs);
+            }
+        }
+        for x in &self.default {
             x.gather_variable(inputs, outputs);
         }
     }
@@ -2558,6 +2717,70 @@ impl ProtoIfStatement {
                 true_side,
                 false_side,
             }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtoCaseStatement {
+    pub arms: Vec<ProtoCaseArm>,
+    pub default: Vec<ProtoStatement>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtoCaseArm {
+    pub cond: ProtoExpression,
+    pub body: Vec<ProtoStatement>,
+}
+
+impl ProtoCaseStatement {
+    /// # Safety
+    /// `ff_values_ptr` and `comb_values_ptr` must point to valid buffers.
+    pub unsafe fn apply_values_ptr(
+        &self,
+        ff_values_ptr: *mut u8,
+        ff_len: usize,
+        comb_values_ptr: *mut u8,
+        comb_len: usize,
+        use_4state: bool,
+    ) -> CaseStatement {
+        unsafe {
+            let arms = self
+                .arms
+                .iter()
+                .map(|arm| {
+                    let cond = arm.cond.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
+                    let body = arm
+                        .body
+                        .iter()
+                        .map(|x| {
+                            x.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            )
+                        })
+                        .collect();
+                    CaseArm { cond, body }
+                })
+                .collect();
+            let default = self
+                .default
+                .iter()
+                .map(|x| {
+                    x.apply_values_ptr(ff_values_ptr, ff_len, comb_values_ptr, comb_len, use_4state)
+                })
+                .collect();
+
+            CaseStatement { arms, default }
         }
     }
 }
@@ -2635,13 +2858,59 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                 vec![ProtoStatement::If(x)]
             }
             air::Statement::Case(c) => {
-                let lowered = c.lower_to_nested_if();
-                let mut out: Vec<ProtoStatement> = Vec::new();
-                for s in &lowered {
-                    let v: Vec<ProtoStatement> = Conv::conv(context, s)?;
-                    out.extend(v);
+                // Isolate the `pending_statements` each arm condition produces (an
+                // inlined function in the case target or a pattern) — whether any
+                // arm has such pending decides flat vs. nested lowering below.
+                let mut converted: Vec<(
+                    ProtoExpression,
+                    Vec<ProtoStatement>,
+                    Vec<ProtoStatement>,
+                )> = Vec::new();
+                let mut any_cond_pending = false;
+                for (arm, cond_expr) in c.arms.iter().zip(c.arm_conditions()) {
+                    let cond: ProtoExpression = Conv::conv(context, &cond_expr)?;
+                    let cond_pending = std::mem::take(&mut context.pending_statements);
+                    any_cond_pending |= !cond_pending.is_empty();
+                    let mut body: Vec<ProtoStatement> = Vec::new();
+                    for s in &arm.body {
+                        let v: Vec<ProtoStatement> = Conv::conv(context, s)?;
+                        body.extend(v);
+                    }
+                    converted.push((cond, cond_pending, body));
                 }
-                out
+                let mut default: Vec<ProtoStatement> = Vec::new();
+                for s in &c.default {
+                    let v: Vec<ProtoStatement> = Conv::conv(context, s)?;
+                    default.extend(v);
+                }
+
+                if any_cond_pending {
+                    // An inlined function in a condition must run lazily per
+                    // arm-tried, not once per arm — else its side effect /
+                    // output-arg write fires for every arm. Fall back to nested
+                    // `if/else` (each condition's pending in the prior arm's else),
+                    // byte-identical to the pre-flattening lowering; such a `case`
+                    // is tiny, so the depth is harmless.
+                    let mut tail = default;
+                    for (cond, mut cond_pending, body) in converted.into_iter().rev() {
+                        let if_stmt = ProtoIfStatement {
+                            cond: Some(cond),
+                            true_side: body,
+                            false_side: std::mem::take(&mut tail),
+                        };
+                        cond_pending.push(ProtoStatement::If(if_stmt));
+                        tail = cond_pending;
+                    }
+                    tail
+                } else {
+                    // Pure conditions: keep the arms flat (the whole point — a
+                    // deep nested tree is what overflows on a big `case`).
+                    let arms = converted
+                        .into_iter()
+                        .map(|(cond, _pending, body)| ProtoCaseArm { cond, body })
+                        .collect();
+                    vec![ProtoStatement::Case(ProtoCaseStatement { arms, default })]
+                }
             }
             air::Statement::IfReset(x) => {
                 let x: ProtoIfStatement = Conv::conv(context, x)?;

@@ -7,8 +7,8 @@ use super::runtime::{
 };
 use crate::ir::variable::native_bytes as calc_native_bytes;
 use crate::ir::{
-    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression, ProtoForRange,
-    ProtoForStatement, ProtoIfStatement, ProtoStatement,
+    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoExpression,
+    ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
 };
 use cranelift::prelude::Value as CraneliftValue;
 use cranelift::prelude::types::{I32, I64, I128};
@@ -819,6 +819,7 @@ impl ProtoStatement {
             ProtoStatement::Assign(x) => x.can_build_binary(),
             ProtoStatement::AssignDynamic(x) => x.can_build_binary(),
             ProtoStatement::If(x) => x.can_build_binary(),
+            ProtoStatement::Case(x) => x.can_build_binary(),
             ProtoStatement::For(x) => x.can_build_binary(),
             ProtoStatement::SystemFunctionCall(_) => false,
             ProtoStatement::CompiledBlock(_) => false,
@@ -842,6 +843,7 @@ impl ProtoStatement {
                 result
             }
             ProtoStatement::If(x) => x.build_binary(context, builder, is_last),
+            ProtoStatement::Case(x) => x.build_binary(context, builder, is_last),
             ProtoStatement::For(x) => x.build_binary(context, builder, is_last),
             ProtoStatement::SystemFunctionCall(_) => None,
             ProtoStatement::CompiledBlock(_) => None,
@@ -2051,6 +2053,146 @@ fn emit_switch_via_br_table(
     context.store_elim_enabled = prev_store_elim;
 
     Some(())
+}
+
+/// Extract the constant selector values from a `case` arm condition — succeeds
+/// only for `sel == const` leaves OR-combined against ONE non-dynamic selector,
+/// so a range/casez/mixed-selector leaf rejects it (→ comparison cascade).
+fn extract_case_eq_values<'a>(
+    cond: &'a ProtoExpression,
+    selector: &mut Option<&'a ProtoExpression>,
+    out: &mut Vec<u64>,
+) -> bool {
+    if let ProtoExpression::Binary {
+        x,
+        op: veryl_analyzer::ir::Op::LogicOr,
+        y,
+        ..
+    } = cond
+    {
+        return extract_case_eq_values(x, selector, out)
+            && extract_case_eq_values(y, selector, out);
+    }
+    let Some((var_expr, const_val)) = extract_eq_const(cond) else {
+        return false;
+    };
+    if let ProtoExpression::Variable {
+        dynamic_select: Some(_),
+        ..
+    } = var_expr
+    {
+        return false;
+    }
+    match selector {
+        Some(sel) if !same_var_read(sel, var_expr) => return false,
+        Some(_) => {}
+        None => *selector = Some(var_expr),
+    }
+    out.push(const_val);
+    true
+}
+
+impl ProtoCaseStatement {
+    pub fn can_build_binary(&self) -> bool {
+        self.arms
+            .iter()
+            .all(|arm| arm.cond.can_build_binary() && arm.body.iter().all(|s| s.can_build_binary()))
+            && self.default.iter().all(|s| s.can_build_binary())
+    }
+
+    /// Reshape the flat arms into an `EqChain` (one entry per matched value) so
+    /// the shared `br_table` emitter can be reused; `None` if not all eq-const.
+    fn as_eq_chain(&self) -> Option<EqChain<'_>> {
+        let mut selector: Option<&ProtoExpression> = None;
+        let mut arms: Vec<EqChainArm<'_>> = Vec::new();
+        for arm in &self.arms {
+            let mut values = Vec::new();
+            if !extract_case_eq_values(&arm.cond, &mut selector, &mut values) {
+                return None;
+            }
+            for value in values {
+                arms.push(EqChainArm {
+                    value,
+                    body: &arm.body,
+                });
+            }
+        }
+        Some(EqChain {
+            selector: selector?,
+            arms,
+            default: &self.default,
+        })
+    }
+
+    pub fn build_binary(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        is_last: bool,
+    ) -> Option<()> {
+        // Dense eq-const arms → a real jump table (as the nested-if path did).
+        if std::env::var("VERYL_SWITCH_LOWER_DISABLE").ok().as_deref() != Some("1")
+            && let Some(chain) = self.as_eq_chain()
+            && chain.arms.len() >= 4
+            && let Some(()) = emit_switch_via_br_table(&chain, context, builder, is_last)
+        {
+            return Some(());
+        }
+        // Otherwise a comparison cascade, built iteratively (only into bodies).
+        let final_block = builder.create_block();
+        let prev_store_elim = context.store_elim_enabled;
+        // load_cache is cleared at block boundaries; an elided store would
+        // leak a stale value into a sibling arm.
+        context.store_elim_enabled = false;
+
+        for arm in &self.arms {
+            let body_block = builder.create_block();
+            let next_block = builder.create_block();
+
+            let (cond_payload, cond_mask_xz) = arm.cond.build_binary(context, builder)?;
+            let effective_cond = if let Some(mask_xz) = cond_mask_xz {
+                builder.ins().band_not(cond_payload, mask_xz)
+            } else {
+                cond_payload
+            };
+            builder
+                .ins()
+                .brif(effective_cond, body_block, &[], next_block, &[]);
+
+            builder.switch_to_block(body_block);
+            context.load_cache.clear();
+            let len = arm.body.len();
+            for (i, s) in arm.body.iter().enumerate() {
+                let last = is_last && (i + 1 == len);
+                s.build_binary(context, builder, last)?;
+            }
+            if is_last {
+                builder.ins().return_(&[]);
+            } else {
+                builder.ins().jump(final_block, &[]);
+            }
+
+            builder.switch_to_block(next_block);
+            context.load_cache.clear();
+        }
+
+        let len = self.default.len();
+        for (i, s) in self.default.iter().enumerate() {
+            let last = is_last && (i + 1 == len);
+            s.build_binary(context, builder, last)?;
+        }
+        if is_last {
+            builder.ins().return_(&[]);
+        } else {
+            builder.ins().jump(final_block, &[]);
+        }
+
+        builder.switch_to_block(final_block);
+        context.load_cache.clear();
+        context.store_elim_enabled = prev_store_elim;
+
+        Some(())
+    }
 }
 // PGO cold-block heuristic (env-gated, default ON).  Cranelift
 // `set_cold_block` lays the marked block out-of-line and biases static

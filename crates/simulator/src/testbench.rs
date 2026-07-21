@@ -168,6 +168,12 @@ fn collect_tb_insts(
                 collect_tb_insts(&if_stmt.true_side, clock_insts, reset_insts);
                 collect_tb_insts(&if_stmt.false_side, clock_insts, reset_insts);
             }
+            Statement::Case(case_stmt) => {
+                for arm in &case_stmt.arms {
+                    collect_tb_insts(&arm.body, clock_insts, reset_insts);
+                }
+                collect_tb_insts(&case_stmt.default, clock_insts, reset_insts);
+            }
             _ => {}
         }
     }
@@ -222,6 +228,12 @@ fn collect_clock_periods(stmts: &[Statement], periods: &mut HashMap<StrId, u64>)
             Statement::If(if_stmt) => {
                 collect_clock_periods(&if_stmt.true_side, periods);
                 collect_clock_periods(&if_stmt.false_side, periods);
+            }
+            Statement::Case(case_stmt) => {
+                for arm in &case_stmt.arms {
+                    collect_clock_periods(&arm.body, periods);
+                }
+                collect_clock_periods(&case_stmt.default, periods);
             }
             _ => {}
         }
@@ -377,6 +389,27 @@ fn convert_stmt(
                     range: for_stmt.range.clone(),
                 }),
             }
+        }
+        // Lower a `case` to a nested `TestbenchStatement::If` chain so lifted
+        // operations (clock/reset/assert/finish) inside its arms are still
+        // recognised. Test-side `case`s are small, so the nesting is harmless.
+        Statement::Case(case_stmt) if !case_stmt.arms.is_empty() => {
+            let mut else_block = convert_stmts(
+                &case_stmt.default,
+                event_map,
+                clock_periods,
+                default_reset_duration,
+            );
+            for arm in case_stmt.arms.iter().rev() {
+                let then_block =
+                    convert_stmts(&arm.body, event_map, clock_periods, default_reset_duration);
+                else_block = vec![TestbenchStatement::If {
+                    condition: arm.cond.clone(),
+                    then_block,
+                    else_block,
+                }];
+            }
+            else_block.into_iter().next().unwrap()
         }
         other => TestbenchStatement::Stmt(other.clone()),
     }

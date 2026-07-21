@@ -199,6 +199,29 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 );
                 intersect(&t, &f)
             }
+            ProtoStatement::Case(c) => {
+                // Guaranteed only if EVERY arm and the default writes the bit
+                // (exactly one branch runs) — intersect all branches.
+                let mut spans: Option<Vec<(usize, usize)>> = None;
+                for branch in c
+                    .arms
+                    .iter()
+                    .map(|arm| &arm.body)
+                    .chain(std::iter::once(&c.default))
+                {
+                    let b = merge_spans(
+                        branch
+                            .iter()
+                            .flat_map(|s| guaranteed_write_spans(s, key))
+                            .collect(),
+                    );
+                    spans = Some(match spans {
+                        None => b,
+                        Some(acc) => intersect(&acc, &b),
+                    });
+                }
+                spans.unwrap_or_default()
+            }
             ProtoStatement::SequentialBlock(body) => merge_spans(
                 body.iter()
                     .flat_map(|s| guaranteed_write_spans(s, key))
