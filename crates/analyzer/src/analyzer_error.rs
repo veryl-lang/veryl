@@ -726,11 +726,13 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(invalid_for_range),
-        help("use a range with `..` or `..=`, e.g. `0..N`"),
+        help("{help}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
-    #[error("for-loop range must use `..` or `..=`; a bare expression is not a valid range")]
+    #[error("{kind}")]
     InvalidForRange {
+        kind: InvalidForRangeKind,
+        help: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -2627,8 +2629,10 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
-    pub fn invalid_for_range(token: &TokenRange) -> Self {
+    pub fn invalid_for_range(kind: InvalidForRangeKind, token: &TokenRange) -> Self {
         AnalyzerError::InvalidForRange {
+            help: kind.help().to_string(),
+            kind,
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -3660,6 +3664,37 @@ impl fmt::Display for InvalidSelectKind {
             }
             InvalidSelectKind::OutOfDimension { .. } => "out of dimension".fmt(f),
             InvalidSelectKind::SelectAfterRange => "select after range is not allowed".fmt(f),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum InvalidForRangeKind {
+    /// A bare expression where a `..`/`..=` range is required.
+    BareExpression,
+    /// A range bound elaborates to a negative value.
+    NegativeBound,
+}
+
+impl InvalidForRangeKind {
+    fn help(&self) -> &'static str {
+        match self {
+            InvalidForRangeKind::BareExpression => "use a range with `..` or `..=`, e.g. `0..N`",
+            InvalidForRangeKind::NegativeBound => {
+                "for-loop range bounds are elaborated as unsigned; rewrite the range to start at 0 and offset inside the body"
+            }
+        }
+    }
+}
+
+impl fmt::Display for InvalidForRangeKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidForRangeKind::BareExpression => {
+                "for-loop range must use `..` or `..=`; a bare expression is not a valid range"
+                    .fmt(f)
+            }
+            InvalidForRangeKind::NegativeBound => "for-loop range bound is negative".fmt(f),
         }
     }
 }
