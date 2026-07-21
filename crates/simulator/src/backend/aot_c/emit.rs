@@ -1188,8 +1188,10 @@ fn emit_wide_ternary(
     })
 }
 
-/// Wide concatenation: high-to-low `acc = (acc << elem_width) | elem`, then a
-/// final width mask (Cranelift expression.rs 247-272).
+/// Wide concatenation, high-to-low `acc = (acc << elem_width) | elem` with a
+/// final width mask.  Each element is placed directly at its precomputed offset:
+/// O(total_width), not the O(N·total_width) of re-shifting the whole accumulator
+/// once per element.
 fn emit_wide_concat(
     elements: &[(Box<ProtoExpression>, usize, usize)],
     width: usize,
@@ -1199,18 +1201,70 @@ fn emit_wide_concat(
     let nw = nb / 8;
     let acc = next_wide_tmp();
     pre.push_str(&format!("uint64_t _w{acc}[{nw}] = {{0}}; "));
+
+    // High-to-low: the first element takes the highest bits, so offsets descend.
+    let total: usize = elements.iter().map(|(_, r, ew)| r * ew).sum();
+    let mut hi = total;
+
     for (elem, repeat, elem_width) in elements {
-        let e_ref = emit_wide_operand(elem, nb, pre)?;
-        for _ in 0..*repeat {
-            let sh = next_wide_tmp();
+        let repeat = *repeat;
+        let ew = *elem_width;
+        if repeat == 0 || ew == 0 {
+            continue;
+        }
+        // Zero adds no bits — skip, but its span still offsets later elements.
+        let elem_is_zero = matches!(
+            elem.as_ref(),
+            ProtoExpression::Value { value, .. }
+                if !value.is_xz() && value.payload().iter_u64_digits().next().is_none()
+        );
+        if elem_is_zero {
+            hi -= ew * repeat;
+            continue;
+        }
+
+        if ew <= 64 {
+            // Mask to `ew`: the reference zero-extends the element from elem_width.
+            let v = emit_expr(elem)?;
+            let e = next_wide_tmp();
             pre.push_str(&format!(
-                "uint64_t _w{sh}[{nw}]; vw_shl((uint8_t*)_w{sh}, (const uint8_t*)_w{acc}, {ew}ull, {nb}u); \
-                 vw_bor((uint8_t*)_w{acc}, (const uint8_t*)_w{sh}, {e}, {nb}u); ",
-                ew = elem_width,
-                e = e_ref.addr,
+                "uint64_t _e{e} = ((uint64_t)({v})) & 0x{m:x}ULL; ",
+                m = width_mask(ew),
             ));
+            for _ in 0..repeat {
+                hi -= ew;
+                let off = hi;
+                let w = off / 64;
+                if w >= nw {
+                    continue; // past the result width
+                }
+                let b = off % 64;
+                pre.push_str(&format!("_w{acc}[{w}] |= _e{e} << {b}; "));
+                // `b+ew>64` ⇒ `b>0`, so `64-b ∈ 1..=63` (no shift UB).
+                if b + ew > 64 && w + 1 < nw {
+                    pre.push_str(&format!(
+                        "_w{acc}[{w1}] |= _e{e} >> {sh}; ",
+                        w1 = w + 1,
+                        sh = 64 - b,
+                    ));
+                }
+            }
+        } else {
+            // Wide element: shift into position once, not re-accumulated.
+            let e_ref = emit_wide_operand(elem, nb, pre)?;
+            for _ in 0..repeat {
+                hi -= ew;
+                let off = hi;
+                let sh = next_wide_tmp();
+                pre.push_str(&format!(
+                    "uint64_t _w{sh}[{nw}]; vw_shl((uint8_t*)_w{sh}, {e}, {off}ull, {nb}u); \
+                     vw_bor((uint8_t*)_w{acc}, (const uint8_t*)_w{acc}, (const uint8_t*)_w{sh}, {nb}u); ",
+                    e = e_ref.addr,
+                ));
+            }
         }
     }
+
     pre.push_str(&format!(
         "vw_apply_mask((uint8_t*)_w{acc}, (const uint8_t*)0, {p}u); ",
         p = wpack(nb, width),
