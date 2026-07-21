@@ -320,6 +320,11 @@ impl SystemFunctionCall {
                 comptime.is_const = arg0.0.comptime().is_const;
                 comptime.clock_domain = arg0.0.comptime().clock_domain;
                 comptime.expr_context.signed = true;
+                // `$signed(x)` reinterprets `x` (same width) as signed; the
+                // Unknown default is width 1 / unsigned, which makes the
+                // synthesizer collapse an operand like `$signed(a)` to `a[0]`.
+                comptime.r#type = arg0.0.comptime().r#type.clone();
+                comptime.r#type.signed = true;
 
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Signed(arg0),
@@ -338,6 +343,10 @@ impl SystemFunctionCall {
                 comptime.is_const = arg0.0.comptime().is_const;
                 comptime.clock_domain = arg0.0.comptime().clock_domain;
                 comptime.expr_context.signed = false;
+                // Mirror of `$signed`: carry the operand's width but an unsigned
+                // type instead of the Unknown default (width 1).
+                comptime.r#type = arg0.0.comptime().r#type.clone();
+                comptime.r#type.signed = false;
 
                 Ok(SystemFunctionCall {
                     kind: SystemFunctionKind::Unsigned(arg0),
