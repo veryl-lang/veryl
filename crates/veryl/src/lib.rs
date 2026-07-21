@@ -274,6 +274,15 @@ pub struct OptTest {
     /// `[test].four_state`.
     #[arg(long = "4state")]
     pub four_state: bool,
+
+    /// Output format: `pretty` (human-readable summary, default) or `json`
+    /// (machine-readable report on stdout)
+    #[arg(long, value_enum, default_value_t)]
+    pub format: Format,
+
+    /// Report format version (only with `--format json`; currently only 1)
+    #[arg(long = "format-version")]
+    pub format_version: Option<u32>,
 }
 
 /// Native-simulator code-generation backend selected by `veryl test --backend`.
@@ -355,6 +364,20 @@ pub enum Format {
     Json,
 }
 
+/// Mirrors `veryl metadata`'s `--format-version` so `synth`/`test` behave the
+/// same. Only version 1 exists yet.
+pub(crate) fn check_format_version(format: Format, version: Option<u32>) -> miette::Result<()> {
+    if let Some(v) = version {
+        if !matches!(format, Format::Json) {
+            miette::bail!("--format-version is only supported with --format json");
+        }
+        if v != 1 {
+            miette::bail!("unsupported --format-version {v}; supported versions: 1");
+        }
+    }
+    Ok(())
+}
+
 /// Dump debug info
 #[derive(Args)]
 pub struct OptDump {
@@ -413,6 +436,15 @@ pub struct OptSynth {
     /// (overrides `synth.timing_paths` in Veryl.toml)
     #[arg(long)]
     pub timing_paths: Option<usize>,
+
+    /// Output format: `pretty` (human-readable summary, default) or `json`
+    /// (machine-readable report on stdout)
+    #[arg(long, value_enum, default_value_t)]
+    pub format: Format,
+
+    /// Report format version (only with `--format json`; currently only 1)
+    #[arg(long = "format-version")]
+    pub format_version: Option<u32>,
 
     /// Dump the gate-level IR (netlist of gates and flip-flops)
     #[arg(long)]

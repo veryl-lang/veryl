@@ -1,6 +1,6 @@
 use crate::cmd_build::CmdBuild;
 use crate::runner::{Cocotb, CocotbSource, Dsim, Vcs, Verilator, Vivado};
-use crate::{OptBuild, OptTest};
+use crate::{Format, OptBuild, OptTest, check_format_version};
 use log::{error, info, warn};
 use miette::Result;
 use std::path::PathBuf;
@@ -25,6 +25,31 @@ fn random_seed() -> u64 {
     use std::collections::hash_map::RandomState;
     use std::hash::BuildHasher;
     RandomState::new().hash_one(std::process::id())
+}
+
+/// Emitted by `veryl test --format json`.
+#[derive(serde::Serialize)]
+struct TestSuiteReport {
+    /// Bump on any breaking change to the report shape.
+    format_version: u32,
+    backend: String,
+    passed: i32,
+    failed: i32,
+    ignored: usize,
+    tests: Vec<TestReport>,
+}
+
+#[derive(serde::Serialize)]
+struct TestReport {
+    name: String,
+    /// "pass" | "fail" | "error"
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    runtime_s: f64,
+    /// Captured `$display`/`$write` output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<String>,
 }
 
 pub struct CmdTest {
@@ -243,6 +268,16 @@ impl CmdTest {
         }
         let mut proto_cache = ProtoModuleCache::default();
 
+        check_format_version(self.opt.format, self.opt.format_version)?;
+        let json = matches!(self.opt.format, Format::Json);
+        let backend_name = match self.opt.backend {
+            Backend::Interpret => "interpret",
+            Backend::Cranelift => "cranelift",
+            Backend::Cc => "cc",
+        };
+        // Native workers push concurrently, so guard the per-test results.
+        let reports = std::sync::Mutex::new(Vec::<TestReport>::new());
+
         let mut success = 0;
         let mut failure = 0;
 
@@ -278,7 +313,8 @@ impl CmdTest {
             // Buffer `$display` output to keep concurrent tests from interleaving.
             // A single worker can't interleave, so stream live; `--no-capture`
             // forces streaming even in parallel.
-            let buffered = num_threads > 1 && !self.opt.no_capture;
+            // JSON mode also buffers: capture output into the report, keep stdout clean.
+            let buffered = (num_threads > 1 && !self.opt.no_capture) || json;
             if buffered {
                 info!("Building simulation model");
             }
@@ -301,6 +337,7 @@ impl CmdTest {
                 let resource_snap = &resource_snapshot;
                 let text_snap = &text_snapshot;
                 let print_lock = &print_lock;
+                let reports = &reports;
                 let handles: Vec<_> = (0..num_threads)
                     .map(|_| {
                         s.spawn(move || {
@@ -325,6 +362,7 @@ impl CmdTest {
                                 // overhead when the feature is off.
                                 #[cfg(feature = "profile")]
                                 let t_build = std::time::Instant::now();
+                                let t0 = std::time::Instant::now();
                                 let build_result = prepare_native_test(
                                     ir_ref,
                                     &pending.test_name,
@@ -365,29 +403,36 @@ impl CmdTest {
                                         run_el.as_secs_f64() * 1e3
                                     );
                                 }
+                                let runtime_s = t0.elapsed().as_secs_f64();
                                 let output = output_buffer::take();
                                 let test_name = &pending.test_name;
                                 let _print = print_lock.lock().unwrap();
+                                let mut rep_status: &'static str = "error";
+                                let mut rep_message: Option<String> = None;
                                 match outcome {
                                     NativeOutcome::ElaborateFailed(e) => {
                                         // Buffered output is from IR build; emit before the diag.
-                                        if !output.is_empty() {
+                                        if !output.is_empty() && !json {
                                             print!("{output}");
                                         }
                                         error!("Failed to elaborate test ({test_name})");
-                                        eprintln!("{:?}", miette::Report::new(e));
+                                        let rendered = format!("{:?}", miette::Report::new(e));
+                                        eprintln!("{rendered}");
+                                        rep_status = "error";
+                                        rep_message = Some(rendered);
                                         tally_fail += 1;
                                     }
                                     NativeOutcome::Ran { result, wave_path } => {
                                         if buffered {
                                             info!("Executing test ({test_name})");
                                         }
-                                        if !output.is_empty() {
+                                        if !output.is_empty() && !json {
                                             print!("{output}");
                                         }
                                         match result {
                                             Ok(TestResult::Pass) => {
                                                 info!("Succeeded test ({test_name})");
+                                                rep_status = "pass";
                                                 tally_pass += 1;
                                                 if let Some(path) = wave_path {
                                                     tally_waves.push(path);
@@ -395,15 +440,34 @@ impl CmdTest {
                                             }
                                             Ok(TestResult::Fail(msg)) => {
                                                 error!("Failed test ({test_name}): {msg}");
+                                                rep_status = "fail";
+                                                rep_message = Some(msg);
                                                 tally_fail += 1;
                                             }
                                             Err(e) => {
                                                 error!("Failed test ({test_name})");
-                                                eprintln!("{:?}", miette::Report::new(e));
+                                                let rendered =
+                                                    format!("{:?}", miette::Report::new(e));
+                                                eprintln!("{rendered}");
+                                                rep_status = "error";
+                                                rep_message = Some(rendered);
                                                 tally_fail += 1;
                                             }
                                         }
                                     }
+                                }
+                                if json {
+                                    reports.lock().unwrap().push(TestReport {
+                                        name: test_name.to_string(),
+                                        status: rep_status,
+                                        message: rep_message,
+                                        runtime_s,
+                                        output: if output.is_empty() {
+                                            None
+                                        } else {
+                                            Some(output)
+                                        },
+                                    });
                                 }
                                 use std::io::Write;
                                 let _ = std::io::stdout().flush();
@@ -441,7 +505,10 @@ impl CmdTest {
                 TestType::Native => unreachable!(),
             };
 
-            if runner.run(metadata, *test, property.top, property.path, self.opt.wave)? {
+            let t0 = std::time::Instant::now();
+            let ok = runner.run(metadata, *test, property.top, property.path, self.opt.wave)?;
+            let runtime_s = t0.elapsed().as_secs_f64();
+            if ok {
                 success += 1;
                 if self.opt.wave {
                     let test_name = test.to_string();
@@ -451,13 +518,23 @@ impl CmdTest {
             } else {
                 failure += 1;
             }
+            if json {
+                reports.lock().unwrap().push(TestReport {
+                    name: test.to_string(),
+                    status: if ok { "pass" } else { "fail" },
+                    message: None,
+                    runtime_s,
+                    output: None,
+                });
+            }
         }
 
         for dt in &doc_tests {
             let module_name = dt.module_name.to_string();
             info!("Executing doc test ({module_name})");
 
-            match run_doc_test(
+            let t0 = std::time::Instant::now();
+            let result = run_doc_test(
                 &ir,
                 &module_name,
                 &dt.wavedrom_json,
@@ -467,18 +544,32 @@ impl CmdTest {
                 metadata,
                 &config,
                 &mut proto_cache,
-            ) {
+            );
+            let runtime_s = t0.elapsed().as_secs_f64();
+            let (status, message) = match result {
                 Ok(wave_path) => {
                     info!("Succeeded doc test ({module_name})");
                     success += 1;
                     if let Some(path) = wave_path {
                         metadata.add_generated_file(path);
                     }
+                    ("pass", None)
                 }
                 Err(e) => {
-                    error!("Failed doc test ({module_name}): {e}");
+                    let msg = e.to_string();
+                    error!("Failed doc test ({module_name}): {msg}");
                     failure += 1;
+                    ("fail", Some(msg))
                 }
+            };
+            if json {
+                reports.lock().unwrap().push(TestReport {
+                    name: module_name.clone(),
+                    status,
+                    message,
+                    runtime_s,
+                    output: None,
+                });
             }
         }
 
@@ -493,6 +584,22 @@ impl CmdTest {
             metadata
                 .save_build_info()
                 .map_err(|e| miette::miette!("{e}"))?;
+        }
+
+        if json {
+            let report = TestSuiteReport {
+                format_version: 1,
+                backend: backend_name.to_string(),
+                passed: success,
+                failed: failure,
+                ignored: ignored_count,
+                tests: reports.into_inner().unwrap(),
+            };
+            match serde_json::to_string_pretty(&report) {
+                Ok(s) => println!("{s}"),
+                Err(e) => eprintln!("failed to serialize test report: {e}"),
+            }
+            return Ok(failure == 0);
         }
 
         if failure == 0 {
