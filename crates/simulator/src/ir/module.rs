@@ -1202,6 +1202,16 @@ pub(crate) fn gather_bit_aware_outputs(
                 gather_bit_aware_outputs(s, out);
             }
         }
+        ProtoStatement::Case(x) => {
+            for arm in &x.arms {
+                for s in &arm.body {
+                    gather_bit_aware_outputs(s, out);
+                }
+            }
+            for s in &x.default {
+                gather_bit_aware_outputs(s, out);
+            }
+        }
         ProtoStatement::For(x) => {
             for s in &x.body {
                 gather_bit_aware_outputs(s, out);
@@ -1450,6 +1460,7 @@ fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
                     ProtoStatement::Assign(_) => "Assign",
                     ProtoStatement::AssignDynamic(_) => "AssignDynamic",
                     ProtoStatement::If(_) => "If",
+                    ProtoStatement::Case(_) => "Case",
                     ProtoStatement::For(_) => "For",
                     ProtoStatement::Break => "Break",
                     ProtoStatement::SystemFunctionCall(_) => "SystemFunctionCall",
@@ -3250,6 +3261,23 @@ fn collect_max_writes_one(stmt: &ProtoStatement) -> HashMap<u32, u32> {
                 let e = result.entry(*off).or_insert(0);
                 if *n > *e {
                     *e = *n;
+                }
+            }
+        }
+        P::Case(c) => {
+            // Only one arm (or the default) executes, so the per-offset write
+            // count is the max across all arms and the default (as for `If`).
+            let branches = c
+                .arms
+                .iter()
+                .map(|arm| collect_max_writes(&arm.body))
+                .chain(std::iter::once(collect_max_writes(&c.default)));
+            for branch in branches {
+                for (off, n) in &branch {
+                    let e = result.entry(*off).or_insert(0);
+                    if *n > *e {
+                        *e = *n;
+                    }
                 }
             }
         }

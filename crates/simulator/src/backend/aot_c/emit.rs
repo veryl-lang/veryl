@@ -460,6 +460,17 @@ impl LocalAnalysis {
                     self.poison(s);
                 }
             }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    self.poison_expr(&arm.cond);
+                    for s in &arm.body {
+                        self.poison(s);
+                    }
+                }
+                for s in &x.default {
+                    self.poison(s);
+                }
+            }
             ProtoStatement::For(x) => {
                 if let VarOffset::Comb(o) = x.var_offset {
                     self.bad.insert(o);
@@ -579,6 +590,19 @@ impl LocalAnalysis {
                     self.walk_stmt(s, i, false);
                 }
                 for s in &x.false_side {
+                    self.walk_stmt(s, i, false);
+                }
+            }
+            ProtoStatement::Case(x) => {
+                // Arm bodies / default run conditionally, like an `If` branch,
+                // so their writes are never top-level localizable.
+                for arm in &x.arms {
+                    self.walk_reads(&arm.cond, i);
+                    for s in &arm.body {
+                        self.walk_stmt(s, i, false);
+                    }
+                }
+                for s in &x.default {
                     self.walk_stmt(s, i, false);
                 }
             }
@@ -3051,6 +3075,25 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                     ))
                 }
             }
+        }
+        ProtoStatement::Case(case_stmt) => {
+            // Build the `if / else if / ... / else` cascade iteratively so a
+            // large `case` doesn't recurse in the emitter (only into arm bodies
+            // via `emit_block`).
+            let mut out = String::new();
+            for (n, arm) in case_stmt.arms.iter().enumerate() {
+                let c = wrap_expect(&emit_expr(&arm.cond)?);
+                let body = emit_block(&arm.body)?;
+                let kw = if n == 0 { "if" } else { " else if" };
+                out.push_str(&format!("{kw} ({c}) {{ {body} }}"));
+            }
+            let default_body = emit_block(&case_stmt.default)?;
+            if case_stmt.arms.is_empty() {
+                out.push_str(&format!("{{ {default_body} }}"));
+            } else {
+                out.push_str(&format!(" else {{ {default_body} }}"));
+            }
+            Some(out)
         }
         ProtoStatement::SequentialBlock(body) => {
             let inner = emit_block(body)?;

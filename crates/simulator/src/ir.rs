@@ -26,11 +26,11 @@ pub use external::{
 pub use module::{Module, ProtoModule};
 pub use statement::{
     CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
-    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoComponentArg, ProtoForBound,
-    ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement, ProtoStatementBlock,
-    ProtoStatements, ProtoSystemFunctionCall, RetWidthCheck, RuntimeForBound, RuntimeForRange,
-    Statement, SystemFunctionCall, TbMethodKind, format_assert_message, format_output,
-    parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
+    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoComponentArg,
+    ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
+    ProtoStatementBlock, ProtoStatements, ProtoSystemFunctionCall, RetWidthCheck, RuntimeForBound,
+    RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, format_assert_message,
+    format_output, parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
 };
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
@@ -230,6 +230,16 @@ impl Ir {
                         .map(classify)
                         .collect();
                     format!("If{{ {} }}", kids.join("; "))
+                }
+                Statement::Case(c) => {
+                    let kids: Vec<String> = c
+                        .arms
+                        .iter()
+                        .flat_map(|arm| arm.body.iter())
+                        .chain(c.default.iter())
+                        .map(classify)
+                        .collect();
+                    format!("Case{{ {} }}", kids.join("; "))
                 }
                 Statement::For(_) => "For".to_string(),
                 Statement::SystemFunctionCall(_) => "SysFn".to_string(),

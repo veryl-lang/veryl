@@ -216,6 +216,17 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
                 walk_stmt_liveness(s, c);
             }
         }
+        ProtoStatement::Case(x) => {
+            for arm in &x.arms {
+                walk_expr_reads(&arm.cond, c);
+                for s in &arm.body {
+                    walk_stmt_liveness(s, c);
+                }
+            }
+            for s in &x.default {
+                walk_stmt_liveness(s, c);
+            }
+        }
         ProtoStatement::For(x) => {
             // The For machinery itself writes the induction `var_offset`
             // on every iteration; mark it as a partial write so DCE
@@ -451,6 +462,17 @@ pub fn apply_counting(
                 if_stmt.true_side = ts;
                 if_stmt.false_side = fs;
                 out.push(ProtoStatement::If(if_stmt));
+            }
+            ProtoStatement::Case(mut case_stmt) => {
+                for arm in &mut case_stmt.arms {
+                    let (body, d) = apply_counting(std::mem::take(&mut arm.body), dead);
+                    dropped += d;
+                    arm.body = body;
+                }
+                let (default, d) = apply_counting(std::mem::take(&mut case_stmt.default), dead);
+                dropped += d;
+                case_stmt.default = default;
+                out.push(ProtoStatement::Case(case_stmt));
             }
             ProtoStatement::For(mut for_stmt) => {
                 let (body, d) = apply_counting(for_stmt.body, dead);

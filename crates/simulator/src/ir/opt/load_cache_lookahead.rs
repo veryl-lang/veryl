@@ -74,6 +74,17 @@ fn walk_stmt(s: &ProtoStatement, idx: usize, reads: &mut FutureReads) {
                 walk_stmt(sub, idx, reads);
             }
         }
+        ProtoStatement::Case(case_stmt) => {
+            for arm in &case_stmt.arms {
+                walk_expr(&arm.cond, idx, reads);
+                for sub in &arm.body {
+                    walk_stmt(sub, idx, reads);
+                }
+            }
+            for sub in &case_stmt.default {
+                walk_stmt(sub, idx, reads);
+            }
+        }
         ProtoStatement::For(f) => {
             let walk_bound = |b: &ProtoForBound, r: &mut FutureReads| {
                 if let ProtoForBound::Dynamic(expr) = b {

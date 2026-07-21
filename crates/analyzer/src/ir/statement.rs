@@ -1257,6 +1257,15 @@ impl CaseStatement {
         }
         tail
     }
+
+    /// One condition per arm (its patterns OR-combined against the case target),
+    /// parallel to `self.arms` — for consumers that keep the arms flat.
+    pub fn arm_conditions(&self) -> Vec<Expression> {
+        self.arms
+            .iter()
+            .map(|arm| arm_cond(&self.case_target, &arm.patterns))
+            .collect()
+    }
 }
 
 /// OR-combine an arm's patterns into a single boolean expression.

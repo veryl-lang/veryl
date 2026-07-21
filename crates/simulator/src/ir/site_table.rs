@@ -134,6 +134,16 @@ fn visit(stmt: &ProtoStatement, table: &mut SiteTable) {
                 visit(s, table);
             }
         }
+        ProtoStatement::Case(c) => {
+            for arm in &c.arms {
+                for s in &arm.body {
+                    visit(s, table);
+                }
+            }
+            for s in &c.default {
+                visit(s, table);
+            }
+        }
         ProtoStatement::For(f) => {
             for s in &f.body {
                 visit(s, table);

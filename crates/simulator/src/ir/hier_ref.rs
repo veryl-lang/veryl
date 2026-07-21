@@ -90,6 +90,17 @@ fn resolve_stmt(
                 resolve_stmt(s, context, children)?;
             }
         }
+        ProtoStatement::Case(x) => {
+            for arm in &mut x.arms {
+                resolve_expr(&mut arm.cond, context, children)?;
+                for s in &mut arm.body {
+                    resolve_stmt(s, context, children)?;
+                }
+            }
+            for s in &mut x.default {
+                resolve_stmt(s, context, children)?;
+            }
+        }
         ProtoStatement::For(x) => {
             let (start, end) = match &mut x.range {
                 ProtoForRange::Forward { start, end, .. }

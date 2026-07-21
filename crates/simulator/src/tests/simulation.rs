@@ -18461,6 +18461,142 @@ fn wide_concat_long_repeat_no_stack_overflow() {
     }
 }
 
+#[test]
+fn large_case_rom_is_flat_no_stack_overflow() {
+    // Regression: a 256-arm `case` used to lower to an N-deep nested `if/else`
+    // chain and overflow the worker stack in the recursive conv/eval/emit
+    // passes. The flat `Statement::Case` bounds the depth — guard it on every
+    // backend and check the ROM values.
+    const N: usize = 256;
+    let rom = |i: usize| -> u64 { ((i * 7 + 1) & 0xff) as u64 };
+
+    let mut arms = String::new();
+    for i in 0..N {
+        arms.push_str(&format!("            {i}: o = 8'd{};\n", rom(i)));
+    }
+    let code = format!(
+        r#"
+    module Top (
+        idx: input  logic<8>,
+        o:   output logic<8>,
+    ) {{
+        always_comb {{
+            case idx {{
+{arms}            default: o = 0;
+            }}
+        }}
+    }}
+    "#
+    );
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for &i in &[0usize, 1, 127, 200, 255] {
+            sim.set("idx", Value::new(i as u64, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(rom(i), 8, false),
+                "idx={i} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn small_case_uses_comparison_cascade() {
+    // Fewer than 4 arms stays below the br_table threshold, so the cranelift
+    // backend emits the flat comparison cascade instead of a jump table. The
+    // case is the whole always_comb body (is_last == true), exercising the
+    // cascade's return/empty-final-block path. Verified across every backend.
+    let code = r#"
+    module Top (
+        sel: input  logic<8>,
+        o:   output logic<8>,
+    ) {
+        always_comb {
+            case sel {
+                8'd1:  o = 8'haa;
+                8'd7:  o = 8'hbb;
+                8'd42: o = 8'hcc;
+                default: o = 8'hff;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for &(sel, exp) in &[
+            (1u64, 0xaau64),
+            (7, 0xbb),
+            (42, 0xcc),
+            (0, 0xff),
+            (100, 0xff),
+        ] {
+            sim.set("sel", Value::new(sel, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(exp, 8, false),
+                "sel={sel} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn case_with_inlined_function_scrutinee_falls_back_to_nested() {
+    // A function call in the case scrutinee inlines the function into every arm
+    // condition, so the arms can't be kept flat (the inlined computation would
+    // then run once per arm instead of lazily per arm-tried). The conv detects
+    // the condition pending and falls back to the nested-if lowering. Confirm
+    // the result is correct across every backend.
+    let code = r#"
+    module Top (
+        sel: input  logic<8>,
+        o:   output logic<8>,
+    ) {
+        function add1 (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return x + 1;
+        }
+        always_comb {
+            case add1(sel) {
+                8'd1:  o = 8'haa;
+                8'd7:  o = 8'hbb;
+                8'd42: o = 8'hcc;
+                default: o = 8'hff;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        // add1(sel): sel=0->1->0xaa; sel=6->7->0xbb; sel=41->42->0xcc; else default.
+        for &(sel, exp) in &[
+            (0u64, 0xaau64),
+            (6, 0xbb),
+            (41, 0xcc),
+            (100, 0xff),
+            (5, 0xff),
+        ] {
+            sim.set("sel", Value::new(sel, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(exp, 8, false),
+                "sel={sel} config={config:?}"
+            );
+        }
+    }
+}
+
 // ── Read-during-write NBA semantics for arrays (memories) ──
 // A registered read of an array element and a same-edge write to that element in
 // another always_ff must both sample the pre-edge (current) state (read-OLD), per
