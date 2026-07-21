@@ -143,6 +143,11 @@ pub fn convert_module(
 pub(crate) enum VarDriverKind {
     None,
     Comb(usize),
+    /// Driven element-wise by 2+ comb decls (a `for i :g` generate loop the
+    /// analyzer unrolled into one Comb decl per element). No decl owns the whole
+    /// variable, so each persists only the bits it writes rather than
+    /// zero-filling the whole array.
+    CombMulti,
     Ff(usize),
 }
 
@@ -379,10 +384,18 @@ impl ConvContext {
                 Declaration::Comb(x) => {
                     for st in &x.statements {
                         collect_assigned(st, &mut |vid| {
-                            if let Some(slot) = self.variables.get_mut(&vid)
-                                && slot.driver == VarDriverKind::None
-                            {
-                                slot.driver = VarDriverKind::Comb(idx);
+                            if let Some(slot) = self.variables.get_mut(&vid) {
+                                match slot.driver {
+                                    VarDriverKind::None => {
+                                        slot.driver = VarDriverKind::Comb(idx);
+                                    }
+                                    // A different comb decl already claimed it:
+                                    // element-wise multi-driver (generate-for).
+                                    VarDriverKind::Comb(prev) if prev != idx => {
+                                        slot.driver = VarDriverKind::CombMulti;
+                                    }
+                                    _ => {}
+                                }
                             }
                         });
                     }
@@ -581,7 +594,15 @@ impl ConvContext {
                         Some(s) => s.clone(),
                         None => continue,
                     };
-                    if slot.driver != VarDriverKind::Comb(decl_idx) {
+                    // Persist this decl's writes. A CombMulti var is seeded with
+                    // its persistent nets by `write_to_dst`, so the `persistent ==
+                    // src` skip below leaves the bits this decl didn't write.
+                    let is_driver = match slot.driver {
+                        VarDriverKind::Comb(d) => d == decl_idx,
+                        VarDriverKind::CombMulti => true,
+                        _ => false,
+                    };
+                    if !is_driver {
                         continue;
                     }
                     for (bit, &src) in nets.iter().take(slot.width).enumerate() {
