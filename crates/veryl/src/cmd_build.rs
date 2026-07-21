@@ -1234,6 +1234,8 @@ exclude_std = true
             no_capture: false,
             seed: None,
             four_state: false,
+            format: crate::Format::Pretty,
+            format_version: None,
         });
         let all_pass = test.exec(&mut metadata).expect("test run should succeed");
         Analyzer::new(&metadata).clear();

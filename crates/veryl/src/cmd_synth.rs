@@ -1,5 +1,5 @@
-use crate::OptSynth;
 use crate::pipeline::{self, AnalyzeOptions};
+use crate::{Format, OptSynth, check_format_version};
 use log::warn;
 use miette::Result;
 use std::cmp::Reverse;
@@ -11,8 +11,62 @@ use veryl_metadata::Metadata;
 use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::veryl_token::TokenSource;
 use veryl_synthesizer::{
-    RamConfig, compute_power, compute_timing_top_n, library_for, port_label, synthesize_with,
+    RamConfig, SynthesizerError, compute_power, compute_timing_top_n, library_for, port_label,
+    synthesize_with,
 };
+
+/// Emitted by `veryl synth --format json`.
+#[derive(serde::Serialize)]
+struct SynthReport {
+    /// Bump on any breaking change to the report shape.
+    format_version: u32,
+    top: String,
+    library: String,
+    /// "ok" | "unsupported" | "no_top" | "error"
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    cells: usize,
+    ffs: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    area: Option<AreaJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timing: Option<TimingJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    power: Option<PowerJson>,
+}
+
+#[derive(serde::Serialize)]
+struct AreaJson {
+    total: f64,
+    combinational: f64,
+    sequential: f64,
+    memory: f64,
+}
+
+#[derive(serde::Serialize)]
+struct TimingJson {
+    delay_ns: f64,
+    depth: usize,
+    from: String,
+    to: String,
+}
+
+#[derive(serde::Serialize)]
+struct PowerJson {
+    total_mw: f64,
+    leakage_mw: f64,
+    dynamic_mw: f64,
+    clock_freq_mhz: f64,
+    activity: f64,
+}
+
+fn print_synth_report_json(report: &SynthReport) {
+    match serde_json::to_string_pretty(report) {
+        Ok(s) => println!("{s}"),
+        Err(e) => eprintln!("failed to serialize synth report: {e}"),
+    }
+}
 
 pub struct CmdSynth {
     opt: OptSynth,
@@ -25,6 +79,14 @@ impl CmdSynth {
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
         let paths = metadata.paths(&self.opt.files, true, true)?;
+
+        check_format_version(self.opt.format, self.opt.format_version)?;
+        let json = matches!(self.opt.format, Format::Json);
+        // Short PDK id ("sky130" / "asap7" / ...) via the enum's serde rename.
+        let library_name = serde_json::to_value(metadata.synth.library)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
 
         // For the default-top heuristic below.
         let user_paths: HashSet<PathId> = paths
@@ -68,6 +130,21 @@ impl CmdSynth {
                 match candidate {
                     Some(id) => id,
                     None => {
+                        if json {
+                            print_synth_report_json(&SynthReport {
+                                format_version: 1,
+                                top: String::new(),
+                                library: library_name,
+                                status: "no_top",
+                                message: None,
+                                cells: 0,
+                                ffs: 0,
+                                area: None,
+                                timing: None,
+                                power: None,
+                            });
+                            return Ok(true);
+                        }
                         warn!("No module found to synthesize");
                         return Ok(false);
                     }
@@ -81,10 +158,71 @@ impl CmdSynth {
         let result = match synthesize_with(&ir, top_id, metadata.synth.library, ram_config) {
             Ok(r) => r,
             Err(err) => {
+                if json {
+                    // Bucket by error variant, not message text: a dynamic
+                    // index/select is a capability gap ("unsupported"), not a crash.
+                    let status = match &err {
+                        SynthesizerError::Unsupported { .. }
+                        | SynthesizerError::DynamicSelect { .. } => "unsupported",
+                        SynthesizerError::TopModuleNotFound { .. } => "no_top",
+                        _ => "error",
+                    };
+                    print_synth_report_json(&SynthReport {
+                        format_version: 1,
+                        top: top_id.to_string(),
+                        library: library_name,
+                        status,
+                        message: Some(err.to_string()),
+                        cells: 0,
+                        ffs: 0,
+                        area: None,
+                        timing: None,
+                        power: None,
+                    });
+                    return Ok(true);
+                }
                 warn!("Synthesis failed: {}", err);
                 return Ok(false);
             }
         };
+        if json {
+            let power = compute_power(
+                &result.gate_ir.module,
+                library,
+                metadata.synth.clock_freq,
+                metadata.synth.activity,
+            );
+            print_synth_report_json(&SynthReport {
+                format_version: 1,
+                top: top_id.to_string(),
+                library: library_name,
+                status: "ok",
+                message: None,
+                cells: result.gate_ir.module.cells.len(),
+                ffs: result.gate_ir.module.ffs.len(),
+                area: Some(AreaJson {
+                    total: result.area.total,
+                    combinational: result.area.combinational,
+                    sequential: result.area.sequential,
+                    memory: result.area.memory,
+                }),
+                timing: Some(TimingJson {
+                    delay_ns: result.timing.critical_path_delay,
+                    depth: result.timing.critical_path_depth,
+                    from: port_label(result.timing.critical_path.first()).to_string(),
+                    to: port_label(result.timing.critical_path.last()).to_string(),
+                }),
+                power: Some(PowerJson {
+                    total_mw: power.total_mw,
+                    leakage_mw: power.leakage_mw,
+                    dynamic_mw: power.dynamic_mw,
+                    clock_freq_mhz: power.clock_freq_mhz,
+                    activity: power.activity,
+                }),
+            });
+            return Ok(true);
+        }
+
         println!(
             "synth: {} — {} gates, {} FFs",
             top_id,
