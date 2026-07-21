@@ -9593,6 +9593,101 @@ fn combinational_loop() {
 }
 
 #[test]
+fn comb_loop_ifstmt_feed_forward_array() {
+    // False positive: an always_comb for-loop over cross-coupled arrays that
+    // reads index i and writes i+1 (a feed-forward / acyclic CORDIC-style
+    // chain) written with an `if`/`else` STATEMENT was wrongly rejected. The
+    // condition read `yw[i]` (no assign_target) was wired to every same-array
+    // write, forming a false cross-index cycle; it is dominated by the earlier
+    // write to `yw[i]`, so the undominated filter now drops it. The
+    // byte-identical ternary form was already accepted.
+    let if_stmt = r#"
+    module Chain (
+        x0: input  signed logic<16>,
+        y0: input  signed logic<16>,
+        xo: output signed logic<16>,
+        yo: output signed logic<16>,
+    ) {
+        var xw: signed logic<16> [5];
+        var yw: signed logic<16> [5];
+        always_comb {
+            xw[0] = x0;
+            yw[0] = y0;
+            for i in 0..4 {
+                if yw[i] <: 0 {
+                    xw[i + 1] = xw[i] - (yw[i] >>> i);
+                    yw[i + 1] = yw[i] + (xw[i] >>> i);
+                } else {
+                    xw[i + 1] = xw[i] + (yw[i] >>> i);
+                    yw[i + 1] = yw[i] - (xw[i] >>> i);
+                }
+            }
+            xo = xw[4];
+            yo = yw[4];
+        }
+    }
+    "#;
+    let errors = analyze(if_stmt);
+    assert!(
+        errors.is_empty(),
+        "feed-forward array chain (if-statement form) must not be a comb loop: {errors:?}"
+    );
+
+    // Guard against over-correcting: a genuine condition-driven loop where the
+    // condition read is UNDOMINATED (`a` is written only under `if b`, `b` only
+    // under `if a`) must still be rejected.
+    let real_cond_loop = r#"
+    module RealLoop (
+        o: output logic,
+    ) {
+        var a: logic;
+        var b: logic;
+        always_comb {
+            if a {
+                b = 1;
+            } else {
+                b = 0;
+            }
+            if b {
+                a = 1;
+            } else {
+                a = 0;
+            }
+            o = a;
+        }
+    }
+    "#;
+    let errors = analyze(real_cond_loop);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
+        "a real condition-driven loop must still be detected: {errors:?}"
+    );
+
+    // And a real array loop `m[0] = m[1]; m[1] = m[0]` must still be rejected.
+    let real_array_loop = r#"
+    module RealArray (
+        o: output logic<8>,
+    ) {
+        var m: logic<8> [2];
+        always_comb {
+            m[0] = m[1];
+            m[1] = m[0];
+            o = m[0];
+        }
+    }
+    "#;
+    let errors = analyze(real_array_loop);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
+        "a real array comb loop must still be detected: {errors:?}"
+    );
+}
+
+#[test]
 fn uncovered_branch() {
     let code = r#"
     module ModuleA {

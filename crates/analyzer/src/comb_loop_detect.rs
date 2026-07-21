@@ -468,8 +468,15 @@ fn build_module_graph(
                 // this declaration (`a = 0; a = a + 1` must not). Disjoint bits still form
                 // real multi-bit cycles (`o_y[1] = o_y[2]; o_y[2] = o_y[1]`), so read/write
                 // masks need not overlap — the bit-partition ranges stop `a[1] = a[0]` self-edges.
+                //
+                // A condition read (`assign_target` is None, e.g. `if yw[i]`) is
+                // recorded against EVERY same-variable write, so on a feed-forward
+                // array chain it wires `yw[i]` to every `yw[j]` — a false cross-index
+                // cycle. Extend the same undominated filter to it: a condition read
+                // dominated by an earlier write to the same element cannot close a
+                // loop; a real (undominated) condition loop is still detected.
                 let mut effective_read = effective_read.clone();
-                if src_id_idx == dst_id_idx {
+                if src_id_idx == dst_id_idx || assign_target.is_none() {
                     let undom = undom_per_decl
                         .get(reader_decl)
                         .and_then(|m| m.get(&src_id_idx))
