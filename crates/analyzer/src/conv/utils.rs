@@ -4082,7 +4082,12 @@ pub fn tb_method_call(
             let count = if let Some(ir::Arguments::Positional(ref positional)) = args
                 && !positional.is_empty()
             {
-                Some(positional[0].0.clone())
+                // Self-determine the width (as for $display args): otherwise a
+                // binary count like `clk.next(DW / 2)` keeps a width-0 comptime
+                // type and folds to 0 in the simulator.
+                let mut count = positional[0].0.clone();
+                count.eval_comptime(context, None);
+                Some(count)
             } else {
                 None
             };
@@ -4102,7 +4107,11 @@ pub fn tb_method_call(
             let duration = if let Some(ir::Arguments::Positional(ref positional)) = args
                 && let Some(arg) = positional.first()
             {
-                Some(arg.0.clone())
+                // Self-determine the width like the count above — else a binary
+                // `rst.assert(DW / 2)` folds to 0 (then clamps to 1 cycle).
+                let mut duration = arg.0.clone();
+                duration.eval_comptime(context, None);
+                Some(duration)
             } else {
                 context.tb_reset_cycles.get(&inst_name).cloned()
             };

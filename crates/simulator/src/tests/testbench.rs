@@ -372,6 +372,152 @@ fn tb_clock_next_zero_count() {
     }
 }
 
+// Regression: a binary-arithmetic argument to `clk.next(...)` (e.g. `DW / 2`,
+// `4 + 4`) advanced zero cycles.  Testbench component-method arguments were not
+// width-inferred like $display's, so the count's comptime stayed type-Unknown /
+// width-0 and the simulator folded the binary to 0.  A literal, identifier, or
+// const worked because their leaf node already carried a width.
+#[test]
+fn tb_clock_next_binary_count() {
+    let code = r#"
+    module Counter (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<32>,
+    ) {
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+    }
+
+    #[test(test_counter)]
+    module test_counter {
+        const DW: u32 = 16;
+
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<32>;
+
+        inst dut: Counter (
+            clk: clk,
+            rst: rst,
+            cnt: cnt,
+        );
+
+        initial {
+            rst.assert();
+            clk.next(DW / 2); // binary expr = 8; must advance 8, not 0
+            clk.next(4 + 4);  // literal binary = 8; must advance 8, not 0
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_counter");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+
+        let mut sim = Simulator::new(ir, None);
+
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+
+        let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
+        if let Some(stmts) = initial_stmts {
+            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+            let result = run_testbench(&mut sim, &tb_stmts);
+            assert_eq!(result, TestResult::Pass);
+            let cnt = sim
+                .get_var("dut.cnt")
+                .or_else(|| sim.get_var("cnt"))
+                .expect("cnt variable not found");
+            assert_eq!(
+                cnt,
+                Value::new(16, 32, false),
+                "clk.next(DW/2) then clk.next(4+4) must advance 8+8 cycles (jit={}, 4state={})",
+                config.use_jit,
+                config.use_4state,
+            );
+        } else {
+            panic!("No initial block found");
+        }
+    }
+}
+
+// Regression companion of `tb_clock_next_binary_count`: the same width-0 fold
+// affected `reset_gen.assert(...)`'s duration, where the count then clamped to 1
+// (`.max(1)`) instead of its real value.  Observe the reset length through the
+// simulation clock (period 2 -> 2 time units per reset cycle).
+#[test]
+fn tb_reset_assert_binary_duration() {
+    let code = r#"
+    module Counter (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<32>,
+    ) {
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+    }
+
+    #[test(test_counter)]
+    module test_counter {
+        const DW: u32 = 16;
+
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<32>;
+
+        inst dut: Counter (
+            clk: clk,
+            rst: rst,
+            cnt: cnt,
+        );
+
+        initial {
+            rst.assert(DW / 2); // binary duration = 8 reset cycles, not 1
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_counter");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+
+        let mut sim = Simulator::new(ir, None);
+
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+
+        let initial_stmts = sim.ir.event_statements.get(&Event::Initial);
+        if let Some(stmts) = initial_stmts {
+            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+            let result = run_testbench(&mut sim, &tb_stmts);
+            assert_eq!(result, TestResult::Pass);
+            // 8 reset cycles * (high 1 + low 1) = 16 time units.
+            assert_eq!(
+                sim.time, 16,
+                "rst.assert(DW/2) must hold reset 8 cycles (jit={}, 4state={})",
+                config.use_jit, config.use_4state,
+            );
+        } else {
+            panic!("No initial block found");
+        }
+    }
+}
+
 /// Reproduce veryl-test read-only cache issue via testbench path
 #[test]
 fn tb_readonly_cache_fill() {
