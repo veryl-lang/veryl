@@ -104,6 +104,40 @@ pub enum ForRange {
 }
 
 impl ForRange {
+    /// True when the range has const-evaluable bounds whose span exceeds
+    /// evaluate_size_limit — i.e. eval_iter declines because of the limit,
+    /// not because the bounds are runtime values.
+    pub fn is_over_size_limit(&self, context: &mut Context) -> bool {
+        let limit = context.config.evaluate_size_limit;
+        let (ForRange::Forward {
+            start,
+            end,
+            inclusive,
+            ..
+        }
+        | ForRange::Reverse {
+            start,
+            end,
+            inclusive,
+            ..
+        }
+        | ForRange::Stepped {
+            start,
+            end,
+            inclusive,
+            ..
+        }) = self;
+        let (Some(start), Some(end)) = (start.eval_value(context), end.eval_value(context)) else {
+            return false;
+        };
+        let end = if *inclusive {
+            end.saturating_add(1)
+        } else {
+            end
+        };
+        end.saturating_sub(start) > limit
+    }
+
     pub fn eval_iter(&self, context: &mut Context) -> Option<Vec<usize>> {
         let limit = context.config.evaluate_size_limit;
         match self {
@@ -280,6 +314,13 @@ impl Statement {
                             }
                         }
                     }
+                } else if context.comptime_for_overflow.is_none()
+                    && x.range.is_over_size_limit(context)
+                {
+                    // Over-limit range: skipping the body would fold the const
+                    // to its pre-loop value. The eval path swallows errors, so
+                    // record it here for analyzer.rs to surface.
+                    context.comptime_for_overflow = Some(x.token);
                 }
                 ControlFlow::Continue
             }

@@ -17697,3 +17697,64 @@ fn negative_for_range() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn comptime_for_over_size_limit() {
+    // A const function whose for loop exceeds evaluate_size_limit had its
+    // body silently skipped, folding the constant to the pre-loop value
+    // (N = 0) with no diagnostic, while the emitted SV computes 2000000.
+    let code = r#"
+    package PkgA {
+        function count () -> u32 {
+            var s: u32;
+            s = 0;
+            for i in 0..2000000 {
+                s += 1;
+            }
+            return s;
+        }
+        const N: u32 = count();
+    }
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        assign o = PkgA::N;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ExceedLimit { .. })),
+        "{errors:?}"
+    );
+
+    // A loop within the limit still folds silently.
+    let code = r#"
+    package PkgB {
+        function count () -> u32 {
+            var s: u32;
+            s = 0;
+            for i in 0..10 {
+                s += 1;
+            }
+            return s;
+        }
+        const N: u32 = count();
+    }
+    module ModuleB (
+        o: output logic<32>,
+    ) {
+        assign o = PkgB::N;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ExceedLimit { .. })),
+        "{errors:?}"
+    );
+}

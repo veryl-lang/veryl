@@ -203,6 +203,13 @@ impl Analyzer {
                 &token,
             ));
         }
+        if let Some(token) = context.comptime_for_overflow.take() {
+            errors.push(AnalyzerError::exceed_limit(
+                ExceedLimitKind::EvaluateSize,
+                context.config.evaluate_size_limit,
+                &token,
+            ));
+        }
 
         (ir, errors)
     }
