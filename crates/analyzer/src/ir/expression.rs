@@ -920,8 +920,18 @@ impl Factor {
     pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
         match self {
             Factor::Variable(id, index, select, comptime) => {
-                let index = index.eval_value(context)?;
-                let value = context.variables.get(id)?.get_value(&index)?.clone();
+                let idx = index.eval_value(context)?;
+                let value = if let Some(variable) = context.variables.get(id) {
+                    variable.get_value(&idx)?.clone()
+                } else if index.0.is_empty() && select.is_empty() && comptime.is_const {
+                    // Const/param scalar refs keep their folded value in comptime;
+                    // use it when the Context has no variable table — synth's
+                    // `try_constant` runs tableless, so `2 ** (AW - 2)` folds here
+                    // instead of reaching synth as an unsupported Pow node.
+                    return comptime.get_value().ok().cloned();
+                } else {
+                    return None;
+                };
 
                 if !select.is_empty() {
                     let (beg, end) = select.eval_value(context, &comptime.r#type, false)?;

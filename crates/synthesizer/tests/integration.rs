@@ -3790,3 +3790,40 @@ fn combinationally_driven_array_is_not_ram() {
         "a combinationally-driven array must not be inferred as a RAM"
     );
 }
+
+#[test]
+fn const_power_operator_folds() {
+    // Regression: a compile-time-constant `**` with a param operand
+    // (`2 ** (AW - 2)`) reached the synthesizer as an un-folded Pow node and
+    // was rejected "unsupported: power operator". Params stay unfolded in the
+    // IR until monomorphization, so `try_constant` must resolve the const
+    // Variable from its comptime value (fresh Context has no variable table).
+    // AW = 4 -> 2 ** (4 - 2) = 4 = 0b0100.
+    use veryl_synthesizer::ir::{NET_CONST0, NET_CONST1};
+    let code = r#"
+        module Top #(
+            param AW: u32 = 4,
+        ) (
+            y: output logic<4>,
+        ) {
+            always_comb {
+                y = (2 ** (AW - 2)) as 4;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    // Pre-fix this returned Err(PowOperator); `.expect` is the core regression.
+    let gate = build_gate_ir(&ir, top).expect("constant ** must synthesize");
+    let y_port = gate
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "y")
+        .expect("y port");
+    // 4 = 0b0100: only bit 2 is the constant-1 net.
+    let expected = [NET_CONST0, NET_CONST0, NET_CONST1, NET_CONST0];
+    assert_eq!(
+        y_port.nets, expected,
+        "2 ** (AW - 2) with AW=4 must fold to the constant 4 (0b0100)"
+    );
+}
