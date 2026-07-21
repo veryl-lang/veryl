@@ -51,7 +51,7 @@ fn emit_ff_log_push(
             let shifted = if i == 0 {
                 payload
             } else {
-                builder.ins().ushr_imm(payload, (i * 64) as i64)
+                builder.ins().ushr_imm_u(payload, (i * 64) as i64)
             };
             let word = builder.ins().ireduce(I64, shifted);
             let off = log_current_offset + (i * 8) as i32;
@@ -65,7 +65,7 @@ fn emit_ff_log_push(
                 let shifted = if i == 0 {
                     m
                 } else {
-                    builder.ins().ushr_imm(m, (i * 64) as i64)
+                    builder.ins().ushr_imm_u(m, (i * 64) as i64)
                 };
                 let word = builder.ins().ireduce(I64, shifted);
                 let off = log_current_offset + nb_i32 + (i * 8) as i32;
@@ -161,12 +161,12 @@ impl ProtoAssignDynamicStatement {
         if let Some((beg, end)) = self.rhs_select {
             let mask = ValueU64::gen_mask(beg - end + 1);
 
-            payload = builder.ins().ushr_imm(payload, end as i64);
-            payload = builder.ins().band_imm(payload, mask as i64);
+            payload = builder.ins().ushr_imm_u(payload, end as i64);
+            payload = builder.ins().band_imm_u(payload, mask as i64);
 
             if let Some(mxz) = mask_xz {
-                let mxz = builder.ins().ushr_imm(mxz, end as i64);
-                let mxz = builder.ins().band_imm(mxz, mask as i64);
+                let mxz = builder.ins().ushr_imm_u(mxz, end as i64);
+                let mxz = builder.ins().band_imm_u(mxz, mask as i64);
                 mask_xz = Some(mxz);
             }
         }
@@ -252,7 +252,7 @@ impl ProtoAssignDynamicStatement {
                 if context.use_4state
                     && let Some(mask_v) = mask
                 {
-                    let mask_offset_val = builder.ins().iadd_imm(offset_val, nb as i64);
+                    let mask_offset_val = builder.ins().iadd_imm_s(offset_val, nb as i64);
                     emit_inline_write_log_push(
                         context,
                         builder,
@@ -298,19 +298,19 @@ impl ProtoAssignDynamicStatement {
             // Clip the shifted payload to the [beg:end] window: the RHS is
             // evaluated at the assignment width (`s.f = ~x`), so bits above
             // `beg` would else leak into adjacent fields / the storage padding.
-            let payload = builder.ins().ishl_imm(payload, end as i64);
-            let payload = builder.ins().band_imm(payload, mask as i64);
+            let payload = builder.ins().ishl_imm_u(payload, end as i64);
+            let payload = builder.ins().band_imm_u(payload, mask as i64);
             let org = load_native_to_i64(builder, addr, 0);
-            let org = builder.ins().band_imm(org, !mask as i64);
+            let org = builder.ins().band_imm_u(org, !mask as i64);
             let result = builder.ins().bor(payload, org);
             if !is_packed_ff_dyn {
                 store_i64_to_native(builder, result, addr, 0);
             }
             let mask_result = if let Some(mask_xz) = mask_xz {
-                let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
-                let mask_xz = builder.ins().band_imm(mask_xz, mask as i64);
+                let mask_xz = builder.ins().ishl_imm_u(mask_xz, end as i64);
+                let mask_xz = builder.ins().band_imm_u(mask_xz, mask as i64);
                 let org = load_native_to_i64(builder, addr, nb_i32);
-                let org = builder.ins().band_imm(org, !mask as i64);
+                let org = builder.ins().band_imm_u(org, !mask as i64);
                 let result_m = builder.ins().bor(mask_xz, org);
                 if !is_packed_ff_dyn {
                     store_i64_to_native(builder, result_m, addr, nb_i32);
@@ -331,14 +331,14 @@ impl ProtoAssignDynamicStatement {
                         return None;
                     }
                     let mask = (1u64 << self.dst_width) - 1;
-                    let masked = builder.ins().band_imm(payload, mask as i64);
+                    let masked = builder.ins().band_imm_u(payload, mask as i64);
                     (masked, masked)
                 }
             };
             let mask_xz_for_log = if let Some(mask_xz_v) = mask_xz {
                 let m = if !matches!(self.dst_width, 8 | 16 | 32 | 64) {
                     let mask = (1u64 << self.dst_width) - 1;
-                    builder.ins().band_imm(mask_xz_v, mask as i64)
+                    builder.ins().band_imm_u(mask_xz_v, mask as i64)
                 } else {
                     mask_xz_v
                 };
@@ -940,7 +940,7 @@ impl ProtoAssignStatement {
                         );
                         let lo = builder.ins().uextend(I128, lo);
                         let hi = builder.ins().uextend(I128, hi);
-                        let hi = builder.ins().ishl_imm(hi, 64);
+                        let hi = builder.ins().ishl_imm_u(hi, 64);
                         builder.ins().bor(lo, hi)
                     }
                 };
@@ -960,7 +960,7 @@ impl ProtoAssignStatement {
                         }
                     } else {
                         let shifted = if end > 0 {
-                            builder.ins().ushr_imm(v, end as i64)
+                            builder.ins().ushr_imm_u(v, end as i64)
                         } else {
                             v
                         };
@@ -1016,8 +1016,8 @@ impl ProtoAssignStatement {
             let sh = (reg_bits - from_w) as i64;
             let mask = gen_mask_for_width(self.dst_width);
             let sext = |builder: &mut FunctionBuilder, v| {
-                let v = builder.ins().ishl_imm(v, sh);
-                let v = builder.ins().sshr_imm(v, sh);
+                let v = builder.ins().ishl_imm_u(v, sh);
+                let v = builder.ins().sshr_imm_u(v, sh);
                 if self.dst_width < reg_bits {
                     band_const(builder, v, mask, wide)
                 } else {
@@ -1182,7 +1182,7 @@ impl ProtoAssignStatement {
             };
 
             // Read-modify-write with native width
-            let payload = builder.ins().ishl_imm(payload, end as i64);
+            let payload = builder.ins().ishl_imm_u(payload, end as i64);
             let payload = builder.ins().band(payload, pos_mask);
 
             // Use cached value if available, otherwise load from memory
@@ -1207,7 +1207,7 @@ impl ProtoAssignStatement {
             }
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
-                let mask_xz = builder.ins().ishl_imm(mask_xz, end as i64);
+                let mask_xz = builder.ins().ishl_imm_u(mask_xz, end as i64);
                 let mask_xz = builder.ins().band(mask_xz, pos_mask);
                 let z = if wide { context.zero_128 } else { context.zero };
                 let org_m = org_mask_xz.unwrap_or(z);
@@ -1552,7 +1552,7 @@ impl ProtoAssignStatement {
             // for comb that is the live value, for a packed FF the old
             // (last-cycle) current slot, and for an unpacked multi-RMW FF the
             // next slot that already holds prior in-event writes (forwarding).
-            let old_ptr = builder.ins().iadd_imm(base_addr, dst_offset as i64);
+            let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
             emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
         } else {
             src_ptr
@@ -1753,9 +1753,9 @@ fn emit_wide_narrow_field_store(
         let m = base_mask << b;
         let off0 = base_off + (k0 * 8) as i32;
         let d = builder.ins().load(I64, flags, base_addr, off0);
-        let cleared = builder.ins().band_imm(d, !m as i64);
-        let shifted = builder.ins().ishl_imm(sv, b);
-        let masked = builder.ins().band_imm(shifted, m as i64);
+        let cleared = builder.ins().band_imm_u(d, !m as i64);
+        let shifted = builder.ins().ishl_imm_u(sv, b);
+        let masked = builder.ins().band_imm_u(shifted, m as i64);
         let result = builder.ins().bor(cleared, masked);
         builder.ins().store(flags, result, base_addr, off0);
     } else {
@@ -1772,16 +1772,16 @@ fn emit_wide_narrow_field_store(
         let off0 = base_off + (k0 * 8) as i32;
         let off1 = base_off + (k1 * 8) as i32;
         let d0 = builder.ins().load(I64, flags, base_addr, off0);
-        let cleared0 = builder.ins().band_imm(d0, !m0 as i64);
-        let shifted0 = builder.ins().ishl_imm(sv, b);
-        let masked0 = builder.ins().band_imm(shifted0, m0 as i64);
+        let cleared0 = builder.ins().band_imm_u(d0, !m0 as i64);
+        let shifted0 = builder.ins().ishl_imm_u(sv, b);
+        let masked0 = builder.ins().band_imm_u(shifted0, m0 as i64);
         let result0 = builder.ins().bor(cleared0, masked0);
         builder.ins().store(flags, result0, base_addr, off0);
 
         let d1 = builder.ins().load(I64, flags, base_addr, off1);
-        let cleared1 = builder.ins().band_imm(d1, !m1 as i64);
-        let shifted1 = builder.ins().ushr_imm(sv, sh);
-        let masked1 = builder.ins().band_imm(shifted1, m1 as i64);
+        let cleared1 = builder.ins().band_imm_u(d1, !m1 as i64);
+        let shifted1 = builder.ins().ushr_imm_u(sv, sh);
+        let masked1 = builder.ins().band_imm_u(shifted1, m1 as i64);
         let result1 = builder.ins().bor(cleared1, masked1);
         builder.ins().store(flags, result1, base_addr, off1);
     }
@@ -1808,7 +1808,7 @@ fn emit_wide_log_chunks(
         let chunk_ptr = if written == 0 {
             src_ptr
         } else {
-            builder.ins().iadd_imm(src_ptr, written as i64)
+            builder.ins().iadd_imm_s(src_ptr, written as i64)
         };
         emit_inline_write_log_push_wide(context, builder, entry_offset_val, chunk_ptr, chunk);
         written += chunk;
@@ -1831,12 +1831,12 @@ fn emit_wide_log_chunks_dyn(
         let entry_offset_val = if written == 0 {
             base_offset_val
         } else {
-            builder.ins().iadd_imm(base_offset_val, written as i64)
+            builder.ins().iadd_imm_s(base_offset_val, written as i64)
         };
         let chunk_ptr = if written == 0 {
             src_ptr
         } else {
-            builder.ins().iadd_imm(src_ptr, written as i64)
+            builder.ins().iadd_imm_s(src_ptr, written as i64)
         };
         emit_inline_write_log_push_wide(context, builder, entry_offset_val, chunk_ptr, chunk);
         written += chunk;

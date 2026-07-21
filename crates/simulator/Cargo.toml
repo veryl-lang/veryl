@@ -32,13 +32,13 @@ veryl-parser        = {version = "0.20.2", path = "../parser"}
 veryl-path          = {version = "0.20.2", path = "../path"}
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-cranelift      = "0.133.0"
+cranelift      = "0.134.1"
 libloading     = "0.9"
 memmap2        = "0.9.9"
 target-lexicon = "0.13.4"
-# Must track cranelift above (cranelift 0.133 <-> wasmtime 46) or
+# Must track cranelift above (cranelift 0.134 <-> wasmtime 47) or
 # cranelift-codegen compiles twice; CI (cargo_deny) enforces it.
-wasmtime       = {version = "46.0", default-features = false, features = ["runtime", "cranelift", "std"]}
+wasmtime       = {version = "47.0", default-features = false, features = ["runtime", "cranelift", "std"]}
 
 [dev-dependencies]
 criterion       = {workspace = true}

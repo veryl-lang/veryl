@@ -252,7 +252,7 @@ impl ProtoExpression {
                     } else {
                         context.comb_values
                     };
-                    let ptr = builder.ins().iadd_imm(base_addr, var_offset.raw() as i64);
+                    let ptr = builder.ins().iadd_imm_s(base_addr, var_offset.raw() as i64);
 
                     // Static bit-select of a wide value; the result form matches
                     // `is_wide_ptr(width)` (see `emit_wide_bit_select_read`).  A
@@ -273,7 +273,7 @@ impl ProtoExpression {
                             };
                             let payload = read(builder, ptr);
                             let mask_xz = if context.use_4state {
-                                let mask_base = builder.ins().iadd_imm(ptr, nb as i64);
+                                let mask_base = builder.ins().iadd_imm_s(ptr, nb as i64);
                                 Some(read(builder, mask_base))
                             } else {
                                 None
@@ -288,7 +288,7 @@ impl ProtoExpression {
                     }
 
                     let mask_xz = if context.use_4state {
-                        Some(builder.ins().iadd_imm(ptr, nb as i64))
+                        Some(builder.ins().iadd_imm_s(ptr, nb as i64))
                     } else {
                         None
                     };
@@ -426,14 +426,14 @@ impl ProtoExpression {
                     if wide {
                         let mask = gen_mask_128(select_width);
                         if *end != 0 {
-                            payload = builder.ins().ushr_imm(payload, *end as i64);
+                            payload = builder.ins().ushr_imm_u(payload, *end as i64);
                         }
                         payload = apply_mask_128(builder, payload, mask);
 
                         if context.use_4state {
                             let mxz = mask_xz.unwrap();
                             let mxz = if *end != 0 {
-                                builder.ins().ushr_imm(mxz, *end as i64)
+                                builder.ins().ushr_imm_u(mxz, *end as i64)
                             } else {
                                 mxz
                             };
@@ -451,18 +451,18 @@ impl ProtoExpression {
                     } else {
                         let mask = ValueU64::gen_mask(select_width);
                         if *end != 0 {
-                            payload = builder.ins().ushr_imm(payload, *end as i64);
+                            payload = builder.ins().ushr_imm_u(payload, *end as i64);
                         }
-                        payload = builder.ins().band_imm(payload, mask as i64);
+                        payload = builder.ins().band_imm_u(payload, mask as i64);
 
                         if context.use_4state {
                             let mxz = mask_xz.unwrap();
                             let mxz = if *end != 0 {
-                                builder.ins().ushr_imm(mxz, *end as i64)
+                                builder.ins().ushr_imm_u(mxz, *end as i64)
                             } else {
                                 mxz
                             };
-                            mask_xz = Some(builder.ins().band_imm(mxz, mask as i64));
+                            mask_xz = Some(builder.ins().band_imm_u(mxz, mask as i64));
                         }
                     }
                 }
@@ -658,10 +658,10 @@ impl ProtoExpression {
                             let p_lo = builder.ins().popcnt(lo);
                             let p_hi = builder.ins().popcnt(hi);
                             let total = builder.ins().iadd(p_lo, p_hi);
-                            builder.ins().urem_imm(total, 2)
+                            builder.ins().urem_imm_u(total, 2)
                         } else {
                             let x0 = builder.ins().popcnt(x_payload);
-                            builder.ins().urem_imm(x0, 2)
+                            builder.ins().urem_imm_u(x0, 2)
                         }
                     }
                     Op::BitXnor => {
@@ -672,12 +672,12 @@ impl ProtoExpression {
                             let p_lo = builder.ins().popcnt(lo);
                             let p_hi = builder.ins().popcnt(hi);
                             let total = builder.ins().iadd(p_lo, p_hi);
-                            let parity = builder.ins().urem_imm(total, 2);
-                            builder.ins().bxor_imm(parity, 1)
+                            let parity = builder.ins().urem_imm_u(total, 2);
+                            builder.ins().bxor_imm_u(parity, 1)
                         } else {
                             let x0 = builder.ins().popcnt(x_payload);
-                            let parity = builder.ins().urem_imm(x0, 2);
-                            builder.ins().bxor_imm(parity, 1)
+                            let parity = builder.ins().urem_imm_u(x0, 2);
+                            builder.ins().bxor_imm_u(parity, 1)
                         }
                     }
                     _ => return None,
@@ -886,9 +886,9 @@ impl ProtoExpression {
                             // the bug). High bits past 64 mean it's certainly
                             // >= width: pin to width and let the per-op `>= width`
                             // clamp select the full-shift result.
-                            let hi = builder.ins().ushr_imm(y_payload, 64);
+                            let hi = builder.ins().ushr_imm_u(y_payload, 64);
                             let hi = builder.ins().ireduce(I64, hi);
-                            let hi_nonzero = builder.ins().icmp_imm(IntCC::NotEqual, hi, 0);
+                            let hi_nonzero = builder.ins().icmp_imm_s(IntCC::NotEqual, hi, 0);
                             let lo = builder.ins().ireduce(I64, y_payload);
                             let w = builder.ins().iconst(I64, expr_context.width as i64);
                             y_payload = builder.ins().select(hi_nonzero, w, lo);
@@ -972,7 +972,7 @@ impl ProtoExpression {
                         let block_end = builder.create_block();
                         builder.append_block_param(block_end, I64);
 
-                        let zero_div = builder.ins().icmp_imm(IntCC::Equal, y_payload, 0);
+                        let zero_div = builder.ins().icmp_imm_s(IntCC::Equal, y_payload, 0);
                         if signed {
                             let block_check = builder.create_block();
                             builder
@@ -980,8 +980,9 @@ impl ProtoExpression {
                                 .brif(zero_div, block_zero, &[], block_check, &[]);
 
                             builder.switch_to_block(block_check);
-                            let neg_one = builder.ins().icmp_imm(IntCC::Equal, y_payload, -1);
-                            let int_min = builder.ins().icmp_imm(IntCC::Equal, x_payload, i64::MIN);
+                            let neg_one = builder.ins().icmp_imm_s(IntCC::Equal, y_payload, -1);
+                            let int_min =
+                                builder.ins().icmp_imm_s(IntCC::Equal, x_payload, i64::MIN);
                             let ovf = builder.ins().band(neg_one, int_min);
                             builder.ins().brif(ovf, block_ovf, &[], block_ok, &[]);
                         } else {
@@ -1018,13 +1019,14 @@ impl ProtoExpression {
                         builder.append_block_param(block_end, I64);
 
                         let bad = if signed {
-                            let zero_div = builder.ins().icmp_imm(IntCC::Equal, y_payload, 0);
-                            let neg_one = builder.ins().icmp_imm(IntCC::Equal, y_payload, -1);
-                            let int_min = builder.ins().icmp_imm(IntCC::Equal, x_payload, i64::MIN);
+                            let zero_div = builder.ins().icmp_imm_s(IntCC::Equal, y_payload, 0);
+                            let neg_one = builder.ins().icmp_imm_s(IntCC::Equal, y_payload, -1);
+                            let int_min =
+                                builder.ins().icmp_imm_s(IntCC::Equal, x_payload, i64::MIN);
                             let ovf = builder.ins().band(neg_one, int_min);
                             builder.ins().bor(zero_div, ovf)
                         } else {
-                            builder.ins().icmp_imm(IntCC::Equal, y_payload, 0)
+                            builder.ins().icmp_imm_s(IntCC::Equal, y_payload, 0)
                         };
                         builder.ins().brif(bad, block_zero, &[], block_ok, &[]);
 
@@ -1065,7 +1067,7 @@ impl ProtoExpression {
                             if v.payload == 1 {
                                 x_payload
                             } else {
-                                builder.ins().bxor_imm(x_payload, 1)
+                                builder.ins().bxor_imm_u(x_payload, 1)
                             }
                         } else {
                             let ret = builder.ins().icmp(IntCC::Equal, x_payload, y_payload);
@@ -1087,7 +1089,7 @@ impl ProtoExpression {
                             if v.payload == 0 {
                                 x_payload
                             } else {
-                                builder.ins().bxor_imm(x_payload, 1)
+                                builder.ins().bxor_imm_u(x_payload, 1)
                             }
                         } else {
                             let ret = builder.ins().icmp(IntCC::NotEqual, x_payload, y_payload);
@@ -1186,8 +1188,8 @@ impl ProtoExpression {
                             // would otherwise underflow and yield 0.
                             let eff_width = x.width().min(native_bits);
                             let shl_amount = (native_bits - eff_width) as i64;
-                            let shifted_up = builder.ins().ishl_imm(x_payload, shl_amount);
-                            let sign_extended = builder.ins().sshr_imm(shifted_up, shl_amount);
+                            let shifted_up = builder.ins().ishl_imm_u(x_payload, shl_amount);
+                            let sign_extended = builder.ins().sshr_imm_u(shifted_up, shl_amount);
                             let raw = builder.ins().sshr(sign_extended, y_payload);
                             if (1..=128).contains(&eff_width) {
                                 // count >= width: arithmetic right shift fills
@@ -1203,7 +1205,7 @@ impl ProtoExpression {
                                 );
                                 let fill = builder
                                     .ins()
-                                    .sshr_imm(sign_extended, (eff_width - 1) as i64);
+                                    .sshr_imm_u(sign_extended, (eff_width - 1) as i64);
                                 builder.ins().select(oob, fill, raw)
                             } else {
                                 raw
@@ -1267,7 +1269,7 @@ impl ProtoExpression {
                         let result_mul = builder.ins().imul(result, base);
                         let new_result = builder.ins().select(is_odd, result_mul, result);
                         let new_base = builder.ins().imul(base, base);
-                        let new_exp = builder.ins().ushr_imm(exp, 1);
+                        let new_exp = builder.ins().ushr_imm_u(exp, 1);
                         builder.ins().jump(
                             loop_header,
                             &[
@@ -1290,7 +1292,7 @@ impl ProtoExpression {
                             let one = iconst_for_width(builder, 1, needs_wide);
                             let zero = iconst_for_width(builder, 0, needs_wide);
                             let mask_val = iconst_for_width(builder, mask, needs_wide);
-                            let y_sign = builder.ins().ushr_imm(y_payload, (y_w - 1) as i64);
+                            let y_sign = builder.ins().ushr_imm_u(y_payload, (y_w - 1) as i64);
                             let y_neg = icmp_const(builder, IntCC::NotEqual, y_sign, 0, needs_wide);
                             let base_masked = band_const(builder, x_payload, mask, needs_wide);
                             let base_is_one =
@@ -1752,7 +1754,7 @@ impl ProtoExpression {
                         };
                         if let Some(is_xz) = is_xz {
                             // payload is always I64 for LogicAnd/LogicOr (result is 1-bit)
-                            let is_one = builder.ins().icmp_imm(IntCC::NotEqual, payload, 0);
+                            let is_one = builder.ins().icmp_imm_s(IntCC::NotEqual, payload, 0);
                             let not_one = builder.ins().bnot(is_one);
                             let has_x = builder.ins().band(not_one, is_xz);
                             let one = builder.ins().iconst(I64, 1);
@@ -1829,11 +1831,11 @@ impl ProtoExpression {
                         });
                         let ew = *elem_width;
                         for _ in 0..*repeat {
-                            acc_payload = builder.ins().ishl_imm(acc_payload, ew as i64);
+                            acc_payload = builder.ins().ishl_imm_u(acc_payload, ew as i64);
                             acc_payload = builder.ins().bor(acc_payload, elem_payload);
 
                             if let Some(acc_xz) = acc_mask_xz {
-                                let shifted = builder.ins().ishl_imm(acc_xz, ew as i64);
+                                let shifted = builder.ins().ishl_imm_u(acc_xz, ew as i64);
                                 acc_mask_xz = if let Some(elem_xz) = elem_mask_xz {
                                     Some(builder.ins().bor(shifted, elem_xz))
                                 } else {
@@ -1846,14 +1848,14 @@ impl ProtoExpression {
 
                     // Fill upper bits: ineg(sign) gives 0→0, 1→0xFFFF...FFFF
                     let fill = builder.ins().ineg(sign_payload);
-                    let fill = builder.ins().ishl_imm(fill, lower_width as i64);
+                    let fill = builder.ins().ishl_imm_u(fill, lower_width as i64);
                     acc_payload = builder.ins().bor(acc_payload, fill);
 
                     if let Some(acc_xz) = acc_mask_xz
                         && let Some(sign_xz) = sign_mask_xz
                     {
                         let xz_fill = builder.ins().ineg(sign_xz);
-                        let xz_fill = builder.ins().ishl_imm(xz_fill, lower_width as i64);
+                        let xz_fill = builder.ins().ishl_imm_u(xz_fill, lower_width as i64);
                         acc_mask_xz = Some(builder.ins().bor(acc_xz, xz_fill));
                     }
 
@@ -1879,11 +1881,11 @@ impl ProtoExpression {
                         let ew = *elem_width;
 
                         for _ in 0..*repeat {
-                            acc_payload = builder.ins().ishl_imm(acc_payload, ew as i64);
+                            acc_payload = builder.ins().ishl_imm_u(acc_payload, ew as i64);
                             acc_payload = builder.ins().bor(acc_payload, elem_payload);
 
                             if let Some(acc_xz) = acc_mask_xz {
-                                let shifted = builder.ins().ishl_imm(acc_xz, ew as i64);
+                                let shifted = builder.ins().ishl_imm_u(acc_xz, ew as i64);
                                 acc_mask_xz = if let Some(elem_xz) = elem_mask_xz {
                                     Some(builder.ins().bor(shifted, elem_xz))
                                 } else {
@@ -2078,7 +2080,7 @@ impl ProtoExpression {
                 if nb > 16 {
                     if select.is_none() && dynamic_select.is_none() {
                         let mask_xz = if context.use_4state {
-                            Some(builder.ins().iadd_imm(addr, nb as i64))
+                            Some(builder.ins().iadd_imm_s(addr, nb as i64))
                         } else {
                             None
                         };
@@ -2093,7 +2095,7 @@ impl ProtoExpression {
                         };
                         let payload = read(builder, addr);
                         let mask_xz = if context.use_4state {
-                            let mask_base = builder.ins().iadd_imm(addr, nb as i64);
+                            let mask_base = builder.ins().iadd_imm_s(addr, nb as i64);
                             Some(read(builder, mask_base))
                         } else {
                             None
@@ -2151,12 +2153,12 @@ impl ProtoExpression {
                     if payload_wide {
                         let mask = gen_mask_128(select_width);
                         if *end != 0 {
-                            payload = builder.ins().ushr_imm(payload, *end as i64);
+                            payload = builder.ins().ushr_imm_u(payload, *end as i64);
                         }
                         payload = apply_mask_128(builder, payload, mask);
                         if context.use_4state {
                             let x = if *end != 0 {
-                                builder.ins().ushr_imm(mask_xz.unwrap(), *end as i64)
+                                builder.ins().ushr_imm_u(mask_xz.unwrap(), *end as i64)
                             } else {
                                 mask_xz.unwrap()
                             };
@@ -2170,11 +2172,11 @@ impl ProtoExpression {
                         }
                     } else {
                         let mask = ValueU64::gen_mask(select_width);
-                        payload = builder.ins().ushr_imm(payload, *end as i64);
-                        payload = builder.ins().band_imm(payload, mask as i64);
+                        payload = builder.ins().ushr_imm_u(payload, *end as i64);
+                        payload = builder.ins().band_imm_u(payload, mask as i64);
                         if context.use_4state {
-                            let x = builder.ins().ushr_imm(mask_xz.unwrap(), *end as i64);
-                            let x = builder.ins().band_imm(x, mask as i64);
+                            let x = builder.ins().ushr_imm_u(mask_xz.unwrap(), *end as i64);
+                            let x = builder.ins().band_imm_u(x, mask as i64);
                             mask_xz = Some(x);
                         }
                     }
@@ -2243,7 +2245,7 @@ impl ProtoExpression {
                         wide_fn_addrs::is_all_ones(),
                         &[x_ptr, packed_val],
                     );
-                    builder.ins().bxor_imm(r, 1)
+                    builder.ins().bxor_imm_u(r, 1)
                 }
                 Op::BitOr | Op::LogicNot => {
                     let r = call_helper_ret(
@@ -2254,7 +2256,7 @@ impl ProtoExpression {
                         &[x_ptr, nb_val],
                     );
                     if matches!(op, Op::LogicNot | Op::BitNor) {
-                        builder.ins().bxor_imm(r, 1)
+                        builder.ins().bxor_imm_u(r, 1)
                     } else {
                         r
                     }
@@ -2267,7 +2269,7 @@ impl ProtoExpression {
                         wide_fn_addrs::is_nonzero(),
                         &[x_ptr, nb_val],
                     );
-                    builder.ins().bxor_imm(r, 1)
+                    builder.ins().bxor_imm_u(r, 1)
                 }
                 Op::BitXor => call_helper_ret(
                     context,
@@ -2284,7 +2286,7 @@ impl ProtoExpression {
                         wide_fn_addrs::popcnt_parity(),
                         &[x_ptr, nb_val],
                     );
-                    builder.ins().bxor_imm(r, 1)
+                    builder.ins().bxor_imm_u(r, 1)
                 }
                 _ => unreachable!(),
             };
@@ -2470,13 +2472,14 @@ impl ProtoExpression {
                     // cmp_result is -1/0/1, convert to boolean
                     match op {
                         Op::Greater => {
-                            let r = builder
-                                .ins()
-                                .icmp_imm(IntCC::SignedGreaterThan, cmp_result, 0);
+                            let r =
+                                builder
+                                    .ins()
+                                    .icmp_imm_s(IntCC::SignedGreaterThan, cmp_result, 0);
                             builder.ins().uextend(I64, r)
                         }
                         Op::GreaterEq => {
-                            let r = builder.ins().icmp_imm(
+                            let r = builder.ins().icmp_imm_s(
                                 IntCC::SignedGreaterThanOrEqual,
                                 cmp_result,
                                 0,
@@ -2484,14 +2487,17 @@ impl ProtoExpression {
                             builder.ins().uextend(I64, r)
                         }
                         Op::Less => {
-                            let r = builder.ins().icmp_imm(IntCC::SignedLessThan, cmp_result, 0);
+                            let r = builder
+                                .ins()
+                                .icmp_imm_s(IntCC::SignedLessThan, cmp_result, 0);
                             builder.ins().uextend(I64, r)
                         }
                         Op::LessEq => {
-                            let r =
-                                builder
-                                    .ins()
-                                    .icmp_imm(IntCC::SignedLessThanOrEqual, cmp_result, 0);
+                            let r = builder.ins().icmp_imm_s(
+                                IntCC::SignedLessThanOrEqual,
+                                cmp_result,
+                                0,
+                            );
                             builder.ins().uextend(I64, r)
                         }
                         _ => unreachable!(),

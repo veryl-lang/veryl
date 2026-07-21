@@ -526,7 +526,7 @@ fn build_binary_inner(
 
     builder.ins().return_(&[]);
     builder.seal_all_blocks();
-    builder.finalize();
+    builder.finalize(isa.frontend_config());
 
     if config.dump_cranelift {
         println!("Cranelift IR");

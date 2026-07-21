@@ -63,7 +63,7 @@ pub(crate) fn bxor_const(
         let c = iconst_128(builder, imm);
         builder.ins().bxor(val, c)
     } else {
-        builder.ins().bxor_imm(val, imm as i64)
+        builder.ins().bxor_imm_u(val, imm as i64)
     }
 }
 
@@ -77,7 +77,7 @@ pub(crate) fn band_const(
         let c = iconst_128(builder, imm);
         builder.ins().band(val, c)
     } else {
-        builder.ins().band_imm(val, imm as i64)
+        builder.ins().band_imm_u(val, imm as i64)
     }
 }
 
@@ -91,7 +91,7 @@ pub(crate) fn bor_const(
         let c = iconst_128(builder, imm);
         builder.ins().bor(val, c)
     } else {
-        builder.ins().bor_imm(val, imm as i64)
+        builder.ins().bor_imm_u(val, imm as i64)
     }
 }
 
@@ -105,7 +105,7 @@ pub(crate) fn iadd_const(
         let c = iconst_128(builder, imm as u128);
         builder.ins().iadd(val, c)
     } else {
-        builder.ins().iadd_imm(val, imm)
+        builder.ins().iadd_imm_s(val, imm)
     }
 }
 
@@ -120,7 +120,7 @@ pub(crate) fn icmp_const(
         let c = iconst_128(builder, imm);
         builder.ins().icmp(cc, val, c)
     } else {
-        builder.ins().icmp_imm(cc, val, imm as i64)
+        builder.ins().icmp_imm_s(cc, val, imm as i64)
     }
 }
 
@@ -159,7 +159,7 @@ pub(crate) fn build_dynamic_select_shift(
         .ins()
         .icmp(IntCC::UnsignedLessThan, idx_payload, num_elem);
     let clamped = builder.ins().select(in_bounds, idx_payload, max_idx);
-    let shift = builder.ins().imul_imm(clamped, dyn_sel.elem_width as i64);
+    let shift = builder.ins().imul_imm_s(clamped, dyn_sel.elem_width as i64);
     Some(shift)
 }
 
@@ -400,7 +400,7 @@ pub(crate) fn emit_wide_is_nonzero(
         wide_fn_addrs::is_nonzero(),
         &[ptr, nb_val],
     );
-    builder.ins().icmp_imm(IntCC::NotEqual, result, 0)
+    builder.ins().icmp_imm_s(IntCC::NotEqual, result, 0)
 }
 
 /// Wide all-ones mask: ones in `[0..width)`, zeros above.
@@ -444,18 +444,18 @@ pub(crate) fn emit_wide_bit_select_read_narrow(
     let mut result = if bit == 0 {
         lo
     } else {
-        builder.ins().ushr_imm(lo, bit)
+        builder.ins().ushr_imm_u(lo, bit)
     };
     // Selection straddles into the next word? (only possible when bit > 0)
     if (end % 64) + width > 64 {
         let hi = builder.ins().load(I64, flags, ptr, ((word + 1) * 8) as i32);
-        let hi_part = builder.ins().ishl_imm(hi, 64 - bit);
+        let hi_part = builder.ins().ishl_imm_u(hi, 64 - bit);
         result = builder.ins().bor(result, hi_part);
     }
     // Mask to the declared result width (width == 64 needs no mask).
     if width < 64 {
         let mask = ((1u64 << width) - 1) as i64;
-        result = builder.ins().band_imm(result, mask);
+        result = builder.ins().band_imm_u(result, mask);
     }
     result
 }
@@ -481,7 +481,7 @@ fn read_shifted_word(
     let mut result = if bit == 0 {
         lo
     } else {
-        builder.ins().ushr_imm(lo, bit)
+        builder.ins().ushr_imm_u(lo, bit)
     };
     if bit != 0 {
         let hi = if word + 1 < src_words {
@@ -489,7 +489,7 @@ fn read_shifted_word(
         } else {
             builder.ins().iconst(I64, 0)
         };
-        let hi_part = builder.ins().ishl_imm(hi, 64 - bit);
+        let hi_part = builder.ins().ishl_imm_u(hi, 64 - bit);
         result = builder.ins().bor(result, hi_part);
     }
     result
@@ -512,7 +512,7 @@ pub(crate) fn emit_wide_bit_select_read_i128(
     let mut w1 = read_shifted_word(builder, ptr, end + 64, src_words);
     let hi_bits = width - 64;
     if hi_bits < 64 {
-        w1 = builder.ins().band_imm(w1, ((1u64 << hi_bits) - 1) as i64);
+        w1 = builder.ins().band_imm_u(w1, ((1u64 << hi_bits) - 1) as i64);
     }
     builder.ins().iconcat(w0, w1)
 }
@@ -540,7 +540,7 @@ pub(crate) fn emit_wide_bit_select_read_wide(
         let valid_bits = width - j * 64;
         if valid_bits < 64 {
             let mask = ((1u64 << valid_bits) - 1) as i64;
-            w = builder.ins().band_imm(w, mask);
+            w = builder.ins().band_imm_u(w, mask);
         }
         builder.ins().store(flags, w, dst, (j * 8) as i32);
     }
@@ -769,11 +769,11 @@ pub(crate) fn expand_sign(
             mask_xz = Some(builder.ins().uextend(I128, m));
         }
         let mask = gen_mask_for_width(dst_width) ^ gen_mask_for_width(src_width);
-        let msb = builder.ins().ushr_imm(payload, (src_width - 1) as i64);
+        let msb = builder.ins().ushr_imm_u(payload, (src_width - 1) as i64);
         let ext = bor_const(builder, payload, mask, dst_wide);
         payload = builder.ins().select(msb, ext, payload);
         if let Some(x) = mask_xz {
-            let msb_xz = builder.ins().ushr_imm(x, (src_width - 1) as i64);
+            let msb_xz = builder.ins().ushr_imm_u(x, (src_width - 1) as i64);
             let ext_xz = bor_const(builder, x, mask, dst_wide);
             mask_xz = Some(builder.ins().select(msb_xz, ext_xz, x));
         }
@@ -801,8 +801,8 @@ pub(crate) fn shift_mask_xz(
                 // `native_bits - x_width` would otherwise underflow.
                 let eff_width = x_width.min(native_bits);
                 let shl_amount = (native_bits - eff_width) as i64;
-                let shifted_up = builder.ins().ishl_imm(mask_xz, shl_amount);
-                let sign_extended = builder.ins().sshr_imm(shifted_up, shl_amount);
+                let shifted_up = builder.ins().ishl_imm_u(mask_xz, shl_amount);
+                let sign_extended = builder.ins().sshr_imm_u(shifted_up, shl_amount);
                 builder.ins().sshr(sign_extended, y_payload)
             } else {
                 builder.ins().ushr(mask_xz, y_payload)
