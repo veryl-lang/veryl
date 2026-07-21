@@ -3827,3 +3827,52 @@ fn const_power_operator_folds() {
         "2 ** (AW - 2) with AW=4 must fold to the constant 4 (0b0100)"
     );
 }
+
+#[test]
+fn signed_operator_multiply_is_not_dropped() {
+    // Regression: `$signed(a) * $signed(b)` synthesized to a single AND gate
+    // (a[0] * b[0]). The analyzer left the `$signed` node's comptime type
+    // Unknown (width 1 / unsigned), so the synthesizer sized the operand to
+    // 1 bit and zero-extended it, collapsing the partial-product network. The
+    // `$signed` operator form must produce the same real multiplier as the
+    // equivalent signed-typed-var form.
+    let code = r#"
+        module SignedOp (
+            a: input  logic<8>,
+            b: input  logic<8>,
+            c: output logic<16>,
+        ) {
+            always_comb {
+                c = $signed(a) * $signed(b);
+            }
+        }
+        module SignedVar (
+            a: input  logic<8>,
+            b: input  logic<8>,
+            c: output logic<16>,
+        ) {
+            var as_: signed logic<8>;
+            var bs_: signed logic<8>;
+            always_comb {
+                as_ = a;
+                bs_ = b;
+                c   = as_ * bs_;
+            }
+        }
+    "#;
+    let (ir, _) = analyze(code, "SignedOp");
+    let op_gate = build_gate_ir(&ir, resource_table::insert_str("SignedOp"))
+        .expect("synthesize $signed operator form");
+    let var_gate = build_gate_ir(&ir, resource_table::insert_str("SignedVar"))
+        .expect("synthesize signed-typed-var form");
+    let op_cells = op_gate.module.cells.len();
+    let var_cells = var_gate.module.cells.len();
+    assert!(
+        op_cells > 100,
+        "$signed(a) * $signed(b) must be a real 8x8 multiplier, got {op_cells} cells (degenerate)"
+    );
+    assert_eq!(
+        op_cells, var_cells,
+        "$signed operator multiply ({op_cells} cells) must match the signed-var multiply ({var_cells} cells)"
+    );
+}
