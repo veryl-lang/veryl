@@ -837,13 +837,83 @@ impl Conv<&ForStatement> for ir::StatementBlock {
         let for_range = build_for_range(context, &value.range, rev, step)?;
 
         // Testbench for-loops may iterate many times at runtime; do not unroll.
+        // A body with `break` also stays a runtime For: flattening would strand a
+        // runtime-conditional Break with no loop to leave, running every iteration.
         if !context.in_test_module
+            && !statement_block_has_break(value.statement_block.as_ref())
             && let Some(range) = for_range.eval_iter(context)
         {
             return unroll_for(context, value, &r#type, clock_domain, &range, token);
         }
 
         build_for_statement(context, value, &r#type, clock_domain, for_range, token)
+    }
+}
+
+/// True when the block contains a `break` that would target THIS loop:
+/// nested for-loops consume their own breaks, so the scan stops there.
+fn statement_block_has_break(block: &StatementBlock) -> bool {
+    block
+        .statement_block_list
+        .iter()
+        .any(|x| statement_block_group_has_break(&x.statement_block_group))
+}
+
+fn statement_block_group_has_break(group: &StatementBlockGroup) -> bool {
+    match &*group.statement_block_group_group {
+        StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => x
+            .statement_block_group_group_list
+            .iter()
+            .any(|x| statement_block_group_has_break(&x.statement_block_group)),
+        StatementBlockGroupGroup::StatementBlockItem(x) => match x.statement_block_item.as_ref() {
+            StatementBlockItem::Statement(x) => statement_has_break(&x.statement),
+            _ => false,
+        },
+    }
+}
+
+fn statement_has_break(stmt: &Statement) -> bool {
+    match stmt {
+        Statement::BreakStatement(_) => true,
+        Statement::IfStatement(x) => {
+            let x = &x.if_statement;
+            statement_block_has_break(&x.statement_block)
+                || x.if_statement_list
+                    .iter()
+                    .any(|x| statement_block_has_break(&x.statement_block))
+                || x.if_statement_opt
+                    .as_ref()
+                    .is_some_and(|x| statement_block_has_break(&x.statement_block))
+        }
+        Statement::IfResetStatement(x) => {
+            let x = &x.if_reset_statement;
+            statement_block_has_break(&x.statement_block)
+                || x.if_reset_statement_list
+                    .iter()
+                    .any(|x| statement_block_has_break(&x.statement_block))
+                || x.if_reset_statement_opt
+                    .as_ref()
+                    .is_some_and(|x| statement_block_has_break(&x.statement_block))
+        }
+        Statement::CaseStatement(x) => x.case_statement.case_statement_list.iter().any(|x| match x
+            .case_item
+            .case_item_group0
+            .as_ref()
+        {
+            CaseItemGroup0::Statement(x) => statement_has_break(&x.statement),
+            CaseItemGroup0::StatementBlock(x) => statement_block_has_break(&x.statement_block),
+        }),
+        Statement::SwitchStatement(x) => x.switch_statement.switch_statement_list.iter().any(|x| {
+            match x.switch_item.switch_item_group0.as_ref() {
+                SwitchItemGroup0::Statement(x) => statement_has_break(&x.statement),
+                SwitchItemGroup0::StatementBlock(x) => {
+                    statement_block_has_break(&x.statement_block)
+                }
+            }
+        }),
+        // A break inside a nested for belongs to that loop.
+        Statement::ForStatement(_) => false,
+        Statement::IdentifierStatement(_) | Statement::ReturnStatement(_) => false,
     }
 }
 
