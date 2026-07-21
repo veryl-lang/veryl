@@ -3876,3 +3876,71 @@ fn signed_operator_multiply_is_not_dropped() {
         "$signed operator multiply ({op_cells} cells) must match the signed-var multiply ({var_cells} cells)"
     );
 }
+
+#[test]
+fn module_generate_for_chain_is_not_zero_gate() {
+    // Regression: a module-level generate-for over an unpacked-array chain
+    // (`for i :g { assign s[i+1] = f(s[i]); }`) synthesized to 0 cells with the
+    // output tied to constant zero. The analyzer unrolls it into one Comb decl
+    // per element; the synthesizer's single-driver-per-variable model let only
+    // the first decl persist and zero-filled the rest of the array. It must
+    // match the equivalent always_comb for-loop over the same array.
+    use veryl_synthesizer::ir::{NET_CONST0, NET_CONST1};
+    let code = r#"
+        module GenChain (
+            x: input  logic<8>,
+            d: input  logic<8>,
+            y: output logic<8>,
+        ) {
+            var s: logic<8> [5];
+            assign s[0] = x;
+            for i in 0..4 :g {
+                assign s[i + 1] = if s[i][7] ? s[i] + d : s[i] - d;
+            }
+            assign y = s[4];
+        }
+        module CombChain (
+            x: input  logic<8>,
+            d: input  logic<8>,
+            y: output logic<8>,
+        ) {
+            var s: logic<8> [5];
+            always_comb {
+                s[0] = x;
+                for i in 0..4 {
+                    s[i + 1] = if s[i][7] ? s[i] + d : s[i] - d;
+                }
+                y = s[4];
+            }
+        }
+    "#;
+    let (ir, _) = analyze(code, "GenChain");
+    let gen_gate = build_gate_ir(&ir, resource_table::insert_str("GenChain"))
+        .expect("synthesize generate-for chain");
+    let comb_gate = build_gate_ir(&ir, resource_table::insert_str("CombChain"))
+        .expect("synthesize always_comb chain");
+    let gen_cells = gen_gate.module.cells.len();
+    let comb_cells = comb_gate.module.cells.len();
+    assert!(
+        gen_cells > 20,
+        "generate-for chain must be real logic, got {gen_cells} cells (degenerate)"
+    );
+    assert_eq!(
+        gen_cells, comb_cells,
+        "generate-for chain ({gen_cells} cells) must match the always_comb chain ({comb_cells} cells)"
+    );
+    // The bug tied every `y` bit to a constant net.
+    let y_port = gen_gate
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "y")
+        .expect("y port");
+    assert!(
+        y_port
+            .nets
+            .iter()
+            .any(|&n| n != NET_CONST0 && n != NET_CONST1),
+        "generate-for chain output must not be tied to constant nets"
+    );
+}
