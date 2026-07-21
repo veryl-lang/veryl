@@ -39,7 +39,7 @@ use quote::quote;
 use syn::spanned::Spanned;
 use syn::{
     Attribute, Data, DeriveInput, Expr, ExprLit, Fields, FnArg, Ident, ImplItem, ItemImpl, Lit,
-    LitStr, Meta, Pat, ReturnType, Type,
+    LitStr, Meta, Pat, ReceiverKind, ReturnType, Type,
 };
 
 fn json_escape(s: &str) -> String {
@@ -699,7 +699,7 @@ fn check_hook_signature(func: &syn::ImplItemFn) -> syn::Result<()> {
         "SimCtx"
     };
     let mut inputs = func.sig.inputs.iter();
-    let self_ok = matches!(inputs.next(), Some(FnArg::Receiver(r)) if r.reference.is_some());
+    let self_ok = matches!(inputs.next(), Some(FnArg::Receiver(r)) if matches!(r.kind, ReceiverKind::Reference(..)));
     let ctx_ok = matches!(inputs.next(), Some(FnArg::Typed(pat)) if is_ref_to(&pat.ty, ctx_ty));
     if !self_ok || !ctx_ok || inputs.next().is_some() {
         return Err(syn::Error::new(
@@ -927,7 +927,7 @@ fn parse_method(func: &mut syn::ImplItemFn) -> syn::Result<MethodSpec> {
     }
 
     let mut inputs = func.sig.inputs.iter_mut();
-    let self_ok = matches!(inputs.next(), Some(FnArg::Receiver(r)) if r.reference.is_some());
+    let self_ok = matches!(inputs.next(), Some(FnArg::Receiver(r)) if matches!(r.kind, ReceiverKind::Reference(..)));
     let ctx_ok = matches!(inputs.next(), Some(FnArg::Typed(pat)) if is_ref_to(&pat.ty, "SimCtx"));
     if !self_ok || !ctx_ok {
         return Err(syn::Error::new(
@@ -1131,7 +1131,7 @@ fn method_dispatch(self_ty: &Type, methods: &[MethodSpec]) -> TokenStream2 {
 }
 
 fn expand_component_impl(mut item_impl: ItemImpl) -> syn::Result<TokenStream2> {
-    if let Some((_, path, _)) = &item_impl.trait_ {
+    if let Some((path, _)) = &item_impl.trait_ {
         return Err(syn::Error::new(
             path.span(),
             "#[component_impl] goes on an inherent impl block, not a trait impl",
