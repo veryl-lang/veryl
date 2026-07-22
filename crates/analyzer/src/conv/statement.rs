@@ -255,9 +255,9 @@ fn conv_tb_method_call_assignment(
     let ir::Statement::TbMethodCall(mut method_call) = tb_stmt else {
         unreachable!()
     };
-    if !matches!(method_call.method, ir::TbMethod::Component { .. }) {
-        // Builtin $tb methods return nothing; report the assignment as an
-        // unsupported use.
+    if !method_call.method.has_return_value() {
+        // The remaining builtin $tb methods return nothing; report the
+        // assignment as an unsupported use.
         context.insert_error(AnalyzerError::invalid_factor(
             None,
             "testbench method without return value",

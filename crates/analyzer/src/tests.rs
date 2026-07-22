@@ -17909,3 +17909,114 @@ fn out_of_range_select_assign() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn tb_random_element_type() {
+    // `$tb::random::<T>` rejects a non-integer / 4-state element type with a
+    // MismatchType error.
+    let build = |ty: &str| {
+        format!(
+            r#"
+    #[test(t)]
+    module t {{
+        var r: $tb::random::<{ty}>;
+        var x: {ty};
+        initial {{
+            x = r.get();
+            $finish();
+        }}
+    }}
+    "#
+        )
+    };
+
+    for ty in ["f32", "f64", "lbool"] {
+        let errors = analyze(&build(ty));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::MismatchType { .. })),
+            "`$tb::random::<{ty}>` should be a type mismatch, got: {errors:?}"
+        );
+    }
+
+    // A valid fixed integer element type raises no type mismatch.
+    let errors = analyze(&build("u32"));
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchType { .. })),
+        "`$tb::random::<u32>` should be accepted, got: {errors:?}"
+    );
+
+    // The element type must be at most 64 bits. A wider type is reached via a
+    // `gen` type binding (`bit<N>` cannot be written as a generic argument
+    // directly); 64 is the accepted boundary, 65 is rejected.
+    let with_gen = |bits: u32| {
+        format!(
+            r#"
+    #[test(t)]
+    module t {{
+        gen w: type = bit<{bits}>;
+        var r: $tb::random::<w>;
+        var x: w;
+        initial {{
+            x = r.get();
+            $finish();
+        }}
+    }}
+    "#
+        )
+    };
+    let errors = analyze(&with_gen(64));
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchType { .. })),
+        "`bit<64>` should be accepted, got: {errors:?}"
+    );
+    let errors = analyze(&with_gen(65));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchType { .. })),
+        "`bit<65>` should be a type mismatch, got: {errors:?}"
+    );
+}
+
+#[test]
+fn tb_random_analyze() {
+    // Valid `$tb::random::<T>` usage for several element types, with its
+    // methods in statement, assignment and typed-let (embedded expression)
+    // positions, must pass the analyzer (the generic return type `T` resolves
+    // in every position). Unused-variable lints are incidental to the shape of
+    // the snippet and are ignored.
+    let code = r#"
+    #[test(test_random)]
+    module test_random {
+        var r: $tb::random::<u32>;
+        var s: $tb::random::<i16>;
+        var b: $tb::random::<bbool>;
+        var x: u32;
+        var y: i16;
+        var sd: u64;
+        initial {
+            r.seed(42);
+            x = r.get();
+            x = r.get_range(0, 100);
+            sd = r.get_seed();
+            y = s.get();
+            let z: u32 = r.get() + 1;
+            $finish();
+        }
+    }
+    "#;
+    let errors: Vec<_> = analyze(code)
+        .into_iter()
+        .filter(|e| !matches!(e, AnalyzerError::UnusedVariable { .. }))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "expected no analyzer errors, got: {errors:?}"
+    );
+}

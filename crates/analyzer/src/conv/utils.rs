@@ -1381,15 +1381,31 @@ pub fn eval_type(
                     }
                 }
                 SymbolKind::TbComponent(x)
-                    if matches!(x.kind, TbComponentKind::File | TbComponentKind::External(_)) =>
+                    if matches!(
+                        x.kind,
+                        TbComponentKind::File
+                            | TbComponentKind::External(_)
+                            | TbComponentKind::Random
+                    ) =>
                 {
-                    // The descriptor lives in the simulator (file table or
-                    // component instance), so this slot is never read; back
-                    // it with a throwaway 32-bit width.
                     if !context.in_test_module {
                         let token: TokenRange = path.paths[0].base.into();
                         context.insert_error(AnalyzerError::invalid_tb_usage(&token));
                     }
+
+                    if matches!(x.kind, TbComponentKind::Random)
+                        && let Some(arg) =
+                            path.paths.last().and_then(|p| p.arguments.first()).cloned()
+                    {
+                        // `$tb::random::<T>`'s element type is its generic argument
+                        // (already resolved through the generic maps above); its
+                        // validity is diagnosed by `check_generic_refereence`. The
+                        // file/component descriptor lives in the simulator and has
+                        // no element type, so its slot is backed by a throwaway
+                        // 32-bit width.
+                        return eval_type(context, &arg, pos);
+                    }
+
                     width.push(Some(32));
                     ir::TypeKind::Bit
                 }
@@ -1464,6 +1480,18 @@ pub fn eval_type(
                 "lbool" => ir::TypeKind::Logic,
                 "string" => ir::TypeKind::String,
                 _ => ir::TypeKind::Unknown,
+            }
+        } else if let GenericSymbolPathKind::VariableType(widths) = &path.kind {
+            // A variable type (`bit<N>` / `logic<N>`) passed as a generic
+            // argument carries its width in the path kind; `logic` is 4-state,
+            // `bit` (and anything else here) is 2-state.
+            for w in widths {
+                width.push(Some(*w));
+            }
+            if path.paths.last().map(|p| p.base.to_string()).as_deref() == Some("logic") {
+                ir::TypeKind::Logic
+            } else {
+                ir::TypeKind::Bit
             }
         } else {
             ir::TypeKind::Unknown
@@ -1870,7 +1898,7 @@ pub fn eval_function_call(
             let ir::Statement::TbMethodCall(method_call) = tb_stmt else {
                 unreachable!()
             };
-            if matches!(method_call.method, TbMethod::Component { .. }) {
+            if method_call.method.has_return_value() {
                 return hoist_component_method_call(context, method_call, token);
             }
             context.insert_error(AnalyzerError::invalid_factor(
@@ -4077,6 +4105,7 @@ pub fn tb_method_call(
     };
 
     let mut ret_width = None;
+    let mut ret_signed = false;
     let method = match (tb_kind, method_name) {
         (TbComponentKind::ClockGen, "next") => {
             let count = if let Some(ir::Arguments::Positional(ref positional)) = args
@@ -4154,6 +4183,33 @@ pub fn tb_method_call(
         }
         (TbComponentKind::File, "close") => TbMethod::FileClose,
         (TbComponentKind::File, "flush") => TbMethod::FileFlush,
+        (TbComponentKind::Random, "seed") => {
+            let value = random_arg(context, &args, 0, method_name, 1, &token)?;
+            TbMethod::RandomSeed { value }
+        }
+        (TbComponentKind::Random, "get") => {
+            let (width, signed) = resolve_random_elem_type(context, type_path);
+            ret_width = Some(width);
+            ret_signed = signed;
+            TbMethod::RandomGet { width, signed }
+        }
+        (TbComponentKind::Random, "get_range") => {
+            let min = random_arg(context, &args, 0, method_name, 2, &token)?;
+            let max = random_arg(context, &args, 1, method_name, 2, &token)?;
+            let (width, signed) = resolve_random_elem_type(context, type_path);
+            ret_width = Some(width);
+            ret_signed = signed;
+            TbMethod::RandomGetRange {
+                min,
+                max,
+                width,
+                signed,
+            }
+        }
+        (TbComponentKind::Random, "get_seed") => {
+            ret_width = Some(64);
+            TbMethod::RandomGetSeed
+        }
         // Any method name is accepted on a user-defined component; the
         // component validates it at run time. With a manifest present the
         // name and arity are also diagnosed here.
@@ -4173,7 +4229,58 @@ pub fn tb_method_call(
         ret: None,
         ret_strict: false,
         ret_width,
+        ret_signed,
     })))
+}
+
+/// Captures the `i`-th positional argument of a `$tb::random` method as a
+/// self-determined expression (its width folds from the argument, as for
+/// `$display`). Emits an arity error and fails when the argument is missing.
+fn random_arg(
+    context: &mut Context,
+    args: &Option<ir::Arguments>,
+    i: usize,
+    method_name: &str,
+    arity: usize,
+    token: &TokenRange,
+) -> IrResult<ir::Expression> {
+    if let Some(ir::Arguments::Positional(positional)) = args
+        && let Some(arg) = positional.get(i)
+    {
+        let mut expr = arg.0.clone();
+        expr.eval_comptime(context, None);
+        Ok(expr)
+    } else {
+        let actual = if let Some(ir::Arguments::Positional(positional)) = args {
+            positional.len()
+        } else {
+            0
+        };
+        context.insert_error(AnalyzerError::mismatch_function_arity(
+            method_name,
+            arity,
+            actual,
+            token,
+        ));
+        Err(ir_error!(*token))
+    }
+}
+
+/// Resolves the element type `T` of a `$tb::random::<T>` variable through the
+/// generic maps in effect, returning its `(width, signed)`. The element type's
+/// validity (fixed integer / `bbool`) is diagnosed by `check_generic_refereence`;
+/// this falls back to a 32-bit unsigned width when resolution fails so a broken
+/// type does not also cause a spurious ICE.
+fn resolve_random_elem_type(context: &mut Context, type_path: &GenericSymbolPath) -> (u32, bool) {
+    let resolved = context.resolve_path(type_path.clone());
+    if let Some(arg) = resolved.paths.last().and_then(|p| p.arguments.first())
+        && let Ok(ty) = eval_type(context, &arg.clone(), TypePosition::Variable)
+        && let Some(width) = ty.total_width()
+    {
+        (width as u32, ty.signed)
+    } else {
+        (32, false)
+    }
 }
 
 /// Hoists a component method call out of an expression: the call runs as
@@ -4199,11 +4306,13 @@ pub fn hoist_component_method_call(
     }
 
     let width = method_call.ret_width.unwrap_or(64) as usize;
+    let signed = method_call.ret_signed;
     let name = format!("__tb_method_ret_{}", context.tb_hoist_count);
     context.tb_hoist_count += 1;
     let path = VarPath::new(resource_table::insert_str(&name));
     let mut r#type = ir::Type::new(ir::TypeKind::Bit);
     r#type.set_concrete_width(Shape::new(vec![Some(width)]));
+    r#type.signed = signed;
 
     let comptime = Comptime::from_type(r#type.clone(), ClockDomain::None, token);
     let id = context.insert_var_path(path.clone(), comptime.clone());
@@ -4213,7 +4322,7 @@ pub fn hoist_component_method_call(
         path.clone(),
         VarKind::Variable,
         r#type,
-        vec![Value::new_x(width, false)],
+        vec![Value::new_x(width, signed)],
         context.get_affiliation(),
         &token,
         array_limit,

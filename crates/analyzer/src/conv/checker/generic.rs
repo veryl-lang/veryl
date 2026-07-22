@@ -1,9 +1,9 @@
 use crate::analyzer_error::MismatchTypeKind;
-use crate::conv::utils::{TypePosition, eval_factor_path, eval_generic_expr};
+use crate::conv::utils::{TypePosition, eval_factor_path, eval_generic_expr, eval_type};
 use crate::conv::{Context, Conv};
 use crate::ir::{self, Comptime, IrResult, Type, VarPathSelect};
 use crate::namespace::Namespace;
-use crate::symbol::{GenericBoundKind, ProtoBound, Symbol, SymbolKind};
+use crate::symbol::{GenericBoundKind, ProtoBound, Symbol, SymbolKind, TbComponentKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::{AnalyzerError, symbol_table};
 use veryl_parser::token_range::TokenRange;
@@ -378,6 +378,39 @@ pub fn check_generic_refereence(context: &mut Context, path: &GenericSymbolPath)
                     };
                     if let Some(error) = error {
                         context.insert_error(error);
+                    }
+
+                    // `$tb::random::<T>` restricts T beyond the plain `type`
+                    // bound: it must be a fixed integer (<= 64 bits) or bbool.
+                    // The kind (2-state integer vs. float / 4-state / aggregate)
+                    // is taken from the generic-arg comptime, which distinguishes
+                    // floats and `logic`; the width is taken from `eval_type`,
+                    // which resolves the concrete width of a `gen`/aliased
+                    // `bit<N>` (the comptime collapses that width to 1 bit).
+                    if let SymbolKind::TbComponent(tb) = &symbol.found.kind
+                        && matches!(tb.kind, TbComponentKind::Random)
+                    {
+                        let kind_ok = matches!(&expr.value, ir::ValueVariant::Type(t)
+                            if matches!(t.kind, ir::TypeKind::Bit) && t.array.as_slice().is_empty());
+                        let width_ok = eval_type(context, &arg, TypePosition::Variable)
+                            .ok()
+                            .map(|t| t.total_width().unwrap_or(1))
+                            .map(|w| (1..=64).contains(&w))
+                            .unwrap_or(false);
+                        if !(kind_ok && width_ok) {
+                            let actual = match &expr.value {
+                                ir::ValueVariant::Type(t) => t.to_string(),
+                                _ => expr.r#type.to_string(),
+                            };
+                            context.insert_error(AnalyzerError::mismatch_type(
+                                MismatchTypeKind::GenericArgument {
+                                    name: expr.token.end.to_string(),
+                                    expected: "u8/u16/u32/u64/i8/i16/i32/i64/bbool".to_string(),
+                                    actual,
+                                },
+                                &expr.token,
+                            ));
+                        }
                     }
                 }
             }

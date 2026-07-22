@@ -67,6 +67,8 @@ paste               = "1.0"
 postcard            = {version = "1.1", features = ["alloc"]}
 pprof               = {version = "0.15.0", features = ["flamegraph"]}
 pulldown-cmark      = "0.13.4"
+rand                = {version = "0.10", default-features = false}
+rand_pcg            = "0.10"
 regex               = "1.12.4"
 scnr2               = "0.5.2"
 semver              = {version = "1.0", features = ["serde"]}

@@ -4,6 +4,7 @@ pub mod component;
 pub mod file_table;
 pub mod ir;
 pub mod output_buffer;
+pub mod random_table;
 pub mod simulator;
 pub mod simulator_error;
 pub mod testbench;

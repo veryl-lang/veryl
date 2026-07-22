@@ -63,6 +63,29 @@ pub enum TestbenchStatement {
         /// Assignment form: destination variable for the return value.
         ret: Option<(VarId, crate::ir::RetWidthCheck)>,
     },
+    /// `r.seed(v)` — `handle` is the `$tb::random` variable's name (RNG key).
+    RandomSeed { handle: StrId, value: Expression },
+    /// `x = r.get()`.
+    RandomGet {
+        handle: StrId,
+        width: u32,
+        signed: bool,
+        ret: Option<(VarId, crate::ir::RetWidthCheck)>,
+    },
+    /// `x = r.get_range(min, max)`.
+    RandomGetRange {
+        handle: StrId,
+        min: Expression,
+        max: Expression,
+        width: u32,
+        signed: bool,
+        ret: Option<(VarId, crate::ir::RetWidthCheck)>,
+    },
+    /// `x = r.get_seed()`.
+    RandomGetSeed {
+        handle: StrId,
+        ret: Option<(VarId, crate::ir::RetWidthCheck)>,
+    },
     /// if-else (may contain next inside)
     If {
         condition: Expression,
@@ -153,13 +176,17 @@ fn collect_tb_insts(
                         reset_insts.push(*inst);
                     }
                 }
-                // File handles and component methods drive no clock/reset
-                // event.
+                // File handles, component methods and random generators
+                // drive no clock/reset event.
                 TbMethodKind::FileOpen { .. }
                 | TbMethodKind::FileWrite { .. }
                 | TbMethodKind::FileClose
                 | TbMethodKind::FileFlush
-                | TbMethodKind::Component { .. } => {}
+                | TbMethodKind::Component { .. }
+                | TbMethodKind::RandomSeed { .. }
+                | TbMethodKind::RandomGet { .. }
+                | TbMethodKind::RandomGetRange { .. }
+                | TbMethodKind::RandomGetSeed { .. } => {}
             },
             Statement::For(for_stmt) => {
                 collect_tb_insts(&for_stmt.body, clock_insts, reset_insts);
@@ -334,6 +361,34 @@ fn convert_stmt(
                 args: args.clone(),
                 ret: *ret,
             },
+            TbMethodKind::RandomSeed { value } => TestbenchStatement::RandomSeed {
+                handle: *inst,
+                value: value.clone(),
+            },
+            TbMethodKind::RandomGet { width, signed, ret } => TestbenchStatement::RandomGet {
+                handle: *inst,
+                width: *width,
+                signed: *signed,
+                ret: *ret,
+            },
+            TbMethodKind::RandomGetRange {
+                min,
+                max,
+                width,
+                signed,
+                ret,
+            } => TestbenchStatement::RandomGetRange {
+                handle: *inst,
+                min: min.clone(),
+                max: max.clone(),
+                width: *width,
+                signed: *signed,
+                ret: *ret,
+            },
+            TbMethodKind::RandomGetSeed { ret } => TestbenchStatement::RandomGetSeed {
+                handle: *inst,
+                ret: *ret,
+            },
         },
         Statement::SystemFunctionCall(SystemFunctionCall::Assert {
             kind,
@@ -430,6 +485,7 @@ fn convert_stmts(
 pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestResult {
     assert_buffer::reset();
     crate::file_table::reset();
+    crate::random_table::reset(sim.ir.seed);
     let result: TestResult = exec(sim, stmts).into();
     // End-of-test component hooks may still record failures.
     sim.finish_components();
@@ -857,6 +913,48 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                 }
                 Err(msg) => ExecResult::Fail(msg),
             }
+        }
+        TestbenchStatement::RandomSeed { handle, value } => {
+            sim.ensure_comb_updated();
+            let seed = value.eval(&mut sim.mask_cache).payload_u64();
+            crate::random_table::seed_handle(*handle, seed);
+            ExecResult::Continue
+        }
+        TestbenchStatement::RandomGet {
+            handle,
+            width,
+            signed,
+            ret,
+        } => {
+            let value = crate::random_table::get(*handle, *width, *signed);
+            if let Some((ret, _)) = ret {
+                sim.set_var_by_id(ret, value);
+            }
+            ExecResult::Continue
+        }
+        TestbenchStatement::RandomGetRange {
+            handle,
+            min,
+            max,
+            width,
+            signed,
+            ret,
+        } => {
+            sim.ensure_comb_updated();
+            let min_v = min.eval(&mut sim.mask_cache).payload_u64();
+            let max_v = max.eval(&mut sim.mask_cache).payload_u64();
+            let value = crate::random_table::get_range(*handle, min_v, max_v, *width, *signed);
+            if let Some((ret, _)) = ret {
+                sim.set_var_by_id(ret, value);
+            }
+            ExecResult::Continue
+        }
+        TestbenchStatement::RandomGetSeed { handle, ret } => {
+            let seed = crate::random_table::get_seed_handle(*handle);
+            if let Some((ret, _)) = ret {
+                sim.set_var_by_id(ret, Value::new(seed, 64, false));
+            }
+            ExecResult::Continue
         }
         TestbenchStatement::Finish => ExecResult::Finished,
     }

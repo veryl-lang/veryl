@@ -1,17 +1,58 @@
 use crate::namespace::Namespace;
 use crate::symbol::{
-    Affiliation, ClockDomain, Direction, DocComment, FunctionProperty, Port, PortProperty, Symbol,
-    SymbolKind, TbComponentKind, TbComponentProperty, Type, TypeKind,
+    Affiliation, ClockDomain, Direction, DocComment, FunctionProperty, GenericBoundKind,
+    GenericParameterProperty, Port, PortProperty, Symbol, SymbolKind, TbComponentKind,
+    TbComponentProperty, Type, TypeKind, UserDefinedType,
 };
+use crate::symbol_path::{GenericSymbol, GenericSymbolPath, GenericSymbolPathKind};
 use crate::symbol_table::SymbolTable;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
+
+/// A builtin `Type` with no width/array (widths for fixed types are derived
+/// from the `TypeKind` itself).
+fn builtin_type(kind: TypeKind) -> Type {
+    Type {
+        modifier: vec![],
+        kind,
+        width: vec![],
+        array: vec![],
+        array_type: None,
+        is_const: false,
+        token: TokenRange::default(),
+    }
+}
+
+/// A `Type` referring to the generic parameter `T` (`base` token) of
+/// `$tb::random`. Left unresolved (`symbol: None`) so the return type is
+/// resolved through the generic map at the call site, like any `-> T`.
+fn generic_param_type(base: Token) -> Type {
+    let range: TokenRange = base.into();
+    let path = GenericSymbolPath {
+        paths: vec![GenericSymbol {
+            base,
+            arguments: vec![],
+        }],
+        kind: GenericSymbolPathKind::Identifier,
+        range,
+    };
+    Type {
+        modifier: vec![],
+        kind: TypeKind::UserDefined(UserDefinedType { path, symbol: None }),
+        width: vec![],
+        array: vec![],
+        array_type: None,
+        is_const: false,
+        token: range,
+    }
+}
 
 fn insert_method(
     symbol_table: &mut SymbolTable,
     parent_ns: &Namespace,
     name: &str,
     port_defs: &[(&str, Direction)],
+    ret: Option<Type>,
 ) {
     let func_token = Token::new(name, 0, 0, 0, 0, TokenSource::Builtin);
     let mut func_ns = parent_ns.clone();
@@ -62,7 +103,7 @@ fn insert_method(
         generic_consts: vec![],
         generic_references: vec![],
         ports,
-        ret: None,
+        ret,
         reference_paths: vec![],
         constantable: None,
         definition: None,
@@ -93,6 +134,7 @@ pub fn insert_external_components(names: &[&str]) {
             &token,
             SymbolKind::TbComponent(TbComponentProperty {
                 kind: TbComponentKind::External(token.text),
+                generic_parameters: vec![],
             }),
             &ns,
             true,
@@ -130,6 +172,7 @@ pub fn insert_dependency_components(project: &str, names: &[&str]) {
             &token,
             SymbolKind::TbComponent(TbComponentProperty {
                 kind: TbComponentKind::External(key),
+                generic_parameters: vec![],
             }),
             &ns,
             true,
@@ -139,95 +182,154 @@ pub fn insert_dependency_components(project: &str, names: &[&str]) {
     }
 }
 
+/// Inserts a non-generic `$tb::<name>` component symbol and returns its inner
+/// namespace, for registering methods under it.
+fn insert_component(
+    symbol_table: &mut SymbolTable,
+    tb_ns: &Namespace,
+    name: &str,
+    kind: TbComponentKind,
+) -> Namespace {
+    let token = Token::new(name, 0, 0, 0, 0, TokenSource::Builtin);
+    let symbol = Symbol::new(
+        &token,
+        SymbolKind::TbComponent(TbComponentProperty {
+            kind,
+            generic_parameters: vec![],
+        }),
+        tb_ns,
+        true,
+        DocComment::default(),
+    );
+    let _ = symbol_table.insert(&token, symbol);
+    let mut ns = tb_ns.clone();
+    ns.push(token.text);
+    ns
+}
+
+fn insert_clock_gen(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
+    let ns = insert_component(symbol_table, tb_ns, "clock_gen", TbComponentKind::ClockGen);
+    insert_method(
+        symbol_table,
+        &ns,
+        "next",
+        &[("count", Direction::Input)],
+        None,
+    );
+}
+
+fn insert_reset_gen(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
+    let ns = insert_component(symbol_table, tb_ns, "reset_gen", TbComponentKind::ResetGen);
+    insert_method(
+        symbol_table,
+        &ns,
+        "assert",
+        &[("count", Direction::Input)],
+        None,
+    );
+}
+
+fn insert_file(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
+    let ns = insert_component(symbol_table, tb_ns, "file", TbComponentKind::File);
+    // `write` is variadic, so it is registered port-less; `tb_method_call`
+    // intercepts the call and handles its arguments.
+    insert_method(
+        symbol_table,
+        &ns,
+        "open",
+        &[("name", Direction::Input)],
+        None,
+    );
+    insert_method(
+        symbol_table,
+        &ns,
+        "append",
+        &[("name", Direction::Input)],
+        None,
+    );
+    insert_method(symbol_table, &ns, "write", &[], None);
+    insert_method(symbol_table, &ns, "close", &[], None);
+    insert_method(symbol_table, &ns, "flush", &[], None);
+}
+
+fn insert_random(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
+    let random_token = Token::new("random", 0, 0, 0, 0, TokenSource::Builtin);
+    let mut ns = tb_ns.clone();
+    ns.push(random_token.text);
+
+    // Synthesize the generic type parameter `T` inside the `$tb::random`
+    // namespace so member methods can return `-> T`, resolved through the
+    // normal generic pipeline at the call site.
+    let t_token = Token::new("T", 0, 0, 0, 0, TokenSource::Builtin);
+    let t_symbol = Symbol::new(
+        &t_token,
+        SymbolKind::GenericParameter(GenericParameterProperty {
+            bound: GenericBoundKind::Type,
+            default_value: None,
+        }),
+        &ns,
+        false,
+        DocComment::default(),
+    );
+    let Some(t_id) = symbol_table.insert(&t_token, t_symbol) else {
+        return;
+    };
+
+    let random_symbol = Symbol::new(
+        &random_token,
+        SymbolKind::TbComponent(TbComponentProperty {
+            kind: TbComponentKind::Random,
+            generic_parameters: vec![t_id],
+        }),
+        tb_ns,
+        true,
+        DocComment::default(),
+    );
+    let _ = symbol_table.insert(&random_token, random_symbol);
+
+    // `seed`/`get`/`get_range` take value arguments handled by
+    // `tb_method_call`; the ports are placeholders. Return types drive the
+    // static typing: `get`/`get_range` return `T`, `get_seed`
+    // returns a 64-bit unsigned, `seed` returns nothing.
+    insert_method(
+        symbol_table,
+        &ns,
+        "seed",
+        &[("value", Direction::Input)],
+        None,
+    );
+    insert_method(
+        symbol_table,
+        &ns,
+        "get",
+        &[],
+        Some(generic_param_type(t_token)),
+    );
+    insert_method(
+        symbol_table,
+        &ns,
+        "get_range",
+        &[("min", Direction::Input), ("max", Direction::Input)],
+        Some(generic_param_type(t_token)),
+    );
+    insert_method(
+        symbol_table,
+        &ns,
+        "get_seed",
+        &[],
+        Some(builtin_type(TypeKind::U64)),
+    );
+}
+
 pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
-    let mut ns = namespace.clone();
+    let mut tb_ns = namespace.clone();
 
     // Push into $tb namespace (already created by DEFINED_NAMESPACES)
     let tb_token = Token::new("$tb", 0, 0, 0, 0, TokenSource::Builtin);
-    ns.push(tb_token.text);
+    tb_ns.push(tb_token.text);
 
-    // $tb::clock_gen
-    let clock_token = Token::new("clock_gen", 0, 0, 0, 0, TokenSource::Builtin);
-    let clock_symbol = Symbol::new(
-        &clock_token,
-        SymbolKind::TbComponent(TbComponentProperty {
-            kind: TbComponentKind::ClockGen,
-        }),
-        &ns,
-        true,
-        DocComment::default(),
-    );
-    let _ = symbol_table.insert(&clock_token, clock_symbol);
-
-    {
-        let mut clock_ns = ns.clone();
-        clock_ns.push(clock_token.text);
-        insert_method(
-            symbol_table,
-            &clock_ns,
-            "next",
-            &[("count", Direction::Input)],
-        );
-    }
-
-    // $tb::reset_gen
-    let reset_token = Token::new("reset_gen", 0, 0, 0, 0, TokenSource::Builtin);
-    let reset_symbol = Symbol::new(
-        &reset_token,
-        SymbolKind::TbComponent(TbComponentProperty {
-            kind: TbComponentKind::ResetGen,
-        }),
-        &ns,
-        true,
-        DocComment::default(),
-    );
-    let _ = symbol_table.insert(&reset_token, reset_symbol);
-
-    {
-        let mut reset_ns = ns.clone();
-        reset_ns.push(reset_token.text);
-        insert_method(
-            symbol_table,
-            &reset_ns,
-            "assert",
-            &[("count", Direction::Input)],
-        );
-    }
-
-    // $tb::file
-    let file_token = Token::new("file", 0, 0, 0, 0, TokenSource::Builtin);
-    let file_symbol = Symbol::new(
-        &file_token,
-        SymbolKind::TbComponent(TbComponentProperty {
-            kind: TbComponentKind::File,
-        }),
-        &ns,
-        true,
-        DocComment::default(),
-    );
-    let _ = symbol_table.insert(&file_token, file_symbol);
-
-    {
-        let mut file_ns = ns.clone();
-        file_ns.push(file_token.text);
-        // `write` is variadic, so it is registered port-less; `tb_method_call`
-        // intercepts the call and handles its arguments.
-        insert_method(
-            symbol_table,
-            &file_ns,
-            "open",
-            &[("name", Direction::Input)],
-        );
-        insert_method(
-            symbol_table,
-            &file_ns,
-            "append",
-            &[("name", Direction::Input)],
-        );
-        insert_method(symbol_table, &file_ns, "write", &[]);
-        insert_method(symbol_table, &file_ns, "close", &[]);
-        insert_method(symbol_table, &file_ns, "flush", &[]);
-    }
-
-    ns.pop();
+    insert_clock_gen(symbol_table, &tb_ns);
+    insert_reset_gen(symbol_table, &tb_ns);
+    insert_file(symbol_table, &tb_ns);
+    insert_random(symbol_table, &tb_ns);
 }

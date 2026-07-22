@@ -156,9 +156,18 @@ fn resolve_stmt(
                     }
                 }
             }
+            crate::ir::statement::ProtoTbMethodKind::RandomSeed { value } => {
+                resolve_expr(value, context, children)?;
+            }
+            crate::ir::statement::ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
+                resolve_expr(min, context, children)?;
+                resolve_expr(max, context, children)?;
+            }
             crate::ir::statement::ProtoTbMethodKind::FileOpen { .. }
             | crate::ir::statement::ProtoTbMethodKind::FileClose
-            | crate::ir::statement::ProtoTbMethodKind::FileFlush => {}
+            | crate::ir::statement::ProtoTbMethodKind::FileFlush
+            | crate::ir::statement::ProtoTbMethodKind::RandomGet { .. }
+            | crate::ir::statement::ProtoTbMethodKind::RandomGetSeed { .. } => {}
         },
         ProtoStatement::SequentialBlock(stmts) => {
             for s in stmts {

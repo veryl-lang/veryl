@@ -163,6 +163,24 @@ pub enum ProtoTbMethodKind {
         /// Assignment form: destination variable for the return value.
         ret: Option<(VarId, RetWidthCheck)>,
     },
+    RandomSeed {
+        value: ProtoExpression,
+    },
+    RandomGet {
+        width: u32,
+        signed: bool,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+    RandomGetRange {
+        min: ProtoExpression,
+        max: ProtoExpression,
+        width: u32,
+        signed: bool,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+    RandomGetSeed {
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
 }
 
 /// How a component method's returned width is validated before it lands
@@ -208,6 +226,24 @@ pub enum TbMethodKind {
     Component {
         method: StrId,
         args: Vec<ComponentArg>,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+    RandomSeed {
+        value: Expression,
+    },
+    RandomGet {
+        width: u32,
+        signed: bool,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+    RandomGetRange {
+        min: Expression,
+        max: Expression,
+        width: u32,
+        signed: bool,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+    RandomGetSeed {
         ret: Option<(VarId, RetWidthCheck)>,
     },
 }
@@ -1043,9 +1079,18 @@ impl ProtoStatement {
                         }
                     }
                 }
+                ProtoTbMethodKind::RandomSeed { value } => {
+                    value.adjust_offsets(ff_delta, comb_delta);
+                }
+                ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
+                    min.adjust_offsets(ff_delta, comb_delta);
+                    max.adjust_offsets(ff_delta, comb_delta);
+                }
                 ProtoTbMethodKind::FileOpen { .. }
                 | ProtoTbMethodKind::FileClose
-                | ProtoTbMethodKind::FileFlush => {}
+                | ProtoTbMethodKind::FileFlush
+                | ProtoTbMethodKind::RandomGet { .. }
+                | ProtoTbMethodKind::RandomGetSeed { .. } => {}
             },
             ProtoStatement::Break => {}
         }
@@ -1223,9 +1268,18 @@ impl ProtoStatement {
                         }
                     }
                 }
+                ProtoTbMethodKind::RandomSeed { value } => {
+                    value.remap_offsets(map);
+                }
+                ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
+                    min.remap_offsets(map);
+                    max.remap_offsets(map);
+                }
                 ProtoTbMethodKind::FileOpen { .. }
                 | ProtoTbMethodKind::FileClose
-                | ProtoTbMethodKind::FileFlush => {}
+                | ProtoTbMethodKind::FileFlush
+                | ProtoTbMethodKind::RandomGet { .. }
+                | ProtoTbMethodKind::RandomGetSeed { .. } => {}
             },
             ProtoStatement::Break => {}
         }
@@ -2170,6 +2224,50 @@ impl ProtoStatement {
                                 ret: *ret,
                             }
                         }
+                        ProtoTbMethodKind::RandomSeed { value } => TbMethodKind::RandomSeed {
+                            value: value.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            ),
+                        },
+                        ProtoTbMethodKind::RandomGet { width, signed, ret } => {
+                            TbMethodKind::RandomGet {
+                                width: *width,
+                                signed: *signed,
+                                ret: *ret,
+                            }
+                        }
+                        ProtoTbMethodKind::RandomGetRange {
+                            min,
+                            max,
+                            width,
+                            signed,
+                            ret,
+                        } => TbMethodKind::RandomGetRange {
+                            min: min.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            ),
+                            max: max.apply_values_ptr(
+                                ff_values_ptr,
+                                ff_len,
+                                comb_values_ptr,
+                                comb_len,
+                                use_4state,
+                            ),
+                            width: *width,
+                            signed: *signed,
+                            ret: *ret,
+                        },
+                        ProtoTbMethodKind::RandomGetSeed { ret } => {
+                            TbMethodKind::RandomGetSeed { ret: *ret }
+                        }
                     };
                     Statement::TbMethodCall {
                         inst: *inst,
@@ -2985,6 +3083,31 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                 }
             },
             air::Statement::TbMethodCall(x) => {
+                // The return destination depends only on the assignment form,
+                // not the method kind, so resolve it once for every returning
+                // method (component + random get/get_range/get_seed).
+                let tb_ret: Option<(VarId, RetWidthCheck)> = match &x.ret {
+                    None => None,
+                    Some(dst) => {
+                        if dst.index.0.is_empty()
+                            && dst.select.0.is_empty()
+                            && dst.select.1.is_none()
+                        {
+                            let check = if let Some(w) = x.ret_width {
+                                RetWidthCheck::Exact(w)
+                            } else if x.ret_strict {
+                                RetWidthCheck::Max64
+                            } else {
+                                RetWidthCheck::Dst
+                            };
+                            Some((dst.id, check))
+                        } else {
+                            // Only a plain variable can receive a method
+                            // return value.
+                            return Err(SimulatorError::unsupported_description(&dst.token));
+                        }
+                    }
+                };
                 let method = match &x.method {
                     air::TbMethod::ClockNext { count, period } => {
                         let count = if let Some(expr) = count {
@@ -3050,35 +3173,39 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                                 }
                             })
                             .collect::<Result<Vec<_>, SimulatorError>>()?;
-                        let ret = match &x.ret {
-                            None => None,
-                            Some(dst) => {
-                                if dst.index.0.is_empty()
-                                    && dst.select.0.is_empty()
-                                    && dst.select.1.is_none()
-                                {
-                                    let check = if let Some(w) = x.ret_width {
-                                        RetWidthCheck::Exact(w)
-                                    } else if x.ret_strict {
-                                        RetWidthCheck::Max64
-                                    } else {
-                                        RetWidthCheck::Dst
-                                    };
-                                    Some((dst.id, check))
-                                } else {
-                                    // Only a plain variable can receive a
-                                    // method return value.
-                                    return Err(SimulatorError::unsupported_description(
-                                        &dst.token,
-                                    ));
-                                }
-                            }
-                        };
                         ProtoTbMethodKind::Component {
                             method: *method,
                             args,
-                            ret,
+                            ret: tb_ret,
                         }
+                    }
+                    air::TbMethod::RandomSeed { value } => {
+                        let value: ProtoExpression = Conv::conv(context, value)?;
+                        ProtoTbMethodKind::RandomSeed { value }
+                    }
+                    air::TbMethod::RandomGet { width, signed } => ProtoTbMethodKind::RandomGet {
+                        width: *width,
+                        signed: *signed,
+                        ret: tb_ret,
+                    },
+                    air::TbMethod::RandomGetRange {
+                        min,
+                        max,
+                        width,
+                        signed,
+                    } => {
+                        let min: ProtoExpression = Conv::conv(context, min)?;
+                        let max: ProtoExpression = Conv::conv(context, max)?;
+                        ProtoTbMethodKind::RandomGetRange {
+                            min,
+                            max,
+                            width: *width,
+                            signed: *signed,
+                            ret: tb_ret,
+                        }
+                    }
+                    air::TbMethod::RandomGetSeed => {
+                        ProtoTbMethodKind::RandomGetSeed { ret: tb_ret }
                     }
                 };
                 vec![ProtoStatement::TbMethodCall {
