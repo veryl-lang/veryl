@@ -1,6 +1,8 @@
 pub(crate) mod arith;
+mod balance;
 pub(crate) mod expression;
 mod postpass;
+mod prefix;
 pub(crate) mod ram;
 pub(crate) mod statement;
 mod worklist;
@@ -18,8 +20,10 @@ use veryl_analyzer::ir::{self as air, Declaration, Function, Shape, Statement, V
 use veryl_parser::resource_table::StrId;
 
 use crate::RamConfig;
+use crate::conv::balance::balance_assoc_chains;
 use crate::conv::expression::synthesize_expr;
 use crate::conv::postpass::complex_gate_replacement;
+use crate::conv::prefix::{absorb_complement, prefix_parallelize};
 use crate::conv::ram::RamCandidate;
 use crate::conv::worklist::{Simpl, dead_cell_elimination, simplify, worklist_simplify};
 use crate::ir::{
@@ -27,6 +31,7 @@ use crate::ir::{
     NetId, NetInfo, PortDir, RESERVED_NETS, RamBlock, RamReadPort, RamWritePort, ResetPolarity,
     ResetSpec,
 };
+use crate::library::{CellLibrary, library_for};
 use crate::synthesizer_error::{SynthesizerError, UnsupportedKind};
 
 pub(crate) use statement::process_statements;
@@ -54,6 +59,14 @@ thread_local! {
 pub fn convert_module(
     module: &air::Module,
     ram: RamConfig,
+) -> Result<GateModule, SynthesizerError> {
+    convert_module_with_library(module, ram, library_for(veryl_metadata::Library::default()))
+}
+
+pub fn convert_module_with_library(
+    module: &air::Module,
+    ram: RamConfig,
+    library: &'static dyn CellLibrary,
 ) -> Result<GateModule, SynthesizerError> {
     struct DepthGuard;
     impl Drop for DepthGuard {
@@ -91,7 +104,7 @@ pub fn convert_module(
         .iter()
         .map(|(k, v)| (*k, v.clone()))
         .collect();
-    let mut ctx = ConvContext::new(functions, ram);
+    let mut ctx = ConvContext::new(functions, ram, library);
     // Detect RAMs before FF banks are allocated, so qualifying arrays skip the
     // per-bit flip-flop + address decode/mux expansion. Opt-out: VERYL_SYNTH_NO_RAM.
     if env::var_os("VERYL_SYNTH_NO_RAM").is_none() {
@@ -218,6 +231,8 @@ pub(crate) struct ConvContext {
     pub cond_stack: Vec<CondTerm>,
     /// RAM-inference thresholds, forwarded to flattened child conversions.
     pub ram_config: RamConfig,
+    /// Target cell library, scoring the restructure A/B in `finalize`.
+    pub library: &'static dyn CellLibrary,
 }
 
 /// One enclosing branch condition. `Neg` (the `else` side) materialises its NOT
@@ -230,7 +245,11 @@ pub(crate) enum CondTerm {
 }
 
 impl ConvContext {
-    fn new(functions: HashMap<air::VarId, Function>, ram_config: RamConfig) -> Self {
+    fn new(
+        functions: HashMap<air::VarId, Function>,
+        ram_config: RamConfig,
+        library: &'static dyn CellLibrary,
+    ) -> Self {
         let mut nets = Vec::with_capacity(16);
         nets.push(NetInfo {
             driver: NetDriver::Const(false),
@@ -254,6 +273,7 @@ impl ConvContext {
             flattened_rams: Vec::new(),
             cond_stack: Vec::new(),
             ram_config,
+            library,
         }
     }
 
@@ -762,7 +782,11 @@ impl ConvContext {
             match CHILD_CACHE.with(|c| c.borrow().get(&cache_key).cloned()) {
                 Some(g) => g,
                 None => {
-                    let g = Rc::new(convert_module(child_module, self.ram_config)?);
+                    let g = Rc::new(convert_module_with_library(
+                        child_module,
+                        self.ram_config,
+                        self.library,
+                    )?);
                     CHILD_CACHE.with(|c| c.borrow_mut().insert(cache_key, g.clone()));
                     g
                 }
@@ -1051,6 +1075,57 @@ impl ConvContext {
             dead_cell_elimination(&mut gate);
         }
 
+        // Depth-reducing restructuring (absorb_complement, balance_assoc_chains,
+        // prefix_parallelize — see each pass's doc), tried on a clone. The
+        // passes help reduction / scan shapes but can disrupt the compound-cell
+        // fusion of carry / comparator chains, and the prefix rebuild spends
+        // area; so both candidates go through the same fusion tail and the
+        // clone is kept only if it comes out faster (equal delay: fewer
+        // cells). The guard, not the passes, makes this a safe default.
+        //
+        // The A/B costs a clone plus a second fusion tail, so it is capped:
+        // beyond the cap the design is datapath/memory dominated (a 2M-cell
+        // hash core's delay is not set by a scan) and the attempt is skipped.
+        // `VERYL_SYNTH_NO_RESTRUCTURE` forces the baseline path.
+        const MAX_RESTRUCTURE_CELLS: usize = 64 * 1024;
+        let restructured = if env::var_os("VERYL_SYNTH_NO_RESTRUCTURE").is_none()
+            && gate.cells.len() <= MAX_RESTRUCTURE_CELLS
+        {
+            let t = Instant::now();
+            let mut b = gate.clone();
+            let absorbed = absorb_complement(&mut b);
+            if absorbed {
+                // Absorption leaves aliases and newly-foldable cells that
+                // would hide scan links from chain detection.
+                converge_simplify(&mut b);
+                dead_cell_elimination(&mut b);
+            }
+            let balanced = balance_assoc_chains(&mut b);
+            if balanced {
+                // Balancing leaves dissolved interiors whose dead reads would
+                // inflate the same-kind fan-out counts chain-linking uses.
+                dead_cell_elimination(&mut b);
+            }
+            let prefixed = prefix_parallelize(&mut b);
+            let changed = absorbed || balanced || prefixed;
+            if changed {
+                converge_simplify(&mut b);
+                dead_cell_elimination(&mut b);
+            }
+            if ftimed {
+                eprintln!(
+                    "[synth-time]     finalize/restructure: {:.3}s (absorb={} balance={} prefix={})",
+                    t.elapsed().as_secs_f64(),
+                    absorbed,
+                    balanced,
+                    prefixed
+                );
+            }
+            changed.then_some(b)
+        } else {
+            None
+        };
+
         // Technology-style rewrite: fuse 2-input primitives into sky130
         // compound cells when the upstream has exactly one live consumer.
         // Runs after DCE so the consumer counts are clean (no stale dead
@@ -1061,6 +1136,22 @@ impl ConvContext {
             complex_gate_replacement(&mut gate)
         );
         fphase!("final_dce", dead_cell_elimination(&mut gate));
+
+        if let Some(mut b) = restructured {
+            complex_gate_replacement(&mut b);
+            dead_cell_elimination(&mut b);
+            // Score with the real timing model: a uniform level count rates a
+            // path of few slow cells better than many fast ones and can adopt
+            // a ~10% delay regression. Sub-femtosecond differences are float
+            // noise: a tie, broken on cell count.
+            let base = crate::analysis::compute_timing(&gate, self.library);
+            let bal = crate::analysis::compute_timing(&b, self.library);
+            const TIE_EPS: f64 = 1e-6;
+            let diff = bal.critical_path_delay - base.critical_path_delay;
+            if diff < -TIE_EPS || (diff.abs() <= TIE_EPS && b.cells.len() < gate.cells.len()) {
+                gate = b;
+            }
+        }
         Ok(gate)
     }
 }
