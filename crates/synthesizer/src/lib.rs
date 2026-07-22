@@ -61,11 +61,23 @@ pub fn build_gate_ir_with(
     top: StrId,
     ram: RamConfig,
 ) -> Result<GateIr, SynthesizerError> {
+    build_gate_ir_with_library(ir, top, ram, library_for(Library::default()))
+}
+
+/// [`build_gate_ir_with`] against a specific cell library, which steers the
+/// restructure A/B in `conv::finalize` — the netlist tracks the library the
+/// caller will report against.
+pub fn build_gate_ir_with_library(
+    ir: &AnalyzerIr,
+    top: StrId,
+    ram: RamConfig,
+    library: &'static dyn CellLibrary,
+) -> Result<GateIr, SynthesizerError> {
     for c in &ir.components {
         if let veryl_analyzer::ir::Component::Module(m) = c
             && m.name == top
         {
-            let module = conv::convert_module(m, ram)?;
+            let module = conv::convert_module_with_library(m, ram, library)?;
             return Ok(GateIr { module });
         }
     }
@@ -96,8 +108,9 @@ pub fn synthesize_with(
     ram: RamConfig,
 ) -> Result<SynthResult, SynthesizerError> {
     let timed = env::var_os("VERYL_SYNTH_TIME").is_some();
+    let lib = library_for(library);
     let t = Instant::now();
-    let gate_ir = build_gate_ir_with(ir, top, ram)?;
+    let gate_ir = build_gate_ir_with_library(ir, top, ram, lib)?;
     if timed {
         eprintln!(
             "[synth-time] build_gate_ir: {:.3}s ({} cells, {} ffs, {} rams)",
@@ -107,7 +120,6 @@ pub fn synthesize_with(
             gate_ir.module.ram_blocks.len(),
         );
     }
-    let lib = library_for(library);
     let t = Instant::now();
     let area = analysis::compute_area(&gate_ir.module, lib);
     if timed {

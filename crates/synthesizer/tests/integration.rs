@@ -168,6 +168,36 @@ fn kogge_stone_wider_add_has_log_depth() {
 }
 
 #[test]
+fn wide_onehot_or_reduction_is_rebalanced_shallow() {
+    // The unrolled running-OR of a 32-way one-hot mux is a depth-~32 ripple;
+    // the balance pass rebuilds it as a tree, ~log2(32) + the AND layer.
+    // Exercises the pass end-to-end, including the keep-the-better guard.
+    let code = r#"
+        module Top (
+            sel:  input  logic<32>,
+            data: input  logic<32>,
+            y:    output logic,
+        ) {
+            always_comb {
+                var acc: logic;
+                acc = 1'b0;
+                for i in 0..32 {
+                    acc = acc | (sel[i] & data[i]);
+                }
+                y = acc;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    assert!(
+        result.timing.critical_path_depth <= 8,
+        "wide one-hot OR reduction should rebalance to ~log2(32) depth, got {}",
+        result.timing.critical_path_depth
+    );
+}
+
+#[test]
 fn mux_ternary() {
     let code = r#"
         module Top (
@@ -4138,4 +4168,133 @@ fn module_generate_for_chain_is_not_zero_gate() {
             .any(|&n| n != NET_CONST0 && n != NET_CONST1),
         "generate-for chain output must not be tied to constant nets"
     );
+}
+
+/// Evaluate one gate of the netlist. Mux2 inputs are `[sel, d0, d1]`.
+fn eval_cell(kind: CellKind, x: &[bool]) -> bool {
+    match kind {
+        CellKind::Buf => x[0],
+        CellKind::Not => !x[0],
+        CellKind::And2 => x[0] && x[1],
+        CellKind::Or2 => x[0] || x[1],
+        CellKind::Nand2 => !(x[0] && x[1]),
+        CellKind::Nor2 => !(x[0] || x[1]),
+        CellKind::Xor2 => x[0] ^ x[1],
+        CellKind::Xnor2 => !(x[0] ^ x[1]),
+        CellKind::And3 => x[0] && x[1] && x[2],
+        CellKind::Or3 => x[0] || x[1] || x[2],
+        CellKind::Nand3 => !(x[0] && x[1] && x[2]),
+        CellKind::Nor3 => !(x[0] || x[1] || x[2]),
+        CellKind::Ao21 => (x[0] && x[1]) || x[2],
+        CellKind::Aoi21 => !((x[0] && x[1]) || x[2]),
+        CellKind::Oa21 => (x[0] || x[1]) && x[2],
+        CellKind::Oai21 => !((x[0] || x[1]) && x[2]),
+        CellKind::Ao31 => (x[0] && x[1] && x[2]) || x[3],
+        CellKind::Aoi31 => !((x[0] && x[1] && x[2]) || x[3]),
+        CellKind::Ao22 => (x[0] && x[1]) || (x[2] && x[3]),
+        CellKind::Aoi22 => !((x[0] && x[1]) || (x[2] && x[3])),
+        CellKind::Oai22 => !((x[0] || x[1]) && (x[2] || x[3])),
+        CellKind::Mux2 => {
+            if x[0] {
+                x[2]
+            } else {
+                x[1]
+            }
+        }
+    }
+}
+
+fn eval_net(
+    m: &veryl_synthesizer::ir::GateModule,
+    net: veryl_synthesizer::ir::NetId,
+    inputs: &std::collections::HashMap<veryl_synthesizer::ir::NetId, bool>,
+    memo: &mut std::collections::HashMap<veryl_synthesizer::ir::NetId, bool>,
+) -> bool {
+    if let Some(&v) = memo.get(&net) {
+        return v;
+    }
+    let v = match &m.nets[net as usize].driver {
+        NetDriver::Const(b) => *b,
+        NetDriver::PortInput => inputs[&net],
+        NetDriver::Cell(ci) => {
+            let c = &m.cells[*ci];
+            let iv: Vec<bool> = c
+                .inputs
+                .iter()
+                .map(|&i| eval_net(m, i, inputs, memo))
+                .collect();
+            eval_cell(c.kind, &iv)
+        }
+        other => panic!("unexpected driver {other:?} in netlist eval"),
+    };
+    memo.insert(net, v);
+    v
+}
+
+/// The depth restructuring rewrites a priority encoder wholesale (ripple →
+/// Sklansky prefix network); verify the final netlist, through the full
+/// pipeline including fusion, against a golden model for every input.
+#[test]
+fn priority_encoder_netlist_matches_golden_model_exhaustively() {
+    let code = r#"
+        module Top (
+            i:     input  logic<16>,
+            out:   output logic<16>,
+            valid: output logic,
+        ) {
+            always_comb {
+                var found: logic;
+                out   = '0;
+                valid = 1'b0;
+                found = 1'b0;
+                for k in rev 0..16 {
+                    if !found && i[k] {
+                        out[k] = 1'b1;
+                        valid  = 1'b1;
+                        found  = 1'b1;
+                    }
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("gate ir").module;
+
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    let in_nets = port("i");
+    let out_nets = port("out");
+    let valid_net = port("valid")[0];
+
+    for mask in 0u32..(1 << 16) {
+        let inputs: std::collections::HashMap<_, _> = in_nets
+            .iter()
+            .enumerate()
+            .map(|(k, &n)| (n, (mask >> k) & 1 == 1))
+            .collect();
+        let mut memo = std::collections::HashMap::new();
+        let expect_out = if mask == 0 {
+            0
+        } else {
+            1u32 << (31 - mask.leading_zeros())
+        };
+        for (k, &n) in out_nets.iter().enumerate() {
+            assert_eq!(
+                eval_net(&gate, n, &inputs, &mut memo),
+                (expect_out >> k) & 1 == 1,
+                "out[{k}] mismatch at i={mask:#06x}"
+            );
+        }
+        assert_eq!(
+            eval_net(&gate, valid_net, &inputs, &mut memo),
+            mask != 0,
+            "valid mismatch at i={mask:#06x}"
+        );
+    }
 }
