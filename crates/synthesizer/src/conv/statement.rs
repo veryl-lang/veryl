@@ -185,6 +185,145 @@ fn record_masked_ram_write(
     Ok(())
 }
 
+/// Records one lane of a byte/bit-masked RAM write, whose destination is a
+/// compile-time-constant sub-word `mem[addr][lo..=hi]`. Lanes at one address
+/// accumulate into a single masked port. Each bit takes `data` = the lane value
+/// and `mask` = the lane's write condition; bits no lane writes keep mask 0
+/// (held). The full condition (outer `ce`, lane `we[i]`) rides in the mask, so
+/// the port `enable` stays high.
+///
+/// Lanes are grouped by their synthesized address nets, so two lanes only merge
+/// when they resolve to the *same* address — a lane whose index was reassigned
+/// earlier in the block gets its own port, exactly as the whole-word path would.
+///
+/// A bit two lanes both write is resolved with a priority mux matching SV
+/// non-blocking last-write-wins: the later lane's value takes the bit where its
+/// condition holds, else the earlier lane's; the conditions OR into the mask.
+/// The common byte/bit-writable RAM has disjoint lanes, so that path is unused
+/// and each bit is written exactly once with no extra gate.
+fn record_subword_ram_write(
+    ctx: &mut ConvContext,
+    dst: &air::AssignDestination,
+    src: &[NetId],
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+) -> Result<(), SynthesizerError> {
+    let cand = ctx.ram_vars[&dst.id];
+    let (lo, hi) = const_subword_range(ctx, dst)?;
+    let idx_expr =
+        dst.index.0.first().ok_or_else(|| {
+            SynthesizerError::internal(format!("RAM write {} has no index", dst.id))
+        })?;
+    let idx_bits = arith::index_bits_for(cand.depth);
+    let addr = synthesize_expr(ctx, idx_expr, current, idx_bits)?;
+    let enable = current_write_enable(ctx);
+    let width = cand.width;
+
+    // Get (or create) the port for this exact address and snapshot the bits this
+    // lane touches (aligned with `src`, `None` for any out-of-range bit) so the
+    // merge below can build muxes without holding the builder borrow.
+    let (port_idx, old): (usize, Vec<Option<(NetId, NetId)>>) = {
+        let Some(builder) = ctx.ram_builders.get_mut(&dst.id) else {
+            return Ok(());
+        };
+        let idx = match builder.subword_ports.get(&addr) {
+            Some(&idx) => idx,
+            None => {
+                let idx = builder.writes.len();
+                builder.subword_ports.insert(addr.clone(), idx);
+                builder.writes.push(RamWritePort {
+                    addr,
+                    data: vec![NET_CONST0; width],
+                    enable: NET_CONST1,
+                    mask: Some(vec![NET_CONST0; width]),
+                });
+                idx
+            }
+        };
+        let port = &builder.writes[idx];
+        let mask = port.mask.as_ref().expect("sub-word port carries a mask");
+        let snap = (0..src.len())
+            .map(|k| {
+                let bit = lo + k;
+                (bit <= hi && bit < width).then(|| (port.data[bit], mask[bit]))
+            })
+            .collect();
+        (idx, snap)
+    };
+
+    let mut merged: Vec<(usize, NetId, NetId)> = Vec::with_capacity(old.len());
+    for (k, slot) in old.iter().enumerate() {
+        let Some((old_data, old_mask)) = *slot else {
+            continue;
+        };
+        let bit = lo + k;
+        let bit_net = src[k];
+        let (data, mask) = if old_mask == NET_CONST0 {
+            // First (or only) lane to write this bit.
+            (bit_net, enable)
+        } else {
+            // `enable ? bit_net : old_data` — later lane wins where it fires.
+            let data = ctx.add_cell(CellKind::Mux2, vec![enable, old_data, bit_net]);
+            (data, or_nets(ctx, old_mask, enable))
+        };
+        merged.push((bit, data, mask));
+    }
+
+    if let Some(builder) = ctx.ram_builders.get_mut(&dst.id) {
+        let port = &mut builder.writes[port_idx];
+        let mask = port.mask.as_mut().expect("sub-word port carries a mask");
+        for (bit, data, m) in merged {
+            port.data[bit] = data;
+            mask[bit] = m;
+        }
+    }
+    Ok(())
+}
+
+/// The constant bit range `[lo, hi]` within the addressed word that a sub-word
+/// RAM destination `mem[addr][sel]` writes. Errors on a dynamic select (which
+/// `ram::is_dynamic_const_subword` already excludes from inference). Mirrors
+/// `write_to_dst`'s static-select arm, folding the `part_select` member offset
+/// into the returned range instead of tracking it separately.
+fn const_subword_range(
+    ctx: &mut ConvContext,
+    dst: &air::AssignDestination,
+) -> Result<(usize, usize), SynthesizerError> {
+    let scalar_width = ctx
+        .variables
+        .get(&dst.id)
+        .map(|s| s.scalar_width)
+        .ok_or_else(|| SynthesizerError::internal(format!("unknown RAM target {}", dst.id)))?;
+    let (member_offset, member_width) = match &dst.comptime.part_select {
+        Some(ps) => {
+            let offset: usize = ps.part_select.iter().map(|p| p.pos).sum();
+            let width = ps
+                .part_select
+                .last()
+                .and_then(|p| p.r#type.total_width())
+                .unwrap_or(scalar_width);
+            (offset, width)
+        }
+        None => (0, scalar_width),
+    };
+    let (lo, hi) = if dst.select.is_empty() {
+        (0, member_width - 1)
+    } else if dst.select.is_const() {
+        let (hi, lo) = dst
+            .select
+            .eval_value(&mut ctx.eval_ctx, &dst.comptime.r#type, false)
+            .ok_or_else(|| {
+                SynthesizerError::dynamic_select(format!("dst {}", dst.id), &dst.token)
+            })?;
+        (lo, hi)
+    } else {
+        return Err(SynthesizerError::dynamic_select(
+            format!("dst {}", dst.id),
+            &dst.token,
+        ));
+    };
+    Ok((member_offset + lo, member_offset + hi))
+}
+
 /// AND of every enclosing branch condition (`Neg` negated). Constants fold, so
 /// an unconditional write stays tied high with no gate.
 fn current_write_enable(ctx: &mut ConvContext) -> NetId {
@@ -214,6 +353,20 @@ fn and_nets(ctx: &mut ConvContext, a: NetId, b: NetId) -> NetId {
         a
     } else {
         ctx.add_cell(CellKind::And2, vec![a, b])
+    }
+}
+
+/// `a | b` with constant folding — the mask combiner for overlapping sub-word
+/// write lanes (a bit is written if either lane's condition holds).
+fn or_nets(ctx: &mut ConvContext, a: NetId, b: NetId) -> NetId {
+    if a == NET_CONST1 || b == NET_CONST1 {
+        NET_CONST1
+    } else if a == NET_CONST0 {
+        b
+    } else if b == NET_CONST0 {
+        a
+    } else {
+        ctx.add_cell(CellKind::Or2, vec![a, b])
     }
 }
 
@@ -273,10 +426,14 @@ pub(crate) fn write_to_dst(
     src: &[NetId],
     current: &mut HashMap<air::VarId, Vec<NetId>>,
 ) -> Result<(), SynthesizerError> {
-    // RAM-inferred arrays don't materialise per-element decode/mux. The single
-    // dynamic write `mem[addr] = data` becomes the macro's write port instead.
+    // RAM-inferred arrays don't materialise per-element decode/mux. A whole-word
+    // `mem[addr] = data` becomes the macro's write port; a constant sub-word
+    // `mem[addr][lane] = data` becomes a byte/bit lane of a masked port.
     if ctx.ram_vars.contains_key(&dst.id) {
-        return record_ram_write(ctx, dst, src, current);
+        if dst.select.is_empty() && dst.comptime.part_select.is_none() {
+            return record_ram_write(ctx, dst, src, current);
+        }
+        return record_subword_ram_write(ctx, dst, src, current);
     }
     let (total_width, scalar_width, shape) = {
         let slot = ctx.variables.get(&dst.id).ok_or_else(|| {

@@ -180,6 +180,13 @@ pub(crate) struct RamBuilder {
     /// One entry per dynamic write site `mem[addr] = data` (multi-write arrays
     /// such as cache data or a superscalar register file produce several).
     pub writes: Vec<RamWritePort>,
+    /// Maps a sub-word write's *synthesized address nets* to its port index in
+    /// `writes`, so byte/bit-masked lane writes at one address accumulate into
+    /// one masked port (see `record_subword_ram_write`). Keyed by the address
+    /// nets, not a syntactic signature, so lanes whose index was reassigned
+    /// earlier in the block — a different synthesized address — land in separate
+    /// ports, matching how each lane's address is resolved from `current`.
+    pub subword_ports: HashMap<Vec<NetId>, usize>,
     /// Read ports keyed by a structural address signature so repeated reads of
     /// the same address share one port.
     pub reads: Vec<(String, RamReadPort)>,
@@ -543,6 +550,7 @@ impl ConvContext {
                             clock: clock_net,
                             clock_edge,
                             writes: Vec::new(),
+                            subword_ports: HashMap::new(),
                             reads: Vec::new(),
                         });
                         continue;

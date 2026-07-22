@@ -2750,6 +2750,201 @@ fn byte_write_enable_frees_a_read_port_near_the_limit() {
 }
 
 #[test]
+fn byte_lane_writes_infer_one_masked_ram() {
+    // Per-byte write-enable RAM written as a loop of constant part-select lane
+    // writes `mem[addr][b*8 +: 8] = din[...]` (a byte-writable SRAM, not the
+    // read-modify-write form). All lanes target the same address, so they must
+    // collapse into ONE masked write port — not one port per byte, and not a
+    // flip-flop bank.
+    let code = r#"
+        module BwByte (
+            clk:   input  clock     ,
+            we:    input  logic<4>  ,
+            addr:  input  logic<6>  ,
+            din:   input  logic<32> ,
+            raddr: input  logic<6>  ,
+            dout:  output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                for b in 0..4 {
+                    if we[b] {
+                        mem[addr][b * 8 +: 8] = din[b * 8 +: 8];
+                    }
+                }
+            }
+            assign dout = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "BwByte");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(m.ram_blocks.len(), 1, "expected one inferred RAM block");
+    let ram = &m.ram_blocks[0];
+    assert_eq!((ram.depth, ram.width), (64, 32));
+    assert_eq!(
+        ram.write_ports.len(),
+        1,
+        "the 4 byte lanes must merge into one masked port, not one port per lane"
+    );
+    let mask = ram.write_ports[0]
+        .mask
+        .as_ref()
+        .expect("byte-lane write must carry a mask");
+    assert_eq!(mask.len(), ram.width);
+    assert_eq!(m.ffs.len(), 0, "byte-writable RAM must not expand to flops");
+}
+
+#[test]
+fn bit_lane_writes_infer_one_masked_ram() {
+    // Per-bit write-enable RAM: a loop of single-bit lane writes `mem[addr][i]
+    // = din[i]`. Same collapse into one masked port as the byte case.
+    let code = r#"
+        module BwBit (
+            clk:   input  clock     ,
+            we:    input  logic<32> ,
+            addr:  input  logic<6>  ,
+            din:   input  logic<32> ,
+            raddr: input  logic<6>  ,
+            dout:  output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                for i in 0..32 {
+                    if we[i] {
+                        mem[addr][i] = din[i];
+                    }
+                }
+            }
+            assign dout = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "BwBit");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(m.ram_blocks.len(), 1, "expected one inferred RAM block");
+    assert_eq!(m.ram_blocks[0].write_ports.len(), 1, "bit lanes → one port");
+    assert!(m.ram_blocks[0].write_ports[0].mask.is_some());
+    assert_eq!(m.ffs.len(), 0, "bit-writable RAM must not expand to flops");
+}
+
+#[test]
+fn dynamic_subword_write_stays_flip_flops() {
+    // A *runtime*-indexed sub-word write `mem[addr][sel] = d` names no fixed
+    // lane, so it must NOT infer a masked RAM — it stays flip-flops.
+    let code = r#"
+        module DynSub (
+            clk:   input  clock     ,
+            addr:  input  logic<6>  ,
+            sel:   input  logic<5>  ,
+            d:     input  logic     ,
+            raddr: input  logic<6>  ,
+            dout:  output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                mem[addr][sel] = d;
+            }
+            assign dout = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "DynSub");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(
+        m.ram_blocks.len(),
+        0,
+        "a dynamic sub-word write is not a fixed lane; must stay flip-flops"
+    );
+}
+
+#[test]
+fn overlapping_lane_writes_use_a_priority_mux() {
+    // Two conditional writes to the *same* byte lane at the same address. They
+    // still merge into one masked port, but the overlapping bits must resolve
+    // with a priority mux (`cb ? y : x`) matching SV non-blocking last-write-
+    // wins — NOT a silent overwrite that drops the earlier writer. The 8
+    // overlapping bits each get one Mux2; a naive overwrite would emit none.
+    let code = r#"
+        module Ov (
+            clk:   input  clock     ,
+            ca:    input  logic     ,
+            cb:    input  logic     ,
+            addr:  input  logic<6>  ,
+            x:     input  logic<8>  ,
+            y:     input  logic<8>  ,
+            raddr: input  logic<6>  ,
+            dout:  output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                if ca {
+                    mem[addr][7:0] = x;
+                }
+                if cb {
+                    mem[addr][7:0] = y;
+                }
+            }
+            assign dout = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Ov");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(m.ram_blocks.len(), 1, "one inferred RAM block");
+    assert_eq!(
+        m.ram_blocks[0].write_ports.len(),
+        1,
+        "same-address lanes stay one port even when they overlap"
+    );
+    assert!(m.ram_blocks[0].write_ports[0].mask.is_some());
+    let muxes = m.cells.iter().filter(|c| c.kind == CellKind::Mux2).count();
+    assert_eq!(
+        muxes, 8,
+        "the 8 overlapping bits must each resolve with a priority mux, got {muxes}"
+    );
+}
+
+#[test]
+fn reassigned_index_lanes_get_separate_ports() {
+    // Two sub-word writes through the SAME syntactic index `q`, but `q` is a
+    // block-local reassigned between them (emitted blocking `=`), so the lanes
+    // resolve to different addresses (`base`, then `base + 1`). Grouping by the
+    // synthesized address nets (not the syntactic signature) must place them in
+    // TWO ports — a signature key would wrongly merge them and drop `b`'s write
+    // to `base + 1`.
+    let code = r#"
+        module Reassign (
+            clk:   input  clock     ,
+            base:  input  logic<6>  ,
+            a:     input  logic<8>  ,
+            b:     input  logic<8>  ,
+            raddr: input  logic<6>  ,
+            dout:  output logic<32> ,
+        ) {
+            var mem: logic<32> [64];
+            always_ff (clk) {
+                var q: logic<6>;
+                q            = base;
+                mem[q][7:0]  = a;
+                q            = base + 1;
+                mem[q][15:8] = b;
+            }
+            assign dout = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Reassign");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(m.ram_blocks.len(), 1, "one inferred RAM block");
+    assert_eq!(
+        m.ram_blocks[0].write_ports.len(),
+        2,
+        "lanes at different (reassigned) addresses must not merge into one port"
+    );
+}
+
+#[test]
 fn reset_array_stays_flip_flops_by_default() {
     // Real SRAM has no reset, so a reset array is always kept as flip-flops; an
     // array meant to be SRAM is written reset-less in the RTL.
