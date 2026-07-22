@@ -10,10 +10,13 @@
 //! Criteria (thresholds come from [`RamConfig`], set in `Veryl.toml`'s
 //! `[synth]` section):
 //!   * array variable, at least `min_bits` stored bits and depth ≥ 2;
-//!   * 1..=`max_write_ports` *clocked* writes `mem[addr] = data`, each a
-//!     single destination, single dynamic index dimension, whole-word (no
-//!     bit/part select). A multi-write array (cache data filled two words per
-//!     beat, a superscalar register file) gets one port per write site;
+//!   * 1..=`max_write_ports` *clocked* writes, each a single destination and
+//!     single dynamic index dimension. A write is either whole-word
+//!     `mem[addr] = data` or a compile-time-constant sub-word `mem[addr][lane]
+//!     = data` (a byte/bit write-enable). A multi-write array (cache data
+//!     filled two words per beat, a superscalar register file) gets one port
+//!     per write site; the sub-word lane writes at one address instead collapse
+//!     into a single masked port (`RamWritePort::mask`);
 //!   * every read is also `mem[addr]` — single dynamic index, whole word — and
 //!     there are at most `max_read_ports` distinct read addresses.
 //!
@@ -22,8 +25,8 @@
 //! bit-arrays such as a cache `valid` stay as flops regardless via the
 //! `min_bits` floor.)
 //!
-//! Partial / sub-word writes remain out of scope and keep the array as
-//! flip-flops.
+//! A *dynamic* (runtime-indexed) sub-word write is not a fixed lane and keeps
+//! the array as flip-flops.
 //!
 //! A dynamically-indexed array that fails inference but exceeds `max_ff_bits`
 //! is rejected rather than expanded into the `O(depth × width)` gates that
@@ -236,12 +239,16 @@ fn stmt_writes_ram(ram_vars: &HashMap<air::VarId, RamCandidate>, stmt: &Statemen
     }
 }
 
-/// 1..=`max_write_ports` clocked writes, each a single dynamic whole-word
-/// destination, no comb / static-index write. A reset (`if_reset`) write
-/// disqualifies the array (real SRAM has no reset; an SRAM-intended array is
-/// written reset-less in the RTL).
+/// 1..=`max_write_ports` clocked writes, no comb / reset write. Each write is
+/// either a whole-word `mem[addr] = data` (one port) or a compile-time-constant
+/// sub-word `mem[addr][lane] = data` (a byte/bit write-enable lane); the sub-word
+/// lane writes at one address merge into a single masked port, so they are
+/// counted per address, not per statement. A reset (`if_reset`) write disqualifies
+/// the array (real SRAM has no reset; an SRAM-intended array is written reset-less).
 fn write_pattern_ok(module: &air::Module, vid: air::VarId, ram: &RamConfig) -> bool {
-    let mut clocked_writes = 0usize;
+    let mut whole_word_ports = 0usize;
+    // Sub-word lane writes to the same address collapse into one masked port.
+    let mut subword_addrs: Vec<String> = Vec::new();
     let mut ok = true;
 
     for decl in &module.declarations {
@@ -252,10 +259,16 @@ fn write_pattern_ok(module: &air::Module, vid: air::VarId, ram: &RamConfig) -> b
                         if in_reset {
                             // Reset assignment → keep as flip-flops.
                             ok = false;
-                            return;
-                        }
-                        clocked_writes += 1;
-                        if dst_count != 1 || !is_dynamic_whole_word(dst) {
+                        } else if dst_count != 1 {
+                            ok = false;
+                        } else if is_dynamic_whole_word(dst) {
+                            whole_word_ports += 1;
+                        } else if is_dynamic_const_subword(dst) {
+                            let sig = addr_signature(&dst.index.0[0]);
+                            if !subword_addrs.contains(&sig) {
+                                subword_addrs.push(sig);
+                            }
+                        } else {
                             ok = false;
                         }
                     });
@@ -284,7 +297,13 @@ fn write_pattern_ok(module: &air::Module, vid: air::VarId, ram: &RamConfig) -> b
         }
     }
 
-    ok && (1..=ram.max_write_ports).contains(&clocked_writes)
+    // Syntactic upper-bound proxy: the build groups sub-word lanes by their
+    // synthesized address nets, so a reassigned (or un-CSE'd computed) index can
+    // build more ports than the distinct signatures counted here. That only
+    // under-counts — every built port has a correct address — so it is a
+    // gate/constraint proxy, never a soundness input.
+    let ports = whole_word_ports + subword_addrs.len();
+    ok && (1..=ram.max_write_ports).contains(&ports)
 }
 
 /// Every read of `vid` is a single dynamic whole-word `mem[addr]`, with at most
@@ -503,6 +522,23 @@ fn is_dynamic_whole_word(dst: &AssignDestination) -> bool {
         && !dst.index.is_const()
         && dst.select.is_empty()
         && dst.comptime.part_select.is_none()
+}
+
+/// `mem[addr][lane]` — a single dynamic index plus a compile-time-constant bit
+/// or part select. The lane is statically known, so several such writes to one
+/// address become one masked write port (byte/bit write-enable). A *dynamic*
+/// sub-word select isn't a static lane and keeps the array as flip-flops.
+fn is_dynamic_const_subword(dst: &AssignDestination) -> bool {
+    if dst.index.0.len() != 1 || dst.index.is_const() {
+        return false;
+    }
+    // Must select a sub-word; a whole-word write is is_dynamic_whole_word's job.
+    if dst.select.is_empty() && dst.comptime.part_select.is_none() {
+        return false;
+    }
+    // A struct-member part_select carries a constant offset; an explicit bit /
+    // range select must be compile-time constant to name a fixed lane.
+    dst.select.is_empty() || dst.select.is_const()
 }
 
 /// Visit every destination targeting `vid`. `f(dst, in_reset, dst_count)` where
