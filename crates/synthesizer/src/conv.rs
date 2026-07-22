@@ -1,5 +1,6 @@
 pub(crate) mod arith;
 mod balance;
+mod counter;
 pub(crate) mod expression;
 mod postpass;
 mod prefix;
@@ -21,6 +22,7 @@ use veryl_parser::resource_table::StrId;
 
 use crate::RamConfig;
 use crate::conv::balance::balance_assoc_chains;
+use crate::conv::counter::count_scan_rebuild;
 use crate::conv::expression::synthesize_expr;
 use crate::conv::postpass::complex_gate_replacement;
 use crate::conv::prefix::{absorb_complement, prefix_parallelize};
@@ -1107,18 +1109,20 @@ impl ConvContext {
                 dead_cell_elimination(&mut b);
             }
             let prefixed = prefix_parallelize(&mut b);
-            let changed = absorbed || balanced || prefixed;
+            let counted = count_scan_rebuild(&mut b);
+            let changed = absorbed || balanced || prefixed || counted;
             if changed {
                 converge_simplify(&mut b);
                 dead_cell_elimination(&mut b);
             }
             if ftimed {
                 eprintln!(
-                    "[synth-time]     finalize/restructure: {:.3}s (absorb={} balance={} prefix={})",
+                    "[synth-time]     finalize/restructure: {:.3}s (absorb={} balance={} prefix={} count={})",
                     t.elapsed().as_secs_f64(),
                     absorbed,
                     balanced,
-                    prefixed
+                    prefixed,
+                    counted
                 );
             }
             changed.then_some(b)
