@@ -2343,6 +2343,130 @@ fn tb_file_native() {
     let _ = std::fs::remove_file(&out_path);
 }
 
+fn run_random_tb(code: &str, top: &str) {
+    let config = Config::default();
+    let ir = analyze_top(code, &config, top).expect("analyze");
+    let mut sim = Simulator::new(ir, None);
+    let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+    let clock_periods = build_clock_periods(&sim.ir.event_statements);
+    let stmts = sim
+        .ir
+        .event_statements
+        .get(&Event::Initial)
+        .cloned()
+        .expect("initial block");
+    let tb_stmts = convert_initial_to_testbench(&stmts, &event_map, &clock_periods, 3);
+    let result = run_testbench(&mut sim, &tb_stmts);
+    assert_eq!(result, TestResult::Pass);
+}
+
+#[test]
+fn tb_random_bit_alias() {
+    // A `bit<N>` element type reached via a `gen` type binding (N <= 64) is
+    // accepted and generates N-bit values.
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_tb_random_bit_alias.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    #[test(test_random_alias)]
+    module test_random_alias {{
+        gen my_t: type = bit<7>;
+        var r: $tb::random::<my_t>;
+        var f: $tb::file;
+        var x: my_t;
+        initial {{
+            r.seed(9);
+            f.open("{0}");
+            x = r.get();
+            f.write("%d\n", x);
+            x = r.get();
+            f.write("%d\n", x);
+            x = r.get();
+            f.write("%d\n", x);
+            x = r.get_range(0, 100);
+            f.write("%d\n", x);
+            f.close();
+            $finish();
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    let _ = std::fs::remove_file(&out_path);
+    run_random_tb(&code, "test_random_alias");
+    let content = std::fs::read_to_string(&out_path).unwrap();
+    assert!(content.lines().next().is_some());
+    for line in content.lines() {
+        let v: u32 = line.trim().parse().unwrap();
+        assert!(v <= 127, "bit<7> random out of range: {v}");
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
+#[test]
+fn tb_random_native() {
+    // Full native path for `$tb::random`: an explicit seed makes the sequence
+    // reproducible, `generate_range(n, n)` is exactly `n`, and a bounded range
+    // stays within bounds.
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_tb_random_native.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    #[test(test_random_native)]
+    module test_random_native {{
+        var r: $tb::random::<u8>;
+        var f: $tb::file;
+        var x: u8;
+        initial {{
+            r.seed(1234);
+            f.open("{0}");
+            x = r.get_range(100, 100);
+            f.write("%d\n", x);
+            x = r.get_range(0, 7);
+            f.write("%d\n", x);
+            x = r.get();
+            f.write("%d\n", x);
+            x = r.get();
+            f.write("%d\n", x);
+            f.close();
+            $finish();
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    let read = || {
+        let _ = std::fs::remove_file(&out_path);
+        run_random_tb(&code, "test_random_native");
+        std::fs::read_to_string(&out_path).unwrap()
+    };
+
+    let content1 = read();
+    let content2 = read();
+    // Explicit seed => reproducible sequence.
+    assert_eq!(content1, content2, "same seed must reproduce the sequence");
+
+    let lines: Vec<&str> = content1.lines().collect();
+    assert_eq!(lines.len(), 4);
+    // generate_range(100, 100) is exactly 100.
+    assert_eq!(lines[0], "100");
+    // generate_range(0, 7) stays within [0, 7].
+    let v: u32 = lines[1].trim().parse().unwrap();
+    assert!(v <= 7, "generate_range(0, 7) out of bounds: {v}");
+    // generate() over u8 stays within [0, 255].
+    for line in &lines[2..] {
+        let v: u32 = line.trim().parse().unwrap();
+        assert!(v <= 255);
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
 #[test]
 fn tb_file_write_without_open_is_dropped() {
     // write/flush/close on a handle that was never opened are silent no-ops

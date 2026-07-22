@@ -557,6 +557,11 @@ impl Symbol {
                 let symbol = symbol_table::get(x.base).unwrap();
                 symbol.generic_parameters()
             }
+            SymbolKind::TbComponent(x) => x
+                .generic_parameters
+                .iter()
+                .map(|x| get_generic_parameter(*x))
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -573,6 +578,7 @@ impl Symbol {
                 let symbol = symbol_table::get(x.base).unwrap();
                 symbol.has_generic_paramters()
             }
+            SymbolKind::TbComponent(x) => !x.generic_parameters.is_empty(),
             _ => false,
         }
     }
@@ -905,9 +911,12 @@ impl Symbol {
             SymbolKind::GenericInstance(x) => symbol_table::get(x.base)
                 .map(|x| x.is_variable_type())
                 .unwrap_or(false),
-            // `$tb::file` is a passive testbench resource declared as `var`.
+            // `$tb::file` and `$tb::random` are testbench resources declared as `var`.
             SymbolKind::TbComponent(x) => {
-                matches!(x.kind, TbComponentKind::File | TbComponentKind::External(_))
+                matches!(
+                    x.kind,
+                    TbComponentKind::File | TbComponentKind::Random | TbComponentKind::External(_)
+                )
             }
             _ => false,
         }
@@ -2912,6 +2921,10 @@ pub enum TbComponentKind {
     ClockGen,
     ResetGen,
     File,
+    /// Random-number generator declared as `var r: $tb::random::<T>;`. The
+    /// element type is a generic argument (see `TbComponentProperty`), so it
+    /// is resolved through the normal generic pipeline.
+    Random,
     /// User-defined verification component declared in `[[components]]` of
     /// Veryl.toml; the payload is the component name.
     External(StrId),
@@ -2923,6 +2936,7 @@ impl std::fmt::Display for TbComponentKind {
             TbComponentKind::ClockGen => write!(f, "clock_gen"),
             TbComponentKind::ResetGen => write!(f, "reset_gen"),
             TbComponentKind::File => write!(f, "file"),
+            TbComponentKind::Random => write!(f, "random"),
             TbComponentKind::External(name) => write!(f, "{name}"),
         }
     }
@@ -2931,6 +2945,10 @@ impl std::fmt::Display for TbComponentKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TbComponentProperty {
     pub kind: TbComponentKind,
+    /// Generic type parameters, held like other symbols' `generic_parameters`.
+    /// Only `$tb::random::<T>` carries one (the synthesized `T`); the other
+    /// builtins and external components leave this empty.
+    pub generic_parameters: Vec<SymbolId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

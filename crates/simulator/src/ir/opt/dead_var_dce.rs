@@ -299,9 +299,19 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
                     }
                 }
             }
+            // `$tb::random` argument signals are reads, like file-write args.
+            ProtoTbMethodKind::RandomSeed { value } => {
+                walk_expr_reads(value, c);
+            }
+            ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
+                walk_expr_reads(min, c);
+                walk_expr_reads(max, c);
+            }
             ProtoTbMethodKind::FileOpen { .. }
             | ProtoTbMethodKind::FileClose
-            | ProtoTbMethodKind::FileFlush => {}
+            | ProtoTbMethodKind::FileFlush
+            | ProtoTbMethodKind::RandomGet { .. }
+            | ProtoTbMethodKind::RandomGetSeed { .. } => {}
         },
         ProtoStatement::Break => {}
     }

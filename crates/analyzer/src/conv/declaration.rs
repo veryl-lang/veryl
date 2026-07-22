@@ -711,7 +711,10 @@ impl Conv<&VarDeclaration> for ir::Declaration {
                 && let SymbolKind::TbComponent(c) = &ty_symbol.found.kind
             {
                 match &c.kind {
-                    TbComponentKind::File => {
+                    TbComponentKind::File | TbComponentKind::Random => {
+                        // `file` handle and `random` generator are never assigned
+                        // (their state lives in the simulator), so suppress the
+                        // unassigned lint.
                         attribute_table::insert(
                             variable_token,
                             Attribute::Allow(AllowItem::UnassignVariable),
@@ -1437,8 +1440,10 @@ impl Conv<&InstDeclaration> for ir::Declaration {
             let type_kind = match tb_prop.kind {
                 TbComponentKind::ClockGen => ir::TypeKind::Clock,
                 TbComponentKind::ResetGen => ir::TypeKind::Reset,
-                // Rejected or handled above.
-                TbComponentKind::File | TbComponentKind::External(_) => unreachable!(),
+                // `file`/`random` are `var`-form; external handled above.
+                TbComponentKind::File | TbComponentKind::Random | TbComponentKind::External(_) => {
+                    unreachable!()
+                }
             };
             let ir_type = {
                 let mut t = ir::Type::new(type_kind);
@@ -1508,8 +1513,10 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             let type_name = match tb_prop.kind {
                                 TbComponentKind::ClockGen => "$tb::clock_gen",
                                 TbComponentKind::ResetGen => "$tb::reset_gen",
-                                // Rejected or handled above.
-                                TbComponentKind::File | TbComponentKind::External(_) => {
+                                // `file`/`random` are `var`-form; external handled above.
+                                TbComponentKind::File
+                                | TbComponentKind::Random
+                                | TbComponentKind::External(_) => {
                                     unreachable!()
                                 }
                             };

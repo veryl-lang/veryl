@@ -255,6 +255,9 @@ pub struct TbMethodCall {
     /// sizes the hoist temporary and is enforced against the value the
     /// component actually returns.
     pub ret_width: Option<u32>,
+    /// Signedness of the returned value. Only `$tb::random::<iN>` returns a
+    /// signed value; component/file methods leave this `false`.
+    pub ret_signed: bool,
 }
 
 #[derive(Clone)]
@@ -283,6 +286,36 @@ pub enum TbMethod {
         method: StrId,
         args: Vec<SystemFunctionInput>,
     },
+    /// `$tb::random::<T>` methods. `width`/`signed` describe the element type
+    /// `T`, resolved through the generic pipeline at the call site.
+    RandomSeed {
+        value: Expression,
+    },
+    RandomGet {
+        width: u32,
+        signed: bool,
+    },
+    RandomGetRange {
+        min: Expression,
+        max: Expression,
+        width: u32,
+        signed: bool,
+    },
+    RandomGetSeed,
+}
+
+impl TbMethod {
+    /// Whether the method yields a value usable in assignment/expression
+    /// position. The remaining builtin `$tb` methods are statements only.
+    pub fn has_return_value(&self) -> bool {
+        matches!(
+            self,
+            TbMethod::Component { .. }
+                | TbMethod::RandomGet { .. }
+                | TbMethod::RandomGetRange { .. }
+                | TbMethod::RandomGetSeed
+        )
+    }
 }
 
 impl Statement {
@@ -485,6 +518,12 @@ impl fmt::Display for Statement {
                     let args_str: Vec<_> = args.iter().map(|a| format!("{a}")).collect();
                     write!(f, "{}.{method}({});", x.inst, args_str.join(", "))
                 }
+                TbMethod::RandomSeed { value } => write!(f, "{}.seed({value});", x.inst),
+                TbMethod::RandomGet { .. } => write!(f, "{}.get();", x.inst),
+                TbMethod::RandomGetRange { min, max, .. } => {
+                    write!(f, "{}.get_range({min}, {max});", x.inst)
+                }
+                TbMethod::RandomGetSeed => write!(f, "{}.get_seed();", x.inst),
             },
             Statement::For(x) => {
                 let range_op = if let ForRange::Reverse { .. } = &x.range {

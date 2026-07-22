@@ -1689,6 +1689,7 @@ mod tests {
             &token,
             VerylSymbolKind::TbComponent(TbComponentProperty {
                 kind: TbComponentKind::External(key),
+                generic_parameters: vec![],
             }),
             &Namespace::new(),
             true,
