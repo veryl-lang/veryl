@@ -4298,3 +4298,62 @@ fn priority_encoder_netlist_matches_golden_model_exhaustively() {
         );
     }
 }
+
+/// The count-scan rebuild rewrites a serial conditional-increment counter
+/// (count-trailing-zeros) into `seed + popcount(conditions)`; verify the
+/// final netlist, through the full pipeline including fusion, against a
+/// golden model for every input.
+#[test]
+fn count_trailing_zeros_netlist_matches_golden_model_exhaustively() {
+    let code = r#"
+        module Top (
+            a:   input  logic<16>,
+            out: output logic<5>,
+        ) {
+            var cnt:   logic<5>;
+            var found: logic;
+            always_comb {
+                cnt   = '0;
+                found = 1'b0;
+                for i in 0..16 {
+                    if !found && a[i] {
+                        found = 1'b1;
+                    } else if !found {
+                        cnt = cnt + 1;
+                    }
+                }
+            }
+            assign out = cnt;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("gate ir").module;
+
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    let in_nets = port("a");
+    let out_nets = port("out");
+
+    for mask in 0u32..(1 << 16) {
+        let inputs: std::collections::HashMap<_, _> = in_nets
+            .iter()
+            .enumerate()
+            .map(|(k, &n)| (n, (mask >> k) & 1 == 1))
+            .collect();
+        let mut memo = std::collections::HashMap::new();
+        let expect = if mask == 0 { 16 } else { mask.trailing_zeros() };
+        for (k, &n) in out_nets.iter().enumerate() {
+            assert_eq!(
+                eval_net(&gate, n, &inputs, &mut memo),
+                (expect >> k) & 1 == 1,
+                "out[{k}] mismatch at a={mask:#06x}"
+            );
+        }
+    }
+}
