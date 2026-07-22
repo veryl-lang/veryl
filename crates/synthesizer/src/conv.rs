@@ -21,7 +21,7 @@ use crate::RamConfig;
 use crate::conv::expression::synthesize_expr;
 use crate::conv::postpass::complex_gate_replacement;
 use crate::conv::ram::RamCandidate;
-use crate::conv::worklist::{dead_cell_elimination, worklist_simplify};
+use crate::conv::worklist::{Simpl, dead_cell_elimination, simplify, worklist_simplify};
 use crate::ir::{
     Cell, CellKind, ClockEdge, FfCell, GateModule, GatePort, NET_CONST0, NET_CONST1, NetDriver,
     NetId, NetInfo, PortDir, RESERVED_NETS, RamBlock, RamReadPort, RamWritePort, ResetPolarity,
@@ -261,6 +261,32 @@ impl ConvContext {
 
     pub(crate) fn add_cell(&mut self, kind: CellKind, inputs: Vec<NetId>) -> NetId {
         debug_assert_eq!(inputs.len(), kind.arity());
+        // Fold to a constant at construction. Without it, an input-independent
+        // `always_comb` — e.g. a `for`-loop lookup table whose index only
+        // *looks* runtime — builds its entire mux/decode network (hundreds of
+        // thousands of cells) before `converge_simplify` collapses it back
+        // down. Only constant results are taken (runtime identities like
+        // `x & 1 -> x` stay with the worklist), so this never returns a live
+        // net. Arity <= 4, so the constant inputs avoid a per-cell heap alloc.
+        let const_of = |ctx: &Self, n: NetId| match ctx.nets[n as usize].driver {
+            NetDriver::Const(b) => Some(b),
+            _ => None,
+        };
+        let mut ivs = [None; 4];
+        for (slot, &n) in ivs.iter_mut().zip(inputs.iter()) {
+            *slot = const_of(self, n);
+        }
+        if let Some(s) = simplify(kind, &ivs[..inputs.len()], &inputs) {
+            // Alias/Invert yield a net, not a value; fold only when it is const.
+            let folded = match s {
+                Simpl::Const(v) => Some(v),
+                Simpl::Alias(n) => const_of(self, n),
+                Simpl::Invert(n) => const_of(self, n).map(|b| !b),
+            };
+            if let Some(v) = folded {
+                return if v { NET_CONST1 } else { NET_CONST0 };
+            }
+        }
         // A Mux2's first input is the select (often origin-less); prefer its
         // data inputs so the downstream critical path stays labeled.
         let pick = |ctx: &Self, n: &NetId| ctx.nets[*n as usize].origin;

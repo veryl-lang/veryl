@@ -92,7 +92,7 @@ fn cse_key(kind: CellKind, inputs: &[NetId]) -> Option<(CellKind, [NetId; 4])> {
     }
 }
 
-enum Simpl {
+pub(super) enum Simpl {
     Const(bool),
     Alias(NetId),
     Invert(NetId),
@@ -164,7 +164,7 @@ fn algebraic_fuse(
 /// primitives just plug a new arm in here and write their own `simpl_*`
 /// function — the shared helpers below cover the common absorbing /
 /// parity / AOI patterns.
-fn simplify(kind: CellKind, iv: &[Option<bool>], nets: &[NetId]) -> Option<Simpl> {
+pub(super) fn simplify(kind: CellKind, iv: &[Option<bool>], nets: &[NetId]) -> Option<Simpl> {
     match kind {
         CellKind::Buf => iv[0].map(Simpl::Const),
         CellKind::Not => iv[0].map(|b| Simpl::Const(!b)),
