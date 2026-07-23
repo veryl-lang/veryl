@@ -52,6 +52,47 @@ struct TestReport {
     output: Option<String>,
 }
 
+/// Load per-test run times recorded by a prior `veryl test`, used to dispatch
+/// the slowest tests first. A missing or corrupt file (or bad line) is ignored,
+/// so the first run falls back to declaration order.
+fn load_test_timings(path: &std::path::Path) -> std::collections::HashMap<String, f64> {
+    let mut map = std::collections::HashMap::new();
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return map;
+    };
+    for line in content.lines() {
+        let mut it = line.split_whitespace();
+        if let (Some(name), Some(secs), None) = (it.next(), it.next(), it.next())
+            && let Ok(secs) = secs.parse::<f64>()
+        {
+            map.insert(name.to_string(), secs);
+        }
+    }
+    map
+}
+
+/// Persist per-test run times for the next run's scheduling.  `fresh` overwrites
+/// `prior` per test, so entries for tests skipped by a `--test` filter survive.
+fn save_test_timings(
+    path: &std::path::Path,
+    prior: &std::collections::HashMap<String, f64>,
+    fresh: &[(String, f64)],
+) {
+    let mut merged = prior.clone();
+    for (name, secs) in fresh {
+        merged.insert(name.clone(), *secs);
+    }
+    let mut lines: Vec<String> = merged
+        .iter()
+        .map(|(name, secs)| format!("{name} {secs:.6}"))
+        .collect();
+    lines.sort();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, lines.join("\n"));
+}
+
 pub struct CmdTest {
     opt: OptTest,
 }
@@ -318,6 +359,23 @@ impl CmdTest {
             if buffered {
                 info!("Building simulation model");
             }
+            // Longest-first scheduling: dispatch the slowest tests first so a
+            // long test can't land in the final wave and stretch the tail.
+            // Reordering is safe — `instance_seed` derives from test/instance
+            // name, not dispatch order. Tests with no history sort first, so a
+            // possibly-slow new test is measured early.
+            let timings_path = metadata.project_dot_build_path().join("test_timings");
+            let prior_timings = load_test_timings(&timings_path);
+            pending_native.sort_by(|a, b| {
+                let ta = prior_timings.get(&a.test_name).copied();
+                let tb = prior_timings.get(&b.test_name).copied();
+                match (ta, tb) {
+                    (None, None) => a.test_name.cmp(&b.test_name),
+                    (None, Some(_)) => std::cmp::Ordering::Less,
+                    (Some(_), None) => std::cmp::Ordering::Greater,
+                    (Some(x), Some(y)) => y.partial_cmp(&x).unwrap_or(std::cmp::Ordering::Equal),
+                }
+            });
             if config.dut_reuse {
                 let tops: Vec<_> = pending_native.iter().filter_map(|p| p.top).collect();
                 veryl_simulator::backend::inst::compute_recurring_set(&ir, &tops);
@@ -335,7 +393,7 @@ impl CmdTest {
             // Workers print each finished test's block under this lock, so results
             // stream as tests complete without interleaving between workers.
             let print_lock = std::sync::Mutex::new(());
-            type ThreadTally = (i32, i32, Vec<PathBuf>);
+            type ThreadTally = (i32, i32, Vec<PathBuf>, Vec<(String, f64)>);
             let results: Vec<ThreadTally> = std::thread::scope(|s| {
                 let queue = &pending_queue;
                 let resource_snap = &resource_snapshot;
@@ -352,6 +410,7 @@ impl CmdTest {
                             let mut thread_cache = ProtoModuleCache::default();
                             let (mut tally_pass, mut tally_fail) = (0, 0);
                             let mut tally_waves: Vec<PathBuf> = Vec::new();
+                            let mut tally_timings: Vec<(String, f64)> = Vec::new();
                             loop {
                                 let pending = queue.lock().unwrap().next();
                                 let Some(pending) = pending else { break };
@@ -381,6 +440,7 @@ impl CmdTest {
                                 let build_el = t_build.elapsed();
                                 #[cfg(feature = "profile")]
                                 let t_run = std::time::Instant::now();
+                                let mut run_secs: Option<f64> = None;
                                 let outcome = match build_result {
                                     Ok(job) => {
                                         let wave_path =
@@ -388,15 +448,24 @@ impl CmdTest {
                                         if !buffered {
                                             info!("Executing test ({})", pending.test_name);
                                         }
+                                        // Time the run (not the build) — the build is
+                                        // amortized by the cross-test chunk cache, so
+                                        // run time is the stable per-test cost that
+                                        // longest-first scheduling sorts on.
+                                        let t_run_sched = std::time::Instant::now();
                                         let result = run_native_testbench(
                                             job.sim_ir,
                                             job.dump,
                                             job.module_name,
                                         );
+                                        run_secs = Some(t_run_sched.elapsed().as_secs_f64());
                                         NativeOutcome::Ran { result, wave_path }
                                     }
                                     Err(e) => NativeOutcome::ElaborateFailed(e),
                                 };
+                                if let Some(secs) = run_secs {
+                                    tally_timings.push((pending.test_name.clone(), secs));
+                                }
                                 #[cfg(feature = "profile")]
                                 {
                                     let run_el = t_run.elapsed();
@@ -476,7 +545,7 @@ impl CmdTest {
                                 use std::io::Write;
                                 let _ = std::io::stdout().flush();
                             }
-                            (tally_pass, tally_fail, tally_waves)
+                            (tally_pass, tally_fail, tally_waves, tally_timings)
                         })
                     })
                     .collect();
@@ -485,13 +554,17 @@ impl CmdTest {
 
             // Workers already printed each result as it finished; fold their
             // tallies and register generated waveforms (needs `&mut metadata`).
-            for (passed, failed, waves) in results {
+            let mut fresh_timings: Vec<(String, f64)> = Vec::new();
+            for (passed, failed, waves, timings) in results {
                 success += passed;
                 failure += failed;
                 for path in waves {
                     metadata.add_generated_file(path);
                 }
+                fresh_timings.extend(timings);
             }
+            // Persist this run's per-test times for the next run's ordering.
+            save_test_timings(&timings_path, &prior_timings, &fresh_timings);
         }
 
         for (test, property) in non_native_tests {
