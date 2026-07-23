@@ -123,11 +123,19 @@ impl Module {
                         .and_then(|r| r.get(*index))
                         .cloned()
                         .unwrap_or_else(|| zero.clone());
-                    // Accept dead bits of a partially driven register; still
-                    // warn if nothing was assigned at all.
+                    // Accept dead bits of a partially driven register; still warn
+                    // if nothing was assigned. Outputs are excluded: their bits are
+                    // read externally, so undriven bits leak X to the parent.
                     let any_assigned = assigned_mask != zero;
                     let any_read_unassigned = (&read_mask & &unassigned_bits) != zero;
-                    if any_assigned && !any_read_unassigned {
+                    if any_assigned
+                        && !any_read_unassigned
+                        && !matches!(variable.kind, VarKind::Output)
+                        && unassigned_bits != zero
+                    {
+                        continue;
+                    }
+                    if unassigned_bits == zero {
                         continue;
                     }
 
