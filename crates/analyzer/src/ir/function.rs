@@ -168,8 +168,8 @@ pub struct FunctionCall {
     pub id: VarId,
     pub index: Option<Vec<usize>>,
     pub comptime: Comptime,
-    pub inputs: HashMap<VarPath, Expression>,
-    pub outputs: HashMap<VarPath, Vec<AssignDestination>>,
+    pub inputs: CallArgs<Expression>,
+    pub outputs: CallArgs<Vec<AssignDestination>>,
 }
 
 impl FunctionCall {
@@ -337,8 +337,8 @@ impl fmt::Display for FunctionCall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut args = String::new();
 
-        let mut inputs: Vec<_> = self.inputs.iter().collect();
-        let mut outputs: Vec<_> = self.outputs.iter().collect();
+        let mut inputs: Vec<_> = self.inputs.iter().map(|(k, v)| (k, v)).collect();
+        let mut outputs: Vec<_> = self.outputs.iter().map(|(k, v)| (k, v)).collect();
         inputs.sort_by_key(|x| x.0);
         outputs.sort_by_key(|x| x.0);
 
@@ -375,10 +375,46 @@ impl fmt::Display for FunctionCall {
 
 pub type PositionalArgs = Vec<(Expression, Vec<VarPathSelect>, TokenRange)>;
 pub type NamedArgs = Vec<(StrId, (Expression, Vec<VarPathSelect>, TokenRange))>;
-pub type FunctionArgs = (
-    HashMap<VarPath, Expression>,
-    HashMap<VarPath, Vec<AssignDestination>>,
-);
+pub type FunctionArgs = (CallArgs<Expression>, CallArgs<Vec<AssignDestination>>);
+
+/// Argument bindings of a [`FunctionCall`], in source argument order.
+/// Not a map: `VarPath` keys are interned `StrId`s whose numeric values
+/// vary run-to-run (parallel interning), so map iteration would make the
+/// consumers' emission order — and the generated code — nondeterministic.
+/// Built only by `to_function_args`, which preserves the source order.
+#[derive(Clone, Debug, Default)]
+pub struct CallArgs<T>(Vec<(VarPath, T)>);
+
+impl<T> CallArgs<T> {
+    pub fn values(&self) -> impl Iterator<Item = &T> {
+        self.0.iter().map(|(_, v)| v)
+    }
+
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.0.iter_mut().map(|(_, v)| v)
+    }
+}
+
+impl<T> std::ops::Deref for CallArgs<T> {
+    type Target = [(VarPath, T)];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for CallArgs<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'a, T> IntoIterator for &'a CallArgs<T> {
+    type Item = &'a (VarPath, T);
+    type IntoIter = std::slice::Iter<'a, (VarPath, T)>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
 
 #[derive(Clone)]
 pub enum Arguments {
@@ -441,8 +477,8 @@ impl Arguments {
         func: &FuncProto,
         token: TokenRange,
     ) -> IrResult<FunctionArgs> {
-        let mut inputs = HashMap::default();
-        let mut outputs = HashMap::default();
+        let mut inputs: Vec<(VarPath, Expression)> = Vec::new();
+        let mut outputs: Vec<(VarPath, Vec<AssignDestination>)> = Vec::new();
 
         if func.arity != self.len() {
             context.insert_error(AnalyzerError::mismatch_function_arity(
@@ -497,14 +533,14 @@ impl Arguments {
                                 &expr_token,
                             );
                         }
-                        inputs.insert(path.clone(), expr);
+                        inputs.push((path.clone(), expr));
                     }
                     Direction::Output => {
                         let dst = dst
                             .into_iter()
                             .filter_map(|x| x.to_assign_destination(context, false))
                             .collect();
-                        outputs.insert(path.clone(), dst);
+                        outputs.push((path.clone(), dst));
                     }
                     _ => (),
                 }
@@ -527,14 +563,14 @@ impl Arguments {
                             let expr = VarPathSelect(expr_path, VarSelect::default(), expr_token);
                             let expr = expr.to_expression(context);
                             if let Some(expr) = expr {
-                                inputs.insert(arg_path, expr);
+                                inputs.push((arg_path, expr));
                             }
                         }
                         Direction::Output => {
                             let dst = VarPathSelect(expr_path, VarSelect::default(), expr_token);
                             let dst = dst.to_assign_destination(context, false);
                             if let Some(dst) = dst {
-                                outputs.insert(arg_path, vec![dst]);
+                                outputs.push((arg_path, vec![dst]));
                             }
                         }
                         _ => (),
@@ -543,6 +579,6 @@ impl Arguments {
             }
         }
 
-        Ok((inputs, outputs))
+        Ok((CallArgs(inputs), CallArgs(outputs)))
     }
 }

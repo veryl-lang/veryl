@@ -543,7 +543,9 @@ pub fn try_compile_inst_chunks(
         let comb_func = if all_can_build && !all_comb_statements.is_empty() {
             // Topo-sort by RAW dependencies so output-port connections
             // run before assigns that read them.
+            crate::ir::module::dump_stmt_order("child-presort", src.name, all_comb_statements);
             let sorted_comb_for_func = stable_topo_sort(all_comb_statements.clone());
+            crate::ir::module::dump_stmt_order("child-postsort", src.name, &sorted_comb_for_func);
 
             let artifact = {
                 let ctx = CompileCtx {

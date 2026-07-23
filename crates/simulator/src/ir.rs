@@ -7,7 +7,7 @@ mod expression;
 pub(crate) mod external;
 pub(crate) mod hier_ref;
 pub(crate) mod inst_layout;
-mod module;
+pub(crate) mod module;
 pub(crate) mod opt;
 pub(crate) mod partial_index;
 pub(crate) mod site_table;

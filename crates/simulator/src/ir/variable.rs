@@ -330,6 +330,14 @@ pub fn create_variable_meta(
     let mut src_sorted: Vec<_> = src.iter().collect();
     src_sorted.sort_by_key(|(k, _)| **k);
 
+    // Temporary diagnostic (VERYL_VARMETA_DUMP=1): print VarId -> path in
+    // allocation order to localize run-to-run VarId permutations.
+    if std::env::var("VERYL_VARMETA_DUMP").as_deref() == Ok("1") {
+        for (k, v) in &src_sorted {
+            eprintln!("[varmeta] {:?} {:?}", k, v.path);
+        }
+    }
+
     let mut variables = HashMap::default();
 
     for (k, v) in src_sorted {
