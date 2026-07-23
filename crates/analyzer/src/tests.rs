@@ -18020,3 +18020,87 @@ fn tb_random_analyze() {
         "expected no analyzer errors, got: {errors:?}"
     );
 }
+
+#[test]
+fn maybe_driver_cross_process_conflict() {
+    // A non-const index/select write has an empty definite mask, so the
+    // per-bit overlap check missed it: two processes writing dynamic slices of
+    // one variable passed silently, though SV rejects it (VCS ICPD, Verilator
+    // MULTIDRIVEN / BLKANDNBLK) for every process-kind pair.
+    let has_conflict = |code: &str| {
+        analyze(code)
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. }))
+    };
+
+    // always_ff + always_comb (mixed).
+    assert!(has_conflict(
+        r#"
+    module ModuleA (
+        clk: input  clock,
+        i_i: input  logic<2>,
+        i_j: input  logic<2>,
+        o_w: output logic<32>,
+    ) {
+        always_ff (clk) {
+            o_w[i_i * 8+:8] = 8'haa;
+        }
+        always_comb {
+            o_w[i_j * 8+:8] = 8'hbb;
+        }
+    }
+    "#
+    ));
+
+    // Two always_comb (same kind).
+    assert!(has_conflict(
+        r#"
+    module ModuleA (
+        i_i: input  logic<2>,
+        i_j: input  logic<2>,
+        o_w: output logic<32>,
+    ) {
+        always_comb {
+            o_w[i_i * 8+:8] = 8'haa;
+        }
+        always_comb {
+            o_w[i_j * 8+:8] = 8'hbb;
+        }
+    }
+    "#
+    ));
+
+    // Two always_ff (same kind).
+    assert!(has_conflict(
+        r#"
+    module ModuleA (
+        clk: input  clock,
+        i_i: input  logic<2>,
+        i_j: input  logic<2>,
+        o_w: output logic<32>,
+    ) {
+        always_ff (clk) {
+            o_w[i_i * 8+:8] = 8'haa;
+        }
+        always_ff (clk) {
+            o_w[i_j * 8+:8] = 8'hbb;
+        }
+    }
+    "#
+    ));
+
+    // A single process writing dynamic slices stays accepted.
+    assert!(!has_conflict(
+        r#"
+    module ModuleA (
+        i_i: input  logic<2>,
+        o_w: output logic<32>,
+    ) {
+        always_comb {
+            o_w = 0;
+            o_w[i_i * 8+:8] = 8'haa;
+        }
+    }
+    "#
+    ));
+}

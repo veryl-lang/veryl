@@ -4708,6 +4708,9 @@ fn array_dynamic_index_write_ff() {
 
 #[test]
 fn array_dynamic_index_write_comb() {
+    // One always_comb: separate per-element assigns plus a dynamic `arr[idx]`
+    // would emit multiple always_comb drivers on `arr` (illegal multi-driver,
+    // rejected as multiple_assignment).
     let code = r#"
     module Top (
         idx: input  logic<2>,
@@ -4716,11 +4719,13 @@ fn array_dynamic_index_write_comb() {
     ) {
         var arr: logic<8> [4];
 
-        assign arr[0] = 10;
-        assign arr[1] = 20;
-        assign arr[2] = 30;
-        assign arr[3] = 40;
-        assign arr[idx] = val;
+        always_comb {
+            arr[0]   = 10;
+            arr[1]   = 20;
+            arr[2]   = 30;
+            arr[3]   = 40;
+            arr[idx] = val;
+        }
         assign o = arr[idx];
     }
     "#;

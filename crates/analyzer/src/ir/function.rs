@@ -261,6 +261,7 @@ impl FunctionCall {
                             index,
                             mask,
                             false,
+                            false,
                             self.comptime.token,
                         );
                         if !success & assign_context.is_ff() {

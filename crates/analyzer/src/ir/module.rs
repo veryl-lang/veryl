@@ -71,7 +71,7 @@ impl Module {
             // accumulated reads/writes are still in place here.
             let snapshot = std::mem::take(&mut new_table.refernced);
             self.per_decl_refs.insert(i, snapshot);
-            assign_table.merge_by_or(context, &mut new_table, true);
+            assign_table.merge_by_or_from(context, &mut new_table, true, true);
         }
 
         for x in self.functions.values() {
