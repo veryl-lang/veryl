@@ -18106,6 +18106,43 @@ fn maybe_driver_cross_process_conflict() {
 }
 
 #[test]
+fn sv_connect_is_not_a_driving_process() {
+    // An `$sv::` connection may be a read; it must not count as a second
+    // driving process against a dynamic write in a real process.
+    let errors = analyze(
+        r#"
+    module ModuleA (
+        clk  : input clock,
+        rst  : input reset,
+        i_bin: input logic<3>,
+    ) {
+        var r_hist: logic<8, 32>;
+
+        always_ff (clk, rst) {
+            if_reset {
+                for b in 0..8 {
+                    r_hist[b] = 0;
+                }
+            } else {
+                r_hist[i_bin] = r_hist[i_bin] + 1;
+            }
+        }
+
+        inst u: $sv::Ext (
+            i_x: r_hist,
+        );
+    }
+    "#,
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn partially_driven_output_port() {
     // The partially-driven dead-bits exemption also swallowed output
     // ports, whose bits are read externally by definition — `o[7:4]`
