@@ -318,6 +318,10 @@ impl CmdTest {
             if buffered {
                 info!("Building simulation model");
             }
+            if config.dut_reuse {
+                let tops: Vec<_> = pending_native.iter().filter_map(|p| p.top).collect();
+                veryl_simulator::backend::inst::compute_recurring_set(&ir, &tops);
+            }
             let pending_queue = std::sync::Mutex::new(pending_native.into_iter());
             let resource_snapshot = resource_table::export_tables();
             // `SimulatorError` snapshots source text from `text_table` eagerly
