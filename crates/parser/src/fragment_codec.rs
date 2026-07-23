@@ -29,6 +29,8 @@ impl IdWindow {
         self.end - self.start
     }
 
+    // Analyzer-side ids layer a sentinel-0 wire shift on top of this (see
+    // veryl_analyzer::fragment_codec); parser ids have no 0 sentinel.
     pub fn encode(&self, id: usize, what: &str) -> Result<u64, String> {
         if id > self.start && id <= self.end {
             Ok((id - self.start - 1) as u64)
