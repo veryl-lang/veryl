@@ -328,6 +328,112 @@ pub(crate) fn emit_wide_binary_op(
     dst
 }
 
+/// Buffers up to this many bytes get unrolled inline limb code in place of
+/// a wide-helper call.  8 limbs covers the 512-bit packed lane buses whose
+/// concat assembly makes shl/bor/apply_mask 74% of all wide helper calls
+/// (measured on pe_core v8c); the win is the removed call + helper-loop
+/// overhead per op.
+pub(crate) const WIDE_INLINE_NB: usize = 64;
+
+/// Unrolled bitwise op over an `nb`-byte buffer pair (`nb % 8 == 0`,
+/// caller gates on [`WIDE_INLINE_NB`]).  Same limb semantics as
+/// `wide_band`/`wide_bor`/`wide_bxor`/`wide_bxor_not`.
+pub(crate) fn emit_wide_bitwise_inline(
+    builder: &mut FunctionBuilder,
+    op: Op,
+    a: CraneliftValue,
+    b: CraneliftValue,
+    nb: usize,
+) -> CraneliftValue {
+    let dst = alloc_wide_slot(builder, nb);
+    for i in 0..nb / 8 {
+        let off = (i * 8) as i32;
+        let la = builder.ins().load(I64, MemFlagsData::trusted(), a, off);
+        let lb = builder.ins().load(I64, MemFlagsData::trusted(), b, off);
+        let r = match op {
+            Op::BitAnd => builder.ins().band(la, lb),
+            Op::BitOr => builder.ins().bor(la, lb),
+            Op::BitXor => builder.ins().bxor(la, lb),
+            Op::BitXnor => {
+                let x = builder.ins().bxor(la, lb);
+                builder.ins().bnot(x)
+            }
+            _ => unreachable!("emit_wide_bitwise_inline: unsupported op"),
+        };
+        builder.ins().store(MemFlagsData::trusted(), r, dst, off);
+    }
+    dst
+}
+
+/// Unrolled constant-amount shift of an `nb`-byte buffer (`right` selects
+/// logical right; left otherwise).  Limb-exact mirror of
+/// `wide_shl`/`wide_lshr` with `word_shift`/`bit_shift` folded to
+/// constants — the shift amounts of packed-lane concat assembly are
+/// compile-time constants, so the helper's generic loop is pure overhead.
+pub(crate) fn emit_wide_shift_const_inline(
+    builder: &mut FunctionBuilder,
+    x: CraneliftValue,
+    amount: u64,
+    nb: usize,
+    right: bool,
+) -> CraneliftValue {
+    let dst = alloc_wide_slot(builder, nb);
+    let n = nb / 8;
+    let word_shift = (amount / 64) as usize;
+    let bit_shift = (amount % 64) as u32;
+    for i in 0..n {
+        let off = (i * 8) as i32;
+        let in_range = if right {
+            word_shift < n - i
+        } else {
+            word_shift <= i
+        };
+        let r = if !in_range {
+            builder.ins().iconst(I64, 0)
+        } else if right {
+            let src = i + word_shift;
+            let lo = builder
+                .ins()
+                .load(I64, MemFlagsData::trusted(), x, (src * 8) as i32);
+            if bit_shift == 0 {
+                lo
+            } else {
+                let hi = if src + 1 < n {
+                    builder
+                        .ins()
+                        .load(I64, MemFlagsData::trusted(), x, ((src + 1) * 8) as i32)
+                } else {
+                    builder.ins().iconst(I64, 0)
+                };
+                let a = builder.ins().ushr_imm_s(lo, bit_shift as i64);
+                let b = builder.ins().ishl_imm_s(hi, (64 - bit_shift) as i64);
+                builder.ins().bor(a, b)
+            }
+        } else {
+            let src = i - word_shift;
+            let lo = builder
+                .ins()
+                .load(I64, MemFlagsData::trusted(), x, (src * 8) as i32);
+            if bit_shift == 0 {
+                lo
+            } else {
+                let hi = if src > 0 {
+                    builder
+                        .ins()
+                        .load(I64, MemFlagsData::trusted(), x, ((src - 1) * 8) as i32)
+                } else {
+                    builder.ins().iconst(I64, 0)
+                };
+                let a = builder.ins().ishl_imm_s(lo, bit_shift as i64);
+                let b = builder.ins().ushr_imm_s(hi, (64 - bit_shift) as i64);
+                builder.ins().bor(a, b)
+            }
+        };
+        builder.ins().store(MemFlagsData::trusted(), r, dst, off);
+    }
+    dst
+}
+
 pub(crate) fn emit_wide_unary_op(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
@@ -365,6 +471,14 @@ pub(crate) fn emit_wide_const(
     ptr
 }
 
+/// Whether to elide provably-no-op wide width-masks (default on;
+/// `VERYL_WIDE_MASK_ELIDE=0` disables for A/B measurement).
+fn wide_mask_elide_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_WIDE_MASK_ELIDE").as_deref() != Ok("0"))
+}
+
 /// Apply width mask to a wide buffer (clear bits ≥ width).
 pub(crate) fn emit_wide_apply_mask(
     context: &mut CraneliftContext,
@@ -373,6 +487,43 @@ pub(crate) fn emit_wide_apply_mask(
     nb: usize,
     width: usize,
 ) {
+    // When `width` fills the whole buffer there are no bits ≥ width to clear, so
+    // `wide_apply_mask` is a proven no-op (partial-word mask skipped, zero-fill
+    // loop empty). Word-aligned wide values (e.g. pe_core's 512-bit v8c lanes)
+    // hit this, so eliding the call drops a share of the per-cycle wide helper
+    // calls. Sound: identical result, one fewer call + comb-buffer touch.
+    // `VERYL_WIDE_MASK_ELIDE=0` disables it for A/B measurement.
+    if width >= nb * 8 && wide_mask_elide_on() {
+        return;
+    }
+    // Unrolled in-place mask: same limb semantics as `wide_apply_mask`
+    // (partial limb masked, higher limbs zeroed).  Only the limbs at or
+    // above `width` are touched, so the inline is gated on THAT count, not
+    // on `nb` — a 1953-bit value in a 2048-bit buffer costs two stores.
+    let touched = (nb / 8).saturating_sub(width / 64);
+    if touched <= 8 && nb.is_multiple_of(8) && width > 0 {
+        let n = nb / 8;
+        let full_words = width / 64;
+        let remaining = width % 64;
+        if remaining > 0 && full_words < n {
+            let off = (full_words * 8) as i32;
+            let v = builder.ins().load(I64, MemFlagsData::trusted(), ptr, off);
+            let m = builder
+                .ins()
+                .band_imm_s(v, ((1u64 << remaining) - 1) as i64);
+            builder.ins().store(MemFlagsData::trusted(), m, ptr, off);
+        }
+        let zero_from = full_words + usize::from(remaining > 0);
+        if zero_from < n {
+            let z = builder.ins().iconst(I64, 0);
+            for i in zero_from..n {
+                builder
+                    .ins()
+                    .store(MemFlagsData::trusted(), z, ptr, (i * 8) as i32);
+            }
+        }
+        return;
+    }
     let packed = wide_ops::pack_nb_width(nb, width);
     let packed_val = builder.ins().iconst(I32, packed as i64);
     let dummy = builder.ins().iconst(I64, 0);
@@ -605,6 +756,66 @@ pub(crate) fn emit_wide_select_rmw(
     width: usize,
     nb: usize,
 ) -> CraneliftValue {
+    if nb <= WIDE_INLINE_NB && nb.is_multiple_of(8) {
+        // `end`/`width` are compile-time constants, so the range mask and
+        // the shift split fold away: limbs outside the range copy `old`,
+        // limbs fully inside take the shifted source, boundary limbs
+        // blend — a lane store into a packed bus becomes 1-2 computed
+        // limbs instead of six wide-helper calls over every limb.
+        let flags = MemFlagsData::trusted();
+        let dst = alloc_wide_slot(builder, nb);
+        let n = nb / 8;
+        let lo_limb = end / 64;
+        let hi_limb = (end + width - 1) / 64;
+        let ws = end / 64;
+        let bs = (end % 64) as u32;
+        for i in 0..n {
+            let off = (i * 8) as i32;
+            let r = if i < lo_limb || i > hi_limb {
+                builder.ins().load(I64, flags, old_ptr, off)
+            } else {
+                // Bits of [end, end+width) covering limb i.
+                let lo_bit = (i * 64).max(end);
+                let hi_bit = ((i + 1) * 64).min(end + width);
+                let m = if hi_bit - lo_bit >= 64 {
+                    u64::MAX
+                } else {
+                    ((1u64 << (hi_bit - lo_bit)) - 1) << (lo_bit % 64)
+                };
+                // (src << end) limb i, with out-of-range source limbs zero.
+                let src_i = i as isize - ws as isize;
+                let lo = if src_i >= 0 {
+                    builder.ins().load(I64, flags, src_ptr, (src_i * 8) as i32)
+                } else {
+                    builder.ins().iconst(I64, 0)
+                };
+                let shifted = if bs == 0 {
+                    lo
+                } else {
+                    let hi = if src_i > 0 {
+                        builder
+                            .ins()
+                            .load(I64, flags, src_ptr, ((src_i - 1) * 8) as i32)
+                    } else {
+                        builder.ins().iconst(I64, 0)
+                    };
+                    let a = builder.ins().ishl_imm_s(lo, bs as i64);
+                    let b = builder.ins().ushr_imm_s(hi, (64 - bs) as i64);
+                    builder.ins().bor(a, b)
+                };
+                if m == u64::MAX {
+                    shifted
+                } else {
+                    let sm = builder.ins().band_imm_s(shifted, m as i64);
+                    let old = builder.ins().load(I64, flags, old_ptr, off);
+                    let om = builder.ins().band_imm_s(old, !m as i64);
+                    builder.ins().bor(om, sm)
+                }
+            };
+            builder.ins().store(flags, r, dst, off);
+        }
+        return dst;
+    }
     let amount = builder.ins().iconst(I64, end as i64);
     let nb_val = builder.ins().iconst(I32, nb as i64);
     // rangemask = fill_ones(width) << end
@@ -741,6 +952,16 @@ pub(crate) fn returns_wide_pointer(expr: &ProtoExpression) -> bool {
         ProtoExpression::Binary { expr_context, .. } => {
             expr.builds_wide_pointer() && expr_context.width > 128
         }
+        // The funnel-load path for a dynamic element read of a wide
+        // variable (window ≤ 64, no combined static select) hands back a
+        // narrow scalar; the shared predicate still reports a pointer
+        // because the AOT-C emitter keeps that shape on the interpreter.
+        ProtoExpression::Variable {
+            dynamic_select: Some(ds),
+            select: None,
+            var_full_width,
+            ..
+        } if is_wide_ptr(*var_full_width) && ds.window <= 64 => false,
         _ => expr.builds_wide_pointer(),
     }
 }

@@ -42,11 +42,126 @@ unsafe fn wr(ptr: *mut u8, i: usize, v: u64) {
     unsafe { (ptr.add(i * 8) as *mut u64).write_unaligned(v) }
 }
 
+// ── Per-op call profiling (VERYL_WIDE_OP_PROFILE=1) ──────────────────
+// Cranelift calls one of these helpers per wide (>128-bit) op, and the run cost
+// of a wide op is dominated by the per-call glue (operand pointer setup, the
+// call, and the comb-buffer load/store round trip) — which scales with call
+// count, not arithmetic. So per-op call counts (+ words = data volume) are the
+// right signal for picking which op to attack in codegen. Gated behind a cached
+// bool: a normal run pays only a predictable never-taken branch, no atomics.
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Op indices into the profiling counters; order matches [`WIDE_OP_NAMES`].
+#[repr(usize)]
+enum ProfOp {
+    Resize,
+    Band,
+    Bor,
+    Bxor,
+    BxorNot,
+    BandNot,
+    Bnot,
+    Add,
+    Sub,
+    Mul,
+    Negate,
+    Copy,
+    Eq,
+    Ne,
+    Ucmp,
+    Scmp,
+    ScmpAsym,
+    Shl,
+    Lshr,
+    Ashr,
+    IsNonzero,
+    IsAllOnes,
+    PopcntParity,
+    ApplyMask,
+    FillOnes,
+}
+
+const N_WIDE_OPS: usize = 25;
+pub const WIDE_OP_NAMES: [&str; N_WIDE_OPS] = [
+    "resize",
+    "band",
+    "bor",
+    "bxor",
+    "bxor_not",
+    "band_not",
+    "bnot",
+    "add",
+    "sub",
+    "mul",
+    "negate",
+    "copy",
+    "eq",
+    "ne",
+    "ucmp",
+    "scmp",
+    "scmp_asym",
+    "shl",
+    "lshr",
+    "ashr",
+    "is_nonzero",
+    "is_all_ones",
+    "popcnt_parity",
+    "apply_mask",
+    "fill_ones",
+];
+
+#[allow(clippy::declare_interior_mutable_const)]
+const ATOMIC_ZERO: AtomicU64 = AtomicU64::new(0);
+static WIDE_OP_COUNTS: [AtomicU64; N_WIDE_OPS] = [ATOMIC_ZERO; N_WIDE_OPS];
+
+fn wide_op_profile_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_WIDE_OP_PROFILE").as_deref() == Ok("1"))
+}
+
+#[inline(always)]
+fn record(op: ProfOp) {
+    // Compiled out entirely without the `profile` feature, so a normal `veryl
+    // test` run pays nothing on the wide hot path (billions of calls at scale).
+    #[cfg(feature = "profile")]
+    if wide_op_profile_on() {
+        WIDE_OP_COUNTS[op as usize].fetch_add(1, Ordering::Relaxed);
+    }
+    let _ = op;
+}
+
+/// Print per-op call counts, sorted descending. Per-call glue (pointer setup +
+/// call + comb-buffer round trip) dominates wide run cost, so call count is the
+/// attribution signal. Call once at process end; no-op unless
+/// `VERYL_WIDE_OP_PROFILE=1`.
+pub fn dump_wide_op_profile() {
+    if !wide_op_profile_on() {
+        return;
+    }
+    let mut rows: Vec<(u64, &str)> = (0..N_WIDE_OPS)
+        .map(|i| (WIDE_OP_COUNTS[i].load(Ordering::Relaxed), WIDE_OP_NAMES[i]))
+        .filter(|(c, _)| *c > 0)
+        .collect();
+    rows.sort_unstable_by_key(|(c, _)| std::cmp::Reverse(*c));
+    let total: u64 = rows.iter().map(|(c, _)| *c).sum();
+    eprintln!("=== wide_op profile (per-op call counts; total={total}) ===");
+    for (calls, name) in rows {
+        let pct = if total > 0 {
+            calls as f64 * 100.0 / total as f64
+        } else {
+            0.0
+        };
+        eprintln!("  wide_{name:<14} calls={calls:>13} ({pct:5.1}%)");
+    }
+}
+
 /// Copy `src` into `dst` (`dst_nb` bytes), zero- or sign-extending from the
 /// source's `pack_nb_width` info.  `src_info` packs (nb, width) in the low
 /// 32 bits and the signed flag in bit 32.  Reads only words covered by the
 /// source width, so a narrower operand never over-reads its allocation.
 pub unsafe extern "C" fn wide_resize(dst: *mut u8, src: *const u8, src_info: u64, dst_nb: u32) {
+    record(ProfOp::Resize);
     let (_, src_w) = unpack_nb_width(src_info as u32);
     let signed = (src_info >> 32) & 1 == 1;
     unsafe {
@@ -70,6 +185,7 @@ pub unsafe extern "C" fn wide_resize(dst: *mut u8, src: *const u8, src_info: u64
 // ── Bitwise binary ops ─────────────────────────────────────────────
 
 pub unsafe extern "C" fn wide_band(dst: *mut u8, a: *const u8, b: *const u8, nb: u32) {
+    record(ProfOp::Band);
     unsafe {
         for i in 0..nw(nb) {
             wr(dst, i, rd(a, i) & rd(b, i));
@@ -78,6 +194,7 @@ pub unsafe extern "C" fn wide_band(dst: *mut u8, a: *const u8, b: *const u8, nb:
 }
 
 pub unsafe extern "C" fn wide_bor(dst: *mut u8, a: *const u8, b: *const u8, nb: u32) {
+    record(ProfOp::Bor);
     unsafe {
         for i in 0..nw(nb) {
             wr(dst, i, rd(a, i) | rd(b, i));
@@ -86,6 +203,7 @@ pub unsafe extern "C" fn wide_bor(dst: *mut u8, a: *const u8, b: *const u8, nb: 
 }
 
 pub unsafe extern "C" fn wide_bxor(dst: *mut u8, a: *const u8, b: *const u8, nb: u32) {
+    record(ProfOp::Bxor);
     unsafe {
         for i in 0..nw(nb) {
             wr(dst, i, rd(a, i) ^ rd(b, i));
@@ -94,6 +212,7 @@ pub unsafe extern "C" fn wide_bxor(dst: *mut u8, a: *const u8, b: *const u8, nb:
 }
 
 pub unsafe extern "C" fn wide_bxor_not(dst: *mut u8, a: *const u8, b: *const u8, nb: u32) {
+    record(ProfOp::BxorNot);
     unsafe {
         for i in 0..nw(nb) {
             wr(dst, i, !(rd(a, i) ^ rd(b, i)));
@@ -102,6 +221,7 @@ pub unsafe extern "C" fn wide_bxor_not(dst: *mut u8, a: *const u8, b: *const u8,
 }
 
 pub unsafe extern "C" fn wide_band_not(dst: *mut u8, a: *const u8, b: *const u8, nb: u32) {
+    record(ProfOp::BandNot);
     unsafe {
         for i in 0..nw(nb) {
             wr(dst, i, rd(a, i) & !rd(b, i));
@@ -112,6 +232,7 @@ pub unsafe extern "C" fn wide_band_not(dst: *mut u8, a: *const u8, b: *const u8,
 // ── Bitwise unary ops ───────────────────────────────────────────────
 
 pub unsafe extern "C" fn wide_bnot(dst: *mut u8, a: *const u8, nb: u32) {
+    record(ProfOp::Bnot);
     unsafe {
         for i in 0..nw(nb) {
             wr(dst, i, !rd(a, i));
@@ -122,6 +243,7 @@ pub unsafe extern "C" fn wide_bnot(dst: *mut u8, a: *const u8, nb: u32) {
 // ── Arithmetic ──────────────────────────────────────────────────────
 
 pub unsafe extern "C" fn wide_add(dst: *mut u8, a: *const u8, b: *const u8, nb: u32) {
+    record(ProfOp::Add);
     unsafe {
         let mut carry = 0u64;
         for i in 0..nw(nb) {
@@ -134,6 +256,7 @@ pub unsafe extern "C" fn wide_add(dst: *mut u8, a: *const u8, b: *const u8, nb: 
 }
 
 pub unsafe extern "C" fn wide_sub(dst: *mut u8, a: *const u8, b: *const u8, nb: u32) {
+    record(ProfOp::Sub);
     unsafe {
         let mut borrow = 0u64;
         for i in 0..nw(nb) {
@@ -146,6 +269,7 @@ pub unsafe extern "C" fn wide_sub(dst: *mut u8, a: *const u8, b: *const u8, nb: 
 }
 
 pub unsafe extern "C" fn wide_mul(dst: *mut u8, a: *const u8, b: *const u8, nb: u32) {
+    record(ProfOp::Mul);
     unsafe {
         let n = nw(nb);
         for i in 0..n {
@@ -170,6 +294,7 @@ pub unsafe extern "C" fn wide_mul(dst: *mut u8, a: *const u8, b: *const u8, nb: 
 }
 
 pub unsafe extern "C" fn wide_negate(dst: *mut u8, a: *const u8, nb: u32) {
+    record(ProfOp::Negate);
     unsafe {
         let mut carry = 1u64;
         for i in 0..nw(nb) {
@@ -183,6 +308,7 @@ pub unsafe extern "C" fn wide_negate(dst: *mut u8, a: *const u8, nb: u32) {
 // ── Memory ──────────────────────────────────────────────────────────
 
 pub unsafe extern "C" fn wide_copy(dst: *mut u8, src: *const u8, nb: u32) {
+    record(ProfOp::Copy);
     unsafe {
         for i in 0..nw(nb) {
             wr(dst, i, rd(src, i));
@@ -193,6 +319,7 @@ pub unsafe extern "C" fn wide_copy(dst: *mut u8, src: *const u8, nb: u32) {
 // ── Comparisons ─────────────────────────────────────────────────────
 
 pub unsafe extern "C" fn wide_eq(a: *const u8, b: *const u8, nb: u32) -> i64 {
+    record(ProfOp::Eq);
     unsafe {
         for i in 0..nw(nb) {
             if rd(a, i) != rd(b, i) {
@@ -204,6 +331,7 @@ pub unsafe extern "C" fn wide_eq(a: *const u8, b: *const u8, nb: u32) -> i64 {
 }
 
 pub unsafe extern "C" fn wide_ne(a: *const u8, b: *const u8, nb: u32) -> i64 {
+    record(ProfOp::Ne);
     unsafe {
         for i in 0..nw(nb) {
             if rd(a, i) != rd(b, i) {
@@ -216,6 +344,7 @@ pub unsafe extern "C" fn wide_ne(a: *const u8, b: *const u8, nb: u32) -> i64 {
 
 /// Unsigned compare: returns -1 if a < b, 0 if a == b, 1 if a > b.
 pub unsafe extern "C" fn wide_ucmp(a: *const u8, b: *const u8, nb: u32) -> i64 {
+    record(ProfOp::Ucmp);
     unsafe {
         for i in (0..nw(nb)).rev() {
             let ai = rd(a, i);
@@ -233,6 +362,7 @@ pub unsafe extern "C" fn wide_ucmp(a: *const u8, b: *const u8, nb: u32) -> i64 {
 
 /// Signed compare using the sign bit at position (width-1).
 pub unsafe extern "C" fn wide_scmp(a: *const u8, b: *const u8, packed_nb_width: u32) -> i64 {
+    record(ProfOp::Scmp);
     let (nb, width) = unpack_nb_width(packed_nb_width);
     if width == 0 || nb == 0 {
         return 0;
@@ -279,6 +409,7 @@ pub unsafe extern "C" fn wide_scmp_asym(
     a_packed: u32,
     b_packed: u32,
 ) -> i64 {
+    record(ProfOp::ScmpAsym);
     let (a_nb, a_w) = unpack_nb_width(a_packed);
     let (b_nb, b_w) = unpack_nb_width(b_packed);
     if a_w == 0 || b_w == 0 || a_nb == 0 || b_nb == 0 {
@@ -310,6 +441,7 @@ pub unsafe extern "C" fn wide_scmp_asym(
 // ── Shifts ───────────────────────────────────────────────────────────
 
 pub unsafe extern "C" fn wide_shl(dst: *mut u8, a: *const u8, amount: u64, nb: u32) {
+    record(ProfOp::Shl);
     unsafe {
         let n = nw(nb);
         let word_shift = (amount / 64) as usize;
@@ -348,6 +480,7 @@ pub unsafe extern "C" fn wide_shl(dst: *mut u8, a: *const u8, amount: u64, nb: u
 }
 
 pub unsafe extern "C" fn wide_lshr(dst: *mut u8, a: *const u8, amount: u64, nb: u32) {
+    record(ProfOp::Lshr);
     unsafe {
         let n = nw(nb);
         let word_shift = (amount / 64) as usize;
@@ -383,6 +516,7 @@ pub unsafe extern "C" fn wide_lshr(dst: *mut u8, a: *const u8, amount: u64, nb: 
 
 /// Arithmetic shift right: fills with sign bit at position (width-1).
 pub unsafe extern "C" fn wide_ashr(dst: *mut u8, a: *const u8, amount: u64, packed_nb_width: u32) {
+    record(ProfOp::Ashr);
     let (nb, width) = unpack_nb_width(packed_nb_width);
     if nb == 0 || width == 0 {
         return;
@@ -415,6 +549,7 @@ pub unsafe extern "C" fn wide_ashr(dst: *mut u8, a: *const u8, amount: u64, pack
 // ── Reductions ───────────────────────────────────────────────────────
 
 pub unsafe extern "C" fn wide_is_nonzero(a: *const u8, nb: u32) -> i64 {
+    record(ProfOp::IsNonzero);
     unsafe {
         for i in 0..nw(nb) {
             if rd(a, i) != 0 {
@@ -427,6 +562,7 @@ pub unsafe extern "C" fn wide_is_nonzero(a: *const u8, nb: u32) -> i64 {
 
 /// Check if all bits in [0..width) are set.
 pub unsafe extern "C" fn wide_is_all_ones(a: *const u8, packed_nb_width: u32) -> i64 {
+    record(ProfOp::IsAllOnes);
     let (_nb, width) = unpack_nb_width(packed_nb_width);
     if width == 0 {
         return 1;
@@ -451,6 +587,7 @@ pub unsafe extern "C" fn wide_is_all_ones(a: *const u8, packed_nb_width: u32) ->
 
 /// Parity of popcount (reduction XOR): returns 0 or 1.
 pub unsafe extern "C" fn wide_popcnt_parity(a: *const u8, nb: u32) -> i64 {
+    record(ProfOp::PopcntParity);
     unsafe {
         let mut total = 0u32;
         for i in 0..nw(nb) {
@@ -462,6 +599,7 @@ pub unsafe extern "C" fn wide_popcnt_parity(a: *const u8, nb: u32) -> i64 {
 
 /// Apply a width mask: clear bits >= width in dst.
 pub unsafe extern "C" fn wide_apply_mask(dst: *mut u8, _unused: *const u8, packed_nb_width: u32) {
+    record(ProfOp::ApplyMask);
     let (nb, width) = unpack_nb_width(packed_nb_width);
     if width == 0 || nb == 0 {
         return;
@@ -482,6 +620,7 @@ pub unsafe extern "C" fn wide_apply_mask(dst: *mut u8, _unused: *const u8, packe
 
 /// Fill dst with all-ones for width bits, zero above.
 pub unsafe extern "C" fn wide_fill_ones(dst: *mut u8, _unused: *const u8, packed_nb_width: u32) {
+    record(ProfOp::FillOnes);
     let (nb, width) = unpack_nb_width(packed_nb_width);
     if nb == 0 {
         return;
