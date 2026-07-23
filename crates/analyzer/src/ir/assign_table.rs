@@ -322,7 +322,11 @@ impl AssignTable {
         process_level: bool,
     ) {
         for (key, mut val) in value.table.drain() {
-            if process_level && val.mask.iter().any(|m| *m != 0u32.into()) {
+            // SV connects register maybe-only writes and may actually be
+            // reads, so they must not count as a driving process.
+            if process_level
+                && (val.dynamic_write || val.definite_mask.iter().any(|m| *m != 0u32.into()))
+            {
                 val.process_write = true;
             }
             if let Some(x) = self.table.get_mut(&key) {
