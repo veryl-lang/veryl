@@ -557,7 +557,7 @@ impl ProtoExpression {
 /// At runtime: low = index * elem_width, high = low + window - 1.
 /// `elem_width` is the per-index stride; `window` is the total selected bits
 /// (= elem_width for a plain element select, part-select-count * elem_width for `+:`/`-:`/step).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct ProtoDynamicBitSelect {
     pub index_expr: Box<ProtoExpression>,
     pub elem_width: usize,
@@ -574,7 +574,7 @@ pub struct DynamicBitSelect {
     pub num_elements: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum ProtoExpression {
     Variable {
         var_offset: VarOffset,
@@ -651,6 +651,32 @@ pub struct ProtoHierVariable {
     pub width: usize,
     pub expr_context: ExpressionContext,
     pub token: TokenRange,
+}
+
+// `resolve_hier_refs` rewrites every `HierVariable` into a plain `Variable`
+// before conv runs, so this variant never reaches the structural fingerprint —
+// but `ProtoExpression`'s derived `Hash` still requires the bound. `token` is
+// excluded (per-test source position, like `ProtoAssignStatement`). `index` and
+// `select` are `air::Expression` trees that don't implement `Hash`; they are
+// folded via `Debug` so the impl stays sound if the resolve invariant ever
+// breaks. The exhaustive destructure makes a new field a compile error.
+impl std::hash::Hash for ProtoHierVariable {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ProtoHierVariable {
+            inst_path,
+            var_path,
+            index,
+            select,
+            width,
+            expr_context,
+            token: _,
+        } = self;
+        inst_path.hash(state);
+        var_path.hash(state);
+        format!("{index:?}{select:?}").hash(state);
+        width.hash(state);
+        expr_context.hash(state);
+    }
 }
 
 impl ProtoExpression {

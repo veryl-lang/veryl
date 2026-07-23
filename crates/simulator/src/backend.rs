@@ -129,6 +129,25 @@ impl std::fmt::Debug for ChunkArtifact {
     }
 }
 
+// `content_fp` (stamped on every `dut_reuse` chunk in `try_compile_chunk`) keeps
+// the hash deterministic across tests; the run-varying `func` address is used
+// only off that path, mirroring `Debug`.
+impl std::hash::Hash for ChunkArtifact {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self.content_fp {
+            Some(fp) => {
+                0u8.hash(state);
+                fp.hash(state);
+            }
+            None => {
+                1u8.hash(state);
+                (self.func as *const () as usize).hash(state);
+            }
+        }
+        self.keepalive.is_some().hash(state);
+    }
+}
+
 pub struct CompileCtx<'a> {
     pub config: &'a Config,
     pub use_4state: bool,

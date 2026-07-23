@@ -76,7 +76,7 @@ impl ProtoStatements {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct ReadmemhElement {
     pub current: VarOffset,
     pub next_offset: Option<isize>,
@@ -137,7 +137,7 @@ pub struct AssignDynamicStatement {
     pub rhs_sign_extend: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum ProtoTbMethodKind {
     ClockNext {
         count: Option<ProtoExpression>,
@@ -185,7 +185,7 @@ pub enum ProtoTbMethodKind {
 
 /// How a component method's returned width is validated before it lands
 /// in the destination variable.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RetWidthCheck {
     /// Direct assignment to a user variable: truncated to its width.
     Dst,
@@ -197,7 +197,7 @@ pub enum RetWidthCheck {
 
 /// Argument of a user-defined component method call: string literals are
 /// extracted at conv time, everything else stays an evaluatable expression.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum ProtoComponentArg {
     Str(String),
     Expr(ProtoExpression),
@@ -766,7 +766,7 @@ impl SystemFunctionCall {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum ProtoSystemFunctionCall {
     Display {
         format_str: String,
@@ -790,7 +790,7 @@ pub enum ProtoSystemFunctionCall {
     Finish,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct ProtoAssignDynamicStatement {
     pub dst_base: VarOffset,
     pub dst_stride: isize,
@@ -825,14 +825,15 @@ pub struct CompiledBlockStatement {
     pub original_stmts: Vec<ProtoStatement>,
 }
 
-// `stmt_deps` and `original_stmts` are excluded from `Debug`: both are derived
-// deterministically from the compiled statements, and `artifact`'s `content_fp`
-// (a fingerprint of exactly those statements — see `try_compile_chunk`) already
-// identifies them. Excluding them keeps the `Debug`-derived chunk / whole-comb
-// fingerprints from redundantly deep-walking the pre-JIT originals nested in
-// every block, which dominated the per-test key cost. Sound because a matching
-// `content_fp` implies matching `original_stmts`. The exhaustive destructure
-// makes adding a codegen-affecting field a compile error here.
+// `stmt_deps` and `original_stmts` are excluded from `Debug` and `Hash`: both are
+// derived deterministically from the compiled statements, and `artifact`'s
+// `content_fp` (a fingerprint of exactly those statements — see
+// `try_compile_chunk`) already identifies them. Excluding them keeps the
+// `Hash`-derived chunk / whole-comb fingerprints from redundantly deep-walking
+// the pre-JIT originals nested in every block, which dominated the per-test key
+// cost. Sound because a matching `content_fp` implies matching `original_stmts`.
+// The exhaustive destructure in each impl makes adding a codegen-affecting field
+// a compile error here.
 impl std::fmt::Debug for CompiledBlockStatement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let CompiledBlockStatement {
@@ -856,13 +857,34 @@ impl std::fmt::Debug for CompiledBlockStatement {
     }
 }
 
-#[derive(Clone, Debug)]
+impl std::hash::Hash for CompiledBlockStatement {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let CompiledBlockStatement {
+            artifact,
+            ff_delta_bytes,
+            comb_delta_bytes,
+            input_offsets,
+            output_offsets,
+            ff_canonical_offsets,
+            stmt_deps: _,
+            original_stmts: _,
+        } = self;
+        artifact.hash(state);
+        ff_delta_bytes.hash(state);
+        comb_delta_bytes.hash(state);
+        input_offsets.hash(state);
+        output_offsets.hash(state);
+        ff_canonical_offsets.hash(state);
+    }
+}
+
+#[derive(Clone, Debug, Hash)]
 pub enum ProtoForBound {
     Const(u64),
     Dynamic(ProtoExpression),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum ProtoForRange {
     Forward {
         start: ProtoForBound,
@@ -919,7 +941,7 @@ impl ProtoForBound {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct ProtoForStatement {
     pub var_offset: VarOffset,
     pub var_width: usize,
@@ -929,7 +951,7 @@ pub struct ProtoForStatement {
     pub body: Vec<ProtoStatement>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum ProtoStatement {
     Assign(ProtoAssignStatement),
     AssignDynamic(ProtoAssignDynamicStatement),
@@ -2540,12 +2562,13 @@ pub struct ProtoAssignStatement {
 }
 
 // `token` is a per-test source position (differs even between otherwise
-// identical assigns), so it is excluded from `Debug`. That makes the
-// `Debug`-derived chunk / whole-comb fingerprints token-agnostic: two structurally
-// identical assigns from different source locations hash the same, which is
-// sound because `token` never affects codegen (it feeds diagnostics only).
-// The exhaustive destructure makes adding a field a compile error here, so a
-// new codegen-affecting field can never be silently dropped from the hash.
+// identical assigns), so it is excluded from both `Debug` and `Hash`. That makes
+// the `Hash`-derived chunk / whole-comb fingerprints token-agnostic: two
+// structurally identical assigns from different source locations hash the same,
+// which is sound because `token` never affects codegen (it feeds diagnostics
+// only). The exhaustive destructure in each impl makes adding a field a compile
+// error here, so a new codegen-affecting field can never be silently dropped
+// from the fingerprint.
 impl std::fmt::Debug for ProtoAssignStatement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ProtoAssignStatement {
@@ -2567,6 +2590,28 @@ impl std::fmt::Debug for ProtoAssignStatement {
             .field("expr", expr)
             .field("dst_ff_current_offset", dst_ff_current_offset)
             .finish()
+    }
+}
+
+impl std::hash::Hash for ProtoAssignStatement {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ProtoAssignStatement {
+            dst,
+            dst_width,
+            select,
+            dynamic_select,
+            rhs_select,
+            expr,
+            dst_ff_current_offset,
+            token: _,
+        } = self;
+        dst.hash(state);
+        dst_width.hash(state);
+        select.hash(state);
+        dynamic_select.hash(state);
+        rhs_select.hash(state);
+        expr.hash(state);
+        dst_ff_current_offset.hash(state);
     }
 }
 
@@ -2773,7 +2818,7 @@ impl CaseStatement {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct ProtoIfStatement {
     pub cond: Option<ProtoExpression>,
     pub true_side: Vec<ProtoStatement>,
@@ -2819,13 +2864,13 @@ impl ProtoIfStatement {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct ProtoCaseStatement {
     pub arms: Vec<ProtoCaseArm>,
     pub default: Vec<ProtoStatement>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct ProtoCaseArm {
     pub cond: ProtoExpression,
     pub body: Vec<ProtoStatement>,

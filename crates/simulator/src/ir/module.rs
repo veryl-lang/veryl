@@ -3203,27 +3203,37 @@ impl Conv<&air::Module> for ProtoModule {
         // try compile_whole_comb; backends that decline (4-state,
         // unsupported construct) return None and Ir::settle_comb stays
         // on the per-chunk Cranelift loop.
+        let dut_reuse = context.config.dut_reuse;
         let whole_comb: Option<Arc<dyn CompiledWhole>> = if !aot_size_ok {
             None
         } else {
-            let ctx = CompileCtx {
-                config: &context.config,
-                use_4state: context.config.use_4state,
-                contains_compiled_block: false,
-            };
-            // Hand the precomputed localization blocklist + array ranges to the
-            // AOT-C emitter (no-op when VERYL_AOT_C_LOCALIZE is off), then clear
-            // it so it can't leak into a later module's emit.
-            #[cfg(not(target_family = "wasm"))]
-            if let Some((block, ranges)) = &localize_info {
-                crate::backend::aot_c::emit::set_localize_blocklist(block.clone(), ranges.clone());
-            }
-            let r = context
-                .backends
-                .try_compile_whole_comb(&ctx, &pre_jit_stmts);
-            #[cfg(not(target_family = "wasm"))]
-            crate::backend::aot_c::emit::clear_localize_blocklist();
-            r
+            // Memoise the whole-comb compile by the same structural `key` as the
+            // comb pipeline: a shared DUT's C is emitted + fingerprinted once,
+            // not per test (the emit is the dominant per-test build cost at
+            // suite scale, and pure waste when the backend declines).
+            comb_pipeline_cache::whole_comb_get_or_compute(key, dut_reuse, || {
+                let ctx = CompileCtx {
+                    config: &context.config,
+                    use_4state: context.config.use_4state,
+                    contains_compiled_block: false,
+                };
+                // Hand the precomputed localization blocklist + array ranges to
+                // the AOT-C emitter (no-op when VERYL_AOT_C_LOCALIZE is off),
+                // then clear it so it can't leak into a later module's emit.
+                #[cfg(not(target_family = "wasm"))]
+                if let Some((block, ranges)) = &localize_info {
+                    crate::backend::aot_c::emit::set_localize_blocklist(
+                        block.clone(),
+                        ranges.clone(),
+                    );
+                }
+                let r = context
+                    .backends
+                    .try_compile_whole_comb(&ctx, &pre_jit_stmts);
+                #[cfg(not(target_family = "wasm"))]
+                crate::backend::aot_c::emit::clear_localize_blocklist();
+                r
+            })
         };
 
         // A whole-comb bail silently drops the whole module to per-chunk

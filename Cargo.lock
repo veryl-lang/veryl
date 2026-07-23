@@ -6373,6 +6373,7 @@ dependencies = [
  "target-lexicon",
  "thiserror",
  "toml",
+ "twox-hash",
  "vcd",
  "veryl-analyzer",
  "veryl-component",

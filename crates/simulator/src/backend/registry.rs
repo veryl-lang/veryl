@@ -9,12 +9,11 @@
 use super::{Backend, ChunkArtifact, CompileCtx, CompiledWhole};
 use crate::ir::{Config, Event, ProtoStatement};
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock, Mutex};
 
 /// Cross-test compiled-chunk cache. Keyed by a 128-bit structural fingerprint
-/// of the chunk (Debug of the statements + the codegen-affecting flags). A
+/// of the chunk (`Hash` of the statements + the codegen-affecting flags). A
 /// chunk artifact addresses storage as `base + offset` with `base` supplied at
 /// dispatch, so two chunks with identical statements — same ops AND same baked
 /// offsets — compile to interchangeable code. `veryl test` lays every testbench
@@ -29,65 +28,48 @@ use std::sync::{Arc, LazyLock, Mutex};
 static CHUNK_ARTIFACT_CACHE: LazyLock<Mutex<HashMap<u128, Arc<ChunkArtifact>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Sink that feeds `Debug` bytes into two differently-seeded hashers, yielding a
-/// 128-bit fingerprint without materialising the formatted string.
-struct FingerprintWriter {
-    a: DefaultHasher,
-    b: DefaultHasher,
-}
+/// Lets the IR's `Hash` impls feed XXH3-128 directly, replacing the old sink
+/// that fed `Debug`-formatted strings (its dominant per-test cost). Keying uses
+/// `finish_128`; the trait's 64-bit `finish` is unused.
+struct Fp128(twox_hash::xxhash3_128::Hasher);
 
-impl std::fmt::Write for FingerprintWriter {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        self.a.write(s.as_bytes());
-        self.b.write(s.as_bytes());
-        Ok(())
-    }
-}
-
-impl FingerprintWriter {
+impl Fp128 {
     fn new() -> Self {
-        let mut w = FingerprintWriter {
-            a: DefaultHasher::new(),
-            b: DefaultHasher::new(),
-        };
-        // Seed the second half so the two 64-bit lanes are independent.
-        w.b.write_u64(0x9E37_79B9_7F4A_7C15);
-        w
+        Fp128(twox_hash::xxhash3_128::Hasher::new())
     }
 
-    fn add_u8(&mut self, v: u8) {
-        self.a.write_u8(v);
-        self.b.write_u8(v);
-    }
-
-    /// Fold `{value:?}` into both lanes without materialising the string.
-    fn add_debug(&mut self, value: &dyn std::fmt::Debug) {
-        use std::fmt::Write;
-        let _ = write!(self, "{value:?}");
-    }
-
-    fn finish(self) -> u128 {
-        ((self.a.finish() as u128) << 64) | self.b.finish() as u128
+    fn finish_128(&self) -> u128 {
+        self.0.finish_128()
     }
 }
 
-/// Structural 128-bit fingerprint of a chunk. `Debug` carries every field of
-/// every statement, so this never drifts out of sync with the IR the way a
-/// hand-written per-variant hash would — a missed field there would be a silent
-/// false-hit miscompile. `ProtoAssignStatement`'s `token` and `ChunkArtifact`'s
-/// `func` address are excluded from `Debug`, so the fingerprint is token- and
-/// pointer-agnostic (both are codegen-irrelevant). Collision odds at ~10^4
-/// unique chunks are ~2^-100.
+impl Hasher for Fp128 {
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.write(bytes);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0.finish_128() as u64
+    }
+}
+
+/// Structural 128-bit fingerprint of a chunk. Every `Hash` impl mirrors its
+/// `Debug` — derived where `Debug` is derived, hand-written over an exhaustive
+/// destructure where `Debug` is — so a codegen-affecting field can never be
+/// silently dropped (a missed field would be a false-hit miscompile). `ProtoAssignStatement`'s `token` and `ChunkArtifact`'s
+/// `func` address are excluded, so the fingerprint is token- and pointer-agnostic
+/// (both are codegen-irrelevant). XXH3-128 gives full 128-bit distribution, so
+/// collision odds at ~10^4 unique chunks stay ~2^-100.
 fn chunk_fingerprint(
     use_4state: bool,
     contains_compiled_block: bool,
     stmts: &[ProtoStatement],
 ) -> u128 {
-    let mut w = FingerprintWriter::new();
-    w.add_u8(use_4state as u8);
-    w.add_u8(contains_compiled_block as u8);
-    w.add_debug(&stmts);
-    w.finish()
+    let mut h = Fp128::new();
+    h.write_u8(use_4state as u8);
+    h.write_u8(contains_compiled_block as u8);
+    stmts.hash(&mut h);
+    h.finish_128()
 }
 
 /// Structural fingerprint of a whole comb statement list plus the extra inputs
@@ -100,13 +82,13 @@ pub(crate) fn whole_comb_fingerprint(
     stmts: &[ProtoStatement],
     extra: u128,
 ) -> u128 {
-    let mut w = FingerprintWriter::new();
-    w.add_u8(use_4state as u8);
-    w.add_debug(&stmts);
+    let mut h = Fp128::new();
+    h.write_u8(use_4state as u8);
+    stmts.hash(&mut h);
     // Domain-separate the extra digest from the statement bytes.
-    w.add_u8(0xE5);
-    w.add_debug(&extra);
-    w.finish()
+    h.write_u8(0xE5);
+    h.write_u128(extra);
+    h.finish_128()
 }
 
 /// Ordered collection of backends.  Whole-module backends should come
