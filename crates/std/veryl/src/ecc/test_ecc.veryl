@@ -1,0 +1,338 @@
+module test_ecc_wrapper #(
+    param DATA_WIDTH: u32 = 8                                  ,
+    param CODE_WIDTH: u32 = ecc_pkg::get_code_width(DATA_WIDTH),
+) (
+    i_data     : input  logic<DATA_WIDTH>,
+    i_error    : input  logic<CODE_WIDTH>,
+    o_data     : output logic<DATA_WIDTH>,
+    o_corrected: output logic            ,
+    o_detected : output logic            ,
+) {
+    var code      : logic<CODE_WIDTH>;
+    var code_error: logic<CODE_WIDTH>;
+
+    inst u_encoder: ecc_encoder #(
+        WIDTH: DATA_WIDTH,
+    ) (
+        i_enable: true  ,
+        i_data  : i_data,
+        o_code  : code  ,
+    );
+
+    assign code_error = code ^ i_error;
+
+    inst u_decoder: ecc_decoder #(
+        WIDTH: DATA_WIDTH,
+    ) (
+        i_enable   : true       ,
+        i_code     : code_error ,
+        o_data     : o_data     ,
+        o_corrected: o_corrected,
+        o_detected : o_detected ,
+    );
+}
+
+#[test(test_ecc_8)]
+module test_ecc_8 {
+    const CODE_WIDTH: u32 = ecc_pkg::get_code_width(8);
+
+    inst u_clock: $tb::clock_gen;
+
+    var data_gen : $tb::random::<u8>            ;
+    var data     : logic            <2, 8>      ;
+    var error    : logic            <CODE_WIDTH>;
+    var corrected: logic                        ;
+    var detected : logic                        ;
+
+    inst duv: test_ecc_wrapper #(
+        DATA_WIDTH: 8,
+    ) (
+        i_data     : data[0]  ,
+        i_error    : error    ,
+        o_data     : data[1]  ,
+        o_corrected: corrected,
+        o_detected : detected ,
+    );
+
+    initial {
+        data[0] = '0;
+        error   = '0;
+
+        for _i in 0..10 {
+            data[0] = data_gen.get();
+
+            u_clock.next();
+            $assert(data[0] == data[1]);
+            $assert(!corrected);
+            $assert(!detected);
+        }
+
+        for i in 0..CODE_WIDTH {
+            data[0]  = data_gen.get();
+            error    = '0;
+            error[i] = '1;
+
+            u_clock.next();
+            $assert(data[0] == data[1]);
+            $assert(corrected);
+            $assert(!detected);
+        }
+
+        for i in 0..(CODE_WIDTH / 2) {
+            data[0]               = data_gen.get();
+            error                 = '0;
+            error[i]              = '1;
+            error[CODE_WIDTH - i] = '1;
+
+            u_clock.next();
+            $assert(!corrected);
+            $assert(detected);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_ecc_16)]
+module test_ecc_16 {
+    const CODE_WIDTH: u32 = ecc_pkg::get_code_width(16);
+
+    inst u_clock: $tb::clock_gen;
+
+    var data_gen : $tb::random::<u16>            ;
+    var data     : logic             <2, 16>     ;
+    var error    : logic             <CODE_WIDTH>;
+    var corrected: logic                         ;
+    var detected : logic                         ;
+
+    inst duv: test_ecc_wrapper #(
+        DATA_WIDTH: 16,
+    ) (
+        i_data     : data[0]  ,
+        i_error    : error    ,
+        o_data     : data[1]  ,
+        o_corrected: corrected,
+        o_detected : detected ,
+    );
+
+    initial {
+        data[0] = '0;
+        error   = '0;
+
+        for _i in 0..10 {
+            data[0] = data_gen.get();
+
+            u_clock.next();
+            $assert(data[0] == data[1]);
+            $assert(!corrected);
+            $assert(!detected);
+        }
+
+        for i in 0..CODE_WIDTH {
+            data[0]  = data_gen.get();
+            error    = '0;
+            error[i] = '1;
+
+            u_clock.next();
+            $assert(data[0] == data[1]);
+            $assert(corrected);
+            $assert(!detected);
+        }
+
+        for i in 0..(CODE_WIDTH / 2) {
+            data[0]               = data_gen.get();
+            error                 = '0;
+            error[i]              = '1;
+            error[CODE_WIDTH - i] = '1;
+
+            u_clock.next();
+            $assert(!corrected);
+            $assert(detected);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_ecc_32)]
+module test_ecc_32 {
+    const CODE_WIDTH: u32 = ecc_pkg::get_code_width(32);
+
+    inst u_clock: $tb::clock_gen;
+
+    var data_gen : $tb::random::<u32>            ;
+    var data     : logic             <2, 32>     ;
+    var error    : logic             <CODE_WIDTH>;
+    var corrected: logic                         ;
+    var detected : logic                         ;
+
+    inst duv: test_ecc_wrapper #(
+        DATA_WIDTH: 32,
+    ) (
+        i_data     : data[0]  ,
+        i_error    : error    ,
+        o_data     : data[1]  ,
+        o_corrected: corrected,
+        o_detected : detected ,
+    );
+
+    initial {
+        data[0] = '0;
+        error   = '0;
+
+        for _i in 0..10 {
+            data[0] = data_gen.get();
+
+            u_clock.next();
+            $assert(data[0] == data[1]);
+            $assert(!corrected);
+            $assert(!detected);
+        }
+
+        for i in 0..CODE_WIDTH {
+            data[0]  = data_gen.get();
+            error    = '0;
+            error[i] = '1;
+
+            u_clock.next();
+            $assert(data[0] == data[1]);
+            $assert(corrected);
+            $assert(!detected);
+        }
+
+        for i in 0..(CODE_WIDTH / 2) {
+            data[0]               = data_gen.get();
+            error                 = '0;
+            error[i]              = '1;
+            error[CODE_WIDTH - i] = '1;
+
+            u_clock.next();
+            $assert(!corrected);
+            $assert(detected);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_ecc_64)]
+module test_ecc_64 {
+    const CODE_WIDTH: u32 = ecc_pkg::get_code_width(64);
+
+    inst u_clock: $tb::clock_gen;
+
+    var data_gen : $tb::random::<u64>            ;
+    var data     : logic             <2, 64>     ;
+    var error    : logic             <CODE_WIDTH>;
+    var corrected: logic                         ;
+    var detected : logic                         ;
+
+    inst duv: test_ecc_wrapper #(
+        DATA_WIDTH: 64,
+    ) (
+        i_data     : data[0]  ,
+        i_error    : error    ,
+        o_data     : data[1]  ,
+        o_corrected: corrected,
+        o_detected : detected ,
+    );
+
+    initial {
+        data[0] = '0;
+        error   = '0;
+
+        for _i in 0..10 {
+            data[0] = data_gen.get();
+
+            u_clock.next();
+            $assert(data[0] == data[1]);
+            $assert(!corrected);
+            $assert(!detected);
+        }
+
+        for i in 0..CODE_WIDTH {
+            data[0]  = data_gen.get();
+            error    = '0;
+            error[i] = '1;
+
+            u_clock.next();
+            $assert(data[0] == data[1]);
+            $assert(corrected);
+            $assert(!detected);
+        }
+
+        for i in 0..(CODE_WIDTH / 2) {
+            data[0]               = data_gen.get();
+            error                 = '0;
+            error[i]              = '1;
+            error[CODE_WIDTH - i] = '1;
+
+            u_clock.next();
+            $assert(!corrected);
+            $assert(detected);
+        }
+
+        $finish();
+    }
+}
+
+#[test(test_ecc_128)]
+module test_ecc_128 {
+    const CODE_WIDTH: u32 = ecc_pkg::get_code_width(128);
+
+    inst u_clock: $tb::clock_gen;
+
+    var data_gen : $tb::random::<u64>            ;
+    var data     : logic             <2, 128>    ;
+    var error    : logic             <CODE_WIDTH>;
+    var corrected: logic                         ;
+    var detected : logic                         ;
+
+    inst duv: test_ecc_wrapper #(
+        DATA_WIDTH: 128,
+    ) (
+        i_data     : data[0]  ,
+        i_error    : error    ,
+        o_data     : data[1]  ,
+        o_corrected: corrected,
+        o_detected : detected ,
+    );
+
+    initial {
+        data[0] = '0;
+        error   = '0;
+
+        for _i in 0..10 {
+            data[0] = {data_gen.get(), data_gen.get()};
+
+            u_clock.next();
+            $assert(data[0] == data[1]);
+            $assert(!corrected);
+            $assert(!detected);
+        }
+
+        for i in 0..CODE_WIDTH {
+            data[0]  = {data_gen.get(), data_gen.get()};
+            error    = '0;
+            error[i] = '1;
+
+            u_clock.next();
+            $assert(data[0] == data[1]);
+            $assert(corrected);
+            $assert(!detected);
+        }
+
+        for i in 0..(CODE_WIDTH / 2) {
+            data[0]               = {data_gen.get(), data_gen.get()};
+            error                 = '0;
+            error[i]              = '1;
+            error[CODE_WIDTH - i] = '1;
+
+            u_clock.next();
+            $assert(!corrected);
+            $assert(detected);
+        }
+
+        $finish();
+    }
+}

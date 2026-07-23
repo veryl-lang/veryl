@@ -1,0 +1,135 @@
+#[fmt(skip)]
+pub package hamming_57_7_pkg {
+    // data width = 57 check width = 7
+    // row[6]: 111111111111111001000011111111111111100000000000000000000 | 1000000
+    // row[5]: 111111110100010111111011101000000010010101010101010101010 | 0100000
+    // row[4]: 111100101011110111110100010111000010001010101010110101010 | 0010000
+    // row[3]: 110011101111001111101100011000101001001010110101001010110 | 0001000
+    // row[2]: 101110011110101111011110000100010101001101001011001011001 | 0000100
+    // row[1]: 110101011101111100111101000010011000110011001100101100101 | 0000010
+    // row[0]: 101011110011111010111100100001100100110100110010110010101 | 0000001
+
+    const DATA_WIDTH : u32 = 57;
+    const CHECK_WIDTH: u32 = 7;
+    const CODE_WIDTH : u32 = DATA_WIDTH + CHECK_WIDTH;
+
+    // Coefficient matrix for check-bit generation.
+    const ENCODE_MATRIX_ROW_0: bit<DATA_WIDTH> = 57'h15e7d790c9a6595; // check[0]
+    const ENCODE_MATRIX_ROW_1: bit<DATA_WIDTH> = 57'h1abbe7a13199965; // check[1]
+    const ENCODE_MATRIX_ROW_2: bit<DATA_WIDTH> = 57'h173d7bc22a69659; // check[2]
+    const ENCODE_MATRIX_ROW_3: bit<DATA_WIDTH> = 57'h19de7d8c5256a56; // check[3]
+    const ENCODE_MATRIX_ROW_4: bit<DATA_WIDTH> = 57'h1e57be8b84555aa; // check[4]
+    const ENCODE_MATRIX_ROW_5: bit<DATA_WIDTH> = 57'h1fe8bf7404aaaaa; // check[5]
+    const ENCODE_MATRIX_ROW_6: bit<DATA_WIDTH> = 57'h1fffc87fff00000; // check[6]
+
+    struct decode_result {
+        error_pos: logic<CODE_WIDTH>, // error position (one-hot, [CHECK_WIDTH-1:0]=check, upper=data)
+        corrected: logic            , // a single-bit error was located and corrected
+        detected : logic            , // an uncorrectable error was detected
+    }
+
+    /// Compute the check bits (AND with the coefficient matrix, then XOR reduction).
+    function encode (
+        data: input logic<DATA_WIDTH>,
+    ) -> logic<CHECK_WIDTH> {
+        var check: logic<CHECK_WIDTH>;
+        check[0] = ^(ENCODE_MATRIX_ROW_0 & data);
+        check[1] = ^(ENCODE_MATRIX_ROW_1 & data);
+        check[2] = ^(ENCODE_MATRIX_ROW_2 & data);
+        check[3] = ^(ENCODE_MATRIX_ROW_3 & data);
+        check[4] = ^(ENCODE_MATRIX_ROW_4 & data);
+        check[5] = ^(ENCODE_MATRIX_ROW_5 & data);
+        check[6] = ^(ENCODE_MATRIX_ROW_6 & data);
+        return check;
+    }
+
+    /// Compute the syndrome (received check bits ^ recomputed check bits).
+    function calc_syndrome (
+        code: input logic<CODE_WIDTH>
+    ) -> logic<CHECK_WIDTH> {
+        var data : logic<DATA_WIDTH> ;
+        var check: logic<CHECK_WIDTH>;
+        data  = code[CODE_WIDTH-1-:DATA_WIDTH];
+        check = code[0+:CHECK_WIDTH];
+        return encode(data) ^ check;
+    }
+
+    /// Determine the error position and flags (corrected/detected) from the syndrome.
+    /// A data-bit correction is honored only while its index is below the active width.
+    function decode (
+        syndrome: input logic<CHECK_WIDTH>,
+        width   : input u32               ,
+    ) -> decode_result {
+        // Boolean-selector switch (SV: case (1'b1)); the syndrome values are mutually
+        // exclusive, so the branches stay parallel while sharing the width gate.
+        // A data branch that fails its width guard falls through to default -> detected.
+        switch {
+            syndrome == 7'h00: return decode_result'{error_pos: 64'h0000000000000000, corrected: false, detected: false}; // no error
+            syndrome == 7'h01: return decode_result'{error_pos: 64'h0000000000000001, corrected: true, detected: false}; // check[0]
+            syndrome == 7'h02: return decode_result'{error_pos: 64'h0000000000000002, corrected: true, detected: false}; // check[1]
+            syndrome == 7'h04: return decode_result'{error_pos: 64'h0000000000000004, corrected: true, detected: false}; // check[2]
+            syndrome == 7'h08: return decode_result'{error_pos: 64'h0000000000000008, corrected: true, detected: false}; // check[3]
+            syndrome == 7'h10: return decode_result'{error_pos: 64'h0000000000000010, corrected: true, detected: false}; // check[4]
+            syndrome == 7'h20: return decode_result'{error_pos: 64'h0000000000000020, corrected: true, detected: false}; // check[5]
+            syndrome == 7'h40: return decode_result'{error_pos: 64'h0000000000000040, corrected: true, detected: false}; // check[6]
+            syndrome == 7'h07 && width >= 1: return decode_result'{error_pos: 64'h0000000000000080, corrected: true, detected: false}; // data[0]
+            syndrome == 7'h38 && width >= 2: return decode_result'{error_pos: 64'h0000000000000100, corrected: true, detected: false}; // data[1]
+            syndrome == 7'h0b && width >= 3: return decode_result'{error_pos: 64'h0000000000000200, corrected: true, detected: false}; // data[2]
+            syndrome == 7'h34 && width >= 4: return decode_result'{error_pos: 64'h0000000000000400, corrected: true, detected: false}; // data[3]
+            syndrome == 7'h0d && width >= 5: return decode_result'{error_pos: 64'h0000000000000800, corrected: true, detected: false}; // data[4]
+            syndrome == 7'h32 && width >= 6: return decode_result'{error_pos: 64'h0000000000001000, corrected: true, detected: false}; // data[5]
+            syndrome == 7'h0e && width >= 7: return decode_result'{error_pos: 64'h0000000000002000, corrected: true, detected: false}; // data[6]
+            syndrome == 7'h31 && width >= 8: return decode_result'{error_pos: 64'h0000000000004000, corrected: true, detected: false}; // data[7]
+            syndrome == 7'h13 && width >= 9: return decode_result'{error_pos: 64'h0000000000008000, corrected: true, detected: false}; // data[8]
+            syndrome == 7'h2c && width >= 10: return decode_result'{error_pos: 64'h0000000000010000, corrected: true, detected: false}; // data[9]
+            syndrome == 7'h15 && width >= 11: return decode_result'{error_pos: 64'h0000000000020000, corrected: true, detected: false}; // data[10]
+            syndrome == 7'h2a && width >= 12: return decode_result'{error_pos: 64'h0000000000040000, corrected: true, detected: false}; // data[11]
+            syndrome == 7'h16 && width >= 13: return decode_result'{error_pos: 64'h0000000000080000, corrected: true, detected: false}; // data[12]
+            syndrome == 7'h29 && width >= 14: return decode_result'{error_pos: 64'h0000000000100000, corrected: true, detected: false}; // data[13]
+            syndrome == 7'h19 && width >= 15: return decode_result'{error_pos: 64'h0000000000200000, corrected: true, detected: false}; // data[14]
+            syndrome == 7'h26 && width >= 16: return decode_result'{error_pos: 64'h0000000000400000, corrected: true, detected: false}; // data[15]
+            syndrome == 7'h1a && width >= 17: return decode_result'{error_pos: 64'h0000000000800000, corrected: true, detected: false}; // data[16]
+            syndrome == 7'h25 && width >= 18: return decode_result'{error_pos: 64'h0000000001000000, corrected: true, detected: false}; // data[17]
+            syndrome == 7'h1c && width >= 19: return decode_result'{error_pos: 64'h0000000002000000, corrected: true, detected: false}; // data[18]
+            syndrome == 7'h23 && width >= 20: return decode_result'{error_pos: 64'h0000000004000000, corrected: true, detected: false}; // data[19]
+            syndrome == 7'h43 && width >= 21: return decode_result'{error_pos: 64'h0000000008000000, corrected: true, detected: false}; // data[20]
+            syndrome == 7'h4c && width >= 22: return decode_result'{error_pos: 64'h0000000010000000, corrected: true, detected: false}; // data[21]
+            syndrome == 7'h70 && width >= 23: return decode_result'{error_pos: 64'h0000000020000000, corrected: true, detected: false}; // data[22]
+            syndrome == 7'h45 && width >= 24: return decode_result'{error_pos: 64'h0000000040000000, corrected: true, detected: false}; // data[23]
+            syndrome == 7'h4a && width >= 25: return decode_result'{error_pos: 64'h0000000080000000, corrected: true, detected: false}; // data[24]
+            syndrome == 7'h46 && width >= 26: return decode_result'{error_pos: 64'h0000000100000000, corrected: true, detected: false}; // data[25]
+            syndrome == 7'h49 && width >= 27: return decode_result'{error_pos: 64'h0000000200000000, corrected: true, detected: false}; // data[26]
+            syndrome == 7'h51 && width >= 28: return decode_result'{error_pos: 64'h0000000400000000, corrected: true, detected: false}; // data[27]
+            syndrome == 7'h52 && width >= 29: return decode_result'{error_pos: 64'h0000000800000000, corrected: true, detected: false}; // data[28]
+            syndrome == 7'h54 && width >= 30: return decode_result'{error_pos: 64'h0000001000000000, corrected: true, detected: false}; // data[29]
+            syndrome == 7'h68 && width >= 31: return decode_result'{error_pos: 64'h0000002000000000, corrected: true, detected: false}; // data[30]
+            syndrome == 7'h58 && width >= 32: return decode_result'{error_pos: 64'h0000004000000000, corrected: true, detected: false}; // data[31]
+            syndrome == 7'h61 && width >= 33: return decode_result'{error_pos: 64'h0000008000000000, corrected: true, detected: false}; // data[32]
+            syndrome == 7'h62 && width >= 34: return decode_result'{error_pos: 64'h0000010000000000, corrected: true, detected: false}; // data[33]
+            syndrome == 7'h64 && width >= 35: return decode_result'{error_pos: 64'h0000020000000000, corrected: true, detected: false}; // data[34]
+            syndrome == 7'h1f && width >= 36: return decode_result'{error_pos: 64'h0000040000000000, corrected: true, detected: false}; // data[35]
+            syndrome == 7'h2f && width >= 37: return decode_result'{error_pos: 64'h0000080000000000, corrected: true, detected: false}; // data[36]
+            syndrome == 7'h37 && width >= 38: return decode_result'{error_pos: 64'h0000100000000000, corrected: true, detected: false}; // data[37]
+            syndrome == 7'h3b && width >= 39: return decode_result'{error_pos: 64'h0000200000000000, corrected: true, detected: false}; // data[38]
+            syndrome == 7'h7c && width >= 40: return decode_result'{error_pos: 64'h0000400000000000, corrected: true, detected: false}; // data[39]
+            syndrome == 7'h3d && width >= 41: return decode_result'{error_pos: 64'h0000800000000000, corrected: true, detected: false}; // data[40]
+            syndrome == 7'h3e && width >= 42: return decode_result'{error_pos: 64'h0001000000000000, corrected: true, detected: false}; // data[41]
+            syndrome == 7'h4f && width >= 43: return decode_result'{error_pos: 64'h0002000000000000, corrected: true, detected: false}; // data[42]
+            syndrome == 7'h73 && width >= 44: return decode_result'{error_pos: 64'h0004000000000000, corrected: true, detected: false}; // data[43]
+            syndrome == 7'h57 && width >= 45: return decode_result'{error_pos: 64'h0008000000000000, corrected: true, detected: false}; // data[44]
+            syndrome == 7'h5b && width >= 46: return decode_result'{error_pos: 64'h0010000000000000, corrected: true, detected: false}; // data[45]
+            syndrome == 7'h5d && width >= 47: return decode_result'{error_pos: 64'h0020000000000000, corrected: true, detected: false}; // data[46]
+            syndrome == 7'h6e && width >= 48: return decode_result'{error_pos: 64'h0040000000000000, corrected: true, detected: false}; // data[47]
+            syndrome == 7'h5e && width >= 49: return decode_result'{error_pos: 64'h0080000000000000, corrected: true, detected: false}; // data[48]
+            syndrome == 7'h67 && width >= 50: return decode_result'{error_pos: 64'h0100000000000000, corrected: true, detected: false}; // data[49]
+            syndrome == 7'h79 && width >= 51: return decode_result'{error_pos: 64'h0200000000000000, corrected: true, detected: false}; // data[50]
+            syndrome == 7'h6b && width >= 52: return decode_result'{error_pos: 64'h0400000000000000, corrected: true, detected: false}; // data[51]
+            syndrome == 7'h6d && width >= 53: return decode_result'{error_pos: 64'h0800000000000000, corrected: true, detected: false}; // data[52]
+            syndrome == 7'h76 && width >= 54: return decode_result'{error_pos: 64'h1000000000000000, corrected: true, detected: false}; // data[53]
+            syndrome == 7'h75 && width >= 55: return decode_result'{error_pos: 64'h2000000000000000, corrected: true, detected: false}; // data[54]
+            syndrome == 7'h7a && width >= 56: return decode_result'{error_pos: 64'h4000000000000000, corrected: true, detected: false}; // data[55]
+            syndrome == 7'h7f && width >= 57: return decode_result'{error_pos: 64'h8000000000000000, corrected: true, detected: false}; // data[56]
+            default: return decode_result'{error_pos: 64'h0000000000000000, corrected: false, detected: true}; // undefined syndrome / out-of-range (multiple-bit error)
+        }
+    }
+}

@@ -1,0 +1,78 @@
+pub module ecc_encoder #(
+    param WIDTH      : u32  = 8                                   ,
+    param TYPE       : type = logic<WIDTH>                        ,
+    const DATA_WIDTH : u32  = $bits(TYPE)                         ,
+    const CHECK_WIDTH: u32  = ecc_pkg::get_check_width(DATA_WIDTH),
+    const CODE_WIDTH : u32  = DATA_WIDTH + CHECK_WIDTH            ,
+) (
+    i_enable: input  logic            ,
+    i_data  : input  TYPE             ,
+    o_code  : output logic<CODE_WIDTH>,
+) {
+    var check: logic<CHECK_WIDTH>;
+
+    always_comb {
+        o_code = {i_data, check};
+    }
+
+    if CHECK_WIDTH == 5 :g {
+        var data: logic<hamming_11_5_pkg::DATA_WIDTH>;
+
+        always_comb {
+            data = i_data as hamming_11_5_pkg::DATA_WIDTH;
+            if i_enable {
+                check = hamming_11_5_pkg::encode(data) as CHECK_WIDTH;
+            } else {
+                check = '0;
+            }
+        }
+    } else if CHECK_WIDTH == 6 {
+        var data: logic<hamming_26_6_pkg::DATA_WIDTH>;
+
+        always_comb {
+            data = i_data as hamming_26_6_pkg::DATA_WIDTH;
+            if i_enable {
+                check = hamming_26_6_pkg::encode(data) as CHECK_WIDTH;
+            } else {
+                check = '0;
+            }
+        }
+    } else if CHECK_WIDTH == 7 {
+        var data: logic<hamming_57_7_pkg::DATA_WIDTH>;
+
+        always_comb {
+            data = i_data as hamming_57_7_pkg::DATA_WIDTH;
+            if i_enable {
+                check = hamming_57_7_pkg::encode(data) as CHECK_WIDTH;
+            } else {
+                check = '0;
+            }
+        }
+    } else if CHECK_WIDTH == 8 {
+        var data: logic<hamming_120_8_pkg::DATA_WIDTH>;
+
+        always_comb {
+            data = i_data as hamming_120_8_pkg::DATA_WIDTH;
+            if i_enable {
+                check = hamming_120_8_pkg::encode(data) as CHECK_WIDTH;
+            } else {
+                check = '0;
+            }
+        }
+    } else if CHECK_WIDTH == 9 {
+        var data: logic<hamming_247_9_pkg::DATA_WIDTH>;
+
+        always_comb {
+            data = i_data as hamming_247_9_pkg::DATA_WIDTH;
+            if i_enable {
+                check = hamming_247_9_pkg::encode(data) as CHECK_WIDTH;
+            } else {
+                check = '0;
+            }
+        }
+    } else {
+        always_comb {
+            check = '0;
+        }
+    }
+}

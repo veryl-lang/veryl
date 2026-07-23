@@ -1,0 +1,29 @@
+pub package ecc_pkg {
+    function get_check_width (
+        data_width: input u32,
+    ) -> u32 {
+        if data_width == 0 {
+            return 0;
+        }
+
+        if data_width <= hamming_11_5_pkg::DATA_WIDTH {
+            return hamming_11_5_pkg::CHECK_WIDTH;
+        } else if data_width <= hamming_26_6_pkg::DATA_WIDTH {
+            return hamming_26_6_pkg::CHECK_WIDTH;
+        } else if data_width <= hamming_57_7_pkg::DATA_WIDTH {
+            return hamming_57_7_pkg::CHECK_WIDTH;
+        } else if data_width <= hamming_120_8_pkg::DATA_WIDTH {
+            return hamming_120_8_pkg::CHECK_WIDTH;
+        } else if data_width <= hamming_247_9_pkg::DATA_WIDTH {
+            return hamming_247_9_pkg::CHECK_WIDTH;
+        } else {
+            return 0;
+        }
+    }
+
+    function get_code_width (
+        data_width: input u32,
+    ) -> u32 {
+        return data_width + get_check_width(data_width);
+    }
+}

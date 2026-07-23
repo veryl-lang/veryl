@@ -1,0 +1,81 @@
+#[fmt(skip)]
+pub package hamming_11_5_pkg {
+    // data width = 11 check width = 5
+    // row[4]: 11111100100 | 10000
+    // row[3]: 11010011110 | 01000
+    // row[2]: 10101011101 | 00100
+    // row[1]: 10110110011 | 00010
+    // row[0]: 11001101011 | 00001
+
+    const DATA_WIDTH : u32 = 11;
+    const CHECK_WIDTH: u32 = 5;
+    const CODE_WIDTH : u32 = DATA_WIDTH + CHECK_WIDTH;
+
+    // Coefficient matrix for check-bit generation.
+    const ENCODE_MATRIX_ROW_0: bit<DATA_WIDTH> = 11'h66b; // check[0]
+    const ENCODE_MATRIX_ROW_1: bit<DATA_WIDTH> = 11'h5b3; // check[1]
+    const ENCODE_MATRIX_ROW_2: bit<DATA_WIDTH> = 11'h55d; // check[2]
+    const ENCODE_MATRIX_ROW_3: bit<DATA_WIDTH> = 11'h69e; // check[3]
+    const ENCODE_MATRIX_ROW_4: bit<DATA_WIDTH> = 11'h7e4; // check[4]
+
+    struct decode_result {
+        error_pos: logic<CODE_WIDTH>, // error position (one-hot, [CHECK_WIDTH-1:0]=check, upper=data)
+        corrected: logic            , // a single-bit error was located and corrected
+        detected : logic            , // an uncorrectable error was detected
+    }
+
+    /// Compute the check bits (AND with the coefficient matrix, then XOR reduction).
+    function encode (
+        data: input logic<DATA_WIDTH>,
+    ) -> logic<CHECK_WIDTH> {
+        var check: logic<CHECK_WIDTH>;
+        check[0] = ^(ENCODE_MATRIX_ROW_0 & data);
+        check[1] = ^(ENCODE_MATRIX_ROW_1 & data);
+        check[2] = ^(ENCODE_MATRIX_ROW_2 & data);
+        check[3] = ^(ENCODE_MATRIX_ROW_3 & data);
+        check[4] = ^(ENCODE_MATRIX_ROW_4 & data);
+        return check;
+    }
+
+    /// Compute the syndrome (received check bits ^ recomputed check bits).
+    function calc_syndrome (
+        code: input logic<CODE_WIDTH>
+    ) -> logic<CHECK_WIDTH> {
+        var data : logic<DATA_WIDTH> ;
+        var check: logic<CHECK_WIDTH>;
+        data  = code[CODE_WIDTH-1-:DATA_WIDTH];
+        check = code[0+:CHECK_WIDTH];
+        return encode(data) ^ check;
+    }
+
+    /// Determine the error position and flags (corrected/detected) from the syndrome.
+    /// A data-bit correction is honored only while its index is below the active width.
+    function decode (
+        syndrome: input logic<CHECK_WIDTH>,
+        width   : input u32               ,
+    ) -> decode_result {
+        // Boolean-selector switch (SV: case (1'b1)); the syndrome values are mutually
+        // exclusive, so the branches stay parallel while sharing the width gate.
+        // A data branch that fails its width guard falls through to default -> detected.
+        switch {
+            syndrome == 5'h00: return decode_result'{error_pos: 16'h0000, corrected: false, detected: false}; // no error
+            syndrome == 5'h01: return decode_result'{error_pos: 16'h0001, corrected: true, detected: false}; // check[0]
+            syndrome == 5'h02: return decode_result'{error_pos: 16'h0002, corrected: true, detected: false}; // check[1]
+            syndrome == 5'h04: return decode_result'{error_pos: 16'h0004, corrected: true, detected: false}; // check[2]
+            syndrome == 5'h08: return decode_result'{error_pos: 16'h0008, corrected: true, detected: false}; // check[3]
+            syndrome == 5'h10: return decode_result'{error_pos: 16'h0010, corrected: true, detected: false}; // check[4]
+            syndrome == 5'h07 && width >= 1: return decode_result'{error_pos: 16'h0020, corrected: true, detected: false}; // data[0]
+            syndrome == 5'h0b && width >= 2: return decode_result'{error_pos: 16'h0040, corrected: true, detected: false}; // data[1]
+            syndrome == 5'h1c && width >= 3: return decode_result'{error_pos: 16'h0080, corrected: true, detected: false}; // data[2]
+            syndrome == 5'h0d && width >= 4: return decode_result'{error_pos: 16'h0100, corrected: true, detected: false}; // data[3]
+            syndrome == 5'h0e && width >= 5: return decode_result'{error_pos: 16'h0200, corrected: true, detected: false}; // data[4]
+            syndrome == 5'h13 && width >= 6: return decode_result'{error_pos: 16'h0400, corrected: true, detected: false}; // data[5]
+            syndrome == 5'h15 && width >= 7: return decode_result'{error_pos: 16'h0800, corrected: true, detected: false}; // data[6]
+            syndrome == 5'h1a && width >= 8: return decode_result'{error_pos: 16'h1000, corrected: true, detected: false}; // data[7]
+            syndrome == 5'h16 && width >= 9: return decode_result'{error_pos: 16'h2000, corrected: true, detected: false}; // data[8]
+            syndrome == 5'h19 && width >= 10: return decode_result'{error_pos: 16'h4000, corrected: true, detected: false}; // data[9]
+            syndrome == 5'h1f && width >= 11: return decode_result'{error_pos: 16'h8000, corrected: true, detected: false}; // data[10]
+            default: return decode_result'{error_pos: 16'h0000, corrected: false, detected: true}; // undefined syndrome / out-of-range (multiple-bit error)
+        }
+    }
+}
