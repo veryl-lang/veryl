@@ -775,10 +775,8 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             var_full_width,
             ..
         } => {
-            // A plain wide leaf read aliases the buffer directly.  A wide
-            // select / dynamic-select is interpreter-only (build_binary
-            // returns a register for a ≤64 select; wider bails).
-            if select.is_some() || dynamic_select.is_some() {
+            // A dynamic-select on a wide var is interpreter-only here.
+            if dynamic_select.is_some() {
                 return None;
             }
             let off = match var_offset {
@@ -791,6 +789,32 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                 VarOffset::Ff(_) => "ff_values",
                 VarOffset::Comb(_) => "comb_values",
             };
+            // Wide-result static bit-select: extract [lo..hi] of the (wide)
+            // source into a scratch = (src >> lo) masked to nbits.  A ≤128-bit
+            // result is a scalar (builds_wide_pointer routes it away from here);
+            // this arm only fires for nbits > 128.  Mirrors the Cranelift
+            // emit_wide_bit_select_read (feat/wide-result-bitselect, §26).
+            if let Some((hi, lo)) = select {
+                let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
+                if nbits <= 128 {
+                    return None;
+                }
+                let src_nb = native_bytes(*var_full_width);
+                let src_nw = src_nb / 8;
+                let res_nb = native_bytes(nbits);
+                let t = next_wide_tmp();
+                pre.push_str(&format!(
+                    "uint64_t _w{t}[{src_nw}]; \
+                     vw_lshr((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), {lo}ull, {src_nb}u); \
+                     vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {mask}u); ",
+                    mask = wpack(src_nb, nbits),
+                ));
+                return Some(WideRef {
+                    addr: format!("((uint8_t*)_w{t})"),
+                    nb: res_nb,
+                    width: nbits,
+                });
+            }
             Some(WideRef {
                 addr: format!("((uint8_t*)({buf} + {off:#x}))"),
                 nb: native_bytes(*var_full_width),
@@ -1699,11 +1723,22 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
     }
 }
 
-/// Classify the first uncovered sub-EXPRESSION of `e` (the leaf where
-/// emit_expr first returns None), for the `VERYL_AOT_C_DIAG` census — so the
+/// Is `e` emittable on the AOT-C path? The narrow `emit_expr` check alone
+/// spuriously fails every wide node, so the census breadcrumb uses this to
+/// name the real uncovered leaf.
+fn expr_covered(e: &ProtoExpression) -> bool {
+    if e.builds_wide_pointer() {
+        emit_wide_expr(e, &mut String::new()).is_some()
+    } else {
+        emit_expr(e).is_some()
+    }
+}
+
+/// Classify the first uncovered sub-EXPRESSION of `e` (the leaf where the
+/// emit first returns None), for the `VERYL_AOT_C_DIAG` census — so the
 /// `exprOK=false` comb bails name the exact wide construct still missing.
 fn classify_uncovered_expr(e: &ProtoExpression) -> String {
-    if emit_expr(e).is_some() {
+    if expr_covered(e) {
         return "(covered)".to_string();
     }
     match e {
@@ -1721,7 +1756,7 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
         ),
         ProtoExpression::Value { width, .. } => format!("Val(w={width})"),
         ProtoExpression::Unary { op, x, width, .. } => {
-            if emit_expr(x).is_none() {
+            if !expr_covered(x) {
                 format!("Un({op:?})/{}", classify_uncovered_expr(x))
             } else {
                 format!("Un({op:?},w={width},xw={})", x.width())
@@ -1730,9 +1765,9 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
         ProtoExpression::Binary {
             op, x, y, width, ..
         } => {
-            if emit_expr(x).is_none() {
+            if !expr_covered(x) {
                 format!("Bin({op:?})/x:{}", classify_uncovered_expr(x))
-            } else if emit_expr(y).is_none() {
+            } else if !expr_covered(y) {
                 format!("Bin({op:?})/y:{}", classify_uncovered_expr(y))
             } else {
                 format!("Bin({op:?},w={width},xw={},yw={})", x.width(), y.width())
@@ -1745,11 +1780,11 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
             width,
             ..
         } => {
-            if emit_expr(cond).is_none() {
+            if !expr_covered(cond) {
                 format!("Tern/c:{}", classify_uncovered_expr(cond))
-            } else if emit_expr(true_expr).is_none() {
+            } else if !expr_covered(true_expr) {
                 format!("Tern/t:{}", classify_uncovered_expr(true_expr))
-            } else if emit_expr(false_expr).is_none() {
+            } else if !expr_covered(false_expr) {
                 format!("Tern/f:{}", classify_uncovered_expr(false_expr))
             } else {
                 format!("Tern(w={width})")
@@ -1759,7 +1794,7 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
             width, elements, ..
         } => {
             for (el, _, _) in elements {
-                if emit_expr(el).is_none() {
+                if !expr_covered(el) {
                     return format!("Concat/{}", classify_uncovered_expr(el));
                 }
             }
@@ -2872,9 +2907,55 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
 pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
     match stmt {
         ProtoStatement::Assign(a) => {
-            // A bare narrow signed RHS sign-extends at the store
-            // (store_sign_extend_from); not done in the C emitter — bail to Cranelift.
-            if a.rhs_select.is_none() && a.expr.store_sign_extend_from(a.dst_width).is_some() {
+            // A rhs_select on a plain variable is a bit-select on that variable
+            // (value.select(hi, lo)); fold it into the variable's own select so
+            // the wide-var select paths (emit_expr / emit_wide_expr) handle a
+            // >128-bit source that isn't a C scalar.  The scalar rhs_select
+            // branch below only reaches ≤128-bit rhs values.  Never for FF (the
+            // FF path handles rhs_select itself).
+            let folded_expr = match (a.rhs_select, &a.expr) {
+                (
+                    Some((hi, lo)),
+                    ProtoExpression::Variable {
+                        var_offset,
+                        select: None,
+                        dynamic_select: None,
+                        var_full_width,
+                        expr_context,
+                        ..
+                    },
+                ) if hi >= lo && !a.dst.is_ff() => Some(ProtoExpression::Variable {
+                    var_offset: *var_offset,
+                    select: Some((hi, lo)),
+                    dynamic_select: None,
+                    width: hi - lo + 1,
+                    var_full_width: *var_full_width,
+                    expr_context: *expr_context,
+                }),
+                _ => None,
+            };
+            let eff_expr: &ProtoExpression = folded_expr.as_ref().unwrap_or(&a.expr);
+            let eff_rhs_select = if folded_expr.is_some() {
+                None
+            } else {
+                a.rhs_select
+            };
+            // A bare signed RHS narrower than the destination sign-extends at
+            // the store (ProtoExpression::store_sign_extend_from): the value is
+            // sign-extended to dst_width BEFORE the (plain/select) store, so a
+            // field reaching above the RHS's own width picks up sign bits.
+            // Handled inline below for dst_width <= 128 by producing a
+            // sign-extended rhs (`se_from`); wider signed stores stay on
+            // Cranelift (none occur in practice).
+            let se_from = if eff_rhs_select.is_none() {
+                eff_expr.store_sign_extend_from(a.dst_width)
+            } else {
+                None
+            };
+            // Sign-extend is handled inline below only for a comb destination of
+            // width <= 128.  FF stores (emit_event_ff_assign doesn't sign-extend)
+            // and wider comb stores stay on Cranelift, which extends in-register.
+            if se_from.is_some() && (a.dst_width > 128 || a.dst.is_ff()) {
                 return None;
             }
             // Route every FF write through the shadow-slot + WriteLogEntry path
@@ -2886,21 +2967,25 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             if a.dst.is_ff() {
                 return emit_event_ff_assign(a);
             }
-            // A runtime-indexed bit-slice store into a comb target isn't
-            // emitted (FF targets were handled above); bail to Cranelift.
-            if a.dynamic_select.is_some() {
+            // A runtime-indexed bit-slice store into a comb target is emitted
+            // below (after the rhs is computed), for dst_width <= 64.  Wider
+            // dynamic-select stores stay on Cranelift.
+            if a.dynamic_select.is_some() && (a.dst_width > 64 || a.dst_width == 0) {
                 return None;
             }
-            // Wide (>128-bit) comb store via the wide-op helper table.  The
-            // 65-128 bit range is already handled by the `__uint128_t` path
-            // below; only >128 needs the flat-buffer pointer + helpers.  A
-            // (bit-)select store IS emitted here (scalar fast path for <=64-bit
-            // fields, full wide RMW otherwise); only rhs_select stays on
-            // Cranelift (S1).
-            if a.dst_width > 128 {
-                // rhs_select on a wide store stays on Cranelift (rare);
-                // dynamic_select bailed above.
-                if a.rhs_select.is_some() {
+            // Wide comb store via the wide-op helper table.  Two cases route
+            // here: (a) dst_width > 128 (never a C scalar); (b) a 65-128-bit
+            // dst whose RHS `builds_wide_pointer` — a wide-pointer result (e.g.
+            // a wide shift over a >128-bit operand truncated to 128) that the
+            // `__uint128_t` scalar path below (emit_expr_root) can't produce.
+            // A 65-128-bit dst with a plain C-scalar RHS still takes the scalar
+            // path.  A (bit-)select store IS emitted here (scalar fast path for
+            // <=64-bit fields, full wide RMW otherwise); only rhs_select stays
+            // on Cranelift (S1).
+            if a.dst_width > 128 || (a.dst_width > 64 && eff_expr.builds_wide_pointer()) {
+                // A non-foldable rhs_select on a wide store (rhs isn't a plain
+                // variable) stays on Cranelift; dynamic_select bailed above.
+                if eff_rhs_select.is_some() {
                     return None;
                 }
                 let VarOffset::Comb(store_off) = a.dst else {
@@ -2918,7 +3003,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                     // <=64-bit field → scalar word RMW (see
                     // emit_wide_narrow_field_store); wider fields fall through.
                     if nbits <= 64 {
-                        return emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, |k| {
+                        return emit_wide_narrow_field_store(eff_expr, hi, lo, a.dst_width, |k| {
                             format!(
                                 "(veryl_u64_ua*)(comb_values + {:#x})",
                                 store_off + (k as isize) * 8
@@ -2931,7 +3016,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                     // from the destination BEFORE the final copy overwrites it.
                     // Mirrors Cranelift emit_wide_select_rmw.
                     let mut pre = String::new();
-                    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+                    let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
                     let src = r.addr;
                     let rmask = next_wide_tmp();
                     let srcsh = next_wide_tmp();
@@ -2959,7 +3044,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 // mask THERE (never the source, which may alias a flat-buffer
                 // variable read).
                 let mut pre = String::new();
-                let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+                let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
                 return Some(format!(
                     "{{ {pre}vw_copy({dst}, {src}, {nb}u); \
                         vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}",
@@ -2970,21 +3055,64 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             let cty = native_c_type(nb)?;
             // Compute the rhs after rhs_select extraction (mirrors
             // AssignStatement::eval_step's `value.select(beg, end)`).
-            let rhs_unselected = emit_expr_root(&a.expr)?;
-            let rhs_str = match a.rhs_select {
+            let rhs_raw = emit_expr_root(eff_expr)?;
+            // Sign-extend a bare signed RHS to dst_width before the store
+            // (`se_from` = the RHS width). dst_width <= 128 is guaranteed here
+            // (wider bailed above). The extension fills bits [w..dst_width) with
+            // the RHS sign, so a select field or plain store reaching those bits
+            // reads the sign — matching value.expand(dst_width, true).
+            let rhs_unselected = match se_from {
+                Some(w) if w < 64 && a.dst_width <= 64 => {
+                    let sh = 64 - w;
+                    format!("((uint64_t)(((int64_t)((uint64_t)({rhs_raw}) << {sh})) >> {sh}))")
+                }
+                Some(w) if w < 128 => {
+                    // dst_width 65..128: extend in __int128_t.
+                    let sh = 128 - w;
+                    format!(
+                        "((__uint128_t)(((__int128_t)((__uint128_t)({rhs_raw}) << {sh})) >> {sh}))"
+                    )
+                }
+                _ => rhs_raw,
+            };
+            let rhs_str = match eff_rhs_select {
                 None => rhs_unselected,
                 Some((rhs_hi, rhs_lo)) => {
                     let nbits = rhs_hi.checked_sub(rhs_lo)?.checked_add(1)?;
-                    if nbits >= 64 {
+                    // A field wider than 128 bits isn't a C scalar; a wide-value
+                    // rhs (emit_expr_root None) already bailed above.  Extract
+                    // [rhs_lo..rhs_hi] mirroring value.select(rhs_hi, rhs_lo).
+                    if nbits > 128 {
                         return None;
                     }
-                    let mask = (1u64 << nbits) - 1;
-                    format!(
-                        "((({src}) >> {lo}) & 0x{m:x}ULL)",
-                        src = rhs_unselected,
-                        lo = rhs_lo,
-                        m = mask,
-                    )
+                    if nbits > 64 {
+                        // 65..128-bit field → __uint128_t shift + mask.
+                        let inner = format!(
+                            "(((__uint128_t)({src})) >> {lo})",
+                            src = rhs_unselected,
+                            lo = rhs_lo
+                        );
+                        if nbits < 128 {
+                            mask_u128(&inner, nbits)
+                        } else {
+                            inner
+                        }
+                    } else if nbits == 64 {
+                        // Exactly 64: mask would overflow `1u64 << 64`.
+                        format!(
+                            "((uint64_t)(({src}) >> {lo}))",
+                            src = rhs_unselected,
+                            lo = rhs_lo
+                        )
+                    } else {
+                        let mask = (1u64 << nbits) - 1;
+                        format!(
+                            "((({src}) >> {lo}) & 0x{m:x}ULL)",
+                            src = rhs_unselected,
+                            lo = rhs_lo,
+                            m = mask,
+                        )
+                    }
                 }
             };
             // FF targets returned via emit_event_ff_assign above, so the
@@ -2993,6 +3121,40 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 return None;
             };
             let buf = "comb_values";
+            // Runtime-indexed field store (dst_width <= 64 guaranteed above):
+            // idx = clamp(index_expr), field = [idx*elem_width ..
+            // +window-1], RMW value's low `window` bits there.  Mirrors
+            // AssignStatement::eval_step's dynamic_select branch
+            // (current.assign(value, beg=end+window-1, end=idx*elem_width)).
+            if let Some(dyn_sel) = &a.dynamic_select {
+                if dyn_sel.window == 0 || dyn_sel.window > 64 || dyn_sel.elem_width == 0 {
+                    return None;
+                }
+                let idx_str = emit_expr(&dyn_sel.index_expr)?;
+                let max_idx = dyn_sel.num_elements.saturating_sub(1);
+                let vmask: u64 = if dyn_sel.window >= 64 {
+                    !0u64
+                } else {
+                    (1u64 << dyn_sel.window) - 1
+                };
+                return Some(format!(
+                    "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
+                        uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+                        uint64_t _sh = _idx * {ew}; \
+                        uint64_t _v = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; \
+                        {ct} _o = *(({ct}*)({b} + {o:#x})); \
+                        *(({ct}*)({b} + {o:#x})) = \
+                          ({ct})((_o & ({ct})(~(0x{vmask:x}ULL << _sh))) | ({ct})(_v << _sh)); }}",
+                    idx = idx_str,
+                    max = max_idx,
+                    ew = dyn_sel.elem_width,
+                    rhs = rhs_str,
+                    vmask = vmask,
+                    ct = cty,
+                    b = buf,
+                    o = store_off,
+                ));
+            }
             // Bit-select store is read-modify-write.
             if let Some((hi, lo)) = a.select {
                 let nbits = hi.checked_sub(lo)?.checked_add(1)?;
@@ -3024,6 +3186,17 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                         phi = (pos >> 64) as u64,
                         plo = pos as u64,
                         lo = lo,
+                    ));
+                }
+                // A full-width [63:0] select on a 64-bit dst is a plain store;
+                // the single-u64 mask math below would overflow (`1u64 << 64`).
+                if nbits == 64 && lo == 0 {
+                    return Some(format!(
+                        "*(({ct}*)({b} + {o:#x})) = ({ct})({rhs});",
+                        ct = cty,
+                        b = buf,
+                        o = store_off,
+                        rhs = rhs_str,
                     ));
                 }
                 // The masked-store math below works in a single u64, so the
@@ -3356,45 +3529,108 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
     }
 }
 
-/// `ProtoStatement::For` → C `for` loop.  Requires constant Forward
-/// range with loop var ≤ 64 bits; falls back otherwise.
+/// `ProtoStatement::For` → C `for` loop.  Covers Forward / Reverse ranges
+/// with constant or dynamic (≤64-bit) bounds and a loop var ≤ 64 bits;
+/// mirrors the Cranelift JIT gate (`ProtoForStatement::can_build_binary`).
+/// Stepped ranges (arbitrary-op advance) stay on the interpreter.
 fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
-    let (start, end_excl, step) = match &for_stmt.range {
+    if for_stmt.var_width == 0 || for_stmt.var_width > 64 {
+        return None;
+    }
+    // A loop bound as a C expression.  Const folds to a literal; Dynamic
+    // (≤64-bit) emits its scalar expression.  `add_one` applies the inclusive
+    // end bump (mirrors the interpreter / const path's `e += 1`).
+    let bound_c = |b: &ProtoForBound, add_one: bool| -> Option<String> {
+        match b {
+            ProtoForBound::Const(v) => {
+                let v = if add_one { v.checked_add(1)? } else { *v };
+                Some(format!("{v}ULL"))
+            }
+            ProtoForBound::Dynamic(e) => {
+                if e.width() > 64 {
+                    return None;
+                }
+                let c = emit_expr(e)?;
+                if add_one {
+                    Some(format!("(({c}) + 1ULL)"))
+                } else {
+                    Some(format!("({c})"))
+                }
+            }
+        }
+    };
+    // Const trip count (loop iterations), or None when a bound is dynamic.
+    let const_trips =
+        |start: &ProtoForBound, end: &ProtoForBound, inclusive: bool, step: u64| -> Option<u64> {
+            let s = match start {
+                ProtoForBound::Const(v) => *v,
+                _ => return None,
+            };
+            let e0 = match end {
+                ProtoForBound::Const(v) => *v,
+                _ => return None,
+            };
+            let e = if inclusive { e0.checked_add(1)? } else { e0 };
+            Some(if e > s { (e - s).div_ceil(step) } else { 0 })
+        };
+
+    // Loop-control fragments referencing hoisted bound temps `_lo`/`_hi`,
+    // evaluated once (as the interpreter/Cranelift read the bounds a single
+    // time before looping).  `int64_t` for Reverse so the signed `>= _lo`
+    // guard terminates on underflow past `_lo`, matching the emitted SV
+    // `for (int i = hi - 1; i >= lo; i -= step)`.
+    let (var_ty, lo, hi, init, cond, incr, trips) = match &for_stmt.range {
         ProtoForRange::Forward {
             start,
             end,
             inclusive,
             step,
         } => {
-            let s = match start {
-                ProtoForBound::Const(v) => *v,
-                ProtoForBound::Dynamic(_) => return None,
-            };
-            let e = match end {
-                ProtoForBound::Const(v) => *v,
-                ProtoForBound::Dynamic(_) => return None,
-            };
-            // Mirror the interpreter: inclusive bumps end by 1 before
-            // the i < end comparison.
-            let e_excl = if *inclusive { e.checked_add(1)? } else { e };
-            (s, e_excl, *step)
+            if *step == 0 {
+                return None;
+            }
+            (
+                "uint64_t",
+                bound_c(start, false)?,
+                bound_c(end, *inclusive)?,
+                "uint64_t _it = _lo".to_string(),
+                "_it < _hi".to_string(),
+                format!("_it += {step}ULL"),
+                const_trips(start, end, *inclusive, *step),
+            )
         }
-        ProtoForRange::Reverse { .. } | ProtoForRange::Stepped { .. } => return None,
+        ProtoForRange::Reverse {
+            start,
+            end,
+            inclusive,
+            step,
+        } => {
+            if *step == 0 {
+                return None;
+            }
+            (
+                "int64_t",
+                bound_c(start, false)?,
+                bound_c(end, *inclusive)?,
+                "int64_t _it = _hi - 1".to_string(),
+                "_it >= _lo".to_string(),
+                format!("_it -= {step}ULL"),
+                const_trips(start, end, *inclusive, *step),
+            )
+        }
+        ProtoForRange::Stepped { .. } => return None,
     };
-    if step == 0 {
-        return None; // would be an infinite loop
-    }
-    if for_stmt.var_width == 0 || for_stmt.var_width > 64 {
-        return None;
-    }
+
     let nb = native_bytes(for_stmt.var_width);
     let cty = native_c_type(nb)?;
     let (buf, off) = match for_stmt.var_offset {
         VarOffset::Ff(o) => ("ff_values", o),
         VarOffset::Comb(o) => ("comb_values", o),
     };
-    // Pushes inside the body execute once per iteration: scale their
-    // contribution to the reserve counters by the trip count.
+
+    // Body pushes (FF write-log entries) execute once per iteration; scale the
+    // reserve counters by the trip count.  A dynamic bound has no compile-time
+    // trip count, so a body that pushes must fall back to the interpreter.
     let narrow_before = EVENT_NARROW_PUSHES.with(|c| c.get());
     let wide_before = EVENT_WIDE_PUSHES.with(|c| c.get());
     let mut body = String::new();
@@ -3402,25 +3638,24 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
         body.push_str(&emit_stmt(s)?);
         body.push(' ');
     }
-    let trips = end_excl.saturating_sub(start).div_ceil(step);
-    EVENT_NARROW_PUSHES.with(|c| {
-        c.set(narrow_before + (c.get() - narrow_before).saturating_mul(trips));
-    });
-    EVENT_WIDE_PUSHES.with(|c| {
-        c.set(wide_before + (c.get() - wide_before).saturating_mul(trips));
-    });
+    let narrow_body = EVENT_NARROW_PUSHES
+        .with(|c| c.get())
+        .saturating_sub(narrow_before);
+    let wide_body = EVENT_WIDE_PUSHES
+        .with(|c| c.get())
+        .saturating_sub(wide_before);
+    if narrow_body > 0 || wide_body > 0 {
+        let trips = trips?;
+        EVENT_NARROW_PUSHES.with(|c| c.set(narrow_before + narrow_body.saturating_mul(trips)));
+        EVENT_WIDE_PUSHES.with(|c| c.set(wide_before + wide_body.saturating_mul(trips)));
+    }
+
     Some(format!(
-        "for (uint64_t _it = {start}ULL; _it < {end}ULL; _it += {step}ULL) {{ \
-            *(({ct}*)({b} + {off:#x})) = ({ct})_it; \
+        "{{ {var_ty} _lo = {lo}, _hi = {hi}; \
+         for ({init}; {cond}; {incr}) {{ \
+            *(({cty}*)({buf} + {off:#x})) = ({cty})_it; \
             {body} \
-        }}",
-        start = start,
-        end = end_excl,
-        step = step,
-        ct = cty,
-        b = buf,
-        off = off,
-        body = body,
+         }} }}",
     ))
 }
 
@@ -3490,30 +3725,59 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 // Mirror Expression::Variable::eval with dynamic_select:
                 //   load full underlying var, idx = clamp(index_expr),
                 //   shift right by idx*elem_width, mask `window` bits.
-                if *var_full_width == 0 || *var_full_width > 64 {
+                if *var_full_width == 0
+                    || dyn_sel.elem_width == 0
+                    || dyn_sel.window == 0
+                    || dyn_sel.window >= 64
+                    || dyn_sel.num_elements == 0
+                {
                     return None;
                 }
-                if dyn_sel.elem_width == 0 || dyn_sel.elem_width >= 64 {
-                    return None;
-                }
-                if dyn_sel.window == 0 || dyn_sel.window >= 64 {
-                    return None;
-                }
-                if dyn_sel.num_elements == 0 {
-                    return None;
-                }
-                let load = emit_var_load(var_offset, *var_full_width)?;
                 let idx_str = emit_expr(&dyn_sel.index_expr)?;
                 let max_idx = dyn_sel.num_elements.saturating_sub(1);
                 let mask = (1u64 << dyn_sel.window) - 1;
+                if *var_full_width <= 128 {
+                    let load = emit_var_load(var_offset, *var_full_width)?;
+                    // Result is <= 64 bits (window < 64); cast down so a
+                    // __uint128_t load (65..128-bit var) still yields a scalar.
+                    return Some(format!(
+                        "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
+                            uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+                            (uint64_t)((({load}) >> (_idx * {ew})) & 0x{mask:x}ULL); }})",
+                        idx = idx_str,
+                        max = max_idx,
+                        load = load,
+                        ew = dyn_sel.elem_width,
+                        mask = mask,
+                    ));
+                }
+                // Wide (>128-bit) underlying var: funnel-read a 64-bit window at
+                // the runtime bit offset idx*elem_width from the flat buffer,
+                // then mask to `window` bits.  Reads past the end (`_hi`) are
+                // guarded to 0.  Mirrors (fullvar >> (idx*ew)) & mask.
+                let (buf, off) = match var_offset {
+                    VarOffset::Ff(o) => ("ff_values", *o),
+                    VarOffset::Comb(o) => ("comb_values", *o),
+                };
+                if off < 0 {
+                    return None;
+                }
+                let nw = native_bytes(*var_full_width) / 8;
                 return Some(format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                        ((({load}) >> (_idx * {ew})) & 0x{mask:x}ULL); }})",
+                        uint64_t _bit = _idx * {ew}; uint64_t _w = _bit >> 6; uint32_t _s = (uint32_t)(_bit & 63); \
+                        const veryl_u64_ua* _p = (const veryl_u64_ua*)({b} + {off:#x}); \
+                        uint64_t _lo = _w < {nw}ull ? _p[_w] : 0; \
+                        uint64_t _hi = (_w + 1) < {nw}ull ? _p[_w + 1] : 0; \
+                        uint64_t _vv = _s == 0 ? _lo : ((_lo >> _s) | (_hi << (64 - _s))); \
+                        (_vv & 0x{mask:x}ULL); }})",
                     idx = idx_str,
                     max = max_idx,
-                    load = load,
                     ew = dyn_sel.elem_width,
+                    b = buf,
+                    off = off,
+                    nw = nw,
                     mask = mask,
                 ));
             }
@@ -3853,6 +4117,94 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 }
                 return Some(inner);
             }
+            // Pow (x ** y): binary exponentiation in native integer arithmetic
+            // (modular via wraparound), then mask to width.  The native
+            // mod-2^64/2^128 then a final mask to `width` is exact because
+            // 2^width | 2^{64,128}.  Mirrors the Cranelift Op::Pow loop; wide
+            // (>128) Pow stays on Cranelift/interpreter.
+            if matches!(op, Op::Pow) {
+                let w = expr_context.width;
+                if w == 0 || w > 128 {
+                    return None;
+                }
+                let id = next_wide_tmp();
+                let (cty_p, one) = if w <= 64 {
+                    ("uint64_t", "(uint64_t)1")
+                } else {
+                    ("__uint128_t", "(__uint128_t)1")
+                };
+                // Mask constant of `w` low bits, typed to match cty_p.
+                let mask_c = if w >= 128 {
+                    "(~(__uint128_t)0)".to_string()
+                } else if w > 64 {
+                    let m: u128 = (1u128 << w) - 1;
+                    format!(
+                        "(((__uint128_t)0x{hi:x}ULL << 64) | (__uint128_t)0x{lo:x}ULL)",
+                        hi = (m >> 64) as u64,
+                        lo = m as u64
+                    )
+                } else if w == 64 {
+                    "(~(uint64_t)0)".to_string()
+                } else {
+                    format!("(uint64_t)0x{m:x}ULL", m = (1u64 << w) - 1)
+                };
+                // IEEE 1800 11.4.3.1: a negative signed exponent yields 0 (|base|
+                // > 1) / 1 (base==1) / ±1 (base==-1); the unsigned loop would
+                // treat it as a huge count.  Applied only for a signed exponent
+                // of width 1..=64, mirroring the Cranelift Op::Pow table.
+                let y_w = y.width();
+                let neg_fixup = if y.expr_context().signed && y_w > 0 && y_w <= 64 {
+                    let base_is_m1 = if expr_context.signed {
+                        format!("_pb{id} == {mask_c}")
+                    } else {
+                        format!("_pb{id} == {one}")
+                    };
+                    // `base == 1` is the outermost select (as in the Cranelift
+                    // reference): base 1 to any power is 1, overriding the
+                    // `base_is_m1` arm, which for an unsigned base aliases to
+                    // `== 1` and would otherwise yield all-ones for an odd
+                    // exponent.
+                    format!(
+                        "_pb{id} = _pb{id} & {mask_c}; \
+                         int _neg{id} = (int)((_pe0{id} >> {sh}) & 1); \
+                         int _odd{id} = (int)(_pe0{id} & 1); \
+                         {cty_p} _tab{id} = (_pb{id} == {one}) ? {one} \
+                                        : (({base_is_m1}) ? (_odd{id} ? {mask_c} : {one}) : ({cty_p})0); \
+                         _pr{id} = _neg{id} ? _tab{id} : _pr{id}; ",
+                        sh = y_w - 1,
+                    )
+                } else {
+                    String::new()
+                };
+                // A signed base is sign-extended to the op width before the
+                // multiply (Verilog widens operands to the result signedness);
+                // the u64/u128 wraparound + final mask then gives the right
+                // low bits.  The exponent stays raw (the loop reads its bits;
+                // a negative one is caught by neg_fixup).
+                let x_w = x.width();
+                let base = if expr_context.signed && x_w > 0 && w <= 64 && x_w < 64 {
+                    let sh = 64 - x_w;
+                    format!("((uint64_t)(((int64_t)((uint64_t)({xs}) << {sh})) >> {sh}))")
+                } else if expr_context.signed && x_w > 0 && w > 64 && x_w < 128 {
+                    let sh = 128 - x_w;
+                    format!("((__uint128_t)(((__int128_t)((__uint128_t)({xs}) << {sh})) >> {sh}))")
+                } else {
+                    xs.clone()
+                };
+                let body = format!(
+                    "({{ {cty_p} _pb{id}=({cty_p})({base}); {cty_p} _pe0{id}=({cty_p})({ys}); \
+                        {cty_p} _we{id}=_pe0{id}; {cty_p} _wb{id}=_pb{id}; {cty_p} _pr{id}={one}; \
+                        while(_we{id}){{ if(_we{id}&1) _pr{id}*=_wb{id}; _wb{id}*=_wb{id}; _we{id}>>=1; }} \
+                        {neg_fixup}_pr{id}; }})"
+                );
+                return Some(if w < 64 {
+                    format!("(({body}) & 0x{m:x}ULL)", m = (1u64 << w) - 1)
+                } else if w > 64 && w < 128 {
+                    mask_u128(&body, w)
+                } else {
+                    body
+                });
+            }
             // Most ops map directly.  ArithShiftR uses signed cast.
             let direct = match op {
                 Op::Add => Some("+"),
@@ -3894,7 +4246,13 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     Op::LogicShiftL | Op::ArithShiftL => x.width() <= 64,
                     _ => false,
                 };
-                if expr_context.width > 64 && (wide_truncates || expr_context.signed) {
+                // Bitwise ops (And/Or/Xor) are sign-agnostic — the result bits
+                // don't depend on operand signedness — so a signed 65..128-bit
+                // result is fine in __uint128_t; only arithmetic/shift ops that
+                // would need a 128-bit sign-extension bail on signedness.
+                let signed_wide_bail =
+                    expr_context.signed && !matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor);
+                if expr_context.width > 64 && (wide_truncates || signed_wide_bail) {
                     return None;
                 }
                 // For 65..128-bit shifts the C operator uses a mod-128 count on
@@ -4048,6 +4406,56 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     let x_w = x.width();
                     if x_w == 0 {
                         return None; // zero-width signed shift
+                    }
+                    // Wide (>128-bit) operand with a scalar (≤128-bit) result:
+                    // materialize the operand wide, vw_ashr/vw_lshr by the count
+                    // (which handles count >= width), then read back the low
+                    // result bits.  The whole thing is a GCC statement
+                    // expression so the scratch decls stay inline.
+                    if x_w > 128 {
+                        let w = expr_context.width;
+                        if w == 0 || w > 128 {
+                            return None;
+                        }
+                        let src_nb = native_bytes(x_w);
+                        let src_nw = src_nb / 8;
+                        let mut pre = String::new();
+                        let xr = emit_wide_operand(x, src_nb, &mut pre)?;
+                        let count = emit_expr(y)?;
+                        let shift_fn = if expr_context.signed {
+                            "vw_ashr"
+                        } else {
+                            "vw_lshr"
+                        };
+                        let id = next_wide_tmp();
+                        let read_raw = if w <= 64 {
+                            format!("((veryl_u64_ua*)_r{id})[0]")
+                        } else {
+                            format!(
+                                "(((__uint128_t)((veryl_u64_ua*)_r{id})[0]) \
+                                 | ((__uint128_t)((veryl_u64_ua*)_r{id})[1] << 64))"
+                            )
+                        };
+                        // Mask the low bits above `width` cleared by the shift's
+                        // sign fill (vw_ashr fills to x_w, not `width`).
+                        let read = if w < 64 {
+                            format!("(({read_raw}) & 0x{m:x}ULL)", m = (1u64 << w) - 1)
+                        } else if w > 64 && w < 128 {
+                            mask_u128(&read_raw, w)
+                        } else {
+                            read_raw
+                        };
+                        let shift_arg = if expr_context.signed {
+                            format!("{pk}u", pk = wpack(src_nb, x_w))
+                        } else {
+                            format!("{src_nb}u")
+                        };
+                        return Some(format!(
+                            "({{ {pre} uint64_t _r{id}[{src_nw}]; \
+                                {shift_fn}((uint8_t*)_r{id}, {src}, (uint64_t)({count}), {shift_arg}); \
+                                {read}; }})",
+                            src = xr.addr,
+                        ));
                     }
                     if x_w > 64 {
                         // 65..128-bit operand in __uint128_t.  Count >= width
@@ -4487,6 +4895,49 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 }
                 return Some(load);
             }
+            // Static bit-select on a 65..128-bit array element
+            // (element_native_bytes == 16): load the full __uint128_t element
+            // and extract [lo..hi].  A field whose top bit sits at/above bit 64
+            // can't be read by the ≤64 load below (which reads only the low 8
+            // bytes); handle it here.  Result nbits <= 64 in practice.
+            if *element_native_bytes == 16
+                && *num_elements != 0
+                && let Some((hi, lo)) = select
+            {
+                let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
+                if nbits > 128 {
+                    return None;
+                }
+                let (buf, base_off) = match base_offset {
+                    VarOffset::Ff(o) => ("ff_values", *o),
+                    VarOffset::Comb(o) => ("comb_values", *o),
+                };
+                let idx_str = emit_expr(index_expr)?;
+                let max_idx = num_elements.saturating_sub(1);
+                let load = format!(
+                    "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
+                        uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+                        (__uint128_t)*((const veryl_u128_ua*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); }})",
+                    idx = idx_str,
+                    max = max_idx,
+                    b = buf,
+                    off = base_off,
+                    stride = stride,
+                );
+                let shifted = format!("(((__uint128_t)({load})) >> {lo})");
+                if nbits >= 128 {
+                    return Some(shifted);
+                }
+                if nbits > 64 {
+                    return Some(mask_u128(&shifted, nbits));
+                }
+                let mask = if nbits == 64 {
+                    u64::MAX
+                } else {
+                    (1u64 << nbits) - 1
+                };
+                return Some(format!("((uint64_t)(({shifted}) & 0x{mask:x}ULL))"));
+            }
             if *num_elements == 0 || *width == 0 || *width > 64 {
                 return None;
             }
@@ -4876,6 +5327,54 @@ mod tests {
     }
 
     #[test]
+    fn emit_expr_binary_pow() {
+        // 32-bit x ** y: binary-exponentiation loop in native u64 then mask.
+        let e = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x10), 32)),
+            op: Op::Pow,
+            y: Box::new(const_expr(3, 32)),
+            width: 32,
+            expr_context: ctx(32, false),
+        };
+        let s = emit_expr(&e).unwrap();
+        // Binary exponentiation: while(exp){ if(exp&1) r*=b; b*=b; exp>>=1; }
+        assert!(s.contains("while"));
+        assert!(s.contains("*="));
+        assert!(s.contains(">>= 1") || s.contains(">>=1"));
+        // Result masked to 32 bits.
+        assert!(s.contains("0xffffffffULL"));
+    }
+
+    #[test]
+    fn emit_stmt_assign_comb_dynamic_select_store() {
+        // Runtime-indexed field store: dst[idx*4 +: 4] = value.  idx clamps to
+        // num_elements-1, then RMW the 4-bit window at bit idx*4.
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Comb(0x20),
+            dst_width: 40,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(var_expr(VarOffset::Comb(0x8), 8)),
+                elem_width: 4,
+                window: 4,
+                num_elements: 10,
+            }),
+            rhs_select: None,
+            expr: const_expr(0xa, 4),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
+        assert!(s.contains("comb_values + 0x20"));
+        // Clamp to num_elements-1 = 9, runtime shift by idx*elem_width.
+        assert!(s.contains("< 9"));
+        assert!(s.contains("_sh = _idx * 4"));
+        // 4-bit window mask.
+        assert!(s.contains("0xfULL"));
+        assert!(s.contains("<< _sh"));
+    }
+
+    #[test]
     fn emit_expr_ternary() {
         let e = ProtoExpression::Ternary {
             cond: Box::new(var_expr(VarOffset::Comb(8), 1)),
@@ -4985,6 +5484,65 @@ mod tests {
         assert!(s.contains("0x1ULL"));
         // Shifted into position by 5.
         assert!(s.contains("<< 5"));
+    }
+
+    fn signed_var_expr(var_offset: VarOffset, width: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset,
+            select: None,
+            dynamic_select: None,
+            width,
+            var_full_width: width,
+            expr_context: ctx(width, true),
+        }
+    }
+
+    #[test]
+    fn emit_stmt_assign_comb_signext_plain_64() {
+        // Signed 32-bit RHS stored into a 64-bit comb dst sign-extends to 64
+        // (mirrors value.expand(64, true)): the store must arithmetic-shift so
+        // the high 32 bits carry the sign, not zero.
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Comb(0x30),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: signed_var_expr(VarOffset::Comb(0x8), 32),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
+        assert!(s.contains("comb_values + 0x30"));
+        // Sign-extend 32 -> 64: shift up by 32, arithmetic shift down by 32.
+        assert!(s.contains("(int64_t)"));
+        assert!(s.contains("<< 32"));
+        assert!(s.contains(">> 32"));
+    }
+
+    #[test]
+    fn emit_stmt_assign_comb_signext_select_fills_sign() {
+        // Signed 8-bit RHS stored into field [15:4] of a 64-bit dst: the value
+        // is sign-extended to dst_width BEFORE the field store, so bits above
+        // the RHS's width (8) in the 12-bit field carry the sign bit.
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Comb(0x40),
+            dst_width: 64,
+            select: Some((15, 4)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: signed_var_expr(VarOffset::Comb(0x8), 8),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
+        assert!(s.contains("comb_values + 0x40"));
+        // Sign-extend 8 -> 64 before masking the 12-bit field.
+        assert!(s.contains("(int64_t)"));
+        assert!(s.contains("<< 56"));
+        // 12-bit field value mask then position shift by 4.
+        assert!(s.contains("0xfffULL"));
+        assert!(s.contains("<< 4"));
     }
 
     #[test]
@@ -5195,8 +5753,9 @@ mod tests {
     }
 
     #[test]
-    fn emit_expr_variable_dynamic_select_wide_var_rejects() {
-        // var_full_width > 64: must reject (multi-word load not yet supported).
+    fn emit_expr_variable_dynamic_select_wide_var_65_128() {
+        // 65..128-bit var: dynamic-select loads the __uint128_t value, shifts
+        // by idx*elem_width, masks to the window.
         use crate::ir::ProtoDynamicBitSelect;
         let idx = const_expr(0, 4);
         let e = ProtoExpression::Variable {
@@ -5212,7 +5771,36 @@ mod tests {
             var_full_width: 96,
             expr_context: ctx(4, false),
         };
-        assert!(emit_expr(&e).is_none());
+        let s = emit_expr(&e).unwrap();
+        // idx clamped to num_elements-1 = 3, shift by idx*4, mask to 4 bits.
+        assert!(s.contains("< 3"));
+        assert!(s.contains("_idx * 4"));
+        assert!(s.contains("0xfULL"));
+    }
+
+    #[test]
+    fn emit_expr_variable_dynamic_select_wide_var_over_128() {
+        // >128-bit var: funnel-read a 64-bit window at the runtime bit offset.
+        use crate::ir::ProtoDynamicBitSelect;
+        let idx = const_expr(0, 4);
+        let e = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0),
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(idx),
+                elem_width: 8,
+                window: 8,
+                num_elements: 16,
+            }),
+            width: 8,
+            var_full_width: 256,
+            expr_context: ctx(8, false),
+        };
+        let s = emit_expr(&e).unwrap();
+        // Funnel read: word index, sub-word shift, guarded hi read, window mask.
+        assert!(s.contains("_bit"));
+        assert!(s.contains("veryl_u64_ua"));
+        assert!(s.contains("0xffULL"));
     }
 
     #[test]
@@ -5662,8 +6250,9 @@ mod tests {
             body: vec![body_assign],
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
-        assert!(s.contains("for (uint64_t _it = 0ULL"));
-        assert!(s.contains("_it < 8ULL"));
+        assert!(s.contains("_lo = 0ULL, _hi = 8ULL"));
+        assert!(s.contains("uint64_t _it = _lo"));
+        assert!(s.contains("_it < _hi"));
         assert!(s.contains("_it += 1ULL"));
         assert!(s.contains("comb_values + 0x0"));
         assert!(s.contains("0xaULL"));
@@ -5685,11 +6274,13 @@ mod tests {
             body: vec![],
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
-        assert!(s.contains("_it < 8ULL"));
+        assert!(s.contains("_hi = 8ULL"));
     }
 
     #[test]
-    fn emit_stmt_for_dynamic_bound_rejects() {
+    fn emit_stmt_for_dynamic_bound_forward() {
+        // A dynamic end bound is now covered: the bound expression is hoisted
+        // to `_hi`, evaluated once before the loop.
         let for_stmt = ProtoForStatement {
             var_offset: VarOffset::Comb(0),
             var_width: 32,
@@ -5700,6 +6291,51 @@ mod tests {
                 end: ProtoForBound::Dynamic(const_expr(8, 32)),
                 inclusive: false,
                 step: 1,
+            },
+            body: vec![],
+        };
+        let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
+        assert!(s.contains("_lo = 0ULL"));
+        assert!(s.contains("uint64_t _it = _lo"));
+        assert!(s.contains("_it < _hi"));
+        assert!(s.contains("_it += 1ULL"));
+    }
+
+    #[test]
+    fn emit_stmt_for_reverse() {
+        // Reverse: signed loop var, init hi-1, `>= _lo` guard, decrementing.
+        let for_stmt = ProtoForStatement {
+            var_offset: VarOffset::Comb(0),
+            var_width: 32,
+            var_native_bytes: 4,
+            var_signed: false,
+            range: ProtoForRange::Reverse {
+                start: ProtoForBound::Const(0),
+                end: ProtoForBound::Const(8),
+                inclusive: false,
+                step: 1,
+            },
+            body: vec![],
+        };
+        let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
+        assert!(s.contains("int64_t _it = _hi - 1"));
+        assert!(s.contains("_it >= _lo"));
+        assert!(s.contains("_it -= 1ULL"));
+    }
+
+    #[test]
+    fn emit_stmt_for_stepped_rejects() {
+        let for_stmt = ProtoForStatement {
+            var_offset: VarOffset::Comb(0),
+            var_width: 32,
+            var_native_bytes: 4,
+            var_signed: false,
+            range: ProtoForRange::Stepped {
+                start: ProtoForBound::Const(1),
+                end: ProtoForBound::Const(64),
+                inclusive: false,
+                step: 2,
+                op: veryl_analyzer::ir::Op::Mul,
             },
             body: vec![],
         };

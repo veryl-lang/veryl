@@ -3274,6 +3274,41 @@ fn binary_corner_case() {
     binary_test("8'shf1", "** ", "3'd2  ", 16, "16'b0000000011100001", false);
     binary_test("8'shx3", "** ", "3'd2  ", 16, "16'bxxxxxxxxxxxxxxxx", true);
     binary_test("8'shz4", "** ", "3'd2  ", 16, "16'bxxxxxxxxxxxxxxxx", true);
+
+    // Negative signed exponent (IEEE 1800 11.4.3.1): base 1 → 1, |base| > 1 → 0,
+    // base -1 → ±1 by exponent parity.  The `1 ** (odd negative)` case caught an
+    // AOT-C miscompile that returned all-ones on the cc backend only.
+    // 1 ** -3 = 1
+    binary_test(
+        "32'd1 ",
+        "** ",
+        "8'shfd",
+        32,
+        "32'b00000000000000000000000000000001",
+        false,
+    );
+    // 1 ** -2 = 1
+    binary_test(
+        "32'd1 ",
+        "** ",
+        "8'shfe",
+        32,
+        "32'b00000000000000000000000000000001",
+        false,
+    );
+    // 2 ** -1 = 0
+    binary_test(
+        "32'd2 ",
+        "** ",
+        "8'shff",
+        32,
+        "32'b00000000000000000000000000000000",
+        false,
+    );
+    // -1 ** -3 = -1
+    binary_test("8'shff", "** ", "8'shfd", 8, "8'b11111111", false);
+    // -1 ** -2 = 1
+    binary_test("8'shff", "** ", "8'shfe", 8, "8'b00000001", false);
 }
 
 // Regression: `$signed(x) >>> y` and signed comparisons on a same-width
