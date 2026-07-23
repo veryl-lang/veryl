@@ -5,7 +5,7 @@ use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::utils::convert_cast;
 use crate::ir::{
-    Comptime, ExpressionContext, FfTable, FunctionCall, Op, Signature, SystemFunctionCall,
+    Comptime, ExpressionContext, FfTable, FunctionCall, Op, Shape, Signature, SystemFunctionCall,
     SystemFunctionKind, Type, TypeKind, ValueVariant, VarId, VarIndex, VarPath, VarSelect,
 };
 use crate::symbol::{ClockDomain, Symbol, SymbolKind};
@@ -712,6 +712,8 @@ pub enum Factor {
     /// (e.g. `dut.u_core.pc` in a testbench initial block). Resolved to a
     /// concrete buffer offset by the simulator after elaboration.
     HierVariable(Box<HierVarRef>),
+    /// A const value with a dynamic selection applied.
+    SelectedValue(Box<SelectedValue>),
     Value(Comptime),
     SystemFunctionCall(SystemFunctionCall),
     FunctionCall(FunctionCall),
@@ -725,6 +727,15 @@ pub struct HierVarRef {
     pub inst_path: Vec<StrId>,
     /// Variable path within the target module.
     pub var_path: VarPath,
+    pub index: VarIndex,
+    pub select: VarSelect,
+    pub comptime: Comptime,
+}
+
+#[derive(Clone, Debug)]
+pub struct SelectedValue {
+    pub values: Vec<Value>,
+    pub array: Shape,
     pub index: VarIndex,
     pub select: VarSelect,
     pub comptime: Comptime,
@@ -759,6 +770,7 @@ impl Factor {
         match self {
             // SystemVerilog member is interpreted as Factor::Value, but it may be assignable.
             Factor::Value(x) => x.r#type.is_systemverilog(),
+            Factor::SelectedValue(x) => x.comptime.r#type.is_systemverilog(),
             Factor::FunctionCall(_) | Factor::SystemFunctionCall(_) => false,
             _ => true,
         }
@@ -819,6 +831,32 @@ impl Factor {
                 is_const: x.is_const,
                 is_global: x.is_global,
             },
+            // The dynamic index/select is a data-dependent read (mirrors Variable).
+            Factor::SelectedValue(x) => {
+                let SelectedValue {
+                    index,
+                    select,
+                    comptime,
+                    ..
+                } = x.as_mut();
+                if !comptime.evaluated {
+                    let select_exprs = select
+                        .0
+                        .iter_mut()
+                        .chain(select.1.as_mut().map(|(_, expr)| expr));
+                    for expr in index.0.iter_mut().chain(select_exprs) {
+                        let c = expr.eval_comptime(context, None);
+                        check_clock_domain(context, comptime, c, &comptime.token.beg);
+                        comptime.clock_domain = comptime.clock_domain.merge(&c.clock_domain);
+                    }
+                }
+                ExpressionContext {
+                    width: comptime.r#type.total_width().unwrap_or(0),
+                    signed: comptime.r#type.signed,
+                    is_const: comptime.is_const,
+                    is_global: comptime.is_global,
+                }
+            }
             Factor::FunctionCall(x) => {
                 x.eval_type(context);
                 ExpressionContext {
@@ -851,6 +889,10 @@ impl Factor {
             Factor::Value(x) => {
                 x.expr_context = expr_context;
                 x.evaluated = true;
+            }
+            Factor::SelectedValue(x) => {
+                x.comptime.expr_context = expr_context;
+                x.comptime.evaluated = true;
             }
             Factor::SystemFunctionCall(x) => {
                 // Preserve the signed flag set by $signed / $unsigned:
@@ -945,6 +987,13 @@ impl Factor {
             }
             Factor::HierVariable(_) => None,
             Factor::Value(x) => x.get_value().ok().cloned(),
+            Factor::SelectedValue(x) => {
+                let index = x.index.eval_value(context)?;
+                let flat = x.array.calc_index(&index)?;
+                let value = x.values.get(flat)?.clone();
+                let (beg, end) = x.select.eval_value(context, &x.comptime.r#type, false)?;
+                Some(value.select(beg, end))
+            }
             Factor::SystemFunctionCall(x) => x.eval_value(context),
             Factor::FunctionCall(x) => x.eval_value(context),
             Factor::Anonymous(_) => None,
@@ -1057,6 +1106,7 @@ impl Factor {
         match self {
             Factor::Variable(_, _, _, x) => x,
             Factor::HierVariable(x) => &x.comptime,
+            Factor::SelectedValue(x) => &x.comptime,
             Factor::Value(x) => x,
             Factor::SystemFunctionCall(x) => &x.comptime,
             Factor::FunctionCall(x) => &x.comptime,
@@ -1069,6 +1119,7 @@ impl Factor {
         match self {
             Factor::Variable(_, _, _, x) => x,
             Factor::HierVariable(x) => &mut x.comptime,
+            Factor::SelectedValue(x) => &mut x.comptime,
             Factor::Value(x) => x,
             Factor::SystemFunctionCall(x) => &mut x.comptime,
             Factor::FunctionCall(x) => &mut x.comptime,
@@ -1081,6 +1132,7 @@ impl Factor {
         match self {
             Factor::Variable(_, _, _, x) => x.token,
             Factor::HierVariable(x) => x.comptime.token,
+            Factor::SelectedValue(x) => x.comptime.token,
             Factor::Value(x) => x.token,
             Factor::SystemFunctionCall(x) => x.comptime.token,
             Factor::FunctionCall(x) => x.comptime.token,
@@ -1102,6 +1154,9 @@ impl fmt::Display for Factor {
                     s.push_str(&format!("{seg}."));
                 }
                 format!("{s}{}{}{}", x.var_path, x.index, x.select)
+            }
+            Factor::SelectedValue(x) => {
+                format!("<const>{}{}", x.index, x.select)
             }
             Factor::Value(x) => {
                 if let Ok(x) = x.get_value() {

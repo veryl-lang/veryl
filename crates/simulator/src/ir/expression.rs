@@ -77,6 +77,14 @@ pub enum Expression {
         width: usize,
         signed: bool,
     },
+    DynamicValue {
+        values: Vec<Value>,
+        index_expr: Box<Expression>,
+        select: Option<(usize, usize)>,
+        dynamic_select: Option<DynamicBitSelect>,
+        width: usize,
+        signed: bool,
+    },
 }
 
 // SAFETY: Same as Statement — see statement.rs.
@@ -229,6 +237,39 @@ impl Expression {
                     value
                 }
             }
+            Expression::DynamicValue {
+                values,
+                index_expr,
+                select,
+                dynamic_select,
+                width,
+                signed,
+            } => {
+                if values.is_empty() {
+                    return Value::new(0, *width, *signed);
+                }
+                let index = index_expr
+                    .eval(mask_cache)
+                    .to_usize()
+                    .unwrap_or(0)
+                    .min(values.len().saturating_sub(1));
+                let value = values[index].clone();
+                if let Some(dyn_sel) = dynamic_select {
+                    let sel_index = dyn_sel
+                        .index_expr
+                        .eval(mask_cache)
+                        .to_usize()
+                        .unwrap_or(0)
+                        .min(dyn_sel.num_elements.saturating_sub(1));
+                    let end = sel_index * dyn_sel.elem_width;
+                    let beg = end + dyn_sel.window - 1;
+                    value.select(beg, end)
+                } else if let Some((beg, end)) = select {
+                    value.select(*beg, *end)
+                } else {
+                    value
+                }
+            }
         }
     }
 
@@ -289,6 +330,16 @@ impl Expression {
                 for i in 0..*num_elements {
                     let ptr = unsafe { (*base_ptr).offset(*stride * i as isize) };
                     inputs.push(ptr);
+                }
+            }
+            Expression::DynamicValue {
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.gather_variable(inputs, outputs);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_variable(inputs, outputs);
                 }
             }
         }
@@ -358,6 +409,16 @@ impl ProtoExpression {
                     inputs.push(last_offset);
                 }
             }
+            ProtoExpression::DynamicValue {
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.gather_variable_offsets(inputs);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_variable_offsets(inputs);
+                }
+            }
         }
     }
 
@@ -425,6 +486,16 @@ impl ProtoExpression {
                     out.push((last_offset, None));
                 }
             }
+            ProtoExpression::DynamicValue {
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.gather_reads_with_ranges(out);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_reads_with_ranges(out);
+                }
+            }
         }
     }
 
@@ -489,6 +560,16 @@ impl ProtoExpression {
                     inputs.push(off);
                 }
             }
+            ProtoExpression::DynamicValue {
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.gather_variable_offsets_expanded(inputs);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                }
+            }
         }
     }
 
@@ -548,6 +629,16 @@ impl ProtoExpression {
                     *stride,
                     *num_elements,
                 ));
+            }
+            ProtoExpression::DynamicValue {
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.gather_dynamic_read_ranges(ranges);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_dynamic_read_ranges(ranges);
+                }
             }
         }
     }
@@ -633,6 +724,14 @@ pub enum ProtoExpression {
         width: usize,
         expr_context: ExpressionContext,
     },
+    DynamicValue {
+        values: Vec<Value>,
+        index_expr: Box<ProtoExpression>,
+        select: Option<(usize, usize)>,
+        dynamic_select: Option<ProtoDynamicBitSelect>,
+        width: usize,
+        expr_context: ExpressionContext,
+    },
     /// Hierarchical testbench reference into a child module instance.
     /// Resolved to a plain `Variable` by `resolve_hier_refs` once the
     /// module's whole `ModuleVariableMeta` tree is assembled; no later
@@ -708,6 +807,16 @@ impl ProtoExpression {
                     dyn_sel.index_expr.adjust_offsets(ff_delta, comb_delta);
                 }
             }
+            ProtoExpression::DynamicValue {
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.adjust_offsets(ff_delta, comb_delta);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.adjust_offsets(ff_delta, comb_delta);
+                }
+            }
             ProtoExpression::Unary { x, .. } => {
                 x.adjust_offsets(ff_delta, comb_delta);
             }
@@ -766,6 +875,16 @@ impl ProtoExpression {
                     dyn_sel.index_expr.remap_offsets(map);
                 }
             }
+            ProtoExpression::DynamicValue {
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.remap_offsets(map);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.remap_offsets(map);
+                }
+            }
             ProtoExpression::Unary { x, .. } => x.remap_offsets(map),
             ProtoExpression::Binary { x, y, .. } => {
                 x.remap_offsets(map);
@@ -800,6 +919,7 @@ impl ProtoExpression {
             ProtoExpression::Concatenation { width, .. } => *width,
             ProtoExpression::Ternary { width, .. } => *width,
             ProtoExpression::DynamicVariable { width, .. } => *width,
+            ProtoExpression::DynamicValue { width, .. } => *width,
         }
     }
 
@@ -879,6 +999,7 @@ impl ProtoExpression {
                 ..
             } => true_expr.effective_bits().max(false_expr.effective_bits()),
             ProtoExpression::DynamicVariable { width, .. } => *width,
+            ProtoExpression::DynamicValue { width, .. } => *width,
         }
     }
 
@@ -892,6 +1013,7 @@ impl ProtoExpression {
             ProtoExpression::Concatenation { expr_context, .. } => expr_context,
             ProtoExpression::Ternary { expr_context, .. } => expr_context,
             ProtoExpression::DynamicVariable { expr_context, .. } => expr_context,
+            ProtoExpression::DynamicValue { expr_context, .. } => expr_context,
         }
     }
 
@@ -955,6 +1077,9 @@ impl ProtoExpression {
                 *element_native_bytes > 16
                     && !(select.is_some() && dynamic_select.is_none() && !is_wide_ptr(*width))
             }
+            // Always interpreter-handled (both backends bail on DynamicValue),
+            // so it never materializes as a wide pointer.
+            ProtoExpression::DynamicValue { .. } => false,
             // Reductions (IS_REDUCTION) collapse to a 1-bit register.
             // NOTE: use `expr_context.width` (the EVALUATION width that
             // `build_binary` keys its wide-vs-narrow dispatch on — Cranelift
@@ -1072,6 +1197,8 @@ impl ProtoExpression {
                 };
                 result_width <= target_width
             }
+            // Conservative: interpreter-evaluated and re-masked at store time.
+            ProtoExpression::DynamicValue { .. } => false,
             ProtoExpression::Unary { op, x, width, .. } => match op {
                 Op::BitAnd
                 | Op::BitNand
@@ -1405,6 +1532,42 @@ impl ProtoExpression {
                         stride: *stride,
                         index_expr: Box::new(index_expr),
                         num_elements: *num_elements,
+                        select: *select,
+                        dynamic_select,
+                        width: *width,
+                        signed: expr_context.signed,
+                    }
+                }
+                ProtoExpression::DynamicValue {
+                    values,
+                    index_expr,
+                    select,
+                    dynamic_select,
+                    width,
+                    expr_context,
+                } => {
+                    let index_expr = index_expr.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    );
+                    let dynamic_select = dynamic_select.as_ref().map(|dyn_sel| DynamicBitSelect {
+                        index_expr: Box::new(dyn_sel.index_expr.apply_values_ptr(
+                            ff_values_ptr,
+                            ff_len,
+                            comb_values_ptr,
+                            comb_len,
+                            use_4state,
+                        )),
+                        elem_width: dyn_sel.elem_width,
+                        window: dyn_sel.window,
+                        num_elements: dyn_sel.num_elements,
+                    });
+                    Expression::DynamicValue {
+                        values: values.clone(),
+                        index_expr: Box::new(index_expr),
                         select: *select,
                         dynamic_select,
                         width: *width,
@@ -1834,6 +1997,38 @@ impl Conv<&air::Expression> for ProtoExpression {
                         expr_context,
                     })
                 }
+                air::Factor::SelectedValue(x) => {
+                    let width =
+                        x.comptime.r#type.total_width().ok_or_else(|| {
+                            SimulatorError::unresolved_expression(&x.comptime.token)
+                        })?;
+                    let expr_context: ExpressionContext = (&x.comptime.expr_context).into();
+                    let values = x.values.clone();
+
+                    let index_expr = build_linear_index_expr(context, &x.array, &x.index)?;
+
+                    let dynamic_select = if x.select.is_empty() {
+                        None
+                    } else {
+                        let elem_bits = values.first().map(|v| v.width()).unwrap_or(width);
+                        let width_shape = [Some(elem_bits)];
+                        Some(build_dynamic_bit_select(
+                            context,
+                            air::ShapeRef::new(&width_shape),
+                            &x.select,
+                            1,
+                        )?)
+                    };
+
+                    Ok(ProtoExpression::DynamicValue {
+                        values,
+                        index_expr: Box::new(index_expr),
+                        select: None,
+                        dynamic_select,
+                        width,
+                        expr_context,
+                    })
+                }
                 air::Factor::FunctionCall(call) => {
                     let mut stmts: Vec<ProtoStatement> = Conv::conv(context, call)?;
 
@@ -1944,7 +2139,8 @@ impl Conv<&air::Expression> for ProtoExpression {
                             | ProtoExpression::Binary { expr_context, .. }
                             | ProtoExpression::Concatenation { expr_context, .. }
                             | ProtoExpression::Ternary { expr_context, .. }
-                            | ProtoExpression::DynamicVariable { expr_context, .. } => expr_context,
+                            | ProtoExpression::DynamicVariable { expr_context, .. }
+                            | ProtoExpression::DynamicValue { expr_context, .. } => expr_context,
                         };
                         ctx.signed = signed;
                         Ok(inner)

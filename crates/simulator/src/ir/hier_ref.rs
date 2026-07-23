@@ -287,6 +287,16 @@ pub(crate) fn resolve_expr(
                 resolve_expr(&mut dyn_sel.index_expr, context, children)?;
             }
         }
+        ProtoExpression::DynamicValue {
+            index_expr,
+            dynamic_select,
+            ..
+        } => {
+            resolve_expr(index_expr, context, children)?;
+            if let Some(dyn_sel) = dynamic_select {
+                resolve_expr(&mut dyn_sel.index_expr, context, children)?;
+            }
+        }
         ProtoExpression::Unary { x, .. } => {
             resolve_expr(x, context, children)?;
         }
