@@ -22,7 +22,7 @@ use crate::{HashMap, HashSet};
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Condvar, LazyLock, Mutex};
+use std::sync::{Condvar, LazyLock, Mutex, RwLock};
 use veryl_analyzer::ir as air;
 
 /// Size floor (ff + comb bytes) below which a recurring component is treated as
@@ -87,10 +87,109 @@ pub fn port_alias_enabled(
     if !dut_reuse {
         return true; // reuse off: keep all boundaries aliased (no global state touched)
     }
-    let recurring = mark_seen_and_is_recurring(component_key, test_top_id);
+    // `mark_seen` is order-dependent (first seer wins): two tests reaching a
+    // shared component in different orders leave it in different alias states —
+    // an aliased-parent / de-aliased-child mix that mis-plans the incremental
+    // settle (a child's writes never fire, e.g. an LSU memory region stays 0).
+    // Prefer the deterministic precomputed set, falling back only when absent.
+    let recurring = match recurring_precomputed(component_key) {
+        Some(r) => r,
+        None => mark_seen_and_is_recurring(component_key, test_top_id),
+    };
     let is_dut_boundary =
         recurring && !in_reuse_dut && (own_ff_bytes + own_comb_bytes) >= dut_reuse_min_bytes();
     !is_dut_boundary
+}
+
+/// Components (by `Arc` pointer) that recur across >= 2 test tops, precomputed
+/// before the parallel conv. `None` until populated (non-CLI callers fall back
+/// to the runtime first-seer marking).
+static RECURRING_SET: RwLock<Option<HashSet<usize>>> = RwLock::new(None);
+
+/// `Some(is_recurring)` if the set has been precomputed, else `None`.
+fn recurring_precomputed(component_key: *const air::Component) -> Option<bool> {
+    RECURRING_SET
+        .read()
+        .unwrap()
+        .as_ref()
+        .map(|s| s.contains(&(component_key as usize)))
+}
+
+/// Populate the deterministic recurring set before the parallel conv, so a
+/// component's alias decision never depends on which worker reaches it first.
+pub fn compute_recurring_set(ir: &air::Ir, tops: &[veryl_parser::resource_table::StrId]) {
+    let set = compute_recurring_set_inner(ir, tops);
+    *RECURRING_SET.write().unwrap() = Some(set);
+}
+
+/// Deterministically compute which components are instantiated under two or more
+/// of `tops` — the DUT(s) shared across testbenches. Early-terminating: once a
+/// component is known to recur its whole subtree is marked once and later tops
+/// skip it, so the (large, shared) DUT subtree is walked ~twice total rather than
+/// once per top.
+fn compute_recurring_set_inner(
+    ir: &air::Ir,
+    tops: &[veryl_parser::resource_table::StrId],
+) -> HashSet<usize> {
+    let mut owner: HashMap<usize, veryl_parser::resource_table::StrId> = HashMap::default();
+    let mut recurring: HashSet<usize> = HashSet::default();
+
+    // Mark `m`'s whole subtree recurring.
+    fn mark_subtree(m: &air::Module, recurring: &mut HashSet<usize>) {
+        for decl in &m.declarations {
+            if let air::Declaration::Inst(inst) = decl {
+                let key = Arc::as_ptr(&inst.component) as usize;
+                if recurring.insert(key)
+                    && let air::Component::Module(child) = inst.component.as_ref()
+                {
+                    mark_subtree(child, recurring);
+                }
+            }
+        }
+    }
+
+    fn walk(
+        m: &air::Module,
+        top: veryl_parser::resource_table::StrId,
+        owner: &mut HashMap<usize, veryl_parser::resource_table::StrId>,
+        recurring: &mut HashSet<usize>,
+    ) {
+        for decl in &m.declarations {
+            if let air::Declaration::Inst(inst) = decl {
+                let key = Arc::as_ptr(&inst.component) as usize;
+                let air::Component::Module(child) = inst.component.as_ref() else {
+                    continue;
+                };
+                if recurring.contains(&key) {
+                    continue; // already recurring — subtree is too
+                }
+                match owner.get(&key) {
+                    Some(&o) if o != top => {
+                        // Seen under a different top: this component and its whole
+                        // subtree recur.
+                        recurring.insert(key);
+                        mark_subtree(child, recurring);
+                    }
+                    Some(_) => {} // same top (SMP replication): not recurring, already walked
+                    None => {
+                        owner.insert(key, top);
+                        walk(child, top, owner, recurring);
+                    }
+                }
+            }
+        }
+    }
+
+    for &top in tops {
+        if let Some(air::Component::Module(m)) = ir
+            .components
+            .iter()
+            .find(|c| matches!(c, air::Component::Module(m) if m.name == top))
+        {
+            walk(m, top, &mut owner, &mut recurring);
+        }
+    }
+    recurring
 }
 
 // Caches a component's fully-converted subtree (statements, child_modules,
