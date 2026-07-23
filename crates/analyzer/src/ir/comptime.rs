@@ -11,6 +11,7 @@ use crate::symbol::ClockDomain;
 use crate::symbol::{Direction, SymbolId};
 use crate::value::Value;
 use std::fmt;
+use std::sync::{Arc, LazyLock};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
@@ -383,15 +384,39 @@ impl ValueVariant {
     }
 }
 
-#[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+/// Shared empty singleton so `Type::default()` is a refcount bump, not an
+/// allocation — `Arc::<[T]>::default()` would allocate a header per call.
+fn empty_width_expr() -> Arc<[crate::ir::WidthExpr]> {
+    static EMPTY: LazyLock<Arc<[crate::ir::WidthExpr]>> = LazyLock::new(|| Arc::from([]));
+    Arc::clone(&EMPTY)
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Type {
     pub kind: TypeKind,
     pub signed: bool,
     pub is_positive: bool,
     pub array: Shape,
     width: Shape,
-    width_expr: Vec<crate::ir::WidthExpr>,
-    array_expr: Vec<crate::ir::WidthExpr>,
+    // Shared, not owned: Type is cloned heavily on the hot analysis path, so
+    // each clone becomes a refcount bump; the set_* methods only ever replace
+    // the whole list.
+    width_expr: Arc<[crate::ir::WidthExpr]>,
+    array_expr: Arc<[crate::ir::WidthExpr]>,
+}
+
+impl Default for Type {
+    fn default() -> Self {
+        Type {
+            kind: TypeKind::default(),
+            signed: false,
+            is_positive: false,
+            array: Shape::default(),
+            width: Shape::default(),
+            width_expr: empty_width_expr(),
+            array_expr: empty_width_expr(),
+        }
+    }
 }
 
 impl Type {
@@ -412,7 +437,7 @@ impl Type {
     }
 
     pub fn set_array_expr(&mut self, exprs: Vec<crate::ir::WidthExpr>) {
-        self.array_expr = exprs;
+        self.array_expr = exprs.into();
     }
 
     pub fn new(kind: TypeKind) -> Type {
@@ -430,7 +455,7 @@ impl Type {
     }
 
     pub fn set_concrete_width(&mut self, shape: Shape) {
-        self.width_expr = crate::ir::WidthExpr::from_shape(&shape);
+        self.width_expr = crate::ir::WidthExpr::from_shape(&shape).into();
         self.width = shape;
     }
 
@@ -441,12 +466,12 @@ impl Type {
             "shape and width_expr length mismatch"
         );
         self.width = shape;
-        self.width_expr = width_expr;
+        self.width_expr = width_expr.into();
     }
 
     pub fn clear_width(&mut self) {
         self.width = Shape::default();
-        self.width_expr.clear();
+        self.width_expr = empty_width_expr();
     }
 
     pub fn to_sv_type_name(&self) -> Option<&'static str> {
@@ -471,7 +496,7 @@ impl Type {
             return String::new();
         }
         let mut s = String::new();
-        for dim in &self.width_expr {
+        for dim in self.width_expr.iter() {
             s.push_str(&dim.to_sv_width_string());
         }
         s
@@ -789,10 +814,10 @@ impl Type {
                 self.set_concrete_width(Shape::new(vec![width]));
             }
             TypeKind::Enum(x) => {
-                self.kind = x.r#type.kind;
+                self.kind = x.r#type.kind.clone();
                 self.signed = x.r#type.signed;
-                let mut array = x.r#type.array;
-                let mut width = x.r#type.width;
+                let mut array = x.r#type.array.clone();
+                let mut width = x.r#type.width.clone();
                 array.append(&mut self.array);
                 width.append(&mut self.width);
                 self.array = array;
@@ -951,14 +976,17 @@ pub enum TypeKind {
     F32,
     F64,
     Logic,
-    Struct(TypeKindStruct),
-    Union(TypeKindUnion),
-    Enum(TypeKindEnum),
-    Module(Signature),
-    Interface(Signature),
-    Modport(Signature, StrId),
-    Package(Signature),
-    Instance(Signature, InstanceKind),
+    Struct(Arc<TypeKindStruct>),
+    Union(Arc<TypeKindUnion>),
+    Enum(Arc<TypeKindEnum>),
+    // Shared: a Signature is a large recursive structure, Signature-kinded
+    // Types are cloned heavily on the hot analysis path, and it is immutable
+    // once here — so each clone becomes a refcount bump.
+    Module(Arc<Signature>),
+    Interface(Arc<Signature>),
+    Modport(Arc<Signature>, StrId),
+    Package(Arc<Signature>),
+    Instance(Arc<Signature>, InstanceKind),
     AbstractInterface(Option<StrId>),
     Type,
     String,
@@ -1009,8 +1037,8 @@ impl TypeKind {
             TypeKind::Module(x)
             | TypeKind::Interface(x)
             | TypeKind::Package(x)
-            | TypeKind::Instance(x, _) => Some(x.clone()),
-            TypeKind::Modport(x, _) => Some(x.clone()),
+            | TypeKind::Instance(x, _) => Some(x.as_ref().clone()),
+            TypeKind::Modport(x, _) => Some(x.as_ref().clone()),
             _ => None,
         }
     }
@@ -1283,10 +1311,10 @@ mod tests {
             })
             .collect();
         let mut t = Type {
-            kind: TypeKind::Struct(TypeKindStruct {
+            kind: TypeKind::Struct(Arc::new(TypeKindStruct {
                 id: SymbolId::default(),
                 members,
-            }),
+            })),
             array: Shape::default(),
             signed: false,
             is_positive: false,
@@ -1305,10 +1333,10 @@ mod tests {
             })
             .collect();
         let mut t = Type {
-            kind: TypeKind::Union(TypeKindUnion {
+            kind: TypeKind::Union(Arc::new(TypeKindUnion {
                 id: SymbolId::default(),
                 members,
-            }),
+            })),
             array: Shape::default(),
             signed: false,
             is_positive: false,
