@@ -2147,6 +2147,26 @@ mod tests {
     }
 
     #[test]
+    fn relational_width0_operands_no_overflow() {
+        // Width-0 signed operands (the `'0`/`'1` unbased-unsized sentinels) made
+        // the relational ops compute `64 - 0 == 64` and shift-overflow (debug
+        // panic). All four comparisons must evaluate without overflow.
+        let mut mc = MaskCache::default();
+        let a = Value::new(0, 0, true);
+        let b = Value::new(0, 0, true);
+        for op in [Op::Greater, Op::GreaterEq, Op::Less, Op::LessEq] {
+            let r = op.eval_value_binary(&a, &b, 1, true, &mut mc);
+            // 0 vs 0: `>`/`<` are false, `>=`/`<=` are true; mainly: no panic.
+            let expect = if matches!(op, Op::GreaterEq | Op::LessEq) {
+                "1'h1"
+            } else {
+                "1'h0"
+            };
+            assert_eq!(format!("{:x}", r), expect, "{op:?}");
+        }
+    }
+
+    #[test]
     fn xz_parse_format() {
         let x0 = Value::from_str("1'bx").unwrap();
         let x1 = Value::from_str("2'bx").unwrap();
