@@ -49,7 +49,7 @@ pub struct SystemFunctionCall {
     pub comptime: Comptime,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AssertKind {
     Fatal,
     Continue,

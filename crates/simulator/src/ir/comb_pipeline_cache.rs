@@ -26,6 +26,7 @@
 use super::statement::{ProtoStatement, ProtoStatements};
 use super::variable::VarOffset;
 use crate::HashMap;
+use crate::backend::CompiledWhole;
 use std::sync::{Arc, Condvar, LazyLock, Mutex};
 
 /// Memoised result of the whole comb pipeline for one comb-list key.
@@ -96,6 +97,71 @@ impl Drop for Claim {
             CV.notify_all();
         }
     }
+}
+
+// ── Whole-comb backend (AOT-C `.so`) cache ──────────────────────────────────
+//
+// `CombPipeline` memoises the sort/DCE/JIT rerun but NOT the backend compile
+// (`Backend::compile_whole_comb`), which re-emits + re-fingerprints the whole
+// shared-DUT comb per test — the dominant per-test build cost at suite scale.
+// Keyed by the same structural `u128`: a match implies a byte-identical comb
+// list (offsets included), so the emitted `.so` is reusable verbatim. A decline
+// (`None`) is cached too, so a declining DUT is emitted+probed once, not per test.
+type WholeComb = Option<Arc<dyn CompiledWhole>>;
+
+enum WholeSlot {
+    Computing,
+    Done(WholeComb),
+}
+
+static WHOLE_CACHE: LazyLock<Mutex<HashMap<u128, WholeSlot>>> =
+    LazyLock::new(|| Mutex::new(HashMap::default()));
+static WHOLE_CV: LazyLock<Condvar> = LazyLock::new(Condvar::new);
+
+/// Single-flight memoisation of the whole-comb compile: `compute` runs only on
+/// the first miss for `key`, and parallel peers block on the condvar until it
+/// publishes. A claim is released if `compute` unwinds, so a panic doesn't hang
+/// blocked peers.
+pub fn whole_comb_get_or_compute(
+    key: u128,
+    dut_reuse: bool,
+    compute: impl FnOnce() -> WholeComb,
+) -> WholeComb {
+    if !dut_reuse {
+        return compute();
+    }
+    let mut cache = WHOLE_CACHE.lock().unwrap();
+    loop {
+        match cache.get(&key) {
+            Some(WholeSlot::Done(v)) => return v.clone(),
+            Some(WholeSlot::Computing) => cache = WHOLE_CV.wait(cache).unwrap(),
+            None => {
+                cache.insert(key, WholeSlot::Computing);
+                break;
+            }
+        }
+    }
+    drop(cache);
+
+    // Release the claim on unwind so blocked peers retry instead of hanging.
+    struct Guard(u128, bool);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            if !self.1 {
+                let mut cache = WHOLE_CACHE.lock().unwrap();
+                cache.remove(&self.0);
+                WHOLE_CV.notify_all();
+            }
+        }
+    }
+    let mut guard = Guard(key, false);
+    let result = compute();
+    guard.1 = true;
+
+    let mut cache = WHOLE_CACHE.lock().unwrap();
+    cache.insert(key, WholeSlot::Done(result.clone()));
+    WHOLE_CV.notify_all();
+    result
 }
 
 /// Consult the cache. On a hit, clone out the memoised pipeline. On a miss,
