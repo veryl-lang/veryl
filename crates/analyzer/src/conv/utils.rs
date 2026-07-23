@@ -2155,6 +2155,73 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
     }
 }
 
+/// Type-check `select`'s array part against `r#type`, drain those array dims,
+/// and return the array `index` with the leftover width select. `Err` on an
+/// (unsupported) array range select. `eval_width_select` only reads the packed
+/// width, so draining the unpacked dims first is safe for later width handling.
+fn split_array_select(
+    context: &mut Context,
+    r#type: &mut ir::Type,
+    select: VarSelect,
+    token: TokenRange,
+) -> IrResult<(VarIndex, VarSelect)> {
+    let (array_select, width_select) = select.split(r#type.array.dims());
+    let _ = array_select.eval_comptime(context, r#type, true);
+    if array_select.is_range() {
+        // TODO: array range select.
+        return Err(ir_error!(token));
+    }
+    let index = array_select.to_index();
+    r#type.array.drain(0..index.dimension());
+    Ok((index, width_select))
+}
+
+/// Bake a resolved `width_select` into `r#type` as a concrete packed width, for
+/// factors that carry no runtime width select of their own (symbol-resolved
+/// values and hierarchical references).
+fn bake_width_select(context: &mut Context, r#type: &mut ir::Type, width_select: &VarSelect) {
+    if !width_select.is_empty() {
+        r#type.flatten_struct_union_enum();
+        if let Some(width) = width_select.eval_comptime(context, r#type, false) {
+            r#type.set_concrete_width(width);
+        }
+    }
+}
+
+/// Reduce a symbol-resolved factor's type by a non-empty `select`.
+///
+/// Package/interface consts and params resolve through the symbol route
+/// (`eval_factor_symbol` / `eval_factor_symbol_external`), which has no `select`
+/// argument and drops the index — leaving the whole `bit<W>[N]` type and
+/// failing operand checks. Apply it here as the `find_path` branch does.
+fn apply_symbol_select(
+    context: &mut Context,
+    factor: ir::Factor,
+    select: VarSelect,
+    token: TokenRange,
+) -> IrResult<ir::Factor> {
+    // Only plain const/param values are indexable here; a type value or a
+    // component/instance carries no array/width to reduce.
+    let ir::Factor::Value(mut comptime) = factor else {
+        return Ok(factor);
+    };
+    if comptime.r#type.is_type() {
+        return Ok(ir::Factor::Value(comptime));
+    }
+
+    let (index, width_select) = split_array_select(context, &mut comptime.r#type, select, token)?;
+    bake_width_select(context, &mut comptime.r#type, &width_select);
+
+    // The folded value belonged to the whole array/word; after a select it no
+    // longer matches the reduced type, so read the element as a plain (runtime)
+    // value rather than mis-folding it.
+    comptime.value = ValueVariant::Unknown;
+    comptime.evaluated = false;
+    comptime.is_const &= index.is_const() && width_select.is_const();
+    comptime.token = token;
+    Ok(ir::Factor::Value(comptime))
+}
+
 pub fn eval_factor_path(
     context: &mut Context,
     symbol_path: GenericSymbolPath,
@@ -2213,10 +2280,8 @@ fn eval_factor_path_inner(
             comptime.r#type = part_select.base.clone();
         }
 
-        let (array_select, width_select) = select.split(comptime.r#type.array.dims());
-
-        // Array select type check
-        let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+        let (index, width_select) =
+            split_array_select(context, &mut comptime.r#type, select, token)?;
 
         let width_select = if let Some(part_select) = &comptime.part_select {
             part_select.to_base_select(context, &width_select)
@@ -2227,30 +2292,22 @@ fn eval_factor_path_inner(
 
         comptime.is_global = false;
 
-        if array_select.is_range() {
-            // TODO
-            Err(ir_error!(token))
+        // A const symbol read through a dynamic index/select is not itself
+        // a compile-time constant (e.g. `A[idx]` for a const array `A`).
+        comptime.is_const &= index.is_const() && width_select.is_const();
+
+        comptime.token = token;
+        if comptime.r#type.is_type() {
+            Ok(ir::Factor::Value(comptime))
         } else {
-            let index = array_select.to_index();
-            comptime.r#type.array.drain(0..index.dimension());
-
-            // A const symbol read through a dynamic index/select is not itself
-            // a compile-time constant (e.g. `A[idx]` for a const array `A`).
-            comptime.is_const &= index.is_const() && width_select.is_const();
-
-            comptime.token = token;
-            if comptime.r#type.is_type() {
-                Ok(ir::Factor::Value(comptime))
-            } else {
-                // Params arrive with evaluated=true (set by eval_expr), which
-                // would make gather_context skip applying the select width —
-                // and skip the index/select clock-domain check, laundering a
-                // foreign-domain index into a const lookup table.
-                if !width_select.is_empty() || !index.is_const() {
-                    comptime.evaluated = false;
-                }
-                Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
+            // Params arrive with evaluated=true (set by eval_expr), which
+            // would make gather_context skip applying the select width —
+            // and skip the index/select clock-domain check, laundering a
+            // foreign-domain index into a const lookup table.
+            if !width_select.is_empty() || !index.is_const() {
+                comptime.evaluated = false;
             }
+            Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
         }
     } else if let HierReference::Resolved(inst_path, var_path, r#type) = hier {
         if !context.in_tb_block {
@@ -2263,33 +2320,21 @@ fn eval_factor_path_inner(
 
         let mut comptime = Comptime::from_type(*r#type, ClockDomain::None, token);
 
-        let (array_select, width_select) = select.split(comptime.r#type.array.dims());
-        let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+        let (index, width_select) =
+            split_array_select(context, &mut comptime.r#type, select, token)?;
         let width_select = eval_width_select(context, &var_path, &comptime.r#type, width_select)
             .ok_or_else(|| ir_error!(token))?;
 
-        if array_select.is_range() {
-            Err(ir_error!(token))
-        } else {
-            let index = array_select.to_index();
-            comptime.r#type.array.drain(0..index.dimension());
+        bake_width_select(context, &mut comptime.r#type, &width_select);
+        comptime.token = token;
 
-            if !width_select.is_empty() {
-                comptime.r#type.flatten_struct_union_enum();
-                if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
-                    comptime.r#type.set_concrete_width(width);
-                }
-            }
-            comptime.token = token;
-
-            Ok(ir::Factor::HierVariable(Box::new(ir::HierVarRef {
-                inst_path,
-                var_path,
-                index,
-                select: width_select,
-                comptime,
-            })))
-        }
+        Ok(ir::Factor::HierVariable(Box::new(ir::HierVarRef {
+            inst_path,
+            var_path,
+            index,
+            select: width_select,
+            comptime,
+        })))
     } else if !matches!(hier, HierReference::NotHier) {
         match hier {
             HierReference::UnknownMember { owner, member } => {
@@ -2336,14 +2381,14 @@ fn eval_factor_path_inner(
             .current_namespace()
             .map(|x| symbol.found.namespace.included(&x))
             .unwrap_or(false);
-        if is_inernal {
+        let factor = if is_inernal {
             eval_factor_symbol(
                 context,
                 generic_path,
                 (*symbol).clone(),
                 allow_unknown_value,
                 token,
-            )
+            )?
         } else {
             let maps = generic_path.to_generic_maps();
             eval_factor_symbol_external(
@@ -2353,7 +2398,13 @@ fn eval_factor_path_inner(
                 maps,
                 allow_unknown_value,
                 token,
-            )
+            )?
+        };
+        // The symbol route drops the array/bit select; apply it to the result.
+        if select.is_empty() {
+            Ok(factor)
+        } else {
+            apply_symbol_select(context, factor, select, token)
         }
     } else {
         Err(ir_error!(token))

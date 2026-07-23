@@ -10534,6 +10534,30 @@ fn invalid_operand() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {
+        const WIDTH: u32 = 8;
+        const SIZE : u32 = 4;
+        const ARRAY: bit<WIDTH> [SIZE] = '{8'h11, 8'h22, 8'h33, 8'h44};
+        function f() -> logic<WIDTH> {
+            var result: logic<WIDTH>;
+            result = '0;
+            for i in 0..SIZE {
+                result = result + ARRAY[i];
+            }
+            return result;
+        }
+    }
+    module ModuleA (
+        o_d: output logic<8>,
+    ) {
+        assign o_d = PkgA::f();
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
