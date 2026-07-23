@@ -520,7 +520,8 @@ impl Conv<&PortDeclarationItem> for () {
                             // provided one, the port type's otherwise.
                             let effective_sig = context
                                 .get_modport_signature(&value.identifier)
-                                .unwrap_or_else(|| sig.clone());
+                                .map(Arc::new)
+                                .unwrap_or_else(|| Arc::clone(sig));
                             let component = get_component(context, &effective_sig, token)?;
                             // Register the port under its effective signature so
                             // inner instances connecting this port (interface
@@ -1696,7 +1697,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 // insert path of interface instance
                 let path = VarPath::new(value.identifier.text());
                 let r#type = {
-                    let mut t = ir::Type::new(TypeKind::Instance(sig, InstanceKind::Interface));
+                    let mut t =
+                        ir::Type::new(TypeKind::Instance(sig.into(), InstanceKind::Interface));
                     t.array = array;
                     t
                 };
@@ -1813,7 +1815,7 @@ fn insert_component_params(
 /// What an interface port's modport connection is actually bound to.
 struct GroupConnect {
     group: StrId,
-    sig: Signature,
+    sig: Arc<Signature>,
     modport: StrId,
     token: TokenRange,
 }
@@ -2878,7 +2880,8 @@ impl Conv<&ModportDeclaration> for () {
 
                 let name = value.identifier.text();
                 let path = VarPath::new(name);
-                let r#type = ir::Type::new(ir::TypeKind::Modport(sig, symbol.found.token.text));
+                let r#type =
+                    ir::Type::new(ir::TypeKind::Modport(sig.into(), symbol.found.token.text));
                 let token: TokenRange = value.identifier.as_ref().into();
 
                 let comptime = Comptime::from_type(r#type, ClockDomain::None, token);

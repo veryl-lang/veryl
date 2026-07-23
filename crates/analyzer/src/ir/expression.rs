@@ -11,6 +11,7 @@ use crate::ir::{
 use crate::symbol::{ClockDomain, Symbol, SymbolKind};
 use crate::value::{Value, ValueBigUint};
 use std::fmt;
+use std::sync::Arc;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
@@ -736,11 +737,13 @@ impl Factor {
     }
 
     pub fn from_component_symbol(symbol: &Symbol, token: TokenRange) -> Self {
-        let sig = Signature::new(symbol.id);
+        let sig = Arc::new(Signature::new(symbol.id));
         let kind = match &symbol.kind {
-            SymbolKind::Module(_) | SymbolKind::AliasModule(_) => TypeKind::Module(sig),
-            SymbolKind::Interface(_) | SymbolKind::AliasInterface(_) => TypeKind::Interface(sig),
-            SymbolKind::Package(_) | SymbolKind::AliasPackage(_) => TypeKind::Package(sig),
+            SymbolKind::Module(_) | SymbolKind::AliasModule(_) => TypeKind::Module(sig.clone()),
+            SymbolKind::Interface(_) | SymbolKind::AliasInterface(_) => {
+                TypeKind::Interface(sig.clone())
+            }
+            SymbolKind::Package(_) | SymbolKind::AliasPackage(_) => TypeKind::Package(sig.clone()),
             _ => unreachable!(),
         };
         let r#type = Type::new(kind);

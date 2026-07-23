@@ -1193,10 +1193,10 @@ pub fn eval_type(
 
                     context.pop_generic_map();
 
-                    ir::TypeKind::Struct(ir::TypeKindStruct {
+                    ir::TypeKind::Struct(Arc::new(ir::TypeKindStruct {
                         id: symbol.found.id,
                         members: members?,
-                    })
+                    }))
                 }
                 SymbolKind::Union(x) => {
                     context.push_generic_map(map.clone());
@@ -1223,10 +1223,10 @@ pub fn eval_type(
 
                     context.pop_generic_map();
 
-                    ir::TypeKind::Union(ir::TypeKindUnion {
+                    ir::TypeKind::Union(Arc::new(ir::TypeKindUnion {
                         id: symbol.found.id,
                         members: members?,
-                    })
+                    }))
                 }
                 SymbolKind::Enum(x) => {
                     let r#type = if let Some(enum_type) = &x.r#type {
@@ -1251,10 +1251,10 @@ pub fn eval_type(
                             t
                         }
                     };
-                    ir::TypeKind::Enum(ir::TypeKindEnum {
+                    ir::TypeKind::Enum(Arc::new(ir::TypeKindEnum {
                         id: symbol.found.id,
                         r#type: Box::new(r#type),
-                    })
+                    }))
                 }
                 SymbolKind::Modport(_) => {
                     // Remove modport name
@@ -1262,7 +1262,7 @@ pub fn eval_type(
                     let token: TokenRange = symbol.found.token.into();
                     let sig =
                         Signature::from_path(context, path).ok_or_else(|| ir_error!(token))?;
-                    ir::TypeKind::Modport(sig, symbol.found.token.text)
+                    ir::TypeKind::Modport(sig.into(), symbol.found.token.text)
                 }
                 SymbolKind::TypeDef(x) if !x.is_proto => {
                     if let Some(ty) = &x.r#type
@@ -1313,7 +1313,7 @@ pub fn eval_type(
                     let token: TokenRange = symbol.found.token.into();
                     let sig =
                         Signature::from_path(context, path).ok_or_else(|| ir_error!(token))?;
-                    ir::TypeKind::Interface(sig)
+                    ir::TypeKind::Interface(sig.into())
                 }
                 SymbolKind::GenericParameter(x) => match &x.bound {
                     GenericBoundKind::Proto(x) => {
@@ -2583,10 +2583,10 @@ pub fn eval_factor_symbol(
 
             if let Some(mut factor) = factor {
                 let enum_type = factor.comptime().r#type.clone();
-                let type_kind = ir::TypeKind::Enum(ir::TypeKindEnum {
+                let type_kind = ir::TypeKind::Enum(Arc::new(ir::TypeKindEnum {
                     id: enum_symbol.id,
                     r#type: Box::new(enum_type),
-                });
+                }));
 
                 let factor_comptime = factor.comptime_mut();
                 factor_comptime.r#type.kind = type_kind;
@@ -2648,13 +2648,13 @@ pub fn eval_factor_symbol(
             if let Ok(component) =
                 symbol_table::resolve_generic_structural(&x.type_name, &symbol.found.namespace)
             {
-                let sig = Signature::new(component.found.id);
+                let sig = Arc::new(Signature::new(component.found.id));
                 let kind = if symbol.found.is_module(true) {
-                    ir::TypeKind::Instance(sig, ir::InstanceKind::Module)
+                    ir::TypeKind::Instance(sig.clone(), ir::InstanceKind::Module)
                 } else if symbol.found.is_interface(true) {
-                    ir::TypeKind::Instance(sig, ir::InstanceKind::Interface)
+                    ir::TypeKind::Instance(sig.clone(), ir::InstanceKind::Interface)
                 } else {
-                    ir::TypeKind::Instance(sig, ir::InstanceKind::SystemVerilog)
+                    ir::TypeKind::Instance(sig.clone(), ir::InstanceKind::SystemVerilog)
                 };
                 let r#type = ir::Type::new(kind);
 
