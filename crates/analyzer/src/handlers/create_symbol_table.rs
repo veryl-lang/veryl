@@ -111,6 +111,7 @@ pub struct CreateSymbolTable {
     in_expression_identifier: Vec<()>,
     in_select: bool,
     reference_functions: Vec<GenericSymbolPath>,
+    reference_candidates: Vec<Vec<ReferenceCandidate>>,
 }
 
 #[derive(Clone)]
@@ -464,6 +465,38 @@ impl CreateSymbolTable {
     fn is_in_expression_identifier(&self) -> bool {
         !self.in_expression_identifier.is_empty()
     }
+
+    fn add_reference_candidate(&mut self, candidate: ReferenceCandidate) {
+        if let Some(candidates) = self.reference_candidates.last_mut() {
+            candidates.push(candidate);
+        } else {
+            reference_table::add(candidate);
+        }
+    }
+
+    fn pop_reference_candidates(&mut self) {
+        fn is_import_item(candidate: &ReferenceCandidate) -> bool {
+            match candidate {
+                ReferenceCandidate::ScopedIdentifier {
+                    in_import_declaration,
+                    ..
+                } => *in_import_declaration,
+                ReferenceCandidate::ImportItem { .. } => true,
+                _ => false,
+            }
+        }
+
+        if let Some(candidates) = self.reference_candidates.pop() {
+            let (import_items, other_itesm): (Vec<_>, Vec<_>) =
+                candidates.into_iter().partition(is_import_item);
+            for item in import_items {
+                reference_table::add(item);
+            }
+            for item in other_itesm {
+                reference_table::add(item);
+            }
+        }
+    }
 }
 
 impl Handler for CreateSymbolTable {
@@ -552,7 +585,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            reference_table::add(arg.into());
+            self.add_reference_candidate(arg.into());
         }
 
         Ok(())
@@ -561,7 +594,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn scoped_identifier(&mut self, arg: &ScopedIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             if !self.with_member_reference {
-                reference_table::add((arg, self.in_import).into());
+                self.add_reference_candidate((arg, self.in_import).into());
             }
 
             // Add symbols under $sv namespace
@@ -620,9 +653,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         arg: arg.clone(),
                         function,
                     };
-                    reference_table::add(cand);
+                    self.add_reference_candidate(cand);
                 } else {
-                    reference_table::add(arg.into());
+                    self.add_reference_candidate(arg.into());
                 }
 
                 self.identifier_path.push(SymbolPathNamespace::default());
@@ -649,7 +682,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
         match self.point {
             HandlerPoint::Before => {
                 self.with_member_reference = true;
-                reference_table::add(arg.into());
+                self.add_reference_candidate(arg.into());
             }
             HandlerPoint::After => self.with_member_reference = false,
         }
@@ -738,7 +771,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 arg: arg.clone(),
                 r#type: self.identifier_factor_names.last().unwrap().clone(),
             };
-            reference_table::add(cand);
+            self.add_reference_candidate(cand);
         }
         Ok(())
     }
@@ -1133,7 +1166,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         ModportDefault::SameLParenModportDefaultListRParen(x) => {
                             let targets: Vec<_> = x.modport_default_list.as_ref().into();
                             for target in &targets {
-                                reference_table::add((*target).into());
+                                self.add_reference_candidate((*target).into());
                             }
 
                             let modports: Vec<_> =
@@ -1143,7 +1176,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         ModportDefault::ConverseLParenModportDefaultListRParen(x) => {
                             let targets: Vec<_> = x.modport_default_list.as_ref().into();
                             for target in &targets {
-                                reference_table::add((*target).into());
+                                self.add_reference_candidate((*target).into());
                             }
 
                             let modports: Vec<_> =
@@ -1177,7 +1210,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
     fn modport_item(&mut self, arg: &ModportItem) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            reference_table::add(arg.into());
+            self.add_reference_candidate(arg.into());
         }
         Ok(())
     }
@@ -1492,7 +1525,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn inst_parameter_item(&mut self, arg: &InstParameterItem) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                reference_table::add(arg.into());
+                self.add_reference_candidate(arg.into());
                 self.connect_target_identifiers.clear();
             }
             HandlerPoint::After => {
@@ -1522,7 +1555,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
     fn inst_port_item(&mut self, arg: &InstPortItem) -> Result<(), ParolError> {
         match self.point {
             HandlerPoint::Before => {
-                reference_table::add(arg.into());
+                self.add_reference_candidate(arg.into());
                 self.connect_target_identifiers.clear();
             }
             HandlerPoint::After => {
@@ -1880,7 +1913,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         ImportDeclarationOptGroup::MultipleImportList(x) => {
                             let item_list: Vec<_> = x.multiple_import_list.as_ref().into();
                             for x in item_list {
-                                reference_table::add((arg.scoped_identifier.as_ref(), x).into());
+                                self.add_reference_candidate(
+                                    (arg.scoped_identifier.as_ref(), x).into(),
+                                );
 
                                 let mut item_path = path.clone();
                                 item_path
@@ -1927,6 +1962,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.parameters.push(Vec::new());
                 self.ports.push(Vec::new());
                 self.affiliation.push(Affiliation::Module);
+                self.reference_candidates.push(Vec::new());
                 self.module_namspace_depth = scope::depth(scope::current());
                 self.exist_clock_without_domain = false;
 
@@ -1941,6 +1977,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let (generic_parameters, generic_consts) = self.generic_context.pop();
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
                 let ports: Vec<_> = self.ports.pop().unwrap();
+                self.pop_reference_candidates();
 
                 let default_clock = if self.default_clock.is_some() {
                     self.default_clock
@@ -2103,12 +2140,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.generic_context.push();
                 self.parameters.push(Vec::new());
                 self.affiliation.push(Affiliation::Interface);
+                self.reference_candidates.push(Vec::new());
                 self.apply_file_scope_import();
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 self.pop_namespace();
                 self.affiliation.pop();
+                self.pop_reference_candidates();
 
                 let (generic_parameters, generic_consts) = self.generic_context.pop();
                 let mixin_sources: Vec<_> = self.mixin_sources.drain(..).collect();
@@ -2161,12 +2200,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.push_namespace(name);
                 self.generic_context.push();
                 self.affiliation.push(Affiliation::Package);
+                self.reference_candidates.push(Vec::new());
                 self.apply_file_scope_import();
                 self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 self.pop_namespace();
                 self.affiliation.pop();
+                self.pop_reference_candidates();
 
                 let (generic_parameters, generic_consts) = self.generic_context.pop();
 
@@ -2264,10 +2305,12 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.in_proto = true;
                 self.parameters.push(Vec::new());
                 self.ports.push(Vec::new());
+                self.reference_candidates.push(Vec::new());
             }
             HandlerPoint::After => {
                 self.pop_namespace();
                 self.affiliation.pop();
+                self.pop_reference_candidates();
                 self.in_proto = false;
 
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
@@ -2307,11 +2350,13 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.push_namespace(arg.identifier.text());
                 self.affiliation.push(Affiliation::Interface);
                 self.parameters.push(Vec::new());
+                self.reference_candidates.push(Vec::new());
                 self.apply_file_scope_import();
             }
             HandlerPoint::After => {
                 self.pop_namespace();
                 self.affiliation.pop();
+                self.pop_reference_candidates();
 
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
                 let property = InterfaceProperty {
@@ -2344,11 +2389,13 @@ impl VerylGrammarTrait for CreateSymbolTable {
             HandlerPoint::Before => {
                 self.push_namespace(arg.identifier.text());
                 self.affiliation.push(Affiliation::Package);
+                self.reference_candidates.push(Vec::new());
                 self.apply_file_scope_import();
             }
             HandlerPoint::After => {
                 self.pop_namespace();
                 self.affiliation.pop();
+                self.pop_reference_candidates();
 
                 let property = PackageProperty {
                     range: arg.into(),
