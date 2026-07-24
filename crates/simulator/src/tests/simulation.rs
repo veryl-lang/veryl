@@ -12689,6 +12689,100 @@ fn packed_array_dynamic_bit_select_read() {
     }
 }
 
+// Regression: a constant range select stacked on a dynamic element select
+// (`a[idx][hi:lo]`) folded hi into the flat element index and kept a
+// single-element window, reading one bit AT the hi position instead of the
+// (hi-lo+1)-bit field at lo. Found via VeeR-EH2's per-thread AXI address
+// mux `{obuf_addr[bus_tid][31:3], 3'b0}` — every read address went to 0.
+#[test]
+fn dynamic_elem_select_const_range_read() {
+    let code = r#"
+    module Top (
+        a  : input  logic<4, 8>,
+        idx: input  logic<2>,
+        o  : output logic<4>,
+        oc : output logic<8>,
+    ) {
+        assign o = a[idx][5:2];
+        assign oc = {a[idx][7:3], 3'b0};
+    }
+    "#;
+
+    let mut configs = Config::all();
+    if crate::backend::aot_c::cc_available() {
+        configs.push(aot_native_validate_config());
+    }
+    for config in configs {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0xDDCCBBAA, 32, false));
+        for idx in 0..4u64 {
+            let elem = (0xDDCC_BBAAu64 >> (idx * 8)) & 0xFF;
+            sim.set("idx", Value::new(idx, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new((elem >> 2) & 0xF, 4, false),
+                "a[{idx}][5:2] config={config:?}"
+            );
+            assert_eq!(
+                sim.get("oc").unwrap(),
+                Value::new(((elem >> 3) & 0x1F) << 3, 8, false),
+                "{{a[{idx}][7:3], 3'b0}} config={config:?}"
+            );
+        }
+    }
+}
+
+// LHS variant of the above: `o[idx][5:2] = v` must RMW the 4-bit field
+// inside the dynamically selected element, not one bit at the hi position.
+#[test]
+fn dynamic_elem_select_const_range_write() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        idx: input  logic<2>,
+        v  : input  logic<4>,
+        o  : output logic<4, 8>,
+    ) {
+        always_ff {
+            if_reset {
+                o = 0;
+            } else {
+                o[idx][5:2] = v;
+            }
+        }
+    }
+    "#;
+
+    let mut configs = Config::all();
+    if crate::backend::aot_c::cc_available() {
+        configs.push(aot_native_validate_config());
+    }
+    for config in configs {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+
+        let mut exp: u64 = 0;
+        for (idx, v) in [(0u64, 0x5u64), (2, 0xA), (3, 0xF), (1, 0x9)] {
+            sim.set("idx", Value::new(idx, 2, false));
+            sim.set("v", Value::new(v, 4, false));
+            sim.step(&clk);
+            let shift = idx * 8 + 2;
+            exp = (exp & !(0xFu64 << shift)) | (v << shift);
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(exp, 32, false),
+                "o[{idx}][5:2]={v:#x} config={config:?}"
+            );
+        }
+    }
+}
+
 // Regression for #20: a dynamic part-select `d[i+:4]` (const width, runtime
 // start) dropped its window width in the sim IR and selected a single bit
 // instead of 4. (`-:`/step with a runtime start are rejected upstream by the
