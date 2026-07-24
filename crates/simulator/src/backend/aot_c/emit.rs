@@ -3346,13 +3346,11 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             if a.dst_base.is_ff() {
                 return None; // handled above in event mode; else out of scope
             }
-            // Wide (>128-bit) dynamic-indexed comb store via the wide-op
-            // helper table.  A `var` array written by runtime index inside
-            // always_ff whose ff_log_base_current_offset is None maps to the
-            // comb buffer, so eval_step writes DIRECTLY to `base + stride*idx`
-            // with no write-log push.  Mirror that byte for byte (RMW for
-            // select, copy+mask for full).  The 65-128 range still bails below.
-            if a.dst_width > 128 {
+            // Dynamic-indexed comb store, >64-bit element.  Such a `var` array
+            // (ff_log_base_current_offset None) lives in the comb buffer, so
+            // eval_step writes directly to `base + stride*idx` with no write-log
+            // push; mirror that (RMW for a bit-select, whole write otherwise).
+            if a.dst_width > 64 {
                 if a.dynamic_select.is_some() || a.rhs_select.is_some() {
                     return None;
                 }
@@ -3404,9 +3402,26 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                             src = r.addr,
                         )
                     }
+                } else if nb == 16 {
+                    // A 65-128-bit element fits a native __uint128_t: masked
+                    // store like the static path, no helper table (>128 below).
+                    let mut pre = String::new();
+                    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+                    let m: u128 = if a.dst_width >= 128 {
+                        !0u128
+                    } else {
+                        (1u128 << a.dst_width) - 1
+                    };
+                    format!(
+                        "{pre}*((veryl_u128_ua*)_pa) = (*(const veryl_u128_ua*)({src})) \
+                         & (((__uint128_t)0x{hi:x}ULL << 64) | (__uint128_t)0x{lo:x}ULL);",
+                        src = r.addr,
+                        hi = (m >> 64) as u64,
+                        lo = m as u64,
+                    )
                 } else {
-                    // Full element write: copy then mask in the destination
-                    // (never the source, which may alias a flat-buffer read).
+                    // Mask the destination, not the source (which may alias a
+                    // flat-buffer read).
                     let mut pre = String::new();
                     let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
                     format!(
@@ -3426,7 +3441,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                     stride = a.dst_stride,
                 ));
             }
-            if a.dst_num_elements == 0 || a.dst_width == 0 || a.dst_width > 64 {
+            if a.dst_num_elements == 0 || a.dst_width == 0 {
                 return None;
             }
             let nb = native_bytes(a.dst_width);
@@ -6114,6 +6129,77 @@ mod tests {
         assert!(s.contains("comb_values + 0x100"));
         assert!(s.contains("uint32_t"));
         assert!(s.contains("0xdeadbeefULL"));
+    }
+
+    #[test]
+    fn emit_stmt_assign_dynamic_comb_wide_65_128() {
+        // Regression: a 65-128-bit full-element dynamic store must emit, not bail.
+        use crate::ir::ProtoAssignDynamicStatement;
+        let a = ProtoAssignDynamicStatement {
+            dst_base: VarOffset::Comb(0x200),
+            dst_stride: 16,
+            dst_num_elements: 8,
+            dst_index_expr: const_expr(3, 4),
+            dst_width: 96,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x1234, 96),
+            dst_ff_current_base_offset: 0,
+        };
+        let s = emit_stmt(&ProtoStatement::AssignDynamic(a)).unwrap();
+        assert!(s.contains("_idx_raw"));
+        assert!(s.contains("_idx_raw < 7 ?"));
+        assert!(s.contains("comb_values + 0x200"));
+        assert!(s.contains("veryl_u128_ua"));
+        // 96-bit mask: low 64 bits all ones, high 32 bits set.
+        assert!(s.contains("0xffffffffULL << 64"));
+    }
+
+    #[test]
+    fn emit_stmt_assign_dynamic_comb_wide_65_128_field_le64() {
+        // Regression: newly-reachable ≤64-bit bit-select into a 65-128-bit element.
+        use crate::ir::ProtoAssignDynamicStatement;
+        let a = ProtoAssignDynamicStatement {
+            dst_base: VarOffset::Comb(0x200),
+            dst_stride: 16,
+            dst_num_elements: 8,
+            dst_index_expr: const_expr(3, 4),
+            dst_width: 96,
+            select: Some((79, 64)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0xabcd, 16),
+            dst_ff_current_base_offset: 0,
+        };
+        let s = emit_stmt(&ProtoStatement::AssignDynamic(a)).unwrap();
+        assert!(s.contains("_idx_raw"));
+        assert!(s.contains("_pa"));
+        assert!(s.contains("veryl_u64_ua"));
+    }
+
+    #[test]
+    fn emit_stmt_assign_dynamic_comb_wide_65_128_field_gt64() {
+        // Regression: newly-reachable >64-bit bit-select into a 65-128-bit element.
+        use crate::ir::ProtoAssignDynamicStatement;
+        let a = ProtoAssignDynamicStatement {
+            dst_base: VarOffset::Comb(0x200),
+            dst_stride: 16,
+            dst_num_elements: 8,
+            dst_index_expr: const_expr(3, 4),
+            dst_width: 119,
+            select: Some((110, 20)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x5, 91),
+            dst_ff_current_base_offset: 0,
+        };
+        let s = emit_stmt(&ProtoStatement::AssignDynamic(a)).unwrap();
+        assert!(s.contains("_idx_raw"));
+        assert!(s.contains("_pa"));
+        assert!(s.contains("vw_fill_ones"));
+        assert!(s.contains("vw_bor"));
+        assert!(s.contains("vw_apply_mask"));
     }
 
     #[test]
