@@ -2967,11 +2967,75 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             if a.dst.is_ff() {
                 return emit_event_ff_assign(a);
             }
-            // A runtime-indexed bit-slice store into a comb target is emitted
-            // below (after the rhs is computed), for dst_width <= 64.  Wider
-            // dynamic-select stores stay on Cranelift.
-            if a.dynamic_select.is_some() && (a.dst_width > 64 || a.dst_width == 0) {
-                return None;
+            // A runtime-indexed bit-slice store. A ≤64-bit dst is the scalar
+            // RMW below; a wide (>64-bit) dst is handled here because that path
+            // shifts the mask in u64 and so can't reach a field crossing the
+            // 64-bit word boundary (SIMT per-lane rows `logic<N, W>[idx] = v`).
+            if let Some(dyn_sel) = &a.dynamic_select {
+                if a.dst_width == 0 {
+                    return None;
+                }
+                if a.dst_width > 64 {
+                    // A static bit-select / rhs_select / sign-extend combined
+                    // with the dynamic index isn't modelled here — bail those.
+                    if a.select.is_some() || eff_rhs_select.is_some() || se_from.is_some() {
+                        return None;
+                    }
+                    let ew = dyn_sel.elem_width;
+                    let ne = dyn_sel.num_elements;
+                    let win = dyn_sel.window;
+                    let VarOffset::Comb(store_off) = a.dst else {
+                        return None;
+                    };
+                    if store_off < 0 || ew == 0 || win == 0 || ne == 0 {
+                        return None;
+                    }
+                    let nb = native_bytes(a.dst_width);
+                    let nw = nb / 8;
+                    if win > nb * 8 {
+                        return None;
+                    }
+                    let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
+                    let max_idx = ne - 1;
+                    let idx = emit_expr(&dyn_sel.index_expr)?;
+                    let mut pre = String::new();
+                    // rhs value (masked to `win` below) as an nb-byte buffer.
+                    let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
+                    let wmsk = next_wide_tmp(); // mask_range = fill_ones(win) << _sh
+                    let keep = next_wide_tmp(); // widthmask & ~mask_range
+                    let widm = next_wide_tmp(); // fill_ones(dst_width)
+                    let srcsh = next_wide_tmp();
+                    let newv = next_wide_tmp();
+                    // Mirror AssignStatement::eval_step's dynamic_select +
+                    // Value::assign(beg=_sh+win-1, end=_sh) EXACTLY, including
+                    // the out-of-width spill (no final width clamp), so AOT and
+                    // the interpreter stay byte-identical.
+                    return Some(format!(
+                        "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
+                            uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
+                            uint64_t _sh = _di * {ew}ull; \
+                            uint64_t _w{wmsk}[{nw}]; \
+                            vw_fill_ones((uint8_t*)_w{wmsk}, (const uint8_t*)0, {pkw}u); \
+                            vw_shl((uint8_t*)_w{wmsk}, (const uint8_t*)_w{wmsk}, _sh, {nb}u); \
+                            uint64_t _w{widm}[{nw}]; \
+                            vw_fill_ones((uint8_t*)_w{widm}, (const uint8_t*)0, {pkd}u); \
+                            uint64_t _w{keep}[{nw}]; \
+                            vw_band_not((uint8_t*)_w{keep}, (const uint8_t*)_w{widm}, (const uint8_t*)_w{wmsk}, {nb}u); \
+                            uint64_t _w{srcsh}[{nw}]; \
+                            vw_copy((uint8_t*)_w{srcsh}, {src}, {nb}u); \
+                            vw_apply_mask((uint8_t*)_w{srcsh}, (const uint8_t*)0, {pkw}u); \
+                            vw_shl((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, _sh, {nb}u); \
+                            vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{wmsk}, {nb}u); \
+                            uint64_t _w{newv}[{nw}]; \
+                            vw_band((uint8_t*)_w{newv}, {dst}, (const uint8_t*)_w{keep}, {nb}u); \
+                            vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); \
+                            vw_copy({dst}, (const uint8_t*)_w{newv}, {nb}u); }}",
+                        pkw = wpack(nb, win),
+                        pkd = wpack(nb, a.dst_width),
+                        src = r.addr,
+                        dst = dst,
+                    ));
+                }
             }
             // Wide comb store via the wide-op helper table.  Two cases route
             // here: (a) dst_width > 128 (never a C scalar); (b) a 65-128-bit
@@ -3346,13 +3410,15 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             if a.dst_base.is_ff() {
                 return None; // handled above in event mode; else out of scope
             }
-            // Wide (>128-bit) dynamic-indexed comb store via the wide-op
+            // Wide (>64-bit) dynamic-indexed comb store via the wide-op
             // helper table.  A `var` array written by runtime index inside
             // always_ff whose ff_log_base_current_offset is None maps to the
             // comb buffer, so eval_step writes DIRECTLY to `base + stride*idx`
             // with no write-log push.  Mirror that byte for byte (RMW for
-            // select, copy+mask for full).  The 65-128 range still bails below.
-            if a.dst_width > 128 {
+            // select, copy+mask for full).  Covers 65-128-bit elements too
+            // (native_bytes/vw_* are width-agnostic); the scalar path below
+            // then only ever sees a ≤64-bit dst.
+            if a.dst_width > 64 {
                 if a.dynamic_select.is_some() || a.rhs_select.is_some() {
                     return None;
                 }
@@ -4241,6 +4307,34 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 // already 128-bit, so only both-narrow truncate; a left shift
                 // follows its left operand alone. Bail those (and signed wide,
                 // which the block below can't sign-extend to 128) to Cranelift.
+                // 65..128-bit unsigned shift-LEFT with a narrow (≤64-bit) left
+                // operand: `(uint64_t)xs << ys` truncates to 64 bits, so promote
+                // xs to __uint128_t first. Placed before the `wide_truncates`
+                // bail below, which would otherwise send this to the interpreter.
+                if expr_context.width > 64
+                    && expr_context.width <= 128
+                    && matches!(op, Op::LogicShiftL | Op::ArithShiftL)
+                    && x.width() <= 64
+                    && !expr_context.signed
+                {
+                    let w = expr_context.width;
+                    let xm = if x.width() >= 64 {
+                        format!("((__uint128_t)((uint64_t)({xs})))")
+                    } else {
+                        format!(
+                            "((__uint128_t)(((uint64_t)({xs})) & 0x{:x}ULL))",
+                            width_mask(x.width())
+                        )
+                    };
+                    let shifted = format!(
+                        "((((__uint128_t)({ys})) >= {w}) ? (__uint128_t)0 : (({xm}) << ({ys})))"
+                    );
+                    return Some(if w < 128 {
+                        mask_u128(&shifted, w)
+                    } else {
+                        shifted
+                    });
+                }
                 let wide_truncates = match op {
                     Op::Add | Op::Sub | Op::Mul => x.width() <= 64 && y.width() <= 64,
                     Op::LogicShiftL | Op::ArithShiftL => x.width() <= 64,
