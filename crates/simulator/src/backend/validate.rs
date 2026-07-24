@@ -51,7 +51,14 @@ pub fn settle_comb(
     // Snapshot inputs so we can restore them for the Cranelift run.
     let ff_snap_in: Vec<u8> = ir.ff_values.to_vec();
     let comb_snap_in: Vec<u8> = ir.comb_values.to_vec();
-    let count_snap_in: u64 = ir.write_log_buffer.count() as u64;
+    // Snapshot the write-log counts too: a comb settle that lands is_ff writes
+    // (the is_ff refinement, e.g. function output args) pushes WriteLogEntries.
+    // Without rewinding before the Cranelift reference run, its pushes accumulate
+    // on top of the AOT run's (count_jit == count_aot + jit_pushes always
+    // diverges) — a phantom, since both push identical offsets.
+    let narrow_snap = ir.write_log_buffer.narrow_count();
+    let wide_snap = ir.write_log_buffer.wide_count();
+    let buf_mut = (&*ir.write_log_buffer) as *const _ as *mut crate::ir::write_log::WriteLogBuffer;
 
     for _ in 0..passes {
         match whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) {
@@ -73,8 +80,11 @@ pub fn settle_comb(
         std::ptr::copy_nonoverlapping(ff_snap_in.as_ptr(), ff_dst, ff_snap_in.len());
         let comb_dst = ir.comb_values.as_ptr() as *mut u8;
         std::ptr::copy_nonoverlapping(comb_snap_in.as_ptr(), comb_dst, comb_snap_in.len());
+        // Rewind the write-log to the pre-AOT counts so the Cranelift run's
+        // entries replace (not append to) the AOT run's.
+        (*buf_mut).narrow_count = narrow_snap;
+        (*buf_mut).wide_count = wide_snap;
     }
-    let _ = count_snap_in;
 
     ir.run_chunked_settle(mask_cache, profile);
 
