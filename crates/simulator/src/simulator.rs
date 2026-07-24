@@ -79,6 +79,9 @@ struct WatchVar {
     ptr: *const u8,
     native_bytes: usize,
     width: u32,
+    /// Raw byte snapshot (payload + optional 4-state mask) for the
+    /// change-only reporting used by `step_legacy`.
+    last: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -205,16 +208,37 @@ impl Simulator {
 
         if let Ok(watch) = std::env::var("VERYL_STEP_WATCH") {
             for path in watch.split(',').filter(|s| !s.is_empty()) {
-                match Self::find_var_meta_in_module(&ret.ir.module_variables, path) {
-                    Some((ptr, native_bytes, width)) => {
-                        ret.watch_vars.push(WatchVar {
-                            label: path.to_string(),
-                            ptr,
-                            native_bytes,
-                            width,
-                        });
+                // Optional unpacked-array element selector: `a.b.gpr[4]`.
+                let (base, elem) = match path.rfind('[') {
+                    Some(pos) if path.ends_with(']') => {
+                        match path[pos + 1..path.len() - 1].parse::<usize>() {
+                            Ok(i) => (&path[..pos], Some(i)),
+                            Err(_) => (path, None),
+                        }
                     }
-                    None => eprintln!("[step_watch] UNRESOLVED: {path}"),
+                    _ => (path, None),
+                };
+                // Collect ALL matches: one path can resolve to several
+                // storages (see collect_var_meta_in_module).
+                let mut found = Vec::new();
+                Self::collect_var_meta_in_module(&ret.ir.module_variables, base, elem, &mut found);
+                if found.is_empty() {
+                    eprintln!("[step_watch] UNRESOLVED: {path}");
+                }
+                let multi = found.len() > 1;
+                for (k, (ptr, native_bytes, width)) in found.into_iter().enumerate() {
+                    let label = if multi {
+                        format!("{path}#{k}")
+                    } else {
+                        path.to_string()
+                    };
+                    ret.watch_vars.push(WatchVar {
+                        label,
+                        ptr,
+                        native_bytes,
+                        width,
+                        last: Vec::new(),
+                    });
                 }
             }
         }
@@ -371,25 +395,30 @@ impl Simulator {
         None
     }
 
-    fn find_var_meta_in_module(
+    /// Watch-path resolver that collects EVERY match (generate
+    /// instances share hierarchical names) and supports an unpacked-array
+    /// element index (`elem` selects `current_values[elem]`).
+    fn collect_var_meta_in_module(
         module: &ModuleVariables,
         target: &str,
-    ) -> Option<(*const u8, usize, u32)> {
+        elem: Option<usize>,
+        out: &mut Vec<(*const u8, usize, u32)>,
+    ) {
         if let Some((head, rest)) = target.split_once('.') {
             for child in &module.children {
-                if child.name.to_string() == head
-                    && let Some(v) = Self::find_var_meta_in_module(child, rest)
-                {
-                    return Some(v);
+                if child.name.to_string() == head {
+                    Self::collect_var_meta_in_module(child, rest, elem, out);
                 }
             }
         }
         for var in module.variables.values() {
             if var.path.to_string() == target {
-                return Some((var.current_values[0], var.native_bytes, var.width as u32));
+                let idx = elem.unwrap_or(0);
+                if let Some(&ptr) = var.current_values.get(idx) {
+                    out.push((ptr, var.native_bytes, var.width as u32));
+                }
             }
         }
-        None
     }
 
     fn dump_watch(&self, tag: &str) {
@@ -404,6 +433,23 @@ impl Simulator {
             line.push_str(&format!(" {}={:x?}", w.label, value));
         }
         eprintln!("{line}");
+    }
+
+    /// Change-only watch used by `step_legacy`: prints a line per watched
+    /// var whose raw storage bytes changed since the previous call.
+    fn dump_watch_changes(&mut self, tag: &str) {
+        let time = self.time;
+        let use_4state = self.ir.use_4state;
+        for w in &mut self.watch_vars {
+            let span = w.native_bytes * (1 + use_4state as usize);
+            let cur = unsafe { std::slice::from_raw_parts(w.ptr, span) };
+            if w.last.as_slice() != cur {
+                let value =
+                    unsafe { read_native_value(w.ptr, w.native_bytes, use_4state, w.width, false) };
+                eprintln!("[step_watch] t={time} {tag}: {}={:x?}", w.label, value);
+                w.last = cur.to_vec();
+            }
+        }
     }
 
     pub fn ensure_comb_updated(&mut self) {
@@ -483,6 +529,15 @@ impl Simulator {
 
         clear_event_write_log();
         self.comb_dirty = true;
+
+        if !self.watch_vars.is_empty() {
+            let tag = match event {
+                Event::Clock(_) => "clk",
+                Event::Reset(_) => "rst",
+                _ => "evt",
+            };
+            self.dump_watch_changes(tag);
+        }
 
         self.dump_variables();
     }
