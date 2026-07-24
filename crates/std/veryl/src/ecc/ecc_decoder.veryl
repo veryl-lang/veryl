@@ -1,0 +1,130 @@
+pub module ecc_decoder #(
+    param WIDTH      : u32  = 8                                   ,
+    param TYPE       : type = logic<WIDTH>                        ,
+    const DATA_WIDTH : u32  = $bits(TYPE)                         ,
+    const CHECK_WIDTH: u32  = ecc_pkg::get_check_width(DATA_WIDTH),
+    const CODE_WIDTH : u32  = DATA_WIDTH + CHECK_WIDTH            ,
+) (
+    i_enable   : input  logic            ,
+    i_code     : input  logic<CODE_WIDTH>,
+    o_data     : output TYPE             ,
+    o_corrected: output logic            ,
+    o_detected : output logic            ,
+) {
+    var data     : logic<DATA_WIDTH> ;
+    var syndrome : logic<CHECK_WIDTH>;
+    var error_pos: logic<DATA_WIDTH> ;
+    var corrected: logic             ;
+    var detected : logic             ;
+
+    always_comb {
+        o_data      = data ^ error_pos;
+        o_corrected = corrected;
+        o_detected  = detected;
+    }
+
+    if CHECK_WIDTH == 5 :g {
+        var code  : logic                          <hamming_11_5_pkg::CODE_WIDTH>;
+        var result: hamming_11_5_pkg::decode_result                              ;
+
+        always_comb {
+            code = i_code as hamming_11_5_pkg::CODE_WIDTH;
+            if i_enable {
+                syndrome = hamming_11_5_pkg::calc_syndrome(code);
+                result   = hamming_11_5_pkg::decode(syndrome, DATA_WIDTH);
+            } else {
+                syndrome = '0;
+                result   = '0;
+            }
+
+            data      = code[CHECK_WIDTH+:DATA_WIDTH];
+            error_pos = result.error_pos[CHECK_WIDTH+:DATA_WIDTH];
+            corrected = result.corrected;
+            detected  = result.detected;
+        }
+    } else if CHECK_WIDTH == 6 {
+        var code  : logic                          <hamming_26_6_pkg::CODE_WIDTH>;
+        var result: hamming_26_6_pkg::decode_result                              ;
+
+        always_comb {
+            code = i_code as hamming_26_6_pkg::CODE_WIDTH;
+            if i_enable {
+                syndrome = hamming_26_6_pkg::calc_syndrome(code);
+                result   = hamming_26_6_pkg::decode(syndrome, DATA_WIDTH);
+            } else {
+                syndrome = '0;
+                result   = '0;
+            }
+
+            data      = code[CHECK_WIDTH+:DATA_WIDTH];
+            error_pos = result.error_pos[CHECK_WIDTH+:DATA_WIDTH];
+            corrected = result.corrected;
+            detected  = result.detected;
+        }
+    } else if CHECK_WIDTH == 7 {
+        var code  : logic                          <hamming_57_7_pkg::CODE_WIDTH>;
+        var result: hamming_57_7_pkg::decode_result                              ;
+
+        always_comb {
+            code = i_code as hamming_57_7_pkg::CODE_WIDTH;
+            if i_enable {
+                syndrome = hamming_57_7_pkg::calc_syndrome(code);
+                result   = hamming_57_7_pkg::decode(syndrome, DATA_WIDTH);
+            } else {
+                syndrome = '0;
+                result   = '0;
+            }
+
+            data      = code[CHECK_WIDTH+:DATA_WIDTH];
+            error_pos = result.error_pos[CHECK_WIDTH+:DATA_WIDTH];
+            corrected = result.corrected;
+            detected  = result.detected;
+        }
+    } else if CHECK_WIDTH == 8 {
+        var code  : logic                           <hamming_120_8_pkg::CODE_WIDTH>;
+        var result: hamming_120_8_pkg::decode_result                               ;
+
+        always_comb {
+            code = i_code as hamming_120_8_pkg::CODE_WIDTH;
+            if i_enable {
+                syndrome = hamming_120_8_pkg::calc_syndrome(code);
+                result   = hamming_120_8_pkg::decode(syndrome, DATA_WIDTH);
+            } else {
+                syndrome = '0;
+                result   = '0;
+            }
+
+            data      = code[CHECK_WIDTH+:DATA_WIDTH];
+            error_pos = result.error_pos[CHECK_WIDTH+:DATA_WIDTH];
+            corrected = result.corrected;
+            detected  = result.detected;
+        }
+    } else if CHECK_WIDTH == 9 {
+        var code  : logic                           <hamming_247_9_pkg::CODE_WIDTH>;
+        var result: hamming_247_9_pkg::decode_result                               ;
+
+        always_comb {
+            code = i_code as hamming_247_9_pkg::CODE_WIDTH;
+            if i_enable {
+                syndrome = hamming_247_9_pkg::calc_syndrome(code);
+                result   = hamming_247_9_pkg::decode(syndrome, DATA_WIDTH);
+            } else {
+                syndrome = '0;
+                result   = '0;
+            }
+
+            data      = code[CHECK_WIDTH+:DATA_WIDTH];
+            error_pos = result.error_pos[CHECK_WIDTH+:DATA_WIDTH];
+            corrected = result.corrected;
+            detected  = result.detected;
+        }
+    } else {
+        always_comb {
+            data      = '0;
+            syndrome  = '0;
+            error_pos = '0;
+            corrected = false;
+            detected  = false;
+        }
+    }
+}
