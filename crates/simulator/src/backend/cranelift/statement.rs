@@ -8,8 +8,9 @@ use super::runtime::{
 use crate::ir::variable::native_bytes as calc_native_bytes;
 use crate::ir::{
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoExpression,
-    ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
+    ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
 };
+use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Value as CraneliftValue;
 use cranelift::prelude::types::{I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
@@ -596,7 +597,28 @@ impl ProtoAssignDynamicStatement {
 }
 impl ProtoForStatement {
     pub fn can_build_binary(&self) -> bool {
-        self.range.is_const() && self.body.iter().all(|s| s.can_build_binary())
+        // A bound is JIT-able when it is a compile-time constant, or a runtime
+        // expression that is itself JIT-able and fits an i64 counter (≤64 bits,
+        // so its payload materialises as a scalar we can compare against).
+        let bound_ok = |b: &ProtoForBound| match b {
+            ProtoForBound::Const(_) => true,
+            ProtoForBound::Dynamic(e) => e.can_build_binary() && e.width() <= 64,
+        };
+        let bounds_jittable = match &self.range {
+            // Forward/Reverse advance by a fixed const step (≥1), so they always
+            // make progress and terminate — safe with runtime bounds.
+            ProtoForRange::Forward { start, end, .. }
+            | ProtoForRange::Reverse { start, end, .. } => bound_ok(start) && bound_ok(end),
+            // Stepped advances via an arbitrary op (e.g. `*= 2`), which can
+            // stall (`0 * 2 == 0`) and spin forever.  The interpreter breaks on
+            // a non-progressing step; const-bound stalls are rejected at
+            // analysis, but runtime bounds have no such guard — so only JIT
+            // const-bound Stepped loops (matching the pre-existing behaviour).
+            ProtoForRange::Stepped { start, end, .. } => {
+                matches!(start, ProtoForBound::Const(_)) && matches!(end, ProtoForBound::Const(_))
+            }
+        };
+        bounds_jittable && self.body.iter().all(|s| s.can_build_binary())
     }
 
     pub fn build_binary(
@@ -617,63 +639,59 @@ impl ProtoForStatement {
         let var_mem_offset = self.var_offset.raw() as i32;
         let nb = self.var_native_bytes;
 
-        let (start_val, end_val, step_val, is_reverse) = match &self.range {
+        let (start_bound, end_bound, inclusive, step_val, is_reverse) = match &self.range {
             ProtoForRange::Forward {
                 start,
                 end,
                 inclusive,
                 step,
-            } => {
-                let mut e = end.as_const()?;
-                if *inclusive {
-                    e += 1;
-                }
-                (start.as_const()?, e, *step, false)
-            }
+            } => (start, end, *inclusive, *step, false),
             ProtoForRange::Reverse {
                 start,
                 end,
                 inclusive,
                 step,
-            } => {
-                let mut e = end.as_const()?;
-                if *inclusive {
-                    e += 1;
-                }
-                (start.as_const()?, e, *step, true)
-            }
+            } => (start, end, *inclusive, *step, true),
             ProtoForRange::Stepped {
                 start,
                 end,
                 inclusive,
                 step,
                 ..
-            } => {
-                let mut e = end.as_const()?;
-                if *inclusive {
-                    e += 1;
-                }
-                (start.as_const()?, e, *step, false)
-            }
+            } => (start, end, *inclusive, *step, false),
         };
+
+        // Evaluate the loop bounds once, here in the entry block, matching the
+        // interpreter which reads `r.start`/`r.end` a single time before
+        // looping (`Statement::For` in `ir::statement`).  Const bounds fold to
+        // `iconst`; dynamic bounds evaluate their expression to an i64.
+        // `inclusive` bumps the end by one, as the const path did with `e += 1`.
+        let start_v = Self::bound_value(start_bound, false, context, builder)?;
+        let end_v = Self::bound_value(end_bound, inclusive, context, builder)?;
 
         // Reverse mirrors the emitted SV `for (int i = hi - 1; i >= lo;
         // i -= step)`. The signed `>= lo` guard makes underflow past `lo`
         // terminate, matching the signed `int i`.
         let init_i = if is_reverse {
-            builder.ins().iconst(I64, (end_val as i64) - 1)
+            builder.ins().iadd_imm_s(end_v, -1)
         } else {
-            builder.ins().iconst(I64, start_val as i64)
+            start_v
         };
 
-        Self::store_counter(context, builder, init_i, base_addr, var_mem_offset, nb);
+        // Carry the counter in a block param (a register), mirroring the
+        // interpreter's local `i`: `var_mem` is written only at the top of the
+        // body. So after the loop `var_mem` holds the last body value (or its
+        // prior value for a zero-iteration loop), matching the interpreter,
+        // not the exit value the counter reaches when the guard fails.
+        builder.append_block_param(header_block, I64);
+        builder.append_block_param(body_block, I64);
 
-        builder.ins().jump(header_block, &[]);
+        builder.ins().jump(header_block, &[BlockArg::Value(init_i)]);
 
         context.load_cache.clear();
         builder.switch_to_block(header_block);
 
-        let i_val = Self::load_counter_as_i64(builder, base_addr, var_mem_offset, nb);
+        let i_val = builder.block_params(header_block)[0];
 
         let cond = if is_reverse {
             // Sign-extend the counter from its native width so an underflow
@@ -684,28 +702,31 @@ impl ProtoForStatement {
             } else {
                 i_val
             };
-            let start_const = builder.ins().iconst(I64, start_val as i64);
             builder
                 .ins()
-                .icmp(IntCC::SignedGreaterThanOrEqual, i_signed, start_const)
+                .icmp(IntCC::SignedGreaterThanOrEqual, i_signed, start_v)
         } else {
-            let end_const = builder.ins().iconst(I64, end_val as i64);
-            builder
-                .ins()
-                .icmp(IntCC::UnsignedLessThan, i_val, end_const)
+            builder.ins().icmp(IntCC::UnsignedLessThan, i_val, end_v)
         };
-        builder.ins().brif(cond, body_block, &[], exit_block, &[]);
+        builder
+            .ins()
+            .brif(cond, body_block, &[BlockArg::Value(i_val)], exit_block, &[]);
 
         context.load_cache.clear();
         let prev_store_elim = context.store_elim_enabled;
         context.store_elim_enabled = false;
         builder.switch_to_block(body_block);
 
+        let i_cur = builder.block_params(body_block)[0];
+
+        // Publish the counter to `var_mem` so the body reads the current `i`.
+        Self::store_counter(context, builder, i_cur, base_addr, var_mem_offset, nb);
+        context.load_cache.clear();
+
         for s in &self.body {
             s.build_binary(context, builder, false)?;
         }
 
-        let i_cur = Self::load_counter_as_i64(builder, base_addr, var_mem_offset, nb);
         let step_c = builder.ins().iconst(I64, step_val as i64);
         let new_i = if is_reverse {
             builder.ins().isub(i_cur, step_c)
@@ -734,9 +755,8 @@ impl ProtoForStatement {
                 _ => builder.ins().iadd(i_cur, step_c),
             }
         };
-        Self::store_counter(context, builder, new_i, base_addr, var_mem_offset, nb);
 
-        builder.ins().jump(header_block, &[]);
+        builder.ins().jump(header_block, &[BlockArg::Value(new_i)]);
 
         context.load_cache.clear();
         context.store_elim_enabled = prev_store_elim;
@@ -745,26 +765,39 @@ impl ProtoForStatement {
         Some(())
     }
 
-    fn load_counter_as_i64(
+    /// Materialise a loop bound as an i64 cranelift value.  Const bounds fold
+    /// to `iconst`; dynamic bounds evaluate their (JIT-able, ≤64-bit) expression
+    /// and normalise its payload to I64.  `add_one` applies the `inclusive`
+    /// end-bound bump.  Callers gate on `can_build_binary`, so the payload is a
+    /// scalar; the `None` arms are defensive (a type mismatch bails to the
+    /// interpreter instead of panicking cranelift).
+    fn bound_value(
+        bound: &ProtoForBound,
+        add_one: bool,
+        context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
-        base_addr: cranelift::prelude::Value,
-        offset: i32,
-        nb: usize,
-    ) -> cranelift::prelude::Value {
-        if nb <= 4 {
-            builder
-                .ins()
-                .uload32(MemFlagsData::trusted(), base_addr, offset)
-        } else if nb <= 8 {
-            builder
-                .ins()
-                .load(I64, MemFlagsData::trusted(), base_addr, offset)
+    ) -> Option<CraneliftValue> {
+        let raw = match bound {
+            ProtoForBound::Const(c) => builder.ins().iconst(I64, *c as i64),
+            ProtoForBound::Dynamic(expr) => {
+                let (payload, _mask) = expr.build_binary(context, builder)?;
+                let ty = builder.func.dfg.value_type(payload);
+                if ty == I64 {
+                    payload
+                } else if ty == I128 {
+                    builder.ins().ireduce(I64, payload)
+                } else if ty.is_int() && ty.bits() < 64 {
+                    builder.ins().uextend(I64, payload)
+                } else {
+                    return None;
+                }
+            }
+        };
+        Some(if add_one {
+            builder.ins().iadd_imm_s(raw, 1)
         } else {
-            let v = builder
-                .ins()
-                .load(I128, MemFlagsData::trusted(), base_addr, offset);
-            builder.ins().ireduce(I64, v)
-        }
+            raw
+        })
     }
 
     fn store_counter(

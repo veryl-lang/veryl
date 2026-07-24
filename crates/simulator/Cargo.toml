@@ -49,6 +49,10 @@ mimalloc        = "0.1"
 veryl-component = {version = "0.1.0", path = "../component"}
 wellen          = "0.25.5"
 
+# Only the Linux/x86_64 RWX code arena uses libc (raw mmap + MADV_HUGEPAGE).
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pprof = {workspace = true}
 

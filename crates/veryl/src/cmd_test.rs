@@ -565,6 +565,9 @@ impl CmdTest {
             }
             // Persist this run's per-test times for the next run's ordering.
             save_test_timings(&timings_path, &prior_timings, &fresh_timings);
+            // Per-op wide-helper call counts (no-op unless VERYL_WIDE_OP_PROFILE=1),
+            // for attributing wide-value run cost by op.
+            veryl_simulator::wide_ops::dump_wide_op_profile();
         }
 
         for (test, property) in non_native_tests {

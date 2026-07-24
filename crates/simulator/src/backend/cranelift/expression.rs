@@ -22,6 +22,26 @@ use veryl_analyzer::value::ValueU64;
 /// needed; otherwise the value is copied into a fresh slot via
 /// `wide_ops::wide_resize` (zero- or sign-extending).
 #[allow(clippy::too_many_arguments)]
+/// Kill switch for the wide-source dynamic-select JIT path
+/// (`VERYL_WIDE_DYNSEL=0` falls back to the interpreter).
+fn wide_dynsel_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_WIDE_DYNSEL").as_deref() != Ok("0"))
+}
+
+/// Compile-time shift amount of a wide shift's count operand, when it is
+/// a plain 2-state constant (the case for concat/packed-lane assembly).
+fn const_shift_amount(y: &ProtoExpression) -> Option<u64> {
+    match y {
+        ProtoExpression::Value {
+            value: Value::U64(v),
+            ..
+        } if v.mask_xz == 0 => Some(v.payload),
+        _ => None,
+    }
+}
+
 fn marshal_wide_operand(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
@@ -103,10 +123,24 @@ impl ProtoExpression {
     pub fn can_build_binary(&self) -> bool {
         match self {
             ProtoExpression::HierVariable(_) => false,
-            ProtoExpression::Variable { dynamic_select, .. } => match dynamic_select {
+            ProtoExpression::Variable {
+                dynamic_select,
+                select,
+                var_full_width,
+                ..
+            } => match dynamic_select {
                 Some(dyn_sel) => {
-                    dyn_sel.elem_width * dyn_sel.num_elements <= 128
-                        && dyn_sel.index_expr.can_build_binary()
+                    let span = dyn_sel.elem_width * dyn_sel.num_elements;
+                    // Narrow sources load into a register; wide (>128-bit)
+                    // sources take the funnel-load path (window ≤ 64, no
+                    // combined static select, span within the storage).
+                    let ok_narrow = span <= 128;
+                    let ok_wide = wide_dynsel_enabled()
+                        && is_wide_ptr(*var_full_width)
+                        && dyn_sel.window <= 64
+                        && select.is_none()
+                        && span <= calc_native_bytes(*var_full_width) * 8;
+                    (ok_narrow || ok_wide) && dyn_sel.index_expr.can_build_binary()
                 }
                 None => true,
             },
@@ -280,11 +314,64 @@ impl ProtoExpression {
                             };
                             return Some((payload, mask_xz));
                         }
-                        // Dynamic bit-select on a wide value: interpreter-only.
+                        // Static + dynamic select combined: interpreter-only.
                         return None;
                     }
-                    if dynamic_select.is_some() {
-                        return None;
+                    if let Some(dyn_sel) = dynamic_select {
+                        // Dynamic element read from a wide variable: funnel
+                        // load of two limbs at the runtime bit offset.  The
+                        // window is ≤ 64 (gated by `can_build_binary`), so
+                        // the result is a narrow register — this keeps the
+                        // packed-lane muxes (`bus[idx*w +: w]` on a >128-bit
+                        // bus) out of the interpreter.
+                        if dyn_sel.window > 64 || dyn_sel.elem_width * dyn_sel.num_elements > nb * 8
+                        {
+                            return None;
+                        }
+                        let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+                        let n_limbs = (nb / 8) as i64;
+                        let word_idx = builder.ins().ushr_imm_s(shift, 6);
+                        let bit_off = builder.ins().band_imm_s(shift, 63);
+                        let mask = gen_mask_for_width(dyn_sel.window) as u64;
+                        let read_plane = |builder: &mut FunctionBuilder, base: CraneliftValue| {
+                            let flags = MemFlagsData::trusted();
+                            let byte_off = builder.ins().ishl_imm_s(word_idx, 3);
+                            let lo_addr = builder.ins().iadd(base, byte_off);
+                            let lo = builder.ins().load(I64, flags, lo_addr, 0);
+                            // The next limb feeds the funnel only when it
+                            // exists; the load address is clamped so the
+                            // last-limb case stays in bounds.
+                            let idx1 = builder.ins().iadd_imm_s(word_idx, 1);
+                            let hi_ok =
+                                builder
+                                    .ins()
+                                    .icmp_imm_s(IntCC::UnsignedLessThan, idx1, n_limbs);
+                            let last = builder.ins().iconst(I64, n_limbs - 1);
+                            let idx1c = builder.ins().select(hi_ok, idx1, last);
+                            let hi_off = builder.ins().ishl_imm_s(idx1c, 3);
+                            let hi_addr = builder.ins().iadd(base, hi_off);
+                            let hi_raw = builder.ins().load(I64, flags, hi_addr, 0);
+                            let zero = builder.ins().iconst(I64, 0);
+                            let hi = builder.ins().select(hi_ok, hi_raw, zero);
+                            let lo_sh = builder.ins().ushr(lo, bit_off);
+                            // (hi << 1) << (63 - bit_off) == hi << (64 -
+                            // bit_off), and contributes 0 at bit_off == 0
+                            // (a plain 64-bit shift would wrap).
+                            let hi1 = builder.ins().ishl_imm_s(hi, 1);
+                            let c63 = builder.ins().iconst(I64, 63);
+                            let inv = builder.ins().isub(c63, bit_off);
+                            let hi_sh = builder.ins().ishl(hi1, inv);
+                            let r = builder.ins().bor(lo_sh, hi_sh);
+                            band_const(builder, r, mask as u128, false)
+                        };
+                        let payload = read_plane(builder, ptr);
+                        let mask_xz = if context.use_4state {
+                            let mask_base = builder.ins().iadd_imm_s(ptr, nb as i64);
+                            Some(read_plane(builder, mask_base))
+                        } else {
+                            None
+                        };
+                        return Some((payload, mask_xz));
                     }
 
                     let mask_xz = if context.use_4state {
@@ -2562,14 +2649,26 @@ impl ProtoExpression {
             Op::Mul => {
                 emit_wide_binary_op(context, builder, wide_fn_addrs::mul(), x_ptr, y_ptr, op_nb)
             }
+            Op::BitAnd if op_nb <= WIDE_INLINE_NB => {
+                emit_wide_bitwise_inline(builder, Op::BitAnd, x_ptr, y_ptr, op_nb)
+            }
             Op::BitAnd => {
                 emit_wide_binary_op(context, builder, wide_fn_addrs::band(), x_ptr, y_ptr, op_nb)
+            }
+            Op::BitOr if op_nb <= WIDE_INLINE_NB => {
+                emit_wide_bitwise_inline(builder, Op::BitOr, x_ptr, y_ptr, op_nb)
             }
             Op::BitOr => {
                 emit_wide_binary_op(context, builder, wide_fn_addrs::bor(), x_ptr, y_ptr, op_nb)
             }
+            Op::BitXor if op_nb <= WIDE_INLINE_NB => {
+                emit_wide_bitwise_inline(builder, Op::BitXor, x_ptr, y_ptr, op_nb)
+            }
             Op::BitXor => {
                 emit_wide_binary_op(context, builder, wide_fn_addrs::bxor(), x_ptr, y_ptr, op_nb)
+            }
+            Op::BitXnor if op_nb <= WIDE_INLINE_NB => {
+                emit_wide_bitwise_inline(builder, Op::BitXnor, x_ptr, y_ptr, op_nb)
             }
             Op::BitXnor => emit_wide_binary_op(
                 context,
@@ -2579,6 +2678,14 @@ impl ProtoExpression {
                 y_ptr,
                 op_nb,
             ),
+            Op::LogicShiftL | Op::ArithShiftL
+                if op_nb <= WIDE_INLINE_NB && const_shift_amount(y).is_some() =>
+            {
+                // Constant shift amount (concat/packed-lane assembly):
+                // unrolled limb shift, no helper call.
+                let c = const_shift_amount(y).unwrap();
+                emit_wide_shift_const_inline(builder, x_ptr, c, op_nb, false)
+            }
             Op::LogicShiftL | Op::ArithShiftL => {
                 // Shift amount: extract from y_ptr as u64
                 let amount = builder.ins().load(I64, MemFlagsData::trusted(), y_ptr, 0);
@@ -2592,6 +2699,10 @@ impl ProtoExpression {
                 );
                 dst
             }
+            Op::LogicShiftR if op_nb <= WIDE_INLINE_NB && const_shift_amount(y).is_some() => {
+                let c = const_shift_amount(y).unwrap();
+                emit_wide_shift_const_inline(builder, x_ptr, c, op_nb, true)
+            }
             Op::LogicShiftR => {
                 let amount = builder.ins().load(I64, MemFlagsData::trusted(), y_ptr, 0);
                 let dst = alloc_wide_slot(builder, op_nb);
@@ -2603,6 +2714,15 @@ impl ProtoExpression {
                     &[dst, x_ptr, amount, nb_val],
                 );
                 dst
+            }
+            Op::ArithShiftR
+                if op_nb <= WIDE_INLINE_NB
+                    && !expr_context.signed
+                    && const_shift_amount(y).is_some() =>
+            {
+                // `>>>` in an unsigned context is a logical shift.
+                let c = const_shift_amount(y).unwrap();
+                emit_wide_shift_const_inline(builder, x_ptr, c, op_nb, true)
             }
             Op::ArithShiftR => {
                 let amount = builder.ins().load(I64, MemFlagsData::trusted(), y_ptr, 0);
@@ -2919,6 +3039,20 @@ impl ProtoExpression {
                     if !value.is_xz() && value.payload().iter_u64_digits().next().is_none()
             );
             if repeat > 1 && elem_is_zero {
+                if nb <= WIDE_INLINE_NB {
+                    acc =
+                        emit_wide_shift_const_inline(builder, acc, (ew * repeat) as u64, nb, false);
+                    if let Some(acc_xz_val) = acc_xz {
+                        acc_xz = Some(emit_wide_shift_const_inline(
+                            builder,
+                            acc_xz_val,
+                            (ew * repeat) as u64,
+                            nb,
+                            false,
+                        ));
+                    }
+                    continue;
+                }
                 let amount = builder.ins().iconst(I64, (ew * repeat) as i64);
                 let new_acc = alloc_wide_slot(builder, nb);
                 call_helper_void(
@@ -2957,6 +3091,31 @@ impl ProtoExpression {
                 .map(|m| wide_operand_as_ptr(builder, elem_is_ptr, expr.width(), m, nb));
 
             for _ in 0..repeat {
+                if nb <= WIDE_INLINE_NB {
+                    // acc = (acc << ew) | elem, fully unrolled (the shift
+                    // amount is the compile-time element width) — the
+                    // helper-call form of this accumulation was the top
+                    // wide hot spot (measured 12M shl + 11.6M bor per
+                    // pe_core cmp run, ~97% at nb=32).
+                    let sh = emit_wide_shift_const_inline(builder, acc, ew as u64, nb, false);
+                    acc = emit_wide_bitwise_inline(builder, Op::BitOr, sh, elem_ptr, nb);
+                    if let Some(acc_xz_val) = acc_xz {
+                        let shx =
+                            emit_wide_shift_const_inline(builder, acc_xz_val, ew as u64, nb, false);
+                        acc_xz = if let Some(elem_xz) = elem_xz_ptr {
+                            Some(emit_wide_bitwise_inline(
+                                builder,
+                                Op::BitOr,
+                                shx,
+                                elem_xz,
+                                nb,
+                            ))
+                        } else {
+                            Some(shx)
+                        };
+                    }
+                    continue;
+                }
                 // acc <<= ew
                 let amount = builder.ins().iconst(I64, ew as i64);
                 let new_acc = alloc_wide_slot(builder, nb);

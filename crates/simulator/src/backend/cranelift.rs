@@ -53,7 +53,9 @@ impl Backend for CraneliftBackend {
         let (func, mmap) = result?;
         Some(Arc::new(ChunkArtifact {
             func,
-            keepalive: Some(Box::new(mmap)),
+            // Arena-allocated code needs no keepalive (blocks are never
+            // unmapped); only the fallback private mapping does.
+            keepalive: mmap.map(|m| Box::new(m) as Box<dyn Send + Sync>),
             content_fp: None,
         }))
     }

@@ -6358,6 +6358,7 @@ dependencies = [
  "fst-writer",
  "fxhash",
  "indent",
+ "libc",
  "libloading",
  "log",
  "memmap2",

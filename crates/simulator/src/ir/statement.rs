@@ -908,15 +908,6 @@ pub enum ProtoForRange {
 }
 
 impl ProtoForRange {
-    pub(crate) fn is_const(&self) -> bool {
-        let (s, e) = match self {
-            ProtoForRange::Forward { start, end, .. }
-            | ProtoForRange::Reverse { start, end, .. }
-            | ProtoForRange::Stepped { start, end, .. } => (start, end),
-        };
-        matches!(s, ProtoForBound::Const(_)) && matches!(e, ProtoForBound::Const(_))
-    }
-
     /// The dynamic (runtime) start/end bound expressions, if any; the
     /// variables they read are inputs of the enclosing statement.
     pub(crate) fn dynamic_bounds(&self) -> impl Iterator<Item = &ProtoExpression> {

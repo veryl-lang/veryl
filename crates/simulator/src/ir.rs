@@ -241,7 +241,17 @@ impl Ir {
                         .collect();
                     format!("Case{{ {} }}", kids.join("; "))
                 }
-                Statement::For(_) => "For".to_string(),
+                Statement::For(f) => {
+                    let const_range = matches!(f.range.start, statement::RuntimeForBound::Const(_))
+                        && matches!(f.range.end, statement::RuntimeForBound::Const(_));
+                    let kids: Vec<String> = f.body.iter().map(classify).collect();
+                    format!(
+                        "For(const_range={}, body_len={}){{ {} }}",
+                        const_range,
+                        f.body.len(),
+                        kids.join("; ")
+                    )
+                }
                 Statement::SystemFunctionCall(_) => "SysFn".to_string(),
                 Statement::SequentialBlock(b) => {
                     let kids: Vec<String> = b.iter().map(classify).collect();

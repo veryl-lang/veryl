@@ -372,7 +372,7 @@ pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
 pub fn build_binary(
     config: &Config,
     proto: Vec<ProtoStatement>,
-) -> Option<(FuncPtr, memmap2::Mmap)> {
+) -> Option<(FuncPtr, Option<memmap2::Mmap>)> {
     build_binary_inner(config, proto, HashSet::default(), false)
 }
 
@@ -381,7 +381,7 @@ pub fn build_binary(
 pub fn build_binary_no_cache(
     config: &Config,
     proto: Vec<ProtoStatement>,
-) -> Option<(FuncPtr, memmap2::Mmap)> {
+) -> Option<(FuncPtr, Option<memmap2::Mmap>)> {
     build_binary_inner(config, proto, HashSet::default(), true)
 }
 
@@ -405,12 +405,70 @@ fn proto_contains_compiled_block(stmts: &[ProtoStatement]) -> bool {
     })
 }
 
+/// (statement count incl. nested, max destination bit-width) for a chunk, used to
+/// label its `perf` map entry so hot wide chunks stand out by shape.
+fn chunk_shape(stmts: &[ProtoStatement]) -> (usize, usize) {
+    let mut count = 0;
+    let mut max_w = 0;
+    for s in stmts {
+        count += 1;
+        match s {
+            ProtoStatement::Assign(a) => max_w = max_w.max(a.dst_width),
+            ProtoStatement::AssignDynamic(a) => max_w = max_w.max(a.dst_width),
+            ProtoStatement::If(x) => {
+                let (tc, tw) = chunk_shape(&x.true_side);
+                let (fc, fw) = chunk_shape(&x.false_side);
+                count += tc + fc;
+                max_w = max_w.max(tw).max(fw);
+            }
+            ProtoStatement::For(x) => {
+                let (bc, bw) = chunk_shape(&x.body);
+                count += bc;
+                max_w = max_w.max(bw);
+            }
+            ProtoStatement::SequentialBlock(b) => {
+                let (bc, bw) = chunk_shape(b);
+                count += bc;
+                max_w = max_w.max(bw);
+            }
+            _ => {}
+        }
+    }
+    (count, max_w)
+}
+
+/// Append a `/tmp/perf-<pid>.map` entry so `perf` can symbolize this JIT'd chunk
+/// (which otherwise samples as an anonymous-mmap address). Gated by
+/// `VERYL_JIT_PERFMAP=1`; the name encodes the chunk's shape so the report groups
+/// hot chunks by statement count and max width. Best-effort — a failed diagnostic
+/// write never aborts a compile.
+fn emit_jit_perfmap(addr: *const u8, size: usize, proto: &[ProtoStatement]) {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    if !*ENABLED.get_or_init(|| std::env::var("VERYL_JIT_PERFMAP").as_deref() == Ok("1")) {
+        return;
+    }
+    let (count, max_w) = chunk_shape(proto);
+    let line = format!(
+        "{:x} {:x} veryl_comb_{count}s_w{max_w}\n",
+        addr as usize, size
+    );
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(format!("/tmp/perf-{}.map", std::process::id()))
+    {
+        use std::io::Write;
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
 fn build_binary_inner(
     config: &Config,
     proto: Vec<ProtoStatement>,
     store_elim: HashSet<VarOffset>,
     disable_load_cache: bool,
-) -> Option<(FuncPtr, memmap2::Mmap)> {
+) -> Option<(FuncPtr, Option<memmap2::Mmap>)> {
     let mut settings_builder = settings::builder();
     settings_builder.set("opt_level", "speed").unwrap();
     if !config.dump_cranelift {
@@ -561,15 +619,108 @@ fn build_binary_inner(
         println!("{}", indent_all_by(2, disasm.to_string()));
     }
 
-    let mut buffer = memmap2::MmapOptions::new()
-        .len(code.code_buffer().len())
-        .map_anon()
-        .unwrap();
+    // Chunk code is packed tightly, in compile (≈ schedule) order, into a
+    // shared executable arena: one page-per-chunk mmap scatters thousands
+    // of small chunks across the address space, and the settle loop —
+    // whose per-run cost is dominated by L1-icache misses — then gets no
+    // spatial locality between consecutively dispatched chunks.  Falls
+    // back to a private mapping if the arena is unavailable (e.g. W^X
+    // policy).
+    let (code_ptr, keepalive) = match code_arena::alloc(code.code_buffer()) {
+        Some(p) => (p as *const u8, None),
+        None => {
+            let mut buffer = memmap2::MmapOptions::new()
+                .len(code.code_buffer().len())
+                .map_anon()
+                .unwrap();
+            buffer.copy_from_slice(code.code_buffer());
+            let buffer = buffer.make_exec().unwrap();
+            let p = buffer.as_ptr();
+            (p, Some(buffer))
+        }
+    };
 
-    buffer.copy_from_slice(code.code_buffer());
-    let buffer = buffer.make_exec().unwrap();
+    let func_ptr: FuncPtr = unsafe { std::mem::transmute(code_ptr) };
 
-    let func_ptr: FuncPtr = unsafe { std::mem::transmute(buffer.as_ptr()) };
+    emit_jit_perfmap(code_ptr, code.code_buffer().len(), &proto);
 
-    Some((func_ptr, buffer))
+    Some((func_ptr, keepalive))
+}
+
+/// Shared executable code arena (see the comment at the allocation site).
+/// Blocks are never unmapped: artifacts cached across tests may outlive
+/// any single simulator, and the whole arena stays far smaller than the
+/// page-per-chunk scheme it replaces.
+mod code_arena {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    mod imp {
+        use std::sync::Mutex;
+
+        struct Arena {
+            cur: *mut u8,
+            remaining: usize,
+        }
+        // SAFETY: the raw pointer is only touched under the mutex.
+        unsafe impl Send for Arena {}
+
+        static ARENA: Mutex<Arena> = Mutex::new(Arena {
+            cur: std::ptr::null_mut(),
+            remaining: 0,
+        });
+
+        const BLOCK: usize = 8 << 20;
+
+        pub fn alloc(code: &[u8]) -> Option<*mut u8> {
+            let need = code.len().checked_add(15)? & !15;
+            let mut a = ARENA.lock().unwrap();
+            if a.remaining < need {
+                let size = BLOCK.max(need.next_multiple_of(4096));
+                // SAFETY: fresh anonymous mapping, error-checked below.
+                let p = unsafe {
+                    libc::mmap(
+                        std::ptr::null_mut(),
+                        size,
+                        libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
+                        libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                        -1,
+                        0,
+                    )
+                };
+                if p == libc::MAP_FAILED {
+                    return None;
+                }
+                // Huge pages keep the call-heavy settle loop off iTLB
+                // walks; best-effort.
+                unsafe {
+                    libc::madvise(p, size, libc::MADV_HUGEPAGE);
+                }
+                a.cur = p as *mut u8;
+                a.remaining = size;
+            }
+            let dst = a.cur;
+            // SAFETY: dst..dst+need is inside the current block (checked
+            // above) and nothing has been published there yet; x86 keeps
+            // icache coherent with these stores once the pointer is
+            // published through the artifact.
+            unsafe {
+                std::ptr::copy_nonoverlapping(code.as_ptr(), dst, code.len());
+                a.cur = dst.add(need);
+            }
+            a.remaining -= need;
+            Some(dst)
+        }
+    }
+
+    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    mod imp {
+        /// The arena is Linux/x86_64-only: it relies on `MADV_HUGEPAGE`
+        /// (Linux-specific) and a persistent RWX mapping (macOS enforces
+        /// W^X, non-x86 needs an icache flush). Everything else keeps the
+        /// per-chunk mapping path.
+        pub fn alloc(_code: &[u8]) -> Option<*mut u8> {
+            None
+        }
+    }
+
+    pub use imp::alloc;
 }
