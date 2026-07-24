@@ -6523,6 +6523,32 @@ fn undefined_identifier() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let inputs = vec![
+        r#"
+        package a_pkg {
+            const WIDTH: u32 = 32;
+        }
+        "#,
+        r#"
+        package b_pkg::<W: u32> {
+            type  T    = logic<W>;
+            const B: T = 0;
+        }
+        "#,
+        r#"
+        module c_module (
+            c: output T,
+        ) {
+            import a_pkg::*;
+            import b_pkg::<WIDTH>::{T, B};
+            assign c = B;
+        }
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(errors.is_empty());
 }
 
 #[test]
