@@ -1352,6 +1352,172 @@ fn wide_128_ff_validate_pool_agnostic() {
 }
 
 #[test]
+fn probe_r4_wide_dynsel_store() {
+    // ROUND 4 (Vortex/SIMT): dynamic bit-select store into a WIDE (>64-bit)
+    // packed-row target `logic<N, W>[idx] = row` — aot_c_validate dual-runs
+    // cc vs Cranelift each cycle.  Non-power-of-2 element width (ew=31) and a
+    // window that fits exactly ((ne-1)*ew + win == dst_width).
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        idx:  input  logic<2>,
+        v:    input  logic<31>,
+        base: input  logic<124>,
+        o:    output logic<124>,
+    ) {
+        var t: logic<4, 31>;
+        always_comb {
+            t = base;
+            t[idx] = v;
+        }
+        assign o = t;
+    }
+    "#;
+    let config = aot_native_validate_config();
+    let ir = analyze(code, &config);
+    assert!(
+        ir.whole_comb.is_some(),
+        "wide dynsel-store comb must be AOT-C-native"
+    );
+    let mut sim = Simulator::new(ir, None);
+    for idx in 0u64..4 {
+        sim.set("base", Value::new(0, 124, false));
+        sim.set("idx", Value::new(idx, 2, false));
+        sim.set("v", Value::new(0x7F, 31, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // element `idx` = 0x7F (7 bits), rest 0.
+        let o = sim.get("o").unwrap();
+        let expect = Value::from_u128(0x7Fu128 << (31 * idx), 0, 124, false);
+        assert_eq!(o, expect, "idx={idx}");
+    }
+}
+
+#[test]
+fn probe_r4_wide_assign_dynamic() {
+    // ROUND 4: dynamic-INDEX store into a 65..128-bit unpacked-array element
+    // `logic<70> [N]; arr[idx] = v`.  aot_c_validate dual-runs cc vs Cranelift.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        idx: input  logic<2>,
+        v:   input  logic<70>,
+        o:   output logic<70>,
+    ) {
+        var arr: logic<70> [4];
+        always_ff {
+            for i in 0..4 {
+                arr[i] = 70'h0;
+            }
+            arr[idx] = v;
+        }
+        assign o = arr[3];
+    }
+    "#;
+    let config = aot_native_validate_config();
+    let ir = analyze(code, &config);
+    assert!(
+        !ir.whole_events.is_empty(),
+        "wide AssignDynamic event must be AOT-C-native"
+    );
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    let bigv: u128 = (1u128 << 69) | (1u128 << 40) | 0xABCD;
+    for idx in 0u64..4 {
+        sim.set("idx", Value::new(idx, 2, false));
+        sim.set("v", Value::from_u128(bigv, 0, 70, false));
+        sim.step(&clk);
+        let o = sim.get("o").unwrap();
+        let expect = if idx == 3 {
+            Value::from_u128(bigv, 0, 70, false)
+        } else {
+            Value::new(0, 70, false)
+        };
+        assert_eq!(o, expect, "idx={idx}");
+    }
+}
+
+#[test]
+fn probe_r4_shift_left_128() {
+    // ROUND 4: 65..128-bit unsigned shift-LEFT with a narrow (≤64-bit) left
+    // operand — `(a << s)` promoted to __uint128_t in a 128-bit context (a
+    // u64 `<<` would truncate).  aot_c_validate dual-runs cc vs Cranelift.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        s: input  logic<7>,
+        o: output logic<128>,
+    ) {
+        assign o = (a << s) + 128'h1;
+    }
+    "#;
+    let config = aot_native_validate_config();
+    let ir = analyze(code, &config);
+    assert!(
+        ir.whole_comb.is_some(),
+        "128-bit shift comb must be AOT-C-native"
+    );
+    let mut sim = Simulator::new(ir, None);
+    for s in [0u64, 1, 31, 63, 64, 96, 100, 127] {
+        sim.set("a", Value::new(0xDEAD_BEEF, 32, false));
+        sim.set("s", Value::new(s, 7, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let o = sim.get("o").unwrap();
+        let expect_val: u128 = (0xDEAD_BEEFu128 << s).wrapping_add(1);
+        // mask to 128 bits (u128 already), the shift drops bits >= 128.
+        let expect = Value::from_u128(expect_val, 0, 128, false);
+        assert_eq!(o, expect, "s={s}");
+    }
+}
+
+#[test]
+fn probe_r4_wide_src_rhs_select() {
+    // ROUND 4: windowed copy `dst = wide_src[hi:lo]` — a static rhs_select of
+    // a >128-bit source into both wide (176-bit) and narrow (48-bit) targets.
+    // aot_c_validate dual-runs cc vs Cranelift.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        src:  input  logic<472>,
+        wide: output logic<176>,
+        narr: output logic<48>,
+    ) {
+        assign wide = src[351:176];
+        assign narr = src[119:72];
+    }
+    "#;
+    let config = aot_native_validate_config();
+    let ir = analyze(code, &config);
+    assert!(
+        ir.whole_comb.is_some(),
+        "wide-src rhs_select comb must be AOT-C-native"
+    );
+    let mut sim = Simulator::new(ir, None);
+    // Distinctive payload: low word pattern + a set bit near the top window.
+    let mut src = Value::new(0, 472, false);
+    // set bits so both windows carry data: bit 72.. and 176..
+    src = Value::from_u128((0x1234_5678u128) << 72, 0, 472, false);
+    sim.set("src", src);
+    sim.step(&Event::Clock(VarId::SYNTHETIC));
+    // narr = src[119:72] = 0x1234_5678 low 48 bits.
+    assert_eq!(
+        sim.get("narr").unwrap(),
+        Value::new((0x1234_5678u64) & ((1u64 << 48) - 1), 48, false)
+    );
+    // wide = src[351:176] — the payload only reaches bit ~104, so window is 0.
+    assert_eq!(sim.get("wide").unwrap(), Value::new(0, 176, false));
+}
+
+#[test]
 fn wide_256_reduce_and_nested_unary() {
     // Wide unary REDUCTIONS (&a / |a / ^a → 1-bit) exercise
     // emit_wide_reduce_unary; the NESTED unary round-trips (~(~a) and -(-a))
