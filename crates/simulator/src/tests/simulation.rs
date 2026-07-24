@@ -20297,3 +20297,33 @@ fn package_const_select_multi_dim_width() {
         }
     }
 }
+
+#[test]
+fn assign_rhs_sized_by_lhs_bit_select_width() {
+    // Regression: sized against the 32-bit variable rather than the 8-bit
+    // select, the shift pair was lossless and stored 0xcd.  0x0d is what the
+    // emitted SV produces under both iverilog and Verilator.
+    let code = r#"
+    module Top (
+        y: input  logic<8>,
+        o: output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            o[7:0] = (y << 4) >> 4;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("y", Value::new(0xcd, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x0d, 32, false),
+            "config={config:?}"
+        );
+    }
+}
