@@ -47,6 +47,12 @@ struct TestReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
     runtime_s: f64,
+    /// Simulation-only wall time: `Simulator::new` + memory preload + the
+    /// cycle loop, excluding the per-test IR build / AOT compile / dlopen that
+    /// `runtime_s` also covers (the boundary a warm Verilator binary re-runs).
+    /// `None` for non-native tests and native tests that never reached execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sim_s: Option<f64>,
     /// Captured `$display`/`$write` output.
     #[serde(skip_serializing_if = "Option::is_none")]
     output: Option<String>,
@@ -466,6 +472,10 @@ impl CmdTest {
                                 if let Some(secs) = run_secs {
                                     tally_timings.push((pending.test_name.clone(), secs));
                                 }
+                                // `run_secs` is exactly the run_native_testbench
+                                // span (Simulator::new + preload + cycle loop),
+                                // which is the sim_s semantics — reuse it.
+                                let sim_s = run_secs;
                                 #[cfg(feature = "profile")]
                                 {
                                     let run_el = t_run.elapsed();
@@ -535,6 +545,7 @@ impl CmdTest {
                                         status: rep_status,
                                         message: rep_message,
                                         runtime_s,
+                                        sim_s,
                                         output: if output.is_empty() {
                                             None
                                         } else {
@@ -604,6 +615,8 @@ impl CmdTest {
                     status: if ok { "pass" } else { "fail" },
                     message: None,
                     runtime_s,
+                    // External simulators compile+run in one step; no split.
+                    sim_s: None,
                     output: None,
                 });
             }
@@ -648,6 +661,7 @@ impl CmdTest {
                     status,
                     message,
                     runtime_s,
+                    sim_s: None,
                     output: None,
                 });
             }
