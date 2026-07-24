@@ -1645,6 +1645,51 @@ pub fn build_dynamic_bit_select(
             };
             (index_expr, w * elem_width)
         }
+        Some((air::VarSelectOp::Colon, lo_expr)) => {
+            // `x[..][hi:lo]`: the hi bound arrived as the LAST plain index,
+            // already folded into index_expr. Both bounds must be constant
+            // (LRM), so rewrite like `[hi -: w]`: shift the flat position down
+            // by (hi - lo) and widen the window to (hi - lo + 1) elements.
+            let (hi, lo) = {
+                let scope = context.scope();
+                let hi = select
+                    .0
+                    .last()
+                    .and_then(|e| e.eval_value(&mut scope.analyzer_context))
+                    .and_then(|v| v.to_usize());
+                let lo = lo_expr
+                    .eval_value(&mut scope.analyzer_context)
+                    .and_then(|v| v.to_usize());
+                (hi, lo)
+            };
+            match (hi, lo) {
+                (Some(hi), Some(lo)) if hi >= lo => {
+                    let w = hi - lo + 1;
+                    let index_expr = if w > 1 {
+                        ProtoExpression::Binary {
+                            x: Box::new(index_expr),
+                            op: Op::Sub,
+                            y: Box::new(const_op(w - 1)),
+                            width: index_width,
+                            expr_context: index_expr_context,
+                        }
+                    } else {
+                        index_expr
+                    };
+                    (index_expr, w * elem_width)
+                }
+                _ => {
+                    // Non-constant or descending bounds: not representable
+                    // in the (elem_width, window) model.
+                    let token = select
+                        .0
+                        .first()
+                        .map(|e| e.comptime().token)
+                        .unwrap_or_default();
+                    return Err(SimulatorError::unsupported_description(&token));
+                }
+            }
+        }
         _ => (index_expr, elem_width),
     };
 
