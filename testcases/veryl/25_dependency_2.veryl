@@ -80,3 +80,8 @@ module Module25E #(
 ) {
     assign o_c = veryl_sample4::foo_func_1::<WIDTH>(i_a, i_b);
 }
+
+module Module25F {
+    import bazpkg::BAZ;
+    let _f: u32 = BAZ;
+}

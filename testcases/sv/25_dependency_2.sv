@@ -94,4 +94,10 @@ module veryl_testcase_Module25E #(
         return a + b + veryl_sample4_foo_func_2();
     endfunction
 endmodule
+
+module veryl_testcase_Module25F;
+    import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C::BAZ;
+
+    int unsigned _f; always_comb _f = BAZ;
+endmodule
 //# sourceMappingURL=../map/25_dependency_2.sv.map
