@@ -20050,3 +20050,66 @@ fn for_loop_break_honored() {
         );
     }
 }
+
+#[test]
+fn package_const_select() {
+    // A package const selected at the reference site, statically and at runtime.
+    let code = r#"
+    package a_pkg {
+        const A: bit<16>   = 16'habcd;
+        const B: bit<8>[4] = '{8'h11, 8'h22, 8'h33, 8'h44};
+    }
+    module Top (
+        i:   input  logic<1>,
+        j:   input  logic<2>,
+        o_a: output logic<8>,
+        o_b: output logic<8>,
+        o_c: output logic<8>,
+        o_d: output logic<8>,
+    ) {
+        assign o_a = a_pkg::A[0+:8];
+        assign o_b = a_pkg::B[2];
+        assign o_c = a_pkg::A[8 * i +: 8];
+        assign o_d = a_pkg::B[j];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (i, j, exp_c, exp_d) in [
+            (0, 0, 0xcd, 0x11),
+            (1, 1, 0xab, 0x22),
+            (0, 2, 0xcd, 0x33),
+            (1, 3, 0xab, 0x44),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+
+            sim.set("i", Value::new(i, 1, false));
+            sim.set("j", Value::new(j, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+            assert_eq!(
+                sim.get("o_a").unwrap(),
+                Value::new(0xcd, 8, false),
+                "const part-select config={config:?}"
+            );
+            assert_eq!(
+                sim.get("o_b").unwrap(),
+                Value::new(0x33, 8, false),
+                "const index config={config:?}"
+            );
+            assert_eq!(
+                sim.get("o_c").unwrap(),
+                Value::new(exp_c, 8, false),
+                "dynamic part-select i={i} config={config:?}"
+            );
+            assert_eq!(
+                sim.get("o_d").unwrap(),
+                Value::new(exp_d, 8, false),
+                "dynamic index j={j} config={config:?}"
+            );
+        }
+    }
+}

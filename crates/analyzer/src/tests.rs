@@ -10560,6 +10560,18 @@ fn invalid_operand() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package PkgA {
+        const ARRAY: bit<8> [4] = '{8'h11, 8'h22, 8'h33, 8'h44};
+    }
+    module ModuleA {
+        let _a: bit<8> = PkgA::ARRAY[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

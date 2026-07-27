@@ -352,6 +352,83 @@ fn synth_factor(
             let elements: Vec<Vec<NetId>> = element_nets.iter().map(|&n| vec![n]).collect();
             Ok(arith::dynamic_mux_tree(ctx, &elements, &idx_nets))
         }
+        Factor::SelectedValue(x) => {
+            let ct = &x.comptime;
+            let elem_width = x.values[0].width();
+            let elements: Vec<Vec<NetId>> = x
+                .values
+                .iter()
+                .map(|v| value_to_nets(v, elem_width))
+                .collect();
+
+            let element_nets: Vec<NetId> = if x.index.0.is_empty() {
+                elements[0].clone()
+            } else if x.index.is_const() {
+                x.index
+                    .eval_value(&mut ctx.eval_ctx)
+                    .and_then(|indices| x.array.calc_index(&indices))
+                    .and_then(|flat| elements.get(flat).cloned())
+                    .ok_or_else(|| {
+                        SynthesizerError::internal(
+                            "const array index does not match its value table".to_string(),
+                        )
+                    })?
+            } else {
+                if x.array.dims() != 1 {
+                    return Err(SynthesizerError::unsupported(
+                        UnsupportedKind::DynamicMultiDimIndex {
+                            what: "const array".to_string(),
+                        },
+                        &ct.token,
+                    ));
+                }
+                let index_bits = arith::index_bits_for(elements.len());
+                let index_nets = synthesize_expr(ctx, &x.index.0[0], current, index_bits)?;
+                arith::dynamic_mux_tree(ctx, &elements, &index_nets)
+            };
+
+            if x.select.is_empty() {
+                return Ok(element_nets);
+            }
+            if !x.select.is_const() {
+                // A part-select at a runtime position can't expand to a fixed slice.
+                if x.select.is_range() {
+                    return Err(SynthesizerError::unsupported(
+                        UnsupportedKind::DynamicRangeSelect {
+                            what: "const value".to_string(),
+                        },
+                        &ct.token,
+                    ));
+                }
+                if x.select.0.len() != 1 {
+                    return Err(SynthesizerError::unsupported(
+                        UnsupportedKind::MultiDimDynamicSelect {
+                            what: "const value".to_string(),
+                        },
+                        &ct.token,
+                    ));
+                }
+                let index_bits = arith::index_bits_for(element_nets.len());
+                let index_nets = synthesize_expr(ctx, &x.select.0[0], current, index_bits)?;
+                let bits: Vec<Vec<NetId>> = element_nets.iter().map(|&n| vec![n]).collect();
+                return Ok(arith::dynamic_mux_tree(ctx, &bits, &index_nets));
+            }
+            let (high, low) = x
+                .select
+                .eval_value(&mut ctx.eval_ctx, &ct.r#type, false)
+                .ok_or_else(|| {
+                    SynthesizerError::dynamic_select("const value".to_string(), &ct.token)
+                })?;
+            if high >= element_nets.len() {
+                return Err(SynthesizerError::internal(format!(
+                    "bit select out of range: {}..={} of {}-bit const",
+                    low,
+                    high,
+                    element_nets.len()
+                )));
+            }
+            Ok(element_nets[low..=high].to_vec())
+        }
         Factor::FunctionCall(call) => synth_function_call(ctx, call, current),
         Factor::SystemFunctionCall(call) => synth_system_function_call(ctx, call, current),
         Factor::Anonymous(ct) => {

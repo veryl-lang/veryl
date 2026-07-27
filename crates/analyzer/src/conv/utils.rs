@@ -183,7 +183,7 @@ pub fn eval_expr(
     if let Ok(mut expr) = expr {
         check_anonymous(context, &expr, allow_anonymous, token);
 
-        let comptime = if let Some(dst_type) = dst_type {
+        let mut comptime = if let Some(dst_type) = dst_type {
             let mut comptime = expr.eval_comptime(context, dst_type.total_width()).clone();
 
             check_compatibility(context, &dst_type, &comptime, &token);
@@ -193,6 +193,15 @@ pub fn eval_expr(
         } else {
             expr.eval_comptime(context, None).clone()
         };
+
+        // `eval_comptime` doesn't evaluate an array literal, so evaluate it here
+        // to carry the element values.
+        if matches!(expr, ir::Expression::ArrayLiteral(..))
+            && !comptime.r#type.array.is_empty()
+            && let Some(values) = eval_array_literal_values(context, &comptime.r#type, &mut expr)?
+        {
+            comptime.value = ValueVariant::NumericArray(values);
+        }
 
         Ok((comptime, expr))
     } else {
@@ -2234,9 +2243,15 @@ fn eval_factor_path_inner(
             let index = array_select.to_index();
             comptime.r#type.array.drain(0..index.dimension());
 
-            // A const symbol read through a dynamic index/select is not itself
-            // a compile-time constant (e.g. `A[idx]` for a const array `A`).
             comptime.is_const &= index.is_const() && width_select.is_const();
+
+            // The whole-array value doesn't describe a selected part of it; drop
+            // it so consumers resolve the selection from the variable table.
+            if (index.dimension() > 0 || !width_select.is_empty())
+                && matches!(comptime.value, ValueVariant::NumericArray(_))
+            {
+                comptime.value = ValueVariant::Unknown;
+            }
 
             comptime.token = token;
             if comptime.r#type.is_type() {
@@ -2336,14 +2351,14 @@ fn eval_factor_path_inner(
             .current_namespace()
             .map(|x| symbol.found.namespace.included(&x))
             .unwrap_or(false);
-        if is_inernal {
+        let factor = if is_inernal {
             eval_factor_symbol(
                 context,
                 generic_path,
                 (*symbol).clone(),
                 allow_unknown_value,
                 token,
-            )
+            )?
         } else {
             let maps = generic_path.to_generic_maps();
             eval_factor_symbol_external(
@@ -2353,10 +2368,90 @@ fn eval_factor_path_inner(
                 maps,
                 allow_unknown_value,
                 token,
-            )
-        }
+            )?
+        };
+
+        apply_symbol_select(context, factor, select, token)
     } else {
         Err(ir_error!(token))
+    }
+}
+
+/// Apply a `select` that the symbol route (`eval_factor_symbol[_external]`)
+/// dropped: none → the value as-is; constant → the selected value; dynamic →
+/// `Factor::SelectedValue`.
+fn apply_symbol_select(
+    context: &mut Context,
+    factor: ir::Factor,
+    select: VarSelect,
+    token: TokenRange,
+) -> IrResult<ir::Factor> {
+    if select.is_empty() {
+        return Ok(factor);
+    }
+    let ir::Factor::Value(mut comptime) = factor else {
+        return Ok(factor);
+    };
+    let values = match &comptime.value {
+        ValueVariant::NumericArray(values) => values.clone(),
+        ValueVariant::Numeric(value) => vec![value.clone()],
+        _ => return Ok(ir::Factor::Value(comptime)),
+    };
+
+    let array = comptime.r#type.array.clone();
+    let (array_select, width_select) = select.split(array.dims());
+    // Array select type check (out-of-range / wrong-order).
+    let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+    if array_select.is_range() {
+        // TODO: array range select.
+        return Err(ir_error!(token));
+    }
+    let index = array_select.to_index();
+
+    comptime.r#type.array.drain(0..index.dimension());
+    if !width_select.is_empty() {
+        comptime.r#type.flatten_struct_union_enum();
+        if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
+            comptime.r#type.set_concrete_width(width);
+        }
+    }
+    let is_const_select = index.is_const() && width_select.is_const();
+    comptime.is_const &= is_const_select;
+    comptime.is_global = comptime.is_const;
+    comptime.token = token;
+
+    // A partial array index selects a sub-array, which can't fold to a single
+    // value: carry the elements so a const assignment materializes them.
+    if !comptime.r#type.array.is_empty() {
+        if !is_const_select || !width_select.is_empty() {
+            // TODO: dynamic sub-array select.
+            return Err(ir_error!(token));
+        }
+        let indices = index.eval_value(context).ok_or_else(|| ir_error!(token))?;
+        let (beg, end) = array.calc_range(&indices).ok_or_else(|| ir_error!(token))?;
+        let values = values.get(beg..=end).ok_or_else(|| ir_error!(token))?;
+        comptime.value = ValueVariant::NumericArray(values.to_vec());
+        return Ok(ir::Factor::Value(comptime));
+    }
+    // The per-element values travel in `SelectedValue.values` instead.
+    comptime.value = ValueVariant::Unknown;
+
+    let factor = ir::Factor::SelectedValue(Box::new(ir::SelectedValue {
+        values,
+        array,
+        index,
+        select: width_select,
+        comptime,
+    }));
+
+    // `eval_value` is not a constness test — it evaluates a non-const index as
+    // 0 — so gate the fold on the select being constant.
+    if is_const_select && let Some(element) = factor.eval_value(context) {
+        let mut comptime = factor.comptime().clone();
+        comptime.value = ValueVariant::Numeric(element);
+        Ok(ir::Factor::Value(comptime))
+    } else {
+        Ok(factor)
     }
 }
 

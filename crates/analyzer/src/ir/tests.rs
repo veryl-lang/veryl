@@ -1316,9 +1316,9 @@ fn array_literal() {
   var var1[4](b): logic = 1'hx;
   var var1[5](b): logic = 1'hx;
   var var2(c): logic<2, 3, 4> = 24'hxxxxxx;
-  const var3[0](X): bit<32> = 32'sh0000000a;
-  const var3[1](X): bit<32> = 32'sh0000000b;
-  const var3[2](X): bit<32> = 32'sh0000000c;
+  const var3[0](X): bit<32> = 32'h0000000a;
+  const var3[1](X): bit<32> = 32'h0000000b;
+  const var3[2](X): bit<32> = 32'h0000000c;
   const var4(Y): bit<3, 4> = 12'habc;
 
   comb {
@@ -3113,4 +3113,35 @@ fn defines_select_ifdef_branch() {
         !ir.contains("00000002"),
         "did not expect ifndef(DEBUG) branch (=2) in IR:\n{ir}"
     );
+}
+
+#[test]
+fn package_const_select() {
+    // A const declared in another package, selected at the reference site: an
+    // element for a full index, a sub-array for a partial one.
+    let code = r#"
+    package a_pkg {
+        const A: bit<16>    = 16'habcd;
+        const B: u32[2]     = '{0, 1};
+        const C: u32 [2, 2] = '{'{1, 2}, '{3, 4}};
+    }
+    module b_module {
+        const A: bit<8>  = a_pkg::A[0+:8];
+        const B: u32     = a_pkg::B[1];
+        const C: u32 [2] = a_pkg::C[0];
+        const D: u32     = a_pkg::C[1][1];
+    }
+    "#;
+
+    let exp = r#"module b_module {
+  const var0(A): bit<8> = 8'hcd;
+  const var1(B): bit<32> = 32'h00000001;
+  const var2[0](C): bit<32> = 32'h00000001;
+  const var2[1](C): bit<32> = 32'h00000002;
+  const var3(D): bit<32> = 32'h00000004;
+
+}
+"#;
+
+    check_ir(code, exp);
 }
