@@ -640,6 +640,18 @@ impl Conv<&IfStatement> for ir::StatementBlock {
                     Conv::conv(c, x.statement_block.as_ref())
                 });
             let true_side = true_side?.0;
+            // If this `else if` is true_side_only, adopt this else-if's body.
+            if true_side_only {
+                if let Some(x) = false_side.last_mut() {
+                    if let ir::Statement::If(x) = x {
+                        x.insert_leaf_false(true_side);
+                    }
+                } else {
+                    false_side.extend(true_side);
+                }
+                else_if_break = true;
+                break;
+            }
 
             let statement = ir::Statement::If(ir::IfStatement {
                 cond,
@@ -654,12 +666,6 @@ impl Conv<&IfStatement> for ir::StatementBlock {
                 }
             } else {
                 false_side.push(statement);
-            }
-
-            // If this `else if` is true_side_only, the remaining else should be skipped.
-            if true_side_only {
-                else_if_break = true;
-                break;
             }
         }
         if let Some(x) = &value.if_statement_opt

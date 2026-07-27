@@ -9915,6 +9915,27 @@ fn uncovered_branch() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        o: output logic<4>,
+    ) {
+        always_comb {
+            for i in 0..4 {
+                if (i <: 1) {
+                    o[i] = 1;
+                } else if (i <: 2) {
+                    o[i] = 0;
+                } else {
+                    o[i] = 1;
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
