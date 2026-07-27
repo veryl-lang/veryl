@@ -10572,6 +10572,24 @@ fn invalid_operand() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtoPkgA {
+        const ARRAY: bit<8> [4];
+    }
+    package PkgB for ProtoPkgA {
+        const ARRAY: bit<8> [4] = '{8'h11, 8'h22, 8'h33, 8'h44};
+    }
+    module ModuleB::<PKG: ProtoPkgA> {
+        let _a: bit<8> = PKG::ARRAY[0] + 1;
+    }
+    module ModuleC {
+        inst u: ModuleB::<PkgB>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

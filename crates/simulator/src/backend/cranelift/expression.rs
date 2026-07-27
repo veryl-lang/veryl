@@ -240,7 +240,6 @@ impl ProtoExpression {
                 };
                 dyn_ok && index_expr.can_build_binary()
             }
-            ProtoExpression::DynamicValue { .. } => false,
         }
     }
     pub fn build_binary(
@@ -271,7 +270,6 @@ impl ProtoExpression {
     ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
         match self {
             ProtoExpression::HierVariable(_) => None,
-            ProtoExpression::DynamicValue { .. } => None,
             ProtoExpression::Variable {
                 var_offset,
                 dynamic_select,

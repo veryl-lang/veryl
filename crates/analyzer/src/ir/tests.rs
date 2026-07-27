@@ -3145,3 +3145,72 @@ fn package_const_select() {
 
     check_ir(code, exp);
 }
+
+#[test]
+fn package_const_dynamic_select() {
+    // A run-time select reads the const as a materialized variable, shared by
+    // both references.
+    let code = r#"
+    package a_pkg {
+        const A: bit<8> [4] = '{8'h11, 8'h22, 8'h33, 8'h44};
+    }
+    module b_module (
+        i: input  logic<2>,
+        o: output logic<8>,
+        p: output logic   ,
+    ) {
+        assign o = a_pkg::A[i];
+        assign p = a_pkg::A[i][0];
+    }
+    "#;
+
+    let exp = r#"module b_module {
+  input var0(i): logic<2> = 2'hx;
+  output var1(o): logic<8> = 8'hxx;
+  output var2(p): logic = 1'hx;
+  const var3[0](__const_prj__a_pkg_A): bit<8> = 8'h11;
+  const var3[1](__const_prj__a_pkg_A): bit<8> = 8'h22;
+  const var3[2](__const_prj__a_pkg_A): bit<8> = 8'h33;
+  const var3[3](__const_prj__a_pkg_A): bit<8> = 8'h44;
+
+  comb {
+    var1 = var3[var0];
+  }
+  comb {
+    var2 = var3[var0][32'sh00000000];
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
+fn const_select_multi_dim_width() {
+    // `M[2]` on a multi-dimensional packed type is the third 8 bit element,
+    // not bit 2.
+    let code = r#"
+    package a_pkg {
+        const M: logic<4, 8> = 32'h11223344;
+    }
+    module b_module {
+        const M: logic<4, 8> = 32'h11223344;
+        const L0: logic<8> = M[2];
+        const L1: logic    = M[2][1];
+        const P0: logic<8> = a_pkg::M[2];
+        const P1: logic    = a_pkg::M[2][1];
+    }
+    "#;
+
+    let exp = r#"module b_module {
+  const var0(M): logic<4, 8> = 32'h11223344;
+  const var1(L0): logic<8> = 8'h22;
+  const var2(L1): logic = 1'h1;
+  const var3(P0): logic<8> = 8'h22;
+  const var4(P1): logic = 1'h1;
+
+}
+"#;
+
+    check_ir(code, exp);
+}
