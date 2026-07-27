@@ -147,16 +147,6 @@ fn walk_expr(expr: &ProtoExpression, idx: usize, reads: &mut FutureReads) {
                 walk_expr(&dyn_sel.index_expr, idx, reads);
             }
         }
-        ProtoExpression::DynamicValue {
-            index_expr,
-            dynamic_select,
-            ..
-        } => {
-            walk_expr(index_expr, idx, reads);
-            if let Some(dyn_sel) = dynamic_select {
-                walk_expr(&dyn_sel.index_expr, idx, reads);
-            }
-        }
         ProtoExpression::Unary { x, .. } => walk_expr(x, idx, reads),
         ProtoExpression::Binary { x, y, .. } => {
             walk_expr(x, idx, reads);

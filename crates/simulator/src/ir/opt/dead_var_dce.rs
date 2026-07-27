@@ -161,16 +161,6 @@ fn walk_expr_reads(expr: &ProtoExpression, c: &mut Census) {
                 walk_expr_reads(&dyn_sel.index_expr, c);
             }
         }
-        ProtoExpression::DynamicValue {
-            index_expr,
-            dynamic_select,
-            ..
-        } => {
-            walk_expr_reads(index_expr, c);
-            if let Some(dyn_sel) = dynamic_select {
-                walk_expr_reads(&dyn_sel.index_expr, c);
-            }
-        }
     }
 }
 

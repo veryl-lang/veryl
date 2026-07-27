@@ -423,16 +423,6 @@ impl LocalAnalysis {
                     self.walk_reads(&ds.index_expr, i);
                 }
             }
-            ProtoExpression::DynamicValue {
-                index_expr,
-                dynamic_select,
-                ..
-            } => {
-                self.walk_reads(index_expr, i);
-                if let Some(ds) = dynamic_select {
-                    self.walk_reads(&ds.index_expr, i);
-                }
-            }
         }
     }
 
@@ -544,9 +534,6 @@ impl LocalAnalysis {
                 if let VarOffset::Comb(o) = base_offset {
                     self.bad.insert(*o);
                 }
-                self.poison_expr(index_expr);
-            }
-            ProtoExpression::DynamicValue { index_expr, .. } => {
                 self.poison_expr(index_expr);
             }
         }
@@ -776,7 +763,6 @@ fn emit_wide_const(
 fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
     match expr {
         ProtoExpression::HierVariable(_) => None,
-        ProtoExpression::DynamicValue { .. } => None,
         ProtoExpression::Value {
             value,
             width,
@@ -1839,16 +1825,6 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
                 classify_uncovered_expr(index_expr),
             )
         }
-        ProtoExpression::DynamicValue {
-            width,
-            values,
-            dynamic_select,
-            ..
-        } => format!(
-            "DynValue(w={width},ne={},ds={})",
-            values.len(),
-            dynamic_select.is_some(),
-        ),
     }
 }
 
@@ -3780,7 +3756,6 @@ pub fn emit_expr_root(expr: &ProtoExpression) -> Option<String> {
 fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> {
     match expr {
         ProtoExpression::HierVariable(_) => None,
-        ProtoExpression::DynamicValue { .. } => None,
         ProtoExpression::Value {
             value,
             width,

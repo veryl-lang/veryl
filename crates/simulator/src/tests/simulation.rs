@@ -20113,3 +20113,46 @@ fn package_const_select() {
         }
     }
 }
+
+#[test]
+fn package_const_select_multi_dim_width() {
+    // The select resolves against the whole const's width shape, so the symbol
+    // route must match the identical local const.
+    let code = r#"
+    package a_pkg {
+        const M: logic<4, 8> = 32'h11223344;
+    }
+    module Top (
+        i:     input  logic<2>,
+        o_loc: output logic<8>,
+        o_pkg: output logic<8>,
+    ) {
+        const M: logic<4, 8> = 32'h11223344;
+        assign o_loc = M[i];
+        assign o_pkg = a_pkg::M[i];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (i, exp) in [(0, 0x44), (1, 0x33), (2, 0x22), (3, 0x11)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+
+            sim.set("i", Value::new(i, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+            assert_eq!(
+                sim.get("o_loc").unwrap(),
+                Value::new(exp, 8, false),
+                "local const i={i} config={config:?}"
+            );
+            assert_eq!(
+                sim.get("o_pkg").unwrap(),
+                Value::new(exp, 8, false),
+                "package const i={i} config={config:?}"
+            );
+        }
+    }
+}

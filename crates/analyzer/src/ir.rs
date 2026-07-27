@@ -27,7 +27,7 @@ pub use declaration::{
     ExternalParamValue, FfClock, FfDeclaration, FfReset, FinalDeclaration, InitialDeclaration,
     InstDeclaration, InstInput, InstOutput, qualified_prefix_len,
 };
-pub use expression::{ArrayLiteralItem, Expression, Factor, HierVarRef, SelectedValue};
+pub use expression::{ArrayLiteralItem, Expression, Factor, HierVarRef};
 pub use ff_table::FfTable;
 pub use function::{Arguments, FuncArg, FuncPath, FuncProto, Function, FunctionBody, FunctionCall};
 pub use interface::Interface;

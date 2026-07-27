@@ -2371,19 +2371,19 @@ fn eval_factor_path_inner(
             )?
         };
 
-        apply_symbol_select(context, factor, select, token)
+        apply_symbol_select(context, factor, select, &symbol.found, token)
     } else {
         Err(ir_error!(token))
     }
 }
 
 /// Apply a `select` that the symbol route (`eval_factor_symbol[_external]`)
-/// dropped: none → the value as-is; constant → the selected value; dynamic →
-/// `Factor::SelectedValue`.
+/// drops.
 fn apply_symbol_select(
     context: &mut Context,
     factor: ir::Factor,
     select: VarSelect,
+    symbol: &Symbol,
     token: TokenRange,
 ) -> IrResult<ir::Factor> {
     if select.is_empty() {
@@ -2395,7 +2395,13 @@ fn apply_symbol_select(
     let values = match &comptime.value {
         ValueVariant::NumericArray(values) => values.clone(),
         ValueVariant::Numeric(value) => vec![value.clone()],
-        _ => return Ok(ir::Factor::Value(comptime)),
+        // A value that can't be evaluated (e.g. a proto-bound const) still
+        // has to shrink its type, or the select is invisible to the operand
+        // and compatibility checks.
+        _ => {
+            reduce_unevaluable_select(context, &mut comptime, select, token);
+            return Ok(ir::Factor::Value(comptime));
+        }
     };
 
     let array = comptime.r#type.array.clone();
@@ -2407,52 +2413,177 @@ fn apply_symbol_select(
         return Err(ir_error!(token));
     }
     let index = array_select.to_index();
+    let is_const_select = index.is_const() && width_select.is_const_with_range();
+    comptime.is_const &= is_const_select;
+    comptime.is_global &= comptime.is_const;
+
+    if is_const_select
+        && let Some(comptime) = fold_symbol_select(
+            context,
+            &comptime,
+            &values,
+            &array,
+            &index,
+            &width_select,
+            token,
+        )
+    {
+        return Ok(ir::Factor::Value(comptime));
+    }
+
+    // A run-time select needs the whole const: read it as a variable, the same
+    // way a local const is read.
+    let id = materialize_const(context, &comptime, values, symbol, token)?;
 
     comptime.r#type.array.drain(0..index.dimension());
+    comptime.value = ValueVariant::Unknown;
+    comptime.token = token;
+    // `gather_context` applies the select width and checks its clock domain
+    // only while the comptime isn't evaluated.
+    comptime.evaluated = false;
+    Ok(ir::Factor::Variable(id, index, width_select, comptime))
+}
+
+/// Shrink a type by a select whose value can't be evaluated. A type name and
+/// a `$sv` member have no shape to reduce.
+fn reduce_unevaluable_select(
+    context: &mut Context,
+    comptime: &mut Comptime,
+    select: VarSelect,
+    token: TokenRange,
+) {
+    if comptime.r#type.is_type() || comptime.r#type.is_systemverilog() {
+        return;
+    }
+
+    let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+    let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+    if array_select.is_range() {
+        return;
+    }
+
+    comptime.r#type.array.drain(0..array_select.dimension());
     if !width_select.is_empty() {
         comptime.r#type.flatten_struct_union_enum();
         if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
             comptime.r#type.set_concrete_width(width);
         }
     }
-    let is_const_select = index.is_const() && width_select.is_const();
-    comptime.is_const &= is_const_select;
-    comptime.is_global = comptime.is_const;
     comptime.token = token;
+}
 
-    // A partial array index selects a sub-array, which can't fold to a single
-    // value: carry the elements so a const assignment materializes them.
+/// Fold a constant select into the selected value. `None` when it can't be
+/// evaluated, leaving the caller to read the const at run time.
+fn fold_symbol_select(
+    context: &mut Context,
+    comptime: &Comptime,
+    values: &[Value],
+    array: &Shape,
+    index: &VarIndex,
+    select: &VarSelect,
+    token: TokenRange,
+) -> Option<Comptime> {
+    let mut comptime = comptime.clone();
+    comptime.r#type.array.drain(0..index.dimension());
+    comptime.token = token;
+    let indices = index.eval_value(context)?;
+
+    // A partial array index selects a sub-array, which has no single value to
+    // fold to. The width select is necessarily empty: it splits off only once
+    // every array dimension is indexed.
     if !comptime.r#type.array.is_empty() {
-        if !is_const_select || !width_select.is_empty() {
-            // TODO: dynamic sub-array select.
-            return Err(ir_error!(token));
+        let (beg, end) = array.calc_range(&indices)?;
+        comptime.value = ValueVariant::NumericArray(values.get(beg..=end)?.to_vec());
+        return Some(comptime);
+    }
+
+    // The select resolves against the element type: the reduction below
+    // replaces its width dimensions by the selected width.
+    let mut element = comptime.r#type.clone();
+    if !select.is_empty() {
+        element.flatten_struct_union_enum();
+        comptime.r#type = element.clone();
+        if let Some(width) = select.eval_comptime(context, &element, false) {
+            comptime.r#type.set_concrete_width(width);
         }
-        let indices = index.eval_value(context).ok_or_else(|| ir_error!(token))?;
-        let (beg, end) = array.calc_range(&indices).ok_or_else(|| ir_error!(token))?;
-        let values = values.get(beg..=end).ok_or_else(|| ir_error!(token))?;
-        comptime.value = ValueVariant::NumericArray(values.to_vec());
-        return Ok(ir::Factor::Value(comptime));
     }
-    // The per-element values travel in `SelectedValue.values` instead.
-    comptime.value = ValueVariant::Unknown;
 
-    let factor = ir::Factor::SelectedValue(Box::new(ir::SelectedValue {
+    let flat = array.calc_index(&indices)?;
+    let (beg, end) = select.eval_value(context, &element, false)?;
+    comptime.value = ValueVariant::Numeric(values.get(flat)?.select(beg, end));
+    Some(comptime)
+}
+
+/// Materialize a symbol-resolved const as a variable of the current component.
+/// References from the same scope share one variable.
+fn materialize_const(
+    context: &mut Context,
+    comptime: &Comptime,
+    values: Vec<Value>,
+    symbol: &Symbol,
+    token: TokenRange,
+) -> IrResult<ir::VarId> {
+    let r#type = comptime.r#type.clone();
+    let values = fit_array_elements(values, &r#type);
+    // An index only resolves when every element of the const is known.
+    if values.len() != r#type.total_array().unwrap_or(1).max(1) {
+        return Err(ir_error!(token));
+    }
+
+    // The namespace keeps generic instances apart: theirs are mangled.
+    let name: String = format!("__const_{}_{}", symbol.namespace, symbol.token)
+        .chars()
+        .map(|x| if x.is_ascii_alphanumeric() { x } else { '_' })
+        .collect();
+    let affiliation = context.get_affiliation();
+    let mut path = VarPath::new(resource_table::insert_str(&name));
+    if let Some(id) = reusable_const(context, &path, affiliation, &r#type, &values) {
+        return Ok(id);
+    }
+    if context.find_path(&path).is_some() {
+        // Distinct paths can sanitize alike: disambiguate rather than share
+        // another const's values.
+        path = VarPath::new(resource_table::insert_str(&format!(
+            "{name}_{}",
+            symbol.id.0
+        )));
+        if let Some(id) = reusable_const(context, &path, affiliation, &r#type, &values) {
+            return Ok(id);
+        }
+    }
+
+    let mut comptime = comptime.clone();
+    comptime.token = token;
+    let id = context.insert_var_path(path.clone(), comptime);
+    let array_limit = context.config.evaluate_array_limit;
+    let variable = Variable::new(
+        id,
+        path,
+        VarKind::Const,
+        r#type,
         values,
-        array,
-        index,
-        select: width_select,
-        comptime,
-    }));
+        affiliation,
+        &token,
+        array_limit,
+    );
+    context.insert_variable(id, variable);
+    Ok(id)
+}
 
-    // `eval_value` is not a constness test — it evaluates a non-const index as
-    // 0 — so gate the fold on the select being constant.
-    if is_const_select && let Some(element) = factor.eval_value(context) {
-        let mut comptime = factor.comptime().clone();
-        comptime.value = ValueVariant::Numeric(element);
-        Ok(ir::Factor::Value(comptime))
-    } else {
-        Ok(factor)
-    }
+fn reusable_const(
+    context: &Context,
+    path: &VarPath,
+    affiliation: Affiliation,
+    r#type: &ir::Type,
+    values: &[Value],
+) -> Option<ir::VarId> {
+    let (id, _) = context.find_path(path)?;
+    let variable = context.variables.get(&id)?;
+    let reusable = variable.kind == VarKind::Const
+        && variable.affiliation == affiliation
+        && variable.r#type == *r#type
+        && variable.value == values;
+    reusable.then_some(id)
 }
 
 /// Evaluates a resolved symbol that lives outside the current module: an
