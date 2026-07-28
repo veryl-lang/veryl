@@ -70,6 +70,7 @@ impl GenericContext {
 pub struct CreateSymbolTable {
     pub errors: Vec<AnalyzerError>,
     build_opt: Build,
+    project_name: StrId,
     point: HandlerPoint,
     module_namspace_depth: usize,
     default_block: Option<StrId>,
@@ -130,6 +131,7 @@ impl CreateSymbolTable {
         scope::set_current(scope::intern_namespace(&namespace));
         Self {
             build_opt: build_opt.clone(),
+            project_name,
             ..Default::default()
         }
     }
@@ -1841,7 +1843,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     &arg.statement_block.r_brace.r_brace_token,
                 );
 
-                let definition = definition_table::insert(Definition::Function(arg.clone()));
+                let definition =
+                    definition_table::insert(self.project_name, Definition::Function(arg.clone()));
                 let property = FunctionProperty {
                     affiliation,
                     is_proto: false,
@@ -2010,7 +2013,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     None
                 };
 
-                let definition = definition_table::insert(Definition::Module(arg.clone()));
+                let definition =
+                    definition_table::insert(self.project_name, Definition::Module(arg.clone()));
                 // Check for #[test(native)] and #[ignore] attributes on module declaration
                 let test = (|| {
                     let attrs = attribute_table::get(&arg.module.module_token.token);
@@ -2164,7 +2168,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     None
                 };
 
-                let definition = definition_table::insert(Definition::Interface(arg.clone()));
+                let definition =
+                    definition_table::insert(self.project_name, Definition::Interface(arg.clone()));
                 let property = InterfaceProperty {
                     range: arg.into(),
                     is_proto: false,
@@ -2315,7 +2320,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
 
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
                 let ports: Vec<_> = self.ports.pop().unwrap();
-                let definition = definition_table::insert(Definition::ProtoModule(arg.clone()));
+                let definition = definition_table::insert(
+                    self.project_name,
+                    Definition::ProtoModule(arg.clone()),
+                );
 
                 let property = ModuleProperty {
                     range: arg.into(),
@@ -2515,7 +2523,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let range =
                     TokenRange::new(&arg.function.function_token, &arg.semicolon.semicolon_token);
 
-                let definition = definition_table::insert(Definition::ProtoFunction(arg.clone()));
+                let definition = definition_table::insert(
+                    self.project_name,
+                    Definition::ProtoFunction(arg.clone()),
+                );
                 let property = FunctionProperty {
                     affiliation,
                     is_proto: true,

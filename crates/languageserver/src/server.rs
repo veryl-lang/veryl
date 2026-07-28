@@ -20,7 +20,7 @@ use veryl_analyzer::{
 };
 use veryl_formatter::Formatter;
 use veryl_metadata::{ComponentManifest, Metadata};
-use veryl_parser::resource_table::{self, PathId};
+use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::text_table;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
@@ -724,7 +724,7 @@ impl Server {
 
         // Clear stale state from a previous analysis before re-registering.
         if let Some(src_id) = resource_table::get_path_id(&src) {
-            drop_tables(src_id);
+            drop_tables(src_id, Some(path.prj.as_str().into()));
         }
         // Snapshot the ID counters before parse so the file's pass1 output
         // can be captured as a fragment afterwards.
@@ -773,7 +773,7 @@ impl Server {
                 // Drop before parse: parse re-registers the text, so
                 // dropping after would erase the just-registered entry.
                 if let Some(path_id) = resource_table::get_path_id(path.to_path_buf()) {
-                    drop_tables(path_id);
+                    drop_tables(path_id, Some(prj.into()));
                 }
                 let diag = match Parser::parse(text, &path) {
                     Ok(x) => {
@@ -841,11 +841,11 @@ impl Server {
         }
     }
 
-    fn on_remove(&mut self, path: Url) {
-        if let Some(path) = path.to_file_path()
+    fn on_remove(&mut self, url: Url) {
+        if let Some(path) = url.to_file_path()
             && let Some(path_id) = resource_table::get_path_id(path.to_path_buf())
         {
-            drop_tables(path_id);
+            drop_tables(path_id, None);
         }
     }
 }
@@ -1505,13 +1505,13 @@ fn current_namespace(url: &Url, line: usize, column: usize) -> Option<Namespace>
     ret_func.or(ret)
 }
 
-fn drop_tables(path: PathId) {
-    symbol_table::drop(path);
-    scope::drop_tokens(path);
+fn drop_tables(path: PathId, prj: Option<StrId>) {
+    symbol_table::drop(path, prj);
+    scope::drop_tokens(path, prj);
     text_table::drop(path);
     attribute_table::drop(path);
     unsafe_table::drop(path);
-    definition_table::drop(path);
+    definition_table::drop(path, prj);
 }
 
 fn completion_keyword() -> Vec<CompletionItem> {

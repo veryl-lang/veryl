@@ -52,3 +52,12 @@ dependencies = []
 [projects.properties]
 QUX_0_VALUE = 16
 QUX_1_VALUE = false
+
+[[projects]]
+name = "veryl_sample5"
+source = "testcases/sample"
+dependencies = []
+
+[projects.properties]
+QUX_0_VALUE = 32
+QUX_1_VALUE = true

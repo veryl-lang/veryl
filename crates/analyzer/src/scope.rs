@@ -379,8 +379,27 @@ impl ScopeArena {
             .insert(token, (scope, define_context.clone(), file_path));
     }
 
-    fn drop_tokens(&mut self, file_path: PathId) {
-        self.token_scopes.retain(|_, (_, _, p)| *p != file_path);
+    fn drop_tokens(&mut self, file_path: PathId, prj: Option<StrId>) {
+        fn is_drop_target(
+            arena: &ScopeArena,
+            scope: ScopeId,
+            scope_path: PathId,
+            file_path: PathId,
+            prj: Option<StrId>,
+        ) -> bool {
+            scope_path == file_path && (prj.is_none() || arena.project_of(scope) == prj)
+        }
+
+        let prj = prj.map(resource_table::canonical_str_id);
+        let drop_list: Vec<_> = self
+            .token_scopes
+            .iter()
+            .filter(|(_, (scope, _, p))| is_drop_target(self, *scope, *p, file_path, prj))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in &drop_list {
+            self.token_scopes.remove(id);
+        }
     }
 
     fn export_tokens_by_path(&self, file_path: PathId) -> Vec<(TokenId, Namespace)> {
@@ -674,8 +693,19 @@ pub fn token_scope(token: TokenId) -> Option<(ScopeId, DefineContext)> {
     })
 }
 
-pub fn drop_tokens(file_path: PathId) {
-    SCOPE_ARENA.with(|f| f.borrow_mut().drop_tokens(file_path))
+/// Project the token was registered under.
+pub fn token_project(token: TokenId) -> Option<StrId> {
+    SCOPE_ARENA.with(|f| {
+        let arena = f.borrow();
+        arena
+            .token_scopes
+            .get(&token)
+            .and_then(|(scope, _, _)| arena.project_of(*scope))
+    })
+}
+
+pub fn drop_tokens(file_path: PathId, prj: Option<StrId>) {
+    SCOPE_ARENA.with(|f| f.borrow_mut().drop_tokens(file_path, prj))
 }
 
 /// Exports all token entries belonging to one file, sorted by token ID.

@@ -16,6 +16,7 @@ use veryl_analyzer::{
 };
 use veryl_cache::Store;
 use veryl_metadata::Metadata;
+use veryl_parser::resource_table::StrId;
 use veryl_parser::{resource_table, text_table};
 use veryl_path::PathSet;
 
@@ -63,19 +64,20 @@ impl LsIncremental {
 
         // Clear any stale state from a previous analysis of this file
         // before re-registering it.
-        drop_file_state(&path.src);
+        let prj: StrId = path.prj.as_str().into();
+        drop_file_state(prj, &path.src);
 
         let is_root = path.prj == self.root_project;
-        scope::set_project(path.prj.as_str().into(), is_root);
+        scope::set_project(prj, is_root);
 
-        match fragment_cache::restore(&fragment) {
+        match fragment_cache::restore(&fragment, prj) {
             Ok(()) => {
                 self.store.keep(&src);
                 self.restored += 1;
                 true
             }
             Err(_) => {
-                drop_file_state(&path.src);
+                drop_file_state(prj, &path.src);
                 false
             }
         }
@@ -142,14 +144,15 @@ fn global_key(metadata: &Metadata) -> Option<String> {
 
 /// Removes everything a file may have registered in the global tables
 /// (same set as the server's `drop_tables`).
-fn drop_file_state(src: &Path) {
+fn drop_file_state(prj: StrId, src: &Path) {
     let path = resource_table::insert_path(src);
-    symbol_table::drop(path);
-    scope::drop_tokens(path);
+    let prj = Some(prj);
+    symbol_table::drop(path, prj);
+    scope::drop_tokens(path, prj);
     text_table::drop(path);
     attribute_table::drop(path);
     unsafe_table::drop(path);
-    definition_table::drop(path);
+    definition_table::drop(path, prj);
 }
 
 /// Per-project stores, so a server handling files from several projects

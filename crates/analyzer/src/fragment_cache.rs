@@ -221,7 +221,7 @@ pub fn capture(
 /// least once (it inserts the shared project namespace symbol, which this
 /// does not). On failure the tables may hold a partial restore; the caller
 /// must `drop` the file and fall back to a regular parse + pass1.
-pub fn restore(fragment: &Fragment) -> Result<(), FragmentError> {
+pub fn restore(fragment: &Fragment, prj: StrId) -> Result<(), FragmentError> {
     let path_id = resource_table::insert_path(&fragment.src_path);
 
     let token_base = resource_table::reserve_token_ids(fragment.token_count);
@@ -284,7 +284,7 @@ pub fn restore(fragment: &Fragment) -> Result<(), FragmentError> {
         unsafe_table::insert(range, value);
     }
     for (id, definition) in payload.definitions {
-        definition_table::insert_with_id(id, definition);
+        definition_table::insert_with_id(prj, id, definition);
     }
     for candidate in payload.reference_candidates {
         reference_table::add(candidate);
@@ -401,7 +401,7 @@ mod tests {
                     if path == "b.veryl"
                         && let Some(x) = &restore_b
                     {
-                        restore(x).unwrap();
+                        restore(x, "prj".into()).unwrap();
                         continue;
                     }
                     let wm = watermark();
