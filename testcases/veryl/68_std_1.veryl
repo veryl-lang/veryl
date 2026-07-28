@@ -100,3 +100,7 @@ module Module68F {
         axi4_stream_if: axi4_stream_if,
     );
 }
+
+package Pkg68G {
+    const WIDTH: u32 = 32;
+}

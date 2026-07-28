@@ -736,7 +736,6 @@ impl GenericSymbolPath {
                 if let Some(maps) = generic_maps {
                     package_path.apply_map(maps);
                 }
-                package_path.unalias(None);
 
                 if let Ok(package_symbol) = symbol_table::resolve(SymbolPathNamespace::from_scope(
                     package_path.generic_path(),
