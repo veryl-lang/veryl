@@ -3280,3 +3280,59 @@ fn const_fold_else_if() {
 
     check_ir(code, exp);
 }
+
+#[test]
+fn const_fold_switch_arm() {
+    let code = r#"
+    module ModuleA (
+        a: input  logic   ,
+        o: output logic<4>,
+    ) {
+        always_comb {
+            for i in 0..4 {
+                switch {
+                    i >: 3  : o[i] = 0;
+                    a       : o[i] = 1;
+                    i <: 4  : o[i] = 0;
+                    default : o[i] = 1;
+                }
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(a): logic = 1'hx;
+  output var1(o): logic<4> = 4'hx;
+  const var2([0].i): signed bit<32> = 32'sh00000000;
+  const var3([1].i): signed bit<32> = 32'sh00000001;
+  const var4([2].i): signed bit<32> = 32'sh00000002;
+  const var5([3].i): signed bit<32> = 32'sh00000003;
+
+  comb {
+    if var0 {
+      var1[32'sh00000000] = 32'sh00000001;
+    } else {
+      var1[32'sh00000000] = 32'sh00000000;
+    }
+    if var0 {
+      var1[32'sh00000001] = 32'sh00000001;
+    } else {
+      var1[32'sh00000001] = 32'sh00000000;
+    }
+    if var0 {
+      var1[32'sh00000002] = 32'sh00000001;
+    } else {
+      var1[32'sh00000002] = 32'sh00000000;
+    }
+    if var0 {
+      var1[32'sh00000003] = 32'sh00000001;
+    } else {
+      var1[32'sh00000003] = 32'sh00000000;
+    }
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}

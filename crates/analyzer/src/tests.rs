@@ -8951,6 +8951,25 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    // With every arm folded away and no `default`, nothing drives `o` - reported
+    // as unassigned, not as an uncovered branch on always-false `if`s.
+    let code = r#"
+    module ModuleA (
+        o: output logic<4>,
+    ) {
+        always_comb {
+            for i in 0..4 {
+                switch {
+                    i >: 10: o[i] = 1;
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
 }
 
 #[test]
@@ -9973,6 +9992,72 @@ fn uncovered_branch() {
                     o[i] = 1;
                 } else if i <: 4 {
                     o[i] = 0;
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // A compile-time-true `switch` arm makes the missing `default` unreachable.
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic   ,
+        o  : output logic<4>,
+    ) {
+        always_comb {
+            for i in 0..4 {
+                switch {
+                    i_a    : o[i] = 1;
+                    i <: 4 : o[i] = 0;
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn switch_const_false_arm_body_unchecked() {
+    // A dead arm's body is never converted, so conversion-time checks stop seeing
+    // it. That is the point here: unrolling the `for` puts this select out of range.
+    let code = r#"
+    module ModuleA (
+        o: output logic<4>,
+    ) {
+        always_comb {
+            for i in 0..4 {
+                switch {
+                    i >: 3 : o[i + 1] = 1;
+                    default: o[i] = 0;
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // The same skip also hides condition-independent errors like a wrong argument
+    // count. `if` behaves this way too; pinned so `switch` is revisited with it.
+    let code = r#"
+    module ModuleA (
+        o: output logic<4>,
+    ) {
+        function f (a: input logic) -> logic {
+            return a;
+        }
+        always_comb {
+            for i in 0..4 {
+                switch {
+                    i >: 10: o[i] = f(1, 2, 3);
+                    default: o[i] = 0;
                 }
             }
         }
