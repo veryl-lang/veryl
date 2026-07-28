@@ -3214,3 +3214,69 @@ fn const_select_multi_dim_width() {
 
     check_ir(code, exp);
 }
+
+#[test]
+fn const_fold_else_if() {
+    let code = r#"
+    module ModuleA (
+        clk: input  clock,
+        rst: input  reset,
+        a  : input  logic,
+        b  : output logic,
+        c  : output logic,
+    ) {
+        const T: bit = 1;
+        always_ff {
+            if_reset {
+                b = 0;
+            } else if a {
+                b = 1;
+            } else if T {
+                b = 0;
+            } else {
+                b = 1;
+            }
+        }
+        always_comb {
+            if a {
+                c = 0;
+            } else if T {
+                c = 1;
+            } else {
+                c = 0;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(clk): clock = 1'hx;
+  input var1(rst): reset = 1'hx;
+  input var2(a): logic = 1'hx;
+  output var3(b): logic = 1'hx;
+  output var4(c): logic = 1'hx;
+  const var5(T): bit = 1'h1;
+
+  ff (var0, var1) {
+    if_reset {
+      var3 = 32'sh00000000;
+    } else {
+      if var2 {
+        var3 = 32'sh00000001;
+      } else {
+        var3 = 32'sh00000000;
+      }
+    }
+  }
+  comb {
+    if var2 {
+      var4 = 32'sh00000000;
+    } else {
+      var4 = 32'sh00000001;
+    }
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}

@@ -587,6 +587,15 @@ fn eval_cond_true_false(context: &mut Context, cond: &ir::Expression) -> (bool, 
     }
 }
 
+/// Append `block` to the innermost `else` of the `else if` chain in `false_side`.
+fn append_leaf_false(false_side: &mut Vec<ir::Statement>, block: Vec<ir::Statement>) {
+    if let Some(ir::Statement::If(x)) = false_side.last_mut() {
+        x.insert_leaf_false(block);
+    } else {
+        false_side.extend(block);
+    }
+}
+
 impl Conv<&IfStatement> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &IfStatement) -> IrResult<Self> {
         let define_context: DefineContext = (&value.r#if.if_token).into();
@@ -640,15 +649,11 @@ impl Conv<&IfStatement> for ir::StatementBlock {
                     Conv::conv(c, x.statement_block.as_ref())
                 });
             let true_side = true_side?.0;
-            // If this `else if` is true_side_only, adopt this else-if's body.
+
+            // Emitting the always-true `if` instead would leave it with an empty
+            // false side, which the uncovered-branch check reads as a latch.
             if true_side_only {
-                if let Some(x) = false_side.last_mut() {
-                    if let ir::Statement::If(x) = x {
-                        x.insert_leaf_false(true_side);
-                    }
-                } else {
-                    false_side.extend(true_side);
-                }
+                append_leaf_false(&mut false_side, true_side);
                 else_if_break = true;
                 break;
             }
@@ -660,13 +665,7 @@ impl Conv<&IfStatement> for ir::StatementBlock {
                 token: x.into(),
             });
 
-            if let Some(x) = false_side.last_mut() {
-                if let ir::Statement::If(x) = x {
-                    x.insert_leaf_false(vec![statement]);
-                }
-            } else {
-                false_side.push(statement);
-            }
+            append_leaf_false(&mut false_side, vec![statement]);
         }
         if let Some(x) = &value.if_statement_opt
             && !else_if_break
@@ -675,15 +674,8 @@ impl Conv<&IfStatement> for ir::StatementBlock {
                 .with_condition_domain(comptime.clone(), |c| {
                     Conv::conv(c, x.statement_block.as_ref())
                 });
-            let mut block = block?.0;
 
-            if let Some(x) = false_side.last_mut() {
-                if let ir::Statement::If(x) = x {
-                    x.insert_leaf_false(block);
-                }
-            } else {
-                false_side.append(&mut block);
-            }
+            append_leaf_false(&mut false_side, block?.0);
         }
 
         if false_side_only {
@@ -737,6 +729,14 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
             let true_side: ir::StatementBlock = Conv::conv(context, x.statement_block.as_ref())?;
             let true_side = true_side.0;
 
+            // The uncovered-branch check that motivates this in `if` is comb-only;
+            // here it just keeps a dead always-true node out of the IR.
+            if true_side_only {
+                append_leaf_false(&mut false_side, true_side);
+                else_if_break = true;
+                break;
+            }
+
             let statement = ir::Statement::If(ir::IfStatement {
                 cond,
                 true_side,
@@ -744,33 +744,14 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
                 token: x.into(),
             });
 
-            if let Some(x) = false_side.last_mut() {
-                if let ir::Statement::If(x) = x {
-                    x.insert_leaf_false(vec![statement]);
-                }
-            } else {
-                false_side.push(statement);
-            }
-
-            // If this `else if` is true_side_only, the remaining else should be skipped.
-            if true_side_only {
-                else_if_break = true;
-                break;
-            }
+            append_leaf_false(&mut false_side, vec![statement]);
         }
         if let Some(x) = &value.if_reset_statement_opt
             && !else_if_break
         {
             let block: ir::StatementBlock = Conv::conv(context, x.statement_block.as_ref())?;
-            let mut block = block.0;
 
-            if let Some(x) = false_side.last_mut() {
-                if let ir::Statement::If(x) = x {
-                    x.insert_leaf_false(block);
-                }
-            } else {
-                false_side.append(&mut block);
-            }
+            append_leaf_false(&mut false_side, block.0);
         }
 
         let statement = ir::Statement::IfReset(ir::IfResetStatement {
