@@ -441,6 +441,7 @@ impl Server {
                     VerylSymbolKind::Embed => SymbolKind::NAMESPACE,
                     VerylSymbolKind::TbComponent(_) => SymbolKind::MODULE,
                     VerylSymbolKind::ProjectProperty(_) => SymbolKind::CONSTANT,
+                    VerylSymbolKind::PropNamespace => SymbolKind::NAMESPACE,
                 };
                 if let Some(location) = to_location(&symbol.token) {
                     #[allow(deprecated)]
@@ -1668,12 +1669,11 @@ mod tests {
     #[test]
     fn external_component_member_completion() {
         use veryl_analyzer::symbol::{DocComment, TbComponentProperty};
-        use veryl_parser::veryl_token::TokenSource;
 
         let key = resource_table::insert_str("golden");
         component_manifest_table::insert(key, manifest());
 
-        let token = Token::new("golden", 0, 0, 0, 0, TokenSource::Builtin);
+        let token = Token::builtin_text("golden");
         let symbol = Symbol::new(
             &token,
             VerylSymbolKind::TbComponent(TbComponentProperty {

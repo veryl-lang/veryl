@@ -7,7 +7,7 @@ use crate::symbol::{
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, GenericSymbolPathKind};
 use crate::symbol_table::SymbolTable;
 use veryl_parser::token_range::TokenRange;
-use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
+use veryl_parser::veryl_token::{Token, VerylToken};
 
 /// A builtin `Type` with no width/array (widths for fixed types are derived
 /// from the `TypeKind` itself).
@@ -54,13 +54,13 @@ fn insert_method(
     port_defs: &[(&str, Direction)],
     ret: Option<Type>,
 ) {
-    let func_token = Token::new(name, 0, 0, 0, 0, TokenSource::Builtin);
+    let func_token = Token::builtin_text(name);
     let mut func_ns = parent_ns.clone();
     func_ns.push(func_token.text);
 
     let mut ports = Vec::new();
     for (port_name, direction) in port_defs {
-        let port_token = Token::new(port_name, 0, 0, 0, 0, TokenSource::Builtin);
+        let port_token = Token::builtin_text(port_name);
         let port_type = Type {
             modifier: vec![],
             kind: TypeKind::Any,
@@ -125,11 +125,11 @@ fn insert_method(
 /// registered; the component interface is only known at simulator load time.
 pub fn insert_external_components(names: &[&str]) {
     let mut ns = Namespace::new();
-    let component_token = Token::new("$comp", 0, 0, 0, 0, TokenSource::Builtin);
+    let component_token = Token::builtin_text("$comp");
     ns.push(component_token.text);
 
     for name in names {
-        let token = Token::new(name, 0, 0, 0, 0, TokenSource::Builtin);
+        let token = Token::builtin_text(name);
         let symbol = Symbol::new(
             &token,
             SymbolKind::TbComponent(TbComponentProperty {
@@ -151,10 +151,10 @@ pub fn insert_external_components(names: &[&str]) {
 /// component keys never contain `::`, so the two sets cannot collide.
 pub fn insert_dependency_components(project: &str, names: &[&str]) {
     let mut ns = Namespace::new();
-    let component_token = Token::new("$comp", 0, 0, 0, 0, TokenSource::Builtin);
+    let component_token = Token::builtin_text("$comp");
     ns.push(component_token.text);
 
-    let project_token = Token::new(project, 0, 0, 0, 0, TokenSource::Builtin);
+    let project_token = Token::builtin_text(project);
     let project_symbol = Symbol::new(
         &project_token,
         SymbolKind::Namespace,
@@ -166,7 +166,7 @@ pub fn insert_dependency_components(project: &str, names: &[&str]) {
     ns.push(project_token.text);
 
     for name in names {
-        let token = Token::new(name, 0, 0, 0, 0, TokenSource::Builtin);
+        let token = Token::builtin_text(name);
         let key = veryl_parser::resource_table::insert_str(&format!("{project}::{name}"));
         let symbol = Symbol::new(
             &token,
@@ -190,7 +190,7 @@ fn insert_component(
     name: &str,
     kind: TbComponentKind,
 ) -> Namespace {
-    let token = Token::new(name, 0, 0, 0, 0, TokenSource::Builtin);
+    let token = Token::builtin_text(name);
     let symbol = Symbol::new(
         &token,
         SymbolKind::TbComponent(TbComponentProperty {
@@ -253,14 +253,14 @@ fn insert_file(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
 }
 
 fn insert_random(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
-    let random_token = Token::new("random", 0, 0, 0, 0, TokenSource::Builtin);
+    let random_token = Token::builtin_text("random");
     let mut ns = tb_ns.clone();
     ns.push(random_token.text);
 
     // Synthesize the generic type parameter `T` inside the `$tb::random`
     // namespace so member methods can return `-> T`, resolved through the
     // normal generic pipeline at the call site.
-    let t_token = Token::new("T", 0, 0, 0, 0, TokenSource::Builtin);
+    let t_token = Token::builtin_text("T");
     let t_symbol = Symbol::new(
         &t_token,
         SymbolKind::GenericParameter(GenericParameterProperty {
@@ -325,7 +325,7 @@ pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
     let mut tb_ns = namespace.clone();
 
     // Push into $tb namespace (already created by DEFINED_NAMESPACES)
-    let tb_token = Token::new("$tb", 0, 0, 0, 0, TokenSource::Builtin);
+    let tb_token = Token::builtin_text("$tb");
     tb_ns.push(tb_token.text);
 
     insert_clock_gen(symbol_table, &tb_ns);

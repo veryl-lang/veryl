@@ -1047,6 +1047,7 @@ pub enum SymbolKind {
     Embed,
     TbComponent(TbComponentProperty),
     ProjectProperty(ProjectPropertyValueProperty),
+    PropNamespace,
 }
 
 impl SymbolKind {
@@ -1141,6 +1142,7 @@ impl SymbolKind {
             SymbolKind::Embed => "embed".to_string(),
             SymbolKind::TbComponent(x) => format!("testbench {}", x.kind),
             SymbolKind::ProjectProperty(_) => "project property".to_string(),
+            SymbolKind::PropNamespace => "$prop namespace".to_string(),
         }
     }
 
@@ -1445,6 +1447,7 @@ impl fmt::Display for SymbolKind {
                     x.value.value_string()
                 )
             }
+            SymbolKind::PropNamespace => "$prop namespace".to_string(),
         };
         text.fmt(f)
     }
