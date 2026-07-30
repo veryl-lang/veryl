@@ -861,27 +861,55 @@ pub fn import_package_path(
     None
 }
 
+/// Whether `scope` is a container `import` is declared directly under, i.e. the
+/// point the import-visibility walk stops at.
+fn is_import_container(scope: ScopeId) -> bool {
+    SCOPE_ARENA.with(|f| {
+        f.borrow().scopes.get(scope.0 as usize).is_some_and(|s| {
+            matches!(
+                s.kind,
+                ScopeKind::Module | ScopeKind::Interface | ScopeKind::Package
+            )
+        })
+    })
+}
+
 /// Whether `symbol` (named `name`, declared under `symbol_define_context`) is
-/// imported directly into `namespace`, matching its exact paths and ifdef
-/// context. Wildcard members are additionally gated by the source container's
-/// ifdef context, mirroring the resolver's `Tier 2` wildcard visibility so an
+/// imported into `namespace`, matching its exact paths and ifdef context.
+/// Wildcard members are additionally gated by the source container's ifdef
+/// context, mirroring the resolver's `Tier 2` wildcard visibility so an
 /// ifdef-excluded member is not treated as imported.
+///
+/// An `import` under a module/interface/package takes effect across all of it,
+/// so a nested scope (generate block, function) also sees the bindings of the
+/// scopes enclosing it up to and including that container. The walk stops there
+/// because `import` is not visible across a container boundary.
 pub fn is_imported(
     namespace: &Namespace,
     symbol: SymbolId,
     name: StrId,
     symbol_define_context: &DefineContext,
 ) -> bool {
-    let scope = intern_namespace(namespace);
     let dctx = &namespace.define_context;
-    imports_get(scope, name)
-        .iter()
-        .any(|b| b.symbol == symbol && &b.define_context == dctx)
-        || wildcards_get(scope).iter().any(|w| {
-            &w.define_context == dctx
-                && !symbol_define_context.exclusive(&w.source_define_context)
-                && locals_get(w.source, name).contains(&symbol)
-        })
+    let mut current = Some(intern_namespace(namespace));
+    while let Some(scope) = current {
+        let imported = imports_get(scope, name)
+            .iter()
+            .any(|b| b.symbol == symbol && &b.define_context == dctx)
+            || wildcards_get(scope).iter().any(|w| {
+                &w.define_context == dctx
+                    && !symbol_define_context.exclusive(&w.source_define_context)
+                    && locals_get(w.source, name).contains(&symbol)
+            });
+        if imported {
+            return true;
+        }
+        if is_import_container(scope) {
+            break;
+        }
+        current = parent(scope);
+    }
+    false
 }
 
 /// Returns the wildcard imports declared directly in `scope`.

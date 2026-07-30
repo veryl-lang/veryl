@@ -1,0 +1,6 @@
+pub module baz_module::<PKG: baz_proto_pkg> (
+    baz: modport baz_if::<PKG>::mp,
+) {
+    assign baz.baz_0 = 0;
+    assign baz.baz_1 = 1;
+}

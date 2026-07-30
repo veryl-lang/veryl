@@ -6,4 +6,10 @@ package veryl_testcase___Package25__1;
         logic [C-1:0] s;
     } S;
 endpackage
+package veryl_testcase___Package25__2;
+    localparam int unsigned C = 2;
+    typedef struct packed {
+        logic [C-1:0] s;
+    } S;
+endpackage
 //# sourceMappingURL=../map/25_dependency_1.sv.map

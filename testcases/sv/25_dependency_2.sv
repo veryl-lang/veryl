@@ -4,7 +4,7 @@
 
 module veryl_testcase_Module25A
     import veryl_sample4___bar_pkg__32::*;
-    import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C::*;
+    import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C__veryl_testcase___Package25__2_C::*;
 (
     input var logic                    i_clk  ,
     input var logic                    i_rst_n,
@@ -101,8 +101,31 @@ module veryl_testcase_Module25F #(
 endmodule
 
 module veryl_testcase_Module25G;
-    import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C::BAZ;
+    import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C__veryl_testcase___Package25__2_C::BAZ_0;
+    import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C__veryl_testcase___Package25__2_C::BAZ_1;
 
-    int unsigned _f; always_comb _f = BAZ;
+
+    int unsigned _f0; always_comb _f0 = BAZ_0;
+    int unsigned _f1; always_comb _f1 = BAZ_1;
+endmodule
+
+package veryl_testcase_Pacakge25H;
+
+
+
+
+endpackage
+
+module veryl_testcase_Module25I;
+
+
+
+
+    veryl_sample4___baz_if__veryl_sample4___baz_pkg__veryl_sample4___baz_pkg__1__2_BAZ_0__3 baz ();
+    if (1) begin :g
+        veryl_sample4___baz_module__veryl_sample4___baz_pkg__veryl_sample4___baz_pkg__1__2_BAZ_0__3 u (
+            .baz (baz)
+        );
+    end
 endmodule
 //# sourceMappingURL=../map/25_dependency_2.sv.map
