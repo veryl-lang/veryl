@@ -811,7 +811,9 @@ impl ReferenceTable {
                     self.check_complex_identifier(&arg.into(), &token, false);
                 }
                 ReferenceCandidate::ImportItem { base, arg } => {
-                    let Ok(base_symbol) = symbol_table::resolve(base) else {
+                    let mut base_path: GenericSymbolPath = base.into();
+                    base_path.unalias(None);
+                    let Ok(base_symbol) = symbol_table::resolve(&base_path) else {
                         continue;
                     };
 
