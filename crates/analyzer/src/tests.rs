@@ -6549,6 +6549,22 @@ fn undefined_identifier() {
 
     let errors = analyze_multiple_inputs(&inputs);
     assert!(errors.is_empty());
+
+    let code = r#"
+    package ab_pkg::<a: u32, b: u32> {
+        const A: u32 = a;
+        const B: u32 = b;
+    }
+    alias package ab_16_32_pkg = ab_pkg::<16, 32>;
+    module c_module {
+        import ab_16_32_pkg::{A, B};
+        let _a: u32 = A;
+        let _b: u32 = B;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
