@@ -103,7 +103,7 @@ pub enum GitoxideError {
     FindReference(#[from] gix::reference::find::existing::Error),
 
     #[error("gitoxide error: {0}")]
-    ConfigTime(#[from] gix::config::time::Error),
+    CommitSignature(#[from] gix::config::commit_signature::Error),
 
     #[error("gitoxide error: {0}")]
     RefNameValidation(#[from] gix::validate::reference::name::Error),
@@ -448,7 +448,7 @@ fn set_remote_head_symbolic(
 
     let remote = repo
         .remote_default_name(gix::remote::Direction::Fetch)
-        .unwrap_or(std::borrow::Cow::Borrowed("origin".into()));
+        .unwrap_or_else(|| "origin".into());
     let name: gix::refs::FullName = format!("refs/remotes/{remote}/HEAD")
         .try_into()
         .map_err(GitoxideError::from)?;
