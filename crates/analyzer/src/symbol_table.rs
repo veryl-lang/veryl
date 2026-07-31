@@ -1652,11 +1652,33 @@ impl SymbolTable {
         format!("{self}")
     }
 
-    pub fn drop(&mut self, file_path: PathId) {
+    pub fn drop(&mut self, file_path: PathId, prj: Option<StrId>) {
+        fn is_drop_symbol(symbol: &Symbol, file_path: PathId, prj: Option<StrId>) -> bool {
+            if symbol.token.source != file_path {
+                return false;
+            }
+
+            if let Some(prj) = prj {
+                symbol
+                    .namespace
+                    .paths
+                    .first()
+                    .is_some_and(|x| resource_table::canonical_str_id(*x) == prj)
+            } else {
+                true
+            }
+        }
+
+        fn is_drop_token(token: &Token, file_path: PathId, prj: Option<StrId>) -> bool {
+            token.source == file_path && (prj.is_none() || scope::token_project(token.id) == prj)
+        }
+
+        let prj = prj.map(resource_table::canonical_str_id);
+
         let drop_list: Vec<_> = self
             .symbol_table
             .iter()
-            .filter(|x| x.1.token.source == file_path)
+            .filter(|x| is_drop_symbol(x.1, file_path, prj))
             .map(|x| *x.0)
             .collect();
 
@@ -1675,7 +1697,7 @@ impl SymbolTable {
         }
 
         for tokens in self.reference_table.values_mut() {
-            tokens.retain(|x| x.source != file_path);
+            tokens.retain(|x| !is_drop_token(x, file_path, prj));
         }
     }
 
@@ -3248,9 +3270,9 @@ pub fn dump() -> String {
     SYMBOL_TABLE.with(|f| f.borrow().dump())
 }
 
-pub fn drop(file_path: PathId) {
+pub fn drop(file_path: PathId, prj: Option<StrId>) {
     clear_resolve_caches();
-    SYMBOL_TABLE.with(|f| f.borrow_mut().drop(file_path))
+    SYMBOL_TABLE.with(|f| f.borrow_mut().drop(file_path, prj))
 }
 
 pub fn add_reference(target: SymbolId, token: &Token) {

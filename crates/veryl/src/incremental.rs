@@ -20,6 +20,7 @@ use veryl_analyzer::{
 };
 use veryl_cache::Store;
 use veryl_metadata::Metadata;
+use veryl_parser::resource_table::StrId;
 use veryl_parser::{resource_table, text_table};
 use veryl_path::PathSet;
 
@@ -182,10 +183,11 @@ impl Incremental {
         };
 
         // What analyze_pass1 would otherwise register for the project.
+        let prj: StrId = path.prj.as_str().into();
         let is_root = path.prj == self.root_project;
-        scope::set_project(path.prj.as_str().into(), is_root);
+        scope::set_project(prj, is_root);
 
-        match fragment_cache::restore(&fragment) {
+        match fragment_cache::restore(&fragment, prj) {
             Ok(()) => {
                 self.store.keep(&src);
                 self.restored += 1;
@@ -200,7 +202,7 @@ impl Incremental {
             }
             Err(x) => {
                 debug!("Failed to restore fragment ({src}): {x}");
-                drop_file_state(&path.src);
+                drop_file_state(prj, &path.src);
                 self.miss.insert(path.src.clone());
                 false
             }
@@ -307,12 +309,13 @@ fn global_key(metadata: &Metadata, defines: &[String]) -> Option<String> {
 
 /// Removes everything a partially restored file may have left in the
 /// global tables (same set as the language server's file drop).
-fn drop_file_state(src: &Path) {
+fn drop_file_state(prj: StrId, src: &Path) {
     let path = resource_table::insert_path(src);
-    symbol_table::drop(path);
-    scope::drop_tokens(path);
+    let prj = Some(prj);
+    symbol_table::drop(path, prj);
+    scope::drop_tokens(path, prj);
     text_table::drop(path);
     attribute_table::drop(path);
     unsafe_table::drop(path);
-    definition_table::drop(path);
+    definition_table::drop(path, prj);
 }

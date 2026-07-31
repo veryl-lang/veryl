@@ -2,7 +2,7 @@ use crate::HashMap;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::sync::Arc;
-use veryl_parser::resource_table::PathId;
+use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::veryl_grammar_trait::{
     FunctionDeclaration, InterfaceDeclaration, ModuleDeclaration, ProtoFunctionDeclaration,
     ProtoModuleDeclaration,
@@ -95,22 +95,22 @@ impl Definition {
 
 #[derive(Clone, Default, Debug)]
 pub struct DefinitionTable {
-    table: HashMap<DefinitionId, Arc<Definition>>,
+    table: HashMap<DefinitionId, (StrId, Arc<Definition>)>,
 }
 
 impl DefinitionTable {
-    pub fn insert(&mut self, definition: Definition) -> DefinitionId {
+    pub fn insert(&mut self, prj: StrId, definition: Definition) -> DefinitionId {
         let id = new_definition_id();
-        self.table.insert(id, Arc::new(definition));
+        self.table.insert(id, (prj, Arc::new(definition)));
         id
     }
 
     pub fn get(&self, id: DefinitionId) -> Option<Arc<Definition>> {
-        self.table.get(&id).cloned()
+        self.table.get(&id).map(|(_, x)| x.clone())
     }
 
-    pub fn insert_with_id(&mut self, id: DefinitionId, definition: Definition) {
-        self.table.insert(id, Arc::new(definition));
+    pub fn insert_with_id(&mut self, prj: StrId, id: DefinitionId, definition: Definition) {
+        self.table.insert(id, (prj, Arc::new(definition)));
     }
 
     pub fn export_in_window(&self, start: usize, end: usize) -> Vec<(DefinitionId, Definition)> {
@@ -118,21 +118,40 @@ impl DefinitionTable {
             .table
             .iter()
             .filter(|(id, _)| id.0 > start && id.0 <= end)
-            .map(|(id, definition)| (*id, (**definition).clone()))
+            .map(|(id, (_, definition))| (*id, (**definition).clone()))
             .collect();
         ret.sort_unstable_by_key(|(id, _)| *id);
         ret
     }
 
-    pub fn drop(&mut self, path: PathId) {
-        self.table.retain(|_, x| x.get_path() != Some(path));
+    pub fn drop(&mut self, path: PathId, prj: Option<StrId>) {
+        fn is_drop_item(
+            definition_prj: StrId,
+            definition: &Definition,
+            path: PathId,
+            prj: Option<StrId>,
+        ) -> bool {
+            if definition.get_path() != Some(path) {
+                return false;
+            }
+
+            if let Some(prj) = prj {
+                resource_table::canonical_str_id(definition_prj) == prj
+            } else {
+                true
+            }
+        }
+
+        let prj = prj.map(resource_table::canonical_str_id);
+        self.table
+            .retain(|_, (p, x)| !is_drop_item(*p, x, path, prj));
     }
 }
 
 thread_local!(static DEFINITION_TABLE: RefCell<DefinitionTable> = RefCell::new(DefinitionTable::default()));
 
-pub fn insert(definition: Definition) -> DefinitionId {
-    DEFINITION_TABLE.with(|f| f.borrow_mut().insert(definition))
+pub fn insert(prj: StrId, definition: Definition) -> DefinitionId {
+    DEFINITION_TABLE.with(|f| f.borrow_mut().insert(prj, definition))
 }
 
 pub fn get(id: DefinitionId) -> Option<Arc<Definition>> {
@@ -141,8 +160,8 @@ pub fn get(id: DefinitionId) -> Option<Arc<Definition>> {
 
 /// Inserts a definition under a caller-provided (reserved) ID without
 /// allocating a new one. Used by fragment restore.
-pub fn insert_with_id(id: DefinitionId, definition: Definition) {
-    DEFINITION_TABLE.with(|f| f.borrow_mut().insert_with_id(id, definition))
+pub fn insert_with_id(prj: StrId, id: DefinitionId, definition: Definition) {
+    DEFINITION_TABLE.with(|f| f.borrow_mut().insert_with_id(prj, id, definition))
 }
 
 /// Exports all definitions whose ID lies in the window `(start, end]`,
@@ -151,6 +170,6 @@ pub fn export_in_window(start: usize, end: usize) -> Vec<(DefinitionId, Definiti
     DEFINITION_TABLE.with(|f| f.borrow().export_in_window(start, end))
 }
 
-pub fn drop(path: PathId) {
-    DEFINITION_TABLE.with(|f| f.borrow_mut().drop(path))
+pub fn drop(path: PathId, prj: Option<StrId>) {
+    DEFINITION_TABLE.with(|f| f.borrow_mut().drop(path, prj))
 }

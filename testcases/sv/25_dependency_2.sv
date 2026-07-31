@@ -75,7 +75,12 @@ module veryl_testcase_Module25D;
     logic _a; always_comb _a = qux_if.qux.s;
 endmodule
 
-module veryl_testcase_Module25E #(
+module veryl_testcase_Module25E;
+    localparam int unsigned QUX_0 = veryl_sample4_qux_pkg::QUX_0;
+    localparam int unsigned QUX_1 = veryl_sample5_qux_pkg::QUX_1;
+endmodule
+
+module veryl_testcase_Module25F #(
     parameter int unsigned WIDTH = 8
 ) (
     input  var logic [WIDTH-1:0] i_a,
@@ -95,7 +100,7 @@ module veryl_testcase_Module25E #(
     endfunction
 endmodule
 
-module veryl_testcase_Module25F;
+module veryl_testcase_Module25G;
     import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C::BAZ;
 
     int unsigned _f; always_comb _f = BAZ;
