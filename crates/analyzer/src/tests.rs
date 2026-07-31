@@ -9936,6 +9936,51 @@ fn uncovered_branch() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    // The const-true arm lands at the leaf of an existing chain, not at the top.
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic   ,
+        o  : output logic<4>,
+    ) {
+        always_comb {
+            for i in 0..4 {
+                if i <: 1 {
+                    o[i] = 1;
+                } else if i_a {
+                    o[i] = 0;
+                } else if i <: 2 {
+                    o[i] = 1;
+                } else {
+                    o[i] = 0;
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic   ,
+        o  : output logic<4>,
+    ) {
+        always_comb {
+            for i in 0..4 {
+                if i_a {
+                    o[i] = 1;
+                } else if i <: 4 {
+                    o[i] = 0;
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
