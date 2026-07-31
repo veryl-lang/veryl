@@ -889,7 +889,9 @@ impl SymbolTable {
         let mut max_depth = 0;
         let mut found = None;
         for id in candidates {
-            let symbol = self.symbol_table.get(&id).unwrap();
+            let Some(symbol) = self.symbol_table.get(&id) else {
+                continue;
+            };
             let matched = self.match_nested_generic_instance(context, symbol)
                 || (context.scope == symbol.scope
                     && !context
@@ -910,7 +912,9 @@ impl SymbolTable {
                 continue;
             }
             for id in scope::locals_get(mixin.source, name) {
-                let symbol = self.symbol_table.get(&id).unwrap();
+                let Some(symbol) = self.symbol_table.get(&id) else {
+                    continue;
+                };
                 if !symbol
                     .namespace
                     .define_context
@@ -1682,6 +1686,20 @@ impl SymbolTable {
             .map(|x| *x.0)
             .collect();
 
+        // Read while the symbols are still in the table.
+        let dropped: Vec<_> = drop_list
+            .iter()
+            .filter_map(|id| {
+                self.symbol_table
+                    .get(id)
+                    .map(|symbol| scope::DroppedSymbol {
+                        scope: symbol.scope,
+                        name: symbol.token.text,
+                        id: *id,
+                    })
+            })
+            .collect();
+
         for id in &drop_list {
             if let Some(symbol) = self.symbol_table.get(id)
                 && let Some(ids) = self.namespace_index.get_mut(&symbol.namespace.paths)
@@ -1699,6 +1717,8 @@ impl SymbolTable {
         for tokens in self.reference_table.values_mut() {
             tokens.retain(|x| !is_drop_token(x, file_path, prj));
         }
+
+        scope::drop_symbols(&dropped);
     }
 
     pub fn add_reference(&mut self, target: SymbolId, token: &Token) {

@@ -14,14 +14,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use veryl_analyzer::fragment_cache::{self, Fragment, FragmentWatermark};
-use veryl_analyzer::{
-    CachedDiagnostic, attribute_table, definition_table, scope, symbol_table, type_dag,
-    unsafe_table,
-};
+use veryl_analyzer::{Analyzer, CachedDiagnostic, scope, symbol_table, type_dag};
 use veryl_cache::Store;
 use veryl_metadata::Metadata;
+use veryl_parser::resource_table;
 use veryl_parser::resource_table::StrId;
-use veryl_parser::{resource_table, text_table};
 use veryl_path::PathSet;
 
 thread_local!(static LAST_RESTORED: Cell<usize> = const { Cell::new(0) });
@@ -202,7 +199,7 @@ impl Incremental {
             }
             Err(x) => {
                 debug!("Failed to restore fragment ({src}): {x}");
-                drop_file_state(prj, &path.src);
+                Analyzer::drop_file(resource_table::insert_path(&path.src), Some(prj));
                 self.miss.insert(path.src.clone());
                 false
             }
@@ -305,17 +302,4 @@ fn global_key(metadata: &Metadata, defines: &[String]) -> Option<String> {
         &lockfile,
         &defines,
     ]))
-}
-
-/// Removes everything a partially restored file may have left in the
-/// global tables (same set as the language server's file drop).
-fn drop_file_state(prj: StrId, src: &Path) {
-    let path = resource_table::insert_path(src);
-    let prj = Some(prj);
-    symbol_table::drop(path, prj);
-    scope::drop_tokens(path, prj);
-    text_table::drop(path);
-    attribute_table::drop(path);
-    unsafe_table::drop(path);
-    definition_table::drop(path, prj);
 }

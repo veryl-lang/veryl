@@ -2,6 +2,7 @@ use crate::analyzer_error::{AnalyzerError, ExceedLimitKind};
 use crate::attribute_table;
 use crate::comb_loop_detect;
 use crate::conv::{Context, Conv};
+use crate::definition_table;
 use crate::generic_inference_table;
 use crate::handlers::*;
 use crate::ir::{Ir, IrResult};
@@ -13,10 +14,12 @@ use crate::scope;
 use crate::symbol::{DocComment, ProjectPropertyValueProperty, Symbol, SymbolKind};
 use crate::symbol_table;
 use crate::type_dag;
+use crate::unsafe_table;
 use std::collections::BTreeMap;
 use veryl_metadata::{Build, Lint, Metadata, ProjectProperty};
 use veryl_parser::doc_comment_table;
-use veryl_parser::resource_table::{self, StrId};
+use veryl_parser::resource_table::{self, PathId, StrId};
+use veryl_parser::text_table;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::{Handler, VerylWalker};
@@ -249,6 +252,28 @@ impl Analyzer {
         ret.append(&mut comb_loop_detect::check(ir));
 
         ret
+    }
+
+    /// Removes what one file registered in the global tables, so it can be
+    /// re-analyzed or a partial fragment restore rolled back.
+    ///
+    /// `prj` scopes the drop to one project: the same source can be registered
+    /// under several at once — two dependencies aliasing one path — and each
+    /// registration must only remove what it added. `None` removes all of them,
+    /// which is what a deleted file needs.
+    ///
+    /// `text_table` / `attribute_table` / `unsafe_table` are keyed by position
+    /// rather than by project, so they are dropped whole and re-registered
+    /// identically by the next parse.
+    pub fn drop_file(path: PathId, prj: Option<StrId>) {
+        // Must precede `drop_tokens`: it matches reference tokens against
+        // their token scope.
+        symbol_table::drop(path, prj);
+        scope::drop_tokens(path, prj);
+        text_table::drop(path);
+        attribute_table::drop(path);
+        unsafe_table::drop(path);
+        definition_table::drop(path, prj);
     }
 
     pub fn clear(&self) {

@@ -1,4 +1,5 @@
 use crate::HashMap;
+use crate::HashSet;
 use crate::SVec;
 use crate::namespace::{DefineContext, Namespace};
 use crate::symbol::{SymbolId, SymbolKind};
@@ -50,6 +51,14 @@ pub fn scope_kind_of(kind: &SymbolKind) -> Option<ScopeKind> {
         SymbolKind::Block => Some(ScopeKind::Block),
         _ => None,
     }
+}
+
+/// A symbol whose scope-tree bindings must go away with it.
+pub struct DroppedSymbol {
+    /// Scope the symbol was inserted into (`Symbol::scope`).
+    pub scope: ScopeId,
+    pub name: StrId,
+    pub id: SymbolId,
 }
 
 /// An explicit `import pkg::name` binding local to a scope.
@@ -252,6 +261,47 @@ impl ScopeArena {
             .entry(name)
             .or_default()
             .push(symbol);
+    }
+
+    /// Removes the tree's own copies of dropped `SymbolId`s. Without this a
+    /// lookup dereferences an id the symbol table no longer holds.
+    fn drop_symbols(&mut self, symbols: &[DroppedSymbol]) {
+        if symbols.is_empty() {
+            return;
+        }
+
+        for symbol in symbols {
+            let name = resource_table::canonical_str_id(symbol.name);
+
+            if let Some(scope) = self.scopes.get_mut(symbol.scope.0 as usize)
+                && let Some(ids) = scope.locals.get_mut(&name)
+            {
+                ids.retain(|x| *x != symbol.id);
+                if ids.is_empty() {
+                    scope.locals.remove(&name);
+                }
+            }
+
+            // The inner scope a symbol opens is the child named after it. The
+            // owner check matters for ifdef-exclusive declarations, which share
+            // that child.
+            if let Some(&owned) = self.intern.get(&(symbol.scope.0, name))
+                && let Some(scope) = self.scopes.get_mut(owned as usize)
+                && scope.owner == Some(symbol.id)
+            {
+                scope.owner = None;
+            }
+        }
+
+        // An import binds the id in the importing file's scope, so there is no
+        // reverse route and this has to scan. `apply_import` re-adds them.
+        let dropped: HashSet<SymbolId> = symbols.iter().map(|x| x.id).collect();
+        for scope in &mut self.scopes {
+            scope.imports.retain(|_, bindings| {
+                bindings.retain(|x| !dropped.contains(&x.symbol));
+                !bindings.is_empty()
+            });
+        }
     }
 
     fn add_import(
@@ -587,6 +637,10 @@ pub fn add_local(scope: ScopeId, name: StrId, symbol: SymbolId) {
     SCOPE_ARENA.with(|f| f.borrow_mut().add_local(scope, name, symbol))
 }
 
+pub fn drop_symbols(symbols: &[DroppedSymbol]) {
+    SCOPE_ARENA.with(|f| f.borrow_mut().drop_symbols(symbols))
+}
+
 pub fn set_kind_owner(scope: ScopeId, kind: ScopeKind, owner: SymbolId) {
     SCOPE_ARENA.with(|f| f.borrow_mut().set_kind_owner(scope, kind, owner))
 }
@@ -841,6 +895,25 @@ pub fn wildcards_get(scope: ScopeId) -> SVec<WildcardImport> {
     })
 }
 
+/// Every symbol the tree binds, for asserting a drop left no dangling id.
+#[cfg(test)]
+pub(crate) fn bound_symbols() -> Vec<SymbolId> {
+    SCOPE_ARENA.with(|f| {
+        f.borrow()
+            .scopes
+            .iter()
+            .flat_map(|s| {
+                s.locals
+                    .values()
+                    .flatten()
+                    .chain(s.imports.values().flatten().map(|x| &x.symbol))
+                    .chain(s.owner.iter())
+                    .copied()
+            })
+            .collect()
+    })
+}
+
 pub fn mixin_get(scope: ScopeId) -> SVec<Mixin> {
     SCOPE_ARENA.with(|f| {
         f.borrow()
@@ -893,6 +966,46 @@ mod tests {
         assert_eq!(owner_of(a), None);
         set_kind_owner(a, ScopeKind::Unknown, SymbolId(42));
         assert_eq!(owner_of(a), Some(SymbolId(42)));
+    }
+
+    #[test]
+    fn drop_symbols_removes_locals_and_owner() {
+        clear();
+        let prj = intern_child(ScopeId(0), name("prj"), ScopeKind::Project);
+        let owned = intern_child(prj, name("Pkg"), ScopeKind::Package);
+        set_kind_owner(owned, ScopeKind::Package, SymbolId(1));
+        add_local(prj, name("Pkg"), SymbolId(1));
+        add_local(prj, name("Mod"), SymbolId(2));
+
+        drop_symbols(&[DroppedSymbol {
+            scope: prj,
+            name: name("Pkg"),
+            id: SymbolId(1),
+        }]);
+
+        assert!(locals_get(prj, name("Pkg")).is_empty());
+        assert_eq!(owner_of(owned), None);
+        assert_eq!(locals_get(prj, name("Mod")).as_slice(), [SymbolId(2)]);
+    }
+
+    #[test]
+    fn drop_symbols_keeps_an_owner_claimed_by_another_symbol() {
+        clear();
+        let prj = intern_child(ScopeId(0), name("prj"), ScopeKind::Project);
+        let owned = intern_child(prj, name("Pkg"), ScopeKind::Package);
+        // Two ifdef-exclusive declarations share the scope they open.
+        set_kind_owner(owned, ScopeKind::Package, SymbolId(2));
+        add_local(prj, name("Pkg"), SymbolId(1));
+        add_local(prj, name("Pkg"), SymbolId(2));
+
+        drop_symbols(&[DroppedSymbol {
+            scope: prj,
+            name: name("Pkg"),
+            id: SymbolId(1),
+        }]);
+
+        assert_eq!(locals_get(prj, name("Pkg")).as_slice(), [SymbolId(2)]);
+        assert_eq!(owner_of(owned), Some(SymbolId(2)));
     }
 
     #[test]
