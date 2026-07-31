@@ -1058,6 +1058,18 @@ impl Conv<&SwitchStatement> for ir::StatementBlock {
                 SwitchItemGroup::Defaul(_) => None,
             };
 
+            // A dead arm's out-of-range select must not reach the range check or the
+            // simulator, and an always-taken arm must not leave the chain with an
+            // empty false side that reads as an uncovered branch.
+            let (true_side_only, false_side_only) = match &cond {
+                Some(cond) => eval_cond_true_false(context, cond),
+                None => (false, false),
+            };
+
+            if false_side_only {
+                continue;
+            }
+
             let convert = |c: &mut Context| -> IrResult<ir::StatementBlock> {
                 match item.switch_item.switch_item_group0.as_ref() {
                     // A bare statement arm has no StatementBlockItem wrapper, so
@@ -1078,6 +1090,12 @@ impl Conv<&SwitchStatement> for ir::StatementBlock {
 
             match cond {
                 Some(cond) => {
+                    // Nothing after this arm can run, including `default` - which is
+                    // the fallback no matter where it was listed.
+                    if true_side_only {
+                        default = true_side.0;
+                        break;
+                    }
                     arms.push((cond, true_side.0, item.switch_item.as_ref().into()));
                 }
                 None => {
