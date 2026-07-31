@@ -9,15 +9,13 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use veryl_analyzer::fragment_cache::{self, Fragment, FragmentWatermark};
-use veryl_analyzer::{
-    attribute_table, definition_table, scope, symbol_table, type_dag, unsafe_table,
-};
+use veryl_analyzer::{Analyzer, scope, type_dag};
 use veryl_cache::Store;
 use veryl_metadata::Metadata;
+use veryl_parser::resource_table;
 use veryl_parser::resource_table::StrId;
-use veryl_parser::{resource_table, text_table};
 use veryl_path::PathSet;
 
 pub struct LsIncremental {
@@ -65,7 +63,7 @@ impl LsIncremental {
         // Clear any stale state from a previous analysis of this file
         // before re-registering it.
         let prj: StrId = path.prj.as_str().into();
-        drop_file_state(prj, &path.src);
+        Analyzer::drop_file(resource_table::insert_path(&path.src), Some(prj));
 
         let is_root = path.prj == self.root_project;
         scope::set_project(prj, is_root);
@@ -77,7 +75,7 @@ impl LsIncremental {
                 true
             }
             Err(_) => {
-                drop_file_state(prj, &path.src);
+                Analyzer::drop_file(resource_table::insert_path(&path.src), Some(prj));
                 false
             }
         }
@@ -142,19 +140,6 @@ fn global_key(metadata: &Metadata) -> Option<String> {
     ]))
 }
 
-/// Removes everything a file may have registered in the global tables
-/// (same set as the server's `drop_tables`).
-fn drop_file_state(prj: StrId, src: &Path) {
-    let path = resource_table::insert_path(src);
-    let prj = Some(prj);
-    symbol_table::drop(path, prj);
-    scope::drop_tokens(path, prj);
-    text_table::drop(path);
-    attribute_table::drop(path);
-    unsafe_table::drop(path);
-    definition_table::drop(path, prj);
-}
-
 /// Per-project stores, so a server handling files from several projects
 /// keeps one store each. Keyed by metadata path.
 #[derive(Default)]
@@ -175,7 +160,7 @@ impl LsIncrementalMap {
 mod tests {
     use super::*;
     use std::thread;
-    use veryl_analyzer::Analyzer;
+    use veryl_analyzer::symbol_table;
     use veryl_parser::Parser;
 
     const FILE_A: &str = "package P { const W: u32 = 8; }\n";

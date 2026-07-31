@@ -18388,3 +18388,59 @@ fn partially_driven_output_port() {
         "{errors:?}"
     );
 }
+
+/// The language server drops a file's state and re-analyzes it on every edit.
+/// The scope tree mirrors each insertion, so the drop must take its bindings.
+#[test]
+fn reanalyze_after_drop() {
+    const CODE: &str = r#"package P {
+    const A: u32 = 1;
+}
+package Q::<W: u32> {
+    const B: u32 = W;
+}
+module M {
+    import P::A;
+    const C: u32 = A;
+    const D: u32 = P::A;
+    const E: u32 = Q::<2>::B;
+}
+"#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let path = std::path::PathBuf::from("reanalyze_after_drop.veryl");
+
+    let analyze = || {
+        let parser = Parser::parse(CODE, &path).unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        let mut context = Context::default();
+        let mut ir = Ir::default();
+        let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+        errors.append(&mut Analyzer::analyze_post_pass1());
+        errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+        errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+        errors
+    };
+
+    let errors = analyze();
+    assert!(errors.is_empty(), "{errors:?}");
+
+    Analyzer::drop_file(
+        veryl_parser::resource_table::insert_path(&path),
+        Some("prj".into()),
+    );
+
+    for id in crate::scope::bound_symbols() {
+        assert!(
+            symbol_table::get(id).is_some(),
+            "scope tree still binds dropped symbol {id:?}"
+        );
+    }
+
+    let errors = analyze();
+    assert!(errors.is_empty(), "{errors:?}");
+}
