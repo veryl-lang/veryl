@@ -1316,9 +1316,9 @@ fn array_literal() {
   var var1[4](b): logic = 1'hx;
   var var1[5](b): logic = 1'hx;
   var var2(c): logic<2, 3, 4> = 24'hxxxxxx;
-  const var3[0](X): bit<32> = 32'sh0000000a;
-  const var3[1](X): bit<32> = 32'sh0000000b;
-  const var3[2](X): bit<32> = 32'sh0000000c;
+  const var3[0](X): bit<32> = 32'h0000000a;
+  const var3[1](X): bit<32> = 32'h0000000b;
+  const var3[2](X): bit<32> = 32'h0000000c;
   const var4(Y): bit<3, 4> = 12'habc;
 
   comb {
@@ -3113,4 +3113,104 @@ fn defines_select_ifdef_branch() {
         !ir.contains("00000002"),
         "did not expect ifndef(DEBUG) branch (=2) in IR:\n{ir}"
     );
+}
+
+#[test]
+fn package_const_select() {
+    // A const declared in another package, selected at the reference site: an
+    // element for a full index, a sub-array for a partial one.
+    let code = r#"
+    package a_pkg {
+        const A: bit<16>    = 16'habcd;
+        const B: u32[2]     = '{0, 1};
+        const C: u32 [2, 2] = '{'{1, 2}, '{3, 4}};
+    }
+    module b_module {
+        const A: bit<8>  = a_pkg::A[0+:8];
+        const B: u32     = a_pkg::B[1];
+        const C: u32 [2] = a_pkg::C[0];
+        const D: u32     = a_pkg::C[1][1];
+    }
+    "#;
+
+    let exp = r#"module b_module {
+  const var0(A): bit<8> = 8'hcd;
+  const var1(B): bit<32> = 32'h00000001;
+  const var2[0](C): bit<32> = 32'h00000001;
+  const var2[1](C): bit<32> = 32'h00000002;
+  const var3(D): bit<32> = 32'h00000004;
+
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
+fn package_const_dynamic_select() {
+    // A run-time select reads the const as a materialized variable, shared by
+    // both references.
+    let code = r#"
+    package a_pkg {
+        const A: bit<8> [4] = '{8'h11, 8'h22, 8'h33, 8'h44};
+    }
+    module b_module (
+        i: input  logic<2>,
+        o: output logic<8>,
+        p: output logic   ,
+    ) {
+        assign o = a_pkg::A[i];
+        assign p = a_pkg::A[i][0];
+    }
+    "#;
+
+    let exp = r#"module b_module {
+  input var0(i): logic<2> = 2'hx;
+  output var1(o): logic<8> = 8'hxx;
+  output var2(p): logic = 1'hx;
+  const var3[0](__const_prj__a_pkg_A): bit<8> = 8'h11;
+  const var3[1](__const_prj__a_pkg_A): bit<8> = 8'h22;
+  const var3[2](__const_prj__a_pkg_A): bit<8> = 8'h33;
+  const var3[3](__const_prj__a_pkg_A): bit<8> = 8'h44;
+
+  comb {
+    var1 = var3[var0];
+  }
+  comb {
+    var2 = var3[var0][32'sh00000000];
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
+fn const_select_multi_dim_width() {
+    // `M[2]` on a multi-dimensional packed type is the third 8 bit element,
+    // not bit 2.
+    let code = r#"
+    package a_pkg {
+        const M: logic<4, 8> = 32'h11223344;
+    }
+    module b_module {
+        const M: logic<4, 8> = 32'h11223344;
+        const L0: logic<8> = M[2];
+        const L1: logic    = M[2][1];
+        const P0: logic<8> = a_pkg::M[2];
+        const P1: logic    = a_pkg::M[2][1];
+    }
+    "#;
+
+    let exp = r#"module b_module {
+  const var0(M): logic<4, 8> = 32'h11223344;
+  const var1(L0): logic<8> = 8'h22;
+  const var2(L1): logic = 1'h1;
+  const var3(P0): logic<8> = 8'h22;
+  const var4(P1): logic = 1'h1;
+
+}
+"#;
+
+    check_ir(code, exp);
 }

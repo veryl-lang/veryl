@@ -4357,3 +4357,66 @@ fn count_trailing_zeros_netlist_matches_golden_model_exhaustively() {
         }
     }
 }
+
+#[test]
+fn package_const_dynamic_select() {
+    // A package const read at a runtime index / bit position.
+    let code = r#"
+        package a_pkg {
+            const ROM:  logic<4> [4] = '{4'h1, 4'h2, 4'h4, 4'h8};
+            const ONES: logic<4> [4] = '{4'hf, 4'hf, 4'hf, 4'hf};
+            const MASK: logic<4>     = 4'b1010;
+        }
+        module Top (
+            sel: input  logic<2>,
+            y:   output logic<4>,
+            w:   output logic<4>,
+            z:   output logic,
+        ) {
+            always_comb {
+                y = a_pkg::ROM[sel];
+                w = a_pkg::ONES[sel];
+                z = a_pkg::MASK[sel];
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let port = |name: &str| {
+        gate.module
+            .ports
+            .iter()
+            .find(|p| format!("{}", p.name) == name)
+            .unwrap()
+    };
+
+    // `ROM[sel]` is a one-hot decode of `sel`: every bit is real logic, and no
+    // two bits share a driver.
+    let y = port("y");
+    for &n in &y.nets {
+        assert!(
+            matches!(gate.module.nets[n as usize].driver, NetDriver::Cell(_)),
+            "ROM[sel] bit must be decoded logic, got {:?}",
+            gate.module.nets[n as usize].driver
+        );
+    }
+    let mut distinct = y.nets.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!(distinct.len(), y.nets.len(), "one-hot bits must differ");
+
+    // Every element of `ONES` is 4'hf, so the selection folds to all ones.
+    for &n in &port("w").nets {
+        assert!(
+            matches!(gate.module.nets[n as usize].driver, NetDriver::Const(true)),
+            "ONES[sel] must fold to a constant"
+        );
+    }
+
+    // 4'b1010 selected by `sel` is exactly `sel[0]`.
+    assert_eq!(
+        port("z").nets[0],
+        port("sel").nets[0],
+        "MASK[sel] must reduce to sel[0]"
+    );
+}

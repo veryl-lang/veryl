@@ -375,4 +375,8 @@ module veryl_testcase_Module68F;
         .axi4_stream_if (axi4_stream_if)
     );
 endmodule
-//# sourceMappingURL=../map/68_std.sv.map
+
+package veryl_testcase_Pkg68G;
+    localparam int unsigned WIDTH = 32;
+endpackage
+//# sourceMappingURL=../map/68_std_1.sv.map

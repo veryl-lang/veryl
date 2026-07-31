@@ -277,18 +277,21 @@ impl ReferenceTable {
     ) {
         let mut path = path.clone();
         let mut generic_maps = generic_maps.cloned().unwrap_or_default();
-
         let orig_len = path.len();
-        path.resolve_imported(scope, define_context, Some(&generic_maps));
 
-        // Prefix paths added by `resolve_imported` have already been resolved.
-        // They should be skipped.
+        path.resolve_imported(scope, define_context, Some(&generic_maps));
         let prefix_len = path.len() - orig_len;
-        for i in prefix_len..path.len() {
+
+        for i in 0..path.len() {
+            // Checks for paths added by 'resolve_imported' should be skipped beucase
+            // they have already been done.
+            let impoted_path = i < prefix_len;
             match symbol_table::resolve_base_path(&path, i, (scope, define_context.clone())) {
                 Ok(symbol) => {
-                    self.check_pacakge_reference(&symbol.found, &path.range);
-                    symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
+                    if !impoted_path {
+                        self.check_pacakge_reference(&symbol.found, &path.range);
+                        symbol_table::add_reference(symbol.found.id, &path.paths[0].base);
+                    }
 
                     // A user-defined component takes its parameters as
                     // generic arguments in the `var` form; they are
@@ -304,9 +307,6 @@ impl ReferenceTable {
                         continue;
                     }
 
-                    // Check number of arguments
-                    let params = symbol.found.generic_parameters();
-
                     let mut inference_attempted_failed = false;
                     if i + 1 == path.paths.len() {
                         use generic_inference_table::InferredApply;
@@ -317,6 +317,8 @@ impl ReferenceTable {
                         }
                     }
 
+                    // Check number of arguments
+                    let params = symbol.found.generic_parameters();
                     let n_args = path.paths[i].arguments.len();
 
                     if in_import_declaration
@@ -329,7 +331,7 @@ impl ReferenceTable {
                         // Generic function, struct and union should be imorted as-is
                         // but not as thier instances.
                         // https://github.com/veryl-lang/veryl/issues/1619
-                        if n_args != 0 {
+                        if !impoted_path && n_args != 0 {
                             self.errors.push(AnalyzerError::invalid_import(&path.range))
                         }
                         continue;
@@ -341,18 +343,20 @@ impl ReferenceTable {
                         params.len() == n_args
                     };
                     if !match_artiy {
-                        if inference_attempted_failed {
-                            self.errors.push(AnalyzerError::generic_inference_failed(
-                                &path.paths[i].base.to_string(),
-                                &path.range,
-                            ));
-                        } else {
-                            self.errors.push(AnalyzerError::mismatch_generics_arity(
-                                &path.paths[i].base.to_string(),
-                                params.len(),
-                                n_args,
-                                &path.range,
-                            ));
+                        if !impoted_path {
+                            if inference_attempted_failed {
+                                self.errors.push(AnalyzerError::generic_inference_failed(
+                                    &path.paths[i].base.to_string(),
+                                    &path.range,
+                                ));
+                            } else {
+                                self.errors.push(AnalyzerError::mismatch_generics_arity(
+                                    &path.paths[i].base.to_string(),
+                                    params.len(),
+                                    n_args,
+                                    &path.range,
+                                ));
+                            }
                         }
                         continue;
                     }

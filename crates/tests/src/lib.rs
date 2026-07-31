@@ -2,7 +2,7 @@
 const DEPENDENCY_TESTS: [&str; 2] = ["25_dependency_1", "25_dependency_2"];
 
 #[cfg(test)]
-const STD_TESTS: [&str; 1] = ["68_std"];
+const STD_TESTS: [&str; 2] = ["68_std_1", "68_std_2"];
 
 #[cfg(test)]
 const PACKAGE_SELF_REF_TESTS: [&str; 2] = ["84_package_self_ref_1", "84_package_self_ref_2"];
@@ -29,6 +29,21 @@ mod parser {
 }
 
 #[cfg(test)]
+fn skip_test(name: &str) -> bool {
+    (crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name)
+        || (crate::STD_TESTS.contains(&name) && crate::STD_TESTS[0] != name)
+        || (crate::PACKAGE_SELF_REF_TESTS.contains(&name)
+            && crate::PACKAGE_SELF_REF_TESTS[0] == name)
+}
+
+#[cfg(test)]
+fn needs_sub_project(name: &str) -> bool {
+    crate::DEPENDENCY_TESTS.contains(&name)
+        || crate::STD_TESTS.contains(&name)
+        || crate::PACKAGE_SELF_REF_TESTS.contains(&name)
+}
+
+#[cfg(test)]
 mod analyzer {
     use std::fs;
     use veryl_analyzer::{Analyzer, Context};
@@ -36,17 +51,11 @@ mod analyzer {
     use veryl_parser::Parser;
 
     fn test(name: &str) {
-        if (crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name)
-            || (crate::PACKAGE_SELF_REF_TESTS.contains(&name)
-                && crate::PACKAGE_SELF_REF_TESTS[0] == name)
-        {
+        if crate::skip_test(name) {
             return;
         }
 
-        let needs_sub_project = crate::DEPENDENCY_TESTS.contains(&name)
-            || crate::STD_TESTS.contains(&name)
-            || crate::PACKAGE_SELF_REF_TESTS.contains(&name);
-        let _lock = if needs_sub_project {
+        let _lock = if crate::needs_sub_project(name) {
             Some(crate::DEPENDENCY_LOCK.lock())
         } else {
             None
@@ -55,7 +64,7 @@ mod analyzer {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        if needs_sub_project {
+        if crate::needs_sub_project(name) {
             let paths = metadata.paths::<&str>(&[], false, true).unwrap();
             let dependency_path = metadata.project_dependencies_path();
             for path in paths {
@@ -70,6 +79,8 @@ mod analyzer {
 
         let files = if crate::DEPENDENCY_TESTS.contains(&name) {
             crate::DEPENDENCY_TESTS.to_vec()
+        } else if crate::STD_TESTS.contains(&name) {
+            crate::STD_TESTS.to_vec()
         } else if crate::PACKAGE_SELF_REF_TESTS.contains(&name) {
             crate::PACKAGE_SELF_REF_TESTS.to_vec()
         } else {
@@ -215,17 +226,11 @@ mod emitter {
     use veryl_parser::Parser;
 
     fn test(name: &str) {
-        if (crate::DEPENDENCY_TESTS.contains(&name) && crate::DEPENDENCY_TESTS[0] != name)
-            || (crate::PACKAGE_SELF_REF_TESTS.contains(&name)
-                && crate::PACKAGE_SELF_REF_TESTS[0] == name)
-        {
+        if crate::skip_test(name) {
             return;
         }
 
-        let needs_sub_project = crate::DEPENDENCY_TESTS.contains(&name)
-            || crate::STD_TESTS.contains(&name)
-            || crate::PACKAGE_SELF_REF_TESTS.contains(&name);
-        let _lock = if needs_sub_project {
+        let _lock = if crate::needs_sub_project(name) {
             Some(crate::DEPENDENCY_LOCK.lock())
         } else {
             None
@@ -234,7 +239,7 @@ mod emitter {
         let metadata_path = Metadata::search_from_current().unwrap();
         let mut metadata = Metadata::load(&metadata_path).unwrap();
 
-        if needs_sub_project {
+        if crate::needs_sub_project(name) {
             let paths = metadata.paths::<&str>(&[], false, true).unwrap();
             let dependency_path = metadata.project_dependencies_path();
             for path in paths {
@@ -249,6 +254,8 @@ mod emitter {
 
         let names = if crate::DEPENDENCY_TESTS.contains(&name) {
             crate::DEPENDENCY_TESTS.to_vec()
+        } else if crate::STD_TESTS.contains(&name) {
+            crate::STD_TESTS.to_vec()
         } else if crate::PACKAGE_SELF_REF_TESTS.contains(&name) {
             crate::PACKAGE_SELF_REF_TESTS.to_vec()
         } else {

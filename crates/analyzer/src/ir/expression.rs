@@ -924,8 +924,8 @@ impl Factor {
         match self {
             Factor::Variable(id, index, select, comptime) => {
                 let idx = index.eval_value(context)?;
-                let value = if let Some(variable) = context.variables.get(id) {
-                    variable.get_value(&idx)?.clone()
+                let (value, r#type) = if let Some(variable) = context.variables.get(id) {
+                    (variable.get_value(&idx)?.clone(), variable.r#type.clone())
                 } else if index.0.is_empty() && select.is_empty() && comptime.is_const {
                     // Const/param scalar refs keep their folded value in comptime;
                     // use it when the Context has no variable table — synth's
@@ -937,7 +937,11 @@ impl Factor {
                 };
 
                 if !select.is_empty() {
-                    let (beg, end) = select.eval_value(context, &comptime.r#type, false)?;
+                    // The select indexes into the variable's own layout, not
+                    // into `comptime.r#type`, whose width dimensions
+                    // `gather_context` has already replaced by the selected
+                    // width (mirrors `eval_assign` / `gather_ff`).
+                    let (beg, end) = select.eval_value(context, &r#type, false)?;
                     Some(value.select(beg, end))
                 } else {
                     Some(value)

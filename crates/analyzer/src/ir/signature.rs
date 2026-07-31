@@ -119,7 +119,8 @@ impl Signature {
         };
 
         if !context.in_generic {
-            // Apply default value
+            let namespace = scope::namespace(scope, &define_context);
+
             for (i, id) in symbol.full_path.iter().enumerate() {
                 let path_symbol = if (i + 1) == symbol.full_path.len() {
                     symbol_table::get(sig.symbol).unwrap()
@@ -127,11 +128,18 @@ impl Signature {
                     symbol_table::get(*id).unwrap()
                 };
 
+                // Apply default value
                 let params = path_symbol.generic_parameters();
                 let n_args = path.paths[i].arguments.len();
                 for (_, default_value) in params.iter().skip(n_args) {
                     if let Some(default_value) = &default_value.default_value {
                         path.paths[i].arguments.push(default_value.clone())
+                    }
+                }
+
+                if !path_symbol.is_global_function() {
+                    for arg in path.paths[i].arguments.iter_mut() {
+                        arg.append_namespace_path(&namespace, &path_symbol.namespace);
                     }
                 }
             }
