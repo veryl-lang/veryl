@@ -77,12 +77,12 @@ fn insert_namespace_symbol(name: &str, public: bool) -> StrId {
 }
 
 fn insert_project_property_symbols(
-    prject_name: StrId,
+    project_name: StrId,
     properties: &BTreeMap<String, ProjectProperty>,
 ) {
-    let mut namespace = Namespace::new();
-    namespace.push(prject_name);
+    let prop_symbol = create_prop_namespace_symbol(project_name);
 
+    let namespace = prop_symbol.inner_namespace();
     for (prop_name, prop_value) in properties {
         let token = Token::from_external_text(prop_name);
         let value_property = ProjectPropertyValueProperty::new(prop_value, token.into());
@@ -95,6 +95,23 @@ fn insert_project_property_symbols(
         );
         symbol_table::insert(&token, symbol);
     }
+}
+
+fn create_prop_namespace_symbol(project_name: StrId) -> Symbol {
+    let mut namespace = Namespace::new();
+    namespace.push(project_name);
+
+    let token = Token::builtin_text("$prop");
+    let symbol = Symbol::new(
+        &token,
+        SymbolKind::PropNamespace,
+        &namespace,
+        false,
+        DocComment::default(),
+    );
+    symbol_table::insert(&token, symbol.clone());
+
+    symbol
 }
 
 impl Analyzer {

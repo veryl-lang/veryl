@@ -117,6 +117,10 @@ impl Token {
         Self::new(text, 0, 0, 0, 0, TokenSource::External)
     }
 
+    pub fn builtin_text(text: &str) -> Self {
+        Self::new(text, 0, 0, 0, 0, TokenSource::Builtin)
+    }
+
     pub fn generate(text: StrId, path: PathId) -> Self {
         let id = resource_table::new_token_id();
         Token {

@@ -6800,7 +6800,8 @@ pub fn symbol_string(
         | SymbolKind::EnumMemberMangled
         | SymbolKind::Test(_)
         | SymbolKind::Embed
-        | SymbolKind::TbComponent(_) => {
+        | SymbolKind::TbComponent(_)
+        | SymbolKind::PropNamespace => {
             unreachable!()
         }
     }

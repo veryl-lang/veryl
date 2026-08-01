@@ -5,7 +5,7 @@ use crate::symbol::{
 };
 use crate::symbol_table::SymbolTable;
 use veryl_parser::token_range::TokenRange;
-use veryl_parser::veryl_token::{Token, TokenSource, VerylToken};
+use veryl_parser::veryl_token::{Token, VerylToken};
 
 pub struct SvSystemFunction {
     pub name: String,
@@ -28,12 +28,12 @@ pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
     let mut namespace = namespace.clone();
 
     for func in sv_system_functions() {
-        let token = Token::new(&func.name, 0, 0, 0, 0, TokenSource::Builtin);
+        let token = Token::builtin_text(&func.name);
         let mut ports = Vec::new();
 
         namespace.push(token.text);
         for (name, direction) in &func.ports {
-            let token = Token::new(name, 0, 0, 0, 0, TokenSource::Builtin);
+            let token = Token::builtin_text(name);
             let r#type = Type {
                 modifier: vec![],
                 kind: TypeKind::Any,

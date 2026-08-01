@@ -17010,14 +17010,14 @@ fn scope_tree_matches_namespace() {
 fn project_properties() {
     let code = r#"
     module ModuleA {
-        const A: i64   = PROP_A;
-        const B: bbool = PROP_B;
+        const A: i64   = $prop::A;
+        const B: bbool = $prop::B;
     }
     "#;
 
     let mut properties = HashMap::new();
-    properties.insert("PROP_A".to_string(), ProjectProperty::Int(32));
-    properties.insert("PROP_B".to_string(), ProjectProperty::Bool(true));
+    properties.insert("A".to_string(), ProjectProperty::Int(32));
+    properties.insert("B".to_string(), ProjectProperty::Bool(true));
 
     let errors = analyze_with_project_properties(code, properties);
     assert!(errors.is_empty());

@@ -4263,8 +4263,8 @@ module ModuleA (
 #[test]
 fn project_properties() {
     let code = r#"module ModuleA {
-    const A: i64   = PROP_A;
-    const B: bbool = PROP_B;
+    const A: i64   = $prop::A;
+    const B: bbool = $prop::B;
 }
 "#;
 
@@ -4278,10 +4278,10 @@ endmodule
     let mut metadata = Metadata::create_default("prj").unwrap();
     metadata
         .properties
-        .insert("PROP_A".to_string(), ProjectProperty::Int(32));
+        .insert("A".to_string(), ProjectProperty::Int(32));
     metadata
         .properties
-        .insert("PROP_B".to_string(), ProjectProperty::Bool(true));
+        .insert("B".to_string(), ProjectProperty::Bool(true));
 
     let ret = if cfg!(windows) {
         emit(&metadata, code).replace("\r\n", "\n")

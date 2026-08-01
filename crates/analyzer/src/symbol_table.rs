@@ -205,7 +205,7 @@ impl SymbolTable {
         let namespace = Namespace::new();
 
         for func in DEFINED_NAMESPACES {
-            let token = Token::new(func, 0, 0, 0, 0, TokenSource::Builtin);
+            let token = Token::builtin_text(func);
             let symbol = Symbol::new(
                 &token,
                 SymbolKind::Namespace,
@@ -688,7 +688,7 @@ impl SymbolTable {
             SymbolKind::AliasPackage(x) => {
                 context = self.trace_type_path(context, &x.target)?;
             }
-            SymbolKind::Enum(_) | SymbolKind::Namespace => {
+            SymbolKind::Enum(_) | SymbolKind::Namespace | SymbolKind::PropNamespace => {
                 context.set_inner(found);
                 context.inner = true;
             }
@@ -824,6 +824,7 @@ impl SymbolTable {
             _ => false,
         };
         let via_namespace = matches!(last_found.kind, SymbolKind::Namespace);
+        let via_prop_namespace = matches!(last_found.kind, SymbolKind::PropNamespace);
         let via_tb_component = matches!(last_found_type, Some(SymbolKind::TbComponent(_)));
 
         match &found.kind {
@@ -863,6 +864,8 @@ impl SymbolTable {
                 // defined in a packge or for generic component defined in other project
                 via_pacakge || via_namespace
             }
+            SymbolKind::ProjectProperty(_) => via_prop_namespace,
+            SymbolKind::PropNamespace => !via_namespace,
             _ => via_namespace,
         }
     }
