@@ -15680,6 +15680,40 @@ fn multiple_default_array_literal() {
 }
 
 #[test]
+fn invalid_array_literal_function_arguments() {
+    let code = r#"
+    module ModuleA (
+        n: input logic<2>,
+        out: output logic<8>,
+    ) {
+        function pick (x: input logic<8> [2]) -> logic<8> {
+            return x[1];
+        }
+        assign out = pick('{8'h11 repeat n});
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert_eq!(errors.len(), 1);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+
+    let code = r#"
+    module ModuleA (
+        out: output logic<8>,
+    ) {
+        function pick (x: input logic<8> [2]) -> logic<8> {
+            return x[1];
+        }
+        assign out = pick('{default: 8'h11, default: 8'h22});
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert_eq!(errors.len(), 1);
+    assert!(matches!(errors[0], AnalyzerError::MultipleDefault { .. }));
+}
+
+#[test]
 fn mismatch_dimension_array() {
     let code = r#"
     module ModuleA {

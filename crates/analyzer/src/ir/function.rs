@@ -1,5 +1,7 @@
 use crate::conv::Context;
-use crate::conv::utils::{check_compatibility, check_implicit_clock_conversion};
+use crate::conv::utils::{
+    check_compatibility, check_implicit_clock_conversion, eval_array_literal,
+};
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
@@ -523,6 +525,17 @@ impl Arguments {
                 match direction {
                     Direction::Input => {
                         let arg_type = &arg.comptime.r#type;
+                        // Argument expressions are initially converted without a
+                        // destination type. Apply the resolved formal shape here,
+                        // where the actual-to-formal binding is first available.
+                        if matches!(expr, Expression::ArrayLiteral(..)) {
+                            eval_array_literal(
+                                context,
+                                Some(&arg_type.array),
+                                Some(arg_type.width()),
+                                &mut expr,
+                            )?;
+                        }
                         if arg_type.is_clock() || arg_type.is_reset() {
                             let expr_comptime = expr.eval_comptime(context, None);
                             let expr_token = expr_comptime.token;
