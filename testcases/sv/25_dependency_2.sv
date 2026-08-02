@@ -107,6 +107,19 @@ module veryl_testcase_Module25G;
 
     int unsigned _f0; always_comb _f0 = BAZ_0;
     int unsigned _f1; always_comb _f1 = BAZ_1;
+
+    // the module import stays visible in nested scopes
+    if (1) begin :g
+        int unsigned _f2; always_comb _f2 = BAZ_0;
+        if (1) begin :h
+            int unsigned _f3; always_comb _f3 = BAZ_1;
+        end
+    end
+
+    function automatic int unsigned f() ;
+        return BAZ_0 + BAZ_1;
+    endfunction
+    int unsigned _f4; always_comb _f4 = f();
 endmodule
 
 package veryl_testcase_Pacakge25H;
@@ -127,5 +140,35 @@ module veryl_testcase_Module25I;
             .baz (baz)
         );
     end
+endmodule
+
+module veryl_testcase_Module25J;
+
+
+
+
+    veryl_sample4___baz_if__veryl_sample4___baz_pkg__veryl_sample4___baz_pkg__1__2_BAZ_0__3 baz ();
+    // a guarded block still sees the module's unguarded import
+    `ifdef DEFINE_A
+    if (1) begin :g
+        veryl_sample4___baz_module__veryl_sample4___baz_pkg__veryl_sample4___baz_pkg__1__2_BAZ_0__3 u (
+            .baz (baz)
+        );
+    end
+    `endif
+endmodule
+
+module veryl_testcase_Module25K;
+    // the reverse: guarded import, unguarded reference
+
+    `ifdef DEFINE_A
+
+    `endif
+
+
+    veryl_sample4___baz_if__veryl_sample4___baz_pkg__veryl_sample4___baz_pkg__1__2_BAZ_0__3 baz ();
+    veryl_sample4___baz_module__veryl_sample4___baz_pkg__veryl_sample4___baz_pkg__1__2_BAZ_0__3 u (
+        .baz (baz)
+    );
 endmodule
 //# sourceMappingURL=../map/25_dependency_2.sv.map
