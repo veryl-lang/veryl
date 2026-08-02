@@ -5477,9 +5477,12 @@ fn function_call_array_literal_arg_shapes() {
         b: input  logic<4>,
         c: input  logic<4>,
         d: input  logic<4>,
+        row: input logic,
+        col: input logic,
         single: output logic<4>,
         repeated: output logic<12>,
         matrix: output logic<16>,
+        indexed: output logic<4>,
         packed_out: output logic,
         packed_value: output logic<4>,
     ) {
@@ -5507,6 +5510,14 @@ fn function_call_array_literal_arg_shapes() {
             return {x[0][0], x[0][1], x[1][0], x[1][1]};
         }
 
+        function pick2x2 (
+            x: input logic<4> [2, 2],
+            row: input logic,
+            col: input logic,
+        ) -> logic<4> {
+            return x[row][col];
+        }
+
         function packed_bit (
             x: input logic<2, 2> [2],
         ) -> logic {
@@ -5522,6 +5533,11 @@ fn function_call_array_literal_arg_shapes() {
         assign single = pick1('{a});
         assign repeated = pack3('{identity(a) repeat 2, default: identity(b)});
         assign matrix = pack2x2('{'{a, b}, '{c, d}});
+        assign indexed = pick2x2(
+            '{'{a, b} repeat 1, default: '{c, d}},
+            row,
+            col,
+        );
         assign packed_out = packed_bit('{'{'{0, 0}, '{0, 0}}, '{'{0, 0}, '{0, 1}}});
         assign packed_value = packed_pattern('{1, 0, 0, 1});
     }
@@ -5537,7 +5553,17 @@ fn function_call_array_literal_arg_shapes() {
         sim.set("b", Value::new(0xb, 4, false));
         sim.set("c", Value::new(0xc, 4, false));
         sim.set("d", Value::new(0xd, 4, false));
-        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        for (row, col, expected) in [(0, 0, 0xa), (0, 1, 0xb), (1, 0, 0xc), (1, 1, 0xd)] {
+            sim.set("row", Value::new(row, 1, false));
+            sim.set("col", Value::new(col, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("indexed").unwrap(),
+                Value::new(expected, 4, false),
+                "row={row} col={col} config={config:?}",
+            );
+        }
 
         assert_eq!(sim.get("single").unwrap(), Value::new(0xa, 4, false));
         assert_eq!(sim.get("repeated").unwrap(), Value::new(0xaab, 12, false));
