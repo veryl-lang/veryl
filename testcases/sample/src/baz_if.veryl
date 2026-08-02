@@ -1,0 +1,7 @@
+pub interface baz_if::<PKG: baz_proto_pkg> {
+    var baz_0: logic<PKG::BAZ_0>;
+    var baz_1: logic<PKG::BAZ_1>;
+    modport mp {
+        ..output
+    }
+}
