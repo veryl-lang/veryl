@@ -91,6 +91,19 @@ module Module25G {
     import bazpkg::BAZ_1;
     let _f0: u32 = BAZ_0;
     let _f1: u32 = BAZ_1;
+
+    // the module import stays visible in nested scopes
+    :g {
+        let _f2: u32 = BAZ_0;
+        :h {
+            let _f3: u32 = BAZ_1;
+        }
+    }
+
+    function f () -> u32 {
+        return BAZ_0 + BAZ_1;
+    }
+    let _f4: u32 = f();
 }
 
 package Pacakge25H {
@@ -110,4 +123,34 @@ module Module25I {
             baz: baz,
         );
     }
+}
+
+module Module25J {
+    import Pacakge25H::baz_1_2;
+
+    alias package baz_1_3 = veryl_sample4::baz_pkg::<baz_1_2::BAZ_0, 3>;
+
+    // driven only under the ifdef below
+    #[allow(unassign_variable)]
+    inst baz: veryl_sample4::baz_if::<baz_1_3>;
+    // a guarded block still sees the module's unguarded import
+    #[ifdef(DEFINE_A)]
+    :g {
+        inst u: veryl_sample4::baz_module::<baz_1_3> (
+            baz: baz,
+        );
+    }
+}
+
+module Module25K {
+    // the reverse: guarded import, unguarded reference
+    #[ifdef(DEFINE_A)]
+    import Pacakge25H::baz_1_2;
+
+    alias package baz_1_3 = veryl_sample4::baz_pkg::<baz_1_2::BAZ_0, 3>;
+
+    inst baz: veryl_sample4::baz_if::<baz_1_3>;
+    inst u: veryl_sample4::baz_module::<baz_1_3> (
+        baz: baz,
+    );
 }

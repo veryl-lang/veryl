@@ -884,6 +884,10 @@ fn is_import_container(scope: ScopeId) -> bool {
 /// so a nested scope (generate block, function) also sees the bindings of the
 /// scopes enclosing it up to and including that container. The walk stops there
 /// because `import` is not visible across a container boundary.
+///
+/// The ifdef gate is non-exclusivity rather than equality, mirroring how
+/// `lookup_name` admits candidates: a guarded scope still sees its container's
+/// unguarded `import`, and an unguarded one a guarded `import`.
 pub fn is_imported(
     namespace: &Namespace,
     symbol: SymbolId,
@@ -893,11 +897,12 @@ pub fn is_imported(
     let dctx = &namespace.define_context;
     let mut current = Some(intern_namespace(namespace));
     while let Some(scope) = current {
+        let scope = generic_delegation(scope).unwrap_or(scope);
         let imported = imports_get(scope, name)
             .iter()
-            .any(|b| b.symbol == symbol && &b.define_context == dctx)
+            .any(|b| b.symbol == symbol && !dctx.exclusive(&b.define_context))
             || wildcards_get(scope).iter().any(|w| {
-                &w.define_context == dctx
+                !dctx.exclusive(&w.define_context)
                     && !symbol_define_context.exclusive(&w.source_define_context)
                     && locals_get(w.source, name).contains(&symbol)
             });
@@ -955,10 +960,39 @@ pub fn mixin_get(scope: ScopeId) -> SVec<Mixin> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::attribute::Attribute;
+    use std::path::Path;
     use veryl_parser::resource_table;
+    use veryl_parser::veryl_token::Token;
 
     fn name(s: &str) -> StrId {
         resource_table::insert_str(s)
+    }
+
+    fn dctx(attrs: &[Attribute]) -> DefineContext {
+        attrs.into()
+    }
+
+    fn dummy_path(s: &str) -> GenericSymbolPath {
+        let path = resource_table::insert_path(Path::new("test.veryl"));
+        (&Token::generate(name(s), path)).into()
+    }
+
+    fn module_with_nested_block() -> (ScopeId, ScopeId, ScopeId) {
+        clear();
+        let prj = intern_child(ScopeId(0), name("prj"), ScopeKind::Project);
+        let module = intern_child(prj, name("Mod"), ScopeKind::Module);
+        let block = intern_child(module, name("g"), ScopeKind::Block);
+        (prj, module, block)
+    }
+
+    fn query(scope: ScopeId, define_context: DefineContext) -> Namespace {
+        let mut ns = Namespace::new();
+        for path in name_path(scope) {
+            ns.push(path);
+        }
+        ns.define_context = define_context;
+        ns
     }
 
     #[test]
@@ -1058,5 +1092,150 @@ mod tests {
         assert_eq!(generic_delegation(inst), Some(base_inner));
         // A non-instance scope has no delegation.
         assert_eq!(generic_delegation(base_inner), None);
+    }
+
+    #[test]
+    fn is_imported_reaches_the_enclosing_container() {
+        let (_, module, block) = module_with_nested_block();
+        add_import(
+            module,
+            name("A"),
+            SymbolId(1),
+            DefineContext::default(),
+            dummy_path("Pkg"),
+        );
+
+        let default = DefineContext::default();
+        for scope in [module, block] {
+            assert!(is_imported(
+                &query(scope, default.clone()),
+                SymbolId(1),
+                name("A"),
+                &default,
+            ));
+        }
+        assert!(!is_imported(
+            &query(block, default.clone()),
+            SymbolId(2),
+            name("A"),
+            &default,
+        ));
+    }
+
+    #[test]
+    fn is_imported_stops_at_the_container() {
+        let (prj, module, block) = module_with_nested_block();
+        add_import(
+            prj,
+            name("A"),
+            SymbolId(1),
+            DefineContext::default(),
+            dummy_path("Pkg"),
+        );
+
+        let default = DefineContext::default();
+        for scope in [module, block] {
+            assert!(
+                !is_imported(
+                    &query(scope, default.clone()),
+                    SymbolId(1),
+                    name("A"),
+                    &default,
+                ),
+                "an import above the container must not be visible"
+            );
+        }
+    }
+
+    #[test]
+    fn is_imported_admits_a_narrowing_ifdef_context() {
+        let (_, module, block) = module_with_nested_block();
+        add_import(
+            module,
+            name("A"),
+            SymbolId(1),
+            DefineContext::default(),
+            dummy_path("Pkg"),
+        );
+
+        let default = DefineContext::default();
+        assert!(is_imported(
+            &query(block, dctx(&[Attribute::Ifdef(name("FOO"))])),
+            SymbolId(1),
+            name("A"),
+            &default,
+        ));
+    }
+
+    #[test]
+    fn is_imported_rejects_an_exclusive_ifdef_context() {
+        let (_, module, block) = module_with_nested_block();
+        add_import(
+            module,
+            name("A"),
+            SymbolId(1),
+            dctx(&[Attribute::Ifdef(name("FOO"))]),
+            dummy_path("Pkg"),
+        );
+
+        let default = DefineContext::default();
+        assert!(!is_imported(
+            &query(block, dctx(&[Attribute::Ifndef(name("FOO"))])),
+            SymbolId(1),
+            name("A"),
+            &default,
+        ));
+    }
+
+    #[test]
+    fn is_imported_follows_a_generic_instance_to_its_base() {
+        clear();
+        let prj = intern_child(ScopeId(0), name("prj"), ScopeKind::Project);
+        let inst = register_generic_instance(prj, name("Mod"), name("__Mod__8"));
+        let base = intern_child(prj, name("Mod"), ScopeKind::Module);
+        add_import(
+            base,
+            name("A"),
+            SymbolId(1),
+            DefineContext::default(),
+            dummy_path("Pkg"),
+        );
+
+        let default = DefineContext::default();
+        assert!(imports_get(inst, name("A")).is_empty());
+        assert!(is_imported(
+            &query(inst, default.clone()),
+            SymbolId(1),
+            name("A"),
+            &default,
+        ));
+    }
+
+    #[test]
+    fn is_imported_follows_a_wildcard_at_the_container() {
+        let (prj, module, block) = module_with_nested_block();
+        let source = intern_child(prj, name("Pkg"), ScopeKind::Package);
+        add_local(source, name("A"), SymbolId(1));
+        add_wildcard(
+            module,
+            source,
+            DefineContext::default(),
+            DefineContext::default(),
+            dummy_path("Pkg"),
+        );
+
+        let default = DefineContext::default();
+        assert!(is_imported(
+            &query(block, dctx(&[Attribute::Ifdef(name("FOO"))])),
+            SymbolId(1),
+            name("A"),
+            &default,
+        ));
+        assert!(!is_imported(
+            &query(block, default.clone()),
+            SymbolId(2),
+            name("A"),
+            &default,
+        ));
     }
 }
