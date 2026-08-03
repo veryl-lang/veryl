@@ -18282,8 +18282,8 @@ fn tb_random_analyze() {
 fn maybe_driver_cross_process_conflict() {
     // A non-const index/select write has an empty definite mask, so the
     // per-bit overlap check missed it: two processes writing dynamic slices of
-    // one variable passed silently, though SV rejects it (VCS ICPD, Verilator
-    // MULTIDRIVEN / BLKANDNBLK) for every process-kind pair.
+    // one variable passed silently, though it is invalid in SV for every
+    // process-kind pair.
     let has_conflict = |code: &str| {
         analyze(code)
             .iter()
@@ -18356,6 +18356,87 @@ fn maybe_driver_cross_process_conflict() {
         always_comb {
             o_w = 0;
             o_w[i_i * 8+:8] = 8'haa;
+        }
+    }
+    "#
+    ));
+
+    // Generate-for processes on distinct array elements stay accepted.
+    assert!(!has_conflict(
+        r#"
+    module ModuleA (
+        clk  : input clock,
+        i_set: input logic,
+        i_idx: input logic<2>,
+    ) {
+        struct Entry {
+            valid: logic,
+            burst: logic<4>,
+        }
+        var entries: Entry [4];
+        for id in 0..4 :EntryArbiter {
+            always_ff (clk) {
+                if i_set {
+                    entries[id].valid = 1;
+                } else {
+                    entries[id].burst[i_idx] = 1;
+                }
+            }
+        }
+    }
+    "#
+    ));
+
+    // Two processes reaching the same array element still conflict.
+    assert!(has_conflict(
+        r#"
+    module ModuleA (
+        clk: input clock,
+        i_i: input logic<2>,
+        i_j: input logic<2>,
+    ) {
+        var entries: logic<4> [4];
+        always_ff (clk) {
+            entries[0][i_i] = 1;
+        }
+        always_ff (clk) {
+            entries[0][i_j] = 1;
+        }
+    }
+    "#
+    ));
+
+    // A const prefix confines the dynamic select to one packed row.
+    assert!(!has_conflict(
+        r#"
+    module ModuleA (
+        clk  : input clock,
+        i_idx: input logic<2>,
+    ) {
+        var buff: logic<4, 4>;
+        for b in 0..4 :BuffLoop {
+            always_ff (clk) {
+                buff[b][i_idx] = 1;
+            }
+        }
+    }
+    "#
+    ));
+
+    // The same packed row written by two processes still conflicts.
+    assert!(has_conflict(
+        r#"
+    module ModuleA (
+        clk: input clock,
+        i_i: input logic<2>,
+        i_j: input logic<2>,
+    ) {
+        var buff: logic<4, 4>;
+        always_ff (clk) {
+            buff[0][i_i] = 1;
+        }
+        always_ff (clk) {
+            buff[0][i_j] = 1;
         }
     }
     "#

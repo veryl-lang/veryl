@@ -44,10 +44,10 @@ pub struct AssignTableEntry {
     pub array: Shape,
     pub affiliation: Affiliation,
     pub maybe: bool,
-    /// A non-const index/select wrote here, so the written position is unknown.
-    pub dynamic_write: bool,
-    /// Set when a full process (module-level declaration) writes this variable.
-    pub process_write: bool,
+    /// Per array element: the bits a non-const index/select may have written.
+    pub dynamic_mask: Vec<BigUint>,
+    /// Per array element: set when a module-level declaration writes it.
+    pub process_write: Vec<bool>,
     pub tokens: Vec<TokenRange>,
 }
 
@@ -62,14 +62,17 @@ impl AssignTableEntry {
     ) -> Self {
         let array = &variable.r#type.array;
         let mut masks = vec![];
+        let mut dynamics = vec![];
 
         let index = array.calc_index(index);
         if let Some(array) = array.total() {
             for i in 0..array {
                 if index == Some(i) {
                     masks.push(mask.clone());
+                    dynamics.push(if dynamic { mask.clone() } else { 0u32.into() });
                 } else {
                     masks.push(0u32.into());
+                    dynamics.push(0u32.into());
                 }
             }
         }
@@ -79,6 +82,7 @@ impl AssignTableEntry {
         } else {
             masks.clone()
         };
+        let elements = masks.len();
         Self {
             mask: masks,
             definite_mask,
@@ -87,8 +91,8 @@ impl AssignTableEntry {
             array: array.to_owned(),
             affiliation: variable.affiliation,
             maybe,
-            dynamic_write: dynamic,
-            process_write: false,
+            process_write: vec![false; elements],
+            dynamic_mask: dynamics,
             tokens: vec![token],
         }
     }
@@ -108,7 +112,9 @@ impl AssignTableEntry {
         if !maybe {
             self.definite_mask[i] |= mask;
         }
-        self.dynamic_write |= dynamic;
+        if dynamic {
+            self.dynamic_mask[i] |= mask;
+        }
         self.maybe |= maybe;
         self.tokens.push(token);
 
@@ -134,8 +140,12 @@ impl AssignTableEntry {
             *val |= &value.definite_mask[i];
         }
         self.maybe |= value.maybe;
-        self.dynamic_write |= value.dynamic_write;
-        self.process_write |= value.process_write;
+        for (i, val) in self.dynamic_mask.iter_mut().enumerate() {
+            *val |= &value.dynamic_mask[i];
+        }
+        for (i, val) in self.process_write.iter_mut().enumerate() {
+            *val |= value.process_write[i];
+        }
     }
 }
 
@@ -324,32 +334,28 @@ impl AssignTable {
         for (key, mut val) in value.table.drain() {
             // SV connects register maybe-only writes and may actually be
             // reads, so they must not count as a driving process.
-            if process_level
-                && (val.dynamic_write || val.definite_mask.iter().any(|m| *m != 0u32.into()))
-            {
-                val.process_write = true;
+            if process_level {
+                for i in 0..val.process_write.len() {
+                    if val.dynamic_mask[i] != 0u32.into() || val.definite_mask[i] != 0u32.into() {
+                        val.process_write[i] = true;
+                    }
+                }
             }
             if let Some(x) = self.table.get_mut(&key) {
                 x.tokens.append(&mut val.tokens);
 
                 if let Some(array) = val.array.total() {
-                    // A dynamic write's position is unprovable, so two processes
-                    // may overlap on it — SV rejects that (VCS ICPD, Verilator
-                    // MULTIDRIVEN / BLKANDNBLK). Static overlaps are caught per-bit
-                    // below.
-                    let multi_process = val.process_write && x.process_write;
-                    let any_dynamic = x.dynamic_write || val.dynamic_write;
-                    if multi_process && any_dynamic && check_conflict {
-                        context.insert_error(AnalyzerError::multiple_assignment(
-                            &x.path.to_string(),
-                            &x.tokens[0],
-                            &x.tokens,
-                        ));
-                    }
                     for i in 0..array {
+                        // A dynamic write's position is unprovable, so it
+                        // conflicts with anything the other process writes in
+                        // the same range, which is invalid in SV.
+                        let multi_process = val.process_write[i] && x.process_write[i];
+                        let dynamic_overlap = &x.dynamic_mask[i] & &val.mask[i] != 0u32.into()
+                            || &val.dynamic_mask[i] & &x.mask[i] != 0u32.into();
                         let definite_overlap =
                             &x.definite_mask[i] & &val.definite_mask[i] != 0u32.into();
-                        if definite_overlap && check_conflict {
+                        if (multi_process && dynamic_overlap || definite_overlap) && check_conflict
+                        {
                             context.insert_error(AnalyzerError::multiple_assignment(
                                 &x.path.to_string(),
                                 &x.tokens[0],
