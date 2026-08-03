@@ -16236,6 +16236,130 @@ fn regression_rev_for_non_additive_step_rejected() {
 }
 
 #[test]
+fn for_step_overflowing_induction_variable_rejected() {
+    // https://github.com/veryl-lang/veryl/issues/3130
+    let mul_repro = r#"
+    module Top (
+        end_bound: input signed logic<64>,
+        hits     : output       logic<32>,
+    ) {
+        always_comb {
+            hits = 0;
+            for _i in 1500000000..end_bound step *= 2 {
+                hits += 1;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(mul_repro);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ForLoopOverflow { .. })),
+        "`*= 2` overflowing the loop variable should be rejected: {errors:?}"
+    );
+
+    let shl_repro = r#"
+    module Top (
+        end_bound: input signed logic<64>,
+        hits     : output       logic<32>,
+    ) {
+        always_comb {
+            hits = 0;
+            for _i in 1073741824..end_bound step <<= 1 {
+                hits += 1;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(shl_repro);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ForLoopOverflow { .. })),
+        "`<<= 1` overflowing the loop variable should be rejected: {errors:?}"
+    );
+
+    let const_bounds = r#"
+    module Top (
+        o: output logic<32>,
+    ) {
+        var sum: logic<32>;
+        always_comb {
+            sum = 0;
+            for i in 1500000000..2000000000 step *= 2 {
+                sum += i;
+            }
+            o = sum;
+        }
+    }
+    "#;
+    let errors = analyze(const_bounds);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ForLoopOverflow { .. })),
+        "const-bounds overflow should be rejected: {errors:?}"
+    );
+}
+
+#[test]
+fn for_step_within_induction_variable_range_accepted() {
+    for range in [
+        "1..10 step *= 2",
+        "0..10 step += 2",
+        "1..1000000 step <<= 1",
+    ] {
+        let code = format!(
+            r#"
+        module Top (
+            o: output logic<32>,
+        ) {{
+            var sum: logic<32>;
+            always_comb {{
+                sum = 0;
+                for i in {range} {{
+                    sum += i;
+                }}
+                o = sum;
+            }}
+        }}
+        "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::ForLoopOverflow { .. })),
+            "`{range}` stays within range and should be accepted: {errors:?}"
+        );
+    }
+
+    let runtime_additive = r#"
+    module Top (
+        n: input  logic<32>,
+        o: output logic<32>,
+    ) {
+        var sum: logic<32>;
+        always_comb {
+            sum = 0;
+            for i in 0..n step += 1 {
+                sum += i;
+            }
+            o = sum;
+        }
+    }
+    "#;
+    let errors = analyze(runtime_additive);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ForLoopOverflow { .. })),
+        "runtime additive loop should be accepted: {errors:?}"
+    );
+}
+
+#[test]
 fn no_panic_on_oversized_based_literal() {
     // Regression: a based literal whose value needs >64 bits while its declared
     // width is <=64 previously panicked in ValueBigUint::to_value_u64
