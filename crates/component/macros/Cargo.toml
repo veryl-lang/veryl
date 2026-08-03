@@ -10,9 +10,9 @@ readme.workspace      = true
 description.workspace = true
 edition.workspace     = true
 
-[package.metadata.release]
-# Block the release if the public API broke without a version bump.
-pre-release-hook = ["cargo", "semver-checks", "check-release", "--package", "veryl-component-macros"]
+# No semver-checks pre-release hook here: a proc-macro crate exposes no
+# library API surface, so cargo-semver-checks has nothing to inspect and
+# exits non-zero, which would abort the release.
 
 [lib]
 proc-macro = true
