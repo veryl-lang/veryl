@@ -4051,11 +4051,67 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
         for (var_path, expr) in &src.inputs {
             let arg_var_id = body.arg_map.get(var_path).unwrap();
 
+            let arg_meta_clone = context.scope().variable_meta.get(arg_var_id).cloned();
+            // Array literals need the formal argument shape before their elements
+            // can be converted into scalar simulator expressions.
+            if let Some(arg_meta) = arg_meta_clone.as_ref()
+                && matches!(expr, air::Expression::ArrayLiteral(..))
+            {
+                let mut expr = expr.clone();
+                let array_exprs = eval_array_literal(
+                    &mut context.scope().analyzer_context,
+                    Some(&arg_meta.r#type.array),
+                    Some(arg_meta.r#type.width()),
+                    &mut expr,
+                )
+                .map_err(|_| SimulatorError::unsupported_description(&src.comptime.token))?
+                .ok_or_else(|| SimulatorError::unsupported_description(&src.comptime.token))?;
+
+                for array_expr in array_exprs {
+                    let arg_index = arg_meta
+                        .r#type
+                        .array
+                        .calc_index(&array_expr.index)
+                        .ok_or_else(|| {
+                            SimulatorError::unsupported_description(&src.comptime.token)
+                        })?;
+                    let select = if array_expr.select.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            array_expr
+                                .to_var_select()
+                                .eval_value(
+                                    &mut context.scope().analyzer_context,
+                                    &arg_meta.r#type,
+                                    false,
+                                )
+                                .ok_or_else(|| {
+                                    SimulatorError::unsupported_description(&src.comptime.token)
+                                })?,
+                        )
+                    };
+                    let mut proto_expr: ProtoExpression = Conv::conv(context, &array_expr.expr)?;
+                    size_fill_literal_rhs(&mut proto_expr, select, None, arg_meta.width);
+                    let arg_element = &arg_meta.elements[arg_index];
+                    result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: arg_element.current,
+                        dst_width: arg_meta.width,
+                        select,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr: proto_expr,
+                        dst_ff_current_offset: 0,
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
+
             // Array argument fed by a bare or constant partial-index
             // variable (`arr` or `arr[0]`): copy per-element. The generic
             // path treats the argument as a scalar and panics at
             // `calc_index().unwrap()` on a whole-array reference.
-            let arg_meta_clone = context.scope().variable_meta.get(arg_var_id).cloned();
             if let Some(arg_meta) = arg_meta_clone.as_ref()
                 && arg_meta.elements.len() > 1
                 && let air::Expression::Term(factor) = expr
