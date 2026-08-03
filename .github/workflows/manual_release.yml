@@ -2,9 +2,18 @@ name: Manual Release
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Package to publish
+        type: choice
+        options:
+          - vsce
+          - highlightjs
+        required: true
 
 jobs:
   vsce:
+    if: inputs.target == 'vsce'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -22,3 +31,26 @@ jobs:
     - run: make publish
       env:
         VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+  highlightjs:
+    if: inputs.target == 'highlightjs'
+    permissions:
+      id-token: write  # Required for OIDC
+      contents: read
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: support/highlightjs
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+    - name: Install Node.js
+      uses: actions/setup-node@v6
+      with:
+        # npm 12 dropped Node 20, so `npm@latest` below needs Node 22 or later.
+        node-version: '22'
+        registry-url: 'https://registry.npmjs.org'
+    # Ensure npm 11.5.1 or later is installed
+    - name: Update npm
+      run: npm install -g npm@latest
+    - run: npm publish
