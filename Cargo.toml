@@ -3,6 +3,7 @@ members = [
     "crates/aligner",
     "crates/analyzer",
     "crates/cache",
+    "crates/causal",
     "crates/component",
     "crates/component/macros",
     "crates/component/sys",
@@ -69,6 +70,7 @@ pprof               = {version = "0.15.0", features = ["flamegraph"]}
 pulldown-cmark      = "0.13.4"
 rand                = {version = "0.10", default-features = false}
 rand_pcg            = "0.10"
+rayon               = "1.12"
 regex               = "1.12.4"
 scnr2               = "0.5.2"
 semver              = {version = "1.0", features = ["serde"]}

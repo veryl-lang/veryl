@@ -16,8 +16,8 @@ use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
     AssignDestination, AssignStatement, CaseStatement, Component, Declaration, Expression, Factor,
-    ForBound, ForRange, ForStatement, FunctionCall, IfStatement, InstDeclaration, Ir, Module,
-    Statement, VarIndex, VarSelect, Variable,
+    ForBound, ForRange, ForStatement, FunctionCall, IfStatement, InstDeclaration, Ir, Module, Op,
+    Statement, SystemFunctionKind, VarIndex, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use crate::value::ValueBigUint;
@@ -25,7 +25,13 @@ use daggy::petgraph::Graph;
 use daggy::petgraph::algo::tarjan_scc;
 use daggy::petgraph::graph::NodeIndex;
 use daggy::petgraph::visit::EdgeRef;
+#[cfg(not(target_family = "wasm"))]
+use rayon::prelude::*;
+use std::collections::BTreeSet;
 use std::collections::VecDeque;
+use veryl_causal::graph::{EdgeKind, IncompleteReason};
+use veryl_causal::procedure::ProcedureSummary;
+use veryl_causal::region::{Region, Span};
 use veryl_parser::resource_table::StrId;
 
 /// `FfTable` / `per_decl_refs` granularity. Bit-precision lives in masks.
@@ -34,6 +40,10 @@ type IdxKey = (VarId, usize);
 /// `(VarId, array_idx, range_idx)`. `range_idx` indexes the variable's
 /// `BitPartition`, so bit-disjoint reads/writes form disjoint nodes.
 type NodeKey = (VarId, usize, usize);
+
+/// Sparse alias node for a dynamically selected region of one object.  This
+/// deliberately occupies no real array element or bit-partition slot.
+const UNKNOWN_REGION_INDEX: usize = usize::MAX;
 
 /// Per `IdxKey`, atomic bit-range masks. Two bits are in the same range
 /// iff they appear in the same set of per-decl masks.
@@ -59,38 +69,77 @@ impl BitPartition {
     }
 }
 
-/// `feedthrough[child_in_id] = { child_out_ids reachable purely combinationally }`.
-/// Port-level only -- the parent keeps bit precision via `BitPartition`.
-#[derive(Clone, Debug, Default)]
-struct ModuleCombSummary {
-    feedthrough: HashMap<VarId, HashSet<VarId>>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ModuleCombDependency {
+    input: Region<VarId>,
+    output: Region<VarId>,
 }
 
+/// Region-preserving combinational feedthrough across one module boundary.
+#[derive(Clone, Debug, Default)]
+struct ModuleCombSummary {
+    dependencies: Vec<ModuleCombDependency>,
+}
+
+/// Compatibility entry point: emit only proven loop diagnostics. Tools which
+/// need to surface analysis coverage must call [`check_detailed`].
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
+    check_detailed(ir).errors
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IncompleteCombAnalysis {
+    pub module: String,
+    pub reasons: BTreeSet<IncompleteReason>,
+}
+
+#[derive(Debug, Default)]
+pub struct CombAnalysisResult {
+    pub errors: Vec<AnalyzerError>,
+    pub incomplete: Vec<IncompleteCombAnalysis>,
+}
+
+/// Run loop detection while retaining uncertainty which must not be promoted
+/// to a hard combinational-loop diagnostic.
+pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
     let mut errors = Vec::new();
+    let mut incomplete = Vec::new();
     let mut summaries: HashMap<StrId, ModuleCombSummary> = HashMap::default();
 
-    let order = topo_order_modules(ir);
+    let (order, recursive_modules) = topo_order_modules(ir);
 
     for &idx in &order {
         if let Component::Module(module) = &ir.components[idx] {
             // Unevaluable generic params -> empty per_decl_refs.
             if module.suppress_unassigned {
+                incomplete.push(IncompleteCombAnalysis {
+                    module: module.name.to_string(),
+                    reasons: [IncompleteReason::UnsupportedSyntax].into(),
+                });
                 continue;
             }
-            let graph = build_module_graph(module, &summaries);
+            let (graph, mut reasons, bit_part) = build_module_graph(module, &summaries);
+            if recursive_modules {
+                reasons.insert(IncompleteReason::RecursiveCall);
+            }
             check_graph(module, &graph, &mut errors);
-            let summary = compute_module_summary(module, &graph);
+            let summary = compute_module_summary(module, &graph, &bit_part);
             summaries.insert(module.name, summary);
+            if !reasons.is_empty() {
+                incomplete.push(IncompleteCombAnalysis {
+                    module: module.name.to_string(),
+                    reasons,
+                });
+            }
         }
     }
 
-    errors
+    CombAnalysisResult { errors, incomplete }
 }
 
 /// Children before parents. Falls back to input order on cycle
 /// (`infinite_recursion` is reported separately).
-fn topo_order_modules(ir: &Ir) -> Vec<usize> {
+fn topo_order_modules(ir: &Ir) -> (Vec<usize>, bool) {
     let mut name_to_idx: HashMap<StrId, usize> = HashMap::default();
     for (i, c) in ir.components.iter().enumerate() {
         if let Component::Module(m) = c {
@@ -141,11 +190,14 @@ fn topo_order_modules(ir: &Ir) -> Vec<usize> {
             .count()
     {
         // Cycle in module graph -- emit imprecise reports anyway.
-        return (0..n)
-            .filter(|i| matches!(ir.components.get(*i), Some(Component::Module(_))))
-            .collect();
+        return (
+            (0..n)
+                .filter(|i| matches!(ir.components.get(*i), Some(Component::Module(_))))
+                .collect(),
+            true,
+        );
     }
-    order
+    (order, false)
 }
 
 fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
@@ -158,12 +210,44 @@ fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
 /// Group bits into atomic ranges by signature: bits with the same set
 /// of containing masks form one range. Bits in zero masks are dropped.
 fn atomic_ranges(masks: &[BigUint], width: usize) -> Vec<BigUint> {
+    // Split only at mask transitions. The previous implementation visited
+    // every declared bit and built a signature BigUint for it, making a sparse
+    // access to a million-bit object take O(width * accesses). Here the work is
+    // O(mask limbs + transitions * accesses), independent of untouched spans.
+    let mut endpoints = BTreeSet::new();
+    endpoints.insert(0usize);
+    endpoints.insert(width);
+    for mask in masks {
+        let digits = mask.iter_u64_digits().collect::<Vec<_>>();
+        let mut previous_bit = false;
+        for word_index in 0..=digits.len() {
+            let word = digits.get(word_index).copied().unwrap_or(0);
+            let shifted = word.wrapping_shl(1) | u64::from(previous_bit);
+            let mut transitions = word ^ shifted;
+            while transitions != 0 {
+                let bit = transitions.trailing_zeros() as usize;
+                let endpoint = word_index.saturating_mul(64).saturating_add(bit);
+                if endpoint <= width {
+                    endpoints.insert(endpoint);
+                }
+                transitions &= transitions - 1;
+            }
+            previous_bit = word >> 63 != 0;
+        }
+    }
+
     let mut by_sig: HashMap<BigUint, BigUint> = HashMap::default();
     let one = BigUint::from(1u32);
-    for b in 0..width {
+    let endpoints = endpoints.into_iter().collect::<Vec<_>>();
+    for window in endpoints.windows(2) {
+        let start = window[0];
+        let end = window[1];
+        if start >= end {
+            continue;
+        }
         let mut sig = BigUint::default();
         for (i, m) in masks.iter().enumerate() {
-            if m.bit(b as u64) {
+            if m.bit(start as u64) {
                 sig |= &one << i;
             }
         }
@@ -171,7 +255,7 @@ fn atomic_ranges(masks: &[BigUint], width: usize) -> Vec<BigUint> {
             continue;
         }
         let entry = by_sig.entry(sig).or_default();
-        *entry |= &one << b;
+        *entry |= ValueBigUint::gen_mask_range(end - 1, start);
     }
     let mut ret: Vec<BigUint> = by_sig.into_values().collect();
     // Stable order by lowest set bit so NodeKey range_idx is deterministic.
@@ -192,7 +276,11 @@ fn oversized_array(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
         .is_some_and(|n| n > OVERSIZED_ARRAY)
 }
 
-fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
+fn build_bit_partition(
+    module: &Module,
+    ctx: &mut Context,
+    memory_ssa_regions: &[Region<VarId>],
+) -> BitPartition {
     let mut masks: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
 
     // Intra-module reads / writes captured during eval_assign.
@@ -259,6 +347,15 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
         }
     }
 
+    // MemorySSA can discover finer positional boundaries than the legacy
+    // read/write masks.  A shifted copy, for example, propagates every
+    // observed endpoint through the copy relation.  Feed those sparse spans
+    // back into the shared partition so distinct causal atoms do not collapse
+    // into a spurious self-edge.
+    for &region in memory_ssa_regions {
+        collect_region_mask(region, module, &mut masks);
+    }
+
     let mut ranges: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
     for (key, ms) in masks {
         let width = module
@@ -273,6 +370,38 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
     }
 
     BitPartition { ranges }
+}
+
+fn collect_region_mask(
+    region: Region<VarId>,
+    module: &Module,
+    masks: &mut HashMap<(VarId, usize), Vec<BigUint>>,
+) {
+    let Region::Exact { object, span } = region else {
+        return;
+    };
+    let Some(width) = module
+        .variables
+        .get(&object)
+        .and_then(Variable::total_width)
+    else {
+        return;
+    };
+    let Some(end) = span.end() else {
+        return;
+    };
+    let mut cursor = span.start;
+    while cursor < end {
+        let element = cursor / width;
+        let bit_start = cursor % width;
+        let element_end = end.min((element + 1).saturating_mul(width));
+        let bit_end = element_end - element * width;
+        masks
+            .entry((object, element))
+            .or_default()
+            .push(ValueBigUint::gen_mask_range(bit_end - 1, bit_start));
+        cursor = element_end;
+    }
 }
 
 fn collect_expr_masks(
@@ -350,19 +479,84 @@ fn eval_dst_mask(
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<StrId, ModuleCombSummary>,
-) -> Graph<NodeKey, ()> {
+) -> (Graph<NodeKey, ()>, BTreeSet<IncompleteReason>, BitPartition) {
     let ff_table = &module.ff_table;
     let union_writes = compute_union_writes(&module.per_decl_refs);
     let writes_per_decl = compute_writes_per_decl(&module.per_decl_refs);
     let undom_per_decl = compute_undominated_per_decl(module);
 
+    // Procedural combinational declarations use statement-ordered region
+    // MemorySSA. Keep instance declarations on the existing bottom-up module
+    // summary path until the same region vocabulary crosses module boundaries.
+    let analyze_declaration = |declaration: &Declaration| match declaration {
+        Declaration::Comb(comb) => Some(crate::comb_memory_ssa::analyze(module, comb)),
+        _ => None,
+    };
+    #[cfg(not(target_family = "wasm"))]
+    let procedure_summaries = module
+        .declarations
+        .par_iter()
+        .filter_map(analyze_declaration)
+        .collect::<Vec<_>>();
+
+    let mut partition_regions = procedure_summaries
+        .iter()
+        .filter_map(|result| result.as_ref().ok())
+        .flat_map(|summary| &summary.dependencies)
+        .flat_map(|dependency| [dependency.input, dependency.output])
+        .collect::<Vec<_>>();
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.functions = module.functions.clone();
-    let bit_part = build_bit_partition(module, &mut ctx);
+    partition_regions.extend(collect_instance_summary_regions(
+        module, summaries, &mut ctx,
+    ));
+    let bit_part = build_bit_partition(module, &mut ctx, &partition_regions);
 
     let mut graph: Graph<NodeKey, ()> = Graph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
+    let mut incomplete = BTreeSet::new();
+
+    if module
+        .variables
+        .values()
+        .any(|variable| matches!(variable.kind, crate::ir::VarKind::Inout))
+    {
+        incomplete.insert(IncompleteReason::InoutPort);
+    }
+
+    for declaration in &module.declarations {
+        match declaration {
+            Declaration::External(_) => {
+                incomplete.insert(IncompleteReason::ExternalComponent);
+            }
+            Declaration::Unsupported(_) => {
+                incomplete.insert(IncompleteReason::UnsupportedSyntax);
+            }
+            _ => {}
+        }
+    }
+    #[cfg(target_family = "wasm")]
+    let procedure_summaries = module
+        .declarations
+        .iter()
+        .filter_map(analyze_declaration)
+        .collect::<Vec<_>>();
+    for result in &procedure_summaries {
+        match result {
+            Ok(summary) => {
+                incomplete.extend(summary.incomplete.iter().copied());
+                add_memory_ssa_edges(module, summary, &bit_part, &mut graph, &mut node_map);
+            }
+            Err(error) => {
+                incomplete.insert(IncompleteReason::UnsupportedSyntax);
+                log::debug!(
+                    "failed to build comb MemorySSA for {}: {error}",
+                    module.name
+                );
+            }
+        }
+    }
 
     for ((src_id, src_idx), entry) in &ff_table.table {
         if entry.is_ff {
@@ -379,6 +573,12 @@ fn build_module_graph(
 
         for (reader_decl, assign_target, src_read_mask, from_ff) in &entry.refered {
             if *from_ff {
+                continue;
+            }
+            if matches!(
+                module.declarations.get(*reader_decl),
+                Some(Declaration::Comb(_))
+            ) {
                 continue;
             }
             // `decl_read_mask == 0` also filters out reads gathered by
@@ -507,6 +707,13 @@ fn build_module_graph(
     for inst in walk_insts(module) {
         match inst.component.as_ref() {
             Component::Module(child) => {
+                if child
+                    .variables
+                    .values()
+                    .any(|variable| matches!(variable.kind, crate::ir::VarKind::Inout))
+                {
+                    incomplete.insert(IncompleteReason::InoutPort);
+                }
                 let Some(summary) = summaries.get(&child.name) else {
                     continue;
                 };
@@ -518,17 +725,149 @@ fn build_module_graph(
                     &mut graph,
                     &mut node_map,
                     &module.variables,
+                    &mut incomplete,
                     &mut ctx,
                 );
             }
             // SV black box: under-detect.
-            Component::SystemVerilog(_) => {}
+            Component::SystemVerilog(_) => {
+                incomplete.insert(IncompleteReason::ExternalComponent);
+            }
             // Interface signals are already lifted into the parent.
             Component::Interface(_) => {}
         }
     }
 
-    graph
+    (graph, incomplete, bit_part)
+}
+
+fn add_memory_ssa_edges(
+    module: &Module,
+    summary: &ProcedureSummary<VarId>,
+    bit_part: &BitPartition,
+    graph: &mut Graph<NodeKey, ()>,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+) {
+    // Unknown control/effects invalidate a whole procedure. Dynamic regions
+    // are narrower: they invalidate only their owning objects, so a dynamic
+    // memory write cannot hide an unrelated scalar loop.
+    if summary.unknown_all
+        || summary
+            .incomplete
+            .iter()
+            .any(|reason| *reason != IncompleteReason::DynamicRegion)
+    {
+        return;
+    }
+    for dependency in &summary.dependencies {
+        if dependency.kind == EdgeKind::Unknown {
+            continue;
+        }
+        let sources = region_node_keys(dependency.input, &module.variables, bit_part);
+        let destinations = region_node_keys(dependency.output, &module.variables, bit_part);
+        for source in &sources {
+            if !is_module_scope_var(source.0, &module.variables) {
+                continue;
+            }
+            for destination in &destinations {
+                if !is_module_scope_var(destination.0, &module.variables) {
+                    continue;
+                }
+                let source = ensure_node(graph, node_map, *source);
+                let destination = ensure_node(graph, node_map, *destination);
+                graph.add_edge(source, destination, ());
+            }
+        }
+    }
+}
+
+/// Convert the MemorySSA engine's flattened, half-open bit region back to the
+/// legacy graph's `(array element, bit partition)` coordinates. The loop is
+/// proportional to touched elements, never to the declared array size.
+fn region_node_keys(
+    region: Region<VarId>,
+    variables: &HashMap<VarId, Variable>,
+    bit_part: &BitPartition,
+) -> Vec<NodeKey> {
+    let (object, span) = match region {
+        Region::Exact { object, span } => (object, span),
+        Region::UnknownObject(object) => {
+            return vec![(object, UNKNOWN_REGION_INDEX, UNKNOWN_REGION_INDEX)];
+        }
+        Region::UnknownAll => return Vec::new(),
+    };
+    let Some(width) = variables.get(&object).and_then(Variable::total_width) else {
+        return Vec::new();
+    };
+    let Some(end) = span.end() else {
+        return Vec::new();
+    };
+    let mut keys = Vec::new();
+    let mut cursor = span.start;
+    while cursor < end {
+        let element = cursor / width;
+        let bit_start = cursor % width;
+        let element_end = end.min((element + 1).saturating_mul(width));
+        let bit_end = element_end - element * width;
+        let mask = ValueBigUint::gen_mask_range(bit_end - 1, bit_start);
+        keys.extend(
+            bit_part
+                .overlapping((object, element), &mask)
+                .into_iter()
+                .map(|range| (object, element, range)),
+        );
+        cursor = element_end;
+    }
+    keys
+}
+
+fn collect_instance_summary_regions(
+    module: &Module,
+    summaries: &HashMap<StrId, ModuleCombSummary>,
+    ctx: &mut Context,
+) -> Vec<Region<VarId>> {
+    let mut regions = Vec::new();
+    for inst in walk_insts(module) {
+        let Component::Module(child) = inst.component.as_ref() else {
+            continue;
+        };
+        let Some(summary) = summaries.get(&child.name) else {
+            continue;
+        };
+        for dependency in &summary.dependencies {
+            let Region::Exact {
+                object: child_input,
+                span: input_span,
+            } = dependency.input
+            else {
+                continue;
+            };
+            let Region::Exact {
+                object: child_output,
+                span: output_span,
+            } = dependency.output
+            else {
+                continue;
+            };
+            let Some(input) = inst.inputs.iter().find(|input| input.id == child_input) else {
+                continue;
+            };
+            let Some(output) = inst.outputs.iter().find(|output| output.id == child_output) else {
+                continue;
+            };
+            if let Some(mapped) =
+                map_expression_span_to_regions(&input.expr, input_span, &module.variables, ctx)
+            {
+                regions.extend(mapped);
+            }
+            if let Some(mapped) =
+                map_destinations_span_to_regions(&output.dst, output_span, &module.variables, ctx)
+            {
+                regions.extend(mapped);
+            }
+        }
+    }
+    regions
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -540,54 +879,208 @@ fn add_inst_feedthrough_edges(
     graph: &mut Graph<NodeKey, ()>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     parent_vars: &HashMap<VarId, Variable>,
+    incomplete: &mut BTreeSet<IncompleteReason>,
     ctx: &mut Context,
 ) {
-    let mut input_reads: HashMap<VarId, Vec<NodeKey>> = HashMap::default();
-    for inp in &inst.inputs {
-        if !is_pure_input_or_output(inp.id, &child.variables, Direction::Input) {
-            continue;
-        }
-        let mut reads = Vec::new();
-        collect_expr_node_keys(&inp.expr, bit_part, &mut reads, ctx);
-        if !reads.is_empty() {
-            input_reads.insert(inp.id, reads);
-        }
-    }
-
-    let mut output_dsts: HashMap<VarId, Vec<NodeKey>> = HashMap::default();
-    for out in &inst.outputs {
-        if !is_pure_input_or_output(out.id, &child.variables, Direction::Output) {
-            continue;
-        }
-        let mut keys = Vec::new();
-        for dst in &out.dst {
-            collect_dst_node_keys(dst, bit_part, &mut keys, parent_vars, ctx);
-        }
-        if !keys.is_empty() {
-            output_dsts.insert(out.id, keys);
-        }
-    }
-
-    for (child_in_id, out_set) in &summary.feedthrough {
-        let Some(parent_reads) = input_reads.get(child_in_id) else {
+    for dependency in &summary.dependencies {
+        let Region::Exact {
+            object: child_input,
+            span: input_span,
+        } = dependency.input
+        else {
             continue;
         };
-        for child_out_id in out_set {
-            let Some(parent_dsts) = output_dsts.get(child_out_id) else {
-                continue;
-            };
-            for r in parent_reads {
-                for d in parent_dsts {
-                    if r == d {
-                        continue;
+        let Region::Exact {
+            object: child_output,
+            span: output_span,
+        } = dependency.output
+        else {
+            continue;
+        };
+        if !is_pure_input_or_output(child_input, &child.variables, Direction::Input)
+            || !is_pure_input_or_output(child_output, &child.variables, Direction::Output)
+        {
+            continue;
+        }
+        let Some(input) = inst.inputs.iter().find(|input| input.id == child_input) else {
+            continue;
+        };
+        let Some(output) = inst.outputs.iter().find(|output| output.id == child_output) else {
+            continue;
+        };
+        let Some(parent_input_regions) =
+            map_expression_span_to_regions(&input.expr, input_span, parent_vars, ctx)
+        else {
+            incomplete.insert(IncompleteReason::UnsupportedSyntax);
+            continue;
+        };
+        let Some(parent_output_regions) =
+            map_destinations_span_to_regions(&output.dst, output_span, parent_vars, ctx)
+        else {
+            incomplete.insert(IncompleteReason::UnsupportedSyntax);
+            continue;
+        };
+        for input_region in parent_input_regions {
+            for source in region_node_keys(input_region, parent_vars, bit_part) {
+                for &output_region in &parent_output_regions {
+                    for destination in region_node_keys(output_region, parent_vars, bit_part) {
+                        let source = ensure_node(graph, node_map, source);
+                        let destination = ensure_node(graph, node_map, destination);
+                        graph.add_edge(source, destination, ());
                     }
-                    let s = ensure_node(graph, node_map, *r);
-                    let t = ensure_node(graph, node_map, *d);
-                    graph.add_edge(s, t, ());
                 }
             }
         }
     }
+}
+
+fn map_expression_span_to_regions(
+    expression: &Expression,
+    requested: Span,
+    variables: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Option<Vec<Region<VarId>>> {
+    if requested.end()? > expression.comptime().r#type.total_width()? {
+        return None;
+    }
+    match expression {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::Variable(id, index, select, _) => {
+                let Region::Exact { object, span } =
+                    exact_variable_region(*id, index, select, variables, ctx)?
+                else {
+                    return None;
+                };
+                if requested.end()? > span.length {
+                    return None;
+                }
+                Some(vec![Region::Exact {
+                    object,
+                    span: Span {
+                        start: span.start.checked_add(requested.start)?,
+                        length: requested.length,
+                    },
+                }])
+            }
+            Factor::Value(_) => Some(Vec::new()),
+            Factor::SystemFunctionCall(call) => match &call.kind {
+                SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
+                    map_expression_span_to_regions(&input.0, requested, variables, ctx)
+                }
+                _ => None,
+            },
+            _ => None,
+        },
+        Expression::Concatenation(parts, _) => {
+            let mut low = 0usize;
+            let mut mapped = Vec::new();
+            for (part, repeat) in parts.iter().rev() {
+                if repeat.is_some() {
+                    return None;
+                }
+                let width = part.comptime().r#type.total_width()?;
+                let part_span = Span {
+                    start: low,
+                    length: width,
+                };
+                if let Some(overlap) = requested.intersection(part_span) {
+                    mapped.extend(map_expression_span_to_regions(
+                        part,
+                        Span {
+                            start: overlap.start.checked_sub(low)?,
+                            length: overlap.length,
+                        },
+                        variables,
+                        ctx,
+                    )?);
+                }
+                low = low.checked_add(width)?;
+            }
+            Some(mapped)
+        }
+        Expression::Unary(op, operand, _)
+            if matches!(op, Op::BitNot | Op::Add)
+                && operand.comptime().r#type.total_width()?
+                    == expression.comptime().r#type.total_width()? =>
+        {
+            map_expression_span_to_regions(operand, requested, variables, ctx)
+        }
+        Expression::Binary(left, op, right, _)
+            if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor)
+                && left.comptime().r#type.total_width()?
+                    == expression.comptime().r#type.total_width()?
+                && right.comptime().r#type.total_width()?
+                    == expression.comptime().r#type.total_width()? =>
+        {
+            let mut mapped = map_expression_span_to_regions(left, requested, variables, ctx)?;
+            mapped.extend(map_expression_span_to_regions(
+                right, requested, variables, ctx,
+            )?);
+            Some(mapped)
+        }
+        _ => None,
+    }
+}
+
+fn map_destinations_span_to_regions(
+    destinations: &[AssignDestination],
+    requested: Span,
+    variables: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Option<Vec<Region<VarId>>> {
+    let mut low = 0usize;
+    let mut mapped = Vec::new();
+    for destination in destinations.iter().rev() {
+        let Region::Exact { object, span } = exact_variable_region(
+            destination.id,
+            &destination.index,
+            &destination.select,
+            variables,
+            ctx,
+        )?
+        else {
+            return None;
+        };
+        let destination_span = Span {
+            start: low,
+            length: span.length,
+        };
+        if let Some(overlap) = requested.intersection(destination_span) {
+            mapped.push(Region::Exact {
+                object,
+                span: Span {
+                    start: span.start.checked_add(overlap.start.checked_sub(low)?)?,
+                    length: overlap.length,
+                },
+            });
+        }
+        low = low.checked_add(span.length)?;
+    }
+    (requested.end()? <= low).then_some(mapped)
+}
+
+fn exact_variable_region(
+    id: VarId,
+    index: &VarIndex,
+    select: &VarSelect,
+    variables: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Option<Region<VarId>> {
+    if !index.is_const() || !select.is_const_with_range() {
+        return None;
+    }
+    let variable = variables.get(&id)?;
+    let width = variable.total_width()?;
+    let index_path = index.eval_value(ctx)?;
+    let array_index = variable.r#type.array.calc_index(&index_path)?;
+    let (high, low) = select.eval_value(ctx, &variable.r#type, false)?;
+    Some(Region::Exact {
+        object: id,
+        span: Span {
+            start: array_index.checked_mul(width)?.checked_add(low)?,
+            length: high.checked_sub(low)?.checked_add(1)?,
+        },
+    })
 }
 
 fn is_pure_input_or_output(id: VarId, vars: &HashMap<VarId, Variable>, want: Direction) -> bool {
@@ -599,77 +1092,6 @@ fn is_pure_input_or_output(id: VarId, vars: &HashMap<VarId, Variable>, want: Dir
         _ => return false,
     };
     actual == want
-}
-
-fn collect_expr_node_keys(
-    expr: &Expression,
-    bit_part: &BitPartition,
-    out: &mut Vec<NodeKey>,
-    ctx: &mut Context,
-) {
-    match expr {
-        Expression::Term(t) => collect_factor_node_keys(t, bit_part, out, ctx),
-        Expression::Unary(_, e, _) => collect_expr_node_keys(e, bit_part, out, ctx),
-        Expression::Binary(a, _, b, _) => {
-            collect_expr_node_keys(a, bit_part, out, ctx);
-            collect_expr_node_keys(b, bit_part, out, ctx);
-        }
-        Expression::Ternary(a, b, c, _) => {
-            collect_expr_node_keys(a, bit_part, out, ctx);
-            collect_expr_node_keys(b, bit_part, out, ctx);
-            collect_expr_node_keys(c, bit_part, out, ctx);
-        }
-        Expression::Concatenation(parts, _) => {
-            for (a, b) in parts {
-                collect_expr_node_keys(a, bit_part, out, ctx);
-                if let Some(b) = b {
-                    collect_expr_node_keys(b, bit_part, out, ctx);
-                }
-            }
-        }
-        Expression::StructConstructor(_, fields, _) => {
-            for (_, e) in fields {
-                collect_expr_node_keys(e, bit_part, out, ctx);
-            }
-        }
-        Expression::ArrayLiteral(_, _) => {}
-    }
-}
-
-fn collect_factor_node_keys(
-    factor: &Factor,
-    bit_part: &BitPartition,
-    out: &mut Vec<NodeKey>,
-    ctx: &mut Context,
-) {
-    match factor {
-        Factor::Variable(id, index, select, _) => {
-            for (idx, mask) in var_reads(*id, index, select, ctx) {
-                for r in bit_part.overlapping((*id, idx), &mask) {
-                    out.push((*id, idx, r));
-                }
-            }
-        }
-        Factor::FunctionCall(_) | Factor::SystemFunctionCall(_) => {
-            // No caller LHS at an inst input -- under-detect.
-        }
-        _ => {}
-    }
-}
-
-fn collect_dst_node_keys(
-    dst: &AssignDestination,
-    bit_part: &BitPartition,
-    out: &mut Vec<NodeKey>,
-    parent_vars: &HashMap<VarId, Variable>,
-    ctx: &mut Context,
-) {
-    let Some((idx, mask)) = eval_dst_mask(dst, parent_vars, ctx) else {
-        return;
-    };
-    for r in bit_part.overlapping((dst.id, idx), &mask) {
-        out.push((dst.id, idx, r));
-    }
 }
 
 fn check_graph(module: &Module, graph: &Graph<NodeKey, ()>, errors: &mut Vec<AnalyzerError>) {
@@ -807,7 +1229,11 @@ fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool 
     }
 }
 
-fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> ModuleCombSummary {
+fn compute_module_summary(
+    module: &Module,
+    graph: &Graph<NodeKey, ()>,
+    bit_part: &BitPartition,
+) -> ModuleCombSummary {
     use crate::ir::VarKind;
 
     let mut input_ids: HashSet<VarId> = HashSet::default();
@@ -824,7 +1250,7 @@ fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> Module
         }
     }
 
-    let mut feedthrough: HashMap<VarId, HashSet<VarId>> = HashMap::default();
+    let mut dependencies = BTreeSet::new();
     let mut visited: HashSet<NodeIndex> = HashSet::default();
     let mut stack: Vec<NodeIndex> = Vec::new();
     for ni in graph.node_indices() {
@@ -841,14 +1267,83 @@ fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> Module
             }
             let nk = graph[n];
             if output_ids.contains(&nk.0) {
-                feedthrough.entry(key.0).or_default().insert(nk.0);
+                for input in node_key_regions(key, module, bit_part) {
+                    for output in node_key_regions(nk, module, bit_part) {
+                        dependencies.insert(ModuleCombDependency { input, output });
+                    }
+                }
             }
             for e in graph.edges(n) {
                 stack.push(e.target());
             }
         }
     }
-    ModuleCombSummary { feedthrough }
+    ModuleCombSummary {
+        dependencies: dependencies.into_iter().collect(),
+    }
+}
+
+fn node_key_regions(key: NodeKey, module: &Module, bit_part: &BitPartition) -> Vec<Region<VarId>> {
+    if key.1 == UNKNOWN_REGION_INDEX || key.2 == UNKNOWN_REGION_INDEX {
+        return Vec::new();
+    }
+    let Some(width) = module.variables.get(&key.0).and_then(Variable::total_width) else {
+        return Vec::new();
+    };
+    let Some(mask) = bit_part.ranges_of((key.0, key.1)).get(key.2) else {
+        return Vec::new();
+    };
+    mask_spans(mask, width)
+        .into_iter()
+        .filter_map(|span| {
+            let start = key.1.checked_mul(width)?.checked_add(span.start)?;
+            Some(Region::Exact {
+                object: key.0,
+                span: Span {
+                    start,
+                    length: span.length,
+                },
+            })
+        })
+        .collect()
+}
+
+fn mask_spans(mask: &BigUint, width: usize) -> Vec<Span> {
+    let digits = mask.iter_u64_digits().collect::<Vec<_>>();
+    let mut spans = Vec::new();
+    let mut start = None;
+    for word_index in 0..=digits.len() {
+        let word = digits.get(word_index).copied().unwrap_or(0);
+        let previous_bit = word_index
+            .checked_sub(1)
+            .and_then(|index| digits.get(index))
+            .is_some_and(|word| word >> 63 != 0);
+        let mut transitions = word ^ (word.wrapping_shl(1) | u64::from(previous_bit));
+        while transitions != 0 {
+            let bit = transitions.trailing_zeros() as usize;
+            let point = word_index.saturating_mul(64).saturating_add(bit).min(width);
+            if mask.bit(point as u64) {
+                start = Some(point);
+            } else if let Some(span_start) = start.take()
+                && span_start < point
+            {
+                spans.push(Span {
+                    start: span_start,
+                    length: point - span_start,
+                });
+            }
+            transitions &= transitions - 1;
+        }
+    }
+    if let Some(span_start) = start
+        && span_start < width
+    {
+        spans.push(Span {
+            start: span_start,
+            length: width - span_start,
+        });
+    }
+    spans
 }
 
 // Statement-level dominance analysis.
@@ -1139,6 +1634,9 @@ fn dst_writes(dst: &AssignDestination, ctx: &mut Context) -> Vec<(usize, BigUint
 
     let mut out = Vec::new();
     if let Some((beg, end)) = range {
+        if end.saturating_sub(beg) > OVERSIZED_ARRAY {
+            return out;
+        }
         for i in beg..=end {
             out.push((i, mask.clone()));
         }
@@ -1168,7 +1666,63 @@ fn var_reads(
     {
         return vec![(flat, mask)];
     }
-    // Dynamic index: conservatively treat every element as read.
+    // Legacy dominance bridge only: exact comb dependencies are handled by
+    // region MemorySSA. Never expand a dynamic access to a huge array here.
     let total = variable.r#type.total_array().unwrap_or(1);
+    if total > OVERSIZED_ARRAY {
+        return Vec::new();
+    }
     (0..total).map(|i| (i, mask.clone())).collect()
+}
+
+#[cfg(test)]
+mod memory_ssa_tests {
+    use super::*;
+
+    #[test]
+    fn atomic_ranges_split_at_sparse_mask_transitions() {
+        let width = 1_000_000;
+        let low = ValueBigUint::gen_mask_range(15, 8);
+        let high = ValueBigUint::gen_mask_range(width - 9, width - 16);
+        let ranges = atomic_ranges(&[low.clone(), high.clone()], width);
+        assert_eq!(ranges.len(), 2);
+        assert!(ranges.contains(&low));
+        assert!(ranges.contains(&high));
+    }
+
+    #[test]
+    fn atomic_ranges_preserve_shared_and_disjoint_signatures() {
+        let first = ValueBigUint::gen_mask_range(127, 0);
+        let second = ValueBigUint::gen_mask_range(191, 64);
+        let ranges = atomic_ranges(&[first, second], 192);
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(ranges[0], ValueBigUint::gen_mask_range(63, 0));
+        assert_eq!(ranges[1], ValueBigUint::gen_mask_range(127, 64));
+        assert_eq!(ranges[2], ValueBigUint::gen_mask_range(191, 128));
+    }
+
+    #[test]
+    fn module_summary_masks_split_across_word_boundaries() {
+        let mask = ValueBigUint::gen_mask_range(1, 0)
+            | ValueBigUint::gen_mask_range(65, 63)
+            | ValueBigUint::gen_mask_range(127, 127);
+        assert_eq!(
+            mask_spans(&mask, 192),
+            vec![
+                Span {
+                    start: 0,
+                    length: 2,
+                },
+                Span {
+                    start: 63,
+                    length: 3,
+                },
+                Span {
+                    start: 127,
+                    length: 1,
+                },
+            ]
+        );
+        assert!(mask_spans(&BigUint::default(), 192).is_empty());
+    }
 }

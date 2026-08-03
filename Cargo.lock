@@ -6124,6 +6124,7 @@ dependencies = [
  "num-traits",
  "paste",
  "postcard",
+ "rayon",
  "serde",
  "serde_json",
  "similar 3.1.1",
@@ -6134,6 +6135,7 @@ dependencies = [
  "thiserror",
  "toml",
  "vcd",
+ "veryl-causal",
  "veryl-component-sys",
  "veryl-metadata",
  "veryl-parser",
@@ -6151,6 +6153,10 @@ dependencies = [
  "toml",
  "veryl-path",
 ]
+
+[[package]]
+name = "veryl-causal"
+version = "0.20.3"
 
 [[package]]
 name = "veryl-component"

@@ -1,0 +1,9 @@
+[package]
+name                  = "veryl-causal"
+version               = "0.20.3"
+publish               = false
+authors.workspace     = true
+repository.workspace  = true
+license.workspace     = true
+description           = "IR-independent sparse causal and MemorySSA analyses"
+edition.workspace     = true

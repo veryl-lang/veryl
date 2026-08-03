@@ -9654,6 +9654,1688 @@ fn combinational_loop() {
 }
 
 #[test]
+fn combinational_loop_memory_ssa_procedural_order_and_observers() {
+    // An observer inside a writer process does not create a signal-value edge.
+    // In particular, IEEE 1800 always_comb sensitivity excludes variables
+    // written by the process; observing x[1] must not wire it back to x[0].
+    let code = r#"
+    module Top (
+        a: input  logic,
+        o: output logic,
+    ) {
+        var x: logic<2>;
+        var y: logic;
+        always_comb {
+            x[0] = a;
+            $display("x1=%d", x[1]);
+            o = x[1];
+        }
+        assign y = x[0];
+        assign x[1] = y;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "observer-only read formed a false signal cycle: {errors:?}"
+    );
+
+    // A dominating procedural write supplies the later read. MemorySSA must
+    // resolve it to that definition, not LiveOnEntry(x[0]).
+    let code = r#"
+    module Top (
+        a: input  logic,
+        o: output logic,
+    ) {
+        var x: logic<2>;
+        always_comb {
+            x[0] = a;
+            x[1] = x[0];
+            o = x[1];
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "dominating procedural definition was treated as an entry read: {errors:?}"
+    );
+
+    // The converse is real: after x[0] consumes the entry value of x[1], the
+    // later write makes final x[1] depend on x[0], reducing to x[1] = x[1].
+    let code = r#"
+    module Top (
+        o: output logic<2>,
+    ) {
+        always_comb {
+            o[0] = o[1];
+            o[1] = o[0];
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "read-before-write feedback was not diagnosed: {errors:?}"
+    );
+
+    // Function summaries come from the specialized body. Merely evaluating an
+    // unused actual argument is not a signal-value dependency of the return.
+    let code = r#"
+    module Top (
+        o: output logic,
+    ) {
+        function ignore (
+            unused: input logic,
+        ) -> logic {
+            return 0;
+        }
+        var feedback: logic;
+        assign o = ignore(feedback);
+        assign feedback = o;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "unused function argument formed a false loop: {errors:?}"
+    );
+}
+
+#[test]
+fn combinational_loop_memory_ssa_retains_dynamic_region_uncertainty() {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let code = r#"
+    module Top (
+        index: input  logic<2>,
+        data : input  logic,
+        o    : output logic,
+    ) {
+        var values: logic [4];
+        always_comb {
+            values[index] = data;
+            o = values[0];
+        }
+    }
+    "#;
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    let pass1 = analyzer.analyze_pass1("prj", &parser.veryl);
+    assert!(pass1.is_empty(), "{pass1:?}");
+    let post1 = Analyzer::analyze_post_pass1();
+    assert!(post1.is_empty(), "{post1:?}");
+    let pass2 = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    assert!(pass2.is_empty(), "{pass2:?}");
+
+    let result = crate::comb_loop_detect::check_detailed(&ir);
+    assert!(result.errors.is_empty(), "{:#?}", result.errors);
+    assert!(result.incomplete.iter().any(|module| {
+        module.module == "Top"
+            && module
+                .reasons
+                .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)
+    }));
+}
+
+fn assert_comb_loop_for_case(case: &str, code: &str, expected: bool) {
+    let errors = analyze(code);
+    let actual = errors
+        .iter()
+        .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }));
+    assert_eq!(actual, expected, "{case}: {errors:?}");
+}
+
+#[test]
+fn combinational_loop_memory_ssa_celox_regression_corpus() {
+    // Ported from celox/tests/basic.rs::test_always_comb_read_before_write_uses_previous_value.
+    assert_comb_loop_for_case(
+        "read before write observes LiveOnEntry",
+        r#"
+        module Top (
+            a: input  logic,
+            c: output logic,
+        ) {
+            var b: logic;
+            always_comb {
+                c = b;
+                b = a;
+            }
+        }
+        "#,
+        false,
+    );
+
+    // Ported from celox/tests/false_loop.rs::test_cross_bit_dependency_false_loop.
+    assert_comb_loop_for_case(
+        "opposite directions on disjoint bits",
+        r#"
+        module Top (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            var a: logic<2>;
+            var b: logic<2>;
+            always_comb {
+                a[0] = i[0];
+                b[0] = a[0];
+                b[1] = i[1];
+                a[1] = b[1];
+            }
+            assign o = {a[1], b[0]};
+        }
+        "#,
+        false,
+    );
+
+    // Ported from the multi-stage observer cases in celox/tests/comb_observer.rs.
+    assert_comb_loop_for_case(
+        "observer in a writer with a multi-stage assign chain",
+        r#"
+        module Top (
+            a: input  logic,
+            o: output logic,
+        ) {
+            var x: logic<4>;
+            always_comb {
+                x[0] = a;
+                $display("x3=%d", x[3]);
+                o = x[3];
+            }
+            assign x[1] = x[0];
+            assign x[2] = x[1];
+            assign x[3] = x[2];
+        }
+        "#,
+        false,
+    );
+
+    // Ported from the case/if matrix in celox/tests/case_switch.rs.
+    assert_comb_loop_for_case(
+        "case phi with complete definitions",
+        r#"
+        module Top (
+            sel: input  logic<2>,
+            a  : input  logic,
+            b  : input  logic,
+            o  : output logic,
+        ) {
+            var selected: logic;
+            always_comb {
+                case sel {
+                    2'd0: selected = a;
+                    2'd1: selected = b;
+                    default: selected = 0;
+                }
+                o = selected;
+            }
+        }
+        "#,
+        false,
+    );
+
+    // Ported from the indexed-local and partial-write function tests in basic.rs.
+    assert_comb_loop_for_case(
+        "function local partial writes are ordered",
+        r#"
+        module Top (
+            d: input  logic<8>,
+            q: output logic<8>,
+        ) {
+            function swap_nibbles (
+                x: input logic<8>,
+            ) -> logic<8> {
+                var tmp: logic<8>;
+                tmp[7:4] = x[3:0];
+                tmp[3:0] = x[7:4];
+                return tmp;
+            }
+            assign q = swap_nibbles(d);
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "one branch keeps an entry definition live",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            always_comb {
+                if sel {
+                    o = 0;
+                }
+                o = o;
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "case without a covering default keeps entry live",
+        r#"
+        module Top (
+            sel: input  logic<2>,
+            o  : output logic,
+        ) {
+            always_comb {
+                case sel {
+                    2'd0: o = 0;
+                    2'd1: o = 1;
+                }
+                o = o;
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "nested function summary preserves a real cycle",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function inner (x: input logic) -> logic {
+                return x;
+            }
+            function outer (x: input logic) -> logic {
+                return inner(x);
+            }
+            assign o = outer(o);
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
+    assert_comb_loop_for_case(
+        "blocking assignment chain uses the immediately preceding definition",
+        r#"
+        module Top (
+            a: input  logic<8>,
+            o: output logic<8>,
+        ) {
+            var tmp: logic<8>;
+            always_comb {
+                tmp = a;
+                tmp = tmp + 8'd1;
+                tmp = tmp << 1;
+                o = tmp;
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "a later full overwrite kills an earlier partial entry read",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            always_comb {
+                o[0] = o[1];
+                o = 0;
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "a full overwrite dominates a later partial read",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            always_comb {
+                o = 0;
+                o[0] = o[1];
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "both branch arms define the value consumed after the merge",
+        r#"
+        module Top (
+            sel: input  logic,
+            a  : input  logic,
+            b  : input  logic,
+            o  : output logic,
+        ) {
+            var selected: logic;
+            always_comb {
+                if sel {
+                    selected = a;
+                } else {
+                    selected = b;
+                }
+                o = selected;
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "function local copy retains bit precision at the return",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function low (x: input logic<8>) -> logic {
+                var tmp: logic<8>;
+                tmp = x;
+                return tmp[0];
+            }
+            var value: logic<8>;
+            assign o = low(value);
+            assign value[7] = o;
+            assign value[6:0] = 0;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "function branch condition is a control dependency of its return",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function gated (x: input logic<8>) -> logic {
+                if x[7] {
+                    return x[0];
+                } else {
+                    return 0;
+                }
+            }
+            var value: logic<8>;
+            assign o = gated(value);
+            assign value[7] = o;
+            assign value[6:0] = 0;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "function branch ignores a bit absent from value and control flow",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function gated (x: input logic<8>) -> logic {
+                if x[7] {
+                    return x[0];
+                } else {
+                    return 0;
+                }
+            }
+            var value: logic<8>;
+            assign o = gated(value);
+            assign value[6] = o;
+            assign value[7] = 0;
+            assign value[5:0] = 0;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "function output writeback participates in procedural order",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function copy (
+                x: input  logic,
+                y: output logic,
+            ) {
+                y = x;
+            }
+            var tmp: logic;
+            always_comb {
+                copy(o, tmp);
+                o = tmp;
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "static array elements remain distinct regions",
+        r#"
+        module Top (
+            a: input  logic<8>,
+            o: output logic<8>,
+        ) {
+            var mem: logic<8> [2];
+            always_comb {
+                mem[0] = a;
+                mem[1] = mem[0];
+                o = mem[1];
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "read-before-write across static array elements is a real loop",
+        r#"
+        module Top (
+            o: output logic<8>,
+        ) {
+            var mem: logic<8> [2];
+            always_comb {
+                mem[0] = mem[1];
+                mem[1] = mem[0];
+                o = mem[1];
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "static struct members remain distinct regions",
+        r#"
+        module Top (
+            a: input  logic<8>,
+            o: output logic<8>,
+        ) {
+            struct Pair {
+                low : logic<8>,
+                high: logic<8>,
+            }
+            var pair: Pair;
+            always_comb {
+                pair.low = a;
+                pair.high = pair.low;
+                o = pair.high;
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "sparse accesses do not scale with a huge declared width",
+        r#"
+        module Top (
+            a: input  logic,
+            o: output logic,
+        ) {
+            var huge: logic<1000000>;
+            always_comb {
+                huge[0] = a;
+                o = huge[999999];
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "dynamic same-object aliasing uses the whole longest static prefix",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            o    : output logic,
+        ) {
+            var values: logic [4];
+            always_comb {
+                values[index] = o;
+                o = values[0];
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
+    assert_comb_loop_for_case(
+        "function bit-select must not taint a disjoint actual bit",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function bit_zero (x: input logic<8>) -> logic {
+                return x[0];
+            }
+            var value: logic<8>;
+            assign o = bit_zero(value);
+            assign value[0] = 0;
+            assign value[7] = o;
+            assign value[6:1] = 0;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "function bit-select must retain same-bit feedback",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function bit_zero (x: input logic<8>) -> logic {
+                return x[0];
+            }
+            var value: logic<8>;
+            assign o = bit_zero(value);
+            assign value[0] = o;
+            assign value[7:1] = 0;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "function bit-select through concatenation ignores high operands",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function bit_zero (x: input logic<8>) -> logic {
+                return x[0];
+            }
+            var value: logic<7>;
+            assign o = bit_zero({value, 1'b0});
+            assign value[6] = o;
+            assign value[5:0] = 0;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "function bit-select through concatenation retains low operand",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function bit_zero (x: input logic<8>) -> logic {
+                return x[0];
+            }
+            assign o = bit_zero({7'b0, o});
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "function bit-select through an actual slice uses its low bit",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function bit_zero (x: input logic<8>) -> logic {
+                return x[0];
+            }
+            var value: logic<16>;
+            assign o = bit_zero(value[15:8]);
+            assign value[15] = o;
+            assign value[14:0] = 0;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "function bit-select through an actual slice retains its low-bit feedback",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function bit_zero (x: input logic<8>) -> logic {
+                return x[0];
+            }
+            var value: logic<16>;
+            assign o = bit_zero(value[15:8]);
+            assign value[8] = o;
+            assign value[15:9] = 0;
+            assign value[7:0] = 0;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "function region crossing a concatenation boundary retains both operands",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            function middle (x: input logic<8>) -> logic<2> {
+                return x[4:3];
+            }
+            var high: logic<4>;
+            var low : logic<4>;
+            assign o = middle({high, low});
+            assign high[0] = o[1];
+            assign high[3:1] = 0;
+            assign low = 0;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "local copy chains propagate bit identity through every hop",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function bit_two (x: input logic<8>) -> logic {
+                var first : logic<8>;
+                var second: logic<8>;
+                first = x;
+                second = first;
+                return second[2];
+            }
+            var value: logic<8>;
+            assign o = bit_two(value);
+            assign value[7] = o;
+            assign value[6:0] = 0;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "local concatenation does not taint a constant low bit",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function low (x: input logic<7>) -> logic {
+                var tmp: logic<8>;
+                tmp = {x, 1'b0};
+                return tmp[0];
+            }
+            var value: logic<7>;
+            assign o = low(value);
+            assign value[6] = o;
+            assign value[5:0] = 0;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "local concatenation retains a signal low bit",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function low (x: input logic) -> logic {
+                var tmp: logic<8>;
+                tmp = {7'b0, x};
+                return tmp[0];
+            }
+            assign o = low(o);
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "same-width bitwise operators preserve positional provenance",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function low (x: input logic<8>) -> logic {
+                var tmp: logic<8>;
+                tmp = x & 8'b00000001;
+                return tmp[0];
+            }
+            var value: logic<8>;
+            assign o = low(value);
+            assign value[7] = o;
+            assign value[6:0] = 0;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "same-width bitwise operators retain same-bit feedback",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function low (x: input logic<8>) -> logic {
+                var tmp: logic<8>;
+                tmp = x | 8'b00000000;
+                return tmp[0];
+            }
+            var value: logic<8>;
+            assign o = low(value);
+            assign value[0] = o;
+            assign value[7:1] = 0;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "structural dependence is not removed by Boolean cancellation",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function low (x: input logic<8>) -> logic {
+                var tmp: logic<8>;
+                tmp = x & 8'b00000000;
+                return tmp[0];
+            }
+            var value: logic<8>;
+            assign o = low(value);
+            assign value[0] = o;
+            assign value[7:1] = 0;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "reduction operators remain dependent on every operand bit",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function parity (x: input logic<8>) -> logic {
+                return ^x;
+            }
+            var value: logic<8>;
+            assign o = parity(value);
+            assign value[7] = o;
+            assign value[6:0] = 0;
+        }
+        "#,
+        true,
+    );
+
+    // Four-state arithmetic remains whole-expression dependent: an X/Z in a
+    // high operand bit can make the entire arithmetic result unknown. A
+    // future two-state transfer may be narrower, but must not leak into logic.
+    assert_comb_loop_for_case(
+        "four-state arithmetic depends on every operand bit",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function low (x: input logic<8>) -> logic {
+                var tmp: logic<8>;
+                tmp = x + 8'd1;
+                return tmp[0];
+            }
+            var value: logic<8>;
+            assign o = low(value);
+            assign value[7] = o;
+            assign value[6:0] = 0;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "dynamic observer must not hide an unrelated proven loop",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            o    : output logic,
+        ) {
+            var observed: logic<4>;
+            always_comb {
+                $display("observed=%d", observed[index]);
+                o = o;
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "dynamic write to one object must not hide another object's loop",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            data : input  logic,
+            o    : output logic,
+        ) {
+            var memory: logic [4];
+            always_comb {
+                memory[index] = data;
+                o = o;
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "dominating full write kills partial branch feedback",
+        r#"
+        module Top (
+            sel: input  logic,
+            a  : input  logic,
+            o  : output logic<2>,
+        ) {
+            always_comb {
+                o = 0;
+                if sel {
+                    o[0] = a;
+                }
+                o[1] = o[0];
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "phi on one bit cannot manufacture a cross-bit cycle",
+        r#"
+        module Top (
+            sel: input  logic,
+            a  : input  logic,
+            b  : input  logic,
+            o  : output logic<2>,
+        ) {
+            always_comb {
+                o = 0;
+                if sel {
+                    o[0] = a;
+                } else {
+                    o[1] = b;
+                }
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn combinational_loop_memory_ssa_malicious_structural_cases() {
+    assert_comb_loop_for_case(
+        "dynamic same-index read/write is structurally self-dependent",
+        r#"
+        module Top (
+            index: input logic<2>,
+            o    : output logic,
+        ) {
+            var values: logic [4];
+            always_comb {
+                values[index] = values[index];
+                o = values[0];
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "dynamic data write without an old-value read is feed-forward",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            data : input  logic,
+            o    : output logic,
+        ) {
+            var values: logic [4];
+            always_comb {
+                values[index] = data;
+                o = values[0];
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "a value controlling its own dynamic write address closes a loop",
+        r#"
+        module Top (
+            data: input  logic,
+            o   : output logic,
+        ) {
+            var index : logic<2>;
+            var values: logic [4];
+            always_comb {
+                index = {1'b0, values[0]};
+                values[index] = data;
+                o = values[0];
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "identical ternary arms do not cancel structural control dependence",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            assign o = if o ? 1'b0 : 1'b0;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "duplicate xor operands remain structural inputs",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            assign o = o ^ o;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "read-before-write across disjoint nibbles is acyclic without a return path",
+        r#"
+        module Top (
+            o: output logic<8>,
+        ) {
+            always_comb {
+                o[3:0] = o[7:4];
+                o[7:4] = 0;
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "overlapping left shift is a directed acyclic bit chain",
+        r#"
+        module Top (
+            o: output logic<8>,
+        ) {
+            always_comb {
+                o[7:1] = o[6:0];
+                o[0] = 0;
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "adding the wraparound bit turns a shift into a structural rotate loop",
+        r#"
+        module Top (
+            o: output logic<8>,
+        ) {
+            always_comb {
+                o[7:1] = o[6:0];
+                o[0] = o[7];
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "concatenation permutation preserves structural feedback",
+        r#"
+        module Top (
+            o: output logic<8>,
+        ) {
+            always_comb {
+                o = {o[3:0], o[7:4]};
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "complete overwrite after a rotate-shaped dead store kills the loop",
+        r#"
+        module Top (
+            o: output logic<8>,
+        ) {
+            always_comb {
+                o = {o[3:0], o[7:4]};
+                o = 0;
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "identical function branches retain structural condition dependence",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function choose (condition: input logic) -> logic {
+                if condition {
+                    return 0;
+                } else {
+                    return 0;
+                }
+            }
+            assign o = choose(o);
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "observer-only duplicate reads do not manufacture value feedback",
+        r#"
+        module Top (
+            a: input  logic,
+            o: output logic,
+        ) {
+            always_comb {
+                $display("o=%d %d", o, o);
+                o = a;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
+    assert_comb_loop_for_case(
+        "a full write after a dynamic self-store kills the dead feedback",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            o    : output logic<4>,
+        ) {
+            always_comb {
+                o[index] = o[index];
+                o = 0;
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "a dominating full write kills a later dynamic read of the old value",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            o    : output logic<4>,
+        ) {
+            always_comb {
+                o = 0;
+                o[index] = o[index];
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "an unrelated exact bit write cannot kill dynamic feedback",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            o    : output logic<4>,
+        ) {
+            always_comb {
+                o[index] = o[index];
+                o[0] = 0;
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "all branch exits overwriting the object kill earlier dynamic feedback",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            sel  : input  logic,
+            o    : output logic<4>,
+        ) {
+            always_comb {
+                o[index] = o[index];
+                if sel {
+                    o = 0;
+                } else {
+                    o = 1;
+                }
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "one branch preserving a dynamic self-store preserves feedback",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            sel  : input  logic,
+            o    : output logic<4>,
+        ) {
+            always_comb {
+                o[index] = o[index];
+                if sel {
+                    o = 0;
+                }
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "dynamic writes to separate objects do not alias",
+        r#"
+        module Top (
+            left_index : input  logic<2>,
+            right_index: input  logic<2>,
+            data       : input  logic,
+            o          : output logic,
+        ) {
+            var left : logic<4>;
+            var right: logic<4>;
+            always_comb {
+                left[left_index] = data;
+                right[right_index] = left[left_index];
+                o = right[0];
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "two object-local dynamic aliases can close a cross-object cycle",
+        r#"
+        module Top (
+            left_index : input  logic<2>,
+            right_index: input  logic<2>,
+            o          : output logic,
+        ) {
+            var left : logic<4>;
+            var right: logic<4>;
+            always_comb {
+                left[left_index] = right[right_index];
+                right[right_index] = left[left_index];
+                o = right[0];
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "a dominating value write also kills a self-derived dynamic address",
+        r#"
+        module Top (
+            data: input  logic,
+            o   : output logic<4>,
+        ) {
+            always_comb {
+                o = 0;
+                o[o[1:0]] = data;
+            }
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "an undominated value driving its own dynamic address is feedback",
+        r#"
+        module Top (
+            data: input  logic,
+            o   : output logic<4>,
+        ) {
+            always_comb {
+                o[o[1:0]] = data;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn combinational_loop_memory_ssa_malicious_dynamic_domain_cases() {
+    assert_comb_loop_for_case(
+        "a dynamic select aliases its whole longest static prefix",
+        r#"
+        module Top (
+            index: input  logic,
+            o    : output logic<4>,
+        ) {
+            always_comb {
+                o[1:0] = 0;
+                o[index] = o[3];
+                o[3] = o[2];
+                o[2] = 0;
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "a one-bit dynamic domain still aliases both representable bits",
+        r#"
+        module Top (
+            index: input  logic,
+            o    : output logic<4>,
+        ) {
+            always_comb {
+                o[index] = o[1];
+            }
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "a representable dynamic target can close a cycle through a high bit",
+        r#"
+        module Top (
+            index: input  logic,
+            o    : output logic<4>,
+        ) {
+            always_comb {
+                o[index] = o[3];
+                o[3] = o[0];
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn combinational_loop_malicious_module_boundary_cases() {
+    assert_comb_loop_for_case(
+        "a child port summary must not turn bit-disjoint feedthrough into a loop",
+        r#"
+        module Child (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            assign o[0] = i[1];
+            assign o[1] = 0;
+        }
+
+        module Top (
+            o: output logic<2>,
+        ) {
+            var child_i: logic<2>;
+            var child_o: logic<2>;
+            inst u: Child (
+                i: child_i,
+                o: child_o,
+            );
+            assign child_i[0] = child_o[0];
+            assign child_i[1] = 0;
+            assign o = child_o;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "a region-preserving child feedthrough still reports a real loop",
+        r#"
+        module Child (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            assign o[0] = i[0];
+            assign o[1] = 0;
+        }
+
+        module Top (
+            o: output logic<2>,
+        ) {
+            var child_i: logic<2>;
+            var child_o: logic<2>;
+            inst u: Child (
+                i: child_i,
+                o: child_o,
+            );
+            assign child_i[0] = child_o[0];
+            assign child_i[1] = 0;
+            assign o = child_o;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "an opaque SystemVerilog component cannot prove a hard loop",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var into_sv : logic;
+            var from_sv : logic;
+            inst u: $sv::Ext (
+                i_data: into_sv,
+                o_data: from_sv,
+            );
+            assign into_sv = from_sv;
+            assign o = from_sv;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "a top input-to-output path has no inferred environment return edge",
+        r#"
+        module Top (
+            i: input  logic,
+            o: output logic,
+        ) {
+            assign o = i;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "bit precision survives two module boundaries",
+        r#"
+        module Leaf (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            assign o[0] = i[1];
+            assign o[1] = 0;
+        }
+
+        module Middle (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            inst u_leaf: Leaf (
+                i: i,
+                o: o,
+            );
+        }
+
+        module Top (
+            o: output logic<2>,
+        ) {
+            var middle_i: logic<2>;
+            var middle_o: logic<2>;
+            inst u_middle: Middle (
+                i: middle_i,
+                o: middle_o,
+            );
+            assign middle_i[0] = middle_o[0];
+            assign middle_i[1] = 0;
+            assign o = middle_o;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "a real loop survives two region-preserving summaries",
+        r#"
+        module Leaf (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            assign o[0] = i[0];
+            assign o[1] = 0;
+        }
+
+        module Middle (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            inst u_leaf: Leaf (
+                i: i,
+                o: o,
+            );
+        }
+
+        module Top (
+            o: output logic<2>,
+        ) {
+            var middle_i: logic<2>;
+            var middle_o: logic<2>;
+            inst u_middle: Middle (
+                i: middle_i,
+                o: middle_o,
+            );
+            assign middle_i[0] = middle_o[0];
+            assign middle_i[1] = 0;
+            assign o = middle_o;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "a concatenated instance input preserves its low-bit source",
+        r#"
+        module Child (
+            i: input  logic<2>,
+            o: output logic,
+        ) {
+            assign o = i[0];
+        }
+
+        module Top (
+            o: output logic,
+        ) {
+            var high    : logic;
+            var low     : logic;
+            var child_o : logic;
+            inst u: Child (
+                i: {high, low},
+                o: child_o,
+            );
+            assign high = child_o;
+            assign low = 0;
+            assign o = child_o;
+        }
+        "#,
+        false,
+    );
+
+    assert_comb_loop_for_case(
+        "a concatenated instance input does not hide a real low-bit loop",
+        r#"
+        module Child (
+            i: input  logic<2>,
+            o: output logic,
+        ) {
+            assign o = i[0];
+        }
+
+        module Top (
+            o: output logic,
+        ) {
+            var high    : logic;
+            var low     : logic;
+            var child_o : logic;
+            inst u: Child (
+                i: {high, low},
+                o: child_o,
+            );
+            assign high = 0;
+            assign low = child_o;
+            assign o = child_o;
+        }
+        "#,
+        true,
+    );
+
+    assert_comb_loop_for_case(
+        "a static slice connection does not contaminate its sibling bit",
+        r#"
+        module Child (
+            i: input  logic,
+            o: output logic,
+        ) {
+            assign o = i;
+        }
+
+        module Top (
+            o: output logic<2>,
+        ) {
+            var bus: logic<2>;
+            inst u: Child (
+                i: bus[1],
+                o: bus[0],
+            );
+            assign bus[1] = 0;
+            assign o = bus;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
+    fn detailed(code: &str) -> crate::comb_loop_detect::CombAnalysisResult {
+        symbol_table::clear();
+        attribute_table::clear();
+        doc_comment_table::clear();
+
+        let metadata = Metadata::create_default("prj").unwrap();
+        let parser = Parser::parse(code, &"").unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        let mut context = Context::default();
+        let mut ir = Ir::default();
+        let pass1 = analyzer.analyze_pass1("prj", &parser.veryl);
+        assert!(pass1.is_empty(), "{pass1:?}");
+        let post1 = Analyzer::analyze_post_pass1();
+        assert!(post1.is_empty(), "{post1:?}");
+        let pass2 = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+        assert!(pass2.is_empty(), "{pass2:?}");
+        crate::comb_loop_detect::check_detailed(&ir)
+    }
+
+    let external = detailed(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var into_sv : logic;
+            var from_sv : logic;
+            inst u: $sv::Ext (
+                i_data: into_sv,
+                o_data: from_sv,
+            );
+            assign into_sv = from_sv;
+            assign o = from_sv;
+        }
+        "#,
+    );
+    assert!(external.errors.is_empty(), "{:#?}", external.errors);
+    assert!(external.incomplete.iter().any(|module| {
+        module.module == "Top"
+            && module
+                .reasons
+                .contains(&veryl_causal::graph::IncompleteReason::ExternalComponent)
+    }));
+
+    let inout = detailed(
+        r#"
+        module Top (
+            io: inout tri logic,
+        ) {}
+        "#,
+    );
+    assert!(inout.errors.is_empty(), "{:#?}", inout.errors);
+    assert!(inout.incomplete.iter().any(|module| {
+        module.module == "Top"
+            && module
+                .reasons
+                .contains(&veryl_causal::graph::IncompleteReason::InoutPort)
+    }));
+
+    let unsupported_actual = detailed(
+        r#"
+        module Child (
+            i: input  logic,
+            o: output logic,
+        ) {
+            assign o = i;
+        }
+
+        module Top (
+            o: output logic,
+        ) {
+            function passthrough (x: input logic) -> logic {
+                return x;
+            }
+            var feedback: logic;
+            inst u: Child (
+                i: passthrough(feedback),
+                o: feedback,
+            );
+            assign o = feedback;
+        }
+        "#,
+    );
+    assert!(
+        unsupported_actual.errors.is_empty(),
+        "{:#?}",
+        unsupported_actual.errors
+    );
+    assert!(unsupported_actual.incomplete.iter().any(|module| {
+        module.module == "Top"
+            && module
+                .reasons
+                .contains(&veryl_causal::graph::IncompleteReason::UnsupportedSyntax)
+    }));
+}
+
+#[test]
 fn comb_loop_ifstmt_feed_forward_array() {
     // False positive: an always_comb for-loop over cross-coupled arrays that
     // reads index i and writes i+1 (a feed-forward / acyclic CORDIC-style

@@ -34,6 +34,7 @@ toml                = {workspace = true}
 thiserror           = {workspace = true}
 vcd                 = {workspace = true}
 veryl-component-sys = {version = "0.1.1", path = "../component/sys"}
+veryl-causal        = {version = "0.20.3", path = "../causal"}
 veryl-metadata      = {version = "0.20.3", path = "../metadata"}
 veryl-parser        = {version = "0.20.3", path = "../parser"}
 
@@ -41,7 +42,8 @@ veryl-parser        = {version = "0.20.3", path = "../parser"}
 miette          = {workspace = true, features = ["fancy-no-syscall"]}
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-miette          = {workspace = true, features = ["fancy"]}
+miette = {workspace = true, features = ["fancy"]}
+rayon  = {workspace = true}
 
 [dev-dependencies]
 toml = {workspace = true}
