@@ -621,12 +621,26 @@ impl AssignDestination {
                 variable.r#type.array.calc_range(&index)
             };
 
-            // If select is not const, assign to the whole width
+            // A dynamic select can only reach inside the region its const prefix
+            // pins down (`x[const][dyn]`); masking the whole width would merge
+            // writes that provably land on different regions.
             let mask = if !is_select_const {
-                let Some(width) = variable.total_width() else {
-                    return;
-                };
-                ValueBigUint::gen_mask(width)
+                let const_len = self
+                    .select
+                    .0
+                    .iter()
+                    .take_while(|x| x.comptime().is_const)
+                    .count();
+                let prefix = self.select.clone().split(const_len).0;
+                match prefix.eval_value(context, &variable.r#type, false) {
+                    Some((beg, end)) => ValueBigUint::gen_mask_range(beg, end),
+                    None => {
+                        let Some(width) = variable.total_width() else {
+                            return;
+                        };
+                        ValueBigUint::gen_mask(width)
+                    }
+                }
             } else {
                 let Some((beg, end)) = self.select.eval_value(context, &variable.r#type, false)
                 else {
