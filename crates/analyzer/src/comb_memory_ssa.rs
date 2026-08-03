@@ -144,23 +144,18 @@ impl Builder {
         match statement {
             Statement::Assign(assign) => {
                 let mut dependencies = self.read_expression(block, &assign.expr, EdgeKind::Value);
-                let aligned_dependencies = if assign.dst.len() == 1 {
-                    self.aligned_assignment_dependencies(
-                        &assign.expr,
-                        &assign.dst[0],
-                        &mut dependencies,
-                    )
-                    .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
+                let aligned_by_destination = self
+                    .aligned_assignment_dependencies(&assign.expr, &assign.dst, &mut dependencies)
+                    .unwrap_or_else(|| vec![Vec::new(); assign.dst.len()]);
                 dependencies.extend_from_slice(controls);
-                for destination in &assign.dst {
+                for (destination, aligned_dependencies) in
+                    assign.dst.iter().zip(aligned_by_destination)
+                {
                     self.write_destination(
                         block,
                         destination,
                         dependencies.clone(),
-                        aligned_dependencies.clone(),
+                        aligned_dependencies,
                     );
                 }
                 Some(block)
@@ -860,17 +855,27 @@ impl Builder {
     fn aligned_assignment_dependencies(
         &mut self,
         expression: &Expression,
-        destination: &AssignDestination,
+        destinations: &[AssignDestination],
         dependencies: &mut Vec<(usize, EdgeKind)>,
-    ) -> Option<Vec<AlignedDependency>> {
-        let Region::Exact {
-            span: destination_span,
-            ..
-        } = self.variable_region(destination.id, &destination.index, &destination.select)
-        else {
-            return None;
-        };
-        if expression.comptime().r#type.total_width()? != destination_span.length {
+    ) -> Option<Vec<Vec<AlignedDependency>>> {
+        let expression_width = expression.comptime().r#type.total_width()?;
+        let mut high = expression_width;
+        let mut destination_spans = Vec::with_capacity(destinations.len());
+        for destination in destinations {
+            let Region::Exact {
+                span: destination_span,
+                ..
+            } = self.variable_region(destination.id, &destination.index, &destination.select)
+            else {
+                return None;
+            };
+            high = high.checked_sub(destination_span.length)?;
+            destination_spans.push(Span {
+                start: high,
+                length: destination_span.length,
+            });
+        }
+        if high != 0 {
             return None;
         }
 
@@ -880,7 +885,7 @@ impl Builder {
             expression,
             Span {
                 start: 0,
-                length: destination_span.length,
+                length: expression_width,
             },
             dependencies,
             &mut dependency_cursor,
@@ -890,7 +895,29 @@ impl Builder {
             return None;
         }
         dependencies.clear();
-        Some(aligned)
+        let mut ret = vec![Vec::new(); destinations.len()];
+        for dependency in aligned {
+            for (index, destination) in destination_spans.iter().copied().enumerate() {
+                let Some(overlap) = dependency.destination.intersection(destination) else {
+                    continue;
+                };
+                let source_offset = overlap.start.checked_sub(dependency.destination.start)?;
+                let destination_offset = overlap.start.checked_sub(destination.start)?;
+                ret[index].push(AlignedDependency {
+                    read: dependency.read,
+                    kind: dependency.kind,
+                    source: Span {
+                        start: dependency.source.start.checked_add(source_offset)?,
+                        length: overlap.length,
+                    },
+                    destination: Span {
+                        start: destination_offset,
+                        length: overlap.length,
+                    },
+                });
+            }
+        }
+        Some(ret)
     }
 
     fn collect_aligned_expression_dependencies(
@@ -925,6 +952,10 @@ impl Builder {
                     aligned.push(AlignedDependency {
                         read,
                         kind,
+                        source: Span {
+                            start: 0,
+                            length: source_span.length,
+                        },
                         destination,
                     });
                     Some(())
@@ -983,6 +1014,53 @@ impl Builder {
                     dependency_cursor,
                     aligned,
                 )
+            }
+            Expression::Binary(left, op, right, _)
+                if matches!(op, Op::LogicShiftL | Op::ArithShiftL)
+                    && left.comptime().r#type.total_width()? == destination.length =>
+            {
+                let shift = right
+                    .clone()
+                    .eval_value(&mut self.context)?
+                    .to_usize()?
+                    .min(destination.length);
+                let mut shifted = Vec::new();
+                self.collect_aligned_expression_dependencies(
+                    left,
+                    Span {
+                        start: 0,
+                        length: destination.length,
+                    },
+                    dependencies,
+                    dependency_cursor,
+                    &mut shifted,
+                )?;
+                let live_source = Span {
+                    start: 0,
+                    length: destination.length.checked_sub(shift)?,
+                };
+                for dependency in shifted {
+                    let Some(overlap) = dependency.destination.intersection(live_source) else {
+                        continue;
+                    };
+                    let offset = overlap.start.checked_sub(dependency.destination.start)?;
+                    aligned.push(AlignedDependency {
+                        read: dependency.read,
+                        kind: dependency.kind,
+                        source: Span {
+                            start: dependency.source.start.checked_add(offset)?,
+                            length: overlap.length,
+                        },
+                        destination: Span {
+                            start: destination
+                                .start
+                                .checked_add(overlap.start)?
+                                .checked_add(shift)?,
+                            length: overlap.length,
+                        },
+                    });
+                }
+                Some(())
             }
             _ => None,
         }

@@ -10055,7 +10055,6 @@ fn combinational_loop_review_preserves_vector_function_return_bits() {
 }
 
 #[test]
-#[ignore = "known bug: multi-destination assignments lose bit correspondence"]
 fn combinational_loop_review_preserves_concatenated_lhs_bits() {
     // Why this case exists: {o[1], o[0]} = value maps each destination bit to
     // one RHS bit. Broadcasting all RHS dependencies to both destinations
@@ -10074,10 +10073,27 @@ fn combinational_loop_review_preserves_concatenated_lhs_bits() {
         "#,
         false,
     );
+
+    // Why this control exists: o[0] is mapped from value[0], so feeding o[0]
+    // back into value[0] is a real same-bit cycle that aligned lowering must
+    // retain while removing the disjoint-bit false positive above.
+    assert_comb_loop_for_case(
+        "a concatenated assignment retains same-bit feedback",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            var value: logic<2>;
+            assign {o[1], o[0]} = value;
+            assign value[0] = o[0];
+            assign value[1] = 0;
+        }
+        "#,
+        true,
+    );
 }
 
 #[test]
-#[ignore = "known bug: constant shifts lose positional dependencies"]
 fn combinational_loop_review_preserves_constant_shift_positions() {
     // Why this case exists: the low bit of a logical left shift is constant
     // zero. Treating every result bit as dependent on every operand bit
@@ -10096,6 +10112,23 @@ fn combinational_loop_review_preserves_constant_shift_positions() {
         }
         "#,
         false,
+    );
+
+    // Why this control exists: after a one-bit left shift, o[1] is value[0].
+    // Returning o[1] to value[0] is therefore a real positional cycle.
+    assert_comb_loop_for_case(
+        "a constant left shift retains displaced same-bit feedback",
+        r#"
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<4>;
+            assign o = value << 1;
+            assign value[0] = o[1];
+            assign value[3:1] = 0;
+        }
+        "#,
+        true,
     );
 }
 

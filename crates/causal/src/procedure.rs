@@ -22,6 +22,8 @@ pub type WriteId = usize;
 pub struct AlignedDependency {
     pub read: ReadId,
     pub kind: EdgeKind,
+    /// LSB-based span relative to the enclosing read region.
+    pub source: Span,
     /// LSB-based span relative to the enclosing write region.
     pub destination: Span,
 }
@@ -294,24 +296,34 @@ where
                     incomplete.insert(IncompleteReason::DynamicRegion);
                     continue;
                 };
+                if dependency.source.length != dependency.destination.length
+                    || dependency.source.end().is_none()
+                    || dependency.source.end() > Some(source_span.length)
+                    || dependency.destination.end().is_none()
+                    || dependency.destination.end() > Some(destination_span.length)
+                {
+                    return Err(ProcedureError::Model(
+                        "aligned dependency does not fit its source and destination",
+                    ));
+                }
+                let Some(source_start) = source_span.start.checked_add(dependency.source.start)
+                else {
+                    return Err(ProcedureError::Model("aligned transfer overflows usize"));
+                };
                 let Some(destination_start) = destination_span
                     .start
                     .checked_add(dependency.destination.start)
                 else {
                     return Err(ProcedureError::Model("aligned transfer overflows usize"));
                 };
+                let transfer_source = Span {
+                    start: source_start,
+                    length: dependency.source.length,
+                };
                 let transfer_destination = Span {
                     start: destination_start,
                     length: dependency.destination.length,
                 };
-                if dependency.destination.end().is_none()
-                    || dependency.destination.end() > Some(destination_span.length)
-                    || source_span.length != transfer_destination.length
-                {
-                    return Err(ProcedureError::Model(
-                        "aligned dependency does not fit its source and destination",
-                    ));
-                }
                 let output_atom = atoms[atom].span;
                 let Some(overlap) = output_atom.intersection(transfer_destination) else {
                     continue;
@@ -322,7 +334,7 @@ where
                         "write atom begins before its aligned transfer",
                     ));
                 };
-                let Some(mapped_start) = source_span.start.checked_add(relative_start) else {
+                let Some(mapped_start) = transfer_source.start.checked_add(relative_start) else {
                     return Err(ProcedureError::Model("aligned transfer overflows usize"));
                 };
                 let mapped = Span {
@@ -523,27 +535,36 @@ fn build_atoms<O: Copy + Ord>(
             else {
                 continue;
             };
+            if dependency.source.length != dependency.destination.length
+                || dependency.source.end().is_none()
+                || dependency.source.end() > Some(source_span.length)
+                || dependency.destination.end().is_none()
+                || dependency.destination.end() > Some(destination_span.length)
+            {
+                return Err(ProcedureError::Model(
+                    "aligned dependency regions have different lengths",
+                ));
+            }
+            let Some(source_start) = source_span.start.checked_add(dependency.source.start) else {
+                return Err(ProcedureError::Model("aligned transfer overflows usize"));
+            };
             let Some(destination_start) = destination_span
                 .start
                 .checked_add(dependency.destination.start)
             else {
                 return Err(ProcedureError::Model("aligned transfer overflows usize"));
             };
+            let mapped_source = Span {
+                start: source_start,
+                length: dependency.source.length,
+            };
             let mapped_destination = Span {
                 start: destination_start,
                 length: dependency.destination.length,
             };
-            if dependency.destination.end().is_none()
-                || dependency.destination.end() > Some(destination_span.length)
-                || source_span.length != mapped_destination.length
-            {
-                return Err(ProcedureError::Model(
-                    "aligned dependency regions have different lengths",
-                ));
-            }
             transfers.push(Transfer {
                 source_object,
-                source_span,
+                source_span: mapped_source,
                 destination_object,
                 destination_span: mapped_destination,
             });
@@ -778,6 +799,10 @@ mod tests {
                     aligned_dependencies: vec![AlignedDependency {
                         read: 0,
                         kind: EdgeKind::Value,
+                        source: Span {
+                            start: 0,
+                            length: 1 << 30,
+                        },
                         destination: Span {
                             start: 0,
                             length: 1 << 30,
