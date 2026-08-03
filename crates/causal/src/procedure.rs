@@ -255,8 +255,9 @@ where
         let mut incoming = BTreeSet::new();
         for &(read, kind) in dependencies {
             let Some((_, atoms)) = read_atoms.get(&read) else {
-                incomplete.insert(IncompleteReason::UnsupportedSyntax);
-                continue;
+                return Err(ProcedureError::Model(
+                    "write dependency refers to an unknown read",
+                ));
             };
             for &atom in atoms {
                 if let Some(&version) = ssa.uses.get(&Usage::Read { read, atom }) {
@@ -268,8 +269,9 @@ where
             let mut atom_incoming = incoming.clone();
             for dependency in aligned_dependencies {
                 let Some((read_region, source_atoms)) = read_atoms.get(&dependency.read) else {
-                    incomplete.insert(IncompleteReason::UnsupportedSyntax);
-                    continue;
+                    return Err(ProcedureError::Model(
+                        "aligned dependency refers to an unknown read",
+                    ));
                 };
                 let (
                     Region::Exact {
@@ -298,8 +300,9 @@ where
                     || dependency.destination.end() > Some(destination_span.length)
                     || source_span.length != transfer_destination.length
                 {
-                    incomplete.insert(IncompleteReason::UnsupportedSyntax);
-                    continue;
+                    return Err(ProcedureError::Model(
+                        "aligned dependency does not fit its source and destination",
+                    ));
                 }
                 let output_atom = atoms[atom].span;
                 let Some(overlap) = output_atom.intersection(transfer_destination) else {

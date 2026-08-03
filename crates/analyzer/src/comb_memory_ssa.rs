@@ -21,7 +21,23 @@ pub(crate) fn analyze(
     let mut builder = Builder::new(module);
     let exit = builder.lower_statements(&declaration.statements, 0, &[]);
     builder.procedure.exit = exit;
+    if let Some(message) = builder.model_error {
+        return Err(ProcedureError::Model(message));
+    }
     procedure::analyze(&builder.procedure)
+}
+
+/// Map a result-bit span to the module regions which structurally supply it.
+/// `None` requests the caller's conservative, all-operands fallback.
+pub(crate) fn map_expression_span(
+    context: &Context,
+    expression: &Expression,
+    requested: Span,
+) -> Option<Vec<Region<VarId>>> {
+    let mut nested_context = Context::default();
+    nested_context.variables = context.variables.clone();
+    nested_context.functions = context.functions.clone();
+    Builder::with_context(nested_context).map_expression_span_to_actual(expression, requested)
 }
 
 struct Builder {
@@ -30,6 +46,7 @@ struct Builder {
     next_read: usize,
     next_write: usize,
     call_stack: Vec<VarId>,
+    model_error: Option<&'static str>,
 }
 
 impl Builder {
@@ -37,6 +54,10 @@ impl Builder {
         let mut context = Context::default();
         context.variables = module.variables.clone();
         context.functions = module.functions.clone();
+        Self::with_context(context)
+    }
+
+    fn with_context(context: Context) -> Self {
         let object_spans = context
             .variables
             .iter()
@@ -60,6 +81,7 @@ impl Builder {
             next_read: 0,
             next_write: 0,
             call_stack: Vec::new(),
+            model_error: None,
         }
     }
 
@@ -82,6 +104,7 @@ impl Builder {
             next_read: 0,
             next_write: 0,
             call_stack,
+            model_error: None,
         }
     }
 
@@ -252,9 +275,8 @@ impl Builder {
                 block
             }
             Statement::IfReset(_) => {
-                self.procedure
-                    .incomplete
-                    .insert(IncompleteReason::UnsupportedSyntax);
+                self.model_error
+                    .get_or_insert("always_comb contains an always_ff-only if_reset statement");
                 block
             }
             Statement::Break => {
@@ -264,9 +286,9 @@ impl Builder {
                 block
             }
             Statement::Unsupported(_) => {
-                self.procedure
-                    .incomplete
-                    .insert(IncompleteReason::UnsupportedSyntax);
+                self.model_error.get_or_insert(
+                    "always_comb contains a statement rejected during IR conversion",
+                );
                 block
             }
             Statement::Null => block,
@@ -383,9 +405,8 @@ impl Builder {
         });
 
         let Some(function_body) = function_body else {
-            self.procedure
-                .incomplete
-                .insert(IncompleteReason::UnsupportedSyntax);
+            self.model_error
+                .get_or_insert("resolved function call has no instantiated function body");
             return vec![(self.unknown_read(block), EdgeKind::Unknown)];
         };
         for (path, input) in &call.inputs {
@@ -405,17 +426,21 @@ impl Builder {
         let mut nested = self.nested(call.id);
         let exit = nested.lower_statements(&function_body.statements, 0, &[]);
         nested.procedure.exit = exit;
+        if self.model_error.is_none() {
+            self.model_error = nested.model_error;
+        }
+        if self.model_error.is_some() {
+            return vec![(self.unknown_read(block), EdgeKind::Unknown)];
+        }
         let Ok(summary) = procedure::analyze(&nested.procedure) else {
-            self.procedure
-                .incomplete
-                .insert(IncompleteReason::UnsupportedSyntax);
+            self.model_error
+                .get_or_insert("function body produced an invalid causal model");
             return vec![(self.unknown_read(block), EdgeKind::Unknown)];
         };
         if !summary.incomplete.is_empty() {
             self.procedure
                 .incomplete
                 .extend(summary.incomplete.iter().copied());
-            return vec![(self.unknown_read(block), EdgeKind::Unknown)];
         }
 
         let mut sources_by_output = BTreeMap::<VarId, Vec<Dependency<VarId>>>::new();
@@ -437,9 +462,8 @@ impl Builder {
                     continue;
                 };
                 let Some((actual_expression, fallback_reads)) = actual_inputs.get(&formal) else {
-                    self.procedure
-                        .incomplete
-                        .insert(IncompleteReason::UnsupportedSyntax);
+                    self.model_error
+                        .get_or_insert("function dependency refers to an unmapped input argument");
                     continue;
                 };
                 if let Some(actual_regions) =
@@ -461,9 +485,8 @@ impl Builder {
 
         for (path, outputs) in &call.outputs {
             let Some(&formal) = function_body.arg_map.get(path) else {
-                self.procedure
-                    .incomplete
-                    .insert(IncompleteReason::UnsupportedSyntax);
+                self.model_error
+                    .get_or_insert("function call output has no formal argument mapping");
                 continue;
             };
             let mut dependencies = dependencies_by_output
@@ -531,6 +554,18 @@ impl Builder {
                     }])
                 }
                 Factor::Value(_) => Some(Vec::new()),
+                Factor::SystemFunctionCall(call) => match &call.kind {
+                    SystemFunctionKind::Bits(_)
+                    | SystemFunctionKind::Size(_)
+                    | SystemFunctionKind::Clog2(_) => Some(Vec::new()),
+                    SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
+                        self.map_expression_span_to_actual(&input.0, requested)
+                    }
+                    _ => None,
+                },
+                Factor::FunctionCall(call) => {
+                    self.map_function_return_span_to_actual(call, requested)
+                }
                 _ => None,
             },
             Expression::Concatenation(parts, _) => {
@@ -559,8 +594,83 @@ impl Builder {
                 }
                 Some(mapped)
             }
+            Expression::Unary(op, operand, _)
+                if matches!(op, Op::BitNot | Op::Add)
+                    && operand.comptime().r#type.total_width()?
+                        == expression.comptime().r#type.total_width()? =>
+            {
+                self.map_expression_span_to_actual(operand, requested)
+            }
+            Expression::Binary(left, op, right, _)
+                if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor)
+                    && left.comptime().r#type.total_width()?
+                        == expression.comptime().r#type.total_width()?
+                    && right.comptime().r#type.total_width()?
+                        == expression.comptime().r#type.total_width()? =>
+            {
+                let mut mapped = self.map_expression_span_to_actual(left, requested)?;
+                mapped.extend(self.map_expression_span_to_actual(right, requested)?);
+                Some(mapped)
+            }
             _ => None,
         }
+    }
+
+    fn map_function_return_span_to_actual(
+        &mut self,
+        call: &FunctionCall,
+        requested: Span,
+    ) -> Option<Vec<Region<VarId>>> {
+        if self.call_stack.contains(&call.id) {
+            return None;
+        }
+        let function_body = self.context.functions.get(&call.id).and_then(|function| {
+            if let Some(index) = &call.index {
+                function.get_function(index)
+            } else {
+                function.get_function(&[])
+            }
+        })?;
+        let ret = function_body.ret?;
+
+        let mut actual_inputs = BTreeMap::<VarId, &Expression>::new();
+        for (path, input) in &call.inputs {
+            if let Some(&formal) = function_body.arg_map.get(path) {
+                actual_inputs.insert(formal, input);
+            }
+        }
+
+        let mut nested = self.nested(call.id);
+        let exit = nested.lower_statements(&function_body.statements, 0, &[]);
+        nested.procedure.exit = exit;
+        if nested.model_error.is_some() {
+            return None;
+        }
+        let summary = procedure::analyze(&nested.procedure).ok()?;
+        let mut mapped = Vec::new();
+        for dependency in summary.dependencies {
+            let Region::Exact {
+                object: output,
+                span: output_span,
+            } = dependency.output
+            else {
+                continue;
+            };
+            if output != ret || output_span.intersection(requested).is_none() {
+                continue;
+            }
+            if dependency.kind == EdgeKind::Unknown {
+                continue;
+            }
+            let Region::Exact { object: input, .. } = dependency.input else {
+                continue;
+            };
+            let actual = actual_inputs.get(&input)?;
+            mapped.extend(self.map_formal_region_to_actual(actual, dependency.input)?);
+        }
+        mapped.sort_unstable();
+        mapped.dedup();
+        Some(mapped)
     }
 
     fn lower_system_function(

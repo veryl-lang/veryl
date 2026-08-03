@@ -11298,7 +11298,7 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
                 .contains(&veryl_causal::graph::IncompleteReason::InoutPort)
     }));
 
-    let unsupported_actual = detailed(
+    let function_actual_loop = detailed(
         r#"
         module Child (
             i: input  logic,
@@ -11323,16 +11323,93 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
         "#,
     );
     assert!(
-        unsupported_actual.errors.is_empty(),
-        "{:#?}",
-        unsupported_actual.errors
+        function_actual_loop
+            .errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "a function-call actual must not hide a proven child feedthrough loop: {:#?}",
+        function_actual_loop.errors
     );
-    assert!(unsupported_actual.incomplete.iter().any(|module| {
-        module.module == "Top"
-            && module
+    assert!(
+        function_actual_loop.incomplete.iter().all(|module| !module
+            .reasons
+            .contains(&veryl_causal::graph::IncompleteReason::MalformedModel)),
+        "a legal function-call actual is not an unsupported causal model: {:#?}",
+        function_actual_loop.incomplete
+    );
+
+    let ignored_function_argument = detailed(
+        r#"
+        module Child (
+            i: input  logic,
+            o: output logic,
+        ) {
+            assign o = i;
+        }
+
+        module Top (
+            o: output logic,
+        ) {
+            function constant_zero (ignored: input logic) -> logic {
+                return 0;
+            }
+            var feedback: logic;
+            inst u: Child (
+                i: constant_zero(feedback),
+                o: feedback,
+            );
+            assign o = feedback;
+        }
+        "#,
+    );
+    assert!(
+        ignored_function_argument.errors.is_empty(),
+        "an unused function argument must not create a stronger-than-source dependency: {:#?}",
+        ignored_function_argument.errors
+    );
+    assert!(
+        ignored_function_argument
+            .incomplete
+            .iter()
+            .all(|module| !module
                 .reasons
-                .contains(&veryl_causal::graph::IncompleteReason::UnsupportedSyntax)
-    }));
+                .contains(&veryl_causal::graph::IncompleteReason::MalformedModel)),
+        "a legal constant-returning function is fully modeled: {:#?}",
+        ignored_function_argument.incomplete
+    );
+}
+
+#[test]
+fn combinational_loop_incomplete_effect_does_not_erase_proven_edges() {
+    // A loop construct carries explicit coverage provenance until break and
+    // runtime iteration semantics are modeled completely. That uncertainty
+    // must not discard an independent, exact dependency from the same block.
+    let result = analyze(
+        r#"
+        module Top (
+            i: input  logic,
+            o: output logic,
+        ) {
+            var scratch: logic [1];
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for index in 0..1 {
+                    scratch[index] = i;
+                }
+                a = b;
+                b = a;
+                o = b;
+            }
+        }
+        "#,
+    );
+    assert!(
+        result
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "an incomplete effect must not hide an unrelated proven loop: {result:#?}"
+    );
 }
 
 #[test]

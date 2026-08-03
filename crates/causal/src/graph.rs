@@ -20,7 +20,12 @@ pub enum IncompleteReason {
     RecursiveCall,
     RuntimeLoop,
     TimedOrEventEffect,
-    UnsupportedSyntax,
+    /// The frontend produced an IR shape which violates the causal adapter's
+    /// invariants. This is an analyzer defect, not a user-language feature
+    /// which callers may silently leave unsupported.
+    MalformedModel,
+    /// Generic elaboration could not determine the concrete module shape.
+    UnevaluatedGeneric,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

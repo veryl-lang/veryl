@@ -15,9 +15,9 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, AssignStatement, CaseStatement, Component, Declaration, Expression, Factor,
-    ForBound, ForRange, ForStatement, FunctionCall, IfStatement, InstDeclaration, Ir, Module, Op,
-    Statement, SystemFunctionKind, VarIndex, VarSelect, Variable,
+    ArrayLiteralItem, AssignDestination, AssignStatement, CaseStatement, Component, Declaration,
+    Expression, Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement,
+    InstDeclaration, Ir, Module, Op, Statement, SystemFunctionKind, VarIndex, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use crate::value::ValueBigUint;
@@ -114,7 +114,7 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
             if module.suppress_unassigned {
                 incomplete.push(IncompleteCombAnalysis {
                     module: module.name.to_string(),
-                    reasons: [IncompleteReason::UnsupportedSyntax].into(),
+                    reasons: [IncompleteReason::UnevaluatedGeneric].into(),
                 });
                 continue;
             }
@@ -203,7 +203,13 @@ fn topo_order_modules(ir: &Ir) -> (Vec<usize>, bool) {
 fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
     module.declarations.iter().filter_map(|d| match d {
         Declaration::Inst(inst) => Some(inst.as_ref()),
-        _ => None,
+        Declaration::Comb(_)
+        | Declaration::Ff(_)
+        | Declaration::External(_)
+        | Declaration::Initial(_)
+        | Declaration::Final(_)
+        | Declaration::Unsupported(_)
+        | Declaration::Null => None,
     })
 }
 
@@ -490,7 +496,13 @@ fn build_module_graph(
     // summary path until the same region vocabulary crosses module boundaries.
     let analyze_declaration = |declaration: &Declaration| match declaration {
         Declaration::Comb(comb) => Some(crate::comb_memory_ssa::analyze(module, comb)),
-        _ => None,
+        Declaration::Ff(_)
+        | Declaration::Inst(_)
+        | Declaration::External(_)
+        | Declaration::Initial(_)
+        | Declaration::Final(_)
+        | Declaration::Unsupported(_)
+        | Declaration::Null => None,
     };
     #[cfg(not(target_family = "wasm"))]
     let procedure_summaries = module
@@ -531,9 +543,14 @@ fn build_module_graph(
                 incomplete.insert(IncompleteReason::ExternalComponent);
             }
             Declaration::Unsupported(_) => {
-                incomplete.insert(IncompleteReason::UnsupportedSyntax);
+                incomplete.insert(IncompleteReason::MalformedModel);
             }
-            _ => {}
+            Declaration::Comb(_)
+            | Declaration::Ff(_)
+            | Declaration::Inst(_)
+            | Declaration::Initial(_)
+            | Declaration::Final(_)
+            | Declaration::Null => {}
         }
     }
     #[cfg(target_family = "wasm")]
@@ -549,7 +566,7 @@ fn build_module_graph(
                 add_memory_ssa_edges(module, summary, &bit_part, &mut graph, &mut node_map);
             }
             Err(error) => {
-                incomplete.insert(IncompleteReason::UnsupportedSyntax);
+                incomplete.insert(IncompleteReason::MalformedModel);
                 log::debug!(
                     "failed to build comb MemorySSA for {}: {error}",
                     module.name
@@ -748,17 +765,10 @@ fn add_memory_ssa_edges(
     graph: &mut Graph<NodeKey, ()>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
 ) {
-    // Unknown control/effects invalidate a whole procedure. Dynamic regions
-    // are narrower: they invalidate only their owning objects, so a dynamic
-    // memory write cannot hide an unrelated scalar loop.
-    if summary.unknown_all
-        || summary
-            .incomplete
-            .iter()
-            .any(|reason| *reason != IncompleteReason::DynamicRegion)
-    {
-        return;
-    }
+    // Incomplete effects are represented by Unknown edges/regions in the
+    // causal model. They must not erase independent, proven dependencies from
+    // the same procedure: doing so lets one opaque read hide an unrelated
+    // scalar loop. Only proven (non-Unknown) edges become hard diagnostics.
     for dependency in &summary.dependencies {
         if dependency.kind == EdgeKind::Unknown {
             continue;
@@ -792,7 +802,22 @@ fn region_node_keys(
     let (object, span) = match region {
         Region::Exact { object, span } => (object, span),
         Region::UnknownObject(object) => {
-            return vec![(object, UNKNOWN_REGION_INDEX, UNKNOWN_REGION_INDEX)];
+            // Alias every region of this object which is otherwise observable
+            // in the sparse partition. This is proportional to touched
+            // regions, not to the declared array size.
+            let mut keys = bit_part
+                .ranges
+                .keys()
+                .filter(|(candidate, _)| *candidate == object)
+                .flat_map(|&(candidate, element)| {
+                    (0..bit_part.ranges_of((candidate, element)).len())
+                        .map(move |range| (candidate, element, range))
+                })
+                .collect::<Vec<_>>();
+            keys.push((object, UNKNOWN_REGION_INDEX, UNKNOWN_REGION_INDEX));
+            keys.sort_unstable();
+            keys.dedup();
+            return keys;
         }
         Region::UnknownAll => return Vec::new(),
     };
@@ -855,16 +880,18 @@ fn collect_instance_summary_regions(
             let Some(output) = inst.outputs.iter().find(|output| output.id == child_output) else {
                 continue;
             };
-            if let Some(mapped) =
+            regions.extend(
                 map_expression_span_to_regions(&input.expr, input_span, &module.variables, ctx)
-            {
-                regions.extend(mapped);
-            }
-            if let Some(mapped) =
+                    .unwrap_or_else(|| {
+                        collect_expression_regions(&input.expr, &module.variables, ctx)
+                    }),
+            );
+            regions.extend(
                 map_destinations_span_to_regions(&output.dst, output_span, &module.variables, ctx)
-            {
-                regions.extend(mapped);
-            }
+                    .unwrap_or_else(|| {
+                        collect_destination_regions(&output.dst, &module.variables, ctx)
+                    }),
+            );
         }
     }
     regions
@@ -908,18 +935,15 @@ fn add_inst_feedthrough_edges(
         let Some(output) = inst.outputs.iter().find(|output| output.id == child_output) else {
             continue;
         };
-        let Some(parent_input_regions) =
+        if expression_has_hierarchical_reference(&input.expr) {
+            incomplete.insert(IncompleteReason::HierarchicalReference);
+        }
+        let parent_input_regions =
             map_expression_span_to_regions(&input.expr, input_span, parent_vars, ctx)
-        else {
-            incomplete.insert(IncompleteReason::UnsupportedSyntax);
-            continue;
-        };
-        let Some(parent_output_regions) =
+                .unwrap_or_else(|| collect_expression_regions(&input.expr, parent_vars, ctx));
+        let parent_output_regions =
             map_destinations_span_to_regions(&output.dst, output_span, parent_vars, ctx)
-        else {
-            incomplete.insert(IncompleteReason::UnsupportedSyntax);
-            continue;
-        };
+                .unwrap_or_else(|| collect_destination_regions(&output.dst, parent_vars, ctx));
         for input_region in parent_input_regions {
             for source in region_node_keys(input_region, parent_vars, bit_part) {
                 for &output_region in &parent_output_regions {
@@ -934,6 +958,81 @@ fn add_inst_feedthrough_edges(
     }
 }
 
+fn expression_has_hierarchical_reference(expression: &Expression) -> bool {
+    match expression {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::HierVariable(_) => true,
+            Factor::Variable(_, index, select, _) => {
+                index
+                    .0
+                    .iter()
+                    .chain(select.0.iter())
+                    .any(expression_has_hierarchical_reference)
+                    || select
+                        .1
+                        .as_ref()
+                        .is_some_and(|(_, width)| expression_has_hierarchical_reference(width))
+            }
+            Factor::SystemFunctionCall(call) => match &call.kind {
+                SystemFunctionKind::Bits(input)
+                | SystemFunctionKind::Size(input)
+                | SystemFunctionKind::Clog2(input)
+                | SystemFunctionKind::Onehot(input)
+                | SystemFunctionKind::Signed(input)
+                | SystemFunctionKind::Unsigned(input) => {
+                    expression_has_hierarchical_reference(&input.0)
+                }
+                SystemFunctionKind::Readmemh(input, _) => {
+                    expression_has_hierarchical_reference(&input.0)
+                }
+                SystemFunctionKind::Display(inputs) | SystemFunctionKind::Write(inputs) => inputs
+                    .iter()
+                    .any(|input| expression_has_hierarchical_reference(&input.0)),
+                SystemFunctionKind::Assert { cond, args, .. } => {
+                    expression_has_hierarchical_reference(&cond.0)
+                        || args
+                            .iter()
+                            .any(|input| expression_has_hierarchical_reference(&input.0))
+                }
+                SystemFunctionKind::Finish => false,
+            },
+            Factor::FunctionCall(call) => call
+                .inputs
+                .values()
+                .any(expression_has_hierarchical_reference),
+            Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => false,
+        },
+        Expression::Unary(_, operand, _) => expression_has_hierarchical_reference(operand),
+        Expression::Binary(left, _, right, _) => {
+            expression_has_hierarchical_reference(left)
+                || expression_has_hierarchical_reference(right)
+        }
+        Expression::Ternary(condition, left, right, _) => {
+            expression_has_hierarchical_reference(condition)
+                || expression_has_hierarchical_reference(left)
+                || expression_has_hierarchical_reference(right)
+        }
+        Expression::Concatenation(parts, _) => parts.iter().any(|(part, repeat)| {
+            expression_has_hierarchical_reference(part)
+                || repeat
+                    .as_ref()
+                    .is_some_and(expression_has_hierarchical_reference)
+        }),
+        Expression::ArrayLiteral(items, _) => items.iter().any(|item| match item {
+            ArrayLiteralItem::Value(value, repeat) => {
+                expression_has_hierarchical_reference(value)
+                    || repeat
+                        .as_ref()
+                        .is_some_and(|repeat| expression_has_hierarchical_reference(repeat))
+            }
+            ArrayLiteralItem::Defaul(value) => expression_has_hierarchical_reference(value),
+        }),
+        Expression::StructConstructor(_, fields, _) => fields
+            .iter()
+            .any(|(_, value)| expression_has_hierarchical_reference(value)),
+    }
+}
+
 fn map_expression_span_to_regions(
     expression: &Expression,
     requested: Span,
@@ -942,6 +1041,9 @@ fn map_expression_span_to_regions(
 ) -> Option<Vec<Region<VarId>>> {
     if requested.end()? > expression.comptime().r#type.total_width()? {
         return None;
+    }
+    if let Some(mapped) = crate::comb_memory_ssa::map_expression_span(ctx, expression, requested) {
+        return Some(mapped);
     }
     match expression {
         Expression::Term(factor) => match factor.as_ref() {
@@ -1057,6 +1159,152 @@ fn map_destinations_span_to_regions(
         low = low.checked_add(span.length)?;
     }
     (requested.end()? <= low).then_some(mapped)
+}
+
+/// Conservative fallback for expression forms without a positional bit map.
+///
+/// This is deliberately exhaustive over the analyzer IR. A new expression or
+/// factor variant must choose its causal operands here instead of silently
+/// turning a legal instance connection into an unsupported procedure.
+fn collect_expression_regions(
+    expression: &Expression,
+    variables: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Vec<Region<VarId>> {
+    fn collect(
+        expression: &Expression,
+        variables: &HashMap<VarId, Variable>,
+        ctx: &mut Context,
+        regions: &mut Vec<Region<VarId>>,
+    ) {
+        match expression {
+            Expression::Term(factor) => match factor.as_ref() {
+                Factor::Variable(id, index, select, _) => {
+                    for address in index.0.iter().chain(select.0.iter()) {
+                        collect(address, variables, ctx, regions);
+                    }
+                    if let Some((_, width)) = &select.1 {
+                        collect(width, variables, ctx, regions);
+                    }
+                    regions.push(variable_access_region(*id, index, select, variables, ctx));
+                }
+                Factor::SystemFunctionCall(call) => match &call.kind {
+                    SystemFunctionKind::Bits(_)
+                    | SystemFunctionKind::Size(_)
+                    | SystemFunctionKind::Clog2(_)
+                    | SystemFunctionKind::Finish => {}
+                    SystemFunctionKind::Onehot(input)
+                    | SystemFunctionKind::Signed(input)
+                    | SystemFunctionKind::Unsigned(input) => {
+                        collect(&input.0, variables, ctx, regions);
+                    }
+                    SystemFunctionKind::Readmemh(input, output) => {
+                        collect(&input.0, variables, ctx, regions);
+                        regions.extend(collect_destination_regions(&output.0, variables, ctx));
+                    }
+                    SystemFunctionKind::Display(inputs) | SystemFunctionKind::Write(inputs) => {
+                        for input in inputs {
+                            collect(&input.0, variables, ctx, regions);
+                        }
+                    }
+                    SystemFunctionKind::Assert { cond, args, .. } => {
+                        collect(&cond.0, variables, ctx, regions);
+                        for input in args {
+                            collect(&input.0, variables, ctx, regions);
+                        }
+                    }
+                },
+                Factor::FunctionCall(call) => {
+                    // A malformed/recursive function which could not produce
+                    // a positional summary still retains its syntactic input
+                    // dependencies without inventing an unknown object.
+                    for input in call.inputs.values() {
+                        collect(input, variables, ctx, regions);
+                    }
+                }
+                Factor::HierVariable(_)
+                | Factor::Value(_)
+                | Factor::Anonymous(_)
+                | Factor::Unknown(_) => {}
+            },
+            Expression::Unary(_, operand, _) => collect(operand, variables, ctx, regions),
+            Expression::Binary(left, _, right, _) => {
+                collect(left, variables, ctx, regions);
+                collect(right, variables, ctx, regions);
+            }
+            Expression::Ternary(condition, left, right, _) => {
+                collect(condition, variables, ctx, regions);
+                collect(left, variables, ctx, regions);
+                collect(right, variables, ctx, regions);
+            }
+            Expression::Concatenation(parts, _) => {
+                for (part, repeat) in parts {
+                    collect(part, variables, ctx, regions);
+                    if let Some(repeat) = repeat {
+                        collect(repeat, variables, ctx, regions);
+                    }
+                }
+            }
+            Expression::ArrayLiteral(items, _) => {
+                for item in items {
+                    match item {
+                        ArrayLiteralItem::Value(value, repeat) => {
+                            collect(value, variables, ctx, regions);
+                            if let Some(repeat) = repeat {
+                                collect(repeat, variables, ctx, regions);
+                            }
+                        }
+                        ArrayLiteralItem::Defaul(value) => {
+                            collect(value, variables, ctx, regions);
+                        }
+                    }
+                }
+            }
+            Expression::StructConstructor(_, fields, _) => {
+                for (_, value) in fields {
+                    collect(value, variables, ctx, regions);
+                }
+            }
+        }
+    }
+
+    let mut regions = Vec::new();
+    collect(expression, variables, ctx, &mut regions);
+    regions.sort_unstable();
+    regions.dedup();
+    regions
+}
+
+fn collect_destination_regions(
+    destinations: &[AssignDestination],
+    variables: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Vec<Region<VarId>> {
+    let mut regions = destinations
+        .iter()
+        .map(|destination| {
+            variable_access_region(
+                destination.id,
+                &destination.index,
+                &destination.select,
+                variables,
+                ctx,
+            )
+        })
+        .collect::<Vec<_>>();
+    regions.sort_unstable();
+    regions.dedup();
+    regions
+}
+
+fn variable_access_region(
+    id: VarId,
+    index: &VarIndex,
+    select: &VarSelect,
+    variables: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Region<VarId> {
+    exact_variable_region(id, index, select, variables, ctx).unwrap_or(Region::UnknownObject(id))
 }
 
 fn exact_variable_region(
