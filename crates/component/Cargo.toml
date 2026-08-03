@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-component"
-version               = "0.1.0"
+version               = "0.1.1"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -17,5 +17,5 @@ pre-release-hook = ["cargo", "semver-checks", "check-release", "--package", "ver
 [dependencies]
 anyhow                 = {workspace = true}
 smallvec               = {workspace = true}
-veryl-component-macros = {version = "0.1.0", path = "macros"}
-veryl-component-sys    = {version = "0.1.0", path = "sys"}
+veryl-component-macros = {version = "0.1.1", path = "macros"}
+veryl-component-sys    = {version = "0.1.1", path = "sys"}
