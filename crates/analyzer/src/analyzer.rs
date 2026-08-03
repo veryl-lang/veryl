@@ -3,6 +3,7 @@ use crate::attribute_table;
 use crate::comb_loop_detect;
 use crate::conv::{Context, Conv};
 use crate::definition_table;
+use crate::dynamic_for_check;
 use crate::generic_inference_table;
 use crate::handlers::*;
 use crate::ir::{Ir, IrResult};
@@ -266,6 +267,7 @@ impl Analyzer {
 
         ret.append(&mut symbol_table::check_unused_variable());
         ret.append(&mut symbol_table::check_wavedrom());
+        ret.append(&mut dynamic_for_check::check(ir));
         ret.append(&mut comb_loop_detect::check(ir));
 
         ret
