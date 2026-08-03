@@ -9868,6 +9868,239 @@ fn assert_comb_loop_for_case(case: &str, code: &str, expected: bool) {
 }
 
 #[test]
+#[ignore = "known bug: a dynamic suffix currently erases its longest static prefix"]
+fn combinational_loop_review_preserves_longest_static_prefix() {
+    // Why this case exists: IEEE 1800-2023 11.5.3 confines buff[0][idx]
+    // to the statically selected row. Aliasing it with buff[1] rejects legal,
+    // bit-disjoint SystemVerilog and makes the analyzer stronger than the LRM.
+    assert_comb_loop_for_case(
+        "a dynamic suffix aliases only its longest static prefix",
+        r#"
+        module Top (
+            idx: input  logic<2>,
+            src: input  logic,
+            o  : output logic,
+        ) {
+            var buff: logic<4, 4>;
+            always_comb {
+                buff[1] = 0;
+                buff[1][0] = src;
+            }
+            always_comb {
+                buff[0][idx] = buff[1][0];
+                o = buff[0][0];
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "known bug: function summaries do not preserve module-scope reads"]
+fn combinational_loop_review_keeps_function_global_read() {
+    // Why this case exists: IEEE 1800-2023 9.2.2.2.1 includes variables read
+    // by a called function in always_comb. A global capture is not a formal
+    // argument, but it is still a real x -> o dependency and closes this loop.
+    assert_comb_loop_for_case(
+        "a called function retains a captured module-scope read",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var x: logic;
+            function get_x () -> logic {
+                return x;
+            }
+            always_comb {
+                o = get_x();
+            }
+            always_comb {
+                x = o;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "known bug: function summaries do not preserve module-scope writes"]
+fn combinational_loop_review_keeps_function_global_write() {
+    // Why this case exists: IEEE 1800-2023 9.2.2.2 treats a variable written
+    // by a called function as written by the always_comb process. Side effects
+    // on module scope must therefore survive function-summary projection.
+    assert_comb_loop_for_case(
+        "a called function retains a captured module-scope write",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var x: logic;
+            function set_x (
+                a: input logic,
+            ) {
+                x = a;
+            }
+            always_comb {
+                set_x(o);
+            }
+            always_comb {
+                o = x;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "known bug: dynamic output regions disappear from module summaries"]
+fn combinational_loop_review_keeps_dynamic_region_across_modules() {
+    // Why this case exists: an instance port is a SystemVerilog data path, so
+    // a child wildcard output must remain a wildcard through every summary.
+    // For idx == 0 the Top-level feedback path is realizable and structural.
+    assert_comb_loop_for_case(
+        "a dynamic child output preserves feedback across two summaries",
+        r#"
+        module Leaf (
+            i: input  logic,
+            o: output logic,
+        ) {
+            assign o = i;
+        }
+
+        module Middle (
+            i  : input  logic,
+            idx: input  logic,
+            o  : output logic<2>,
+        ) {
+            inst u: Leaf (
+                i: i,
+                o: o[idx],
+            );
+        }
+
+        module Top (
+            idx: input  logic,
+            o  : output logic,
+        ) {
+            var feedback: logic;
+            var bus     : logic<2>;
+            inst u: Middle (
+                i  : feedback,
+                idx: idx,
+                o  : bus,
+            );
+            assign feedback = bus[0];
+            assign o = feedback;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "known bug: break does not terminate the current CFG path"]
+fn combinational_loop_review_drops_unreachable_statements_after_break() {
+    // Why this case exists: IEEE 1800-2023 12.8 makes break jump to the loop
+    // exit. Statements after it are unreachable and cannot prove a hard SCC.
+    assert_comb_loop_for_case(
+        "unreachable statements after break do not form a loop",
+        r#"
+        module Top (
+            n: input  logic<32>,
+            o: output logic,
+        ) {
+            var x: logic;
+            var y: logic;
+            always_comb {
+                for i in 0..n {
+                    break;
+                    x = y;
+                    y = x;
+                }
+                o = 0;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "known bug: vector function returns lose result-bit correspondence"]
+fn combinational_loop_review_preserves_vector_function_return_bits() {
+    // Why this case exists: identity(value)[0] depends only on value[0].
+    // Collapsing a vector return to an object-wide dependency invents the
+    // value[1] -> o[0] -> value[1] cycle rejected by the current analyzer.
+    assert_comb_loop_for_case(
+        "a vector function return preserves bit identity",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            function identity (
+                x: input logic<2>,
+            ) -> logic<2> {
+                return x;
+            }
+            var value: logic<2>;
+            assign o = identity(value);
+            assign value[0] = 0;
+            assign value[1] = o[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "known bug: multi-destination assignments lose bit correspondence"]
+fn combinational_loop_review_preserves_concatenated_lhs_bits() {
+    // Why this case exists: {o[1], o[0]} = value maps each destination bit to
+    // one RHS bit. Broadcasting all RHS dependencies to both destinations
+    // invents a value[1] -> o[0] -> value[1] cycle.
+    assert_comb_loop_for_case(
+        "a concatenated assignment destination preserves bit identity",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            var value: logic<2>;
+            assign {o[1], o[0]} = value;
+            assign value[0] = 0;
+            assign value[1] = o[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "known bug: constant shifts lose positional dependencies"]
+fn combinational_loop_review_preserves_constant_shift_positions() {
+    // Why this case exists: the low bit of a logical left shift is constant
+    // zero. Treating every result bit as dependent on every operand bit
+    // invents a value[1] -> o[0] -> value[1] cycle.
+    assert_comb_loop_for_case(
+        "a constant left shift preserves its zero-filled low bit",
+        r#"
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<4>;
+            assign o = value << 1;
+            assign value[0] = 0;
+            assign value[1] = o[0];
+            assign value[3:2] = 0;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
 fn combinational_loop_memory_ssa_celox_regression_corpus() {
     // Ported from celox/tests/basic.rs::test_always_comb_read_before_write_uses_previous_value.
     assert_comb_loop_for_case(
