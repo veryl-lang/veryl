@@ -19,7 +19,9 @@ pub(crate) fn analyze(
     declaration: &CombDeclaration,
 ) -> Result<ProcedureSummary<VarId>, ProcedureError> {
     let mut builder = Builder::new(module);
-    let exit = builder.lower_statements(&declaration.statements, 0, &[]);
+    let exit = builder
+        .lower_statements(&declaration.statements, 0, &[], None)
+        .unwrap_or(0);
     builder.procedure.exit = exit;
     if let Some(message) = builder.model_error {
         return Err(ProcedureError::Model(message));
@@ -124,11 +126,12 @@ impl Builder {
         statements: &[Statement],
         mut block: usize,
         controls: &[(usize, EdgeKind)],
-    ) -> usize {
+        break_target: Option<usize>,
+    ) -> Option<usize> {
         for statement in statements {
-            block = self.lower_statement(statement, block, controls);
+            block = self.lower_statement(statement, block, controls, break_target)?;
         }
-        block
+        Some(block)
     }
 
     fn lower_statement(
@@ -136,7 +139,8 @@ impl Builder {
         statement: &Statement,
         block: usize,
         controls: &[(usize, EdgeKind)],
-    ) -> usize {
+        break_target: Option<usize>,
+    ) -> Option<usize> {
         match statement {
             Statement::Assign(assign) => {
                 let mut dependencies = self.read_expression(block, &assign.expr, EdgeKind::Value);
@@ -159,7 +163,7 @@ impl Builder {
                         aligned_dependencies.clone(),
                     );
                 }
-                block
+                Some(block)
             }
             Statement::If(statement) => {
                 let condition = self.read_expression(block, &statement.cond, EdgeKind::Control);
@@ -167,16 +171,30 @@ impl Builder {
                 nested_controls.extend(condition);
                 let true_block = self.new_block();
                 let false_block = self.new_block();
-                let join = self.new_block();
                 self.edge(block, true_block);
                 self.edge(block, false_block);
-                let true_exit =
-                    self.lower_statements(&statement.true_side, true_block, &nested_controls);
-                let false_exit =
-                    self.lower_statements(&statement.false_side, false_block, &nested_controls);
-                self.edge(true_exit, join);
-                self.edge(false_exit, join);
-                join
+                let true_exit = self.lower_statements(
+                    &statement.true_side,
+                    true_block,
+                    &nested_controls,
+                    break_target,
+                );
+                let false_exit = self.lower_statements(
+                    &statement.false_side,
+                    false_block,
+                    &nested_controls,
+                    break_target,
+                );
+                let exits = true_exit.into_iter().chain(false_exit).collect::<Vec<_>>();
+                if exits.is_empty() {
+                    None
+                } else {
+                    let join = self.new_block();
+                    for exit in exits {
+                        self.edge(exit, join);
+                    }
+                    Some(join)
+                }
             }
             Statement::Case(statement) => {
                 let mut condition =
@@ -206,19 +224,34 @@ impl Builder {
                 }
                 let mut nested_controls = controls.to_vec();
                 nested_controls.extend(condition);
-                let join = self.new_block();
+                let mut exits = Vec::new();
                 for arm in &statement.arms {
                     let arm_block = self.new_block();
                     self.edge(block, arm_block);
-                    let exit = self.lower_statements(&arm.body, arm_block, &nested_controls);
-                    self.edge(exit, join);
+                    exits.extend(self.lower_statements(
+                        &arm.body,
+                        arm_block,
+                        &nested_controls,
+                        break_target,
+                    ));
                 }
                 let default_block = self.new_block();
                 self.edge(block, default_block);
-                let default_exit =
-                    self.lower_statements(&statement.default, default_block, &nested_controls);
-                self.edge(default_exit, join);
-                join
+                exits.extend(self.lower_statements(
+                    &statement.default,
+                    default_block,
+                    &nested_controls,
+                    break_target,
+                ));
+                if exits.is_empty() {
+                    None
+                } else {
+                    let join = self.new_block();
+                    for exit in exits {
+                        self.edge(exit, join);
+                    }
+                    Some(join)
+                }
             }
             Statement::For(statement) => {
                 self.procedure
@@ -247,17 +280,20 @@ impl Builder {
                 nested_controls.extend(condition);
                 self.edge(header, body);
                 self.edge(header, exit);
-                let body_exit = self.lower_statements(&statement.body, body, &nested_controls);
-                self.edge(body_exit, header);
-                exit
+                if let Some(body_exit) =
+                    self.lower_statements(&statement.body, body, &nested_controls, Some(exit))
+                {
+                    self.edge(body_exit, header);
+                }
+                Some(exit)
             }
             Statement::FunctionCall(call) => {
                 self.lower_function_call(block, call, controls);
-                block
+                Some(block)
             }
             Statement::SystemFunctionCall(call) => {
                 self.lower_system_function(block, call, false);
-                block
+                Some(block)
             }
             Statement::TbMethodCall(call) => {
                 self.procedure
@@ -272,26 +308,32 @@ impl Builder {
                         Vec::new(),
                     );
                 }
-                block
+                Some(block)
             }
             Statement::IfReset(_) => {
                 self.model_error
                     .get_or_insert("always_comb contains an always_ff-only if_reset statement");
-                block
+                Some(block)
             }
             Statement::Break => {
                 self.procedure
                     .incomplete
                     .insert(IncompleteReason::RuntimeLoop);
-                block
+                if let Some(target) = break_target {
+                    self.edge(block, target);
+                } else {
+                    self.model_error
+                        .get_or_insert("break appears outside a lowered loop");
+                }
+                None
             }
             Statement::Unsupported(_) => {
                 self.model_error.get_or_insert(
                     "always_comb contains a statement rejected during IR conversion",
                 );
-                block
+                Some(block)
             }
-            Statement::Null => block,
+            Statement::Null => Some(block),
         }
     }
 
@@ -424,7 +466,9 @@ impl Builder {
         }
 
         let mut nested = self.nested(call.id);
-        let exit = nested.lower_statements(&function_body.statements, 0, &[]);
+        let exit = nested
+            .lower_statements(&function_body.statements, 0, &[], None)
+            .unwrap_or(0);
         nested.procedure.exit = exit;
         if self.model_error.is_none() {
             self.model_error = nested.model_error;
@@ -641,7 +685,9 @@ impl Builder {
         }
 
         let mut nested = self.nested(call.id);
-        let exit = nested.lower_statements(&function_body.statements, 0, &[]);
+        let exit = nested
+            .lower_statements(&function_body.statements, 0, &[], None)
+            .unwrap_or(0);
         nested.procedure.exit = exit;
         if nested.model_error.is_some() {
             return None;

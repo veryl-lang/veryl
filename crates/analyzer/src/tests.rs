@@ -10001,7 +10001,6 @@ fn combinational_loop_review_keeps_dynamic_region_across_modules() {
 }
 
 #[test]
-#[ignore = "known bug: break does not terminate the current CFG path"]
 fn combinational_loop_review_drops_unreachable_statements_after_break() {
     // Why this case exists: IEEE 1800-2023 12.8 makes break jump to the loop
     // exit. Statements after it are unreachable and cannot prove a hard SCC.
