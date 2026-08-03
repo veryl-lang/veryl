@@ -72,6 +72,10 @@ pub struct ProcedureSummary<O> {
     /// Objects touched through an unresolved region. Exact dependencies on
     /// other objects remain independently provable.
     pub uncertain_objects: BTreeSet<O>,
+    /// Objects written through an unresolved region. Adapters use this
+    /// narrower set when exact SSA atoms must be projected back to a sparse
+    /// object-level destination without conflating dynamic reads with writes.
+    pub uncertain_write_objects: BTreeSet<O>,
     pub unknown_all: bool,
     pub atom_count: usize,
     pub definition_count: usize,
@@ -164,6 +168,7 @@ where
     >::new();
     let mut incomplete = procedure.incomplete.clone();
     let mut uncertain_objects = BTreeSet::new();
+    let mut uncertain_write_objects = BTreeSet::new();
     let mut unknown_all = false;
     let mut ssa_events = vec![Vec::new(); procedure.events.len()];
 
@@ -202,6 +207,9 @@ where
                         &mut uncertain_objects,
                         &mut unknown_all,
                     );
+                    if let Region::UnknownObject(object) = region {
+                        uncertain_write_objects.insert(*object);
+                    }
                     if writes
                         .insert(
                             *id,
@@ -382,6 +390,7 @@ where
         dependencies: dependencies.into_iter().collect(),
         incomplete,
         uncertain_objects,
+        uncertain_write_objects,
         unknown_all,
         atom_count: atoms.len(),
         definition_count: definitions,
@@ -838,6 +847,7 @@ mod tests {
 
         let summary = analyze(&procedure).unwrap();
         assert_eq!(summary.uncertain_objects, BTreeSet::from([1]));
+        assert_eq!(summary.uncertain_write_objects, BTreeSet::from([1]));
         assert!(!summary.unknown_all);
         assert_eq!(
             summary.dependencies,
@@ -847,6 +857,31 @@ mod tests {
                 kind: EdgeKind::Value,
             }]
         );
+    }
+
+    #[test]
+    fn dynamic_read_does_not_mark_object_as_dynamically_written() {
+        let procedure = Procedure {
+            entry: 0,
+            exit: 0,
+            successors: vec![vec![]],
+            events: vec![vec![Event::Read {
+                id: 0,
+                region: Region::UnknownObject(1),
+            }]],
+            object_spans: BTreeMap::from([(
+                1,
+                Span {
+                    start: 0,
+                    length: 8,
+                },
+            )]),
+            incomplete: BTreeSet::new(),
+        };
+
+        let summary = analyze(&procedure).unwrap();
+        assert_eq!(summary.uncertain_objects, BTreeSet::from([1]));
+        assert!(summary.uncertain_write_objects.is_empty());
     }
 
     #[test]

@@ -1,8 +1,8 @@
 //! Combinational loop detection on the analyzer IR (issue #931).
 //!
-//! Builds a per-module `(VarId, array_index)` dependency graph from
-//! `FfTable` and per-decl `ReferencedEntry` masks, then reports SCCs.
-//! Module instance feedthrough is summarized bottom-up in topo order.
+//! Builds a sparse per-module region dependency graph from independently
+//! analyzable Memory SSA procedure summaries, then reports SCCs. Module
+//! instance feedthrough is summarized bottom-up in topo order.
 //!
 //! Under-detect by design: opaque constructs (SystemVerilog black
 //! boxes, `inout` ports, recursive functions) add no edges; the
@@ -15,9 +15,8 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, AssignStatement, CaseStatement, Component, Declaration,
-    Expression, Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement,
-    InstDeclaration, Ir, Module, Op, Statement, SystemFunctionKind, VarIndex, VarSelect, Variable,
+    ArrayLiteralItem, AssignDestination, Component, Declaration, Expression, Factor,
+    InstDeclaration, Ir, Module, Op, SystemFunctionKind, VarIndex, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use crate::value::ValueBigUint;
@@ -34,7 +33,7 @@ use veryl_causal::procedure::ProcedureSummary;
 use veryl_causal::region::{Region, Span};
 use veryl_parser::resource_table::StrId;
 
-/// `FfTable` / `per_decl_refs` granularity. Bit-precision lives in masks.
+/// One concrete unpacked-array element. Bit-precision lives in masks.
 type IdxKey = (VarId, usize);
 
 /// `(VarId, array_idx, range_idx)`. `range_idx` indexes the variable's
@@ -110,7 +109,7 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
 
     for &idx in &order {
         if let Component::Module(module) = &ir.components[idx] {
-            // Unevaluable generic params -> empty per_decl_refs.
+            // Unevaluable generic params do not have a concrete module shape.
             if module.suppress_unassigned {
                 incomplete.push(IncompleteCombAnalysis {
                     module: module.name.to_string(),
@@ -269,95 +268,12 @@ fn atomic_ranges(masks: &[BigUint], width: usize) -> Vec<BigUint> {
     ret
 }
 
-/// Arrays larger than this are under-detected: a dynamic write (`arr[i] = ...`
-/// with no foldable index) fans out to every element, so the per-element graph
-/// / bit-partition expansion below is O(elements). A memory this large is not a
-/// realistic combinational-loop participant, so adding no edges stays sound.
-const OVERSIZED_ARRAY: usize = 1 << 16;
-
-fn oversized_array(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
-    variables
-        .get(&id)
-        .and_then(|v| v.r#type.total_array())
-        .is_some_and(|n| n > OVERSIZED_ARRAY)
-}
-
-fn build_bit_partition(
-    module: &Module,
-    ctx: &mut Context,
-    memory_ssa_regions: &[Region<VarId>],
-) -> BitPartition {
+fn build_bit_partition(module: &Module, memory_ssa_regions: &[Region<VarId>]) -> BitPartition {
     let mut masks: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
 
-    // Intra-module reads / writes captured during eval_assign.
-    for refs in module.per_decl_refs.values() {
-        for (id, entry) in refs {
-            for (i, m) in entry.mask_ref.iter().enumerate() {
-                if *m != BigUint::default() {
-                    masks.entry((*id, i)).or_default().push(m.clone());
-                }
-            }
-            for (i, m) in entry.mask_assign.iter().enumerate() {
-                if *m != BigUint::default() {
-                    masks.entry((*id, i)).or_default().push(m.clone());
-                }
-            }
-        }
-    }
-
-    // Per-reference masks. Per-decl aggregates alone would collapse
-    // bit-disjoint reads/writes of the same var into one atomic range
-    // (e.g. `b = a[0]; c = a[1];` aggregates a's mask to {0,1}).
-    for ((src_id, src_idx), entry) in &module.ff_table.table {
-        for (_, assign_target, src_read_mask, _) in &entry.refered {
-            if *src_read_mask != BigUint::default() {
-                masks
-                    .entry((*src_id, *src_idx))
-                    .or_default()
-                    .push(src_read_mask.clone());
-            }
-            if let Some((dst_id, dst_idx_opt, lhs_mask)) = assign_target
-                && *lhs_mask != BigUint::default()
-            {
-                if let Some(dst_idx) = dst_idx_opt {
-                    masks
-                        .entry((*dst_id, *dst_idx))
-                        .or_default()
-                        .push(lhs_mask.clone());
-                } else if let Some(var) = module.variables.get(dst_id)
-                    && let Some(total) = var.r#type.total_array()
-                    && total <= OVERSIZED_ARRAY
-                {
-                    for i in 0..total {
-                        masks
-                            .entry((*dst_id, i))
-                            .or_default()
-                            .push(lhs_mask.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    // Inst input expressions: gather_ff records them but without masks.
-    for inst in walk_insts(module) {
-        for inp in &inst.inputs {
-            collect_expr_masks(&inp.expr, &mut masks, ctx);
-        }
-        for out in &inst.outputs {
-            for dst in &out.dst {
-                if let Some((idx, mask)) = eval_dst_mask(dst, &module.variables, ctx) {
-                    masks.entry((dst.id, idx)).or_default().push(mask);
-                }
-            }
-        }
-    }
-
-    // MemorySSA can discover finer positional boundaries than the legacy
-    // read/write masks.  A shifted copy, for example, propagates every
-    // observed endpoint through the copy relation.  Feed those sparse spans
-    // back into the shared partition so distinct causal atoms do not collapse
-    // into a spurious self-edge.
+    // A shifted copy can propagate every observed endpoint through the copy
+    // relation. Feed those sparse spans into the shared partition so distinct
+    // causal atoms do not collapse into a spurious self-edge.
     for &region in memory_ssa_regions {
         collect_region_mask(region, module, &mut masks);
     }
@@ -410,87 +326,10 @@ fn collect_region_mask(
     }
 }
 
-fn collect_expr_masks(
-    expr: &Expression,
-    out: &mut HashMap<(VarId, usize), Vec<BigUint>>,
-    ctx: &mut Context,
-) {
-    match expr {
-        Expression::Term(t) => collect_factor_masks(t, out, ctx),
-        Expression::Unary(_, e, _) => collect_expr_masks(e, out, ctx),
-        Expression::Binary(a, _, b, _) => {
-            collect_expr_masks(a, out, ctx);
-            collect_expr_masks(b, out, ctx);
-        }
-        Expression::Ternary(a, b, c, _) => {
-            collect_expr_masks(a, out, ctx);
-            collect_expr_masks(b, out, ctx);
-            collect_expr_masks(c, out, ctx);
-        }
-        Expression::Concatenation(parts, _) => {
-            for (a, b) in parts {
-                collect_expr_masks(a, out, ctx);
-                if let Some(b) = b {
-                    collect_expr_masks(b, out, ctx);
-                }
-            }
-        }
-        Expression::StructConstructor(_, fields, _) => {
-            for (_, e) in fields {
-                collect_expr_masks(e, out, ctx);
-            }
-        }
-        Expression::ArrayLiteral(_, _) => {}
-    }
-}
-
-fn collect_factor_masks(
-    factor: &Factor,
-    out: &mut HashMap<(VarId, usize), Vec<BigUint>>,
-    ctx: &mut Context,
-) {
-    match factor {
-        Factor::Variable(id, index, select, _) => {
-            for (idx, mask) in var_reads(*id, index, select, ctx) {
-                out.entry((*id, idx)).or_default().push(mask);
-            }
-        }
-        Factor::FunctionCall(call) => {
-            for input in call.inputs.values() {
-                collect_expr_masks(input, out, ctx);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// None if the index is dynamic.
-fn eval_dst_mask(
-    dst: &AssignDestination,
-    parent_vars: &HashMap<VarId, Variable>,
-    ctx: &mut Context,
-) -> Option<(usize, BigUint)> {
-    let v = parent_vars.get(&dst.id)?;
-    let idx_path = dst.index.eval_value(ctx)?;
-    let flat = v.r#type.array.calc_index(&idx_path)?;
-    let mask = if let Some((beg, end)) = dst.select.eval_value(ctx, &v.r#type, false) {
-        ValueBigUint::gen_mask_range(beg, end)
-    } else {
-        let width = v.total_width()?;
-        ValueBigUint::gen_mask(width)
-    };
-    Some((flat, mask))
-}
-
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<StrId, ModuleCombSummary>,
 ) -> (Graph<NodeKey, ()>, BTreeSet<IncompleteReason>, BitPartition) {
-    let ff_table = &module.ff_table;
-    let union_writes = compute_union_writes(&module.per_decl_refs);
-    let writes_per_decl = compute_writes_per_decl(&module.per_decl_refs);
-    let undom_per_decl = compute_undominated_per_decl(module);
-
     // Procedural combinational declarations use statement-ordered region
     // MemorySSA. Keep instance declarations on the existing bottom-up module
     // summary path until the same region vocabulary crosses module boundaries.
@@ -514,8 +353,14 @@ fn build_module_graph(
     let mut partition_regions = procedure_summaries
         .iter()
         .filter_map(|result| result.as_ref().ok())
-        .flat_map(|summary| &summary.dependencies)
-        .flat_map(|dependency| [dependency.input, dependency.output])
+        .flat_map(|summary| {
+            summary.dependencies.iter().flat_map(|dependency| {
+                [
+                    dependency.input,
+                    sparse_output_region(summary, dependency.output),
+                ]
+            })
+        })
         .collect::<Vec<_>>();
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
@@ -523,7 +368,7 @@ fn build_module_graph(
     partition_regions.extend(collect_instance_summary_regions(
         module, summaries, &mut ctx,
     ));
-    let bit_part = build_bit_partition(module, &mut ctx, &partition_regions);
+    let bit_part = build_bit_partition(module, &partition_regions);
 
     let mut graph: Graph<NodeKey, ()> = Graph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
@@ -571,152 +416,6 @@ fn build_module_graph(
                     "failed to build comb MemorySSA for {}: {error}",
                     module.name
                 );
-            }
-        }
-    }
-
-    for ((src_id, src_idx), entry) in &ff_table.table {
-        if entry.is_ff {
-            continue;
-        }
-        if !is_module_scope_var(*src_id, &module.variables) {
-            continue;
-        }
-        // Under-detect oversized arrays (see `OVERSIZED_ARRAY`).
-        if oversized_array(*src_id, &module.variables) {
-            continue;
-        }
-        let src_id_idx = (*src_id, *src_idx);
-
-        for (reader_decl, assign_target, src_read_mask, from_ff) in &entry.refered {
-            if *from_ff {
-                continue;
-            }
-            if matches!(
-                module.declarations.get(*reader_decl),
-                Some(Declaration::Comb(_))
-            ) {
-                continue;
-            }
-            // `decl_read_mask == 0` also filters out reads gathered by
-            // `gather_ff` but missing from `eval_assign` (notably inst
-            // input expressions, which `add_inst_feedthrough_edges` handles).
-            let decl_read_mask = lookup_read_mask(&module.per_decl_refs, *reader_decl, src_id_idx);
-            if decl_read_mask == BigUint::default() {
-                continue;
-            }
-            let read_mask = if *src_read_mask != BigUint::default() {
-                &decl_read_mask & src_read_mask
-            } else {
-                decl_read_mask
-            };
-            if read_mask == BigUint::default() {
-                continue;
-            }
-            // Internal sources need a comb writer overlapping the read bits.
-            // Input ports are driven externally so they always carry data.
-            let effective_read = if is_input_port(*src_id, &module.variables) {
-                read_mask.clone()
-            } else {
-                let Some(driven) = union_writes.get(&src_id_idx) else {
-                    continue;
-                };
-                let overlap = &read_mask & driven;
-                if overlap == BigUint::default() {
-                    continue;
-                }
-                overlap
-            };
-
-            // Per-statement LHS mask preferred over per-decl aggregate.
-            // Otherwise `t1[0] = 0; t1[1] = src;` would route src into both
-            // bits.
-            let dst_with_masks: Vec<((VarId, usize), BigUint)> = match assign_target {
-                Some((dst_id, Some(dst_idx), lhs_mask)) => {
-                    let mask = if *lhs_mask != BigUint::default() {
-                        lhs_mask.clone()
-                    } else {
-                        lookup_write_mask(&module.per_decl_refs, *reader_decl, (*dst_id, *dst_idx))
-                    };
-                    if mask != BigUint::default() {
-                        vec![((*dst_id, *dst_idx), mask)]
-                    } else {
-                        vec![]
-                    }
-                }
-                // Under-detect oversized arrays (see `OVERSIZED_ARRAY`).
-                Some((dst_id, None, _)) if oversized_array(*dst_id, &module.variables) => vec![],
-                Some((dst_id, None, lhs_mask)) => writes_per_decl
-                    .get(reader_decl)
-                    .map(|w| {
-                        w.iter()
-                            .filter(|(id, _, _)| id == dst_id)
-                            .map(|(id, idx, decl_mask)| {
-                                let mask = if *lhs_mask != BigUint::default() {
-                                    lhs_mask & decl_mask
-                                } else {
-                                    decl_mask.clone()
-                                };
-                                ((*id, *idx), mask)
-                            })
-                            .filter(|(_, m)| m != &BigUint::default())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                None => writes_per_decl
-                    .get(reader_decl)
-                    .map(|w| {
-                        w.iter()
-                            .filter(|(id, _, _)| *id == *src_id)
-                            .map(|(id, idx, m)| ((*id, *idx), m.clone()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            };
-
-            for (dst_id_idx, write_mask) in dst_with_masks {
-                if write_mask == BigUint::default() {
-                    continue;
-                }
-                if !is_module_scope_var(dst_id_idx.0, &module.variables) {
-                    continue;
-                }
-                // Same `(VarId, idx)`: only undominated reads can close a cycle through
-                // this declaration (`a = 0; a = a + 1` must not). Disjoint bits still form
-                // real multi-bit cycles (`o_y[1] = o_y[2]; o_y[2] = o_y[1]`), so read/write
-                // masks need not overlap — the bit-partition ranges stop `a[1] = a[0]` self-edges.
-                //
-                // A condition read (`assign_target` is None, e.g. `if yw[i]`) is
-                // recorded against EVERY same-variable write, so on a feed-forward
-                // array chain it wires `yw[i]` to every `yw[j]` — a false cross-index
-                // cycle. Extend the same undominated filter to it: a condition read
-                // dominated by an earlier write to the same element cannot close a
-                // loop; a real (undominated) condition loop is still detected.
-                let mut effective_read = effective_read.clone();
-                if src_id_idx == dst_id_idx || assign_target.is_none() {
-                    let undom = undom_per_decl
-                        .get(reader_decl)
-                        .and_then(|m| m.get(&src_id_idx))
-                        .cloned()
-                        .unwrap_or_default();
-                    let undom_read = &undom & &effective_read;
-                    if undom_read == BigUint::default() {
-                        continue;
-                    }
-                    effective_read = undom_read;
-                }
-
-                let src_ranges = bit_part.overlapping(src_id_idx, &effective_read);
-                let dst_ranges = bit_part.overlapping(dst_id_idx, &write_mask);
-                for sr in &src_ranges {
-                    let src_node_key = (src_id_idx.0, src_id_idx.1, *sr);
-                    let src_node = ensure_node(&mut graph, &mut node_map, src_node_key);
-                    for dr in &dst_ranges {
-                        let dst_node_key = (dst_id_idx.0, dst_id_idx.1, *dr);
-                        let dst_node = ensure_node(&mut graph, &mut node_map, dst_node_key);
-                        graph.add_edge(src_node, dst_node, ());
-                    }
-                }
             }
         }
     }
@@ -774,7 +473,11 @@ fn add_memory_ssa_edges(
             continue;
         }
         let sources = region_node_keys(dependency.input, &module.variables, bit_part);
-        let destinations = region_node_keys(dependency.output, &module.variables, bit_part);
+        let destinations = region_node_keys(
+            sparse_output_region(summary, dependency.output),
+            &module.variables,
+            bit_part,
+        );
         for source in &sources {
             if !is_module_scope_var(source.0, &module.variables) {
                 continue;
@@ -791,8 +494,21 @@ fn add_memory_ssa_edges(
     }
 }
 
+/// Memory SSA expands an unknown-object write over its sparse atom endpoints
+/// so kill/phi semantics stay exact. Do not turn the resulting large exact
+/// output spans back into per-element graph nodes: the object-local alias node
+/// carries the same uncertainty and aliases only regions touched elsewhere.
+fn sparse_output_region(summary: &ProcedureSummary<VarId>, output: Region<VarId>) -> Region<VarId> {
+    match output {
+        Region::Exact { object, .. } if summary.uncertain_write_objects.contains(&object) => {
+            Region::UnknownObject(object)
+        }
+        output => output,
+    }
+}
+
 /// Convert the MemorySSA engine's flattened, half-open bit region back to the
-/// legacy graph's `(array element, bit partition)` coordinates. The loop is
+/// graph `(array element, bit partition)` coordinates. The loop is
 /// proportional to touched elements, never to the declared array size.
 fn region_node_keys(
     region: Region<VarId>,
@@ -1375,66 +1091,6 @@ fn has_self_edge(graph: &Graph<NodeKey, ()>, node: NodeIndex) -> bool {
         .any(|e| e.source() == node && e.target() == node)
 }
 
-fn compute_union_writes(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-) -> HashMap<(VarId, usize), BigUint> {
-    let mut out: HashMap<(VarId, usize), BigUint> = HashMap::default();
-    for refs in per_decl_refs.values() {
-        for (id, entry) in refs {
-            for (i, mask) in entry.mask_assign.iter().enumerate() {
-                if *mask == BigUint::default() {
-                    continue;
-                }
-                let cur = out.entry((*id, i)).or_default();
-                *cur |= mask;
-            }
-        }
-    }
-    out
-}
-
-/// `decl -> Vec<(VarId, idx, write_mask)>`. Includes inst-output dsts.
-fn compute_writes_per_decl(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-) -> HashMap<usize, Vec<(VarId, usize, BigUint)>> {
-    let mut out: HashMap<usize, Vec<(VarId, usize, BigUint)>> = HashMap::default();
-    for (decl, refs) in per_decl_refs {
-        for (id, entry) in refs {
-            for (i, mask) in entry.mask_assign.iter().enumerate() {
-                if *mask == BigUint::default() {
-                    continue;
-                }
-                out.entry(*decl).or_default().push((*id, i, mask.clone()));
-            }
-        }
-    }
-    out
-}
-
-fn lookup_read_mask(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-    decl: usize,
-    key: (VarId, usize),
-) -> BigUint {
-    per_decl_refs
-        .get(&decl)
-        .and_then(|m| m.get(&key.0))
-        .and_then(|e| e.mask_ref.get(key.1).cloned())
-        .unwrap_or_default()
-}
-
-fn lookup_write_mask(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-    decl: usize,
-    key: (VarId, usize),
-) -> BigUint {
-    per_decl_refs
-        .get(&decl)
-        .and_then(|m| m.get(&key.0))
-        .and_then(|e| e.mask_assign.get(key.1).cloned())
-        .unwrap_or_default()
-}
-
 fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
     let mut tokens: Vec<veryl_parser::token_range::TokenRange> = Vec::new();
     let mut identifier: Option<String> = None;
@@ -1443,13 +1099,22 @@ fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
         if !seen_var.insert(*id) {
             continue;
         }
-        if let Some(var) = module.variables.get(id)
+        let variable = module.variables.get(id);
+        if let Some(var) = variable
             && identifier.is_none()
         {
             identifier = Some(var.path.to_string());
         }
-        if let Some(toks) = module.assign_tokens.get(id) {
+        if let Some(toks) = module.assign_tokens.get(id)
+            && !toks.is_empty()
+        {
             tokens.extend(toks.iter().copied());
+        } else if let Some(var) = variable {
+            // Large dynamic assignments intentionally do not allocate the
+            // legacy per-element AssignTable, so no assignment-token vector
+            // exists. The declaration still provides a stable diagnostic
+            // anchor for a loop proven by the sparse causal graph.
+            tokens.push(var.token);
         }
     }
     {
@@ -1463,11 +1128,6 @@ fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
         &primary,
         &participants,
     ))
-}
-
-fn is_input_port(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
-    use crate::ir::VarKind;
-    matches!(variables.get(&id).map(|v| v.kind), Some(VarKind::Input))
 }
 
 fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
@@ -1592,335 +1252,6 @@ fn mask_spans(mask: &BigUint, width: usize) -> Vec<Span> {
         });
     }
     spans
-}
-
-// Statement-level dominance analysis.
-
-/// `defs`: bits guaranteed-written on the current path.
-/// `undom`: bits read without a covering preceding write.
-#[derive(Default, Clone)]
-struct DominanceState {
-    defs: HashMap<IdxKey, BigUint>,
-    undom: HashMap<IdxKey, BigUint>,
-}
-
-fn compute_undominated_per_decl(module: &Module) -> HashMap<usize, HashMap<IdxKey, BigUint>> {
-    let mut out: HashMap<usize, HashMap<IdxKey, BigUint>> = HashMap::default();
-    let mut ctx = Context::default();
-    ctx.variables = module.variables.clone();
-    ctx.functions = module.functions.clone();
-
-    for (decl_idx, decl) in module.declarations.iter().enumerate() {
-        if let Declaration::Comb(c) = decl {
-            let mut state = DominanceState::default();
-            walk_block(&c.statements, &mut state, &mut ctx);
-            state.undom.retain(|_, m| *m != BigUint::default());
-            if !state.undom.is_empty() {
-                out.insert(decl_idx, state.undom);
-            }
-        }
-    }
-    out
-}
-
-fn walk_block(stmts: &[Statement], state: &mut DominanceState, ctx: &mut Context) {
-    for stmt in stmts {
-        walk_stmt(stmt, state, ctx);
-    }
-}
-
-fn walk_stmt(stmt: &Statement, state: &mut DominanceState, ctx: &mut Context) {
-    match stmt {
-        Statement::Assign(a) => walk_assign(a, state, ctx),
-        Statement::If(i) => walk_if(i, state, ctx),
-        Statement::Case(c) => walk_case(c, state, ctx),
-        Statement::For(f) => walk_for(f, state, ctx),
-        Statement::FunctionCall(c) => walk_function_call(c.as_ref(), state, ctx),
-        // IfReset is always_ff-only; the rest have no LHS to track.
-        Statement::IfReset(_)
-        | Statement::SystemFunctionCall(_)
-        | Statement::TbMethodCall(_)
-        | Statement::Break
-        | Statement::Unsupported(_)
-        | Statement::Null => {}
-    }
-}
-
-fn walk_assign(stmt: &AssignStatement, state: &mut DominanceState, ctx: &mut Context) {
-    // RHS before LHS: otherwise `a = a + 1` sees itself as dominated.
-    walk_expr(&stmt.expr, state, ctx);
-    for dst in &stmt.dst {
-        for (idx, mask) in dst_writes(dst, ctx) {
-            let key = (dst.id, idx);
-            *state.defs.entry(key).or_default() |= &mask;
-        }
-    }
-}
-
-fn walk_if(stmt: &IfStatement, state: &mut DominanceState, ctx: &mut Context) {
-    walk_expr(&stmt.cond, state, ctx);
-
-    let saved_defs = state.defs.clone();
-    let saved_undom = state.undom.clone();
-
-    let mut true_state = DominanceState {
-        defs: saved_defs.clone(),
-        undom: saved_undom.clone(),
-    };
-    walk_block(&stmt.true_side, &mut true_state, ctx);
-
-    let mut false_state = DominanceState {
-        defs: saved_defs,
-        undom: saved_undom,
-    };
-    walk_block(&stmt.false_side, &mut false_state, ctx);
-
-    // Merge: defs = intersection (only both-paths writes dominate
-    // downstream); undom = union (any path's undom contributes).
-    let mut keys: HashSet<IdxKey> = HashSet::default();
-    for k in true_state.defs.keys().chain(false_state.defs.keys()) {
-        keys.insert(*k);
-    }
-    let mut merged_defs: HashMap<IdxKey, BigUint> = HashMap::default();
-    for key in keys {
-        let zero = BigUint::default();
-        let t = true_state.defs.get(&key).unwrap_or(&zero);
-        let f = false_state.defs.get(&key).unwrap_or(&zero);
-        let merged = t & f;
-        if merged != zero {
-            merged_defs.insert(key, merged);
-        }
-    }
-    state.defs = merged_defs;
-
-    state.undom = true_state.undom;
-    for (key, mask) in false_state.undom {
-        *state.undom.entry(key).or_default() |= &mask;
-    }
-}
-
-fn walk_case(stmt: &CaseStatement, state: &mut DominanceState, ctx: &mut Context) {
-    walk_expr(&stmt.case_target, state, ctx);
-    for arm in &stmt.arms {
-        for p in &arm.patterns {
-            match p {
-                crate::ir::CasePattern::Eq(e) => walk_expr(e, state, ctx),
-                crate::ir::CasePattern::Range { lo, hi, .. } => {
-                    walk_expr(lo, state, ctx);
-                    walk_expr(hi, state, ctx);
-                }
-            }
-        }
-    }
-
-    let saved_defs = state.defs.clone();
-    let saved_undom = state.undom.clone();
-
-    let mut branch_states: Vec<DominanceState> = Vec::with_capacity(stmt.arms.len() + 1);
-    for arm in &stmt.arms {
-        let mut s = DominanceState {
-            defs: saved_defs.clone(),
-            undom: saved_undom.clone(),
-        };
-        walk_block(&arm.body, &mut s, ctx);
-        branch_states.push(s);
-    }
-    // Empty default behaves as the saved state, modeling "no arm matched".
-    let mut default_state = DominanceState {
-        defs: saved_defs,
-        undom: saved_undom,
-    };
-    walk_block(&stmt.default, &mut default_state, ctx);
-    branch_states.push(default_state);
-
-    // defs = intersection across branches; undom = union.
-    let mut keys: HashSet<IdxKey> = HashSet::default();
-    for b in &branch_states {
-        for k in b.defs.keys() {
-            keys.insert(*k);
-        }
-    }
-    let mut merged_defs: HashMap<IdxKey, BigUint> = HashMap::default();
-    for key in keys {
-        let zero = BigUint::default();
-        let mut acc: Option<BigUint> = None;
-        for b in &branch_states {
-            let v = b.defs.get(&key).unwrap_or(&zero).clone();
-            acc = Some(match acc {
-                Some(a) => a & v,
-                None => v,
-            });
-        }
-        if let Some(merged) = acc
-            && merged != zero
-        {
-            merged_defs.insert(key, merged);
-        }
-    }
-    state.defs = merged_defs;
-
-    let mut merged_undom: HashMap<IdxKey, BigUint> = HashMap::default();
-    for b in branch_states {
-        for (key, mask) in b.undom {
-            *merged_undom.entry(key).or_default() |= &mask;
-        }
-    }
-    state.undom = merged_undom;
-}
-
-fn walk_for(stmt: &ForStatement, state: &mut DominanceState, ctx: &mut Context) {
-    walk_for_range(&stmt.range, state, ctx);
-    // Body may run zero times: surface undom reads but don't trust
-    // its writes to dominate anything afterwards.
-    let saved_defs = state.defs.clone();
-    walk_block(&stmt.body, state, ctx);
-    state.defs = saved_defs;
-}
-
-fn walk_for_range(range: &ForRange, state: &mut DominanceState, ctx: &mut Context) {
-    let bounds = match range {
-        ForRange::Forward { start, end, .. }
-        | ForRange::Reverse { start, end, .. }
-        | ForRange::Stepped { start, end, .. } => [start, end],
-    };
-    for b in bounds {
-        if let ForBound::Expression(e) = b {
-            walk_expr(e, state, ctx);
-        }
-    }
-}
-
-fn walk_function_call(call: &FunctionCall, state: &mut DominanceState, ctx: &mut Context) {
-    for input in call.inputs.values() {
-        walk_expr(input, state, ctx);
-    }
-    for outputs in call.outputs.values() {
-        for dst in outputs {
-            for (idx, mask) in dst_writes(dst, ctx) {
-                let key = (dst.id, idx);
-                *state.defs.entry(key).or_default() |= &mask;
-            }
-        }
-    }
-}
-
-fn walk_expr(expr: &Expression, state: &mut DominanceState, ctx: &mut Context) {
-    match expr {
-        Expression::Term(t) => walk_factor(t, state, ctx),
-        Expression::Unary(_, e, _) => walk_expr(e, state, ctx),
-        Expression::Binary(a, _, b, _) => {
-            walk_expr(a, state, ctx);
-            walk_expr(b, state, ctx);
-        }
-        Expression::Ternary(a, b, c, _) => {
-            walk_expr(a, state, ctx);
-            walk_expr(b, state, ctx);
-            walk_expr(c, state, ctx);
-        }
-        Expression::Concatenation(parts, _) => {
-            for (a, b) in parts {
-                walk_expr(a, state, ctx);
-                if let Some(b) = b {
-                    walk_expr(b, state, ctx);
-                }
-            }
-        }
-        Expression::StructConstructor(_, fields, _) => {
-            for (_, e) in fields {
-                walk_expr(e, state, ctx);
-            }
-        }
-        Expression::ArrayLiteral(_, _) => {}
-    }
-}
-
-fn walk_factor(factor: &Factor, state: &mut DominanceState, ctx: &mut Context) {
-    match factor {
-        Factor::Variable(id, index, select, _) => {
-            for (idx, mask) in var_reads(*id, index, select, ctx) {
-                let key = (*id, idx);
-                let dominated = state.defs.get(&key).cloned().unwrap_or_default();
-                let undom_bits = &mask ^ (&mask & &dominated);
-                if undom_bits != BigUint::default() {
-                    *state.undom.entry(key).or_default() |= undom_bits;
-                }
-            }
-        }
-        Factor::FunctionCall(call) => walk_function_call(call, state, ctx),
-        _ => {}
-    }
-}
-
-/// Mirrors the masking logic of `AssignDestination::eval_assign`.
-fn dst_writes(dst: &AssignDestination, ctx: &mut Context) -> Vec<(usize, BigUint)> {
-    let Some(variable) = ctx.get_variable_info(dst.id) else {
-        return Vec::new();
-    };
-    let is_index_const = dst.index.is_const();
-    let is_select_const = dst.select.is_const();
-
-    let range = if !is_index_const {
-        variable.r#type.array.calc_range(&[])
-    } else {
-        let Some(index) = dst.index.eval_value(ctx) else {
-            return Vec::new();
-        };
-        variable.r#type.array.calc_range(&index)
-    };
-
-    let mask = if !is_select_const {
-        let Some(width) = variable.total_width() else {
-            return Vec::new();
-        };
-        ValueBigUint::gen_mask(width)
-    } else {
-        let Some((beg, end)) = dst.select.eval_value(ctx, &variable.r#type, false) else {
-            return Vec::new();
-        };
-        ValueBigUint::gen_mask_range(beg, end)
-    };
-
-    let mut out = Vec::new();
-    if let Some((beg, end)) = range {
-        if end.saturating_sub(beg) > OVERSIZED_ARRAY {
-            return out;
-        }
-        for i in beg..=end {
-            out.push((i, mask.clone()));
-        }
-    }
-    out
-}
-
-fn var_reads(
-    id: VarId,
-    index: &VarIndex,
-    select: &VarSelect,
-    ctx: &mut Context,
-) -> Vec<(usize, BigUint)> {
-    let Some(variable) = ctx.variables.get(&id).cloned() else {
-        return Vec::new();
-    };
-    let mask = if let Some((beg, end)) = select.eval_value(ctx, &variable.r#type, false) {
-        ValueBigUint::gen_mask_range(beg, end)
-    } else {
-        let Some(width) = variable.total_width() else {
-            return Vec::new();
-        };
-        ValueBigUint::gen_mask(width)
-    };
-    if let Some(idx_path) = index.eval_value(ctx)
-        && let Some(flat) = variable.r#type.array.calc_index(&idx_path)
-    {
-        return vec![(flat, mask)];
-    }
-    // Legacy dominance bridge only: exact comb dependencies are handled by
-    // region MemorySSA. Never expand a dynamic access to a huge array here.
-    let total = variable.r#type.total_array().unwrap_or(1);
-    if total > OVERSIZED_ARRAY {
-        return Vec::new();
-    }
-    (0..total).map(|i| (i, mask.clone())).collect()
 }
 
 #[cfg(test)]

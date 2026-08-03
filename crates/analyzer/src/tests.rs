@@ -9118,12 +9118,10 @@ fn unassignable_output() {
 }
 
 #[test]
-fn combinational_loop_oversized_array_underdetect() {
-    // Regression: a dynamic-index write to a very large array. The dynamic
-    // index makes `compute_assign_target` yield arr_idx = None, which routes
-    // through `comb_loop_detect`'s per-element expansion — O(elements) and a
-    // hang without the `OVERSIZED_ARRAY` guard. Analysis must finish and report
-    // no combinational loop.
+fn combinational_loop_oversized_array_is_sparse_and_complete() {
+    // Why this case exists: a sequential memory with a combinational read must
+    // remain loop-free, and its analysis cost must not scale with all 8M
+    // declared elements merely because both accesses use a dynamic index.
     let code = r#"
     module ModuleA (
         clk:  input  clock,
@@ -9152,6 +9150,76 @@ fn combinational_loop_oversized_array_underdetect() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
         "oversized dynamic-index array must not be flagged as a comb loop",
+    );
+
+    // Why this case exists: the former size guard silently discarded every
+    // edge for arrays above 64K elements. A dynamic write can alias the exact
+    // element it reads, so the same sparse object-level analysis must still
+    // prove this real feedback path without enumerating 128K elements.
+    let code = r#"
+    module ModuleA (
+        idx: input  logic<17>,
+        rd:  output logic<32>,
+    ) {
+        var mem: logic<32> [131072];
+        always_comb {
+            mem[idx] = mem[0];
+            rd = mem[idx];
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "oversized arrays must retain proven dynamic/exact alias loops: {errors:#?}",
+    );
+
+    // Why this case exists: object-level aliasing must not invent a cycle when
+    // the dynamic store is fed only by an external input.
+    let code = r#"
+    module ModuleA (
+        idx: input  logic<17>,
+        wd:  input  logic<32>,
+        rd:  output logic<32>,
+    ) {
+        var mem: logic<32> [131072];
+        always_comb {
+            mem[idx] = wd;
+            rd = mem[idx];
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "oversized feed-forward dynamic stores must remain loop-free: {errors:#?}",
+    );
+
+    // Why this case exists: a dynamic read makes an object uncertain but does
+    // not turn a separate exact write into a dynamic write. Conflating the two
+    // would alias mem[1] back onto mem[0] and invent a self-loop.
+    let code = r#"
+    module ModuleA (
+        idx: input  logic<17>,
+        rd:  output logic<32>,
+    ) {
+        var mem: logic<32> [131072];
+        always_comb {
+            rd = mem[idx];
+            mem[1] = mem[0];
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "a dynamic read must not broaden an exact write: {errors:#?}",
     );
 }
 
