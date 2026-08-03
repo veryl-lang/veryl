@@ -128,7 +128,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          # npm 12 dropped Node 20, so `npm@latest` below needs Node 22 or later.
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
       # Ensure npm 11.5.1 or later is installed
       - name: Update npm
