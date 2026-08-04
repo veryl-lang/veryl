@@ -10942,7 +10942,6 @@ fn combinational_loop_review_preserves_vector_ternary_positions() {
 }
 
 #[test]
-#[ignore = "captured independent-review regression: function concat output loses destinations"]
 fn combinational_loop_review_preserves_function_concat_output_positions() {
     // Why this case exists: y = x copied into {o[1], o[0]} still maps x[0]
     // only to o[0]. Treating the concatenated output actual as all-to-all

@@ -742,17 +742,20 @@ impl Builder {
             dependencies.sort_unstable();
             dependencies.dedup();
             dependencies.extend_from_slice(controls);
-            let aligned =
+            let aligned_by_destination =
                 self.function_output_aligned_dependencies(formal, outputs, &mapped_dependencies);
-            if aligned.is_some() {
+            if aligned_by_destination.is_some() {
                 dependencies = controls.to_vec();
             }
-            for destination in outputs {
+            for (index, destination) in outputs.iter().enumerate() {
                 self.write_destination(
                     block,
                     destination,
                     dependencies.clone(),
-                    aligned.clone().unwrap_or_default(),
+                    aligned_by_destination
+                        .as_ref()
+                        .map(|aligned| aligned[index].clone())
+                        .unwrap_or_default(),
                 );
             }
         }
@@ -784,17 +787,7 @@ impl Builder {
         formal: VarId,
         outputs: &[AssignDestination],
         mapped_dependencies: &[(Region<VarId>, Vec<MappedFunctionRead>)],
-    ) -> Option<Vec<AlignedDependency>> {
-        let [destination] = outputs else {
-            return None;
-        };
-        let Region::Exact {
-            span: destination_span,
-            ..
-        } = self.variable_region(destination.id, &destination.index, &destination.select)
-        else {
-            return None;
-        };
+    ) -> Option<Vec<Vec<AlignedDependency>>> {
         let formal_length = self
             .context
             .variables
@@ -808,11 +801,27 @@ impl Builder {
                     .total_array()
                     .unwrap_or(1),
             )?;
-        if destination_span.length != formal_length {
+        let mut high = formal_length;
+        let mut destination_spans = Vec::with_capacity(outputs.len());
+        for destination in outputs {
+            let Region::Exact {
+                span: destination_span,
+                ..
+            } = self.variable_region(destination.id, &destination.index, &destination.select)
+            else {
+                return None;
+            };
+            high = high.checked_sub(destination_span.length)?;
+            destination_spans.push(Span {
+                start: high,
+                length: destination_span.length,
+            });
+        }
+        if high != 0 {
             return None;
         }
 
-        let mut aligned = Vec::new();
+        let mut aligned = vec![Vec::new(); outputs.len()];
         for &(output, ref dependencies) in mapped_dependencies {
             let Region::Exact {
                 object,
@@ -834,15 +843,23 @@ impl Builder {
                 if !dependency.aligned || input_span.length != output_span.length {
                     return None;
                 }
-                aligned.push(AlignedDependency {
-                    read: dependency.read,
-                    kind: dependency.kind,
-                    source: Span {
-                        start: 0,
-                        length: input_span.length,
-                    },
-                    destination: output_span,
-                });
+                for (index, destination_span) in destination_spans.iter().copied().enumerate() {
+                    let Some(overlap) = output_span.intersection(destination_span) else {
+                        continue;
+                    };
+                    aligned[index].push(AlignedDependency {
+                        read: dependency.read,
+                        kind: dependency.kind,
+                        source: Span {
+                            start: overlap.start.checked_sub(output_span.start)?,
+                            length: overlap.length,
+                        },
+                        destination: Span {
+                            start: overlap.start.checked_sub(destination_span.start)?,
+                            length: overlap.length,
+                        },
+                    });
+                }
             }
         }
         Some(aligned)
