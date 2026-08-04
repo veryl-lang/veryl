@@ -22643,6 +22643,127 @@ fn combinational_loop_whole_unpacked_instance_is_sparse_and_precise() {
 }
 
 #[test]
+fn combinational_loop_periodic_repeat_is_sparse_and_phase_precise() {
+    // Why these cases exist: Veryl elaborates a succinct array repeat into one
+    // assignment per element. Causal summaries must recover one periodic
+    // transfer whose size is independent of 200,000 copies, while retaining
+    // the bit phase both locally and through a module boundary.
+    for (name, through_instance, count, index, output_bit, expected) in [
+        (
+            "local repeat retains matching phase feedback",
+            false,
+            64,
+            42,
+            0,
+            true,
+        ),
+        (
+            "local repeat keeps a different phase disjoint",
+            false,
+            64,
+            42,
+            1,
+            false,
+        ),
+        (
+            "instance repeat retains matching phase feedback",
+            true,
+            200_000,
+            123_456,
+            0,
+            true,
+        ),
+        (
+            "instance repeat keeps a different phase disjoint",
+            true,
+            64,
+            42,
+            1,
+            false,
+        ),
+    ] {
+        let body = if through_instance {
+            r#"
+                inst u: Broadcast (
+                    i: feedback,
+                    o: passed,
+                );
+            "#
+        } else {
+            "assign passed = '{feedback repeat COUNT};"
+        }
+        .replace("COUNT", &count.to_string());
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Broadcast (
+                    i: input  logic<2>,
+                    o: output logic<2> [{count}],
+                ) {{
+                    assign o = '{{i repeat {count}}};
+                }}
+
+                module Top (
+                    o: output logic,
+                ) {{
+                    var feedback: logic<2>;
+                    var passed  : logic<2> [{count}];
+                    {body}
+                    assign feedback[0] = passed[{index}][{output_bit}];
+                    assign feedback[1] = 0;
+                    assign o = passed[0][0];
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+
+    // Why this extra hierarchy exists: an intermediate module observes only
+    // one input phase while forwarding the whole periodic output. Its summary
+    // must retain both the sparse phase partition and the regular transfer for
+    // the next module boundary.
+    for (output_bit, expected) in [(0, true), (1, false)] {
+        assert_comb_loop_for_case(
+            "a periodic phase survives two module summaries",
+            &format!(
+                r#"
+                module Broadcast (
+                    i: input  logic<2>,
+                    o: output logic<2> [64],
+                ) {{
+                    assign o = '{{i repeat 64}};
+                }}
+
+                module Wrapper (
+                    i  : input  logic<2>,
+                    o  : output logic<2> [64],
+                    tap: output logic,
+                ) {{
+                    inst u: Broadcast (i: i, o: o);
+                    assign tap = i[0];
+                }}
+
+                module Top (
+                    o: output logic,
+                ) {{
+                    var feedback: logic<2>;
+                    var passed  : logic<2> [64];
+                    var tap     : logic;
+                    inst u: Wrapper (i: feedback, o: passed, tap: tap);
+                    assign feedback[0] = passed[42][{output_bit}];
+                    assign feedback[1] = 0;
+                    assign o = tap;
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
 fn combinational_loop_review_uses_structural_selector_overlap() {
     // Why these cases exist: structural feedback compares each access's
     // independently possible region. Both `idx` and `~idx` can address
