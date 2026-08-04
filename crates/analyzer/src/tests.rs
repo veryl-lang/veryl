@@ -11226,6 +11226,63 @@ fn combinational_loop_review_preserves_local_right_shift_positions() {
 }
 
 #[test]
+#[ignore = "captured final-review regression: arithmetic right shift loses source positions"]
+fn combinational_loop_review_preserves_arithmetic_right_shift_positions() {
+    // Why this case exists: for a one-bit arithmetic right shift, o[0] is
+    // value[1]; discarded value[0] cannot influence it. Whole-vector fallback
+    // invents value[0] -> o[0] feedback.
+    assert_comb_loop_for_case(
+        "an arithmetic right shift keeps a discarded bit loop-free",
+        r#"
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<4>;
+            assign o = $signed(value) >>> 1;
+            assign value[0] = o[0];
+            assign value[3:1] = 0;
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: o[0] is the live source value[1], so returning
+    // it to value[1] is a real shifted-bit SCC.
+    assert_comb_loop_for_case(
+        "an arithmetic right shift detects its live shifted bit",
+        r#"
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<4>;
+            assign o = $signed(value) >>> 1;
+            assign value[0] = 0;
+            assign value[1] = o[0];
+            assign value[3:2] = 0;
+        }
+        "#,
+        true,
+    );
+
+    // Why this control exists: the vacated MSB is a replication of the sign
+    // bit, so sign feedback remains a real (non-positional) dependency.
+    assert_comb_loop_for_case(
+        "an arithmetic right shift retains sign-fill feedback",
+        r#"
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<4>;
+            assign o = $signed(value) >>> 1;
+            assign value[2:0] = 0;
+            assign value[3] = o[3];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn combinational_loop_review_preserves_function_actual_shift_positions() {
     // Why this case exists: (value << 1)[0] is an inserted zero. Passing the
     // shifted vector through a function must not broadcast value[1] to o.
