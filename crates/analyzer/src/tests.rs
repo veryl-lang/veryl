@@ -12964,6 +12964,118 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
                 .contains(&veryl_causal::graph::IncompleteReason::InoutPort)
     }));
 
+    // Why this case exists: a dynamic selection inside a function must carry
+    // its unresolved region provenance through the function summary. Function
+    // lowering must not silently turn it into complete coverage.
+    let complex_function = detailed(
+        r#"
+        module Top (
+            i    : input  logic<4>,
+            index: input  logic<2>,
+            o    : output logic,
+        ) {
+            function select (
+                x    : input logic<4>,
+                index: input logic<2>,
+            ) -> logic {
+                return x[index];
+            }
+            assign o = select(i, index);
+        }
+        "#,
+    );
+    assert!(
+        complex_function.errors.is_empty(),
+        "incomplete function coverage must not become a hard loop: {:#?}",
+        complex_function.errors
+    );
+    assert!(
+        complex_function.incomplete.iter().any(|module| {
+            module.module == "Top"
+                && module
+                    .reasons
+                    .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)
+        }),
+        "a function with a dynamic selection must retain incomplete provenance: {:#?}",
+        complex_function.incomplete
+    );
+
+    // Why this case exists: even a fully modeled expression on an SV input
+    // cannot prove feedthrough inside the external component. A feedback-like
+    // connection around that boundary stays incomplete rather than becoming a
+    // stronger-than-source hard loop.
+    let complex_external_actual = detailed(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function invert (x: input logic) -> logic {
+                return !x;
+            }
+            var feedback: logic;
+            inst u: $sv::Ext (
+                i_data: invert(invert(feedback)),
+                o_data: feedback,
+            );
+            assign o = feedback;
+        }
+        "#,
+    );
+    assert!(
+        complex_external_actual.errors.is_empty(),
+        "an opaque SV feedthrough must not become a hard loop: {:#?}",
+        complex_external_actual.errors
+    );
+    assert!(complex_external_actual.incomplete.iter().any(|module| {
+        module.module == "Top"
+            && module
+                .reasons
+                .contains(&veryl_causal::graph::IncompleteReason::ExternalComponent)
+    }));
+
+    // Why this case exists: incomplete coverage and a proven loop are
+    // independent facts. Keep the coverage provenance for detailed clients,
+    // while the analyzer's diagnostic result contains the proven loop.
+    let external_and_proven_loop_code = r#"
+        module Top (
+            i: input  logic,
+            o: output logic,
+        ) {
+            var from_sv: logic;
+            var a      : logic;
+            var b      : logic;
+            inst u: $sv::Ext (
+                i_data: i,
+                o_data: from_sv,
+            );
+            assign a = b;
+            assign b = a;
+            assign o = b | from_sv;
+        }
+        "#;
+    let external_and_proven_loop = detailed(external_and_proven_loop_code);
+    assert!(
+        external_and_proven_loop
+            .errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "a proven loop must remain the hard diagnostic: {:#?}",
+        external_and_proven_loop.errors
+    );
+    assert!(external_and_proven_loop.incomplete.iter().any(|module| {
+        module.module == "Top"
+            && module
+                .reasons
+                .contains(&veryl_causal::graph::IncompleteReason::ExternalComponent)
+    }));
+    let diagnostics = analyze(external_and_proven_loop_code);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "the ordinary analyzer must diagnose the proven loop: {diagnostics:#?}"
+    );
+
     let function_actual_loop = detailed(
         r#"
         module Child (
