@@ -8,7 +8,6 @@ use crate::ir::{
     ForBound, ForRange, FunctionCall, Module, Op, Statement, SystemFunctionCall,
     SystemFunctionKind, TypeKind, VarId, VarIndex, VarSelect,
 };
-use crate::value::Value;
 use veryl_causal::graph::{EdgeKind, IncompleteReason};
 use veryl_causal::procedure::{
     self, AlignedDependency, Event, MustAliasCandidate, Procedure, ProcedureError, ProcedureSummary,
@@ -2192,9 +2191,6 @@ impl Builder {
         let Some(width) = variable.total_width() else {
             return vec![Region::UnknownObject(id)];
         };
-        if let Some(regions) = self.bounded_variable_regions(id, &variable, index, select, width) {
-            return regions;
-        }
         vec![self.variable_region_fallback(id, &variable, index, select, width)]
     }
 
@@ -2327,173 +2323,6 @@ impl Builder {
         }
     }
 
-    /// Exactly enumerate small two-state selector domains. This is deliberately
-    /// bounded: four-state selectors retain X/Z candidates, and large domains
-    /// fall back to the longest-static-prefix region below.
-    fn bounded_variable_regions(
-        &mut self,
-        id: VarId,
-        variable: &crate::ir::Variable,
-        index: &VarIndex,
-        select: &VarSelect,
-        width: usize,
-    ) -> Option<Vec<Region<VarId>>> {
-        let expressions = index
-            .0
-            .iter()
-            .chain(select.0.iter())
-            .chain(select.1.iter().map(|(_, bound)| bound))
-            .collect::<Vec<_>>();
-        if expressions
-            .iter()
-            .all(|expression| expression.comptime().is_const)
-        {
-            return None;
-        }
-
-        let mut ids = BTreeSet::new();
-        if !expressions
-            .iter()
-            .all(|expression| Self::collect_two_state_variables(expression, &mut ids))
-        {
-            return None;
-        }
-        let variables = ids
-            .into_iter()
-            .map(|id| {
-                let variable = self.context.variables.get(&id)?;
-                let bits = variable.total_width()?;
-                (matches!(variable.r#type.kind, TypeKind::Bit)
-                    && variable.r#type.total_array()? == 1
-                    && bits <= 8)
-                    .then_some((id, bits, variable.r#type.signed))
-            })
-            .collect::<Option<Vec<_>>>()?;
-        let total_bits = variables
-            .iter()
-            .try_fold(0usize, |total, (_, bits, _)| total.checked_add(*bits))?;
-        if total_bits > 8 {
-            return None;
-        }
-
-        let saved = variables
-            .iter()
-            .map(|&(id, _, _)| Some((id, self.context.variables.get(&id)?.value.clone())))
-            .collect::<Option<Vec<_>>>()?;
-        let assignments = 1usize.checked_shl(total_bits as u32)?;
-        let mut spans = Vec::new();
-        for assignment in 0..assignments {
-            let mut shift = 0usize;
-            for &(id, bits, signed) in &variables {
-                let mask = (1usize << bits).saturating_sub(1);
-                let payload = ((assignment >> shift) & mask) as u64;
-                let Some(variable) = self.context.variables.get_mut(&id) else {
-                    continue;
-                };
-                variable.value = vec![Value::new(payload, bits, signed)];
-                shift += bits;
-            }
-            let Some(index_path) = index.eval_value(&mut self.context) else {
-                continue;
-            };
-            let Some(array_index) = variable.r#type.array.calc_index(&index_path) else {
-                continue;
-            };
-            let Some((high, low)) = select.eval_value(&mut self.context, &variable.r#type, false)
-            else {
-                continue;
-            };
-            if high >= width || low > high {
-                continue;
-            }
-            let Some(start) = array_index
-                .checked_mul(width)
-                .and_then(|base| base.checked_add(low))
-            else {
-                continue;
-            };
-            spans.push(Span {
-                start,
-                length: high - low + 1,
-            });
-        }
-        for (id, value) in saved {
-            if let Some(variable) = self.context.variables.get_mut(&id) {
-                variable.value = value;
-            }
-        }
-
-        spans.sort_unstable();
-        spans.dedup();
-        let first = spans.first().copied()?;
-        let mut merged = Vec::new();
-        let mut start = first.start;
-        let mut end = first.end()?;
-        for span in spans.iter().copied().skip(1) {
-            if span.start > end {
-                merged.push(Region::UnknownRegion {
-                    object: id,
-                    span: Span {
-                        start,
-                        length: end.checked_sub(start)?,
-                    },
-                });
-                start = span.start;
-                end = span.end()?;
-            } else {
-                end = end.max(span.end()?);
-            }
-        }
-        merged.push(Region::UnknownRegion {
-            object: id,
-            span: Span {
-                start,
-                length: end.checked_sub(start)?,
-            },
-        });
-        Some(merged)
-    }
-
-    fn collect_two_state_variables(expression: &Expression, ids: &mut BTreeSet<VarId>) -> bool {
-        if expression.comptime().is_const {
-            return true;
-        }
-        match expression {
-            Expression::Term(factor) => match factor.as_ref() {
-                Factor::Variable(id, index, select, _)
-                    if index.0.is_empty() && select.is_empty() =>
-                {
-                    ids.insert(*id);
-                    true
-                }
-                Factor::SystemFunctionCall(call) => match &call.kind {
-                    SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
-                        Self::collect_two_state_variables(&input.0, ids)
-                    }
-                    _ => false,
-                },
-                Factor::Value(_) => true,
-                _ => false,
-            },
-            Expression::Unary(_, operand, _) => Self::collect_two_state_variables(operand, ids),
-            Expression::Binary(left, _, right, _) => {
-                Self::collect_two_state_variables(left, ids)
-                    && Self::collect_two_state_variables(right, ids)
-            }
-            Expression::Ternary(condition, left, right, _) => {
-                Self::collect_two_state_variables(condition, ids)
-                    && Self::collect_two_state_variables(left, ids)
-                    && Self::collect_two_state_variables(right, ids)
-            }
-            Expression::Concatenation(parts, _) => parts.iter().all(|(part, repeat)| {
-                Self::collect_two_state_variables(part, ids)
-                    && repeat
-                        .as_ref()
-                        .is_none_or(|repeat| Self::collect_two_state_variables(repeat, ids))
-            }),
-            Expression::ArrayLiteral(_, _) | Expression::StructConstructor(_, _, _) => false,
-        }
-    }
 }
 
 fn combine_edge_kinds(left: EdgeKind, right: EdgeKind) -> EdgeKind {
