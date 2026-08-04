@@ -832,93 +832,13 @@ impl Builder {
         expression: &Expression,
         requested: Span,
     ) -> Option<Vec<Region<VarId>>> {
-        match expression {
-            Expression::Term(factor) => match factor.as_ref() {
-                Factor::Variable(id, index, select, _) => {
-                    let Region::Exact {
-                        object,
-                        span: actual_span,
-                    } = self.variable_region(*id, index, select)
-                    else {
-                        return None;
-                    };
-                    if requested.end()? > actual_span.length {
-                        return None;
-                    }
-                    Some(vec![Region::Exact {
-                        object,
-                        span: Span {
-                            start: actual_span.start.checked_add(requested.start)?,
-                            length: requested.length,
-                        },
-                    }])
-                }
-                Factor::Value(_) => Some(Vec::new()),
-                Factor::SystemFunctionCall(call) => match &call.kind {
-                    SystemFunctionKind::Bits(_)
-                    | SystemFunctionKind::Size(_)
-                    | SystemFunctionKind::Clog2(_) => Some(Vec::new()),
-                    SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
-                        self.map_expression_span_to_actual(&input.0, requested)
-                    }
-                    _ => None,
-                },
-                Factor::FunctionCall(call) => self
-                    .map_function_return_spans_to_actual(call, requested)
-                    .map(|mapped| mapped.into_iter().map(|(region, _)| region).collect()),
-                _ => None,
-            },
-            Expression::Concatenation(parts, _) => {
-                let mut low = 0usize;
-                let mut mapped = Vec::new();
-                // Veryl and SystemVerilog list concatenation operands from
-                // most to least significant. Walk in reverse so `low` stays
-                // in the same LSB-based coordinate system as Region::Span.
-                for (part, repeat) in parts.iter().rev() {
-                    let width = part.comptime().r#type.total_width()?;
-                    let repeat = if let Some(repeat) = repeat {
-                        repeat.clone().eval_value(&mut self.context)?.to_usize()?
-                    } else {
-                        1
-                    };
-                    for copy in 0..repeat {
-                        let copy_start = low.checked_add(copy.checked_mul(width)?)?;
-                        let part_span = Span {
-                            start: copy_start,
-                            length: width,
-                        };
-                        if let Some(overlap) = requested.intersection(part_span) {
-                            let local = Span {
-                                start: overlap.start.checked_sub(copy_start)?,
-                                length: overlap.length,
-                            };
-                            mapped.extend(self.map_expression_span_to_actual(part, local)?);
-                        }
-                    }
-                    low = low.checked_add(width.checked_mul(repeat)?)?;
-                }
-                Some(mapped)
-            }
-            Expression::Unary(op, operand, _)
-                if matches!(op, Op::BitNot | Op::Add)
-                    && operand.comptime().r#type.total_width()?
-                        == expression.comptime().r#type.total_width()? =>
-            {
-                self.map_expression_span_to_actual(operand, requested)
-            }
-            Expression::Binary(left, op, right, _)
-                if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor)
-                    && left.comptime().r#type.total_width()?
-                        == expression.comptime().r#type.total_width()?
-                    && right.comptime().r#type.total_width()?
-                        == expression.comptime().r#type.total_width()? =>
-            {
-                let mut mapped = self.map_expression_span_to_actual(left, requested)?;
-                mapped.extend(self.map_expression_span_to_actual(right, requested)?);
-                Some(mapped)
-            }
-            _ => None,
-        }
+        self.map_expression_span_positioned_to_actual(expression, requested)
+            .map(|mapped| {
+                mapped
+                    .into_iter()
+                    .map(|positioned| positioned.region)
+                    .collect()
+            })
     }
 
     fn map_expression_span_positioned_to_actual(

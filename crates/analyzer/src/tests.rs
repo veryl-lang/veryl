@@ -10855,7 +10855,6 @@ fn combinational_loop_review_short_circuits_instance_actual_side_effects() {
 }
 
 #[test]
-#[ignore = "captured independent-review regression: function actual shift loses bit positions"]
 fn combinational_loop_review_preserves_function_actual_shift_positions() {
     // Why this case exists: (value << 1)[0] is an inserted zero. Passing the
     // shifted vector through a function must not broadcast value[1] to o.
