@@ -9867,14 +9867,7 @@ fn combinational_loop_memory_ssa_retains_dynamic_region_uncertainty() {
     let post1 = Analyzer::analyze_post_pass1();
     assert!(post1.is_empty(), "{post1:?}");
     let pass2 = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
-    // Why this assertion exists: a dynamic destination is a weak write, so
-    // the assignment pass must report its retained candidates even though the
-    // comb-loop pass keeps that uncertainty out of hard SCC diagnostics.
-    assert_eq!(pass2.len(), 1, "{pass2:?}");
-    assert!(
-        matches!(pass2[0], AnalyzerError::UncoveredBranch { .. }),
-        "{pass2:?}"
-    );
+    assert!(pass2.is_empty(), "{pass2:?}");
 
     let result = crate::comb_loop_detect::check_detailed(&ir);
     assert!(result.errors.is_empty(), "{:#?}", result.errors);
@@ -9884,6 +9877,23 @@ fn combinational_loop_memory_ssa_retains_dynamic_region_uncertainty() {
                 .reasons
                 .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)
     }));
+
+    // Why this assertion exists: the ordinary analyzer consumes coverage from
+    // the same post-pass MemorySSA run, while the detailed loop API keeps hard
+    // SCC diagnostics and incompleteness separate.
+    let diagnostics = analyze(code);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{diagnostics:?}"
+    );
 }
 
 fn assert_comb_loop_for_case(case: &str, code: &str, expected: bool) {
@@ -13549,8 +13559,8 @@ fn combinational_loop_nonempty_runtime_form_loop_has_no_zero_trip_path() {
         ) {
             var value: logic;
             always_comb {
-                for index in 0..1 {
-                    value = index[0];
+                for _index in 0..1 {
+                    value = 1;
                     break;
                 }
                 o = value;
