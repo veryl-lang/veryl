@@ -10386,7 +10386,6 @@ fn combinational_loop_review_keeps_instance_output_address_dependency() {
 }
 
 #[test]
-#[ignore = "known bug: dependency-free captured function writes disappear from summaries"]
 fn combinational_loop_review_keeps_dependency_free_function_write() {
     // Why this case exists: clear_x writes x even though the written value has
     // no signal dependency. That write kills LiveOnEntry before o reads x;
@@ -10413,7 +10412,6 @@ fn combinational_loop_review_keeps_dependency_free_function_write() {
 }
 
 #[test]
-#[ignore = "known bug: observer lowering skips return-only function side effects"]
 fn combinational_loop_review_keeps_observer_function_side_effect() {
     // Why this case exists: IEEE 1800-2023 11.3.5 preserves side effects of
     // evaluated expressions. touch(o) is evaluated as a display argument, and

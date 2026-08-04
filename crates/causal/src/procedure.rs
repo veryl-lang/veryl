@@ -87,6 +87,9 @@ pub struct Dependency<O> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcedureSummary<O> {
     pub dependencies: Vec<Dependency<O>>,
+    /// Sparse output atoms which can be written on exit, including writes
+    /// whose assigned value has no signal dependency.
+    pub outputs: Vec<Region<O>>,
     pub incomplete: BTreeSet<IncompleteReason>,
     /// Objects touched through an unresolved region. Exact dependencies on
     /// other objects remain independently provable.
@@ -587,6 +590,11 @@ where
                 kind,
                 aligned,
             })
+            .collect(),
+        outputs: written_atoms
+            .iter()
+            .copied()
+            .map(|atom| atom_region(atoms[atom]))
             .collect(),
         incomplete,
         uncertain_objects,

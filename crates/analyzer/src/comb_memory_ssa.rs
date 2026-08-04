@@ -561,6 +561,9 @@ impl Builder {
             dependencies.sort_unstable();
             dependencies.dedup();
         }
+        for &output in &summary.outputs {
+            dependencies_by_output.entry(output).or_default();
+        }
 
         for (&output, dependencies) in &dependencies_by_output {
             let output_object = match output {
@@ -884,7 +887,7 @@ impl Builder {
     fn lower_observer_expression(&mut self, block: usize, expression: &Expression) {
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
-                Factor::FunctionCall(call) if !call.outputs.is_empty() => {
+                Factor::FunctionCall(call) => {
                     self.lower_function_call(block, call, &[]);
                 }
                 Factor::SystemFunctionCall(call) => {
