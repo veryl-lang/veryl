@@ -22,7 +22,6 @@ use crate::symbol::{Affiliation, Direction};
 use crate::value::ValueBigUint;
 use daggy::petgraph::Direction::Incoming;
 use daggy::petgraph::Graph;
-use daggy::petgraph::algo::tarjan_scc;
 use daggy::petgraph::graph::NodeIndex;
 use daggy::petgraph::visit::EdgeRef;
 #[cfg(not(target_family = "wasm"))]
@@ -1981,7 +1980,63 @@ fn check_graph(module: &Module, graph: &Graph<NodeKey, bool>, errors: &mut Vec<A
 }
 
 fn strongly_connected_components(graph: &Graph<NodeKey, bool>) -> Vec<Vec<NodeIndex>> {
-    tarjan_scc(graph)
+    let node_bound = graph
+        .node_indices()
+        .map(NodeIndex::index)
+        .max()
+        .map_or(0, |index| index + 1);
+
+    // Kosaraju's two passes are both iterative. Combinational dependency
+    // chains can be tens of thousands of nodes deep, so even a linear-time
+    // recursive SCC implementation can exhaust the compiler's call stack.
+    let mut visited = vec![false; node_bound];
+    let mut finish_order = Vec::with_capacity(graph.node_count());
+    for start in graph.node_indices() {
+        if visited[start.index()] {
+            continue;
+        }
+
+        let mut stack = vec![(start, false)];
+        while let Some((node, exiting)) = stack.pop() {
+            if exiting {
+                finish_order.push(node);
+                continue;
+            }
+            if visited[node.index()] {
+                continue;
+            }
+            visited[node.index()] = true;
+            stack.push((node, true));
+            for successor in graph.neighbors(node) {
+                if !visited[successor.index()] {
+                    stack.push((successor, false));
+                }
+            }
+        }
+    }
+
+    visited.fill(false);
+    let mut components = Vec::new();
+    for start in finish_order.into_iter().rev() {
+        if visited[start.index()] {
+            continue;
+        }
+
+        visited[start.index()] = true;
+        let mut component = Vec::new();
+        let mut stack = vec![start];
+        while let Some(node) = stack.pop() {
+            component.push(node);
+            for predecessor in graph.neighbors_directed(node, Incoming) {
+                if !visited[predecessor.index()] {
+                    visited[predecessor.index()] = true;
+                    stack.push(predecessor);
+                }
+            }
+        }
+        components.push(component);
+    }
+    components
 }
 
 fn ensure_node(
