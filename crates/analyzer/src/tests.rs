@@ -29,6 +29,26 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
 }
 
 #[track_caller]
+fn analyze_comb_detailed(code: &str) -> crate::comb_loop_detect::CombAnalysisResult {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    let pass1 = analyzer.analyze_pass1("prj", &parser.veryl);
+    assert!(pass1.is_empty(), "{pass1:?}");
+    let post1 = Analyzer::analyze_post_pass1();
+    assert!(post1.is_empty(), "{post1:?}");
+    let pass2 = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    assert!(pass2.is_empty(), "{pass2:?}");
+    crate::comb_loop_detect::check_detailed(&ir)
+}
+
+#[track_caller]
 fn analyze_with_lint(code: &str, lint: Lint) -> Vec<AnalyzerError> {
     symbol_table::clear();
     attribute_table::clear();
@@ -12906,26 +12926,7 @@ fn combinational_loop_malicious_module_boundary_cases() {
 
 #[test]
 fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
-    fn detailed(code: &str) -> crate::comb_loop_detect::CombAnalysisResult {
-        symbol_table::clear();
-        attribute_table::clear();
-        doc_comment_table::clear();
-
-        let metadata = Metadata::create_default("prj").unwrap();
-        let parser = Parser::parse(code, &"").unwrap();
-        let analyzer = Analyzer::new(&metadata);
-        let mut context = Context::default();
-        let mut ir = Ir::default();
-        let pass1 = analyzer.analyze_pass1("prj", &parser.veryl);
-        assert!(pass1.is_empty(), "{pass1:?}");
-        let post1 = Analyzer::analyze_post_pass1();
-        assert!(post1.is_empty(), "{post1:?}");
-        let pass2 = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
-        assert!(pass2.is_empty(), "{pass2:?}");
-        crate::comb_loop_detect::check_detailed(&ir)
-    }
-
-    let external = detailed(
+    let external = analyze_comb_detailed(
         r#"
         module Top (
             o: output logic,
@@ -12949,7 +12950,7 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
                 .contains(&veryl_causal::graph::IncompleteReason::ExternalComponent)
     }));
 
-    let inout = detailed(
+    let inout = analyze_comb_detailed(
         r#"
         module Top (
             io: inout tri logic,
@@ -12967,7 +12968,7 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
     // Why this case exists: a dynamic selection inside a function must carry
     // its unresolved region provenance through the function summary. Function
     // lowering must not silently turn it into complete coverage.
-    let complex_function = detailed(
+    let complex_function = analyze_comb_detailed(
         r#"
         module Top (
             i    : input  logic<4>,
@@ -13004,7 +13005,7 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
     // cannot prove feedthrough inside the external component. A feedback-like
     // connection around that boundary stays incomplete rather than becoming a
     // stronger-than-source hard loop.
-    let complex_external_actual = detailed(
+    let complex_external_actual = analyze_comb_detailed(
         r#"
         module Top (
             o: output logic,
@@ -13053,7 +13054,7 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
             assign o = b | from_sv;
         }
         "#;
-    let external_and_proven_loop = detailed(external_and_proven_loop_code);
+    let external_and_proven_loop = analyze_comb_detailed(external_and_proven_loop_code);
     assert!(
         external_and_proven_loop
             .errors
@@ -13076,7 +13077,7 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
         "the ordinary analyzer must diagnose the proven loop: {diagnostics:#?}"
     );
 
-    let function_actual_loop = detailed(
+    let function_actual_loop = analyze_comb_detailed(
         r#"
         module Child (
             i: input  logic,
@@ -13116,7 +13117,7 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
         function_actual_loop.incomplete
     );
 
-    let ignored_function_argument = detailed(
+    let ignored_function_argument = analyze_comb_detailed(
         r#"
         module Child (
             i: input  logic,
@@ -13159,34 +13160,50 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
 
 #[test]
 fn combinational_loop_incomplete_effect_does_not_erase_proven_edges() {
-    // A loop construct carries explicit coverage provenance until break and
-    // runtime iteration semantics are modeled completely. That uncertainty
-    // must not discard an independent, exact dependency from the same block.
-    let result = analyze(
-        r#"
+    // Why this case exists: a nonconstant bound prevents frontend unrolling,
+    // so the causal adapter must retain RuntimeLoop coverage provenance. That
+    // uncertainty must not discard an independent, exact dependency from the
+    // same block or replace its hard loop diagnostic.
+    let code = r#"
         module Top (
-            i: input  logic,
+            n: input  logic<32>,
             o: output logic,
         ) {
-            var scratch: logic [1];
             var a: logic;
             var b: logic;
             always_comb {
-                for index in 0..1 {
-                    scratch[index] = i;
+                for index in 0..n {
+                    $display("index=%d", index);
                 }
-                a = b;
-                b = a;
-                o = b;
             }
+            assign a = b;
+            assign b = a;
+            assign o = b;
         }
-        "#,
+        "#;
+    let detailed = analyze_comb_detailed(code);
+    assert_eq!(
+        detailed
+            .errors
+            .iter()
+            .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+            .count(),
+        1,
+        "only the independent proven loop should be diagnosed: {detailed:#?}"
     );
+    assert!(detailed.incomplete.iter().any(|module| {
+        module.module == "Top"
+            && module
+                .reasons
+                .contains(&veryl_causal::graph::IncompleteReason::RuntimeLoop)
+    }));
+
+    let diagnostics = analyze(code);
     assert!(
-        result
+        diagnostics
             .iter()
             .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
-        "an incomplete effect must not hide an unrelated proven loop: {result:#?}"
+        "the ordinary analyzer must diagnose the proven loop: {diagnostics:#?}"
     );
 }
 
