@@ -34,21 +34,3 @@ does not remove an input edge: for example, `x & '0` remains structurally
 dependent on the corresponding bits of `x`. Observer-only reads affect SV
 sensitivity but do not define a signal value and therefore create no value
 edge here.
-
-## Follow-up work
-
-These are intentionally separate transfer kinds rather than approximations of
-the positional transfer:
-
-- two-state add/sub prefix dependencies (output bit `n` depends on operand bits
-  `0..=n`), while four-state arithmetic remains whole-expression dependent;
-- constant shifts, including vacated constant spans and signed arithmetic-right
-  fill dependencies;
-- width/sign casts and context extension/truncation;
-- repeated concatenations and other statically expanded aggregate expressions.
-
-Each should land with paired positive/negative loop tests across `bit` and
-`logic`, plus a declared-width-independent cost test.
-
-The initial implementation was adapted from Celox's `celox-analysis` crate.
-Both projects use the same `MIT OR Apache-2.0` license.
