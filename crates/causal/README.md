@@ -13,10 +13,11 @@ The design has three constraints:
 - Region endpoints form the version domain. Analysis cost depends on accesses,
   definitions, phis and CFG edges, not on a signal's declared bit width or an
   array's element count.
-- Exact and unknown dependencies stay distinct. Only exact/proven paths are
-  eligible for a hard combinational-loop diagnostic; dynamic aliases, external
-  components, hierarchy, timed effects and unsupported syntax are retained as
-  explicit incomplete reasons.
+- Dependencies within known expressions and unknown external effects stay
+  distinct. Conservative transfers within a known expression remain eligible
+  for a hard combinational-loop diagnostic; external components, hierarchy,
+  timed effects and unsupported syntax are retained as explicit incomplete
+  reasons rather than guessed as feedthrough.
 - Procedures are independent work items. Their summaries are deterministic and
   immutable, so callers may build them concurrently and merge them in source or
   module-topology order.

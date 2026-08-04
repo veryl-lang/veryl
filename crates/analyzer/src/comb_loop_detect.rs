@@ -13,14 +13,15 @@
 //! sensitivity list of `always_comb`.
 //!
 //! A graph node is an `(object, sparse region)` pair rather than a whole
-//! variable or one node per bit. A directed edge `A -> B` means that a proven
-//! value, control, or address dependency can make a write to region `B`
-//! structurally depend on region `A`. A self-edge or a multi-node strongly
+//! variable or one node per bit. A directed edge `A -> B` means that the
+//! selected structural model makes a write to region `B` value-, control-, or
+//! address-dependent on region `A`. A self-edge or a multi-node strongly
 //! connected component is therefore a combinational loop. Position-preserving
 //! operations retain an `aligned` edge so that, for example, `dst[0] = src[0]`
 //! does not imply a dependency between every bit of `dst` and every bit of
 //! `src`. Operations without a positional transfer conservatively connect the
-//! observed source and destination atoms all-to-all.
+//! observed source and destination atoms all-to-all, as permitted by the
+//! acceptance contract.
 //!
 //! Previous-value retention is deliberately not represented as a dependency
 //! edge. A conditional or partial write can leave a MemorySSA entry definition
@@ -91,7 +92,7 @@
 //! diagnostic, and their presence does not erase unrelated proven edges from
 //! the same procedure or module.
 //!
-//! [`check`] returns only proven loop errors for compatibility.
+//! [`check`] returns only hard loop errors for compatibility.
 //! [`check_detailed`] additionally exposes per-module incomplete reasons. The
 //! important incomplete boundaries are:
 //!
