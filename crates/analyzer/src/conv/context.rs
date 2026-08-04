@@ -50,10 +50,10 @@ pub struct Context {
     pub var_id: VarId,
     pub var_paths: HashMap<VarPath, (VarId, Comptime)>,
     pub func_paths: HashMap<FuncPath, VarId>,
-    /// Symbols whose function bodies are mid-conversion. Carried (via `inherit`)
-    /// across the fresh per-call contexts that mutual recursion creates, so
-    /// re-entry is detected and the IR conversion doesn't overflow.
-    pub converting_funcs: Vec<SymbolId>,
+    /// Function specializations whose bodies are mid-conversion. Carried (via
+    /// `inherit`) across fresh per-call contexts so true recursive re-entry is
+    /// detected without conflating finite generic specializations.
+    pub converting_funcs: Vec<FuncPath>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,

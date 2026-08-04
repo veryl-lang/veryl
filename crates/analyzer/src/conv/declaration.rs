@@ -1141,7 +1141,7 @@ fn conv_function(
     // Re-entry while mid-conversion is a call cycle (mutual recursion
     // `f0 -> f1 -> f0`) that the same-context `func_paths` guard above misses,
     // since it recurses through fresh contexts. Bail; `type_dag` reports it.
-    if context.converting_funcs.contains(&symbol.id) {
+    if context.converting_funcs.contains(&path) {
         return Ok(());
     }
     let id = context.insert_func_path(path.clone());
@@ -1179,7 +1179,7 @@ fn conv_function(
 
     // Mark in-progress for the body conversion only (where recursion lands);
     // kept below the `?`-bearing setup so an early error leaves no stale entry.
-    context.converting_funcs.push(symbol.id);
+    context.converting_funcs.push(path.clone());
     context.push_affiliation(Affiliation::Function);
     context.push_hierarchy(name);
     context.push_namespace(namespace);

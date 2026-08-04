@@ -3890,7 +3890,12 @@ pub fn function_call(
     sig.normalize();
 
     // same signature re-entered => true infinite recursion
-    if context.function_call_stack.contains(&sig) {
+    let unresolved_generic_template = !symbol_table::get(sig.symbol)
+        .unwrap()
+        .generic_parameters()
+        .is_empty()
+        && sig.generic_parameters.is_empty();
+    if !unresolved_generic_template && context.function_call_stack.contains(&sig) {
         context.insert_error(AnalyzerError::infinite_recursion(&token));
         return Err(ir_error!(token));
     }

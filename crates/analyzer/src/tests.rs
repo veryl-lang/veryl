@@ -10533,7 +10533,6 @@ fn combinational_loop_review_preserves_split_function_return_bits() {
 }
 
 #[test]
-#[ignore = "known bug: recursive function identity ignores generic specialization"]
 fn combinational_loop_review_distinguishes_generic_function_specializations() {
     // Why this case exists: recurse::<2> and recurse::<1> are distinct finite
     // specializations. Elaboration reduces the call to passed = feedback, so

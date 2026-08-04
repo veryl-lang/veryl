@@ -178,6 +178,18 @@ impl Signature {
 
                     sig.full_path
                         .append(&mut found.inner_namespace().paths.to_vec());
+                } else if let Some(last) = path.paths.last() {
+                    // A finite recursive generic call can elaborate a new
+                    // value (for example N - 1) before a structural instance
+                    // symbol has been materialized. Keep the resolved actuals
+                    // in the signature so conversion can instantiate that
+                    // specialization instead of lowering the call to unknown.
+                    let parameters = symbol.found.generic_parameters();
+                    if parameters.len() == last.arguments.len() {
+                        for ((name, _), argument) in parameters.iter().zip(&last.arguments) {
+                            sig.add_generic_parameter(*name, argument.clone());
+                        }
+                    }
                 }
             }
         }
