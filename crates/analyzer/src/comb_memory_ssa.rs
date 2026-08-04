@@ -42,6 +42,16 @@ pub(crate) fn map_expression_span(
     Builder::with_context(nested_context).map_expression_span_to_actual(expression, requested)
 }
 
+fn exact_regions_have_equal_length(left: Region<VarId>, right: Region<VarId>) -> bool {
+    matches!(
+        (left, right),
+        (
+            Region::Exact { span: left, .. },
+            Region::Exact { span: right, .. }
+        ) if left.length == right.length
+    )
+}
+
 struct Builder {
     context: Context,
     procedure: Procedure<VarId>,
@@ -50,6 +60,14 @@ struct Builder {
     unresolved_writes: BTreeMap<String, Vec<(usize, Vec<usize>)>>,
     call_stack: Vec<VarId>,
     model_error: Option<&'static str>,
+}
+
+#[derive(Clone, Copy)]
+struct MappedFunctionRead {
+    read: usize,
+    kind: EdgeKind,
+    input: Region<VarId>,
+    aligned: bool,
 }
 
 impl Builder {
@@ -510,7 +528,7 @@ impl Builder {
             .values()
             .copied()
             .collect::<BTreeSet<_>>();
-        let mut dependencies_by_output = BTreeMap::<Region<VarId>, Vec<(usize, EdgeKind)>>::new();
+        let mut dependencies_by_output = BTreeMap::<Region<VarId>, Vec<MappedFunctionRead>>::new();
         for dependency in &summary.dependencies {
             let mut mapped = Vec::new();
             let input_object = match dependency.input {
@@ -526,12 +544,25 @@ impl Builder {
                 if let Some(actual_regions) =
                     self.map_formal_region_to_actual(actual_expression, dependency.input)
                 {
+                    let preserve_alignment = dependency.aligned
+                        && actual_regions.len() == 1
+                        && exact_regions_have_equal_length(actual_regions[0], dependency.output);
                     mapped.extend(actual_regions.into_iter().map(|actual_region| {
-                        (self.push_read(block, actual_region), dependency.kind)
+                        MappedFunctionRead {
+                            read: self.push_read(block, actual_region),
+                            kind: dependency.kind,
+                            input: actual_region,
+                            aligned: preserve_alignment,
+                        }
                     }));
                 } else {
                     mapped.extend(fallback_reads.iter().map(|&(read, actual_kind)| {
-                        (read, combine_edge_kinds(dependency.kind, actual_kind))
+                        MappedFunctionRead {
+                            read,
+                            kind: combine_edge_kinds(dependency.kind, actual_kind),
+                            input: Region::UnknownAll,
+                            aligned: false,
+                        }
                     }));
                 }
             } else if input_object.is_some_and(|object| {
@@ -539,7 +570,13 @@ impl Builder {
                     variable.affiliation == crate::symbol::Affiliation::Module
                 })
             }) {
-                mapped.push((self.push_read(block, dependency.input), dependency.kind));
+                mapped.push(MappedFunctionRead {
+                    read: self.push_read(block, dependency.input),
+                    kind: dependency.kind,
+                    input: dependency.input,
+                    aligned: dependency.aligned
+                        && exact_regions_have_equal_length(dependency.input, dependency.output),
+                });
             } else if input_object.is_some_and(|object| formal_ids.contains(&object)) {
                 self.model_error
                     .get_or_insert("function dependency refers to an unmapped input argument");
@@ -548,18 +585,23 @@ impl Builder {
                 self.procedure
                     .incomplete
                     .insert(IncompleteReason::MalformedModel);
-                mapped.push((self.unknown_read(block), EdgeKind::Unknown));
+                mapped.push(MappedFunctionRead {
+                    read: self.unknown_read(block),
+                    kind: EdgeKind::Unknown,
+                    input: Region::UnknownAll,
+                    aligned: false,
+                });
             }
-            mapped.sort_unstable();
-            mapped.dedup();
+            mapped.sort_unstable_by_key(|dependency| (dependency.read, dependency.kind));
+            mapped.dedup_by_key(|dependency| (dependency.read, dependency.kind));
             dependencies_by_output
                 .entry(dependency.output)
                 .or_default()
                 .extend(mapped);
         }
         for dependencies in dependencies_by_output.values_mut() {
-            dependencies.sort_unstable();
-            dependencies.dedup();
+            dependencies.sort_unstable_by_key(|dependency| (dependency.read, dependency.kind));
+            dependencies.dedup_by_key(|dependency| (dependency.read, dependency.kind));
         }
         for &output in &summary.outputs {
             dependencies_by_output.entry(output).or_default();
@@ -580,7 +622,10 @@ impl Builder {
             if !is_module_capture {
                 continue;
             }
-            let mut dependencies = dependencies.clone();
+            let mut dependencies = dependencies
+                .iter()
+                .map(|dependency| (dependency.read, dependency.kind))
+                .collect::<Vec<_>>();
             dependencies.extend_from_slice(controls);
             let id = self.next_write;
             self.next_write += 1;
@@ -598,23 +643,37 @@ impl Builder {
                     .get_or_insert("function call output has no formal argument mapping");
                 continue;
             };
-            let mut dependencies = dependencies_by_output
+            let mapped_dependencies = dependencies_by_output
                 .iter()
                 .filter_map(|(output, dependencies)| match output {
                     Region::Exact { object, .. } | Region::UnknownObject(object)
                         if *object == formal =>
                     {
-                        Some(dependencies.iter().copied())
+                        Some((*output, dependencies.clone()))
                     }
                     _ => None,
                 })
-                .flatten()
+                .collect::<Vec<_>>();
+            let mut dependencies = mapped_dependencies
+                .iter()
+                .flat_map(|(_, dependencies)| dependencies.iter().copied())
+                .map(|dependency| (dependency.read, dependency.kind))
                 .collect::<Vec<_>>();
             dependencies.sort_unstable();
             dependencies.dedup();
             dependencies.extend_from_slice(controls);
+            let aligned =
+                self.function_output_aligned_dependencies(formal, outputs, &mapped_dependencies);
+            if aligned.is_some() {
+                dependencies = controls.to_vec();
+            }
             for destination in outputs {
-                self.write_destination(block, destination, dependencies.clone(), Vec::new());
+                self.write_destination(
+                    block,
+                    destination,
+                    dependencies.clone(),
+                    aligned.clone().unwrap_or_default(),
+                );
             }
         }
 
@@ -630,6 +689,7 @@ impl Builder {
                     _ => None,
                 })
                 .flatten()
+                .map(|dependency| (dependency.read, dependency.kind))
                 .collect::<Vec<_>>();
             dependencies.sort_unstable();
             dependencies.dedup();
@@ -637,6 +697,75 @@ impl Builder {
         } else {
             Vec::new()
         }
+    }
+
+    fn function_output_aligned_dependencies(
+        &mut self,
+        formal: VarId,
+        outputs: &[AssignDestination],
+        mapped_dependencies: &[(Region<VarId>, Vec<MappedFunctionRead>)],
+    ) -> Option<Vec<AlignedDependency>> {
+        let [destination] = outputs else {
+            return None;
+        };
+        let Region::Exact {
+            span: destination_span,
+            ..
+        } = self.variable_region(destination.id, &destination.index, &destination.select)
+        else {
+            return None;
+        };
+        let formal_length = self
+            .context
+            .variables
+            .get(&formal)?
+            .total_width()?
+            .checked_mul(
+                self.context
+                    .variables
+                    .get(&formal)?
+                    .r#type
+                    .total_array()
+                    .unwrap_or(1),
+            )?;
+        if destination_span.length != formal_length {
+            return None;
+        }
+
+        let mut aligned = Vec::new();
+        for &(output, ref dependencies) in mapped_dependencies {
+            let Region::Exact {
+                object,
+                span: output_span,
+            } = output
+            else {
+                return None;
+            };
+            if object != formal || output_span.end()? > formal_length {
+                return None;
+            }
+            for dependency in dependencies {
+                let Region::Exact {
+                    span: input_span, ..
+                } = dependency.input
+                else {
+                    return None;
+                };
+                if !dependency.aligned || input_span.length != output_span.length {
+                    return None;
+                }
+                aligned.push(AlignedDependency {
+                    read: dependency.read,
+                    kind: dependency.kind,
+                    source: Span {
+                        start: 0,
+                        length: input_span.length,
+                    },
+                    destination: output_span,
+                });
+            }
+        }
+        Some(aligned)
     }
 
     fn map_formal_region_to_actual(
@@ -696,9 +825,9 @@ impl Builder {
                     }
                     _ => None,
                 },
-                Factor::FunctionCall(call) => {
-                    self.map_function_return_span_to_actual(call, requested)
-                }
+                Factor::FunctionCall(call) => self
+                    .map_function_return_spans_to_actual(call, requested)
+                    .map(|mapped| mapped.into_iter().map(|(region, _)| region).collect()),
                 _ => None,
             },
             Expression::Concatenation(parts, _) => {
@@ -749,11 +878,11 @@ impl Builder {
         }
     }
 
-    fn map_function_return_span_to_actual(
+    fn map_function_return_spans_to_actual(
         &mut self,
         call: &FunctionCall,
         requested: Span,
-    ) -> Option<Vec<Region<VarId>>> {
+    ) -> Option<Vec<(Region<VarId>, Span)>> {
         if self.call_stack.contains(&call.id) {
             return None;
         }
@@ -822,7 +951,25 @@ impl Builder {
                     length: output_overlap.length,
                 },
             };
-            mapped.extend(self.map_formal_region_to_actual(actual, formal_region)?);
+            let actual_regions = self.map_formal_region_to_actual(actual, formal_region)?;
+            for actual_region in actual_regions {
+                let Region::Exact {
+                    span: actual_span, ..
+                } = actual_region
+                else {
+                    return None;
+                };
+                if actual_span.length != output_overlap.length {
+                    return None;
+                }
+                mapped.push((
+                    actual_region,
+                    Span {
+                        start: output_overlap.start.checked_sub(requested.start)?,
+                        length: output_overlap.length,
+                    },
+                ));
+            }
         }
         mapped.sort_unstable();
         mapped.dedup();
@@ -1092,7 +1239,7 @@ impl Builder {
                     Some(())
                 }
                 Factor::FunctionCall(call) => {
-                    let regions = self.map_function_return_span_to_actual(
+                    let regions = self.map_function_return_spans_to_actual(
                         call,
                         Span {
                             start: 0,
@@ -1100,11 +1247,11 @@ impl Builder {
                         },
                     )?;
                     let dependency_count = regions.len();
-                    for region in regions {
+                    for (region, mapped_destination) in regions {
                         let Region::Exact { span, .. } = region else {
                             return None;
                         };
-                        if span.length != destination.length {
+                        if span.length != mapped_destination.length {
                             return None;
                         }
                         aligned.push(AlignedDependency {
@@ -1114,7 +1261,10 @@ impl Builder {
                                 start: 0,
                                 length: span.length,
                             },
-                            destination,
+                            destination: Span {
+                                start: destination.start.checked_add(mapped_destination.start)?,
+                                length: mapped_destination.length,
+                            },
                         });
                     }
                     for _ in 0..dependency_count {

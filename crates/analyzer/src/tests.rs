@@ -10474,7 +10474,6 @@ fn combinational_loop_review_keeps_instance_actual_function_side_effect() {
 }
 
 #[test]
-#[ignore = "known bug: function output arguments discard aligned bit coordinates"]
 fn combinational_loop_review_preserves_vector_function_output_bits() {
     // Why this case exists: output argument y is a vector identity of x.
     // Broadcasting all x bits to all y bits invents value[1] -> o[0] feedback.
@@ -10503,7 +10502,6 @@ fn combinational_loop_review_preserves_vector_function_output_bits() {
 }
 
 #[test]
-#[ignore = "known bug: split function return dependencies fall back to all-to-all"]
 fn combinational_loop_review_preserves_split_function_return_bits() {
     // Why this case exists: {high, low}[0] is low. Returning o[0] to high is
     // acyclic when low is constant, even though the return uses two regions.
