@@ -14254,6 +14254,13 @@ fn uncovered_branch() {
     "#;
 
     let errors = analyze(code);
+    // Why this assertion exists: legacy branch bookkeeping and MemorySSA both
+    // observe this latch, but the analyzer must expose one diagnostic.
+    assert_eq!(
+        errors.len(),
+        1,
+        "coverage must not be reported twice: {errors:#?}"
+    );
     assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
 
     let code = r#"
