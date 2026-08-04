@@ -10903,7 +10903,6 @@ fn combinational_loop_review_preserves_function_actual_shift_positions() {
 }
 
 #[test]
-#[ignore = "captured independent-review regression: vector ternary loses bit positions"]
 fn combinational_loop_review_preserves_vector_ternary_positions() {
     // Why this case exists: both branches preserve vector bit positions, so
     // o[0] can read only value[0] (or the constant), never value[1].

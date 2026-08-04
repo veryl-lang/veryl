@@ -198,15 +198,8 @@ impl Builder {
     ) -> Option<usize> {
         match statement {
             Statement::Assign(assign) => {
-                let mut dependencies = self.read_expression(block, &assign.expr, EdgeKind::Value);
-                let aligned_by_destination = self
-                    .aligned_assignment_dependencies(
-                        block,
-                        &assign.expr,
-                        &assign.dst,
-                        &mut dependencies,
-                    )
-                    .unwrap_or_else(|| vec![Vec::new(); assign.dst.len()]);
+                let (mut dependencies, aligned_by_destination) =
+                    self.assignment_dependencies(block, &assign.expr, &assign.dst);
                 dependencies.extend_from_slice(controls);
                 for (destination, aligned_dependencies) in
                     assign.dst.iter().zip(aligned_by_destination)
@@ -389,6 +382,55 @@ impl Builder {
                 Some(block)
             }
             Statement::Null => Some(block),
+        }
+    }
+
+    fn assignment_dependencies(
+        &mut self,
+        block: usize,
+        expression: &Expression,
+        destinations: &[AssignDestination],
+    ) -> (Vec<(usize, EdgeKind)>, Vec<Vec<AlignedDependency>>) {
+        if let Expression::Ternary(condition, left, right, _) = expression {
+            let condition_dependencies = self.read_expression(block, condition, EdgeKind::Control);
+            let branches = match self.constant_condition(condition) {
+                Some(true) => [Some(left.as_ref()), None],
+                Some(false) => [Some(right.as_ref()), None],
+                None => [Some(left.as_ref()), Some(right.as_ref())],
+            };
+            let mut all_dependencies = condition_dependencies.clone();
+            let mut aligned = vec![Vec::new(); destinations.len()];
+            let mut precise = true;
+            for branch in branches.into_iter().flatten() {
+                let mut branch_dependencies = self.read_expression(block, branch, EdgeKind::Value);
+                all_dependencies.extend_from_slice(&branch_dependencies);
+                if branch_dependencies.is_empty() {
+                    continue;
+                }
+                let Some(branch_aligned) = self.aligned_assignment_dependencies(
+                    block,
+                    branch,
+                    destinations,
+                    &mut branch_dependencies,
+                ) else {
+                    precise = false;
+                    continue;
+                };
+                for (combined, branch) in aligned.iter_mut().zip(branch_aligned) {
+                    combined.extend(branch);
+                }
+            }
+            if precise {
+                (condition_dependencies, aligned)
+            } else {
+                (all_dependencies, vec![Vec::new(); destinations.len()])
+            }
+        } else {
+            let mut dependencies = self.read_expression(block, expression, EdgeKind::Value);
+            let aligned = self
+                .aligned_assignment_dependencies(block, expression, destinations, &mut dependencies)
+                .unwrap_or_else(|| vec![Vec::new(); destinations.len()]);
+            (dependencies, aligned)
         }
     }
 
