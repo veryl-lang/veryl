@@ -24703,6 +24703,7 @@ fn comb_loop_uses_structural_selector_regions() {
         );
     }
 }
+#[test]
 fn orphan_else_across_scopes() {
     // The ifdef/elsif/else attribute state persisted across attribute-group
     // lists and nesting levels, so an orphan #[else] chained to an #[ifdef]
