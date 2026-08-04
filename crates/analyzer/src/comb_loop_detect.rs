@@ -1466,6 +1466,7 @@ fn map_destinations_span_positioned(
                 },
                 expression: overlap,
                 aligned: true,
+                kind: EdgeKind::Value,
             });
         }
         low = low.checked_add(span.length)?;

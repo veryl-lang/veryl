@@ -61,9 +61,10 @@ pub(crate) struct PositionedRegion {
     pub region: Region<VarId>,
     /// Bit coordinates in the mapped expression which this region supplies.
     pub expression: Span,
-    /// False when this region controls the mapped expression span instead of
-    /// supplying corresponding data bits.
+    /// Whether source and result bits correspond one-to-one.
     pub aligned: bool,
+    /// Value for data (including replicated fill); Control for selectors.
+    pub kind: EdgeKind,
 }
 
 pub(crate) fn map_expression_span_positioned(
@@ -403,6 +404,7 @@ impl Builder {
                 None => [Some(left.as_ref()), Some(right.as_ref())],
             };
             let mut all_dependencies = condition_dependencies.clone();
+            let mut precise_dependencies = condition_dependencies.clone();
             let mut aligned = vec![Vec::new(); destinations.len()];
             let mut precise = true;
             for branch in branches.into_iter().flatten() {
@@ -416,23 +418,31 @@ impl Builder {
                     branch,
                     destinations,
                     &mut branch_dependencies,
+                    Some(left.comptime().r#type.signed && right.comptime().r#type.signed),
                 ) else {
                     precise = false;
                     continue;
                 };
+                precise_dependencies.extend(branch_dependencies);
                 for (combined, branch) in aligned.iter_mut().zip(branch_aligned) {
                     combined.extend(branch);
                 }
             }
             if precise {
-                (condition_dependencies, aligned)
+                (precise_dependencies, aligned)
             } else {
                 (all_dependencies, vec![Vec::new(); destinations.len()])
             }
         } else {
             let mut dependencies = self.read_expression(block, expression, EdgeKind::Value);
             let aligned = self
-                .aligned_assignment_dependencies(block, expression, destinations, &mut dependencies)
+                .aligned_assignment_dependencies(
+                    block,
+                    expression,
+                    destinations,
+                    &mut dependencies,
+                    None,
+                )
                 .unwrap_or_else(|| vec![Vec::new(); destinations.len()]);
             (dependencies, aligned)
         }
@@ -913,6 +923,19 @@ impl Builder {
         expression: &Expression,
         requested: Span,
     ) -> Option<Vec<PositionedRegion>> {
+        self.map_expression_span_positioned_with_signed(
+            expression,
+            requested,
+            expression.comptime().r#type.signed,
+        )
+    }
+
+    fn map_expression_span_positioned_with_signed(
+        &mut self,
+        expression: &Expression,
+        requested: Span,
+        extension_signed: bool,
+    ) -> Option<Vec<PositionedRegion>> {
         let expression_type = &expression.comptime().r#type;
         let packed_width = expression_type.total_width()?;
         let expression_length =
@@ -936,7 +959,7 @@ impl Builder {
                 start: packed_width,
                 length: requested.end()?.checked_sub(packed_width)?,
             });
-            if expression_type.signed
+            if extension_signed
                 && packed_width != 0
                 && let Some(extension) = extension
             {
@@ -953,6 +976,7 @@ impl Builder {
                         region: sign.region,
                         expression: extension,
                         aligned: false,
+                        kind: EdgeKind::Value,
                     }),
                 );
             }
@@ -981,6 +1005,7 @@ impl Builder {
                         },
                         expression: requested,
                         aligned: true,
+                        kind: EdgeKind::Value,
                     }])
                 }
                 Factor::Value(_) => Some(Vec::new()),
@@ -1005,6 +1030,7 @@ impl Builder {
                                     length: relative.length,
                                 },
                                 aligned,
+                                kind: EdgeKind::Value,
                             })
                             .collect()
                     }),
@@ -1017,8 +1043,17 @@ impl Builder {
                         requested,
                     );
                 }
-                let mut mapped = self.map_expression_span_positioned_to_actual(left, requested)?;
-                mapped.extend(self.map_expression_span_positioned_to_actual(right, requested)?);
+                let result_signed = expression.comptime().r#type.signed;
+                let mut mapped = self.map_expression_span_positioned_with_signed(
+                    left,
+                    requested,
+                    result_signed,
+                )?;
+                mapped.extend(self.map_expression_span_positioned_with_signed(
+                    right,
+                    requested,
+                    result_signed,
+                )?);
                 let condition_width = condition.comptime().r#type.total_width()?;
                 mapped.extend(
                     self.map_expression_span_positioned_to_actual(
@@ -1033,6 +1068,7 @@ impl Builder {
                         region: condition.region,
                         expression: requested,
                         aligned: false,
+                        kind: EdgeKind::Control,
                     }),
                 );
                 Some(mapped)
@@ -1070,6 +1106,7 @@ impl Builder {
                                         length: positioned.expression.length,
                                     },
                                     aligned: positioned.aligned,
+                                    kind: positioned.kind,
                                 }),
                         );
                     }
@@ -1077,18 +1114,29 @@ impl Builder {
                 }
                 Some(mapped)
             }
-            Expression::Unary(op, operand, _) if matches!(op, Op::BitNot | Op::Add) => {
+            Expression::Unary(Op::BitNot | Op::Add, operand, _) => {
                 self.map_expression_span_positioned_to_actual(operand, requested)
             }
+            Expression::Binary(left, Op::As, _, _) => self
+                .map_expression_span_positioned_with_signed(
+                    left,
+                    requested,
+                    expression.comptime().r#type.signed,
+                ),
             Expression::Binary(left, op, right, _)
-                if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor)
-                    && left.comptime().r#type.total_width()?
-                        == expression.comptime().r#type.total_width()?
-                    && right.comptime().r#type.total_width()?
-                        == expression.comptime().r#type.total_width()? =>
+                if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor) =>
             {
-                let mut mapped = self.map_expression_span_positioned_to_actual(left, requested)?;
-                mapped.extend(self.map_expression_span_positioned_to_actual(right, requested)?);
+                let result_signed = expression.comptime().r#type.signed;
+                let mut mapped = self.map_expression_span_positioned_with_signed(
+                    left,
+                    requested,
+                    result_signed,
+                )?;
+                mapped.extend(self.map_expression_span_positioned_with_signed(
+                    right,
+                    requested,
+                    result_signed,
+                )?);
                 Some(mapped)
             }
             Expression::Binary(left, op, right, _)
@@ -1123,6 +1171,7 @@ impl Builder {
                                 length: positioned.expression.length,
                             },
                             aligned: positioned.aligned,
+                            kind: positioned.kind,
                         })
                         .collect(),
                 )
@@ -1157,6 +1206,7 @@ impl Builder {
                                 length: positioned.expression.length,
                             },
                             aligned: positioned.aligned,
+                            kind: positioned.kind,
                         })
                         .collect(),
                 )
@@ -1192,6 +1242,7 @@ impl Builder {
                                     length: positioned.expression.length,
                                 },
                                 aligned: positioned.aligned,
+                                kind: positioned.kind,
                             }),
                     );
                 }
@@ -1212,6 +1263,7 @@ impl Builder {
                             region: sign.region,
                             expression: fill,
                             aligned: false,
+                            kind: EdgeKind::Value,
                         }),
                     );
                 }
@@ -1444,10 +1496,10 @@ impl Builder {
     }
 
     fn binary_rhs_is_reachable(&mut self, left: &Expression, op: Op) -> bool {
-        match (op, self.constant_condition(left)) {
-            (Op::LogicAnd, Some(false)) | (Op::LogicOr, Some(true)) => false,
-            _ => true,
-        }
+        !matches!(
+            (op, self.constant_condition(left)),
+            (Op::LogicAnd, Some(false)) | (Op::LogicOr, Some(true))
+        )
     }
 
     fn write_destination(
@@ -1498,6 +1550,7 @@ impl Builder {
         expression: &Expression,
         destinations: &[AssignDestination],
         dependencies: &mut Vec<(usize, EdgeKind)>,
+        extension_signed: Option<bool>,
     ) -> Option<Vec<Vec<AlignedDependency>>> {
         let mut expression_width = 0usize;
         let mut destination_lengths = Vec::with_capacity(destinations.len());
@@ -1523,12 +1576,13 @@ impl Builder {
         }
 
         let mut aligned = Vec::new();
-        let positioned = self.map_expression_span_positioned_to_actual(
+        let positioned = self.map_expression_span_positioned_with_signed(
             expression,
             Span {
                 start: 0,
                 length: expression_width,
             },
+            extension_signed.unwrap_or(expression.comptime().r#type.signed),
         )?;
         let mut retained = Vec::new();
         for positioned in positioned {
@@ -1542,7 +1596,7 @@ impl Builder {
                 }
                 aligned.push(AlignedDependency {
                     read,
-                    kind: EdgeKind::Value,
+                    kind: positioned.kind,
                     source: Span {
                         start: 0,
                         length: span.length,
@@ -1550,7 +1604,7 @@ impl Builder {
                     destination: positioned.expression,
                 });
             } else {
-                retained.push((read, EdgeKind::Control));
+                retained.push((read, positioned.kind));
             }
         }
         *dependencies = retained;

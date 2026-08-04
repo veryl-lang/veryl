@@ -22205,8 +22205,7 @@ fn combinational_loop_review_bounds_dynamic_selector_values() {
 }
 
 #[test]
-#[ignore = "captured third-review follow-up: coercions and correlated selectors"]
-fn combinational_loop_review_preserves_coercions_and_selector_correlation() {
+fn combinational_loop_review_preserves_expression_coercions() {
     // Why these cases exist: both ternary operands are signed and four bits
     // wide after context sizing. Its high result bit depends only on the
     // two-bit value's sign bit, not on value[0].
@@ -22300,7 +22299,11 @@ fn combinational_loop_review_preserves_coercions_and_selector_correlation() {
             expected,
         );
     }
+}
 
+#[test]
+#[ignore = "captured third-review follow-up: correlated selectors need guarded regions"]
+fn combinational_loop_review_preserves_selector_correlation() {
     // Why these cases exist: bounded evaluation must preserve correlation
     // between a read and write selector. For one-bit two-state idx, idx and
     // ~idx are always distinct, while two identical selectors may alias.
