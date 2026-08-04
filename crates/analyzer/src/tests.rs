@@ -14134,6 +14134,32 @@ fn combinational_loop_function_summary_fanout_is_memoized() {
 }
 
 #[test]
+fn combinational_loop_rejected_periodic_run_is_scanned_once() {
+    // Why this case exists: a long run with one source but the same exact
+    // destination is legal sequential overwrite, not a periodic transfer.
+    // Rejecting the candidate must not sort every remaining suffix again.
+    let assignments = "a = i;\n".repeat(4096);
+    let errors = analyze(&format!(
+        r#"
+        module Top (
+            i: input  logic,
+            o: output logic,
+        ) {{
+            var a: logic;
+            always_comb {{
+                {assignments}
+            }}
+            assign o = a;
+        }}
+        "#
+    ));
+    assert!(
+        errors.is_empty(),
+        "repeated overwrite is valid: {errors:#?}"
+    );
+}
+
+#[test]
 fn combinational_loop_malformed_effect_is_a_causal_barrier() {
     // Why this case exists: a rejected statement may have unknown side
     // effects, so a cycle which crosses it is not proven. The malformed
