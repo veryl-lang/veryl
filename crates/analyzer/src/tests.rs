@@ -10955,6 +10955,178 @@ fn combinational_loop_review_preserves_nested_vector_ternary_positions() {
 }
 
 #[test]
+#[ignore = "captured final-review regression: ternary positions disappear at call boundaries"]
+fn combinational_loop_review_preserves_ternary_positions_across_boundaries() {
+    // Why this case exists: low reads only bit zero of its formal. A ternary
+    // actual preserves that bit position, so feedback into value[1] is
+    // disjoint even when the mapping crosses a function-call boundary.
+    assert_comb_loop_for_case(
+        "a function ternary actual keeps a disjoint bit loop-free",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            function low (
+                x: input logic<2>,
+            ) -> logic {
+                return x[0];
+            }
+            var value: logic<2>;
+            assign o = low(if sel ? value : 0);
+            assign value[0] = 0;
+            assign value[1] = o;
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: returning the selected bit to value[0] closes
+    // the function actual's real corresponding-bit path.
+    assert_comb_loop_for_case(
+        "a function ternary actual detects its corresponding-bit loop",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            function low (
+                x: input logic<2>,
+            ) -> logic {
+                return x[0];
+            }
+            var value: logic<2>;
+            assign o = low(if sel ? value : 0);
+            assign value[0] = o;
+            assign value[1] = 0;
+        }
+        "#,
+        true,
+    );
+
+    // Why this case exists: the same positional rule must survive a module
+    // port boundary; child output o depends only on actual bit zero.
+    assert_comb_loop_for_case(
+        "an instance ternary actual keeps a disjoint bit loop-free",
+        r#"
+        module Low (
+            i: input  logic<2>,
+            o: output logic,
+        ) {
+            assign o = i[0];
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var value: logic<2>;
+            var passed: logic;
+            inst u: Low (
+                i: if sel ? value : 0,
+                o: passed,
+            );
+            assign value[0] = 0;
+            assign value[1] = passed;
+            assign o = passed;
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: feeding the child result back to actual bit
+    // zero is a real loop through the instance boundary.
+    assert_comb_loop_for_case(
+        "an instance ternary actual detects its corresponding-bit loop",
+        r#"
+        module Low (
+            i: input  logic<2>,
+            o: output logic,
+        ) {
+            assign o = i[0];
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var value: logic<2>;
+            var passed: logic;
+            inst u: Low (
+                i: if sel ? value : 0,
+                o: passed,
+            );
+            assign value[0] = passed;
+            assign value[1] = 0;
+            assign o = passed;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "captured final-review regression: unpacked module ports collapse element positions"]
+fn combinational_loop_review_preserves_unpacked_port_element_positions() {
+    // Why this case exists: Child is an element-wise identity over an unpacked
+    // array. Returning child_o[1] to child_i[0] crosses distinct elements and
+    // must not be widened to whole-array feedback at the instance boundary.
+    assert_comb_loop_for_case(
+        "an unpacked-array module port keeps disjoint elements loop-free",
+        r#"
+        module Child (
+            i: input  logic [2],
+            o: output logic [2],
+        ) {
+            assign o[0] = i[0];
+            assign o[1] = i[1];
+        }
+        module Top (
+            o: output logic,
+        ) {
+            var child_i: logic [2];
+            var child_o: logic [2];
+            inst u: Child (
+                i: child_i,
+                o: child_o,
+            );
+            assign child_i[0] = child_o[1];
+            assign child_i[1] = 0;
+            assign o = child_o[0];
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: returning child_o[0] to the corresponding
+    // child_i[0] element is a real instance-boundary SCC.
+    assert_comb_loop_for_case(
+        "an unpacked-array module port detects same-element feedback",
+        r#"
+        module Child (
+            i: input  logic [2],
+            o: output logic [2],
+        ) {
+            assign o[0] = i[0];
+            assign o[1] = i[1];
+        }
+        module Top (
+            o: output logic,
+        ) {
+            var child_i: logic [2];
+            var child_o: logic [2];
+            inst u: Child (
+                i: child_i,
+                o: child_o,
+            );
+            assign child_i[0] = child_o[0];
+            assign child_i[1] = 0;
+            assign o = child_o[0];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 #[ignore = "captured final-review regression: local right shift loses zero-fill positions"]
 fn combinational_loop_review_preserves_local_right_shift_positions() {
     // Why this case exists: (value >> 1)[3] is an inserted zero. Returning
