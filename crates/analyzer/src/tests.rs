@@ -22626,3 +22626,72 @@ fn combinational_loop_review_uses_structural_selector_overlap() {
         );
     }
 }
+
+#[test]
+fn combinational_loop_review_maps_instance_actual_function_captures() {
+    // Why this case exists: a function used as an instance input may read a
+    // module-scope variable without listing it as a formal. The function
+    // summary, rather than the call's empty syntactic argument list, must map
+    // that capture into the child feedthrough and retain the real loop.
+    assert_comb_loop_for_case(
+        "an instance actual function retains a module-scope capture",
+        r#"
+        module Child (
+            i: input  logic,
+            o: output logic,
+        ) {
+            assign o = i;
+        }
+
+        module Top (
+            o: output logic,
+        ) {
+            var x     : logic;
+            var passed: logic;
+            function get_x () -> logic {
+                return x;
+            }
+            inst u: Child (
+                i: get_x(),
+                o: passed,
+            );
+            assign x = passed;
+            assign o = passed;
+        }
+        "#,
+        true,
+    );
+
+    // Why this control exists: an exact module capture keeps its selected bit
+    // position. Feeding the child output into another bit must remain
+    // loop-free instead of widening the capture to the whole object.
+    assert_comb_loop_for_case(
+        "an instance actual function keeps a disjoint captured bit loop-free",
+        r#"
+        module Child (
+            i: input  logic,
+            o: output logic,
+        ) {
+            assign o = i;
+        }
+
+        module Top (
+            o: output logic,
+        ) {
+            var x     : logic<2>;
+            var passed: logic;
+            function get_high () -> logic {
+                return x[1];
+            }
+            inst u: Child (
+                i: get_high(),
+                o: passed,
+            );
+            assign x[0] = passed;
+            assign x[1] = 0;
+            assign o = passed;
+        }
+        "#,
+        false,
+    );
+}
