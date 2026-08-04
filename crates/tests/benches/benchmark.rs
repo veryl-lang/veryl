@@ -54,6 +54,19 @@ fn criterion_benchmark(c: &mut Criterion) {
         }
     }
 
+    let loop_ir = {
+        let parser = Parser::parse(&text, &"").unwrap();
+        let prj = &metadata.project.name;
+        let analyzer = Analyzer::new(&metadata);
+        let mut context = Context::default();
+        let mut ir = veryl_analyzer::ir::Ir::default();
+        analyzer.analyze_pass1(prj, &parser.veryl);
+        Analyzer::analyze_post_pass1();
+        analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+        analyzer.clear();
+        ir
+    };
+
     let mut group = c.benchmark_group("throughput");
     group.throughput(Throughput::Bytes(text.len() as u64));
     group.bench_function("parse", |b| {
@@ -79,6 +92,9 @@ fn criterion_benchmark(c: &mut Criterion) {
             Analyzer::analyze_post_pass2(&ir);
             analyzer.clear();
         })
+    });
+    group.bench_function("comb_loop", |b| {
+        b.iter_with_large_drop(|| veryl_analyzer::comb_loop_detect::check(black_box(&loop_ir)))
     });
     group.finish();
 }

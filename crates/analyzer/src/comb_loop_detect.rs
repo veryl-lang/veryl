@@ -178,6 +178,19 @@ impl CausalEdge {
 
 type CausalGraph = Graph<NodeKey, CausalEdge>;
 
+#[cfg(not(target_family = "wasm"))]
+fn benefits_from_parallelism(work_items: usize) -> bool {
+    // A procedure/observer task is normally too small to amortize waking the
+    // global pool. Its idle workers also outlive this pass and can contend with
+    // later serial compiler work, so retain parallelism for genuinely broad
+    // modules rather than initializing Rayon for ordinary RTL.
+    const MIN_PARALLEL_WORK_ITEMS: usize = 64;
+    if work_items < MIN_PARALLEL_WORK_ITEMS {
+        return false;
+    }
+    work_items >= rayon::current_num_threads().saturating_mul(2)
+}
+
 #[derive(Clone, Copy)]
 enum SummaryDirection {
     Forward,
@@ -1043,11 +1056,25 @@ fn build_module_graph(
         | Declaration::Null => None,
     };
     #[cfg(not(target_family = "wasm"))]
-    let mut procedure_summaries = module
+    let procedure_count = module
         .declarations
-        .par_iter()
-        .filter_map(analyze_declaration)
-        .collect::<Vec<_>>();
+        .iter()
+        .filter(|declaration| matches!(declaration, Declaration::Comb(_)))
+        .count();
+    #[cfg(not(target_family = "wasm"))]
+    let mut procedure_summaries = if benefits_from_parallelism(procedure_count) {
+        module
+            .declarations
+            .par_iter()
+            .filter_map(analyze_declaration)
+            .collect::<Vec<_>>()
+    } else {
+        module
+            .declarations
+            .iter()
+            .filter_map(analyze_declaration)
+            .collect::<Vec<_>>()
+    };
     #[cfg(target_family = "wasm")]
     let mut procedure_summaries = module
         .declarations
@@ -1073,7 +1100,7 @@ fn build_module_graph(
     instance_observers
         .retain(|expression| crate::comb_memory_ssa::expression_needs_observer(expression));
     #[cfg(not(target_family = "wasm"))]
-    procedure_summaries.extend(
+    procedure_summaries.extend(if benefits_from_parallelism(instance_observers.len()) {
         instance_observers
             .par_iter()
             .map(|expression| {
@@ -1083,8 +1110,19 @@ fn build_module_graph(
                     &function_cache,
                 )
             })
-            .collect::<Vec<_>>(),
-    );
+            .collect::<Vec<_>>()
+    } else {
+        instance_observers
+            .iter()
+            .map(|expression| {
+                crate::comb_memory_ssa::analyze_observer_expression(
+                    module,
+                    expression,
+                    &function_cache,
+                )
+            })
+            .collect::<Vec<_>>()
+    });
 
     #[cfg(target_family = "wasm")]
     procedure_summaries.extend(instance_observers.iter().map(|expression| {
@@ -3197,7 +3235,11 @@ fn compute_module_summary(
     };
 
     const QUANTUM: usize = 512;
-    let winning_walks = if graph.node_count() < QUANTUM {
+    // Below this grain, starting the global Rayon pool and racing both walk
+    // directions costs more than completing the smaller side serially. This
+    // changes scheduling only; both paths compute the same summary.
+    const MIN_PARALLEL_SUMMARY_NODES: usize = QUANTUM * 8;
+    let winning_walks = if graph.node_count() < MIN_PARALLEL_SUMMARY_NODES {
         let (direction, endpoints) = if input_nodes.len() <= output_nodes.len() {
             (SummaryDirection::Forward, input_nodes)
         } else {
