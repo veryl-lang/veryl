@@ -9887,6 +9887,22 @@ fn assert_comb_loop_for_case(case: &str, code: &str, expected: bool) {
     assert_eq!(actual, expected, "{case}: {errors:?}");
 }
 
+fn assert_incomplete_assignment_without_comb_loop(case: &str, code: &str) {
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })),
+        "{case}: retained entry state must be diagnosed as an incomplete assignment: {errors:#?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{case}: state retention is not combinational feedback: {errors:#?}"
+    );
+}
+
 #[test]
 fn combinational_loop_review_preserves_longest_static_prefix() {
     // Why this case exists: IEEE 1800-2023 11.5.3 confines buff[0][idx]
@@ -13273,6 +13289,182 @@ fn combinational_loop_diagnostic_uses_exact_minimal_assignment_witness() {
         code.find("assign b = a;")
             .expect("short-cycle return assignment")
             + "assign ".len()
+    );
+}
+
+#[test]
+fn combinational_loop_runtime_zero_trip_retention_is_not_feedback() {
+    // Why this case exists: a runtime loop can execute zero times. The value
+    // retained on that path infers state, but it is not a same-evaluation read
+    // from `held` and therefore must not become a combinational self-loop.
+    assert_incomplete_assignment_without_comb_loop(
+        "a zero-trip runtime loop retains state rather than feeding back combinationally",
+        r#"
+        module Top (
+            n: input  logic<32>,
+            o: output logic,
+        ) {
+            var held: logic;
+            always_comb {
+                for index in 0..n {
+                    held = index[0];
+                }
+                o = held;
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
+fn combinational_loop_dynamic_element_retention_is_not_feedback() {
+    // Why this case exists: one dynamic element write leaves every other
+    // candidate element unchanged. May-write coverage must not masquerade as
+    // must-write coverage, and the preserved elements are latch state rather
+    // than a combinational self-read.
+    assert_incomplete_assignment_without_comb_loop(
+        "a dynamic element store leaves unselected elements unassigned",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            o    : output logic,
+        ) {
+            var held: logic [4];
+            always_comb {
+                held[index] = 1;
+                o = held[0];
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
+fn combinational_loop_missing_if_arm_retention_is_not_feedback() {
+    // Why this case exists: the existing uncovered-branch checker already
+    // identifies this latch. The causal graph must not add a second and
+    // semantically incorrect combinational-loop diagnosis for the same
+    // unassigned path.
+    assert_incomplete_assignment_without_comb_loop(
+        "an if without an else infers a latch, not a combinational loop",
+        r#"
+        module Top (
+            enable: input  logic,
+            o     : output logic,
+        ) {
+            var held: logic;
+            always_comb {
+                if enable {
+                    held = 1;
+                }
+                o = held;
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
+fn combinational_loop_missing_switch_default_retention_is_not_feedback() {
+    // Why this case exists: n-way control flow reaches the same entry-state
+    // phi as an uncovered if. Missing-default retention must receive the same
+    // latch diagnosis without being reclassified as combinational feedback.
+    assert_incomplete_assignment_without_comb_loop(
+        "a switch without a default infers a latch, not a combinational loop",
+        r#"
+        module Top (
+            select: input  logic,
+            o     : output logic,
+        ) {
+            var held: logic;
+            always_comb {
+                switch {
+                    select: held = 1;
+                }
+                o = held;
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
+fn combinational_loop_latch_boundary_breaks_a_cross_variable_cycle() {
+    // Why this case exists: collapsing a latched variable's pre-state and
+    // next-state into one NodeKey invents the cycle held -> o -> enable ->
+    // held. A state boundary must cut that path even when the false SCC spans
+    // several source variables instead of appearing as a direct self-edge.
+    assert_incomplete_assignment_without_comb_loop(
+        "a retained variable is a state boundary inside a larger apparent SCC",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var enable: logic;
+            var held  : logic;
+            always_comb {
+                if enable {
+                    held = 0;
+                }
+                o = held;
+            }
+            assign enable = o;
+        }
+        "#,
+    );
+}
+
+#[test]
+fn combinational_loop_explicit_self_read_remains_feedback() {
+    // Why this case exists: removing entry-state retention edges wholesale
+    // would also hide a real source read. The fix must distinguish an implicit
+    // preserve path from the explicit `value = value` dependency.
+    let errors = analyze(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var value: logic;
+            always_comb {
+                value = value;
+                o = value;
+            }
+        }
+        "#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "an explicit same-evaluation self-read remains combinational feedback: {errors:#?}"
+    );
+}
+
+#[test]
+fn combinational_loop_default_before_runtime_loop_kills_retention() {
+    // Why this case exists: a dominating full assignment removes the entry
+    // state before a possibly-zero-trip loop. This is the positive control for
+    // both coverage and loop analysis and must remain diagnostic-free.
+    let errors = analyze(
+        r#"
+        module Top (
+            n: input  logic<32>,
+            o: output logic,
+        ) {
+            var value: logic;
+            always_comb {
+                value = 0;
+                for index in 0..n {
+                    value = index[0];
+                }
+                o = value;
+            }
+        }
+        "#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a dominating default is complete: {errors:#?}"
     );
 }
 
