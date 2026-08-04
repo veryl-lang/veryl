@@ -1,10 +1,14 @@
 //! Region-sensitive combinational loop detection on the analyzer IR (issue
 //! #931).
 //!
+//! The user-visible acceptance bounds are specified in
+//! `crates/analyzer/COMBINATIONAL_LOOP_ANALYSIS.md`. This module documents the
+//! current implementation within those bounds.
+//!
 //! # Problem model
 //!
-//! This analysis decides whether the elaborated design contains a cycle of
-//! **structural combinational dependencies**. It does not compute Boolean
+//! This implementation finds cycles of **structural combinational
+//! dependencies** in the elaborated design. It does not compute Boolean
 //! functions, prove algebraic cancellation, or reproduce the implicit
 //! sensitivity list of `always_comb`.
 //!
@@ -70,7 +74,7 @@
 //!   nested function calls, module-scope function captures, and side effects in
 //!   instance actual/address expressions.
 //!
-//! Dynamic selects are modeled structurally, not by value-range inference.
+//! This implementation models dynamic selects without value-range inference.
 //! The region is derived from the LRM static prefix and the declared object
 //! shape. Expressions such as `idx`, `~idx`, and `idx * 2` do not receive
 //! special candidate sets. Syntactically corresponding unresolved accesses can

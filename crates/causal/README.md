@@ -5,6 +5,9 @@ causal graph algorithms. A front end lowers one procedure into dense immutable
 tables; the tables own no parser resources, symbol-table locks or Veryl IR
 references.
 
+The Veryl analyzer's user-visible acceptance bounds are specified in
+[`crates/analyzer/COMBINATIONAL_LOOP_ANALYSIS.md`](../analyzer/COMBINATIONAL_LOOP_ANALYSIS.md).
+
 The design has three constraints:
 
 - Region endpoints form the version domain. Analysis cost depends on accesses,
