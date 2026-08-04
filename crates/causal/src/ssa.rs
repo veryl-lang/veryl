@@ -350,6 +350,62 @@ where
     })
 }
 
+/// Construct SSA for one straight-line block without building dominance or
+/// liveness state. This is equivalent to [`build`] for a one-block CFG with no
+/// successors, but avoids paying the general CFG cost for ordinary continuous
+/// assignments and other branch-free procedures.
+pub fn build_linear<V, D, U>(events: &[Event<V, D, U>]) -> Result<SparseSsa<V, D, U>, SsaError>
+where
+    V: Copy + Ord,
+    D: Copy + Ord,
+    U: Copy + Ord,
+{
+    let mut current = BTreeMap::<V, Version<V, D>>::new();
+    let mut definitions = BTreeSet::<(V, D)>::new();
+    let mut uses = BTreeMap::<U, Version<V, D>>::new();
+    for event in events {
+        match *event {
+            Event::Use { variable, usage } => {
+                let version = current
+                    .get(&variable)
+                    .copied()
+                    .unwrap_or(Version::Entry(variable));
+                if uses.insert(usage, version).is_some() {
+                    return Err(SsaError::new(
+                        "SSA.USE_IDENTITY",
+                        Some(0),
+                        "one use identity occurs more than once",
+                    ));
+                }
+            }
+            Event::Definition {
+                variable,
+                definition,
+            } => {
+                if !definitions.insert((variable, definition)) {
+                    return Err(SsaError::new(
+                        "SSA.DEFINITION_IDENTITY",
+                        Some(0),
+                        "one variable-definition identity occurs more than once",
+                    ));
+                }
+                current.insert(
+                    variable,
+                    Version::Definition {
+                        variable,
+                        definition,
+                    },
+                );
+            }
+        }
+    }
+    Ok(SparseSsa {
+        phis: Vec::new(),
+        phis_by_block: vec![Vec::new()],
+        uses,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,5 +523,41 @@ mod tests {
                 definition: 2
             }
         );
+    }
+
+    #[test]
+    fn linear_builder_matches_general_one_block_ssa() {
+        let cfg = ControlFlowGraph::analyze(vec![vec![]], 0).unwrap();
+        let events = vec![
+            Event::Use {
+                variable: 1,
+                usage: 10,
+            },
+            Event::Definition {
+                variable: 1,
+                definition: 20,
+            },
+            Event::Use {
+                variable: 2,
+                usage: 30,
+            },
+            Event::Definition {
+                variable: 2,
+                definition: 40,
+            },
+            Event::Use {
+                variable: 1,
+                usage: 50,
+            },
+            Event::Use {
+                variable: 2,
+                usage: 60,
+            },
+        ];
+
+        let general = build(&cfg, std::slice::from_ref(&events)).unwrap();
+        let linear = build_linear(&events).unwrap();
+
+        assert_eq!(linear, general);
     }
 }

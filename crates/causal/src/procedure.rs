@@ -489,7 +489,18 @@ where
         return Err(ProcedureError::Model("procedure exit is out of range"));
     }
 
-    let cfg = ForwardControlFlowGraph::analyze(procedure.successors.clone(), procedure.entry)?;
+    let is_linear = procedure.events.len() == 1
+        && procedure.entry == 0
+        && procedure.exit == 0
+        && procedure.successors[0].is_empty();
+    let cfg = if is_linear {
+        None
+    } else {
+        Some(ForwardControlFlowGraph::analyze(
+            procedure.successors.clone(),
+            procedure.entry,
+        )?)
+    };
     let (atoms, atoms_by_object) = build_atoms(&procedure.events, &procedure.object_spans)?;
     let mut read_atoms = BTreeMap::<ReadId, (Region<O>, Vec<usize>)>::new();
     let mut writes = BTreeMap::<
@@ -613,7 +624,14 @@ where
         usage: Usage::Exit { atom },
     }));
 
-    let ssa = ssa::build(&cfg, &ssa_events)?;
+    let ssa = if is_linear {
+        ssa::build_linear(&ssa_events[0])?
+    } else {
+        ssa::build(
+            cfg.as_ref().expect("non-linear procedure has a CFG"),
+            &ssa_events,
+        )?
+    };
     let must_alias = procedure
         .must_alias
         .iter()
@@ -623,7 +641,8 @@ where
             let ordered = if write_block == read_block {
                 write_position < read_position
             } else {
-                cfg.dominators.dominates(write_block, read_block)
+                cfg.as_ref()
+                    .is_some_and(|cfg| cfg.dominators.dominates(write_block, read_block))
             };
             if !ordered {
                 return None;
