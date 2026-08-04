@@ -9138,7 +9138,7 @@ fn unassignable_output() {
 }
 
 #[test]
-fn combinational_loop_oversized_array_is_sparse_and_complete() {
+fn comb_loop_oversized_array_is_sparse_and_complete() {
     // Why this case exists: a sequential memory with a combinational read must
     // remain loop-free even when its declared index space is too large for the
     // analyzer's ordinary elaboration limit.
@@ -9244,7 +9244,7 @@ fn combinational_loop_oversized_array_is_sparse_and_complete() {
 }
 
 #[test]
-fn combinational_loop() {
+fn comb_loop_core_semantics_and_region_regressions() {
     // 2-block ring: assign b = c + a; assign c = b + 1
     let code = r#"
     module ModuleA (
@@ -9742,7 +9742,7 @@ fn combinational_loop() {
 }
 
 #[test]
-fn combinational_loop_memory_ssa_procedural_order_and_observers() {
+fn comb_loop_statement_order_and_observer_semantics() {
     // An observer inside a writer process does not create a signal-value edge.
     // In particular, IEEE 1800 always_comb sensitivity excludes variables
     // written by the process; observing x[1] must not wire it back to x[0].
@@ -9839,7 +9839,7 @@ fn combinational_loop_memory_ssa_procedural_order_and_observers() {
 }
 
 #[test]
-fn combinational_loop_memory_ssa_retains_dynamic_region_uncertainty() {
+fn comb_loop_dynamic_write_reports_region_uncertainty() {
     symbol_table::clear();
     attribute_table::clear();
     doc_comment_table::clear();
@@ -9896,7 +9896,7 @@ fn combinational_loop_memory_ssa_retains_dynamic_region_uncertainty() {
     );
 }
 
-fn assert_comb_loop_for_case(case: &str, code: &str, expected: bool) {
+fn assert_comb_loop(case: &str, code: &str, expected: bool) {
     let errors = analyze(code);
     let actual = errors
         .iter()
@@ -9921,11 +9921,11 @@ fn assert_incomplete_assignment_without_comb_loop(case: &str, code: &str) {
 }
 
 #[test]
-fn combinational_loop_review_preserves_longest_static_prefix() {
+fn comb_loop_dynamic_select_is_confined_to_static_prefix() {
     // Why this case exists: IEEE 1800-2023 11.5.3 confines buff[0][idx]
     // to the statically selected row. Aliasing it with buff[1] rejects legal,
     // bit-disjoint SystemVerilog and makes the analyzer stronger than the LRM.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a dynamic suffix aliases only its longest static prefix",
         r#"
         module Top (
@@ -9949,11 +9949,11 @@ fn combinational_loop_review_preserves_longest_static_prefix() {
 }
 
 #[test]
-fn combinational_loop_review_keeps_function_global_read() {
+fn comb_loop_function_global_read_contributes_value_dependency() {
     // Why this case exists: IEEE 1800-2023 9.2.2.2.1 includes variables read
     // by a called function in always_comb. A global capture is not a formal
     // argument, but it is still a real x -> o dependency and closes this loop.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a called function retains a captured module-scope read",
         r#"
         module Top (
@@ -9976,7 +9976,7 @@ fn combinational_loop_review_keeps_function_global_read() {
 
     // Why this control exists: a captured read alone is not feedback. Its
     // source may be driven independently from an input without a return path.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a captured function read remains feed-forward without a return path",
         r#"
         module Top (
@@ -10000,11 +10000,11 @@ fn combinational_loop_review_keeps_function_global_read() {
 }
 
 #[test]
-fn combinational_loop_review_keeps_function_global_write() {
+fn comb_loop_function_global_write_contributes_procedural_effect() {
     // Why this case exists: IEEE 1800-2023 9.2.2.2 treats a variable written
     // by a called function as written by the always_comb process. Side effects
     // on module scope must therefore survive function-summary projection.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a called function retains a captured module-scope write",
         r#"
         module Top (
@@ -10029,7 +10029,7 @@ fn combinational_loop_review_keeps_function_global_write() {
 
     // Why this control exists: a captured function write from an independent
     // input is a normal feed-forward side effect, not a loop by itself.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a captured function write remains feed-forward without a return path",
         r#"
         module Top (
@@ -10055,11 +10055,11 @@ fn combinational_loop_review_keeps_function_global_write() {
 }
 
 #[test]
-fn combinational_loop_review_keeps_dynamic_region_across_modules() {
+fn comb_loop_dynamic_region_survives_module_summary() {
     // Why this case exists: an instance port is a SystemVerilog data path, so
     // a child wildcard output must remain a wildcard through every summary.
     // For idx == 0 the Top-level feedback path is realizable and structural.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a dynamic child output preserves feedback across two summaries",
         r#"
         module Leaf (
@@ -10100,10 +10100,10 @@ fn combinational_loop_review_keeps_dynamic_region_across_modules() {
 }
 
 #[test]
-fn combinational_loop_review_drops_unreachable_statements_after_break() {
+fn comb_loop_drops_unreachable_statements_after_break() {
     // Why this case exists: IEEE 1800-2023 12.8 makes break jump to the loop
     // exit. Statements after it are unreachable and cannot prove a hard SCC.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "unreachable statements after break do not form a loop",
         r#"
         module Top (
@@ -10127,11 +10127,11 @@ fn combinational_loop_review_drops_unreachable_statements_after_break() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_vector_function_return_bits() {
+fn comb_loop_preserves_vector_function_return_bits() {
     // Why this case exists: identity(value)[0] depends only on value[0].
     // Collapsing a vector return to an object-wide dependency invents the
     // value[1] -> o[0] -> value[1] cycle rejected by the current analyzer.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a vector function return preserves bit identity",
         r#"
         module Top (
@@ -10153,7 +10153,7 @@ fn combinational_loop_review_preserves_vector_function_return_bits() {
 
     // Why this control exists: output bit zero corresponds to input bit zero
     // through identity. Feeding that same bit back must remain a real loop.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a vector function return retains same-bit feedback",
         r#"
         module Top (
@@ -10175,11 +10175,11 @@ fn combinational_loop_review_preserves_vector_function_return_bits() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_concatenated_lhs_bits() {
+fn comb_loop_preserves_concatenated_lhs_bits() {
     // Why this case exists: {o[1], o[0]} = value maps each destination bit to
     // one RHS bit. Broadcasting all RHS dependencies to both destinations
     // invents a value[1] -> o[0] -> value[1] cycle.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a concatenated assignment destination preserves bit identity",
         r#"
         module Top (
@@ -10197,7 +10197,7 @@ fn combinational_loop_review_preserves_concatenated_lhs_bits() {
     // Why this control exists: o[0] is mapped from value[0], so feeding o[0]
     // back into value[0] is a real same-bit cycle that aligned lowering must
     // retain while removing the disjoint-bit false positive above.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a concatenated assignment retains same-bit feedback",
         r#"
         module Top (
@@ -10214,11 +10214,11 @@ fn combinational_loop_review_preserves_concatenated_lhs_bits() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_constant_shift_positions() {
+fn comb_loop_preserves_constant_shift_positions() {
     // Why this case exists: the low bit of a logical left shift is constant
     // zero. Treating every result bit as dependent on every operand bit
     // invents a value[1] -> o[0] -> value[1] cycle.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a constant left shift preserves its zero-filled low bit",
         r#"
         module Top (
@@ -10236,7 +10236,7 @@ fn combinational_loop_review_preserves_constant_shift_positions() {
 
     // Why this control exists: after a one-bit left shift, o[1] is value[0].
     // Returning o[1] to value[0] is therefore a real positional cycle.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a constant left shift retains displaced same-bit feedback",
         r#"
         module Top (
@@ -10253,11 +10253,11 @@ fn combinational_loop_review_preserves_constant_shift_positions() {
 }
 
 #[test]
-fn combinational_loop_review_dynamic_write_is_a_weak_update() {
+fn comb_loop_dynamic_write_is_a_weak_update() {
     // Why this case exists: o[idx] writes exactly one candidate. For idx != 1,
     // the old o[1] remains live through o[0] = o[1]; o[1] = o[0], so a real
     // structural self-dependency must not be killed by the dynamic store.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a dynamic store cannot kill every candidate definition",
         r#"
         module Top (
@@ -10276,7 +10276,7 @@ fn combinational_loop_review_dynamic_write_is_a_weak_update() {
 
     // Why this control exists: a full-width write really does kill every
     // candidate before the assignment chain and must remain loop-free.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a full store still kills every candidate definition",
         r#"
         module Top (
@@ -10294,11 +10294,11 @@ fn combinational_loop_review_dynamic_write_is_a_weak_update() {
 }
 
 #[test]
-fn combinational_loop_review_aliases_overlapping_unknown_regions() {
+fn comb_loop_aliases_overlapping_unknown_regions() {
     // Why this case exists: mem[i][j] and mem[0][k] can denote the same
     // element when i == 0 and j == k. Region::may_alias already says these
     // bounded regions overlap, so the graph must preserve that realizable SCC.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "overlapping dynamic prefixes retain realizable feedback",
         r#"
         module Top (
@@ -10323,7 +10323,7 @@ fn combinational_loop_review_aliases_overlapping_unknown_regions() {
 
     // Why this control exists: statically disjoint row one cannot alias row
     // zero, even though both have a dynamic suffix.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "disjoint dynamic prefixes remain independent",
         r#"
         module Top (
@@ -10347,11 +10347,11 @@ fn combinational_loop_review_aliases_overlapping_unknown_regions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_module_summary_positions() {
+fn comb_loop_preserves_module_summary_positions() {
     // Why this case exists: Child is a bitwise identity. child_o[1] is driven
     // by the constant child_i[1], so feeding it to child_i[0] is acyclic.
     // A module summary must not collapse the identity into an all-to-all edge.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a vector identity module preserves disjoint bit positions",
         r#"
         module Child (
@@ -10379,7 +10379,7 @@ fn combinational_loop_review_preserves_module_summary_positions() {
 
     // Why this control exists: returning child_o[0] to its corresponding
     // child_i[0] is a real same-bit loop across the instance boundary.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a vector identity module retains same-bit feedback",
         r#"
         module Child (
@@ -10407,11 +10407,11 @@ fn combinational_loop_review_preserves_module_summary_positions() {
 }
 
 #[test]
-fn combinational_loop_review_keeps_instance_output_address_dependency() {
+fn comb_loop_instance_output_address_contributes_dependency() {
     // Why this case exists: idx selects the instance output destination and
     // is itself read from one candidate destination. This is the same address
     // feedback already detected for a procedural bus[idx] assignment.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a dynamic instance output retains address feedback",
         r#"
         module Child (
@@ -10439,11 +10439,11 @@ fn combinational_loop_review_keeps_instance_output_address_dependency() {
 }
 
 #[test]
-fn combinational_loop_review_keeps_dependency_free_function_write() {
+fn comb_loop_function_write_without_value_dependency_is_recorded() {
     // Why this case exists: clear_x writes x even though the written value has
     // no signal dependency. That write kills LiveOnEntry before o reads x;
     // omitting it invents x -> o -> x feedback.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a constant captured function write participates in procedural order",
         r#"
         module Top (
@@ -10465,11 +10465,11 @@ fn combinational_loop_review_keeps_dependency_free_function_write() {
 }
 
 #[test]
-fn combinational_loop_review_keeps_observer_function_side_effect() {
+fn comb_loop_observer_function_side_effect_is_recorded() {
     // Why this case exists: IEEE 1800-2023 11.3.5 preserves side effects of
     // evaluated expressions. touch(o) is evaluated as a display argument, and
     // 9.2.2.2 makes its captured x write part of the always_comb procedure.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a display argument retains a called function global write",
         r#"
         module Top (
@@ -10495,11 +10495,11 @@ fn combinational_loop_review_keeps_observer_function_side_effect() {
 }
 
 #[test]
-fn combinational_loop_review_keeps_instance_actual_function_side_effect() {
+fn comb_loop_instance_actual_function_side_effect_is_recorded() {
     // Why this case exists: IEEE 1800-2023 4.9.6 models an input connection as
     // an implicit continuous assignment. Its actual expression is evaluated
     // even when the child has no output feedthrough, so touch(o) still writes x.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance input actual retains a called function global write",
         r#"
         module Sink (
@@ -10526,11 +10526,11 @@ fn combinational_loop_review_keeps_instance_actual_function_side_effect() {
 }
 
 #[test]
-fn combinational_loop_review_keeps_instance_selector_function_side_effect() {
+fn comb_loop_instance_input_selector_side_effect_is_recorded() {
     // Why this case exists: an otherwise plain instance actual still evaluates
     // the expressions in its selectors. Skipping the observer for mem[touch(o)]
     // would lose touch's module-scope write and hide the x -> o -> x cycle.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance input selector retains a called function global write",
         r#"
         module Sink (
@@ -10558,11 +10558,11 @@ fn combinational_loop_review_keeps_instance_selector_function_side_effect() {
 }
 
 #[test]
-fn combinational_loop_review_keeps_instance_output_selector_function_side_effect() {
+fn comb_loop_instance_output_selector_side_effect_is_recorded() {
     // Why this case exists: an output connection evaluates the selector in its
     // destination. The observer must retain touch(o)'s module-scope write even
     // though the child output value itself is constant.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance output selector retains a called function global write",
         r#"
         module Source (
@@ -10592,10 +10592,10 @@ fn combinational_loop_review_keeps_instance_output_selector_function_side_effect
 }
 
 #[test]
-fn combinational_loop_review_preserves_vector_function_output_bits() {
+fn comb_loop_preserves_vector_function_output_bits() {
     // Why this case exists: output argument y is a vector identity of x.
     // Broadcasting all x bits to all y bits invents value[1] -> o[0] feedback.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a vector function output argument preserves bit identity",
         r#"
         module Top (
@@ -10620,10 +10620,10 @@ fn combinational_loop_review_preserves_vector_function_output_bits() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_split_function_return_bits() {
+fn comb_loop_preserves_split_function_return_bits() {
     // Why this case exists: {high, low}[0] is low. Returning o[0] to high is
     // acyclic when low is constant, even though the return uses two regions.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a concatenated function return preserves each source bit",
         r#"
         module Top (
@@ -10647,7 +10647,7 @@ fn combinational_loop_review_preserves_split_function_return_bits() {
 }
 
 #[test]
-fn combinational_loop_review_distinguishes_generic_function_specializations() {
+fn comb_loop_distinguishes_generic_function_specializations() {
     // Why this case exists: recurse::<2> and recurse::<1> are distinct finite
     // specializations. Elaboration reduces the call to passed = feedback, so
     // treating the second specialization as infinite recursion hides a real SCC.
@@ -10684,10 +10684,10 @@ fn combinational_loop_review_distinguishes_generic_function_specializations() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_repeat_concatenation_positions() {
+fn comb_loop_preserves_repeat_concatenation_positions() {
     // Why this case exists: {value repeat 2} is {value, value}, so o[0]
     // depends only on value[0]. Broadcasting value[1] to o[0] invents a loop.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "repeat concatenation keeps a disjoint low-bit path loop-free",
         r#"
         module Top (
@@ -10704,7 +10704,7 @@ fn combinational_loop_review_preserves_repeat_concatenation_positions() {
 
     // Why this control exists: feeding o[0] back to value[0] selects the
     // corresponding repeated bit and therefore is a real structural SCC.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "repeat concatenation still detects a corresponding-bit loop",
         r#"
         module Top (
@@ -10721,10 +10721,10 @@ fn combinational_loop_review_preserves_repeat_concatenation_positions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_instance_shift_positions() {
+fn comb_loop_preserves_instance_shift_positions() {
     // Why this case exists: (value << 1)[0] is an inserted constant zero.
     // Falling back to every operand creates a fictitious value[1] path.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance actual left shift keeps its inserted bit loop-free",
         r#"
         module Child (
@@ -10753,7 +10753,7 @@ fn combinational_loop_review_preserves_instance_shift_positions() {
 
     // Why this control exists: passed[1] is value[0], so feeding it back to
     // value[0] is the corresponding shifted-bit SCC and must remain detected.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance actual left shift detects its live shifted bit",
         r#"
         module Child (
@@ -10781,10 +10781,10 @@ fn combinational_loop_review_preserves_instance_shift_positions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_instance_repeat_positions() {
+fn comb_loop_preserves_instance_repeat_positions() {
     // Why this case exists: {high repeat 2, low}[2] is high. Treating every
     // operand as a source invents a low -> child_o -> low feedback path.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance repeat actual keeps an unrelated operand loop-free",
         r#"
         module Child (
@@ -10813,7 +10813,7 @@ fn combinational_loop_review_preserves_instance_repeat_positions() {
 
     // Why this control exists: feeding child_o back to high closes the actual
     // i[2] path and must remain a real loop after positional mapping.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance repeat actual detects its selected repeated operand",
         r#"
         module Child (
@@ -10842,11 +10842,11 @@ fn combinational_loop_review_preserves_instance_repeat_positions() {
 }
 
 #[test]
-fn combinational_loop_review_distinguishes_generic_module_specializations() {
+fn comb_loop_distinguishes_generic_module_specializations() {
     // Why this case exists: ENABLE: 1 elaborates Child into an identity even
     // though its declaration default is zero. Reusing the default summary for
     // the specialization hides the real feedback through this instance.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an enabled generic-module specialization retains its feedthrough",
         r#"
         module Child #(
@@ -10881,7 +10881,7 @@ fn combinational_loop_review_distinguishes_generic_module_specializations() {
 
     // Why this control exists: ENABLE: 0 elaborates the output to a constant
     // even though the declaration default is one, so there is no return path.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a disabled generic-module specialization does not inherit feedthrough",
         r#"
         module Child #(
@@ -10916,11 +10916,11 @@ fn combinational_loop_review_distinguishes_generic_module_specializations() {
 }
 
 #[test]
-fn combinational_loop_review_short_circuits_instance_actual_side_effects() {
+fn comb_loop_short_circuits_instance_actual_side_effects() {
     // Why this case exists: IEEE 1800-2023 11.4.11 evaluates only the selected
     // ternary branch. touch(o) is in the constant-dead branch, so it cannot
     // write x or form an o -> x -> o feedback path.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a constant-dead instance actual branch has no function side effect",
         r#"
         module Sink (
@@ -10947,7 +10947,7 @@ fn combinational_loop_review_short_circuits_instance_actual_side_effects() {
 
     // Why this control exists: choosing the touch branch evaluates the call,
     // so its captured write closes the real o -> x -> o path.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a constant-taken instance actual branch retains its function side effect",
         r#"
         module Sink (
@@ -10974,9 +10974,9 @@ fn combinational_loop_review_short_circuits_instance_actual_side_effects() {
 }
 
 #[test]
-fn combinational_loop_review_short_circuits_logical_rhs_side_effects() {
+fn comb_loop_short_circuits_logical_rhs_side_effects() {
     let case = |name: &str, expression: &str, expected: bool| {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -11033,9 +11033,9 @@ fn combinational_loop_review_short_circuits_logical_rhs_side_effects() {
 }
 
 #[test]
-fn combinational_loop_review_short_circuits_instance_logical_actuals() {
+fn comb_loop_short_circuits_instance_logical_actuals() {
     let case = |name: &str, expression: &str, expected: bool| {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -11092,11 +11092,11 @@ fn combinational_loop_review_short_circuits_instance_logical_actuals() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_nested_vector_ternary_positions() {
+fn comb_loop_preserves_nested_vector_ternary_positions() {
     // Why this case exists: bitwise negation does not change bit positions.
     // The nested ternary still maps o[0] only from value[0] (or a constant),
     // so broadcasting value[1] through the outer unary operator is fictitious.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a nested vector ternary keeps a disjoint bit loop-free",
         r#"
         module Top (
@@ -11114,7 +11114,7 @@ fn combinational_loop_review_preserves_nested_vector_ternary_positions() {
 
     // Why this control exists: feeding o[0] back to its corresponding
     // value[0] closes a real path through both ternary and negation.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a nested vector ternary detects its corresponding-bit loop",
         r#"
         module Top (
@@ -11132,11 +11132,11 @@ fn combinational_loop_review_preserves_nested_vector_ternary_positions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_ternary_positions_across_boundaries() {
+fn comb_loop_preserves_ternary_positions_across_boundaries() {
     // Why this case exists: low reads only bit zero of its formal. A ternary
     // actual preserves that bit position, so feedback into value[1] is
     // disjoint even when the mapping crosses a function-call boundary.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a function ternary actual keeps a disjoint bit loop-free",
         r#"
         module Top (
@@ -11159,7 +11159,7 @@ fn combinational_loop_review_preserves_ternary_positions_across_boundaries() {
 
     // Why this control exists: returning the selected bit to value[0] closes
     // the function actual's real corresponding-bit path.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a function ternary actual detects its corresponding-bit loop",
         r#"
         module Top (
@@ -11182,7 +11182,7 @@ fn combinational_loop_review_preserves_ternary_positions_across_boundaries() {
 
     // Why this case exists: the same positional rule must survive a module
     // port boundary; child output o depends only on actual bit zero.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance ternary actual keeps a disjoint bit loop-free",
         r#"
         module Low (
@@ -11211,7 +11211,7 @@ fn combinational_loop_review_preserves_ternary_positions_across_boundaries() {
 
     // Why this control exists: feeding the child result back to actual bit
     // zero is a real loop through the instance boundary.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance ternary actual detects its corresponding-bit loop",
         r#"
         module Low (
@@ -11240,11 +11240,11 @@ fn combinational_loop_review_preserves_ternary_positions_across_boundaries() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_unpacked_port_element_positions() {
+fn comb_loop_preserves_unpacked_port_element_positions() {
     // Why this case exists: Child is an element-wise identity over an unpacked
     // array. Returning child_o[1] to child_i[0] crosses distinct elements and
     // must not be widened to whole-array feedback at the instance boundary.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an unpacked-array module port keeps disjoint elements loop-free",
         r#"
         module Child (
@@ -11273,7 +11273,7 @@ fn combinational_loop_review_preserves_unpacked_port_element_positions() {
 
     // Why this control exists: returning child_o[0] to the corresponding
     // child_i[0] element is a real instance-boundary SCC.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an unpacked-array module port detects same-element feedback",
         r#"
         module Child (
@@ -11302,11 +11302,11 @@ fn combinational_loop_review_preserves_unpacked_port_element_positions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_unpacked_function_actual_positions() {
+fn comb_loop_preserves_unpacked_function_actual_positions() {
     // Why this case exists: high reads only unpacked element one. Feeding its
     // result to value[0] is element-disjoint and must not fall back to reading
     // the whole actual because packed width excludes the unpacked count.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an unpacked function actual keeps disjoint elements loop-free",
         r#"
         module Top (
@@ -11328,7 +11328,7 @@ fn combinational_loop_review_preserves_unpacked_function_actual_positions() {
 
     // Why this control exists: returning the function result to the same
     // value[1] element closes the real function-boundary loop.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an unpacked function actual detects same-element feedback",
         r#"
         module Top (
@@ -11350,10 +11350,10 @@ fn combinational_loop_review_preserves_unpacked_function_actual_positions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_local_right_shift_positions() {
+fn comb_loop_preserves_local_right_shift_positions() {
     // Why this case exists: (value >> 1)[3] is an inserted zero. Returning
     // that discarded high bit to value[0] cannot form feedback.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a local logical right shift keeps its inserted bit loop-free",
         r#"
         module Top (
@@ -11370,7 +11370,7 @@ fn combinational_loop_review_preserves_local_right_shift_positions() {
 
     // Why this control exists: o[0] is value[1], so feeding it back to
     // value[1] is the real shifted-bit SCC.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a local logical right shift detects its live shifted bit",
         r#"
         module Top (
@@ -11388,11 +11388,11 @@ fn combinational_loop_review_preserves_local_right_shift_positions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_arithmetic_right_shift_positions() {
+fn comb_loop_preserves_arithmetic_right_shift_positions() {
     // Why this case exists: for a one-bit arithmetic right shift, o[0] is
     // value[1]; discarded value[0] cannot influence it. Whole-vector fallback
     // invents value[0] -> o[0] feedback.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an arithmetic right shift keeps a discarded bit loop-free",
         r#"
         module Top (
@@ -11409,7 +11409,7 @@ fn combinational_loop_review_preserves_arithmetic_right_shift_positions() {
 
     // Why this control exists: o[0] is the live source value[1], so returning
     // it to value[1] is a real shifted-bit SCC.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an arithmetic right shift detects its live shifted bit",
         r#"
         module Top (
@@ -11427,7 +11427,7 @@ fn combinational_loop_review_preserves_arithmetic_right_shift_positions() {
 
     // Why this control exists: the vacated MSB is a replication of the sign
     // bit, so sign feedback remains a real (non-positional) dependency.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an arithmetic right shift retains sign-fill feedback",
         r#"
         module Top (
@@ -11444,10 +11444,10 @@ fn combinational_loop_review_preserves_arithmetic_right_shift_positions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_function_actual_shift_positions() {
+fn comb_loop_preserves_function_actual_shift_positions() {
     // Why this case exists: (value << 1)[0] is an inserted zero. Passing the
     // shifted vector through a function must not broadcast value[1] to o.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a function actual left shift keeps its inserted bit loop-free",
         r#"
         module Top (
@@ -11470,7 +11470,7 @@ fn combinational_loop_review_preserves_function_actual_shift_positions() {
 
     // Why this control exists: shifted bit one is value[0], so returning it to
     // value[0] is a real corresponding-bit loop.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a function actual left shift detects its live shifted bit",
         r#"
         module Top (
@@ -11492,10 +11492,10 @@ fn combinational_loop_review_preserves_function_actual_shift_positions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_vector_ternary_positions() {
+fn comb_loop_preserves_vector_ternary_positions() {
     // Why this case exists: both branches preserve vector bit positions, so
     // o[0] can read only value[0] (or the constant), never value[1].
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a vector ternary keeps a disjoint bit loop-free",
         r#"
         module Top (
@@ -11513,7 +11513,7 @@ fn combinational_loop_review_preserves_vector_ternary_positions() {
 
     // Why this control exists: returning o[0] to value[0] closes the selected
     // branch's real same-bit path and must remain detected.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a vector ternary detects its corresponding-bit loop",
         r#"
         module Top (
@@ -11531,11 +11531,11 @@ fn combinational_loop_review_preserves_vector_ternary_positions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_function_concat_output_positions() {
+fn comb_loop_preserves_function_concat_output_positions() {
     // Why this case exists: y = x copied into {o[1], o[0]} still maps x[0]
     // only to o[0]. Treating the concatenated output actual as all-to-all
     // invents value[1] -> o[0] feedback.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a concatenated function output keeps a disjoint bit loop-free",
         r#"
         module Top (
@@ -11560,7 +11560,7 @@ fn combinational_loop_review_preserves_function_concat_output_positions() {
 
     // Why this control exists: value[0] copied to o[0] and fed back to the
     // same bit is a real loop through the concatenated output destination.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a concatenated function output detects its corresponding-bit loop",
         r#"
         module Top (
@@ -11585,9 +11585,9 @@ fn combinational_loop_review_preserves_function_concat_output_positions() {
 }
 
 #[test]
-fn combinational_loop_memory_ssa_celox_regression_corpus() {
+fn comb_loop_statement_order_and_control_flow_regressions() {
     // Ported from celox/tests/basic.rs::test_always_comb_read_before_write_uses_previous_value.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "read before write observes LiveOnEntry",
         r#"
         module Top (
@@ -11605,7 +11605,7 @@ fn combinational_loop_memory_ssa_celox_regression_corpus() {
     );
 
     // Ported from celox/tests/false_loop.rs::test_cross_bit_dependency_false_loop.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "opposite directions on disjoint bits",
         r#"
         module Top (
@@ -11627,7 +11627,7 @@ fn combinational_loop_memory_ssa_celox_regression_corpus() {
     );
 
     // Ported from the multi-stage observer cases in celox/tests/comb_observer.rs.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "observer in a writer with a multi-stage assign chain",
         r#"
         module Top (
@@ -11649,7 +11649,7 @@ fn combinational_loop_memory_ssa_celox_regression_corpus() {
     );
 
     // Ported from the case/if matrix in celox/tests/case_switch.rs.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "case phi with complete definitions",
         r#"
         module Top (
@@ -11673,7 +11673,7 @@ fn combinational_loop_memory_ssa_celox_regression_corpus() {
     );
 
     // Ported from the indexed-local and partial-write function tests in basic.rs.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function local partial writes are ordered",
         r#"
         module Top (
@@ -11694,7 +11694,7 @@ fn combinational_loop_memory_ssa_celox_regression_corpus() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "one branch keeps an entry definition live",
         r#"
         module Top (
@@ -11712,7 +11712,7 @@ fn combinational_loop_memory_ssa_celox_regression_corpus() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "case without a covering default keeps entry live",
         r#"
         module Top (
@@ -11731,7 +11731,7 @@ fn combinational_loop_memory_ssa_celox_regression_corpus() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "nested function summary preserves a real cycle",
         r#"
         module Top (
@@ -11751,8 +11751,8 @@ fn combinational_loop_memory_ssa_celox_regression_corpus() {
 }
 
 #[test]
-fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
-    assert_comb_loop_for_case(
+fn comb_loop_region_and_function_mapping_regressions() {
+    assert_comb_loop(
         "blocking assignment chain uses the immediately preceding definition",
         r#"
         module Top (
@@ -11771,7 +11771,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a later full overwrite kills an earlier partial entry read",
         r#"
         module Top (
@@ -11786,7 +11786,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a full overwrite dominates a later partial read",
         r#"
         module Top (
@@ -11801,7 +11801,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "both branch arms define the value consumed after the merge",
         r#"
         module Top (
@@ -11824,7 +11824,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function local copy retains bit precision at the return",
         r#"
         module Top (
@@ -11844,7 +11844,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function branch condition is a control dependency of its return",
         r#"
         module Top (
@@ -11866,7 +11866,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function branch ignores a bit absent from value and control flow",
         r#"
         module Top (
@@ -11889,7 +11889,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function output writeback participates in procedural order",
         r#"
         module Top (
@@ -11911,7 +11911,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "static array elements remain distinct regions",
         r#"
         module Top (
@@ -11929,7 +11929,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "read-before-write across static array elements is a real loop",
         r#"
         module Top (
@@ -11946,7 +11946,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "static struct members remain distinct regions",
         r#"
         module Top (
@@ -11968,7 +11968,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "sparse accesses do not scale with a huge declared width",
         r#"
         module Top (
@@ -11985,7 +11985,7 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "dynamic same-object aliasing uses the whole longest static prefix",
         r#"
         module Top (
@@ -12004,8 +12004,8 @@ fn combinational_loop_memory_ssa_extended_celox_regression_corpus() {
 }
 
 #[test]
-fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
-    assert_comb_loop_for_case(
+fn comb_loop_alias_and_opaque_effect_boundaries() {
+    assert_comb_loop(
         "function bit-select must not taint a disjoint actual bit",
         r#"
         module Top (
@@ -12024,7 +12024,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function bit-select must retain same-bit feedback",
         r#"
         module Top (
@@ -12042,7 +12042,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function bit-select through concatenation ignores high operands",
         r#"
         module Top (
@@ -12060,7 +12060,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function bit-select through concatenation retains low operand",
         r#"
         module Top (
@@ -12075,7 +12075,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function bit-select through an actual slice uses its low bit",
         r#"
         module Top (
@@ -12093,7 +12093,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function bit-select through an actual slice retains its low-bit feedback",
         r#"
         module Top (
@@ -12112,7 +12112,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "function region crossing a concatenation boundary retains both operands",
         r#"
         module Top (
@@ -12132,7 +12132,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "local copy chains propagate bit identity through every hop",
         r#"
         module Top (
@@ -12154,7 +12154,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "local concatenation does not taint a constant low bit",
         r#"
         module Top (
@@ -12174,7 +12174,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "local concatenation retains a signal low bit",
         r#"
         module Top (
@@ -12191,7 +12191,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "same-width bitwise operators preserve positional provenance",
         r#"
         module Top (
@@ -12211,7 +12211,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "same-width bitwise operators retain same-bit feedback",
         r#"
         module Top (
@@ -12231,7 +12231,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "structural dependence is not removed by Boolean cancellation",
         r#"
         module Top (
@@ -12251,7 +12251,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "reduction operators remain dependent on every operand bit",
         r#"
         module Top (
@@ -12272,7 +12272,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
     // Four-state arithmetic remains whole-expression dependent: an X/Z in a
     // high operand bit can make the entire arithmetic result unknown. A
     // future two-state transfer may be narrower, but must not leak into logic.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "four-state arithmetic depends on every operand bit",
         r#"
         module Top (
@@ -12292,7 +12292,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "dynamic observer must not hide an unrelated proven loop",
         r#"
         module Top (
@@ -12309,7 +12309,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "dynamic write to one object must not hide another object's loop",
         r#"
         module Top (
@@ -12327,7 +12327,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "dominating full write kills partial branch feedback",
         r#"
         module Top (
@@ -12347,7 +12347,7 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "phi on one bit cannot manufacture a cross-bit cycle",
         r#"
         module Top (
@@ -12371,8 +12371,8 @@ fn combinational_loop_memory_ssa_adversarial_alias_and_effect_boundaries() {
 }
 
 #[test]
-fn combinational_loop_memory_ssa_malicious_structural_cases() {
-    assert_comb_loop_for_case(
+fn comb_loop_structural_dependency_semantics() {
+    assert_comb_loop(
         "dynamic same-index read/write is structurally self-dependent",
         r#"
         module Top (
@@ -12389,7 +12389,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "dynamic data write without an old-value read is feed-forward",
         r#"
         module Top (
@@ -12407,7 +12407,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a value controlling its own dynamic write address closes a loop",
         r#"
         module Top (
@@ -12426,7 +12426,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "identical ternary arms do not cancel structural control dependence",
         r#"
         module Top (
@@ -12438,7 +12438,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "duplicate xor operands remain structural inputs",
         r#"
         module Top (
@@ -12450,7 +12450,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "read-before-write across disjoint nibbles is acyclic without a return path",
         r#"
         module Top (
@@ -12465,7 +12465,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "overlapping left shift is a directed acyclic bit chain",
         r#"
         module Top (
@@ -12480,7 +12480,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "adding the wraparound bit turns a shift into a structural rotate loop",
         r#"
         module Top (
@@ -12495,7 +12495,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "concatenation permutation preserves structural feedback",
         r#"
         module Top (
@@ -12509,7 +12509,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "complete overwrite after a rotate-shaped dead store kills the loop",
         r#"
         module Top (
@@ -12524,7 +12524,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "identical function branches retain structural condition dependence",
         r#"
         module Top (
@@ -12543,7 +12543,7 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "observer-only duplicate reads do not manufacture value feedback",
         r#"
         module Top (
@@ -12561,8 +12561,8 @@ fn combinational_loop_memory_ssa_malicious_structural_cases() {
 }
 
 #[test]
-fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
-    assert_comb_loop_for_case(
+fn comb_loop_dynamic_write_kill_semantics() {
+    assert_comb_loop(
         "a full write after a dynamic self-store kills the dead feedback",
         r#"
         module Top (
@@ -12578,7 +12578,7 @@ fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a dominating full write kills a later dynamic read of the old value",
         r#"
         module Top (
@@ -12594,7 +12594,7 @@ fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an unrelated exact bit write cannot kill dynamic feedback",
         r#"
         module Top (
@@ -12610,7 +12610,7 @@ fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "all branch exits overwriting the object kill earlier dynamic feedback",
         r#"
         module Top (
@@ -12631,7 +12631,7 @@ fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "one branch preserving a dynamic self-store preserves feedback",
         r#"
         module Top (
@@ -12650,7 +12650,7 @@ fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "dynamic writes to separate objects do not alias",
         r#"
         module Top (
@@ -12671,7 +12671,7 @@ fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "two object-local dynamic aliases can close a cross-object cycle",
         r#"
         module Top (
@@ -12691,7 +12691,7 @@ fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a dominating value write also kills a self-derived dynamic address",
         r#"
         module Top (
@@ -12707,7 +12707,7 @@ fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an undominated value driving its own dynamic address is feedback",
         r#"
         module Top (
@@ -12724,8 +12724,8 @@ fn combinational_loop_memory_ssa_malicious_dynamic_kill_cases() {
 }
 
 #[test]
-fn combinational_loop_memory_ssa_malicious_dynamic_domain_cases() {
-    assert_comb_loop_for_case(
+fn comb_loop_dynamic_select_alias_domain() {
+    assert_comb_loop(
         "a dynamic select aliases its whole longest static prefix",
         r#"
         module Top (
@@ -12743,7 +12743,7 @@ fn combinational_loop_memory_ssa_malicious_dynamic_domain_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a one-bit dynamic domain still aliases both representable bits",
         r#"
         module Top (
@@ -12758,7 +12758,7 @@ fn combinational_loop_memory_ssa_malicious_dynamic_domain_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a representable dynamic target can close a cycle through a high bit",
         r#"
         module Top (
@@ -12776,8 +12776,8 @@ fn combinational_loop_memory_ssa_malicious_dynamic_domain_cases() {
 }
 
 #[test]
-fn combinational_loop_malicious_module_boundary_cases() {
-    assert_comb_loop_for_case(
+fn comb_loop_module_boundary_region_mapping() {
+    assert_comb_loop(
         "a child port summary must not turn bit-disjoint feedthrough into a loop",
         r#"
         module Child (
@@ -12805,7 +12805,7 @@ fn combinational_loop_malicious_module_boundary_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a region-preserving child feedthrough still reports a real loop",
         r#"
         module Child (
@@ -12833,7 +12833,7 @@ fn combinational_loop_malicious_module_boundary_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an opaque SystemVerilog component cannot prove a hard loop",
         r#"
         module Top (
@@ -12852,7 +12852,7 @@ fn combinational_loop_malicious_module_boundary_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a top input-to-output path has no inferred environment return edge",
         r#"
         module Top (
@@ -12865,7 +12865,7 @@ fn combinational_loop_malicious_module_boundary_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "bit precision survives two module boundaries",
         r#"
         module Leaf (
@@ -12903,7 +12903,7 @@ fn combinational_loop_malicious_module_boundary_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a real loop survives two region-preserving summaries",
         r#"
         module Leaf (
@@ -12941,7 +12941,7 @@ fn combinational_loop_malicious_module_boundary_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a concatenated instance input preserves its low-bit source",
         r#"
         module Child (
@@ -12969,7 +12969,7 @@ fn combinational_loop_malicious_module_boundary_cases() {
         false,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a concatenated instance input does not hide a real low-bit loop",
         r#"
         module Child (
@@ -12997,7 +12997,7 @@ fn combinational_loop_malicious_module_boundary_cases() {
         true,
     );
 
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a static slice connection does not contaminate its sibling bit",
         r#"
         module Child (
@@ -13024,7 +13024,7 @@ fn combinational_loop_malicious_module_boundary_cases() {
 }
 
 #[test]
-fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
+fn comb_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
     let external = analyze_comb_detailed(
         r#"
         module Top (
@@ -13258,7 +13258,7 @@ fn combinational_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
 }
 
 #[test]
-fn combinational_loop_incomplete_effect_does_not_erase_proven_edges() {
+fn comb_loop_incomplete_effect_does_not_erase_proven_edges() {
     // Why this case exists: a nonconstant bound prevents frontend unrolling,
     // so the causal adapter must retain RuntimeLoop coverage provenance. That
     // uncertainty must not discard an independent, exact dependency from the
@@ -13307,7 +13307,7 @@ fn combinational_loop_incomplete_effect_does_not_erase_proven_edges() {
 }
 
 #[test]
-fn combinational_loop_diagnostic_uses_exact_minimal_assignment_witness() {
+fn comb_loop_diagnostic_uses_short_assignment_cycle_witness() {
     // Why this case exists: all four variables belong to one maximal SCC, and
     // `a` has two reaching assignments in different branches. The actionable
     // witness is the short a/b cycle; reporting a=d, c=b, or d=c would expose
@@ -13376,7 +13376,7 @@ fn combinational_loop_diagnostic_uses_exact_minimal_assignment_witness() {
 }
 
 #[test]
-fn combinational_loop_runtime_zero_trip_retention_is_not_feedback() {
+fn comb_loop_dynamic_loop_zero_trip_retention_is_not_feedback() {
     // Why this case exists: a runtime loop can execute zero times. The value
     // retained on that path infers state, but it is not a same-evaluation read
     // from `held` and therefore must not become a combinational self-loop.
@@ -13400,7 +13400,7 @@ fn combinational_loop_runtime_zero_trip_retention_is_not_feedback() {
 }
 
 #[test]
-fn combinational_loop_dynamic_element_retention_is_not_feedback() {
+fn comb_loop_dynamic_element_retention_is_not_feedback() {
     // Why this case exists: one dynamic element write leaves every other
     // candidate element unchanged. May-write coverage must not masquerade as
     // must-write coverage, and the preserved elements are latch state rather
@@ -13423,7 +13423,7 @@ fn combinational_loop_dynamic_element_retention_is_not_feedback() {
 }
 
 #[test]
-fn combinational_loop_oversized_dynamic_retention_is_sparse_and_not_feedback() {
+fn comb_loop_oversized_dynamic_retention_is_sparse_and_not_feedback() {
     // Why this case exists: the legacy assignment table skips arrays above its
     // enumeration limit. Retention coverage must stay declaration-width
     // independent instead of either disappearing or expanding 131072 elements,
@@ -13446,7 +13446,7 @@ fn combinational_loop_oversized_dynamic_retention_is_sparse_and_not_feedback() {
 }
 
 #[test]
-fn combinational_loop_missing_if_arm_retention_is_not_feedback() {
+fn comb_loop_missing_if_arm_retention_is_not_feedback() {
     // Why this case exists: the existing uncovered-branch checker already
     // identifies this latch. The causal graph must not add a second and
     // semantically incorrect combinational-loop diagnosis for the same
@@ -13471,7 +13471,7 @@ fn combinational_loop_missing_if_arm_retention_is_not_feedback() {
 }
 
 #[test]
-fn combinational_loop_missing_switch_default_retention_is_not_feedback() {
+fn comb_loop_missing_switch_default_retention_is_not_feedback() {
     // Why this case exists: n-way control flow reaches the same entry-state
     // phi as an uncovered if. Missing-default retention must receive the same
     // latch diagnosis without being reclassified as combinational feedback.
@@ -13495,7 +13495,7 @@ fn combinational_loop_missing_switch_default_retention_is_not_feedback() {
 }
 
 #[test]
-fn combinational_loop_retention_does_not_hide_cross_variable_feedback() {
+fn comb_loop_retention_does_not_hide_cross_variable_feedback() {
     // Why this case exists: retention itself is diagnosed as incomplete
     // assignment, but it must not erase the explicit held -> o -> enable
     // value/control dependencies. Those dependencies form proven structural
@@ -13532,7 +13532,7 @@ fn combinational_loop_retention_does_not_hide_cross_variable_feedback() {
 }
 
 #[test]
-fn combinational_loop_explicit_self_read_remains_feedback() {
+fn comb_loop_explicit_self_read_remains_feedback() {
     // Why this case exists: removing entry-state retention edges wholesale
     // would also hide a real source read. The fix must distinguish an implicit
     // preserve path from the explicit `value = value` dependency.
@@ -13558,7 +13558,7 @@ fn combinational_loop_explicit_self_read_remains_feedback() {
 }
 
 #[test]
-fn combinational_loop_default_before_runtime_loop_kills_retention() {
+fn comb_loop_default_before_dynamic_loop_kills_retention() {
     // Why this case exists: a dominating full assignment removes the entry
     // state before a possibly-zero-trip loop. This is the positive control for
     // both coverage and loop analysis and must remain diagnostic-free.
@@ -13586,7 +13586,7 @@ fn combinational_loop_default_before_runtime_loop_kills_retention() {
 }
 
 #[test]
-fn combinational_loop_full_write_after_runtime_loop_kills_retention() {
+fn comb_loop_full_write_after_dynamic_loop_kills_retention() {
     // Why this case exists: incomplete-assignment coverage is a property of
     // the procedure exit, not of an intermediate statement. A later full
     // write kills the zero-trip entry value left by the runtime loop.
@@ -13614,7 +13614,7 @@ fn combinational_loop_full_write_after_runtime_loop_kills_retention() {
 }
 
 #[test]
-fn combinational_loop_nonempty_runtime_form_loop_has_no_zero_trip_path() {
+fn comb_loop_nonempty_const_loop_has_no_zero_trip_path() {
     // Why this case exists: `break` keeps a constant loop in runtime-form IR,
     // but 0..1 still enters its body exactly once. Runtime representation does
     // not by itself imply that a zero-trip path is reachable.
@@ -13641,7 +13641,7 @@ fn combinational_loop_nonempty_runtime_form_loop_has_no_zero_trip_path() {
 }
 
 #[test]
-fn combinational_loop_empty_runtime_form_loop_has_no_body_path() {
+fn comb_loop_empty_const_loop_has_no_body_path() {
     // Why this case exists: `break` keeps this const-evaluable empty range in
     // runtime-form IR, but its body is still unreachable. Treating "empty" as
     // merely "possibly empty" invents both a write and a hard cycle.
@@ -13673,7 +13673,7 @@ fn combinational_loop_empty_runtime_form_loop_has_no_body_path() {
 }
 
 #[test]
-fn combinational_loop_break_before_write_retains_coverage() {
+fn comb_loop_break_before_write_retains_coverage() {
     // Why this case exists: a const singleton loop is guaranteed to enter its
     // body, but a conditional break can still bypass a later assignment. The
     // missed write is a coverage error, not a zero-trip path or comb feedback.
@@ -13700,7 +13700,7 @@ fn combinational_loop_break_before_write_retains_coverage() {
 }
 
 #[test]
-fn combinational_loop_runtime_form_cardinality_variants() {
+fn comb_loop_const_range_forms_preserve_cardinality() {
     // Why this case exists: inclusive, reverse, and stepped ranges share the
     // same source-level cardinality rules even when break prevents unrolling.
     // Singleton bodies have an early-break coverage path; empty bodies have no
@@ -13760,11 +13760,11 @@ fn combinational_loop_runtime_form_cardinality_variants() {
 }
 
 #[test]
-fn combinational_loop_runtime_form_iterator_constants_prune_dead_edges() {
+fn comb_loop_const_iterator_prunes_dead_if_edges() {
     // Why this case exists: break keeps the singleton loop in runtime-form IR,
     // but its sole iterator value is still the constant 1. The unreachable
     // i==0 assignment must not create a stronger-than-SV a -> b -> a loop.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a runtime-form singleton retains its iterator constant",
         r#"
         module Top (
@@ -13791,12 +13791,12 @@ fn combinational_loop_runtime_form_iterator_constants_prune_dead_edges() {
 }
 
 #[test]
-fn combinational_loop_runtime_form_iterator_constants_prune_dead_case_arms() {
+fn comb_loop_const_iterator_prunes_dead_case_arms() {
     // Why this case exists: case selection uses the same per-iteration SV
     // value as if selection. A dead i==0 arm in a singleton i==1 loop cannot
     // contribute a hard dependency merely because break prevented frontend
     // unrolling.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a runtime-form singleton prunes dead case arms",
         r#"
         module Top (
@@ -13822,7 +13822,7 @@ fn combinational_loop_runtime_form_iterator_constants_prune_dead_case_arms() {
 }
 
 #[test]
-fn combinational_loop_over_limit_const_loop_does_not_prove_dead_edges() {
+fn comb_loop_over_limit_const_loop_does_not_prove_dead_edges() {
     // Why this case exists: the same const iterator semantics apply above the
     // compiler's expansion limit. If exact bounded lowering is deliberately
     // skipped, its approximation is incomplete and cannot become a hard loop.
@@ -13857,7 +13857,7 @@ fn combinational_loop_over_limit_const_loop_does_not_prove_dead_edges() {
 }
 
 #[test]
-fn combinational_loop_runtime_form_iterator_constants_preserve_must_write() {
+fn comb_loop_const_iterator_preserves_must_write_paths() {
     // Why this case exists: the two const iterations are i=0 and i=1, and the
     // only reachable break follows the i=1 assignment. Every exit is covered;
     // collapsing both iterations into one unknown body invents retention.
@@ -13889,7 +13889,7 @@ fn combinational_loop_runtime_form_iterator_constants_preserve_must_write() {
 }
 
 #[test]
-fn combinational_loop_singleton_break_is_not_runtime_incomplete() {
+fn comb_loop_singleton_break_is_fully_analyzed() {
     // Why this case exists: break makes this const singleton use the compact
     // runtime-form CFG, but there is no loop backedge and therefore no
     // RuntimeLoop uncertainty to expose through check_detailed.
@@ -13918,7 +13918,7 @@ fn combinational_loop_singleton_break_is_not_runtime_incomplete() {
 }
 
 #[test]
-fn combinational_loop_finite_runtime_form_recurrence_is_not_feedback() {
+fn comb_loop_seeded_finite_recurrence_is_feed_forward() {
     // Why this case exists: a conditional break keeps a finite const loop in
     // runtime-form IR. Its loop-carried value is a bounded combinational chain
     // rooted at the dominating default, not an unbounded graph backedge.
@@ -13949,11 +13949,11 @@ fn combinational_loop_finite_runtime_form_recurrence_is_not_feedback() {
 }
 
 #[test]
-fn combinational_loop_finite_runtime_form_explicit_self_read_is_feedback() {
+fn comb_loop_unseeded_finite_recurrence_is_feedback() {
     // Why this case exists: bounded lowering must remove only loop-carried
     // pseudo-feedback. Without a dominating seed, the first iteration's
     // explicit value read still forms real combinational self-feedback.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a finite runtime-form loop retains its first explicit self-read",
         r#"
         module Top (
@@ -13977,7 +13977,7 @@ fn combinational_loop_finite_runtime_form_explicit_self_read_is_feedback() {
 }
 
 #[test]
-fn combinational_loop_function_output_weak_write_retains_coverage() {
+fn comb_loop_function_output_weak_write_retains_coverage() {
     // Why this case exists: a function output argument is copied back to its
     // caller, but a dynamic write inside the function still leaves unselected
     // packed bits without a definition. Function summarization must preserve
@@ -14006,7 +14006,7 @@ fn combinational_loop_function_output_weak_write_retains_coverage() {
 }
 
 #[test]
-fn combinational_loop_function_capture_coverage_obeys_caller_order() {
+fn comb_loop_function_capture_coverage_obeys_caller_order() {
     // Why this case exists: a function's module-scope write is part of its
     // caller procedure. A dominating default or a later full write supplies
     // every preserved bit, so function-local weak-write coverage must not be
@@ -14039,7 +14039,7 @@ fn combinational_loop_function_capture_coverage_obeys_caller_order() {
 }
 
 #[test]
-fn combinational_loop_function_capture_without_default_retains_coverage() {
+fn comb_loop_function_capture_without_default_retains_coverage() {
     // Why this case exists: the caller-order kill controls above need a
     // positive control. Without a caller default, a captured dynamic write
     // still leaves unselected bits unassigned at the always_comb exit.
@@ -14066,7 +14066,7 @@ fn combinational_loop_function_capture_without_default_retains_coverage() {
 }
 
 #[test]
-fn combinational_loop_uncalled_function_still_checks_output_coverage() {
+fn comb_loop_uncalled_function_still_checks_output_coverage() {
     // Why this case exists: output-argument completeness is a property of the
     // function definition, not of whether an always_comb happens to call it.
     // A runtime loop may execute zero times and leave the output unassigned.
@@ -14091,7 +14091,7 @@ fn combinational_loop_uncalled_function_still_checks_output_coverage() {
 }
 
 #[test]
-fn combinational_loop_function_summary_fanout_is_memoized() {
+fn comb_loop_function_summary_fanout_is_memoized() {
     // Why this case exists: each function calls the previous specialization
     // twice, so per-call recursive analysis grows as 2^N. The source contains
     // only N unique function bodies and must be analyzed in O(N) summaries.
@@ -14134,7 +14134,7 @@ fn combinational_loop_function_summary_fanout_is_memoized() {
 }
 
 #[test]
-fn combinational_loop_rejected_periodic_run_is_scanned_once() {
+fn comb_loop_rejected_periodic_run_is_scanned_once() {
     // Why this case exists: a long run with one source but the same exact
     // destination is legal sequential overwrite, not a periodic transfer.
     // Rejecting the candidate must not sort every remaining suffix again.
@@ -14160,7 +14160,7 @@ fn combinational_loop_rejected_periodic_run_is_scanned_once() {
 }
 
 #[test]
-fn combinational_loop_malformed_effect_is_a_causal_barrier() {
+fn comb_loop_malformed_effect_is_a_causal_barrier() {
     // Why this case exists: a rejected statement may have unknown side
     // effects, so a cycle which crosses it is not proven. The malformed
     // procedure must not suppress a separate exact cycle in another procedure.
@@ -14200,7 +14200,7 @@ fn combinational_loop_malformed_effect_is_a_causal_barrier() {
 }
 
 #[test]
-fn combinational_loop_branch_weak_writes_share_one_coverage_diagnostic() {
+fn comb_loop_branch_weak_writes_share_one_coverage_diagnostic() {
     // Why this case exists: distinct weak writes can reach the same retained
     // object through different branches. Coverage reporting should present one
     // coherent variable diagnostic containing both assignment sites.
@@ -14245,7 +14245,7 @@ fn combinational_loop_branch_weak_writes_share_one_coverage_diagnostic() {
 }
 
 #[test]
-fn combinational_loop_dynamic_runtime_coverage_is_not_duplicated() {
+fn comb_loop_dynamic_loop_coverage_is_not_duplicated() {
     // Why this case exists: both legacy branch bookkeeping and MemorySSA can
     // observe the missing path inside a dynamic loop. Coverage ownership must
     // produce one warning rather than appending the same warning twice.
@@ -14279,7 +14279,7 @@ fn combinational_loop_dynamic_runtime_coverage_is_not_duplicated() {
 }
 
 #[test]
-fn combinational_loop_runtime_coverage_sites_stay_region_local() {
+fn comb_loop_dynamic_loop_coverage_sites_stay_region_local() {
     // Why this case exists: value[1] is fully defined even though it is also
     // written in a runtime loop. Its loop assignment must not be reported as a
     // covered site for the independently retained value[0].
@@ -14321,7 +14321,7 @@ fn combinational_loop_runtime_coverage_sites_stay_region_local() {
 }
 
 #[test]
-fn combinational_loop_captured_coverage_sites_stay_region_local() {
+fn comb_loop_captured_coverage_sites_stay_region_local() {
     // Why this case exists: function summary coverage is mapped back into the
     // caller one captured region at a time. A caller default for value[1] must
     // prevent that bit's function assignment from appearing in value[0]'s
@@ -14369,7 +14369,7 @@ fn combinational_loop_captured_coverage_sites_stay_region_local() {
 }
 
 #[test]
-fn comb_loop_ifstmt_feed_forward_array() {
+fn comb_loop_if_assignment_to_array_is_feed_forward() {
     // False positive: an always_comb for-loop over cross-coupled arrays that
     // reads index i and writes i+1 (a feed-forward / acyclic CORDIC-style
     // chain) written with an `if`/`else` STATEMENT was wrongly rejected. The
@@ -23308,7 +23308,7 @@ module M {
 }
 
 #[test]
-fn combinational_loop_review_preserves_context_width_extension_positions() {
+fn comb_loop_preserves_context_width_extension_positions() {
     // Why these cases exist: IEEE 1800-2023 11.8.2 zero-extends an unsigned
     // two-bit RHS to its four-bit assignment context. The new high bits are
     // constants, while the low-bit control remains a real feedback path.
@@ -23324,7 +23324,7 @@ fn combinational_loop_review_preserves_context_width_extension_positions() {
             true,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23353,7 +23353,7 @@ fn combinational_loop_review_preserves_context_width_extension_positions() {
         ),
         ("signed extension retains its replicated sign bit", 1, true),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23375,7 +23375,7 @@ fn combinational_loop_review_preserves_context_width_extension_positions() {
     // Why this case exists: conditional operands are extended to the result
     // width before selection (11.4.11); the control dependency does not turn
     // an unsigned zero-fill bit into data feedthrough.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a ternary preserves unsigned zero extension",
         r#"
         module Top (
@@ -23393,7 +23393,7 @@ fn combinational_loop_review_preserves_context_width_extension_positions() {
 
     // Why these cases exist: formal argument coercion uses the same unsigned
     // extension at function and module boundaries; a high formal bit is zero.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a function formal high bit does not read an unsigned short actual",
         r#"
         module Top (
@@ -23412,7 +23412,7 @@ fn combinational_loop_review_preserves_context_width_extension_positions() {
         "#,
         false,
     );
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a module formal high bit does not read an unsigned short actual",
         r#"
         module High (
@@ -23438,7 +23438,7 @@ fn combinational_loop_review_preserves_context_width_extension_positions() {
 }
 
 #[test]
-fn combinational_loop_review_uses_structural_dynamic_selector_regions() {
+fn comb_loop_uses_structural_dynamic_selector_regions() {
     // Why these cases exist: a nonconstant selector is analyzed structurally
     // from its longest static prefix. The selector's runtime value domain does
     // not narrow the region, so `idx + 2` overlaps both elements zero and two.
@@ -23459,7 +23459,7 @@ fn combinational_loop_review_uses_structural_dynamic_selector_regions() {
             2 => "assign value[0] = 0; assign value[1] = 0; assign value[3] = 0;",
             _ => unreachable!(),
         };
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23498,7 +23498,7 @@ fn combinational_loop_review_uses_structural_dynamic_selector_regions() {
             3 => "assign value[0] = 0; assign value[1] = 0; assign value[2] = 0;",
             _ => unreachable!(),
         };
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23519,7 +23519,7 @@ fn combinational_loop_review_uses_structural_dynamic_selector_regions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_expression_coercions() {
+fn comb_loop_preserves_expression_coercions() {
     // Why these cases exist: both ternary operands are signed and four bits
     // wide after context sizing. Its high result bit depends only on the
     // two-bit value's sign bit, not on value[0].
@@ -23535,7 +23535,7 @@ fn combinational_loop_review_preserves_expression_coercions() {
             true,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23596,7 +23596,7 @@ fn combinational_loop_review_preserves_expression_coercions() {
             true,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23616,7 +23616,7 @@ fn combinational_loop_review_preserves_expression_coercions() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_assignment_pattern_positions() {
+fn comb_loop_preserves_assignment_pattern_positions() {
     // Why these cases exist: IEEE 1800-2023 10.9.2 evaluates each structure
     // constructor expression in the assignment context of its named member.
     // A dependency supplying `b` must not be widened to the unrelated `a`.
@@ -23632,7 +23632,7 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
             true,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23667,7 +23667,7 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
             true,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23719,7 +23719,7 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
             true,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23781,7 +23781,7 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
             true,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23827,7 +23827,7 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
             true,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23859,7 +23859,7 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
     // Why this case exists: projecting only the constructor member consumed
     // as a value must not remove effects of a function called in another
     // member. The function writes `state`, closing a real loop through `o`.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a structure constructor retains effects from an unobserved member",
         r#"
         module Top (
@@ -23884,7 +23884,7 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
 
     // Why this case exists: a sparse query through a large replication should
     // inspect only the selected copy, not materialize every declared element.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a large array repeat remains sparse and bit-precise",
         r#"
         module Pick (
@@ -23913,7 +23913,7 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
 }
 
 #[test]
-fn combinational_loop_whole_unpacked_instance_is_sparse_and_precise() {
+fn comb_loop_whole_unpacked_instance_is_sparse_and_precise() {
     // Why these cases exist: a whole-array module connection must not create
     // one graph node per declared element. A sparse access far inside a
     // 200,000-element array still has to meet its positionally corresponding
@@ -23926,7 +23926,7 @@ fn combinational_loop_whole_unpacked_instance_is_sparse_and_precise() {
             false,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -23957,7 +23957,7 @@ fn combinational_loop_whole_unpacked_instance_is_sparse_and_precise() {
 }
 
 #[test]
-fn combinational_loop_periodic_repeat_is_sparse_and_phase_precise() {
+fn comb_loop_periodic_repeat_is_sparse_and_phase_precise() {
     // Why these cases exist: Veryl elaborates a succinct array repeat into one
     // assignment per element. Causal summaries must recover one periodic
     // transfer whose size is independent of 200,000 copies, while retaining
@@ -24007,7 +24007,7 @@ fn combinational_loop_periodic_repeat_is_sparse_and_phase_precise() {
             "assign passed = '{feedback repeat COUNT};"
         }
         .replace("COUNT", &count.to_string());
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -24039,7 +24039,7 @@ fn combinational_loop_periodic_repeat_is_sparse_and_phase_precise() {
     // must retain both the sparse phase partition and the regular transfer for
     // the next module boundary.
     for (output_bit, expected) in [(0, true), (1, false)] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             "a periodic phase survives two module summaries",
             &format!(
                 r#"
@@ -24078,12 +24078,12 @@ fn combinational_loop_periodic_repeat_is_sparse_and_phase_precise() {
 }
 
 #[test]
-fn combinational_loop_nested_repeat_is_sparse_and_phase_precise() {
+fn comb_loop_nested_repeat_is_sparse_and_phase_precise() {
     // Why these cases exist: nested array repeats are one Cartesian transfer,
     // not one inner summary per outer element. Both axes must survive IR
     // lowering while preserving the selected packed bit.
     for (output_bit, expected) in [(0, true), (1, false)] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             "nested periodic axes retain only their matching packed phase",
             &format!(
                 r#"
@@ -24105,13 +24105,13 @@ fn combinational_loop_nested_repeat_is_sparse_and_phase_precise() {
 }
 
 #[test]
-fn combinational_loop_nested_repeat_actual_survives_module_boundary() {
+fn comb_loop_nested_repeat_actual_survives_module_boundary() {
     // Why these cases exist: a repeated expression used as an instance actual
     // carries periodic input coordinates into the child summary. Mapping only
     // its first base span misses distant feedback; widening it loses packed
     // phase and invents feedback through the adjacent bit.
     for (output_bit, expected) in [(0, true), (1, false)] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             "nested actual axes cross a module boundary without losing phase",
             &format!(
                 r#"
@@ -24143,12 +24143,12 @@ fn combinational_loop_nested_repeat_actual_survives_module_boundary() {
 }
 
 #[test]
-fn combinational_loop_periodic_output_maps_concatenated_actual() {
+fn comb_loop_periodic_output_maps_concatenated_actual() {
     // Why this case exists: a child periodic output may legally connect to a
     // concatenated parent lvalue. Each output fragment must be clipped in the
     // child's coordinates; requiring one whole destination silently drops the
     // real a -> child.o[0] -> a feedback path.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "a periodic child output survives a concatenated parent destination",
         r#"
         module Fanout (
@@ -24175,7 +24175,7 @@ fn combinational_loop_periodic_output_maps_concatenated_actual() {
 }
 
 #[test]
-fn combinational_loop_review_uses_structural_selector_overlap() {
+fn comb_loop_uses_structural_selector_overlap() {
     // Why these cases exist: structural feedback compares each access's
     // independently possible region. Both `idx` and `~idx` can address
     // elements {0,1}, so their regions overlap without relational selector
@@ -24184,7 +24184,7 @@ fn combinational_loop_review_uses_structural_selector_overlap() {
         ("complementary selectors retain structural overlap", "~idx"),
         ("identical selectors retain structural overlap", "idx"),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -24204,12 +24204,12 @@ fn combinational_loop_review_uses_structural_selector_overlap() {
 }
 
 #[test]
-fn combinational_loop_review_maps_instance_actual_function_captures() {
+fn comb_loop_maps_instance_actual_function_captures() {
     // Why this case exists: a function used as an instance input may read a
     // module-scope variable without listing it as a formal. The function
     // summary, rather than the call's empty syntactic argument list, must map
     // that capture into the child feedthrough and retain the real loop.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance actual function retains a module-scope capture",
         r#"
         module Child (
@@ -24241,7 +24241,7 @@ fn combinational_loop_review_maps_instance_actual_function_captures() {
     // Why this control exists: an exact module capture keeps its selected bit
     // position. Feeding the child output into another bit must remain
     // loop-free instead of widening the capture to the whole object.
-    assert_comb_loop_for_case(
+    assert_comb_loop(
         "an instance actual function keeps a disjoint captured bit loop-free",
         r#"
         module Child (
@@ -24286,7 +24286,7 @@ fn combinational_loop_review_maps_instance_actual_function_captures() {
             true,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -24323,7 +24323,7 @@ fn combinational_loop_review_maps_instance_actual_function_captures() {
 }
 
 #[test]
-fn combinational_loop_review_uses_structural_selector_regions() {
+fn comb_loop_uses_structural_selector_regions() {
     // Why these cases exist: dependency analysis must not infer a sparse
     // runtime value set such as {0,2} for `idx * 2`. As a nonconstant selector,
     // it structurally overlaps both elements one and two.
@@ -24344,7 +24344,7 @@ fn combinational_loop_review_uses_structural_selector_regions() {
             .map(|index| format!("assign mem[{index}] = 0;"))
             .collect::<Vec<_>>()
             .join("\n");
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
@@ -24378,7 +24378,7 @@ fn combinational_loop_review_uses_structural_selector_regions() {
             true,
         ),
     ] {
-        assert_comb_loop_for_case(
+        assert_comb_loop(
             name,
             &format!(
                 r#"
