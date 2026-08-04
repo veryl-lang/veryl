@@ -12932,6 +12932,10 @@ fn dual_jit_wide_dynamic_assign_mixed() {
     ) {
         var mem: logic<96> [4];
         always_comb {
+            mem[0] = 0;
+            mem[1] = 0;
+            mem[2] = 0;
+            mem[3] = 0;
             mem[sel] = val;
             out = a + 1;
             wide_out = mem[0];
