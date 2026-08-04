@@ -181,12 +181,16 @@ fn live_summary_nodes(
 /// Sparse alias node for a dynamically selected region of one object.  This
 /// deliberately occupies no real array element or bit-partition slot.
 const UNKNOWN_REGION_INDEX: usize = usize::MAX;
+const DENSE_REGION_INDEX: usize = usize::MAX - 1;
 
 /// Per `IdxKey`, atomic bit-range masks. Two bits are in the same range
 /// iff they appear in the same set of per-decl masks.
 #[derive(Default)]
 struct BitPartition {
     ranges: HashMap<VarId, BTreeMap<usize, Vec<BigUint>>>,
+    /// Symbolic full-element interiors of large exact spans. Their graph-node
+    /// count depends on observed spans, not on unpacked array length.
+    dense_regions: Vec<Region<VarId>>,
     /// Stable identities for unresolved regions. They are graph nodes, not
     /// array elements, so their count depends on accesses rather than width.
     wildcards: Vec<Region<VarId>>,
@@ -479,25 +483,27 @@ fn atomic_ranges(masks: &[BigUint], width: usize) -> Vec<BigUint> {
 }
 
 fn build_bit_partition(module: &Module, memory_ssa_regions: &[Region<VarId>]) -> BitPartition {
-    let mut masks: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
+    let mut masks: HashMap<VarId, BTreeMap<usize, Vec<BigUint>>> = HashMap::default();
 
     // A shifted copy can propagate every observed endpoint through the copy
     // relation. Feed those sparse spans into the shared partition so distinct
     // causal atoms do not collapse into a spurious self-edge.
-    for &region in memory_ssa_regions {
-        collect_region_mask(region, module, &mut masks);
-    }
+    let dense_regions = collect_region_masks(memory_ssa_regions, module, &mut masks);
 
     let mut ranges: HashMap<VarId, BTreeMap<usize, Vec<BigUint>>> = HashMap::default();
-    for (key, ms) in masks {
+    for (object, elements) in masks {
         let width = module
             .variables
-            .get(&key.0)
-            .and_then(|v| v.total_width())
+            .get(&object)
+            .and_then(|variable| variable.total_width())
             .unwrap_or(1);
-        let parts = atomic_ranges(&ms, width);
-        if !parts.is_empty() {
-            ranges.entry(key.0).or_default().insert(key.1, parts);
+        for (element, mut element_masks) in elements {
+            element_masks.sort_unstable();
+            element_masks.dedup();
+            let parts = atomic_ranges(&element_masks, width);
+            if !parts.is_empty() {
+                ranges.entry(object).or_default().insert(element, parts);
+            }
         }
     }
 
@@ -514,39 +520,123 @@ fn build_bit_partition(module: &Module, memory_ssa_regions: &[Region<VarId>]) ->
         .into_iter()
         .collect();
 
-    BitPartition { ranges, wildcards }
+    BitPartition {
+        ranges,
+        dense_regions,
+        wildcards,
+    }
 }
 
-fn collect_region_mask(
-    region: Region<VarId>,
+fn collect_region_masks(
+    regions: &[Region<VarId>],
     module: &Module,
-    masks: &mut HashMap<(VarId, usize), Vec<BigUint>>,
-) {
-    let Region::Exact { object, span } = region else {
-        return;
-    };
-    let Some(width) = module
-        .variables
-        .get(&object)
-        .and_then(Variable::total_width)
-    else {
-        return;
-    };
-    let Some(end) = span.end() else {
-        return;
-    };
-    let mut cursor = span.start;
-    while cursor < end {
-        let element = cursor / width;
-        let bit_start = cursor % width;
-        let element_end = end.min((element + 1).saturating_mul(width));
-        let bit_end = element_end - element * width;
-        masks
-            .entry((object, element))
-            .or_default()
-            .push(ValueBigUint::gen_mask_range(bit_end - 1, bit_start));
-        cursor = element_end;
+    masks: &mut HashMap<VarId, BTreeMap<usize, Vec<BigUint>>>,
+) -> Vec<Region<VarId>> {
+    // Full-element interiors are homogeneous. Materialize only their boundary
+    // representatives and any sparse element already observed by another
+    // region. This keeps whole-array work independent of the declared number
+    // of unpacked elements while preserving every relevant intersection.
+    let mut full_interiors: HashMap<VarId, Vec<(usize, usize)>> = HashMap::default();
+    for &region in regions {
+        let Region::Exact { object, span } = region else {
+            continue;
+        };
+        let Some(width) = module
+            .variables
+            .get(&object)
+            .and_then(Variable::total_width)
+        else {
+            continue;
+        };
+        let Some(end) = span.end() else {
+            continue;
+        };
+        if width == 0 || span.start >= end {
+            continue;
+        }
+
+        let first = span.start / width;
+        let last = (end - 1) / width;
+        let first_end = end.min((first + 1).saturating_mul(width));
+        push_element_mask(
+            masks,
+            object,
+            first,
+            ValueBigUint::gen_mask_range(first_end - first * width - 1, span.start % width),
+        );
+        if last != first {
+            push_element_mask(
+                masks,
+                object,
+                last,
+                ValueBigUint::gen_mask_range(end - last * width - 1, 0),
+            );
+        }
+
+        let interior_start = first.saturating_add(1);
+        if interior_start < last {
+            full_interiors
+                .entry(object)
+                .or_default()
+                .push((interior_start, last));
+        }
     }
+
+    let mut dense_regions = Vec::new();
+    for (object, mut intervals) in full_interiors {
+        intervals.sort_unstable();
+        intervals.dedup();
+
+        let Some(width) = module
+            .variables
+            .get(&object)
+            .and_then(Variable::total_width)
+        else {
+            continue;
+        };
+        let full_mask = ValueBigUint::gen_mask_range(width - 1, 0);
+        let elements = masks.entry(object).or_default();
+        for (start, end) in intervals {
+            dense_regions.push(Region::Exact {
+                object,
+                span: Span {
+                    start: start.saturating_mul(width),
+                    length: end.saturating_sub(start).saturating_mul(width),
+                },
+            });
+            // One representative retains dependencies which touch only the
+            // whole interval. Other exact accesses have already inserted
+            // their own element keys and are filled by the range query.
+            elements.entry(start).or_default();
+            let materialized = elements
+                .range(start..end)
+                .map(|(&element, _)| element)
+                .collect::<Vec<_>>();
+            for element in materialized {
+                elements
+                    .get_mut(&element)
+                    .expect("materialized element")
+                    .push(full_mask.clone());
+            }
+        }
+    }
+    dense_regions.sort_unstable();
+    dense_regions.dedup();
+    dense_regions
+}
+
+fn push_element_mask(
+    masks: &mut HashMap<VarId, BTreeMap<usize, Vec<BigUint>>>,
+    object: VarId,
+    element: usize,
+    mask: BigUint,
+) {
+    masks
+        .entry(object)
+        .or_default()
+        .entry(element)
+        .or_default()
+        .push(mask);
 }
 
 fn build_module_graph(
@@ -908,7 +998,7 @@ fn aligned_region_node_pairs(
 ) -> Vec<(NodeKey, NodeKey)> {
     let (
         Region::Exact {
-            object: input_object,
+            object: _,
             span: input_span,
         },
         Region::Exact {
@@ -932,27 +1022,16 @@ fn aligned_region_node_pairs(
     if input_span.length != output_span.length {
         return Vec::new();
     }
-    let Some(input_width) = variables.get(&input_object).and_then(Variable::total_width) else {
-        return Vec::new();
-    };
     let mut pairs = BTreeSet::new();
     for source in region_node_keys(input, variables, bit_part) {
-        let Some(mask) = bit_part.ranges_of((source.0, source.1)).get(source.2) else {
-            continue;
-        };
-        for local in mask_spans(mask, input_width) {
-            let Some(global_start) = source
-                .1
-                .checked_mul(input_width)
-                .and_then(|base| base.checked_add(local.start))
+        for source_region in node_key_regions_for_variables(source, variables, bit_part) {
+            let Region::Exact {
+                span: source_span, ..
+            } = source_region
             else {
                 continue;
             };
-            let Some(overlap) = (Span {
-                start: global_start,
-                length: local.length,
-            })
-            .intersection(input_span) else {
+            let Some(overlap) = source_span.intersection(input_span) else {
                 continue;
             };
             let Some(offset) = overlap.start.checked_sub(input_span.start) else {
@@ -1079,6 +1158,28 @@ fn sparse_exact_node_keys(
     keys
 }
 
+fn dense_region_node_keys(object: VarId, span: Span, bit_part: &BitPartition) -> Vec<NodeKey> {
+    bit_part
+        .dense_regions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, region)| match region {
+            Region::Exact {
+                object: candidate,
+                span: candidate_span,
+            } if *candidate == object
+                && span.intersection(*candidate_span) == Some(*candidate_span) =>
+            {
+                Some((object, DENSE_REGION_INDEX, index))
+            }
+            Region::Exact { .. }
+            | Region::UnknownRegion { .. }
+            | Region::UnknownObject(_)
+            | Region::UnknownAll => None,
+        })
+        .collect()
+}
+
 /// Convert the MemorySSA engine's flattened, half-open bit region back to the
 /// graph `(array element, bit partition)` coordinates. The loop is
 /// proportional to touched elements, never to the declared array size.
@@ -1089,7 +1190,9 @@ fn region_node_keys(
 ) -> Vec<NodeKey> {
     let mut keys = match region {
         Region::Exact { object, span } => {
-            return sparse_exact_node_keys(object, span, variables, bit_part);
+            let mut keys = sparse_exact_node_keys(object, span, variables, bit_part);
+            keys.extend(dense_region_node_keys(object, span, bit_part));
+            keys
         }
         Region::UnknownRegion { object, span } => {
             sparse_exact_node_keys(object, span, variables, bit_part)
@@ -2256,10 +2359,26 @@ fn compute_module_summary(
 }
 
 fn node_key_regions(key: NodeKey, module: &Module, bit_part: &BitPartition) -> Vec<Region<VarId>> {
+    node_key_regions_for_variables(key, &module.variables, bit_part)
+}
+
+fn node_key_regions_for_variables(
+    key: NodeKey,
+    variables: &HashMap<VarId, Variable>,
+    bit_part: &BitPartition,
+) -> Vec<Region<VarId>> {
     if key.1 == UNKNOWN_REGION_INDEX {
         return bit_part.wildcards.get(key.2).copied().into_iter().collect();
     }
-    let Some(width) = module.variables.get(&key.0).and_then(Variable::total_width) else {
+    if key.1 == DENSE_REGION_INDEX {
+        return bit_part
+            .dense_regions
+            .get(key.2)
+            .copied()
+            .into_iter()
+            .collect();
+    }
+    let Some(width) = variables.get(&key.0).and_then(Variable::total_width) else {
         return Vec::new();
     };
     let Some(mask) = bit_part.ranges_of((key.0, key.1)).get(key.2) else {
