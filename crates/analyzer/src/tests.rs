@@ -24079,6 +24079,44 @@ fn combinational_loop_nested_repeat_is_sparse_and_phase_precise() {
 }
 
 #[test]
+fn combinational_loop_nested_repeat_actual_survives_module_boundary() {
+    // Why these cases exist: a repeated expression used as an instance actual
+    // carries periodic input coordinates into the child summary. Mapping only
+    // its first base span misses distant feedback; widening it loses packed
+    // phase and invents feedback through the adjacent bit.
+    for (output_bit, expected) in [(0, true), (1, false)] {
+        assert_comb_loop_for_case(
+            "nested actual axes cross a module boundary without losing phase",
+            &format!(
+                r#"
+                module Identity (
+                    i: input  logic<2> [100, 20],
+                    o: output logic<2> [100, 20],
+                ) {{
+                    assign o = i;
+                }}
+
+                module Top (
+                    o: output logic,
+                ) {{
+                    var feedback: logic<2>;
+                    var passed  : logic<2> [100, 20];
+                    inst u: Identity (
+                        i: '{{'{{feedback repeat 20}} repeat 100}},
+                        o: passed,
+                    );
+                    assign feedback[0] = passed[78][12][{output_bit}];
+                    assign feedback[1] = 0;
+                    assign o = passed[0][0][0];
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
 fn combinational_loop_review_uses_structural_selector_overlap() {
     // Why these cases exist: structural feedback compares each access's
     // independently possible region. Both `idx` and `~idx` can address
