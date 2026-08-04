@@ -22,6 +22,8 @@ pub fn resolve_enum(list: &[Symbol]) -> Vec<AnalyzerError> {
         let mut pre_value = None;
         let mut member_width = 0;
         let mut seen_values: HashSet<BigUint> = HashSet::default();
+        // x/z values have no numeric `value()`, so they bypass `seen_values`.
+        let mut seen_xz: HashSet<(BigUint, BigUint)> = HashSet::default();
         for id in &r#enum.members {
             let mut symbol = symbol_table::get(*id).unwrap();
 
@@ -32,6 +34,7 @@ pub fn resolve_enum(list: &[Symbol]) -> Vec<AnalyzerError> {
                 pre_value.as_ref(),
                 enum_width,
                 &mut member_width,
+                &mut seen_xz,
                 &mut errors,
             );
             if matches!(value, EnumMemberValue::UnevaluableValue) {
@@ -110,6 +113,7 @@ fn eval_enum_width(
     width
 }
 
+#[allow(clippy::too_many_arguments)]
 fn eval_enum_member_value(
     context: &mut Context,
     symbol: &Symbol,
@@ -117,6 +121,7 @@ fn eval_enum_member_value(
     pre_value: Option<&EnumMemberValue>,
     enum_width: usize,
     member_width: &mut usize,
+    seen_xz: &mut HashSet<(BigUint, BigUint)>,
     errors: &mut Vec<AnalyzerError>,
 ) -> EnumMemberValue {
     let SymbolKind::EnumMember(enum_member) = &symbol.kind else {
@@ -164,6 +169,15 @@ fn eval_enum_member_value(
                     ));
                 }
                 *member_width = (*member_width).max(needed);
+                // Key on (payload, x/z-mask): z sets payload bits under the mask,
+                // so x and z differ.
+                let key = (value.payload().into_owned(), value.mask_xz().into_owned());
+                if !seen_xz.insert(key) {
+                    errors.push(AnalyzerError::duplicate_enum_variant(
+                        &symbol.token.to_string(),
+                        &symbol.token.into(),
+                    ));
+                }
                 enum_member.value.clone()
             }
         } else {

@@ -4665,3 +4665,71 @@ endinterface
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn hoisted_declaration_keeps_ifdef_guard() {
+    // Statement-block declarations are hoisted to the top of the begin/end
+    // block; the hoist used to flatten the groups and drop their
+    // `ifdef/`else guards, emitting both arms' declarations unguarded into
+    // the same scope (duplicate declaration, rejected by every SV tool).
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M {
+    var x: logic;
+    always_comb {
+        #[ifdef(DEFINE_E)]
+        let e: logic<8> = 1;
+        #[else]
+        let e: logic<16> = 3;
+        x = e[0];
+    }
+}
+"#;
+    let ret = emit(&metadata, code);
+    let hoist = ret.find("logic [8-1:0] e;").unwrap();
+    let guarded = &ret[..hoist];
+    assert!(
+        guarded.trim_end().ends_with("`ifdef DEFINE_E"),
+        "hoisted declaration must sit inside its ifdef guard:\n{ret}"
+    );
+    assert!(
+        ret.contains("`else\n        logic [16-1:0] e;\n        `endif"),
+        "else-arm declaration must sit inside the guard:\n{ret}"
+    );
+}
+
+#[test]
+fn struct_member_ifdef_keeps_semicolon_inside_guard() {
+    // The member-separating ';' used to be emitted after `endif, so with
+    // the define off the preprocessor kept a stray ';' inside the struct
+    // body — invalid SV.
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M {
+    struct S {
+        a: logic<8>,
+        #[ifdef(DEF_A)]
+        b: logic<8>,
+        c: logic<8>,
+    }
+    var s: S;
+    var o: logic<8>;
+    always_comb {
+        s.a = 1;
+        s.c = 2;
+        #[ifdef(DEF_A)]
+        s.b = 3;
+    }
+    assign o = s.a + s.c;
+}
+"#;
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("logic [8-1:0] b;\n        `endif"),
+        "member ';' must land inside the ifdef guard:\n{ret}"
+    );
+    assert!(
+        !ret.contains("`endif;"),
+        "no stray ';' after `endif:\n{ret}"
+    );
+}
