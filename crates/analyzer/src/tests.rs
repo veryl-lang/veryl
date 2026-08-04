@@ -24052,6 +24052,33 @@ fn combinational_loop_periodic_repeat_is_sparse_and_phase_precise() {
 }
 
 #[test]
+fn combinational_loop_nested_repeat_is_sparse_and_phase_precise() {
+    // Why these cases exist: nested array repeats are one Cartesian transfer,
+    // not one inner summary per outer element. Both axes must survive IR
+    // lowering while preserving the selected packed bit.
+    for (output_bit, expected) in [(0, true), (1, false)] {
+        assert_comb_loop_for_case(
+            "nested periodic axes retain only their matching packed phase",
+            &format!(
+                r#"
+                module Top (
+                    o: output logic,
+                ) {{
+                    var feedback: logic<2>;
+                    var passed  : logic<2> [100, 20];
+                    assign passed = '{{'{{feedback repeat 20}} repeat 100}};
+                    assign feedback[0] = passed[78][12][{output_bit}];
+                    assign feedback[1] = 0;
+                    assign o = passed[0][0][0];
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
 fn combinational_loop_review_uses_structural_selector_overlap() {
     // Why these cases exist: structural feedback compares each access's
     // independently possible region. Both `idx` and `~idx` can address
