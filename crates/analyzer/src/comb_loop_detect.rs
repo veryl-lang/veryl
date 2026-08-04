@@ -1540,14 +1540,30 @@ fn collect_expression_regions(
                 | Factor::Unknown(_) => {}
             },
             Expression::Unary(_, operand, _) => collect(operand, variables, ctx, regions),
-            Expression::Binary(left, _, right, _) => {
+            Expression::Binary(left, op, right, _) => {
                 collect(left, variables, ctx, regions);
-                collect(right, variables, ctx, regions);
+                let left_value = left.clone().eval_value(ctx);
+                let rhs_reachable = match (op, left_value.as_ref()) {
+                    (Op::LogicAnd, Some(value)) if !value.is_xz() && !value.is_positive() => false,
+                    (Op::LogicOr, Some(value)) if !value.is_xz() && value.is_positive() => false,
+                    _ => true,
+                };
+                if rhs_reachable {
+                    collect(right, variables, ctx, regions);
+                }
             }
             Expression::Ternary(condition, left, right, _) => {
                 collect(condition, variables, ctx, regions);
-                collect(left, variables, ctx, regions);
-                collect(right, variables, ctx, regions);
+                match condition.clone().eval_value(ctx) {
+                    Some(value) if !value.is_xz() && value.is_positive() => {
+                        collect(left, variables, ctx, regions);
+                    }
+                    Some(value) if !value.is_xz() => collect(right, variables, ctx, regions),
+                    _ => {
+                        collect(left, variables, ctx, regions);
+                        collect(right, variables, ctx, regions);
+                    }
+                }
             }
             Expression::Concatenation(parts, _) => {
                 for (part, repeat) in parts {

@@ -10914,7 +10914,6 @@ fn combinational_loop_review_short_circuits_logical_rhs_side_effects() {
 }
 
 #[test]
-#[ignore = "captured final-review regression: instance fallback retains dead logical RHS"]
 fn combinational_loop_review_short_circuits_instance_logical_actuals() {
     let case = |name: &str, expression: &str, expected: bool| {
         assert_comb_loop_for_case(
