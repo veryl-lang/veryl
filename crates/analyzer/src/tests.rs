@@ -13575,6 +13575,65 @@ fn combinational_loop_nonempty_runtime_form_loop_has_no_zero_trip_path() {
 }
 
 #[test]
+fn combinational_loop_empty_runtime_form_loop_has_no_body_path() {
+    // Why this case exists: `break` keeps this const-evaluable empty range in
+    // runtime-form IR, but its body is still unreachable. Treating "empty" as
+    // merely "possibly empty" invents both a write and a hard cycle.
+    let errors = analyze(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for _index in 1..1 {
+                    a = b;
+                    break;
+                }
+            }
+            assign b = a;
+            assign o = b;
+        }
+        "#,
+    );
+    assert!(
+        errors.iter().all(|error| !matches!(
+            error,
+            AnalyzerError::CombinationalLoop { .. } | AnalyzerError::UncoveredBranch { .. }
+        )),
+        "an empty loop has no reachable body assignment: {errors:#?}"
+    );
+}
+
+#[test]
+fn combinational_loop_break_before_write_retains_coverage() {
+    // Why this case exists: a const singleton loop is guaranteed to enter its
+    // body, but a conditional break can still bypass a later assignment. The
+    // missed write is a coverage error, not a zero-trip path or comb feedback.
+    assert_incomplete_assignment_without_comb_loop(
+        "a break before the first write leaves the output unassigned",
+        r#"
+        module Top (
+            stop: input  logic,
+            o   : output logic,
+        ) {
+            var value: logic;
+            always_comb {
+                for _index in 0..1 {
+                    if stop {
+                        break;
+                    }
+                    value = 1;
+                }
+                o = value;
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
 fn combinational_loop_function_output_weak_write_retains_coverage() {
     // Why this case exists: a function output argument is copied back to its
     // caller, but a dynamic write inside the function still leaves unselected
@@ -13598,6 +13657,69 @@ fn combinational_loop_function_output_weak_write_retains_coverage() {
                 write_selected(index, value);
                 o = value[0];
             }
+        }
+        "#,
+    );
+}
+
+#[test]
+fn combinational_loop_function_capture_coverage_obeys_caller_order() {
+    // Why this case exists: a function's module-scope write is part of its
+    // caller procedure. A dominating default or a later full write supplies
+    // every preserved bit, so function-local weak-write coverage must not be
+    // finalized before the caller MemorySSA reaches its exit.
+    for body in [
+        "value = 0; write_selected(index);",
+        "write_selected(index); value = 0;",
+    ] {
+        let errors = analyze(&format!(
+            r#"
+            module Top (
+                index: input  logic<2>,
+                o    : output logic,
+            ) {{
+                var value: logic<4>;
+                function write_selected (
+                    index: input logic<2>,
+                ) {{
+                    value[index] = 1;
+                }}
+                always_comb {{
+                    {body}
+                    o = value[0];
+                }}
+            }}
+            "#
+        ));
+        assert!(
+            errors
+                .iter()
+                .all(|error| !matches!(error, AnalyzerError::UncoveredBranch { .. })),
+            "caller ordering completely defines the captured value: {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn combinational_loop_uncalled_function_still_checks_output_coverage() {
+    // Why this case exists: output-argument completeness is a property of the
+    // function definition, not of whether an always_comb happens to call it.
+    // A runtime loop may execute zero times and leave the output unassigned.
+    assert_incomplete_assignment_without_comb_loop(
+        "an uncalled function still has to assign its output on every path",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function maybe_write (
+                n    : input  logic<32>,
+                value: output logic,
+            ) {
+                for _index in 0..n {
+                    value = 1;
+                }
+            }
+            assign o = 0;
         }
         "#,
     );
