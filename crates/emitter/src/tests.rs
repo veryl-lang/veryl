@@ -4697,3 +4697,39 @@ fn hoisted_declaration_keeps_ifdef_guard() {
         "else-arm declaration must sit inside the guard:\n{ret}"
     );
 }
+
+#[test]
+fn struct_member_ifdef_keeps_semicolon_inside_guard() {
+    // The member-separating ';' used to be emitted after `endif, so with
+    // the define off the preprocessor kept a stray ';' inside the struct
+    // body — invalid SV.
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M {
+    struct S {
+        a: logic<8>,
+        #[ifdef(DEF_A)]
+        b: logic<8>,
+        c: logic<8>,
+    }
+    var s: S;
+    var o: logic<8>;
+    always_comb {
+        s.a = 1;
+        s.c = 2;
+        #[ifdef(DEF_A)]
+        s.b = 3;
+    }
+    assign o = s.a + s.c;
+}
+"#;
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("logic [8-1:0] b;\n        `endif"),
+        "member ';' must land inside the ifdef guard:\n{ret}"
+    );
+    assert!(
+        !ret.contains("`endif;"),
+        "no stray ';' after `endif:\n{ret}"
+    );
+}
