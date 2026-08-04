@@ -22133,17 +22133,21 @@ fn combinational_loop_review_preserves_context_width_extension_positions() {
 }
 
 #[test]
-fn combinational_loop_review_bounds_dynamic_selector_values() {
-    // Why these cases exist: a two-state one-bit selector has exactly the
-    // values {0,1}. Adding two therefore reaches only elements {2,3}; element
-    // zero is disjoint, while element two is a real candidate.
+fn combinational_loop_review_uses_structural_dynamic_selector_regions() {
+    // Why these cases exist: a nonconstant selector is analyzed structurally
+    // from its longest static prefix. The selector's runtime value domain does
+    // not narrow the region, so `idx + 2` overlaps both elements zero and two.
     for (name, target, expected) in [
         (
-            "a shifted one-bit index cannot reach element zero",
+            "a shifted dynamic index structurally overlaps element zero",
             0,
-            false,
+            true,
         ),
-        ("a shifted one-bit index can reach element two", 2, true),
+        (
+            "a shifted dynamic index structurally overlaps element two",
+            2,
+            true,
+        ),
     ] {
         let clears = match target {
             0 => "assign value[1] = 0; assign value[2] = 0; assign value[3] = 0;",
@@ -22169,15 +22173,20 @@ fn combinational_loop_review_bounds_dynamic_selector_values() {
         );
     }
 
-    // Why these cases exist: an indexed part-select with base {0,1} and width
-    // two reaches only bits 0..2. Bit three is disjoint; bit zero is reachable.
+    // Why these cases exist: a nonconstant indexed part-select base retains
+    // its enclosing packed region. Inferring the base's runtime values would
+    // incorrectly make bit three structurally disjoint.
     for (name, target, expected) in [
         (
-            "a bounded indexed part-select cannot reach bit three",
+            "a dynamic indexed part-select structurally overlaps bit three",
             3,
-            false,
+            true,
         ),
-        ("a bounded indexed part-select can reach bit zero", 0, true),
+        (
+            "a dynamic indexed part-select structurally overlaps bit zero",
+            0,
+            true,
+        ),
     ] {
         let clears = match target {
             0 => "assign value[1] = 0; assign value[2] = 0; assign value[3] = 0;",
@@ -22912,18 +22921,18 @@ fn combinational_loop_review_maps_instance_actual_function_captures() {
 }
 
 #[test]
-fn combinational_loop_review_preserves_sparse_selector_regions() {
-    // Why these cases exist: for a one-bit two-state selector, `idx * 2` has
-    // the independently provable non-contiguous candidate set {0,2}. Element
-    // one is unreachable, while feedback into element two is a real loop.
+fn combinational_loop_review_uses_structural_selector_regions() {
+    // Why these cases exist: dependency analysis must not infer a sparse
+    // runtime value set such as {0,2} for `idx * 2`. As a nonconstant selector,
+    // it structurally overlaps both elements one and two.
     for (name, target, expected) in [
         (
-            "a non-contiguous selector excludes an unreachable array element",
+            "a multiplied dynamic index structurally overlaps element one",
             1,
-            false,
+            true,
         ),
         (
-            "a non-contiguous selector retains a reachable array element",
+            "a multiplied dynamic index structurally overlaps element two",
             2,
             true,
         ),
