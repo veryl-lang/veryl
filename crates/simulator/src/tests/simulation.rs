@@ -17570,7 +17570,10 @@ fn concat_lhs_with_dynamic_bit_select() {
         a: output logic<4>,
         b: output logic,
     ) {
-        assign {a[i], b} = v;
+        always_comb {
+            a = 0;
+            {a[i], b} = v;
+        }
     }
     "#;
     for config in Config::all() {
@@ -17587,8 +17590,8 @@ fn concat_lhs_with_dynamic_bit_select() {
         sim.set("i", Value::new(0, 2, false));
         sim.set("v", Value::new(0b11, 2, false));
         sim.step(&Event::Clock(VarId::SYNTHETIC));
-        // Bit 2 keeps its previous value (only a[i] is driven).
-        assert_eq!(sim.get("a").unwrap().payload_u128(), 0b0101, "{config:?}");
+        // The default assignment clears bit 2 before a[0] is selected.
+        assert_eq!(sim.get("a").unwrap().payload_u128(), 0b0001, "{config:?}");
         assert_eq!(sim.get("b").unwrap().payload_u128(), 1, "{config:?}");
     }
 }
