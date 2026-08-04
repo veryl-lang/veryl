@@ -116,7 +116,8 @@ pub struct CombAnalysisResult {
 pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
     let mut errors = Vec::new();
     let mut incomplete = Vec::new();
-    let mut summaries: HashMap<StrId, ModuleCombSummary> = HashMap::default();
+    let mut summaries: HashMap<usize, ModuleCombSummary> = HashMap::default();
+    let mut visiting_specializations = HashSet::default();
 
     let (order, recursion_affected_modules) = topo_order_modules(ir);
 
@@ -130,13 +131,18 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
                 });
                 continue;
             }
-            let (graph, mut reasons, bit_part) = build_module_graph(module, &summaries);
+            ensure_instance_summaries(
+                module,
+                &mut summaries,
+                &mut visiting_specializations,
+                &mut errors,
+                &mut incomplete,
+            );
+            let (graph, mut reasons, _bit_part) = build_module_graph(module, &summaries);
             if recursion_affected_modules.contains(&idx) {
                 reasons.insert(IncompleteReason::RecursiveCall);
             }
             check_graph(module, &graph, &mut errors);
-            let summary = compute_module_summary(module, &graph, &bit_part);
-            summaries.insert(module.name, summary);
             if !reasons.is_empty() {
                 incomplete.push(IncompleteCombAnalysis {
                     module: module.name.to_string(),
@@ -147,6 +153,49 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
     }
 
     CombAnalysisResult { errors, incomplete }
+}
+
+fn component_summary_key(inst: &InstDeclaration) -> usize {
+    std::sync::Arc::as_ptr(&inst.component) as *const () as usize
+}
+
+/// Analyze the concrete module carried by each instance. Generic parameter
+/// overrides are already elaborated in this `Arc<Component>` and therefore
+/// cannot share the declaration-default summary keyed only by module name.
+fn ensure_instance_summaries(
+    module: &Module,
+    summaries: &mut HashMap<usize, ModuleCombSummary>,
+    visiting: &mut HashSet<usize>,
+    errors: &mut Vec<AnalyzerError>,
+    incomplete: &mut Vec<IncompleteCombAnalysis>,
+) {
+    for inst in walk_insts(module) {
+        let Component::Module(child) = inst.component.as_ref() else {
+            continue;
+        };
+        let key = component_summary_key(inst);
+        if summaries.contains_key(&key) {
+            continue;
+        }
+        if !visiting.insert(key) {
+            incomplete.push(IncompleteCombAnalysis {
+                module: child.name.to_string(),
+                reasons: [IncompleteReason::RecursiveCall].into(),
+            });
+            continue;
+        }
+        ensure_instance_summaries(child, summaries, visiting, errors, incomplete);
+        let (graph, reasons, bit_part) = build_module_graph(child, summaries);
+        check_graph(child, &graph, errors);
+        summaries.insert(key, compute_module_summary(child, &graph, &bit_part));
+        if !reasons.is_empty() {
+            incomplete.push(IncompleteCombAnalysis {
+                module: child.name.to_string(),
+                reasons,
+            });
+        }
+        visiting.remove(&key);
+    }
 }
 
 /// Children before parents. Modules in, or transitively depending on, an
@@ -360,7 +409,7 @@ fn collect_region_mask(
 
 fn build_module_graph(
     module: &Module,
-    summaries: &HashMap<StrId, ModuleCombSummary>,
+    summaries: &HashMap<usize, ModuleCombSummary>,
 ) -> (
     Graph<NodeKey, bool>,
     BTreeSet<IncompleteReason>,
@@ -494,7 +543,7 @@ fn build_module_graph(
                     &module.variables,
                     &mut ctx,
                 );
-                let Some(summary) = summaries.get(&child.name) else {
+                let Some(summary) = summaries.get(&component_summary_key(inst)) else {
                     continue;
                 };
                 add_inst_feedthrough_edges(
@@ -833,7 +882,7 @@ fn region_node_keys(
 
 fn collect_instance_summary_regions(
     module: &Module,
-    summaries: &HashMap<StrId, ModuleCombSummary>,
+    summaries: &HashMap<usize, ModuleCombSummary>,
     ctx: &mut Context,
 ) -> Vec<Region<VarId>> {
     let mut regions = Vec::new();
@@ -853,7 +902,7 @@ fn collect_instance_summary_regions(
                 ctx,
             ));
         }
-        let Some(summary) = summaries.get(&child.name) else {
+        let Some(summary) = summaries.get(&component_summary_key(inst)) else {
             continue;
         };
         for dependency in &summary.dependencies {

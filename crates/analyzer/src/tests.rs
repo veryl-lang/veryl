@@ -10723,7 +10723,6 @@ fn combinational_loop_review_preserves_instance_repeat_positions() {
 }
 
 #[test]
-#[ignore = "captured independent-review regression: generic module summaries ignore specialization"]
 fn combinational_loop_review_distinguishes_generic_module_specializations() {
     // Why this case exists: ENABLE: 1 elaborates Child into an identity even
     // though its declaration default is zero. Reusing the default summary for
