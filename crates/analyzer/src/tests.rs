@@ -10442,7 +10442,6 @@ fn combinational_loop_review_keeps_observer_function_side_effect() {
 }
 
 #[test]
-#[ignore = "known bug: an unused child input hides function side effects in its actual"]
 fn combinational_loop_review_keeps_instance_actual_function_side_effect() {
     // Why this case exists: IEEE 1800-2023 4.9.6 models an input connection as
     // an implicit continuous assignment. Its actual expression is evaluated

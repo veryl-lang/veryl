@@ -29,6 +29,19 @@ pub(crate) fn analyze(
     procedure::analyze(&builder.procedure)
 }
 
+pub(crate) fn analyze_observer_expression(
+    module: &Module,
+    expression: &Expression,
+) -> Result<ProcedureSummary<VarId>, ProcedureError> {
+    let mut builder = Builder::new(module);
+    builder.lower_observer_expression(0, expression);
+    builder.procedure.exit = 0;
+    if let Some(message) = builder.model_error {
+        return Err(ProcedureError::Model(message));
+    }
+    procedure::analyze(&builder.procedure)
+}
+
 /// Map a result-bit span to the module regions which structurally supply it.
 /// `None` requests the caller's conservative, all-operands fallback.
 pub(crate) fn map_expression_span(

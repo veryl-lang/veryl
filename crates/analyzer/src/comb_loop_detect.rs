@@ -380,11 +380,36 @@ fn build_module_graph(
         | Declaration::Null => None,
     };
     #[cfg(not(target_family = "wasm"))]
-    let procedure_summaries = module
+    let mut procedure_summaries = module
         .declarations
         .par_iter()
         .filter_map(analyze_declaration)
         .collect::<Vec<_>>();
+    #[cfg(target_family = "wasm")]
+    let mut procedure_summaries = module
+        .declarations
+        .iter()
+        .filter_map(analyze_declaration)
+        .collect::<Vec<_>>();
+
+    let instance_inputs = walk_insts(module)
+        .flat_map(|inst| inst.inputs.iter().map(|input| &input.expr))
+        .collect::<Vec<_>>();
+    #[cfg(not(target_family = "wasm"))]
+    procedure_summaries.extend(
+        instance_inputs
+            .par_iter()
+            .map(|expression| {
+                crate::comb_memory_ssa::analyze_observer_expression(module, expression)
+            })
+            .collect::<Vec<_>>(),
+    );
+    #[cfg(target_family = "wasm")]
+    procedure_summaries.extend(
+        instance_inputs.iter().map(|expression| {
+            crate::comb_memory_ssa::analyze_observer_expression(module, expression)
+        }),
+    );
 
     let mut partition_regions = procedure_summaries
         .iter()
@@ -435,12 +460,6 @@ fn build_module_graph(
             | Declaration::Null => {}
         }
     }
-    #[cfg(target_family = "wasm")]
-    let procedure_summaries = module
-        .declarations
-        .iter()
-        .filter_map(analyze_declaration)
-        .collect::<Vec<_>>();
     for result in &procedure_summaries {
         match result {
             Ok(summary) => {
