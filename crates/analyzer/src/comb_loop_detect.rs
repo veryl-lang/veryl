@@ -110,7 +110,7 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
     let mut incomplete = Vec::new();
     let mut summaries: HashMap<StrId, ModuleCombSummary> = HashMap::default();
 
-    let (order, recursive_modules) = topo_order_modules(ir);
+    let (order, recursion_affected_modules) = topo_order_modules(ir);
 
     for &idx in &order {
         if let Component::Module(module) = &ir.components[idx] {
@@ -123,7 +123,7 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
                 continue;
             }
             let (graph, mut reasons, bit_part) = build_module_graph(module, &summaries);
-            if recursive_modules {
+            if recursion_affected_modules.contains(&idx) {
                 reasons.insert(IncompleteReason::RecursiveCall);
             }
             check_graph(module, &graph, &mut errors);
@@ -141,9 +141,10 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
     CombAnalysisResult { errors, incomplete }
 }
 
-/// Children before parents. Falls back to input order on cycle
-/// (`infinite_recursion` is reported separately).
-fn topo_order_modules(ir: &Ir) -> (Vec<usize>, bool) {
+/// Children before parents. Modules in, or transitively depending on, an
+/// instantiation cycle are appended in input order because no bottom-up order
+/// exists for them (`infinite_recursion` is reported separately).
+fn topo_order_modules(ir: &Ir) -> (Vec<usize>, HashSet<usize>) {
     let mut name_to_idx: HashMap<StrId, usize> = HashMap::default();
     for (i, c) in ir.components.iter().enumerate() {
         if let Component::Module(m) = c {
@@ -160,7 +161,6 @@ fn topo_order_modules(ir: &Ir) -> (Vec<usize>, bool) {
             for inst in walk_insts(m) {
                 if let Component::Module(child) = inst.component.as_ref()
                     && let Some(&child_idx) = name_to_idx.get(&child.name)
-                    && child_idx != i
                 {
                     deps[i].insert(child_idx);
                     rev_deps[child_idx].insert(i);
@@ -169,10 +169,24 @@ fn topo_order_modules(ir: &Ir) -> (Vec<usize>, bool) {
         }
     }
 
-    let mut indeg: Vec<usize> = deps.iter().map(|s| s.len()).collect();
+    let is_module = ir
+        .components
+        .iter()
+        .map(|component| matches!(component, Component::Module(_)))
+        .collect::<Vec<_>>();
+    order_from_dependencies(&is_module, &deps, &rev_deps)
+}
+
+fn order_from_dependencies(
+    is_module: &[bool],
+    deps: &[HashSet<usize>],
+    rev_deps: &[HashSet<usize>],
+) -> (Vec<usize>, HashSet<usize>) {
+    let n = is_module.len();
+    let mut indeg: Vec<usize> = deps.iter().map(HashSet::len).collect();
     let mut q: VecDeque<usize> = VecDeque::new();
     for (i, _) in indeg.iter().enumerate().take(n) {
-        if matches!(ir.components.get(i), Some(Component::Module(_))) && indeg[i] == 0 {
+        if is_module[i] && indeg[i] == 0 {
             q.push_back(i);
         }
     }
@@ -186,22 +200,14 @@ fn topo_order_modules(ir: &Ir) -> (Vec<usize>, bool) {
             }
         }
     }
-    if order.len()
-        != ir
-            .components
-            .iter()
-            .filter(|c| matches!(c, Component::Module(_)))
-            .count()
-    {
-        // Cycle in module graph -- emit imprecise reports anyway.
-        return (
-            (0..n)
-                .filter(|i| matches!(ir.components.get(*i), Some(Component::Module(_))))
-                .collect(),
-            true,
-        );
-    }
-    (order, false)
+    let ordered = order.iter().copied().collect::<HashSet<_>>();
+    let recursion_affected = (0..n)
+        .filter(|i| is_module[*i] && !ordered.contains(i))
+        .collect::<HashSet<_>>();
+    order.extend(recursion_affected.iter().copied());
+    // HashSet iteration is intentionally not part of summary identity.
+    order[ordered.len()..].sort_unstable();
+    (order, recursion_affected)
 }
 
 fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
@@ -1532,6 +1538,29 @@ fn mask_spans(mask: &BigUint, width: usize) -> Vec<Span> {
 #[cfg(test)]
 mod memory_ssa_tests {
     use super::*;
+
+    #[test]
+    fn recursive_module_does_not_taint_independent_modules() {
+        // Why this case exists: one recursive hierarchy makes only its SCC and
+        // transitive parents incomplete. Marking an independent hierarchy as
+        // RecursiveCall needlessly discards a valid bottom-up summary.
+        fn set(values: &[usize]) -> HashSet<usize> {
+            values.iter().copied().collect()
+        }
+
+        let is_module = [true, true, true, true];
+        let deps = [set(&[0]), HashSet::default(), set(&[0]), set(&[1])];
+        let rev_deps = [
+            set(&[0, 2]),
+            set(&[3]),
+            HashSet::default(),
+            HashSet::default(),
+        ];
+
+        let (order, affected) = order_from_dependencies(&is_module, &deps, &rev_deps);
+        assert_eq!(order, vec![1, 3, 0, 2]);
+        assert_eq!(affected, set(&[0, 2]));
+    }
 
     #[test]
     fn atomic_ranges_split_at_sparse_mask_transitions() {
