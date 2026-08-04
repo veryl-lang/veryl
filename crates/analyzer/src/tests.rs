@@ -10565,7 +10565,6 @@ fn combinational_loop_review_distinguishes_generic_function_specializations() {
 }
 
 #[test]
-#[ignore = "known bug: repeat concatenation loses positional bit correspondence"]
 fn combinational_loop_review_preserves_repeat_concatenation_positions() {
     // Why this case exists: {value repeat 2} is {value, value}, so o[0]
     // depends only on value[0]. Broadcasting value[1] to o[0] invents a loop.

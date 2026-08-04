@@ -850,22 +850,27 @@ impl Builder {
                 // most to least significant. Walk in reverse so `low` stays
                 // in the same LSB-based coordinate system as Region::Span.
                 for (part, repeat) in parts.iter().rev() {
-                    if repeat.is_some() {
-                        return None;
-                    }
                     let width = part.comptime().r#type.total_width()?;
-                    let part_span = Span {
-                        start: low,
-                        length: width,
+                    let repeat = if let Some(repeat) = repeat {
+                        repeat.clone().eval_value(&mut self.context)?.to_usize()?
+                    } else {
+                        1
                     };
-                    if let Some(overlap) = requested.intersection(part_span) {
-                        let local = Span {
-                            start: overlap.start.checked_sub(low)?,
-                            length: overlap.length,
+                    for copy in 0..repeat {
+                        let copy_start = low.checked_add(copy.checked_mul(width)?)?;
+                        let part_span = Span {
+                            start: copy_start,
+                            length: width,
                         };
-                        mapped.extend(self.map_expression_span_to_actual(part, local)?);
+                        if let Some(overlap) = requested.intersection(part_span) {
+                            let local = Span {
+                                start: overlap.start.checked_sub(copy_start)?,
+                                length: overlap.length,
+                            };
+                            mapped.extend(self.map_expression_span_to_actual(part, local)?);
+                        }
                     }
-                    low = low.checked_add(width)?;
+                    low = low.checked_add(width.checked_mul(repeat)?)?;
                 }
                 Some(mapped)
             }
@@ -1294,22 +1299,40 @@ impl Builder {
             Expression::Concatenation(parts, _) => {
                 let mut low = destination.end()?;
                 for (part, repeat) in parts {
-                    if repeat.is_some() {
-                        return None;
-                    }
                     let width = part.comptime().r#type.total_width()?;
-                    low = low.checked_sub(width)?;
+                    let repeat = if let Some(repeat) = repeat {
+                        repeat.clone().eval_value(&mut self.context)?.to_usize()?
+                    } else {
+                        1
+                    };
+                    let group_width = width.checked_mul(repeat)?;
+                    low = low.checked_sub(group_width)?;
+                    let mut part_dependencies = Vec::new();
                     self.collect_aligned_expression_dependencies(
                         block,
                         part,
                         Span {
-                            start: low,
+                            start: 0,
                             length: width,
                         },
                         dependencies,
                         dependency_cursor,
-                        aligned,
+                        &mut part_dependencies,
                     )?;
+                    for copy in 0..repeat {
+                        let copy_start = low.checked_add(copy.checked_mul(width)?)?;
+                        aligned.extend(part_dependencies.iter().map(|dependency| {
+                            AlignedDependency {
+                                read: dependency.read,
+                                kind: dependency.kind,
+                                source: dependency.source,
+                                destination: Span {
+                                    start: copy_start + dependency.destination.start,
+                                    length: dependency.destination.length,
+                                },
+                            }
+                        }));
+                    }
                 }
                 (low == destination.start).then_some(())
             }
