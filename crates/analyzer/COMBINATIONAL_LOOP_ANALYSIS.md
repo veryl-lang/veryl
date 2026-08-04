@@ -174,11 +174,78 @@ This latitude applies independently to expressions, selectors, aggregates,
 functions, and module summaries. It does not make the required causal semantics
 above optional.
 
+## Default portability profile
+
+The acceptance bounds permit implementations with very different usefulness.
+They are therefore not, by themselves, the policy of the default Veryl
+analyzer. The default analyzer uses a narrower **portability profile** chosen to
+avoid both excessive rejection and dependence on optimizations which downstream
+tools may not reproduce.
+
+This profile is an engineering interoperability contract, not a consequence of
+the SystemVerilog LRM. Its contents are based on the representations accepted by
+the downstream synthesis ecosystem supported by Veryl and may be revised as
+that ecosystem changes.
+
+### Minimum precision
+
+The default profile shall preserve statically established placement through:
+
+- direct copies and static packed or unpacked selections;
+- struct fields, array elements, concatenations, aggregate constructors,
+  literals, and statically repeated values;
+- truncation, zero extension, sign extension, and width or sign casts whose
+  result placement is statically determined;
+- pointwise unary and bitwise operations, conditional result placement, and
+  constant shifts, including vacated and sign-filled positions; and
+- function arguments, function results and outputs, and known module port
+  mappings when the corresponding placement crosses those boundaries.
+
+The required placement composes through multiple such operations. An
+implementation which collapses all of these cases to whole-object dependency
+does not implement the default profile, even if it remains within the wider
+acceptance bounds.
+
+Operators and mappings not covered by the profile may use whole dependency.
+For example, the default profile does not require bit-prefix modeling for
+addition or subtraction, or value-range modeling for a dynamic selector.
+
+### Portability ceiling
+
+The default analyzer may use information beyond the minimum profile without
+requiring that every analyzer start from the same unoptimized representation.
+However, a refinement beyond the profile shall be the sole reason for accepting
+a program only when at least one of the following is true:
+
+- the refinement has been added to the portability profile based on downstream
+  interoperability results; or
+- the transformation which removes the dependency is materialized in the
+  representation emitted to downstream tools.
+
+For example, an optimizer may prove that correlated operands produce a
+constant. The default analyzer may rely on that fact for acceptance when the
+emitted design contains the resulting constant or an equivalent form without
+that dependency. It shall not rely on the proof while emitting the original
+expression and requiring every downstream tool to rediscover it.
+
+The same rule applies to value ranges, relationships between selectors,
+algebraic cancellation, and operator-specific precision beyond the profile.
+These facts may always be used for performance, diagnostics, or to construct the
+emitted representation; the restriction concerns using an unmaterialized fact
+as the final reason to suppress a hard error.
+
+Tool-specific or experimental analysis modes may choose a different point
+within the general acceptance bounds, but shall not silently replace the
+default portability profile. Changes to the default profile which can turn a
+previously accepted design into an error are compatibility changes, even when
+both behaviors fall within the wider language bounds.
+
 ## Permitted precision
 
-An implementation may use any fact which is valid for the representation it
-analyzes. It may analyze optimized or unoptimized input. It may, but need not,
-use:
+Within the wider acceptance bounds, an implementation may use any fact which is
+valid for the representation it analyzes. It may analyze optimized or
+unoptimized input. The default analyzer additionally observes the portability
+profile above. An implementation may, but need not, use:
 
 - packed bit positions and unpacked element positions;
 - constant values, unreachable control-flow paths, and short-circuit facts;
