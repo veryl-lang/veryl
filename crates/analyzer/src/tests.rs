@@ -22133,7 +22133,6 @@ fn combinational_loop_review_preserves_context_width_extension_positions() {
 }
 
 #[test]
-#[ignore = "captured third-review regression: dynamic selectors discard bounded values"]
 fn combinational_loop_review_bounds_dynamic_selector_values() {
     // Why these cases exist: a two-state one-bit selector has exactly the
     // values {0,1}. Adding two therefore reaches only elements {2,3}; element
