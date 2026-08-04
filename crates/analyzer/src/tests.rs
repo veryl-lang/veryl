@@ -10602,7 +10602,6 @@ fn combinational_loop_review_preserves_repeat_concatenation_positions() {
 }
 
 #[test]
-#[ignore = "known bug: instance actual mapping ignores constant shift positions"]
 fn combinational_loop_review_preserves_instance_shift_positions() {
     // Why this case exists: (value << 1)[0] is an inserted constant zero.
     // Falling back to every operand creates a fictitious value[1] path.
@@ -10663,7 +10662,6 @@ fn combinational_loop_review_preserves_instance_shift_positions() {
 }
 
 #[test]
-#[ignore = "known bug: instance actual mapping ignores repeat-concat positions"]
 fn combinational_loop_review_preserves_instance_repeat_positions() {
     // Why this case exists: {high repeat 2, low}[2] is high. Treating every
     // operand as a source invents a low -> child_o -> low feedback path.

@@ -956,50 +956,144 @@ fn add_inst_feedthrough_edges(
         if expression_has_hierarchical_reference(&input.expr) {
             incomplete.insert(IncompleteReason::HierarchicalReference);
         }
+        if dependency.aligned
+            && let (
+                Region::Exact {
+                    span: child_input_span,
+                    ..
+                },
+                Region::Exact {
+                    span: child_output_span,
+                    ..
+                },
+            ) = (dependency.input, dependency.output)
+            && child_input_span.length == child_output_span.length
+            && let Some(parent_inputs) = crate::comb_memory_ssa::map_expression_span_positioned(
+                ctx,
+                &input.expr,
+                child_input_span,
+            )
+            && let Some(parent_outputs) =
+                map_destinations_span_positioned(&output.dst, child_output_span, parent_vars, ctx)
+        {
+            for (source, destination) in aligned_instance_region_pairs(
+                &parent_inputs,
+                &parent_outputs,
+                child_input_span,
+                child_output_span,
+                parent_vars,
+                bit_part,
+            ) {
+                let source = ensure_node(graph, node_map, source);
+                let destination = ensure_node(graph, node_map, destination);
+                graph.add_edge(source, destination, true);
+            }
+            continue;
+        }
         let parent_input_regions =
             map_child_input_region(dependency.input, child, &input.expr, parent_vars, ctx);
         let parent_output_regions =
             map_child_output_region(dependency.output, child, &output.dst, parent_vars, ctx);
-        let preserve_alignment = dependency.aligned
-            && parent_input_regions.len() == 1
-            && parent_output_regions.len() == 1
-            && exact_regions_have_equal_length(parent_input_regions[0], parent_output_regions[0]);
-        let pairs = if preserve_alignment {
-            aligned_region_node_pairs(
-                parent_input_regions[0],
-                parent_output_regions[0],
-                parent_vars,
-                bit_part,
-            )
-        } else {
-            parent_input_regions
-                .iter()
-                .copied()
-                .flat_map(|input_region| {
-                    let destinations = parent_output_regions
-                        .iter()
-                        .copied()
-                        .flat_map(|output_region| {
-                            region_node_keys(output_region, parent_vars, bit_part)
-                        })
-                        .collect::<Vec<_>>();
-                    region_node_keys(input_region, parent_vars, bit_part)
-                        .into_iter()
-                        .flat_map(move |source| {
-                            destinations
-                                .clone()
-                                .into_iter()
-                                .map(move |destination| (source, destination))
-                        })
-                })
-                .collect()
-        };
+        let pairs = parent_input_regions
+            .iter()
+            .copied()
+            .flat_map(|input_region| {
+                let destinations = parent_output_regions
+                    .iter()
+                    .copied()
+                    .flat_map(|output_region| {
+                        region_node_keys(output_region, parent_vars, bit_part)
+                    })
+                    .collect::<Vec<_>>();
+                region_node_keys(input_region, parent_vars, bit_part)
+                    .into_iter()
+                    .flat_map(move |source| {
+                        destinations
+                            .clone()
+                            .into_iter()
+                            .map(move |destination| (source, destination))
+                    })
+            })
+            .collect::<Vec<_>>();
         for (source, destination) in pairs {
             let source = ensure_node(graph, node_map, source);
             let destination = ensure_node(graph, node_map, destination);
-            graph.add_edge(source, destination, preserve_alignment);
+            graph.add_edge(source, destination, false);
         }
     }
+}
+
+fn aligned_instance_region_pairs(
+    inputs: &[crate::comb_memory_ssa::PositionedRegion],
+    outputs: &[crate::comb_memory_ssa::PositionedRegion],
+    child_input: Span,
+    child_output: Span,
+    parent_vars: &HashMap<VarId, Variable>,
+    bit_part: &BitPartition,
+) -> Vec<(NodeKey, NodeKey)> {
+    let mut pairs = BTreeSet::new();
+    for input in inputs {
+        let Some(input_start) = input.expression.start.checked_sub(child_input.start) else {
+            continue;
+        };
+        let input_relative = Span {
+            start: input_start,
+            length: input.expression.length,
+        };
+        let Region::Exact {
+            object: input_object,
+            span: input_region,
+        } = input.region
+        else {
+            continue;
+        };
+        for output in outputs {
+            let Some(output_start) = output.expression.start.checked_sub(child_output.start) else {
+                continue;
+            };
+            let output_relative = Span {
+                start: output_start,
+                length: output.expression.length,
+            };
+            let Some(overlap) = input_relative.intersection(output_relative) else {
+                continue;
+            };
+            let Region::Exact {
+                object: output_object,
+                span: output_region,
+            } = output.region
+            else {
+                continue;
+            };
+            let Some(input_offset) = overlap.start.checked_sub(input_relative.start) else {
+                continue;
+            };
+            let Some(output_offset) = overlap.start.checked_sub(output_relative.start) else {
+                continue;
+            };
+            let input_region = Region::Exact {
+                object: input_object,
+                span: Span {
+                    start: input_region.start + input_offset,
+                    length: overlap.length,
+                },
+            };
+            let output_region = Region::Exact {
+                object: output_object,
+                span: Span {
+                    start: output_region.start + output_offset,
+                    length: overlap.length,
+                },
+            };
+            pairs.extend(aligned_region_node_pairs(
+                input_region,
+                output_region,
+                parent_vars,
+                bit_part,
+            ));
+        }
+    }
+    pairs.into_iter().collect()
 }
 
 fn exact_regions_have_equal_length(left: Region<VarId>, right: Region<VarId>) -> bool {
@@ -1275,6 +1369,46 @@ fn map_destinations_span_to_regions(
                     start: span.start.checked_add(overlap.start.checked_sub(low)?)?,
                     length: overlap.length,
                 },
+            });
+        }
+        low = low.checked_add(span.length)?;
+    }
+    (requested.end()? <= low).then_some(mapped)
+}
+
+fn map_destinations_span_positioned(
+    destinations: &[AssignDestination],
+    requested: Span,
+    variables: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Option<Vec<crate::comb_memory_ssa::PositionedRegion>> {
+    let mut low = 0usize;
+    let mut mapped = Vec::new();
+    for destination in destinations.iter().rev() {
+        let Region::Exact { object, span } = exact_variable_region(
+            destination.id,
+            &destination.index,
+            &destination.select,
+            variables,
+            ctx,
+        )?
+        else {
+            return None;
+        };
+        let destination_span = Span {
+            start: low,
+            length: span.length,
+        };
+        if let Some(overlap) = requested.intersection(destination_span) {
+            mapped.push(crate::comb_memory_ssa::PositionedRegion {
+                region: Region::Exact {
+                    object,
+                    span: Span {
+                        start: span.start.checked_add(overlap.start.checked_sub(low)?)?,
+                        length: overlap.length,
+                    },
+                },
+                expression: overlap,
             });
         }
         low = low.checked_add(span.length)?;
