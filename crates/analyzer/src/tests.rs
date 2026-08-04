@@ -13510,6 +13510,90 @@ fn combinational_loop_default_before_runtime_loop_kills_retention() {
 }
 
 #[test]
+fn combinational_loop_full_write_after_runtime_loop_kills_retention() {
+    // Why this case exists: incomplete-assignment coverage is a property of
+    // the procedure exit, not of an intermediate statement. A later full
+    // write kills the zero-trip entry value left by the runtime loop.
+    let errors = analyze(
+        r#"
+        module Top (
+            n: input  logic<32>,
+            o: output logic,
+        ) {
+            var value: logic;
+            always_comb {
+                for index in 0..n {
+                    value = index[0];
+                }
+                value = 0;
+                o = value;
+            }
+        }
+        "#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a later full write kills runtime-loop retention: {errors:#?}"
+    );
+}
+
+#[test]
+fn combinational_loop_nonempty_runtime_form_loop_has_no_zero_trip_path() {
+    // Why this case exists: `break` keeps a constant loop in runtime-form IR,
+    // but 0..1 still enters its body exactly once. Runtime representation does
+    // not by itself imply that a zero-trip path is reachable.
+    let errors = analyze(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var value: logic;
+            always_comb {
+                for index in 0..1 {
+                    value = index[0];
+                    break;
+                }
+                o = value;
+            }
+        }
+        "#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a statically nonempty loop assigns before breaking: {errors:#?}"
+    );
+}
+
+#[test]
+fn combinational_loop_function_output_weak_write_retains_coverage() {
+    // Why this case exists: a function output argument is copied back to its
+    // caller, but a dynamic write inside the function still leaves unselected
+    // packed bits without a definition. Function summarization must preserve
+    // that exit-coverage fact without inventing a comb dependency.
+    assert_incomplete_assignment_without_comb_loop(
+        "a function output weak write remains incomplete at the caller",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            o    : output logic,
+        ) {
+            function write_selected (
+                index: input  logic<2>,
+                value: output logic<4>,
+            ) {
+                value[index] = 1;
+            }
+            var value: logic<4>;
+            always_comb {
+                write_selected(index, value);
+                o = value[0];
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
 fn comb_loop_ifstmt_feed_forward_array() {
     // False positive: an always_comb for-loop over cross-coupled arrays that
     // reads index i and writes i+1 (a feed-forward / acyclic CORDIC-style
