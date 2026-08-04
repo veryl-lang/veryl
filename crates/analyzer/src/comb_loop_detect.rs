@@ -20,6 +20,7 @@ use crate::ir::{
 };
 use crate::symbol::{Affiliation, Direction};
 use crate::value::ValueBigUint;
+use daggy::petgraph::Direction::Incoming;
 use daggy::petgraph::Graph;
 use daggy::petgraph::algo::tarjan_scc;
 use daggy::petgraph::graph::NodeIndex;
@@ -40,6 +41,144 @@ type IdxKey = (VarId, usize);
 /// `BitPartition`, so bit-disjoint reads/writes form disjoint nodes.
 type NodeKey = (VarId, usize, usize);
 
+#[derive(Clone, Copy)]
+enum SummaryDirection {
+    Forward,
+    Reverse,
+}
+
+struct SummaryWalk {
+    direction: SummaryDirection,
+    endpoints: Vec<(NodeIndex, NodeKey)>,
+    next_endpoint: usize,
+    current_key: Option<NodeKey>,
+    visited: HashSet<(NodeIndex, bool)>,
+    stack: Vec<(NodeIndex, bool)>,
+    dependencies: BTreeMap<(Region<VarId>, Region<VarId>), bool>,
+}
+
+impl SummaryWalk {
+    fn new(direction: SummaryDirection, endpoints: Vec<(NodeIndex, NodeKey)>) -> Self {
+        Self {
+            direction,
+            endpoints,
+            next_endpoint: 0,
+            current_key: None,
+            visited: HashSet::default(),
+            stack: Vec::new(),
+            dependencies: BTreeMap::new(),
+        }
+    }
+
+    /// Advance a bounded amount of graph work. Running forward and reverse
+    /// walks in equal quanta lets the cheaper direction finish without an
+    /// endpoint-count heuristic committing to an adversarially expensive side.
+    fn advance(
+        &mut self,
+        graph: &Graph<NodeKey, bool>,
+        live_nodes: &[bool],
+        module: &Module,
+        bit_part: &BitPartition,
+        input_ids: &HashSet<VarId>,
+        output_ids: &HashSet<VarId>,
+        budget: usize,
+    ) -> bool {
+        let mut work = 0usize;
+        while work < budget {
+            if self.stack.is_empty() {
+                let Some(&(endpoint, key)) = self.endpoints.get(self.next_endpoint) else {
+                    return true;
+                };
+                self.next_endpoint += 1;
+                self.current_key = Some(key);
+                self.visited.clear();
+                self.stack.push((endpoint, true));
+            }
+            let Some((node, path_aligned)) = self.stack.pop() else {
+                continue;
+            };
+            work += 1;
+            if !self.visited.insert((node, path_aligned)) {
+                continue;
+            }
+            let endpoint_key = self.current_key.expect("active summary endpoint");
+            let node_key = graph[node];
+            let pair = match self.direction {
+                SummaryDirection::Forward if output_ids.contains(&node_key.0) => {
+                    Some((endpoint_key, node_key))
+                }
+                SummaryDirection::Reverse if input_ids.contains(&node_key.0) => {
+                    Some((node_key, endpoint_key))
+                }
+                SummaryDirection::Forward | SummaryDirection::Reverse => None,
+            };
+            if let Some((input_key, output_key)) = pair {
+                for input in node_key_regions(input_key, module, bit_part) {
+                    for output in node_key_regions(output_key, module, bit_part) {
+                        self.dependencies
+                            .entry((input, output))
+                            .and_modify(|aligned| *aligned &= path_aligned)
+                            .or_insert(path_aligned);
+                    }
+                }
+            }
+            match self.direction {
+                SummaryDirection::Forward => {
+                    self.stack.extend(
+                        graph
+                            .edges(node)
+                            .filter(|edge| live_nodes[edge.target().index()])
+                            .map(|edge| (edge.target(), path_aligned && *edge.weight())),
+                    );
+                }
+                SummaryDirection::Reverse => {
+                    self.stack.extend(
+                        graph
+                            .edges_directed(node, Incoming)
+                            .filter(|edge| live_nodes[edge.source().index()])
+                            .map(|edge| (edge.source(), path_aligned && *edge.weight())),
+                    );
+                }
+            }
+        }
+        self.stack.is_empty() && self.next_endpoint == self.endpoints.len()
+    }
+}
+
+fn live_summary_nodes(
+    graph: &Graph<NodeKey, bool>,
+    inputs: &[(NodeIndex, NodeKey)],
+    outputs: &[(NodeIndex, NodeKey)],
+) -> Vec<bool> {
+    let mut reachable_from_input = vec![false; graph.node_count()];
+    let mut stack = inputs.iter().map(|&(node, _)| node).collect::<Vec<_>>();
+    while let Some(node) = stack.pop() {
+        if std::mem::replace(&mut reachable_from_input[node.index()], true) {
+            continue;
+        }
+        stack.extend(graph.edges(node).map(|edge| edge.target()));
+    }
+
+    let mut reaches_output = vec![false; graph.node_count()];
+    stack.extend(outputs.iter().map(|&(node, _)| node));
+    while let Some(node) = stack.pop() {
+        if std::mem::replace(&mut reaches_output[node.index()], true) {
+            continue;
+        }
+        stack.extend(
+            graph
+                .edges_directed(node, Incoming)
+                .map(|edge| edge.source()),
+        );
+    }
+
+    reachable_from_input
+        .into_iter()
+        .zip(reaches_output)
+        .map(|(from_input, to_output)| from_input && to_output)
+        .collect()
+}
+
 /// Sparse alias node for a dynamically selected region of one object.  This
 /// deliberately occupies no real array element or bit-partition slot.
 const UNKNOWN_REGION_INDEX: usize = usize::MAX;
@@ -48,7 +187,7 @@ const UNKNOWN_REGION_INDEX: usize = usize::MAX;
 /// iff they appear in the same set of per-decl masks.
 #[derive(Default)]
 struct BitPartition {
-    ranges: HashMap<IdxKey, Vec<BigUint>>,
+    ranges: HashMap<VarId, BTreeMap<usize, Vec<BigUint>>>,
     /// Stable identities for unresolved regions. They are graph nodes, not
     /// array elements, so their count depends on accesses rather than width.
     wildcards: Vec<Region<VarId>>,
@@ -57,7 +196,11 @@ struct BitPartition {
 impl BitPartition {
     /// Empty slice means the variable's bits are untouched.
     fn ranges_of(&self, key: IdxKey) -> &[BigUint] {
-        self.ranges.get(&key).map(|v| v.as_slice()).unwrap_or(&[])
+        self.ranges
+            .get(&key.0)
+            .and_then(|elements| elements.get(&key.1))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     fn wildcard_keys(&self, region: Region<VarId>) -> Vec<NodeKey> {
@@ -346,7 +489,7 @@ fn build_bit_partition(module: &Module, memory_ssa_regions: &[Region<VarId>]) ->
         collect_region_mask(region, module, &mut masks);
     }
 
-    let mut ranges: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
+    let mut ranges: HashMap<VarId, BTreeMap<usize, Vec<BigUint>>> = HashMap::default();
     for (key, ms) in masks {
         let width = module
             .variables
@@ -355,7 +498,7 @@ fn build_bit_partition(module: &Module, memory_ssa_regions: &[Region<VarId>]) ->
             .unwrap_or(1);
         let parts = atomic_ranges(&ms, width);
         if !parts.is_empty() {
-            ranges.insert(key, parts);
+            ranges.entry(key.0).or_default().insert(key.1, parts);
         }
     }
 
@@ -574,7 +717,72 @@ fn propagate_aligned_regions(
     regions: Vec<Region<VarId>>,
     summaries: &[Result<ProcedureSummary<VarId>, veryl_causal::procedure::ProcedureError>],
 ) -> Vec<Region<VarId>> {
-    let transfers = summaries
+    #[derive(Clone, Copy)]
+    struct Transfer {
+        from: Span,
+        to_object: VarId,
+        to: Span,
+    }
+
+    struct TransferIndex {
+        transfers: Vec<Transfer>,
+        leaf_base: usize,
+        max_end: Vec<usize>,
+    }
+
+    impl TransferIndex {
+        fn new(mut transfers: Vec<Transfer>) -> Self {
+            transfers.sort_unstable_by_key(|transfer| transfer.from.start);
+            let leaf_base = transfers.len().next_power_of_two().max(1);
+            let mut max_end = vec![0; leaf_base * 2];
+            for (index, transfer) in transfers.iter().enumerate() {
+                max_end[leaf_base + index] = transfer.from.end().unwrap_or(usize::MAX);
+            }
+            for index in (1..leaf_base).rev() {
+                max_end[index] = max_end[index * 2].max(max_end[index * 2 + 1]);
+            }
+            Self {
+                transfers,
+                leaf_base,
+                max_end,
+            }
+        }
+
+        fn for_each_overlap(&self, span: Span, mut visit: impl FnMut(Transfer)) {
+            let Some(end) = span.end() else {
+                return;
+            };
+            let high = self
+                .transfers
+                .partition_point(|transfer| transfer.from.start < end);
+            self.visit_overlaps(1, 0, self.leaf_base, high, span.start, &mut visit);
+        }
+
+        fn visit_overlaps(
+            &self,
+            node: usize,
+            low: usize,
+            high: usize,
+            query_high: usize,
+            query_low: usize,
+            visit: &mut impl FnMut(Transfer),
+        ) {
+            if low >= query_high || self.max_end[node] <= query_low {
+                return;
+            }
+            if high - low == 1 {
+                if let Some(&transfer) = self.transfers.get(low) {
+                    visit(transfer);
+                }
+                return;
+            }
+            let middle = low + (high - low) / 2;
+            self.visit_overlaps(node * 2, low, middle, query_high, query_low, visit);
+            self.visit_overlaps(node * 2 + 1, middle, high, query_high, query_low, visit);
+        }
+    }
+
+    let raw_transfers = summaries
         .iter()
         .filter_map(|summary| summary.as_ref().ok())
         .flat_map(|summary| &summary.dependencies)
@@ -594,6 +802,20 @@ fn propagate_aligned_regions(
             _ => None,
         })
         .collect::<Vec<_>>();
+    let mut transfers = HashMap::<VarId, Vec<Transfer>>::default();
+    for (left, right) in raw_transfers {
+        for (from, to) in [(left, right), (right, left)] {
+            transfers.entry(from.0).or_default().push(Transfer {
+                from: from.1,
+                to_object: to.0,
+                to: to.1,
+            });
+        }
+    }
+    let transfers = transfers
+        .into_iter()
+        .map(|(object, transfers)| (object, TransferIndex::new(transfers)))
+        .collect::<HashMap<_, _>>();
     let mut known = regions.into_iter().collect::<BTreeSet<_>>();
     let mut pending = known
         .iter()
@@ -603,32 +825,30 @@ fn propagate_aligned_regions(
         let Region::Exact { object, span } = region else {
             continue;
         };
-        for &(left, right) in &transfers {
-            for (from, to) in [(left, right), (right, left)] {
-                if object != from.0 {
-                    continue;
-                }
-                let Some(overlap) = span.intersection(from.1) else {
-                    continue;
-                };
-                let Some(offset) = overlap.start.checked_sub(from.1.start) else {
-                    continue;
-                };
-                let Some(start) = to.1.start.checked_add(offset) else {
-                    continue;
-                };
-                let mapped = Region::Exact {
-                    object: to.0,
-                    span: Span {
-                        start,
-                        length: overlap.length,
-                    },
-                };
-                if known.insert(mapped) {
-                    pending.push_back(mapped);
-                }
+        let Some(object_transfers) = transfers.get(&object) else {
+            continue;
+        };
+        object_transfers.for_each_overlap(span, |transfer| {
+            let Some(overlap) = span.intersection(transfer.from) else {
+                return;
+            };
+            let Some(offset) = overlap.start.checked_sub(transfer.from.start) else {
+                return;
+            };
+            let Some(start) = transfer.to.start.checked_add(offset) else {
+                return;
+            };
+            let mapped = Region::Exact {
+                object: transfer.to_object,
+                span: Span {
+                    start,
+                    length: overlap.length,
+                },
+            };
+            if known.insert(mapped) {
+                pending.push_back(mapped);
             }
-        }
+        });
     }
     known.into_iter().collect()
 }
@@ -817,14 +1037,25 @@ fn sparse_exact_node_keys(
     let Some(width) = variables.get(&object).and_then(Variable::total_width) else {
         return Vec::new();
     };
+    if width == 0 {
+        return Vec::new();
+    }
     if span.end().is_none() {
         return Vec::new();
     }
+    let Some(elements) = bit_part.ranges.get(&object) else {
+        return Vec::new();
+    };
+    let Some(end) = span.end() else {
+        return Vec::new();
+    };
+    if span.length == 0 {
+        return Vec::new();
+    }
+    let first_element = span.start / width;
+    let last_element = (end - 1) / width;
     let mut keys = Vec::new();
-    for (&(candidate, element), ranges) in &bit_part.ranges {
-        if candidate != object {
-            continue;
-        }
+    for (&element, ranges) in elements.range(first_element..=last_element) {
         let Some(element_start) = element.checked_mul(width) else {
             continue;
         };
@@ -866,10 +1097,11 @@ fn region_node_keys(
         }
         Region::UnknownObject(object) => bit_part
             .ranges
-            .iter()
-            .filter(|((candidate, _), _)| *candidate == object)
-            .flat_map(|(&(candidate, element), ranges)| {
-                (0..ranges.len()).map(move |range| (candidate, element, range))
+            .get(&object)
+            .into_iter()
+            .flat_map(|elements| elements.iter())
+            .flat_map(|(&element, ranges)| {
+                (0..ranges.len()).map(move |range| (object, element, range))
             })
             .collect(),
         Region::UnknownAll => return Vec::new(),
@@ -1804,35 +2036,127 @@ fn compute_module_summary(
         }
     }
 
-    let mut dependencies = BTreeMap::new();
-    let mut visited: HashSet<(NodeIndex, bool)> = HashSet::default();
-    let mut stack: Vec<(NodeIndex, bool)> = Vec::new();
-    for ni in graph.node_indices() {
-        let key = graph[ni];
-        if !input_ids.contains(&key.0) {
-            continue;
+    let input_nodes = graph
+        .node_indices()
+        .filter_map(|node| {
+            let key = graph[node];
+            input_ids.contains(&key.0).then_some((node, key))
+        })
+        .collect::<Vec<_>>();
+    let output_nodes = graph
+        .node_indices()
+        .filter_map(|node| {
+            let key = graph[node];
+            output_ids.contains(&key.0).then_some((node, key))
+        })
+        .collect::<Vec<_>>();
+    if input_nodes.is_empty() || output_nodes.is_empty() {
+        return ModuleCombSummary::default();
+    }
+    let live_nodes = live_summary_nodes(graph, &input_nodes, &output_nodes);
+    let input_nodes = input_nodes
+        .into_iter()
+        .filter(|(node, _)| live_nodes[node.index()])
+        .collect::<Vec<_>>();
+    let output_nodes = output_nodes
+        .into_iter()
+        .filter(|(node, _)| live_nodes[node.index()])
+        .collect::<Vec<_>>();
+    if input_nodes.is_empty() || output_nodes.is_empty() {
+        return ModuleCombSummary::default();
+    }
+
+    const QUANTUM: usize = 512;
+    let winning_walks = if graph.node_count() < QUANTUM {
+        let (direction, endpoints) = if input_nodes.len() <= output_nodes.len() {
+            (SummaryDirection::Forward, input_nodes)
+        } else {
+            (SummaryDirection::Reverse, output_nodes)
+        };
+        let mut walk = SummaryWalk::new(direction, endpoints);
+        while !walk.advance(
+            graph,
+            &live_nodes,
+            module,
+            bit_part,
+            &input_ids,
+            &output_ids,
+            QUANTUM,
+        ) {}
+        vec![walk]
+    } else {
+        #[cfg(not(target_family = "wasm"))]
+        let lane_count = rayon::current_num_threads();
+        #[cfg(target_family = "wasm")]
+        let lane_count = 1usize;
+        let make_walks = |direction, endpoints: Vec<(NodeIndex, NodeKey)>| {
+            let lanes = lane_count.min(endpoints.len()).max(1);
+            let mut partitions = vec![Vec::new(); lanes];
+            for (index, endpoint) in endpoints.into_iter().enumerate() {
+                partitions[index % lanes].push(endpoint);
+            }
+            partitions
+                .into_iter()
+                .map(|endpoints| SummaryWalk::new(direction, endpoints))
+                .collect::<Vec<_>>()
+        };
+        let mut forward = make_walks(SummaryDirection::Forward, input_nodes);
+        let mut reverse = make_walks(SummaryDirection::Reverse, output_nodes);
+        loop {
+            let advance_side = |walks: &mut [SummaryWalk]| {
+                #[cfg(not(target_family = "wasm"))]
+                let complete = walks
+                    .par_iter_mut()
+                    .map(|walk| {
+                        walk.advance(
+                            graph,
+                            &live_nodes,
+                            module,
+                            bit_part,
+                            &input_ids,
+                            &output_ids,
+                            QUANTUM,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                #[cfg(target_family = "wasm")]
+                let complete = walks
+                    .iter_mut()
+                    .map(|walk| {
+                        walk.advance(
+                            graph,
+                            &live_nodes,
+                            module,
+                            bit_part,
+                            &input_ids,
+                            &output_ids,
+                            QUANTUM,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                complete.into_iter().all(|complete| complete)
+            };
+            #[cfg(not(target_family = "wasm"))]
+            let (forward_complete, reverse_complete) =
+                rayon::join(|| advance_side(&mut forward), || advance_side(&mut reverse));
+            #[cfg(target_family = "wasm")]
+            let (forward_complete, reverse_complete) =
+                (advance_side(&mut forward), advance_side(&mut reverse));
+            if forward_complete {
+                break forward;
+            }
+            if reverse_complete {
+                break reverse;
+            }
         }
-        visited.clear();
-        stack.clear();
-        stack.push((ni, true));
-        while let Some((n, path_aligned)) = stack.pop() {
-            if !visited.insert((n, path_aligned)) {
-                continue;
-            }
-            let nk = graph[n];
-            if output_ids.contains(&nk.0) {
-                for input in node_key_regions(key, module, bit_part) {
-                    for output in node_key_regions(nk, module, bit_part) {
-                        dependencies
-                            .entry((input, output))
-                            .and_modify(|aligned| *aligned &= path_aligned)
-                            .or_insert(path_aligned);
-                    }
-                }
-            }
-            for e in graph.edges(n) {
-                stack.push((e.target(), path_aligned && *e.weight()));
-            }
+    };
+    let mut dependencies = BTreeMap::new();
+    for walk in winning_walks {
+        for (pair, aligned) in walk.dependencies {
+            dependencies
+                .entry(pair)
+                .and_modify(|existing| *existing &= aligned)
+                .or_insert(aligned);
         }
     }
     ModuleCombSummary {
