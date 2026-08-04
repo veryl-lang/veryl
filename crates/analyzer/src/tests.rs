@@ -22339,6 +22339,56 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
         );
     }
 
+    // Why these cases exist: the same named-member projection must survive a
+    // module boundary; otherwise the instance fallback re-taints all members.
+    for (name, constructor, expected) in [
+        (
+            "a structure actual keeps an unrelated member loop-free",
+            "Types::Pair'{a: 0, b: feedback}",
+            false,
+        ),
+        (
+            "a structure actual retains corresponding-member feedback",
+            "Types::Pair'{a: feedback, b: 0}",
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                package Types {{
+                    struct Pair {{
+                        a: logic,
+                        b: logic,
+                    }}
+                }}
+
+                module Pick (
+                    i: input  Types::Pair,
+                    o: output logic,
+                ) {{
+                    assign o = i.a;
+                }}
+
+                module Top (
+                    o: output logic,
+                ) {{
+                    var feedback: logic;
+                    var passed  : logic;
+                    inst u: Pick (
+                        i: {constructor},
+                        o: passed,
+                    );
+                    assign feedback = passed;
+                    assign o = passed;
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+
     // Why these cases exist: IEEE 1800-2023 10.9.1 maps array-pattern
     // expressions element by element. The module reads only element zero, so
     // an actual dependency in element one is disjoint while element-zero
