@@ -134,6 +134,14 @@ through the specialization and actual connections being instantiated. A loop
 inside a known child remains a loop whether or not a parent creates a return
 path through that child.
 
+A module definition may recursively instantiate a different concrete
+specialization of itself. When elaboration produces a finite specialization
+graph, every specialization and connection shall be analyzed normally; repeated
+use of the same source-level module name is not an incomplete boundary. A cycle
+which re-enters the same concrete specialization cannot form a finite
+bottom-up summary and is incomplete unless rejected earlier as nonterminating
+elaboration.
+
 No return dependency is implied merely because a path reaches a module port or
 the top of the design. The external environment shall not be modeled as an
 implicit edge from an output back to an input.
@@ -303,9 +311,9 @@ they shall not create guessed edges outside the whole-dependency boundary.
 
 An analysis is **incomplete** when some relevant dependency cannot be placed
 within the acceptance bounds. Causes include opaque boundaries, `inout`,
-unresolved hierarchy, recursive functions or modules, unevaluated generic
-shapes, unanalyzed loops, timed or event effects, and legal constructs not yet
-represented by the analyzer.
+unresolved hierarchy, unresolved recursive calls or cyclic concrete
+specialization graphs, unevaluated generic shapes, unanalyzed loops, timed or
+event effects, and legal constructs not yet represented by the analyzer.
 
 The acceptance equation above applies to the portion for which analysis is
 complete. Incomplete behavior has these rules:

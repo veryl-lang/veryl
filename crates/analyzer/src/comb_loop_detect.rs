@@ -99,7 +99,7 @@
 //! - SystemVerilog/external components and `inout` ports;
 //! - hierarchical references and instance actual/destination mappings which
 //!   cannot preserve a region;
-//! - recursive functions or module-instantiation cycles;
+//! - recursive functions or cyclic concrete module-specialization graphs;
 //! - runtime-bound loops and constant loops deliberately left above the
 //!   evaluation-size limit;
 //! - timed/event effects, unsupported or malformed analyzer IR, and generic
@@ -472,7 +472,7 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
     let mut summaries: HashMap<usize, ModuleCombSummary> = HashMap::default();
     let mut visiting_specializations = HashSet::default();
 
-    let (order, recursion_affected_modules) = topo_order_modules(ir);
+    let order = module_analysis_order(ir);
 
     for &idx in &order {
         if let Component::Module(module) = &ir.components[idx] {
@@ -493,12 +493,9 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
                 &mut incomplete,
                 collect_coverage,
             );
-            let (graph, mut reasons, _bit_part, module_coverage) =
+            let (graph, reasons, _bit_part, module_coverage) =
                 build_module_graph(module, &summaries, collect_coverage);
             extend_unique_errors(&mut coverage, module_coverage);
-            if recursion_affected_modules.contains(&idx) {
-                reasons.insert(IncompleteReason::RecursiveCall);
-            }
             check_graph(module, &graph, &mut errors);
             if !reasons.is_empty() {
                 incomplete.push(IncompleteCombAnalysis {
@@ -576,10 +573,12 @@ fn ensure_instance_summaries(
     }
 }
 
-/// Children before parents. Modules in, or transitively depending on, an
-/// instantiation cycle are appended in input order because no bottom-up order
-/// exists for them (`infinite_recursion` is reported separately).
-fn topo_order_modules(ir: &Ir) -> (Vec<usize>, HashSet<usize>) {
+/// Put declaration-level children before parents when module names happen to
+/// form a DAG. Name cycles affect scheduling only: recursive generic modules
+/// can elaborate to a finite graph of distinct concrete specializations, and
+/// only [`ensure_instance_summaries`] has the specialization identity required
+/// to classify recursion. Remaining declarations are appended in input order.
+fn module_analysis_order(ir: &Ir) -> Vec<usize> {
     let mut name_to_idx: HashMap<StrId, usize> = HashMap::default();
     for (i, c) in ir.components.iter().enumerate() {
         if let Component::Module(m) = c {
@@ -616,7 +615,7 @@ fn order_from_dependencies(
     is_module: &[bool],
     deps: &[HashSet<usize>],
     rev_deps: &[HashSet<usize>],
-) -> (Vec<usize>, HashSet<usize>) {
+) -> Vec<usize> {
     let n = is_module.len();
     let mut indeg: Vec<usize> = deps.iter().map(HashSet::len).collect();
     let mut q: VecDeque<usize> = VecDeque::new();
@@ -636,13 +635,13 @@ fn order_from_dependencies(
         }
     }
     let ordered = order.iter().copied().collect::<HashSet<_>>();
-    let recursion_affected = (0..n)
+    let remaining = (0..n)
         .filter(|i| is_module[*i] && !ordered.contains(i))
         .collect::<HashSet<_>>();
-    order.extend(recursion_affected.iter().copied());
+    order.extend(remaining.iter().copied());
     // HashSet iteration is intentionally not part of summary identity.
     order[ordered.len()..].sort_unstable();
-    (order, recursion_affected)
+    order
 }
 
 fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
@@ -3314,10 +3313,10 @@ mod memory_ssa_tests {
     use super::*;
 
     #[test]
-    fn recursive_module_does_not_taint_independent_modules() {
-        // Why this case exists: one recursive hierarchy makes only its SCC and
-        // transitive parents incomplete. Marking an independent hierarchy as
-        // RecursiveCall needlessly discards a valid bottom-up summary.
+    fn module_name_cycles_only_affect_analysis_order() {
+        // Why this case exists: a source-level module-name cycle can be a
+        // finite chain of distinct generic specializations. This ordering
+        // helper lacks concrete identity and must not classify recursion.
         fn set(values: &[usize]) -> HashSet<usize> {
             values.iter().copied().collect()
         }
@@ -3331,9 +3330,8 @@ mod memory_ssa_tests {
             HashSet::default(),
         ];
 
-        let (order, affected) = order_from_dependencies(&is_module, &deps, &rev_deps);
+        let order = order_from_dependencies(&is_module, &deps, &rev_deps);
         assert_eq!(order, vec![1, 3, 0, 2]);
-        assert_eq!(affected, set(&[0, 2]));
     }
 
     #[test]

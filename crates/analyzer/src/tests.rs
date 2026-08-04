@@ -13024,6 +13024,70 @@ fn comb_loop_module_boundary_region_mapping() {
 }
 
 #[test]
+fn comb_loop_finite_recursive_module_specializations_are_complete() {
+    // Why this case exists: source-level recursion by module name is not a
+    // cyclic elaboration when a parameter produces a finite chain of distinct
+    // concrete specializations. The chain must retain its feedthrough summary
+    // without acquiring RecursiveCall incompleteness.
+    let recursive_chain = r#"
+        module Recursive #(
+            param DEPTH: u32 = 3,
+        )(
+            i: input  logic,
+            o: output logic,
+        ) {
+            if DEPTH == 0 :base {
+                assign o = i;
+            } else {
+                inst next: Recursive #(
+                    DEPTH: DEPTH - 1
+                )(
+                    i,
+                    o,
+                );
+            }
+        }
+    "#;
+    let acyclic = analyze_comb_detailed(recursive_chain);
+    assert!(acyclic.errors.is_empty(), "{acyclic:#?}");
+    assert!(
+        acyclic.incomplete.iter().all(|module| !module
+            .reasons
+            .contains(&veryl_causal::graph::IncompleteReason::RecursiveCall)),
+        "finite concrete specialization recursion must be complete: {acyclic:#?}"
+    );
+
+    let cyclic = analyze_comb_detailed(&format!(
+        r#"
+        {recursive_chain}
+        module Top (
+            o: output logic,
+        ) {{
+            var feedback: logic;
+            inst chain: Recursive (
+                i: feedback,
+                o: feedback,
+            );
+            assign o = feedback;
+        }}
+        "#
+    ));
+    assert!(
+        cyclic
+            .errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "feedthrough must survive every finite recursive specialization: {cyclic:#?}"
+    );
+    assert!(
+        cyclic.incomplete.iter().all(|module| !module
+            .reasons
+            .contains(&veryl_causal::graph::IncompleteReason::RecursiveCall)),
+        "a finite recursive chain is not an incomplete boundary: {cyclic:#?}"
+    );
+}
+
+#[test]
 fn comb_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
     let external = analyze_comb_detailed(
         r#"
