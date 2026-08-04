@@ -182,22 +182,30 @@ This latitude applies independently to expressions, selectors, aggregates,
 functions, and module summaries. It does not make the required causal semantics
 above optional.
 
-## Default portability profile
+## Practical RTL acceptance
 
 The acceptance bounds permit implementations with very different usefulness.
 They are therefore not, by themselves, the policy of the default Veryl
-analyzer. The default analyzer uses a narrower **portability profile** chosen to
-avoid both excessive rejection and dependence on optimizations which downstream
-tools may not reproduce.
+analyzer. The default analyzer chooses a narrower operating point intended for
+ordinary RTL development.
 
-This profile is an engineering interoperability contract, not a consequence of
-the SystemVerilog LRM. Its contents are based on the representations accepted by
-the downstream synthesis ecosystem supported by Veryl and may be revised as
-that ecosystem changes.
+This policy is engineering judgment, not a consequence of the SystemVerilog
+LRM. It accounts for all of the following:
 
-### Minimum precision
+- behavior commonly accepted by downstream synthesis tools;
+- dependencies an RTL author can reasonably recognize from the source; and
+- stable, predictable diagnostics which do not depend on a particular optimizer
+  discovering a nonobvious identity.
 
-The default profile shall preserve statically established placement through:
+The policy may therefore reject a technically loop-free construction when its
+freedom from feedback depends on an unusually subtle value relationship. It
+shall not use that judgment to reject ordinary static wiring which the required
+precision below can distinguish. The policy may be revised as synthesis tools
+and established RTL practice change.
+
+### Baseline precision
+
+The default policy shall preserve statically established placement through:
 
 - direct copies and static packed or unpacked selections;
 - struct fields, array elements, concatenations, aggregate constructors,
@@ -211,22 +219,22 @@ The default profile shall preserve statically established placement through:
 
 The required placement composes through multiple such operations. An
 implementation which collapses all of these cases to whole-object dependency
-does not implement the default profile, even if it remains within the wider
+does not implement the default policy, even if it remains within the wider
 acceptance bounds.
 
-Operators and mappings not covered by the profile may use whole dependency.
-For example, the default profile does not require bit-prefix modeling for
+Operators and mappings not covered by this baseline may use whole dependency.
+For example, the default policy does not require bit-prefix modeling for
 addition or subtraction, or value-range modeling for a dynamic selector.
 
-### Portability ceiling
+### Practical upper bound
 
-The default analyzer may use information beyond the minimum profile without
+The default analyzer may use information beyond the baseline without
 requiring that every analyzer start from the same unoptimized representation.
-However, a refinement beyond the profile shall be the sole reason for accepting
+However, a refinement beyond the baseline shall be the sole reason for accepting
 a program only when at least one of the following is true:
 
-- the refinement has been added to the portability profile based on downstream
-  interoperability results; or
+- the refinement has been adopted by the default policy based on downstream
+  interoperability and ordinary RTL practice; or
 - the transformation which removes the dependency is materialized in the
   representation emitted to downstream tools.
 
@@ -237,23 +245,23 @@ that dependency. It shall not rely on the proof while emitting the original
 expression and requiring every downstream tool to rediscover it.
 
 The same rule applies to value ranges, relationships between selectors,
-algebraic cancellation, and operator-specific precision beyond the profile.
+algebraic cancellation, and operator-specific precision beyond the baseline.
 These facts may always be used for performance, diagnostics, or to construct the
 emitted representation; the restriction concerns using an unmaterialized fact
 as the final reason to suppress a hard error.
 
 Tool-specific or experimental analysis modes may choose a different point
 within the general acceptance bounds, but shall not silently replace the
-default portability profile. Changes to the default profile which can turn a
-previously accepted design into an error are compatibility changes, even when
-both behaviors fall within the wider language bounds.
+default policy. Changes to the default policy which can turn a previously
+accepted design into an error are compatibility changes, even when both
+behaviors fall within the wider language bounds.
 
 ## Permitted precision
 
 Within the wider acceptance bounds, an implementation may use any fact which is
 valid for the representation it analyzes. It may analyze optimized or
-unoptimized input. The default analyzer additionally observes the portability
-profile above. An implementation may, but need not, use:
+unoptimized input. The default analyzer additionally observes the practical RTL
+policy above. An implementation may, but need not, use:
 
 - packed bit positions and unpacked element positions;
 - constant values, unreachable control-flow paths, and short-circuit facts;
