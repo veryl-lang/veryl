@@ -1875,6 +1875,104 @@ mod tests {
     }
 
     #[test]
+    fn direct_multiaxis_transfer_preserves_holes_without_enumeration() {
+        // Why this case exists: the public event API now carries every repeat
+        // axis directly. A distant interior sparse read must project to the
+        // source, while its adjacent stride gap remains dependency-free;
+        // neither result may expand the 200,000-by-200,000 copy lattice.
+        let copies = 200_000usize;
+        let inner_stride = 2usize;
+        let outer_stride = 500_000usize;
+        let destination_length = (copies - 1) * outer_stride + (copies - 1) * inner_stride + 1;
+        let selected = 123_456 * outer_stride + 65_432 * inner_stride;
+        let procedure = Procedure {
+            entry: 0,
+            exit: 0,
+            successors: vec![vec![]],
+            events: vec![vec![
+                Event::Read {
+                    id: 0,
+                    region: exact(1, 0, 1),
+                },
+                Event::Write {
+                    id: 0,
+                    region: exact(2, 0, destination_length),
+                    dependencies: vec![],
+                    aligned_dependencies: vec![AlignedDependency {
+                        read: 0,
+                        kind: EdgeKind::Value,
+                        source: Span {
+                            start: 0,
+                            length: 1,
+                        },
+                        destination: Span {
+                            start: 0,
+                            length: 1,
+                        },
+                        axes: vec![
+                            PeriodicAxis {
+                                repetitions: copies,
+                                destination_stride: inner_stride,
+                            },
+                            PeriodicAxis {
+                                repetitions: copies,
+                                destination_stride: outer_stride,
+                            },
+                        ],
+                    }],
+                },
+                Event::Read {
+                    id: 1,
+                    region: exact(2, selected, 1),
+                },
+                Event::Write {
+                    id: 1,
+                    region: exact(3, 0, 1),
+                    dependencies: vec![(1, EdgeKind::Value)],
+                    aligned_dependencies: vec![],
+                },
+                Event::Read {
+                    id: 2,
+                    region: exact(2, selected + 1, 1),
+                },
+                Event::Write {
+                    id: 2,
+                    region: exact(4, 0, 1),
+                    dependencies: vec![(2, EdgeKind::Value)],
+                    aligned_dependencies: vec![],
+                },
+            ]],
+            object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
+            incomplete: BTreeSet::new(),
+        };
+
+        let summary = analyze(&procedure).unwrap();
+        assert!(summary.atom_count < 20, "{summary:#?}");
+        assert!(summary.dependencies.iter().any(|dependency| {
+            dependency.input == exact(1, 0, 1) && dependency.output == exact(3, 0, 1)
+        }));
+        assert!(!summary.dependencies.iter().any(|dependency| {
+            dependency.input == exact(1, 0, 1) && dependency.output == exact(4, 0, 1)
+        }));
+        let copies = summary
+            .periodic_dependencies
+            .iter()
+            .filter(|dependency| {
+                dependency.input == exact(1, 0, 1) && dependency.output_object == 2
+            })
+            .map(|dependency| {
+                dependency
+                    .axes
+                    .iter()
+                    .map(|axis| axis.repetitions)
+                    .product::<usize>()
+            })
+            .sum::<usize>();
+        assert_eq!(copies, 200_000usize * 200_000, "{summary:#?}");
+    }
+
+    #[test]
     fn object_local_uncertainty_preserves_other_exact_dependencies() {
         let procedure = Procedure {
             entry: 0,
