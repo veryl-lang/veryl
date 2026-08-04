@@ -3219,4 +3219,33 @@ mod memory_ssa_tests {
             }
         ));
     }
+
+    #[test]
+    fn diagnostic_witness_uses_one_short_real_cycle_from_a_larger_scc() {
+        // Why this case exists: a maximal SCC can contain both a short cycle
+        // and a longer return path. Once the source-level anchor is selected,
+        // diagnostics should show its shortest real return cycle instead of
+        // dumping every node or edge in the component.
+        let mut graph = CausalGraph::new();
+        let a = graph.add_node((VarId::from_raw(0), 0, 0));
+        let b = graph.add_node((VarId::from_raw(1), 0, 0));
+        let c = graph.add_node((VarId::from_raw(2), 0, 0));
+        let d = graph.add_node((VarId::from_raw(3), 0, 0));
+        graph.add_edge(a, b, CausalEdge::new(false, Some(TokenRange::default())));
+        graph.add_edge(b, a, CausalEdge::new(false, None));
+        graph.add_edge(b, c, CausalEdge::new(false, None));
+        graph.add_edge(c, d, CausalEdge::new(false, None));
+        graph.add_edge(d, a, CausalEdge::new(false, None));
+
+        let scc = strongly_connected_components(&graph)
+            .into_iter()
+            .find(|component| component.len() == 4)
+            .expect("one maximal SCC");
+        let witness = diagnostic_cycle_witness(&graph, &scc).expect("cycle witness");
+        let endpoints = witness
+            .into_iter()
+            .map(|edge| graph.edge_endpoints(edge).expect("live edge"))
+            .collect::<Vec<_>>();
+        assert_eq!(endpoints, vec![(a, b), (b, a)]);
+    }
 }

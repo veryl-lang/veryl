@@ -13208,6 +13208,75 @@ fn combinational_loop_incomplete_effect_does_not_erase_proven_edges() {
 }
 
 #[test]
+fn combinational_loop_diagnostic_uses_exact_minimal_assignment_witness() {
+    // Why this case exists: all four variables belong to one maximal SCC, and
+    // `a` has two reaching assignments in different branches. The actionable
+    // witness is the short a/b cycle; reporting a=d, c=b, or d=c would expose
+    // SCC membership rather than the actual cycle selected for this diagnostic.
+    let code = r#"
+    module Top (
+        select: input  logic,
+        o     : output logic,
+    ) {
+        var a: logic;
+        var b: logic;
+        var c: logic;
+        var d: logic;
+        always_comb {
+            if select {
+                a = b;
+            } else {
+                a = d;
+            }
+        }
+        assign b = a;
+        assign c = b;
+        assign d = c;
+        assign o = a;
+    }
+    "#;
+    let errors = analyze(code);
+    let loops = errors
+        .iter()
+        .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+        .collect::<Vec<_>>();
+    assert_eq!(loops.len(), 1, "{errors:#?}");
+    let AnalyzerError::CombinationalLoop {
+        identifier,
+        input,
+        error_location,
+        loop_participants,
+        ..
+    } = loops[0]
+    else {
+        unreachable!()
+    };
+    assert_eq!(identifier, "a");
+    assert_eq!(loop_participants.len(), 1, "{errors:#?}");
+
+    let local_offset = |absolute: usize| {
+        let mut base = 0usize;
+        for source in &input.sources {
+            if absolute < base + source.text.len() {
+                return absolute - base;
+            }
+            base += source.text.len();
+        }
+        panic!("diagnostic offset {absolute} is outside its sources")
+    };
+    assert_eq!(
+        local_offset(error_location.offset()),
+        code.find("a = b;").expect("short-cycle assignment")
+    );
+    assert_eq!(
+        local_offset(loop_participants[0].offset()),
+        code.find("assign b = a;")
+            .expect("short-cycle return assignment")
+            + "assign ".len()
+    );
+}
+
+#[test]
 fn comb_loop_ifstmt_feed_forward_array() {
     // False positive: an always_comb for-loop over cross-coupled arrays that
     // reads index i and writes i+1 (a feed-forward / acyclic CORDIC-style
