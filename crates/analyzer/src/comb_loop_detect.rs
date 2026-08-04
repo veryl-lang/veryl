@@ -80,7 +80,9 @@
 //! shape. Expressions such as `idx`, `~idx`, and `idx * 2` do not receive
 //! special candidate sets. Syntactically corresponding unresolved accesses can
 //! be promoted to must-alias only when MemorySSA proves that their selector
-//! reads observe the same SSA versions; otherwise they remain uncertain.
+//! reads observe the same SSA versions; otherwise they retain a conservative
+//! bounded region. A bounded dynamic region is complete even though its exact
+//! selected element remains uncertain.
 //!
 //! # Conservative fallbacks and incomplete results
 //!

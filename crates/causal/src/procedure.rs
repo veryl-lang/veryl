@@ -512,6 +512,7 @@ where
                     let expanded = expand(*region, &atoms, &atoms_by_object);
                     record_unknown_region(
                         *region,
+                        &procedure.object_spans,
                         &mut incomplete,
                         &mut uncertain_objects,
                         &mut unknown_all,
@@ -540,6 +541,7 @@ where
                     let expanded = expand(*region, &atoms, &atoms_by_object);
                     record_unknown_region(
                         *region,
+                        &procedure.object_spans,
                         &mut incomplete,
                         &mut uncertain_objects,
                         &mut unknown_all,
@@ -723,7 +725,28 @@ where
                     },
                 ) = (*read_region, *write_region)
                 else {
-                    incomplete.insert(IncompleteReason::DynamicRegion);
+                    // Positional transfer is optional precision. When either
+                    // endpoint is dynamic but bounded, retain a complete
+                    // whole-dependency fallback instead of dropping the read
+                    // and misclassifying loss of precision as incompleteness.
+                    for &source_atom in source_atoms {
+                        if let Some(&version) = ssa.uses.get(&Usage::Read {
+                            read: dependency.read,
+                            atom: source_atom,
+                        }) {
+                            atom_incoming.insert((
+                                version,
+                                dependency.kind,
+                                false,
+                                !read_region.is_exact(),
+                                Some(dependency.read),
+                                false,
+                                false,
+                                None,
+                                None,
+                            ));
+                        }
+                    }
                     continue;
                 };
                 let mut axes = dependency.axes.clone();
@@ -1094,15 +1117,21 @@ where
 
 fn record_unknown_region<O: Copy + Ord>(
     region: Region<O>,
+    object_spans: &BTreeMap<O, Span>,
     incomplete: &mut BTreeSet<IncompleteReason>,
     uncertain_objects: &mut BTreeSet<O>,
     unknown_all: &mut bool,
 ) {
     match region {
         Region::Exact { .. } => {}
-        Region::UnknownRegion { object, .. } | Region::UnknownObject(object) => {
-            incomplete.insert(IncompleteReason::DynamicRegion);
+        Region::UnknownRegion { object, .. } => {
             uncertain_objects.insert(object);
+        }
+        Region::UnknownObject(object) => {
+            uncertain_objects.insert(object);
+            if !object_spans.contains_key(&object) {
+                incomplete.insert(IncompleteReason::DynamicRegion);
+            }
         }
         Region::UnknownAll => {
             incomplete.insert(IncompleteReason::DynamicRegion);
@@ -2055,6 +2084,7 @@ mod tests {
         assert_eq!(summary.definition_count, 1);
         assert_eq!(summary.uncertain_input_regions, BTreeSet::from([prefix]));
         assert_eq!(summary.uncertain_write_regions, BTreeSet::from([prefix]));
+        assert!(summary.incomplete.is_empty(), "{summary:#?}");
     }
 
     #[test]
@@ -2081,6 +2111,34 @@ mod tests {
         let summary = analyze(&procedure).unwrap();
         assert_eq!(summary.uncertain_objects, BTreeSet::from([1]));
         assert!(summary.uncertain_write_objects.is_empty());
+        assert!(summary.incomplete.is_empty(), "{summary:#?}");
+    }
+
+    #[test]
+    fn unknown_object_without_declared_shape_is_incomplete() {
+        // Why this case exists: UnknownObject is complete only when its
+        // declared span lets MemorySSA cover the entire object. Without that
+        // span, expanding to the atoms seen elsewhere could omit dependencies.
+        let procedure = Procedure {
+            entry: 0,
+            exit: 0,
+            successors: vec![vec![]],
+            events: vec![vec![Event::Read {
+                id: 0,
+                region: Region::UnknownObject(1u8),
+            }]],
+            object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
+            incomplete: BTreeSet::new(),
+        };
+
+        let summary = analyze(&procedure).unwrap();
+        assert!(
+            summary
+                .incomplete
+                .contains(&IncompleteReason::DynamicRegion),
+            "{summary:#?}"
+        );
     }
 
     #[test]
@@ -2118,6 +2176,75 @@ mod tests {
             vec![Dependency {
                 input: exact(1, 0, 8),
                 output: exact(1, 0, 8),
+                kind: EdgeKind::Value,
+                aligned: false,
+                origin: Some(0),
+            }]
+        );
+        assert!(summary.incomplete.is_empty(), "{summary:#?}");
+    }
+
+    #[test]
+    fn dynamic_aligned_transfer_falls_back_to_complete_whole_dependency() {
+        // Why this case exists: a positional transfer cannot align an unknown
+        // selected element, but both objects are bounded. Dropping the aligned
+        // read makes the result incomplete and loses a real dependency; the
+        // complete fallback is an unaligned whole-object edge.
+        let procedure = Procedure {
+            entry: 0,
+            exit: 0,
+            successors: vec![vec![]],
+            events: vec![vec![
+                Event::Read {
+                    id: 0,
+                    region: Region::UnknownObject(1u8),
+                },
+                Event::Write {
+                    id: 0,
+                    region: exact(2, 0, 8),
+                    dependencies: vec![],
+                    aligned_dependencies: vec![AlignedDependency {
+                        read: 0,
+                        kind: EdgeKind::Value,
+                        source: Span {
+                            start: 0,
+                            length: 8,
+                        },
+                        destination: Span {
+                            start: 0,
+                            length: 8,
+                        },
+                        axes: vec![],
+                    }],
+                },
+            ]],
+            object_spans: BTreeMap::from([
+                (
+                    1,
+                    Span {
+                        start: 0,
+                        length: 8,
+                    },
+                ),
+                (
+                    2,
+                    Span {
+                        start: 0,
+                        length: 8,
+                    },
+                ),
+            ]),
+            must_alias: BTreeSet::new(),
+            incomplete: BTreeSet::new(),
+        };
+
+        let summary = analyze(&procedure).unwrap();
+        assert!(summary.incomplete.is_empty(), "{summary:#?}");
+        assert_eq!(
+            summary.dependencies,
+            vec![Dependency {
+                input: exact(1, 0, 8),
+                output: exact(2, 0, 8),
                 kind: EdgeKind::Value,
                 aligned: false,
                 origin: Some(0),

@@ -31,8 +31,9 @@ impl Span {
 /// A statically resolved region, or an unresolved access within one object.
 ///
 /// `UnknownObject` is intentionally not expanded to the object's numerical
-/// width.  Clients retain the uncertainty and decide whether a result which
-/// depends on it is a warning, a hard error, or merely an optimization barrier.
+/// width in this value. Clients with a declared object span can expand it
+/// conservatively and still produce a complete result; without that span the
+/// access remains incomplete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Region<O> {
     Exact {

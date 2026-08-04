@@ -13,6 +13,8 @@ pub enum EdgeKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IncompleteReason {
+    /// A dynamic access could not be bounded to a known object or static
+    /// prefix. Bounded dynamic accesses are conservative but complete.
     DynamicRegion,
     ExternalComponent,
     HierarchicalReference,

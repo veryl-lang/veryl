@@ -9839,7 +9839,10 @@ fn comb_loop_statement_order_and_observer_semantics() {
 }
 
 #[test]
-fn comb_loop_dynamic_write_reports_region_uncertainty() {
+fn comb_loop_bounded_dynamic_write_is_complete() {
+    // Why this case exists: an unresolved selector still stays within the
+    // declared values object. Whole-object expansion is conservative and
+    // complete even though coverage analysis separately reports retention.
     symbol_table::clear();
     attribute_table::clear();
     doc_comment_table::clear();
@@ -9871,12 +9874,12 @@ fn comb_loop_dynamic_write_reports_region_uncertainty() {
 
     let result = crate::comb_loop_detect::check_detailed(&ir);
     assert!(result.errors.is_empty(), "{:#?}", result.errors);
-    assert!(result.incomplete.iter().any(|module| {
-        module.module == "Top"
-            && module
-                .reasons
-                .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)
-    }));
+    assert!(
+        result.incomplete.iter().all(|module| !module
+            .reasons
+            .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)),
+        "a dynamic write bounded to values must be complete: {result:#?}"
+    );
 
     // Why this assertion exists: the ordinary analyzer consumes coverage from
     // the same post-pass MemorySSA run, while the detailed loop API keeps hard
@@ -9893,6 +9896,80 @@ fn comb_loop_dynamic_write_reports_region_uncertainty() {
             .iter()
             .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
         "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn comb_loop_function_dynamic_read_is_complete() {
+    // Why this case exists: a function summary must retain the declared shape
+    // of a formal argument. A dynamic selection within that formal is bounded
+    // and must not become incomplete merely by crossing the call boundary.
+    let dynamic_function = analyze_comb_detailed(
+        r#"
+        module Top (
+            i    : input  logic<4>,
+            index: input  logic<2>,
+            o    : output logic,
+        ) {
+            function select (
+                x    : input logic<4>,
+                index: input logic<2>,
+            ) -> logic {
+                return x[index];
+            }
+            assign o = select(i, index);
+        }
+        "#,
+    );
+    assert!(dynamic_function.errors.is_empty(), "{dynamic_function:#?}");
+    assert!(
+        dynamic_function.incomplete.iter().all(|module| !module
+            .reasons
+            .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)),
+        "a dynamic function read bounded to its formal must be complete: {dynamic_function:#?}"
+    );
+}
+
+#[test]
+fn comb_loop_bounded_dynamic_read_retains_feedback() {
+    // Why this case exists: treating a bounded dynamic access as complete must
+    // not erase its conservative dependency. A feedback path through a child
+    // module remains a proven structural combinational loop.
+    let dynamic_loop = analyze_comb_detailed(
+        r#"
+        module Child (
+            i    : input  logic<4>,
+            index: input  logic<2>,
+            o    : output logic,
+        ) {
+            assign o = i[index];
+        }
+        module Top (
+            index: input  logic<2>,
+            o    : output logic,
+        ) {
+            var feedback: logic;
+            inst child: Child (
+                i: {3'b0, feedback},
+                index,
+                o: feedback,
+            );
+            assign o = feedback;
+        }
+        "#,
+    );
+    assert!(
+        dynamic_loop
+            .errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "a bounded dynamic read must retain its conservative loop: {dynamic_loop:#?}"
+    );
+    assert!(
+        dynamic_loop.incomplete.iter().all(|module| !module
+            .reasons
+            .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)),
+        "a conservative bounded loop is complete: {dynamic_loop:#?}"
     );
 }
 
@@ -13127,42 +13204,6 @@ fn comb_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
                 .reasons
                 .contains(&veryl_causal::graph::IncompleteReason::InoutPort)
     }));
-
-    // Why this case exists: a dynamic selection inside a function must carry
-    // its unresolved region provenance through the function summary. Function
-    // lowering must not silently turn it into complete coverage.
-    let complex_function = analyze_comb_detailed(
-        r#"
-        module Top (
-            i    : input  logic<4>,
-            index: input  logic<2>,
-            o    : output logic,
-        ) {
-            function select (
-                x    : input logic<4>,
-                index: input logic<2>,
-            ) -> logic {
-                return x[index];
-            }
-            assign o = select(i, index);
-        }
-        "#,
-    );
-    assert!(
-        complex_function.errors.is_empty(),
-        "incomplete function coverage must not become a hard loop: {:#?}",
-        complex_function.errors
-    );
-    assert!(
-        complex_function.incomplete.iter().any(|module| {
-            module.module == "Top"
-                && module
-                    .reasons
-                    .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)
-        }),
-        "a function with a dynamic selection must retain incomplete provenance: {:#?}",
-        complex_function.incomplete
-    );
 
     // Why this case exists: even a fully modeled expression on an SV input
     // cannot prove feedthrough inside the external component. A feedback-like

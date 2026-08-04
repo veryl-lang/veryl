@@ -323,6 +323,12 @@ unresolved hierarchy, unresolved recursive calls or cyclic concrete
 specialization graphs, unevaluated generic shapes, unanalyzed loops, timed or
 event effects, and legal constructs not yet represented by the analyzer.
 
+A dynamic access is not incomplete merely because its exact selected region is
+unknown. If its object or longest static prefix has a known shape, whole
+dependency over that bounded region is conservative and complete. The access is
+incomplete only when the enclosing region itself cannot be bounded or when its
+mapping is lost across another incomplete boundary.
+
 The acceptance equation above applies to the portion for which analysis is
 complete. Incomplete behavior has these rules:
 
