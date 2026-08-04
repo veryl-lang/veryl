@@ -6123,6 +6123,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "paste",
+ "petgraph",
  "postcard",
  "rayon",
  "serde",

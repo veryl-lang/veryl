@@ -18,10 +18,10 @@ use crate::ir::{
     InstDeclaration, Ir, Module, Op, SystemFunctionKind, VarIndex, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
-use daggy::petgraph::Direction::Incoming;
-use daggy::petgraph::Graph;
-use daggy::petgraph::graph::NodeIndex;
-use daggy::petgraph::visit::EdgeRef;
+use petgraph::Direction::Incoming;
+use petgraph::Graph;
+use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 #[cfg(not(target_family = "wasm"))]
 use rayon::prelude::*;
 use std::collections::VecDeque;
