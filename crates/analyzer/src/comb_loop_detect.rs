@@ -3403,6 +3403,35 @@ mod memory_ssa_tests {
     }
 
     #[test]
+    fn periodic_symbolic_node_lookup_scales_with_region_count() {
+        // Why this case exists: every symbolic periodic region already has a
+        // stable sorted identity. Resolving P such regions must not linearly
+        // scan the P-entry table for each lookup.
+        let object = VarId::from_raw(0);
+        let periodic_regions = (0..8192)
+            .map(|start| PeriodicRegion {
+                object,
+                output: Span { start, length: 1 },
+                axes: vec![PeriodicAxis {
+                    repetitions: 2,
+                    destination_stride: 8192,
+                }],
+            })
+            .collect::<Vec<_>>();
+        let bit_part = BitPartition {
+            periodic_regions: periodic_regions.clone(),
+            ..BitPartition::default()
+        };
+        let variables = HashMap::default();
+        for (index, periodic) in periodic_regions.into_iter().enumerate() {
+            assert_eq!(
+                periodic_region_node_keys(periodic, &variables, &bit_part),
+                vec![(object, PERIODIC_REGION_INDEX, index)]
+            );
+        }
+    }
+
+    #[test]
     fn diagnostic_witness_uses_one_short_real_cycle_from_a_larger_scc() {
         // Why this case exists: a maximal SCC can contain both a short cycle
         // and a longer return path. Once the source-level anchor is selected,
