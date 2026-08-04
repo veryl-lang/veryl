@@ -10797,7 +10797,6 @@ fn combinational_loop_review_distinguishes_generic_module_specializations() {
 }
 
 #[test]
-#[ignore = "captured independent-review regression: constant ternary evaluates dead side effects"]
 fn combinational_loop_review_short_circuits_instance_actual_side_effects() {
     // Why this case exists: IEEE 1800-2023 11.4.11 evaluates only the selected
     // ternary branch. touch(o) is in the constant-dead branch, so it cannot

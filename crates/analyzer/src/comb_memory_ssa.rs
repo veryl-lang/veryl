@@ -410,8 +410,14 @@ impl Builder {
             }
             Expression::Ternary(condition, left, right, _) => {
                 reads.extend(self.read_expression(block, condition, EdgeKind::Control));
-                reads.extend(self.read_expression(block, left, kind));
-                reads.extend(self.read_expression(block, right, kind));
+                match self.constant_condition(condition) {
+                    Some(true) => reads.extend(self.read_expression(block, left, kind)),
+                    Some(false) => reads.extend(self.read_expression(block, right, kind)),
+                    None => {
+                        reads.extend(self.read_expression(block, left, kind));
+                        reads.extend(self.read_expression(block, right, kind));
+                    }
+                }
             }
             Expression::Concatenation(parts, _) => {
                 for (expression, repeat) in parts {
@@ -1272,8 +1278,14 @@ impl Builder {
             }
             Expression::Ternary(condition, left, right, _) => {
                 self.lower_observer_expression(block, condition);
-                self.lower_observer_expression(block, left);
-                self.lower_observer_expression(block, right);
+                match self.constant_condition(condition) {
+                    Some(true) => self.lower_observer_expression(block, left),
+                    Some(false) => self.lower_observer_expression(block, right),
+                    None => {
+                        self.lower_observer_expression(block, left);
+                        self.lower_observer_expression(block, right);
+                    }
+                }
             }
             Expression::Concatenation(parts, _) => {
                 for (expression, repeat) in parts {
@@ -1304,6 +1316,11 @@ impl Builder {
                 }
             }
         }
+    }
+
+    fn constant_condition(&mut self, expression: &Expression) -> Option<bool> {
+        let value = expression.clone().eval_value(&mut self.context)?;
+        (!value.is_xz()).then(|| value.is_positive())
     }
 
     fn write_destination(
