@@ -13694,6 +13694,37 @@ fn combinational_loop_runtime_form_cardinality_variants() {
 }
 
 #[test]
+fn combinational_loop_finite_runtime_form_recurrence_is_not_feedback() {
+    // Why this case exists: a conditional break keeps a finite const loop in
+    // runtime-form IR. Its loop-carried value is a bounded combinational chain
+    // rooted at the dominating default, not an unbounded graph backedge.
+    let errors = analyze(
+        r#"
+        module Top (
+            stop: input  logic,
+            o   : output logic,
+        ) {
+            var value: logic;
+            always_comb {
+                value = 0;
+                for _index in 0..2 {
+                    value = !value;
+                    if stop {
+                        break;
+                    }
+                }
+                o = value;
+            }
+        }
+        "#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a bounded recurrence with a dominating seed is feed-forward: {errors:#?}"
+    );
+}
+
+#[test]
 fn combinational_loop_function_output_weak_write_retains_coverage() {
     // Why this case exists: a function output argument is copied back to its
     // caller, but a dynamic write inside the function still leaves unselected
