@@ -859,6 +859,9 @@ pub struct IfStatement {
     pub cond: Expression,
     pub true_side: Vec<Statement>,
     pub false_side: Vec<Statement>,
+    /// The source conditional carries a non-`none` `cond_type`, so retained
+    /// paths introduced by this join do not produce coverage diagnostics.
+    pub coverage_suppressed: bool,
     pub token: TokenRange,
 }
 
@@ -1052,6 +1055,8 @@ pub struct CaseStatement {
     pub arms: Vec<CaseArm>,
     pub default: Vec<Statement>,
     pub case_target: Box<Expression>,
+    /// See [`IfStatement::coverage_suppressed`].
+    pub coverage_suppressed: bool,
     pub token: TokenRange,
 }
 
@@ -1298,6 +1303,7 @@ impl CaseStatement {
                 cond,
                 true_side: arm.body.clone(),
                 false_side: std::mem::take(&mut tail),
+                coverage_suppressed: self.coverage_suppressed,
                 token: arm.token,
             };
             tail = vec![Statement::If(if_stmt)];

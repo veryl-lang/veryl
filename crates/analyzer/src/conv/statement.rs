@@ -1,4 +1,6 @@
 use crate::analyzer_error::{ComponentInterfaceMismatchKind, MismatchTypeKind};
+use crate::attribute::{Attribute, CondTypeItem};
+use crate::attribute_table;
 use crate::conv::utils::{
     TbMethodCallPosition, TypePosition, argument_list, build_for_range, build_for_statement,
     case_patterns, check_assign_clock_domain, eval_array_range_assign, eval_assign_statement,
@@ -16,6 +18,19 @@ use crate::symbol_table;
 use crate::{AnalyzerError, ir_error};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
+
+fn coverage_suppressed(token: &TokenRange) -> bool {
+    let mut attrs = attribute_table::get(&token.beg);
+    attrs.reverse();
+    for attr in attrs {
+        match attr {
+            Attribute::CondType(CondTypeItem::None) => return false,
+            Attribute::CondType(_) => return true,
+            _ => {}
+        }
+    }
+    false
+}
 
 impl Conv<&StatementBlock> for ir::StatementBlock {
     fn conv(context: &mut Context, value: &StatementBlock) -> IrResult<Self> {
@@ -658,11 +673,13 @@ impl Conv<&IfStatement> for ir::StatementBlock {
                 break;
             }
 
+            let token = x.into();
             let statement = ir::Statement::If(ir::IfStatement {
                 cond,
                 true_side,
                 false_side: vec![],
-                token: x.into(),
+                coverage_suppressed: coverage_suppressed(&token),
+                token,
             });
 
             append_leaf_false(&mut false_side, vec![statement]);
@@ -681,11 +698,13 @@ impl Conv<&IfStatement> for ir::StatementBlock {
         if false_side_only {
             Ok(ir::StatementBlock(false_side))
         } else {
+            let token = value.into();
             let statement = ir::Statement::If(ir::IfStatement {
                 cond,
                 true_side,
                 false_side,
-                token: value.into(),
+                coverage_suppressed: coverage_suppressed(&token),
+                token,
             });
             Ok(ir::StatementBlock(vec![statement]))
         }
@@ -737,11 +756,13 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
                 break;
             }
 
+            let token = x.into();
             let statement = ir::Statement::If(ir::IfStatement {
                 cond,
                 true_side,
                 false_side: vec![],
-                token: x.into(),
+                coverage_suppressed: coverage_suppressed(&token),
+                token,
             });
 
             append_leaf_false(&mut false_side, vec![statement]);
@@ -1019,12 +1040,14 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
             return Ok(ir::StatementBlock::default());
         }
 
+        let token = value.case.case_token.token.into();
         Ok(ir::StatementBlock(vec![ir::Statement::Case(
             ir::CaseStatement {
                 arms,
                 default,
                 case_target: Box::new(tgt),
-                token: value.case.case_token.token.into(),
+                coverage_suppressed: coverage_suppressed(&token),
+                token,
             },
         )]))
     }
@@ -1113,6 +1136,7 @@ impl Conv<&SwitchStatement> for ir::StatementBlock {
                 cond,
                 true_side: body,
                 false_side: std::mem::take(&mut tail),
+                coverage_suppressed: coverage_suppressed(&token),
                 token,
             })];
         }

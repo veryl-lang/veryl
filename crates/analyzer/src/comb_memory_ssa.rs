@@ -3,8 +3,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::attribute::{Attribute, CondTypeItem};
-use crate::attribute_table;
 use crate::conv::Context;
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CombDeclaration, Expression, Factor,
@@ -380,19 +378,6 @@ fn weak_region(region: Region<VarId>) -> Region<VarId> {
         Region::Exact { object, span } => Region::UnknownRegion { object, span },
         region => region,
     }
-}
-
-fn has_cond_type(token: &TokenRange) -> bool {
-    let mut attrs = attribute_table::get(&token.beg);
-    attrs.reverse();
-    for attr in attrs {
-        match attr {
-            Attribute::CondType(CondTypeItem::None) => return false,
-            Attribute::CondType(_) => return true,
-            _ => {}
-        }
-    }
-    false
 }
 
 struct Builder {
@@ -926,7 +911,7 @@ impl Builder {
                     None
                 } else {
                     let join = self.new_block();
-                    if has_cond_type(&statement.token) {
+                    if statement.coverage_suppressed {
                         self.procedure.events[join].push(Event::SuppressRetentionDiagnostic);
                     }
                     for exit in exits {
@@ -1014,7 +999,7 @@ impl Builder {
                     None
                 } else {
                     let join = self.new_block();
-                    if has_cond_type(&statement.token) {
+                    if statement.coverage_suppressed {
                         self.procedure.events[join].push(Event::SuppressRetentionDiagnostic);
                     }
                     for exit in exits {
