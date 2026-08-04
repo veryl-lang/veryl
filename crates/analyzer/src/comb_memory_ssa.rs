@@ -2322,7 +2322,6 @@ impl Builder {
             span: Span { start, length },
         }
     }
-
 }
 
 fn combine_edge_kinds(left: EdgeKind, right: EdgeKind) -> EdgeKind {

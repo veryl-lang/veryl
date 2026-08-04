@@ -3021,9 +3021,10 @@ mod memory_ssa_tests {
                 },
             ],
         };
-        let concrete = periodic.axes.iter().fold(
-            vec![periodic.output],
-            |copies, axis| {
+        let concrete = periodic
+            .axes
+            .iter()
+            .fold(vec![periodic.output], |copies, axis| {
                 copies
                     .into_iter()
                     .flat_map(|copy| {
@@ -3033,8 +3034,7 @@ mod memory_ssa_tests {
                         })
                     })
                     .collect()
-            },
-        );
+            });
         for start in 0..14 {
             for length in 1..=4 {
                 let query = Span { start, length };

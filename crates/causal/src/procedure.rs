@@ -237,9 +237,7 @@ fn normalize_periodic_axes(axes: &mut Vec<PeriodicAxis>) -> Option<()> {
             return None;
         }
         if let Some(inner) = normalized.last_mut()
-            && inner
-                .destination_stride
-                .checked_mul(inner.repetitions)
+            && inner.destination_stride.checked_mul(inner.repetitions)
                 == Some(axis.destination_stride)
         {
             inner.repetitions = inner.repetitions.checked_mul(axis.repetitions)?;
@@ -820,49 +818,48 @@ where
                         }
                     }
                     let mut next_aligned = path_aligned && aligned;
-                    let (next_translation, next_periodic_output) = if let Some(periodic) =
-                        periodic_output
-                    {
-                        if let Some(outer) = &path_periodic_output {
-                            let Some(composed) = compose_periodic_projections(periodic, outer)
-                            else {
-                                continue;
-                            };
-                            (None, Some(composed))
-                        } else if let Some(offset) = path_translation {
-                            let shifted = if offset >= 0 {
-                                periodic.output.start.checked_add(offset as usize)
+                    let (next_translation, next_periodic_output) =
+                        if let Some(periodic) = periodic_output {
+                            if let Some(outer) = &path_periodic_output {
+                                let Some(composed) = compose_periodic_projections(periodic, outer)
+                                else {
+                                    continue;
+                                };
+                                (None, Some(composed))
+                            } else if let Some(offset) = path_translation {
+                                let shifted = if offset >= 0 {
+                                    periodic.output.start.checked_add(offset as usize)
+                                } else {
+                                    periodic.output.start.checked_sub((-offset) as usize)
+                                };
+                                let Some(start) = shifted else {
+                                    continue;
+                                };
+                                (
+                                    None,
+                                    Some(PeriodicProjection {
+                                        source: periodic.source,
+                                        output: Span {
+                                            start,
+                                            length: periodic.output.length,
+                                        },
+                                        axes: periodic.axes.clone(),
+                                    }),
+                                )
                             } else {
-                                periodic.output.start.checked_sub((-offset) as usize)
-                            };
-                            let Some(start) = shifted else {
-                                continue;
-                            };
-                            (
-                                None,
-                                Some(PeriodicProjection {
-                                    source: periodic.source,
-                                    output: Span {
-                                        start,
-                                        length: periodic.output.length,
-                                    },
-                                    axes: periodic.axes.clone(),
-                                }),
-                            )
+                                next_aligned = false;
+                                (None, None)
+                            }
+                        } else if path_periodic_output.is_some() {
+                            (None, path_periodic_output.clone())
                         } else {
-                            next_aligned = false;
-                            (None, None)
-                        }
-                    } else if path_periodic_output.is_some() {
-                        (None, path_periodic_output.clone())
-                    } else {
-                        (
-                            path_translation.and_then(|path| {
-                                translation.and_then(|edge| path.checked_add(edge))
-                            }),
-                            None,
-                        )
-                    };
+                            (
+                                path_translation.and_then(|path| {
+                                    translation.and_then(|edge| path.checked_add(edge))
+                                }),
+                                None,
+                            )
+                        };
                     stack.push((
                         input,
                         combine_edge_kinds(path_kind, kind),
@@ -1696,7 +1693,13 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(nested.len(), 1, "{summary:#?}");
-        assert_eq!(nested[0].output, Span { start: 0, length: 1 });
+        assert_eq!(
+            nested[0].output,
+            Span {
+                start: 0,
+                length: 1
+            }
+        );
         assert_eq!(
             nested[0].axes,
             vec![
