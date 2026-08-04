@@ -22003,7 +22003,6 @@ module M {
 }
 
 #[test]
-#[ignore = "captured third-review regression: context width loses extension positions"]
 fn combinational_loop_review_preserves_context_width_extension_positions() {
     // Why these cases exist: IEEE 1800-2023 11.8.2 zero-extends an unsigned
     // two-bit RHS to its four-bit assignment context. The new high bits are

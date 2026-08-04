@@ -886,14 +886,6 @@ impl Builder {
         else {
             return None;
         };
-        let expression_length = expression
-            .comptime()
-            .r#type
-            .total_width()?
-            .checked_mul(expression.comptime().r#type.total_array().unwrap_or(1))?;
-        if formal_span.end()? > expression_length {
-            return None;
-        }
         self.map_expression_span_positioned_to_actual(expression, formal_span)
     }
 
@@ -920,6 +912,51 @@ impl Builder {
         expression: &Expression,
         requested: Span,
     ) -> Option<Vec<PositionedRegion>> {
+        let expression_type = &expression.comptime().r#type;
+        let packed_width = expression_type.total_width()?;
+        let expression_length =
+            packed_width.checked_mul(expression_type.total_array().unwrap_or(1))?;
+        if requested.end()? > expression_length {
+            // Context sizing extends only a packed value. Unpacked shape
+            // coercions are not bit extension and remain a conservative
+            // fallback when their flattened lengths disagree.
+            if expression_type.total_array().unwrap_or(1) != 1 {
+                return None;
+            }
+            let mut mapped = Vec::new();
+            if let Some(value_bits) = requested.intersection(Span {
+                start: 0,
+                length: packed_width,
+            }) {
+                mapped
+                    .extend(self.map_expression_span_positioned_to_actual(expression, value_bits)?);
+            }
+            let extension = requested.intersection(Span {
+                start: packed_width,
+                length: requested.end()?.checked_sub(packed_width)?,
+            });
+            if expression_type.signed
+                && packed_width != 0
+                && let Some(extension) = extension
+            {
+                mapped.extend(
+                    self.map_expression_span_positioned_to_actual(
+                        expression,
+                        Span {
+                            start: packed_width - 1,
+                            length: 1,
+                        },
+                    )?
+                    .into_iter()
+                    .map(|sign| PositionedRegion {
+                        region: sign.region,
+                        expression: extension,
+                        aligned: false,
+                    }),
+                );
+            }
+            return Some(mapped);
+        }
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::Variable(id, index, select, _) => {
