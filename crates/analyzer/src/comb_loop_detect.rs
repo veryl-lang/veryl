@@ -1,12 +1,130 @@
-//! Combinational loop detection on the analyzer IR (issue #931).
+//! Region-sensitive combinational loop detection on the analyzer IR (issue
+//! #931).
 //!
-//! Builds a sparse per-module region dependency graph from independently
-//! analyzable Memory SSA procedure summaries, then reports SCCs. Module
-//! instance feedthrough is summarized bottom-up in topo order.
+//! # Problem model
 //!
-//! Under-detect by design: opaque constructs (SystemVerilog black
-//! boxes, `inout` ports, recursive functions) add no edges; the
-//! simulator's `analyze_dependency` is the backup safety net.
+//! This analysis decides whether the elaborated design contains a cycle of
+//! **structural combinational dependencies**. It does not compute Boolean
+//! functions, prove algebraic cancellation, or reproduce the implicit
+//! sensitivity list of `always_comb`.
+//!
+//! A graph node is an `(object, sparse region)` pair rather than a whole
+//! variable or one node per bit. A directed edge `A -> B` means that a proven
+//! value, control, or address dependency can make a write to region `B`
+//! structurally depend on region `A`. A self-edge or a multi-node strongly
+//! connected component is therefore a combinational loop. Position-preserving
+//! operations retain an `aligned` edge so that, for example, `dst[0] = src[0]`
+//! does not imply a dependency between every bit of `dst` and every bit of
+//! `src`. Operations without a positional transfer conservatively connect the
+//! observed source and destination atoms all-to-all.
+//!
+//! Previous-value retention is deliberately not represented as a dependency
+//! edge. A conditional or partial write can leave a MemorySSA entry definition
+//! reaching the procedure exit, but that is incomplete assignment/inferred
+//! state, not by itself combinational feedback. The same MemorySSA result is
+//! used to produce coverage diagnostics through `check_analyzer`, while
+//! explicit reads of the old value remain ordinary dependencies and can form
+//! real loops.
+//!
+//! # Analysis pipeline
+//!
+//! 1. `comb_memory_ssa` lowers each combinational procedure to a CFG
+//!    with statement-ordered region reads and writes. Sparse MemorySSA resolves
+//!    overwrites, branch phis, loop-carried definitions, weak dynamic writes,
+//!    function arguments, output arguments, and module-scope captures. Each
+//!    procedure and instance-observer expression is an independent work item;
+//!    native builds analyze those work items in parallel after function
+//!    summaries have been frozen.
+//! 2. Procedure summaries are merged into one module graph. Region endpoints
+//!    observed by accesses partition objects into atomic spans. Large dense
+//!    spans and regular repeated copies have symbolic nodes, so graph size is
+//!    normally a function of accesses and boundaries rather than declared bit
+//!    width or unpacked-array length.
+//! 3. Child modules are analyzed before parents. A module summary contains only
+//!    input-to-output feedthrough proven in the child graph. Instance actuals
+//!    project the child's regions back into the parent, preserving bit
+//!    positions, aggregate layout, and Cartesian repetition axes when that
+//!    mapping is representable.
+//! 4. Iterative SCC discovery finds cyclic components without using the process
+//!    stack. For each SCC, diagnostics choose a stable source-backed edge and
+//!    the shortest directed return path to that edge. This yields one
+//!    deterministic simple cycle with assignment provenance, rather than every
+//!    member of a maximal SCC.
+//!
+//! # Cases modeled precisely
+//!
+//! The precise path includes:
+//!
+//! - sequential blocking-assignment order, dominating full writes, branch
+//!   joins, early `break`, empty/nonempty finite loops, and constant iterator
+//!   values for finite loops accepted by the evaluation limit;
+//! - constant `if`, `case`, ternary, and short-circuit pruning, while dynamic
+//!   conditions remain control dependencies;
+//! - exact packed and unpacked selections, disjoint struct fields and array
+//!   elements, concatenations, struct constructors, array literals, repeated
+//!   values, and fragmented instance output destinations;
+//! - position-preserving variables, supported casts and width extension,
+//!   pointwise bitwise operators, constant shifts, and function return/output
+//!   mappings; and
+//! - ordinary Veryl module instances, concrete generic specializations,
+//!   nested function calls, module-scope function captures, and side effects in
+//!   instance actual/address expressions.
+//!
+//! Dynamic selects are modeled structurally, not by value-range inference.
+//! The region is derived from the LRM static prefix and the declared object
+//! shape. Expressions such as `idx`, `~idx`, and `idx * 2` do not receive
+//! special candidate sets. Syntactically corresponding unresolved accesses can
+//! be promoted to must-alias only when MemorySSA proves that their selector
+//! reads observe the same SSA versions; otherwise they remain uncertain.
+//!
+//! # Conservative fallbacks and incomplete results
+//!
+//! A known expression whose exact bit transfer is unavailable falls back to
+//! structural dependencies on its known operands. This can lose bit-level
+//! precision, but it does not invent a value-domain proof. In contrast, an
+//! effect or boundary whose dependencies cannot be established is marked with
+//! [`IncompleteReason`]. Unknown edges never participate in a hard loop
+//! diagnostic, and their presence does not erase unrelated proven edges from
+//! the same procedure or module.
+//!
+//! [`check`] returns only proven loop errors for compatibility.
+//! [`check_detailed`] additionally exposes per-module incomplete reasons. The
+//! important incomplete boundaries are:
+//!
+//! - SystemVerilog/external components and `inout` ports;
+//! - hierarchical references and instance actual/destination mappings which
+//!   cannot preserve a region;
+//! - recursive functions or module-instantiation cycles;
+//! - runtime-bound loops and constant loops deliberately left above the
+//!   evaluation-size limit;
+//! - timed/event effects, unsupported or malformed analyzer IR, and generic
+//!   modules whose concrete shape was not elaborated.
+//!
+//! These cases may still contain a real loop that this pass cannot prove. No
+//! guessed feedthrough is added across an opaque boundary. Callers that require
+//! a completeness guarantee must inspect `CombAnalysisResult::incomplete`
+//! rather than interpreting an empty `errors` list as proof that the design is
+//! acyclic.
+//!
+//! # Complexity and limits
+//!
+//! Sparse exact spans, dense-region nodes, and `PeriodicRegion` keep the
+//! common cost independent of numerical declaration width and repetition
+//! count. The representation is not a general symbolic algebra, however:
+//!
+//! - a finite loop is expanded only while its exact iteration list is within
+//!   the configured evaluation limit; larger loops are incomplete even when a
+//!   human can see that an early `break` bounds their execution;
+//! - irregular or unaligned transfers can require an all-to-all product of
+//!   source and destination atoms, and adversarially overlapping access
+//!   boundaries or input/output feedthrough pairs can still make graph and
+//!   summary construction quadratic;
+//! - parallelism is across procedures, observer expressions, and partitions of
+//!   large module-summary walks. One enormous procedure and the bottom-up
+//!   module topology still contain serial work; and
+//! - the reported witness is shortest only for the selected stable anchor. It
+//!   is deterministic and actionable, but is not guaranteed to be the globally
+//!   shortest cycle in the SCC.
 
 use crate::AnalyzerError;
 use crate::HashMap;
