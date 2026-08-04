@@ -10200,6 +10200,381 @@ fn combinational_loop_review_preserves_constant_shift_positions() {
 }
 
 #[test]
+#[ignore = "known bug: an unresolved write is modeled as a strong update of every candidate"]
+fn combinational_loop_review_dynamic_write_is_a_weak_update() {
+    // Why this case exists: o[idx] writes exactly one candidate. For idx != 1,
+    // the old o[1] remains live through o[0] = o[1]; o[1] = o[0], so a real
+    // structural self-dependency must not be killed by the dynamic store.
+    assert_comb_loop_for_case(
+        "a dynamic store cannot kill every candidate definition",
+        r#"
+        module Top (
+            idx: input  logic<2>,
+            o  : output logic<4>,
+        ) {
+            always_comb {
+                o[idx] = 0;
+                o[0] = o[1];
+                o[1] = o[0];
+            }
+        }
+        "#,
+        true,
+    );
+
+    // Why this control exists: a full-width write really does kill every
+    // candidate before the assignment chain and must remain loop-free.
+    assert_comb_loop_for_case(
+        "a full store still kills every candidate definition",
+        r#"
+        module Top (
+            o: output logic<4>,
+        ) {
+            always_comb {
+                o = 0;
+                o[0] = o[1];
+                o[1] = o[0];
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "known bug: overlapping bounded wildcard regions are disconnected graph nodes"]
+fn combinational_loop_review_aliases_overlapping_unknown_regions() {
+    // Why this case exists: mem[i][j] and mem[0][k] can denote the same
+    // element when i == 0 and j == k. Region::may_alias already says these
+    // bounded regions overlap, so the graph must preserve that realizable SCC.
+    assert_comb_loop_for_case(
+        "overlapping dynamic prefixes retain realizable feedback",
+        r#"
+        module Top (
+            i: input  logic,
+            j: input  logic,
+            k: input  logic,
+            o: output logic,
+        ) {
+            var mem: logic [2, 2];
+            var feedback: logic;
+            always_comb {
+                mem[i][j] = feedback;
+            }
+            always_comb {
+                feedback = mem[0][k];
+            }
+            assign o = feedback;
+        }
+        "#,
+        true,
+    );
+
+    // Why this control exists: statically disjoint row one cannot alias row
+    // zero, even though both have a dynamic suffix.
+    assert_comb_loop_for_case(
+        "disjoint dynamic prefixes remain independent",
+        r#"
+        module Top (
+            j: input  logic,
+            k: input  logic,
+            o: output logic,
+        ) {
+            var mem: logic [2, 2];
+            var feedback: logic;
+            always_comb {
+                mem[1][j] = feedback;
+            }
+            always_comb {
+                feedback = mem[0][k];
+            }
+            assign o = feedback;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "known bug: module summaries discard aligned bit coordinates"]
+fn combinational_loop_review_preserves_module_summary_positions() {
+    // Why this case exists: Child is a bitwise identity. child_o[1] is driven
+    // by the constant child_i[1], so feeding it to child_i[0] is acyclic.
+    // A module summary must not collapse the identity into an all-to-all edge.
+    assert_comb_loop_for_case(
+        "a vector identity module preserves disjoint bit positions",
+        r#"
+        module Child (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            assign o = i;
+        }
+        module Top (
+            o: output logic<2>,
+        ) {
+            var child_i: logic<2>;
+            var child_o: logic<2>;
+            inst u: Child (
+                i: child_i,
+                o: child_o,
+            );
+            assign child_i[0] = child_o[1];
+            assign child_i[1] = 0;
+            assign o = child_o;
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: returning child_o[0] to its corresponding
+    // child_i[0] is a real same-bit loop across the instance boundary.
+    assert_comb_loop_for_case(
+        "a vector identity module retains same-bit feedback",
+        r#"
+        module Child (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            assign o = i;
+        }
+        module Top (
+            o: output logic<2>,
+        ) {
+            var child_i: logic<2>;
+            var child_o: logic<2>;
+            inst u: Child (
+                i: child_i,
+                o: child_o,
+            );
+            assign child_i[0] = child_o[0];
+            assign child_i[1] = 0;
+            assign o = child_o;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "known bug: a dynamic instance output drops its address dependency"]
+fn combinational_loop_review_keeps_instance_output_address_dependency() {
+    // Why this case exists: idx selects the instance output destination and
+    // is itself read from one candidate destination. This is the same address
+    // feedback already detected for a procedural bus[idx] assignment.
+    assert_comb_loop_for_case(
+        "a dynamic instance output retains address feedback",
+        r#"
+        module Child (
+            i: input  logic,
+            o: output logic,
+        ) {
+            assign o = i;
+        }
+        module Top (
+            seed: input  logic,
+            o   : output logic,
+        ) {
+            var idx: logic;
+            var bus: logic [2];
+            inst u: Child (
+                i: seed,
+                o: bus[idx],
+            );
+            assign idx = bus[0];
+            assign o = idx;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "known bug: dependency-free captured function writes disappear from summaries"]
+fn combinational_loop_review_keeps_dependency_free_function_write() {
+    // Why this case exists: clear_x writes x even though the written value has
+    // no signal dependency. That write kills LiveOnEntry before o reads x;
+    // omitting it invents x -> o -> x feedback.
+    assert_comb_loop_for_case(
+        "a constant captured function write participates in procedural order",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var x: logic;
+            function clear_x () {
+                x = 0;
+            }
+            always_comb {
+                clear_x();
+                o = x;
+                x = o;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "known bug: observer lowering skips return-only function side effects"]
+fn combinational_loop_review_keeps_observer_function_side_effect() {
+    // Why this case exists: IEEE 1800-2023 11.3.5 preserves side effects of
+    // evaluated expressions. touch(o) is evaluated as a display argument, and
+    // 9.2.2.2 makes its captured x write part of the always_comb procedure.
+    assert_comb_loop_for_case(
+        "a display argument retains a called function global write",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var x: logic;
+            function touch (
+                a: input logic,
+            ) -> logic {
+                x = a;
+                return 0;
+            }
+            always_comb {
+                $display("touch=%d", touch(o));
+            }
+            always_comb {
+                o = x;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "known bug: an unused child input hides function side effects in its actual"]
+fn combinational_loop_review_keeps_instance_actual_function_side_effect() {
+    // Why this case exists: IEEE 1800-2023 4.9.6 models an input connection as
+    // an implicit continuous assignment. Its actual expression is evaluated
+    // even when the child has no output feedthrough, so touch(o) still writes x.
+    assert_comb_loop_for_case(
+        "an instance input actual retains a called function global write",
+        r#"
+        module Sink (
+            i: input logic,
+        ) {}
+        module Top (
+            o: output logic,
+        ) {
+            var x: logic;
+            function touch (
+                a: input logic,
+            ) -> logic {
+                x = a;
+                return 0;
+            }
+            inst u: Sink (
+                i: touch(o),
+            );
+            assign o = x;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "known bug: function output arguments discard aligned bit coordinates"]
+fn combinational_loop_review_preserves_vector_function_output_bits() {
+    // Why this case exists: output argument y is a vector identity of x.
+    // Broadcasting all x bits to all y bits invents value[1] -> o[0] feedback.
+    assert_comb_loop_for_case(
+        "a vector function output argument preserves bit identity",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            function copy (
+                x: input  logic<2>,
+                y: output logic<2>,
+            ) {
+                y = x;
+            }
+            var value: logic<2>;
+            always_comb {
+                copy(value, o);
+            }
+            assign value[0] = 0;
+            assign value[1] = o[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "known bug: split function return dependencies fall back to all-to-all"]
+fn combinational_loop_review_preserves_split_function_return_bits() {
+    // Why this case exists: {high, low}[0] is low. Returning o[0] to high is
+    // acyclic when low is constant, even though the return uses two regions.
+    assert_comb_loop_for_case(
+        "a concatenated function return preserves each source bit",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            function combine_bits (
+                high: input logic,
+                low : input logic,
+            ) -> logic<2> {
+                return {high, low};
+            }
+            var high: logic;
+            var low: logic;
+            assign o = combine_bits(high, low);
+            assign high = o[0];
+            assign low = 0;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "known bug: recursive function identity ignores generic specialization"]
+fn combinational_loop_review_distinguishes_generic_function_specializations() {
+    // Why this case exists: recurse::<2> and recurse::<1> are distinct finite
+    // specializations. Elaboration reduces the call to passed = feedback, so
+    // treating the second specialization as infinite recursion hides a real SCC.
+    let errors = analyze_with_large_stack(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function recurse::<N: u32> (
+                x: input logic,
+            ) -> logic {
+                gen M: u32 = N - 1;
+                if N == 1 {
+                    return x;
+                } else {
+                    return recurse::<M>(x);
+                }
+            }
+            var feedback: logic;
+            var passed: logic;
+            assign passed = recurse::<2>(feedback);
+            assign feedback = passed;
+            assign o = feedback;
+        }
+        "#,
+    );
+    let actual = errors
+        .iter()
+        .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }));
+    assert!(
+        actual,
+        "finite generic recursion retains the specialized feedthrough: {errors:?}"
+    );
+}
+
+#[test]
 fn combinational_loop_memory_ssa_celox_regression_corpus() {
     // Ported from celox/tests/basic.rs::test_always_comb_read_before_write_uses_previous_value.
     assert_comb_loop_for_case(
