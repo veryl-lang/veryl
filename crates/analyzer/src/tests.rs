@@ -14350,6 +14350,152 @@ fn comb_loop_branch_weak_writes_share_one_coverage_diagnostic() {
 }
 
 #[test]
+fn comb_coverage_dynamic_if_respects_each_cond_type() {
+    // Why this case exists: cond_type historically suppresses incomplete-
+    // assignment diagnostics at the annotated branch. A constant condition
+    // would be folded before MemorySSA and would not exercise this contract.
+    for (cond_type, expect_uncovered) in [
+        ("unique", false),
+        ("unique0", false),
+        ("priority", false),
+        ("none", true),
+    ] {
+        let code = format!(
+            r#"
+            module Top (
+                sel: input  logic,
+                o  : output logic,
+            ) {{
+                always_comb {{
+                    #[cond_type({cond_type})]
+                    if sel {{
+                        o = 1;
+                    }}
+                }}
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        let uncovered = errors
+            .iter()
+            .filter(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+            .count();
+        assert_eq!(
+            uncovered,
+            usize::from(expect_uncovered),
+            "cond_type({cond_type}) produced unexpected coverage diagnostics: {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn comb_coverage_dynamic_case_respects_each_cond_type() {
+    // Why this case exists: case lowering has an implicit empty default path.
+    // Its dynamic target must retain the same cond_type suppression contract
+    // as if lowering, including cond_type(none) restoring the diagnostic.
+    for (cond_type, expect_uncovered) in [
+        ("unique", false),
+        ("unique0", false),
+        ("priority", false),
+        ("none", true),
+    ] {
+        let code = format!(
+            r#"
+            module Top (
+                sel: input  logic,
+                o  : output logic,
+            ) {{
+                always_comb {{
+                    #[cond_type({cond_type})]
+                    case sel {{
+                        0: o = 1;
+                    }}
+                }}
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        let uncovered = errors
+            .iter()
+            .filter(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+            .count();
+        assert_eq!(
+            uncovered,
+            usize::from(expect_uncovered),
+            "cond_type({cond_type}) produced unexpected coverage diagnostics: {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn comb_coverage_cond_type_suppression_is_join_local() {
+    // Why this case exists: dropping every write beneath cond_type from
+    // coverage would also deprive the ordinary outer join of its diagnostic
+    // source. Suppression belongs to the annotated CFG join, while retention
+    // introduced by another join remains diagnostic.
+    let errors = analyze(
+        r#"
+        module Top (
+            outer: input  logic,
+            inner: input  logic,
+            o    : output logic,
+        ) {
+            always_comb {
+                if outer {
+                    #[cond_type(priority)]
+                    if inner {
+                        o = 1;
+                    }
+                }
+            }
+        }
+        "#,
+    );
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+            .count(),
+        1,
+        "the unannotated outer join must remain diagnostic: {errors:#?}"
+    );
+}
+
+#[test]
+fn comb_loop_cond_type_suppresses_coverage_without_erasing_feedback() {
+    // Why this case exists: cond_type affects only incomplete-assignment
+    // reporting. The retained value and explicit self-read remain in the
+    // causal summary, so a proven structural loop must still be rejected.
+    let errors = analyze(
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            always_comb {
+                #[cond_type(priority)]
+                if sel {
+                    o = o;
+                }
+            }
+        }
+        "#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "cond_type must not erase a proven feedback dependency: {errors:#?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::UncoveredBranch { .. })),
+        "cond_type(priority) must still suppress its coverage diagnostic: {errors:#?}"
+    );
+}
+
+#[test]
 fn comb_loop_dynamic_loop_coverage_is_not_duplicated() {
     // Why this case exists: both legacy branch bookkeeping and MemorySSA can
     // observe the missing path inside a dynamic loop. Coverage ownership must

@@ -105,6 +105,12 @@ loop, and a dynamic write which cannot certainly cover the whole destination.
 A complete write before or after such a construct can remove retention when it
 dominates every relevant exit.
 
+For incomplete-assignment diagnostics, `cond_type(unique)`,
+`cond_type(unique0)`, and `cond_type(priority)` suppress retention introduced
+at the annotated conditional, while `cond_type(none)` does not. This policy
+does not erase the retained value or any causal dependency, and retention
+introduced at another unsuppressed control-flow join remains diagnostic.
+
 ### Functions
 
 Dependencies through function inputs, outputs, return values, and

@@ -83,6 +83,9 @@ pub enum Event<O> {
         /// of `dst[0]` depends only on `src[0]`.
         aligned_dependencies: Vec<AlignedDependency>,
     },
+    /// Marks a CFG join whose entry-state retention is intentionally exempt
+    /// from coverage diagnostics. The retained value remains in the summary.
+    SuppressRetentionDiagnostic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +129,9 @@ pub struct RetainedOutput<O> {
     /// The unresolved write which may leave this region untouched. `None`
     /// means retention comes from a control-flow path which performs no write.
     pub origin: Option<WriteId>,
+    /// Whether this retained path is eligible for an incomplete-assignment
+    /// diagnostic. Paths to the same output may carry both values.
+    pub coverage_diagnostic: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,6 +243,7 @@ struct DepVersion<O> {
     periodic_output: Option<PeriodicProjection>,
     origin: Option<WriteId>,
     retention_origin: Option<WriteId>,
+    retention_coverage_diagnostic: bool,
     marker: std::marker::PhantomData<O>,
 }
 
@@ -503,6 +510,17 @@ where
     let mut ssa_events = vec![Vec::new(); procedure.events.len()];
     let mut read_locations = BTreeMap::new();
     let mut write_locations = BTreeMap::new();
+    let suppressed_retention_blocks = procedure
+        .events
+        .iter()
+        .enumerate()
+        .filter_map(|(block, events)| {
+            events
+                .iter()
+                .any(|event| matches!(event, Event::SuppressRetentionDiagnostic))
+                .then_some(block)
+        })
+        .collect::<BTreeSet<_>>();
 
     for (block, events) in procedure.events.iter().enumerate() {
         for (position, event) in events.iter().enumerate() {
@@ -581,6 +599,7 @@ where
                         });
                     }
                 }
+                Event::SuppressRetentionDiagnostic => {}
             }
         }
     }
@@ -893,6 +912,7 @@ where
             None,
             None,
             None,
+            true,
         )];
         let mut visited = BTreeSet::new();
         while let Some((
@@ -905,6 +925,7 @@ where
             path_periodic_output,
             path_origin,
             path_retention_origin,
+            path_retention_coverage_diagnostic,
         )) = stack.pop()
         {
             if !visited.insert(DepVersion::<O> {
@@ -917,6 +938,7 @@ where
                 periodic_output: path_periodic_output.clone(),
                 origin: path_origin,
                 retention_origin: path_retention_origin,
+                retention_coverage_diagnostic: path_retention_coverage_diagnostic,
                 marker: std::marker::PhantomData,
             }) {
                 continue;
@@ -926,6 +948,7 @@ where
                     retained_outputs.insert(RetainedOutput {
                         output: atom_region(atoms[output_atom]),
                         origin: path_retention_origin,
+                        coverage_diagnostic: path_retention_coverage_diagnostic,
                     });
                     continue;
                 }
@@ -960,6 +983,17 @@ where
                 Version::Entry(_) | Version::Phi { .. } => None,
             };
             if let Some(inputs) = version_deps.get(&version) {
+                // The innermost join on a retained path determines which
+                // source construct exposed the missing definition. A nested
+                // ordinary join must therefore override an outer suppression,
+                // and an annotated inner join must override an ordinary outer
+                // join for its own path.
+                let next_retention_coverage_diagnostic = match version {
+                    Version::Phi { block, .. } => !suppressed_retention_blocks.contains(&block),
+                    Version::Entry(_) | Version::Definition { .. } => {
+                        path_retention_coverage_diagnostic
+                    }
+                };
                 for (
                     input,
                     kind,
@@ -1065,6 +1099,7 @@ where
                         next_periodic_output,
                         next_origin,
                         next_retention_origin,
+                        next_retention_coverage_diagnostic,
                     ));
                 }
             }
@@ -1174,6 +1209,7 @@ fn build_atoms<O: Copy + Ord>(
         }
         let region = match event {
             Event::Read { region, .. } | Event::Write { region, .. } => *region,
+            Event::SuppressRetentionDiagnostic => continue,
         };
         if matches!(
             region,
@@ -1602,9 +1638,99 @@ mod tests {
             vec![RetainedOutput {
                 output: exact(1, 0, 1),
                 origin: None,
+                coverage_diagnostic: true,
             }]
         );
         assert_eq!(summary.phi_count, 1);
+    }
+
+    #[test]
+    fn suppressed_join_preserves_retention_without_diagnostic_provenance() {
+        // Why this case exists: source-level completeness assertions suppress
+        // only the coverage diagnostic. They must not erase the retained
+        // entry value from the MemorySSA summary.
+        let procedure = Procedure {
+            entry: 0,
+            exit: 3,
+            successors: vec![vec![1, 2], vec![3], vec![3], vec![]],
+            events: vec![
+                vec![],
+                vec![Event::Write {
+                    id: 0,
+                    region: exact(1, 0, 1),
+                    dependencies: vec![],
+                    aligned_dependencies: vec![],
+                }],
+                vec![],
+                vec![Event::SuppressRetentionDiagnostic],
+            ],
+            object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
+            incomplete: BTreeSet::new(),
+        };
+
+        let summary = analyze(&procedure).unwrap();
+        assert_eq!(
+            summary.retained_outputs,
+            vec![RetainedOutput {
+                output: exact(1, 0, 1),
+                origin: None,
+                coverage_diagnostic: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn nested_ordinary_join_overrides_outer_retention_suppression() {
+        // Why this case exists: suppression belongs to one annotated join,
+        // not every write lexically inside it. The inner ordinary branch has
+        // its own missing-definition path and remains diagnostic.
+        let procedure = Procedure {
+            entry: 0,
+            exit: 6,
+            successors: vec![
+                vec![1, 2],
+                vec![3, 4],
+                vec![6],
+                vec![5],
+                vec![5],
+                vec![6],
+                vec![],
+            ],
+            events: vec![
+                vec![],
+                vec![],
+                vec![],
+                vec![Event::Write {
+                    id: 0,
+                    region: exact(1, 0, 1),
+                    dependencies: vec![],
+                    aligned_dependencies: vec![],
+                }],
+                vec![],
+                vec![],
+                vec![Event::SuppressRetentionDiagnostic],
+            ],
+            object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
+            incomplete: BTreeSet::new(),
+        };
+
+        let summary = analyze(&procedure).unwrap();
+        assert!(
+            summary
+                .retained_outputs
+                .iter()
+                .any(|retained| retained.coverage_diagnostic),
+            "the inner ordinary join must retain diagnostic provenance: {summary:#?}"
+        );
+        assert!(
+            summary
+                .retained_outputs
+                .iter()
+                .any(|retained| !retained.coverage_diagnostic),
+            "the outer annotated join must retain suppressed provenance: {summary:#?}"
+        );
     }
 
     #[test]

@@ -3,6 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::attribute::{Attribute, CondTypeItem};
+use crate::attribute_table;
 use crate::conv::Context;
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CombDeclaration, Expression, Factor,
@@ -380,6 +382,19 @@ fn weak_region(region: Region<VarId>) -> Region<VarId> {
     }
 }
 
+fn has_cond_type(token: &TokenRange) -> bool {
+    let mut attrs = attribute_table::get(&token.beg);
+    attrs.reverse();
+    for attr in attrs {
+        match attr {
+            Attribute::CondType(CondTypeItem::None) => return false,
+            Attribute::CondType(_) => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 struct Builder {
     context: Context,
     procedure: Procedure<VarId>,
@@ -567,6 +582,9 @@ impl Builder {
         let mut sites = BTreeSet::new();
         let mut retained_spans = BTreeMap::<VarId, Vec<Span>>::new();
         for retained in &summary.retained_outputs {
+            if !retained.coverage_diagnostic {
+                continue;
+            }
             let object = match retained.output {
                 Region::Exact { object, .. }
                 | Region::UnknownRegion { object, .. }
@@ -908,6 +926,9 @@ impl Builder {
                     None
                 } else {
                     let join = self.new_block();
+                    if has_cond_type(&statement.token) {
+                        self.procedure.events[join].push(Event::SuppressRetentionDiagnostic);
+                    }
                     for exit in exits {
                         self.edge(exit, join);
                     }
@@ -993,6 +1014,9 @@ impl Builder {
                     None
                 } else {
                     let join = self.new_block();
+                    if has_cond_type(&statement.token) {
+                        self.procedure.events[join].push(Event::SuppressRetentionDiagnostic);
+                    }
                     for exit in exits {
                         self.edge(exit, join);
                     }
