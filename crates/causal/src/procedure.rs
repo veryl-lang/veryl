@@ -120,11 +120,25 @@ pub struct Dependency<O> {
     pub origin: Option<WriteId>,
 }
 
+/// An output region whose exit version can be the procedure-entry version
+/// without any source-level read. This is state retention/incomplete write
+/// coverage, not a value dependency suitable for a combinational SCC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RetainedOutput<O> {
+    pub output: Region<O>,
+    /// The unresolved write which may leave this region untouched. `None`
+    /// means retention comes from a control-flow path which performs no write.
+    pub origin: Option<WriteId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcedureSummary<O> {
     pub dependencies: Vec<Dependency<O>>,
     /// Regular one-to-many transfers retained without expanding every copy.
     pub periodic_dependencies: Vec<PeriodicDependency<O>>,
+    /// Entry-state preservation is kept separate from value dependencies so
+    /// consumers can diagnose inferred state without inventing comb loops.
+    pub retained_outputs: Vec<RetainedOutput<O>>,
     /// Sparse output atoms which can be written on exit, including writes
     /// whose assigned value has no signal dependency.
     pub outputs: Vec<Region<O>>,
@@ -225,6 +239,7 @@ struct DepVersion<O> {
     translation: Option<i128>,
     periodic_output: Option<PeriodicProjection>,
     origin: Option<WriteId>,
+    retention_origin: Option<WriteId>,
     marker: std::marker::PhantomData<O>,
 }
 
@@ -726,6 +741,7 @@ where
         }
     }
 
+    let mut retained_outputs = BTreeSet::new();
     let mut dependencies = BTreeSet::new();
     let mut periodic_dependencies = BTreeSet::new();
     let mut uncertain_input_dependencies = BTreeSet::new();
@@ -742,6 +758,7 @@ where
             Some(0i128),
             None,
             None,
+            None,
         )];
         let mut visited = BTreeSet::new();
         while let Some((
@@ -753,6 +770,7 @@ where
             path_translation,
             path_periodic_output,
             path_origin,
+            path_retention_origin,
         )) = stack.pop()
         {
             if !visited.insert(DepVersion::<O> {
@@ -764,11 +782,19 @@ where
                 translation: path_translation,
                 periodic_output: path_periodic_output.clone(),
                 origin: path_origin,
+                retention_origin: path_retention_origin,
                 marker: std::marker::PhantomData,
             }) {
                 continue;
             }
             if let Version::Entry(input_atom) = version {
+                if active_read.is_none() {
+                    retained_outputs.insert(RetainedOutput {
+                        output: atom_region(atoms[output_atom]),
+                        origin: path_retention_origin,
+                    });
+                    continue;
+                }
                 let input = atom_region(atoms[input_atom]);
                 if let Some(periodic) = path_periodic_output {
                     periodic_dependencies.insert(PeriodicDependency {
@@ -799,7 +825,6 @@ where
                 Version::Definition { definition, .. } => Some(definition.write),
                 Version::Entry(_) | Version::Phi { .. } => None,
             };
-            let next_origin = path_origin.or(current_write);
             if let Some(inputs) = version_deps.get(&version) {
                 for (
                     input,
@@ -821,17 +846,27 @@ where
                     let preserve_active_read = *preserve_active_read;
                     let weak_previous = *weak_previous;
                     let translation = *translation;
-                    if weak_previous {
-                        let Some(read) = active_read else {
-                            // Retention by itself is not value feedback. It
-                            // becomes observable only through a later read of
-                            // a possibly unselected candidate.
-                            continue;
-                        };
-                        if current_write.is_some_and(|write| must_alias.contains(&(read, write))) {
-                            continue;
-                        }
+                    if weak_previous
+                        && active_read.is_some_and(|read| {
+                            current_write.is_some_and(|write| must_alias.contains(&(read, write)))
+                        })
+                    {
+                        continue;
                     }
+                    // A weak write does not supply the preserved value. Walk
+                    // through it without claiming it as the dependency origin;
+                    // remember it separately only if the walk reaches entry
+                    // without encountering an actual read.
+                    let next_origin = if weak_previous {
+                        path_origin
+                    } else {
+                        path_origin.or(current_write)
+                    };
+                    let next_retention_origin = if weak_previous {
+                        path_retention_origin.or(current_write)
+                    } else {
+                        path_retention_origin
+                    };
                     let mut next_aligned = path_aligned && aligned;
                     let (next_translation, next_periodic_output) =
                         if let Some(periodic) = periodic_output {
@@ -888,6 +923,7 @@ where
                         next_translation,
                         next_periodic_output,
                         next_origin,
+                        next_retention_origin,
                     ));
                 }
             }
@@ -919,6 +955,7 @@ where
             })
             .collect(),
         periodic_dependencies: periodic_dependencies.into_iter().collect(),
+        retained_outputs: retained_outputs.into_iter().collect(),
         outputs: written_atoms
             .iter()
             .copied()
@@ -1416,7 +1453,7 @@ mod tests {
     }
 
     #[test]
-    fn branch_merge_retains_only_the_live_entry_arm() {
+    fn branch_merge_reports_retained_entry_separately() {
         let procedure = Procedure {
             entry: 0,
             exit: 3,
@@ -1437,13 +1474,11 @@ mod tests {
             incomplete: BTreeSet::new(),
         };
         let summary = analyze(&procedure).unwrap();
+        assert!(summary.dependencies.is_empty());
         assert_eq!(
-            summary.dependencies,
-            vec![Dependency {
-                input: exact(1, 0, 1),
+            summary.retained_outputs,
+            vec![RetainedOutput {
                 output: exact(1, 0, 1),
-                kind: EdgeKind::Value,
-                aligned: true,
                 origin: None,
             }]
         );

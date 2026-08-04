@@ -386,9 +386,28 @@ impl Statement {
             }
             Statement::FunctionCall(x) => x.eval_assign(context, assign_table, assign_context),
             Statement::For(x) => {
+                // A runtime loop may execute zero times. Treat its body as one
+                // coverage arm and the zero-trip path as an empty arm; merely
+                // walking the body once incorrectly marks every body write as
+                // unconditional.
+                let mut body_table = AssignTable::new(context);
+                std::mem::swap(&mut body_table.refernced, &mut assign_table.refernced);
+                let base_tables = if assign_table.table.is_empty() {
+                    Cow::Borrowed(base_tables)
+                } else {
+                    let mut base_tables = base_tables.to_vec();
+                    base_tables.push(assign_table);
+                    Cow::Owned(base_tables)
+                };
                 for s in &x.body {
-                    s.eval_assign(context, assign_table, assign_context, base_tables);
+                    s.eval_assign(context, &mut body_table, assign_context, &base_tables);
                 }
+                if assign_context.is_comb() {
+                    let zero_trip = AssignTable::new(context);
+                    body_table.check_uncoverd(context, &zero_trip, &base_tables);
+                }
+                assign_table.merge_by_or(context, &mut body_table, false);
+                std::mem::swap(&mut assign_table.refernced, &mut body_table.refernced);
             }
             Statement::TbMethodCall(x) => {
                 // A component method's return value drives its destination
