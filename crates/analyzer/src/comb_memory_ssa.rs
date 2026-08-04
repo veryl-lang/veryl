@@ -33,6 +33,11 @@ enum FunctionCacheEntry {
     Ready(Option<Arc<ProcedureAnalysis>>),
 }
 
+enum PeriodicAssignmentRun {
+    Lowered(usize),
+    Rejected(usize),
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct FunctionAnalysisCache {
     entries: Arc<Mutex<BTreeMap<FunctionKey, FunctionCacheEntry>>>,
@@ -706,10 +711,19 @@ impl Builder {
     ) -> Option<usize> {
         let mut index = 0usize;
         while index < statements.len() {
-            if let Some(consumed) =
+            if let Some(run) =
                 self.lower_periodic_variable_assignments(&statements[index..], block, controls)
             {
-                index += consumed;
+                match run {
+                    PeriodicAssignmentRun::Lowered(consumed) => index += consumed,
+                    PeriodicAssignmentRun::Rejected(consumed) => {
+                        for statement in &statements[index..index + consumed] {
+                            block =
+                                self.lower_statement(statement, block, controls, break_target)?;
+                        }
+                        index += consumed;
+                    }
+                }
                 continue;
             }
             block = self.lower_statement(&statements[index], block, controls, break_target)?;
@@ -727,7 +741,7 @@ impl Builder {
         statements: &[Statement],
         block: usize,
         controls: &[(usize, EdgeKind)],
-    ) -> Option<usize> {
+    ) -> Option<PeriodicAssignmentRun> {
         let Statement::Assign(first) = statements.first()? else {
             return None;
         };
@@ -786,18 +800,21 @@ impl Builder {
             .iter()
             .any(|(candidate, _)| *candidate != object)
         {
-            return None;
+            return Some(PeriodicAssignmentRun::Rejected(destinations.len()));
         }
         destinations.sort_unstable_by_key(|(_, span)| span.start);
         if destinations
             .windows(2)
             .any(|pair| pair[0].1.end().is_none_or(|end| end != pair[1].1.start))
         {
-            return None;
+            return Some(PeriodicAssignmentRun::Rejected(destinations.len()));
         }
+        let Some(length) = source_span.length.checked_mul(destinations.len()) else {
+            return Some(PeriodicAssignmentRun::Rejected(destinations.len()));
+        };
         let output = Span {
             start: destinations[0].1.start,
-            length: source_span.length.checked_mul(destinations.len())?,
+            length,
         };
         let read = self.push_read(block, source);
         let id = self.next_write;
@@ -831,7 +848,7 @@ impl Builder {
                     .collect(),
             }],
         });
-        Some(destinations.len())
+        Some(PeriodicAssignmentRun::Lowered(destinations.len()))
     }
 
     fn lower_statement(
