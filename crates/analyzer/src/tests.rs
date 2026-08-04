@@ -9867,7 +9867,14 @@ fn combinational_loop_memory_ssa_retains_dynamic_region_uncertainty() {
     let post1 = Analyzer::analyze_post_pass1();
     assert!(post1.is_empty(), "{post1:?}");
     let pass2 = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
-    assert!(pass2.is_empty(), "{pass2:?}");
+    // Why this assertion exists: a dynamic destination is a weak write, so
+    // the assignment pass must report its retained candidates even though the
+    // comb-loop pass keeps that uncertainty out of hard SCC diagnostics.
+    assert_eq!(pass2.len(), 1, "{pass2:?}");
+    assert!(
+        matches!(pass2[0], AnalyzerError::UncoveredBranch { .. }),
+        "{pass2:?}"
+    );
 
     let result = crate::comb_loop_detect::check_detailed(&ir);
     assert!(result.errors.is_empty(), "{:#?}", result.errors);
@@ -13412,13 +13419,12 @@ fn combinational_loop_missing_switch_default_retention_is_not_feedback() {
 }
 
 #[test]
-fn combinational_loop_latch_boundary_breaks_a_cross_variable_cycle() {
-    // Why this case exists: collapsing a latched variable's pre-state and
-    // next-state into one NodeKey invents the cycle held -> o -> enable ->
-    // held. A state boundary must cut that path even when the false SCC spans
-    // several source variables instead of appearing as a direct self-edge.
-    assert_incomplete_assignment_without_comb_loop(
-        "a retained variable is a state boundary inside a larger apparent SCC",
+fn combinational_loop_retention_does_not_hide_cross_variable_feedback() {
+    // Why this case exists: retention itself is diagnosed as incomplete
+    // assignment, but it must not erase the explicit held -> o -> enable
+    // value/control dependencies. Those dependencies form proven structural
+    // feedback independently of the retained entry-state path.
+    let errors = analyze(
         r#"
         module Top (
             o: output logic,
@@ -13434,6 +13440,18 @@ fn combinational_loop_latch_boundary_breaks_a_cross_variable_cycle() {
             assign enable = o;
         }
         "#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })),
+        "the missing assignment path must remain diagnosed: {errors:#?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "retention must not hide independently proven structural feedback: {errors:#?}"
     );
 }
 
