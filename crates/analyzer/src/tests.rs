@@ -21952,6 +21952,7 @@ fn reanalyze_after_drop() {
     const CODE: &str = r#"package P {
     const A: u32 = 1;
 }
+
 package Q::<W: u32> {
     const B: u32 = W;
 }
@@ -21999,4 +22000,208 @@ module M {
 
     let errors = analyze();
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+#[ignore = "captured third-review regression: context width loses extension positions"]
+fn combinational_loop_review_preserves_context_width_extension_positions() {
+    // Why these cases exist: IEEE 1800-2023 11.8.2 zero-extends an unsigned
+    // two-bit RHS to its four-bit assignment context. The new high bits are
+    // constants, while the low-bit control remains a real feedback path.
+    for (name, feedback, expected) in [
+        (
+            "unsigned extension does not read a zero-filled high bit",
+            "o[3]",
+            false,
+        ),
+        (
+            "unsigned extension retains its corresponding low bit",
+            "o[0]",
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Top (
+                    o: output logic<4>,
+                ) {{
+                    var value: logic<2>;
+                    assign o = value;
+                    assign value[0] = {feedback};
+                    assign value[1] = 0;
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+
+    // Why these cases exist: signed extension replicates only the source sign
+    // bit. Feedback from a high destination bit to value[0] is disjoint, but
+    // feedback to value[1] is a real sign-fill cycle.
+    for (name, target, expected) in [
+        (
+            "signed extension does not read a non-sign source bit",
+            0,
+            false,
+        ),
+        ("signed extension retains its replicated sign bit", 1, true),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Top (
+                    o: output logic<4>,
+                ) {{
+                    var value: logic<2>;
+                    assign o = $signed(value);
+                    assign value[{target}] = o[3];
+                    assign value[{}] = 0;
+                }}
+                "#,
+                1 - target
+            ),
+            expected,
+        );
+    }
+
+    // Why this case exists: conditional operands are extended to the result
+    // width before selection (11.4.11); the control dependency does not turn
+    // an unsigned zero-fill bit into data feedthrough.
+    assert_comb_loop_for_case(
+        "a ternary preserves unsigned zero extension",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic<4>,
+        ) {
+            var value: logic<2>;
+            assign o = if sel ? value : 4'b0;
+            assign value[0] = o[3];
+            assign value[1] = 0;
+        }
+        "#,
+        false,
+    );
+
+    // Why these cases exist: formal argument coercion uses the same unsigned
+    // extension at function and module boundaries; a high formal bit is zero.
+    assert_comb_loop_for_case(
+        "a function formal high bit does not read an unsigned short actual",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var value: logic<2>;
+            function high (
+                i: input logic<4>,
+            ) -> logic {
+                return i[3];
+            }
+            assign o = high(value);
+            assign value[0] = o;
+            assign value[1] = 0;
+        }
+        "#,
+        false,
+    );
+    assert_comb_loop_for_case(
+        "a module formal high bit does not read an unsigned short actual",
+        r#"
+        module High (
+            i: input  logic<4>,
+            o: output logic,
+        ) {
+            assign o = i[3];
+        }
+        module Top (
+            o: output logic,
+        ) {
+            var value: logic<2>;
+            inst u: High (
+                i: value,
+                o: o,
+            );
+            assign value[0] = o;
+            assign value[1] = 0;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "captured third-review regression: dynamic selectors discard bounded values"]
+fn combinational_loop_review_bounds_dynamic_selector_values() {
+    // Why these cases exist: a two-state one-bit selector has exactly the
+    // values {0,1}. Adding two therefore reaches only elements {2,3}; element
+    // zero is disjoint, while element two is a real candidate.
+    for (name, target, expected) in [
+        (
+            "a shifted one-bit index cannot reach element zero",
+            0,
+            false,
+        ),
+        ("a shifted one-bit index can reach element two", 2, true),
+    ] {
+        let clears = match target {
+            0 => "assign value[1] = 0; assign value[2] = 0; assign value[3] = 0;",
+            2 => "assign value[0] = 0; assign value[1] = 0; assign value[3] = 0;",
+            _ => unreachable!(),
+        };
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Top (
+                    idx: input  bit,
+                    o  : output logic,
+                ) {{
+                    var value: logic [4];
+                    assign o = value[idx + 2];
+                    assign value[{target}] = o;
+                    {clears}
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+
+    // Why these cases exist: an indexed part-select with base {0,1} and width
+    // two reaches only bits 0..2. Bit three is disjoint; bit zero is reachable.
+    for (name, target, expected) in [
+        (
+            "a bounded indexed part-select cannot reach bit three",
+            3,
+            false,
+        ),
+        ("a bounded indexed part-select can reach bit zero", 0, true),
+    ] {
+        let clears = match target {
+            0 => "assign value[1] = 0; assign value[2] = 0; assign value[3] = 0;",
+            3 => "assign value[0] = 0; assign value[1] = 0; assign value[2] = 0;",
+            _ => unreachable!(),
+        };
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Top (
+                    idx: input  bit,
+                    o  : output logic<2>,
+                ) {{
+                    var value: logic<4>;
+                    assign o = value[idx+:2];
+                    assign value[{target}] = o[0];
+                    {clears}
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
 }
