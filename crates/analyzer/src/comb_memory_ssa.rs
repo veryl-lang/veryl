@@ -555,11 +555,12 @@ impl Builder {
                     ));
                 }
                 reads.extend(selector_reads.iter().copied());
-                let region = self.variable_region(*id, index, select);
-                reads.push((
-                    self.push_variable_read(block, *id, index, select, region, &selector_reads),
-                    kind,
-                ));
+                for region in self.variable_regions(*id, index, select) {
+                    reads.push((
+                        self.push_variable_read(block, *id, index, select, region, &selector_reads),
+                        kind,
+                    ));
+                }
             }
             Factor::HierVariable(_) => {
                 self.procedure
@@ -1728,26 +1729,28 @@ impl Builder {
             selector_reads.extend(self.read_expression(block, expression, EdgeKind::Address));
         }
         dependencies.extend(selector_reads.iter().copied());
-        let region = self.variable_region(destination.id, &destination.index, &destination.select);
-        let id = self.next_write;
-        self.next_write += 1;
-        if let Some(key) = Self::unresolved_access_key(
-            destination.id,
-            &destination.index,
-            &destination.select,
-            region,
-        ) {
-            self.unresolved_writes
-                .entry(key)
-                .or_default()
-                .push((id, selector_reads.iter().map(|&(read, _)| read).collect()));
+        for region in self.variable_regions(destination.id, &destination.index, &destination.select)
+        {
+            let id = self.next_write;
+            self.next_write += 1;
+            if let Some(key) = Self::unresolved_access_key(
+                destination.id,
+                &destination.index,
+                &destination.select,
+                region,
+            ) {
+                self.unresolved_writes
+                    .entry(key)
+                    .or_default()
+                    .push((id, selector_reads.iter().map(|&(read, _)| read).collect()));
+            }
+            self.procedure.events[block].push(Event::Write {
+                id,
+                region,
+                dependencies: dependencies.clone(),
+                aligned_dependencies: aligned_dependencies.clone(),
+            });
         }
-        self.procedure.events[block].push(Event::Write {
-            id,
-            region,
-            dependencies,
-            aligned_dependencies,
-        });
     }
 
     fn aligned_assignment_dependencies(
@@ -1899,12 +1902,60 @@ impl Builder {
         index: &VarIndex,
         select: &VarSelect,
     ) -> Region<VarId> {
-        let Some(variable) = self.context.variables.get(&id).cloned() else {
+        let regions = self.variable_regions(id, index, select);
+        if regions.len() == 1 {
+            return regions[0];
+        }
+        let mut start = usize::MAX;
+        let mut end = 0usize;
+        for region in regions {
+            let Region::UnknownRegion { object, span } = region else {
+                return Region::UnknownObject(id);
+            };
+            if object != id {
+                return Region::UnknownObject(id);
+            }
+            start = start.min(span.start);
+            let Some(span_end) = span.end() else {
+                return Region::UnknownObject(id);
+            };
+            end = end.max(span_end);
+        }
+        let Some(length) = end.checked_sub(start) else {
             return Region::UnknownObject(id);
+        };
+        Region::UnknownRegion {
+            object: id,
+            span: Span { start, length },
+        }
+    }
+
+    fn variable_regions(
+        &mut self,
+        id: VarId,
+        index: &VarIndex,
+        select: &VarSelect,
+    ) -> Vec<Region<VarId>> {
+        let Some(variable) = self.context.variables.get(&id).cloned() else {
+            return vec![Region::UnknownObject(id)];
         };
         let Some(width) = variable.total_width() else {
-            return Region::UnknownObject(id);
+            return vec![Region::UnknownObject(id)];
         };
+        if let Some(regions) = self.bounded_variable_regions(id, &variable, index, select, width) {
+            return regions;
+        }
+        vec![self.variable_region_fallback(id, &variable, index, select, width)]
+    }
+
+    fn variable_region_fallback(
+        &mut self,
+        id: VarId,
+        variable: &crate::ir::Variable,
+        index: &VarIndex,
+        select: &VarSelect,
+        width: usize,
+    ) -> Region<VarId> {
         if index.0.is_empty() && select.0.is_empty() && select.1.is_none() {
             let Some(length) = variable
                 .r#type
@@ -1917,9 +1968,6 @@ impl Builder {
                 object: id,
                 span: Span { start: 0, length },
             };
-        }
-        if let Some(region) = self.bounded_variable_region(id, &variable, index, select, width) {
-            return region;
         }
         // Preserve the longest statically known prefix. `eval_value` maps an
         // X/Z numeric index to zero for simulation convenience, so alias
@@ -2032,14 +2080,14 @@ impl Builder {
     /// Exactly enumerate small two-state selector domains. This is deliberately
     /// bounded: four-state selectors retain X/Z candidates, and large domains
     /// fall back to the longest-static-prefix region below.
-    fn bounded_variable_region(
+    fn bounded_variable_regions(
         &mut self,
         id: VarId,
         variable: &crate::ir::Variable,
         index: &VarIndex,
         select: &VarSelect,
         width: usize,
-    ) -> Option<Region<VarId>> {
+    ) -> Option<Vec<Region<VarId>>> {
         let expressions = index
             .0
             .iter()
@@ -2128,20 +2176,32 @@ impl Builder {
         spans.sort_unstable();
         spans.dedup();
         let first = spans.first().copied()?;
+        let mut merged = Vec::new();
+        let mut start = first.start;
         let mut end = first.end()?;
         for span in spans.iter().copied().skip(1) {
             if span.start > end {
-                return None;
+                merged.push(Region::UnknownRegion {
+                    object: id,
+                    span: Span {
+                        start,
+                        length: end.checked_sub(start)?,
+                    },
+                });
+                start = span.start;
+                end = span.end()?;
+            } else {
+                end = end.max(span.end()?);
             }
-            end = end.max(span.end()?);
         }
-        Some(Region::UnknownRegion {
+        merged.push(Region::UnknownRegion {
             object: id,
             span: Span {
-                start: first.start,
-                length: end.checked_sub(first.start)?,
+                start,
+                length: end.checked_sub(start)?,
             },
-        })
+        });
+        Some(merged)
     }
 
     fn collect_two_state_variables(expression: &Expression, ids: &mut BTreeSet<VarId>) -> bool {
