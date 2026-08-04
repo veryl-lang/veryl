@@ -10558,6 +10558,40 @@ fn combinational_loop_review_keeps_instance_selector_function_side_effect() {
 }
 
 #[test]
+fn combinational_loop_review_keeps_instance_output_selector_function_side_effect() {
+    // Why this case exists: an output connection evaluates the selector in its
+    // destination. The observer must retain touch(o)'s module-scope write even
+    // though the child output value itself is constant.
+    assert_comb_loop_for_case(
+        "an instance output selector retains a called function global write",
+        r#"
+        module Source (
+            o: output logic,
+        ) {
+            assign o = 0;
+        }
+        module Top (
+            o: output logic,
+        ) {
+            var bus: logic<2>;
+            var x  : logic;
+            function touch (
+                a: input logic,
+            ) -> logic {
+                x = a;
+                return 0;
+            }
+            inst u: Source (
+                o: bus[touch(o)],
+            );
+            assign o = x;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn combinational_loop_review_preserves_vector_function_output_bits() {
     // Why this case exists: output argument y is a vector identity of x.
     // Broadcasting all x bits to all y bits invents value[1] -> o[0] feedback.
@@ -13671,7 +13705,7 @@ fn combinational_loop_runtime_form_cardinality_variants() {
     // same source-level cardinality rules even when break prevents unrolling.
     // Singleton bodies have an early-break coverage path; empty bodies have no
     // reachable assignment or dependency at all.
-    for range in ["0..=0", "rev 0..1", "0..1 step += 2"] {
+    for range in ["0..=0", "rev 0..1", "1..2 step *= 2"] {
         assert_incomplete_assignment_without_comb_loop(
             "a singleton runtime-form range can break before its write",
             &format!(
@@ -13696,7 +13730,7 @@ fn combinational_loop_runtime_form_cardinality_variants() {
         );
     }
 
-    for range in ["1..1", "rev 1..1", "1..1 step += 2"] {
+    for range in ["1..1", "rev 1..1", "2..2 step *= 2"] {
         let errors = analyze(&format!(
             r#"
             module Top (
@@ -13723,6 +13757,69 @@ fn combinational_loop_runtime_form_cardinality_variants() {
             "an empty {range} loop has no body path: {errors:#?}"
         );
     }
+}
+
+#[test]
+fn combinational_loop_runtime_form_iterator_constants_prune_dead_edges() {
+    // Why this case exists: break keeps the singleton loop in runtime-form IR,
+    // but its sole iterator value is still the constant 1. The unreachable
+    // i==0 assignment must not create a stronger-than-SV a -> b -> a loop.
+    assert_comb_loop_for_case(
+        "a runtime-form singleton retains its iterator constant",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for i in 1..2 {
+                    if i == 0 {
+                        a = b;
+                    } else {
+                        a = 0;
+                    }
+                    break;
+                }
+            }
+            assign b = a;
+            assign o = b;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn combinational_loop_runtime_form_iterator_constants_preserve_must_write() {
+    // Why this case exists: the two const iterations are i=0 and i=1, and the
+    // only reachable break follows the i=1 assignment. Every exit is covered;
+    // collapsing both iterations into one unknown body invents retention.
+    let errors = analyze(
+        r#"
+        module Top (
+            stop: input  logic,
+            o   : output logic,
+        ) {
+            var value: logic;
+            always_comb {
+                for i in 0..2 {
+                    if i == 1 {
+                        value = 1;
+                    }
+                    if i == 1 && stop {
+                        break;
+                    }
+                }
+                o = value;
+            }
+        }
+        "#,
+    );
+    assert!(
+        errors.is_empty(),
+        "all finite-loop exits assign value: {errors:#?}"
+    );
 }
 
 #[test]
@@ -13786,6 +13883,34 @@ fn combinational_loop_finite_runtime_form_recurrence_is_not_feedback() {
 }
 
 #[test]
+fn combinational_loop_finite_runtime_form_explicit_self_read_is_feedback() {
+    // Why this case exists: bounded lowering must remove only loop-carried
+    // pseudo-feedback. Without a dominating seed, the first iteration's
+    // explicit value read still forms real combinational self-feedback.
+    assert_comb_loop_for_case(
+        "a finite runtime-form loop retains its first explicit self-read",
+        r#"
+        module Top (
+            stop: input  logic,
+            o   : output logic,
+        ) {
+            var value: logic;
+            always_comb {
+                for _index in 0..2 {
+                    value = !value;
+                    if stop {
+                        break;
+                    }
+                }
+                o = value;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn combinational_loop_function_output_weak_write_retains_coverage() {
     // Why this case exists: a function output argument is copied back to its
     // caller, but a dynamic write inside the function still leaves unselected
@@ -13843,12 +13968,7 @@ fn combinational_loop_function_capture_coverage_obeys_caller_order() {
             }}
             "#
         ));
-        assert!(
-            errors
-                .iter()
-                .all(|error| !matches!(error, AnalyzerError::UncoveredBranch { .. })),
-            "caller ordering completely defines the captured value: {errors:#?}"
-        );
+        assert!(errors.is_empty(), "caller ordering is valid: {errors:#?}");
     }
 }
 
@@ -14033,6 +14153,40 @@ fn combinational_loop_branch_weak_writes_share_one_coverage_diagnostic() {
 }
 
 #[test]
+fn combinational_loop_dynamic_runtime_coverage_is_not_duplicated() {
+    // Why this case exists: both legacy branch bookkeeping and MemorySSA can
+    // observe the missing path inside a dynamic loop. Coverage ownership must
+    // produce one warning rather than appending the same warning twice.
+    let errors = analyze(
+        r#"
+        module Top (
+            n        : input  logic<32>,
+            condition: input  logic,
+            o        : output logic,
+        ) {
+            var value: logic;
+            always_comb {
+                for _index in 0..n {
+                    if condition {
+                        value = 1;
+                    }
+                }
+                o = value;
+            }
+        }
+        "#,
+    );
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+            .count(),
+        1,
+        "dynamic-loop coverage must be reported once: {errors:#?}"
+    );
+}
+
+#[test]
 fn combinational_loop_runtime_coverage_sites_stay_region_local() {
     // Why this case exists: value[1] is fully defined even though it is also
     // written in a runtime loop. Its loop assignment must not be reported as a
@@ -14068,6 +14222,10 @@ fn combinational_loop_runtime_coverage_sites_stay_region_local() {
         .collect::<Vec<_>>();
     assert_eq!(coverage.len(), 1, "{errors:#?}");
     assert_eq!(coverage[0].len(), 1, "{errors:#?}");
+    assert_eq!(
+        coverage[0][0].offset(),
+        code.find("value[0] = 1").expect("retained bit assignment")
+    );
 }
 
 #[test]
@@ -14111,6 +14269,11 @@ fn combinational_loop_captured_coverage_sites_stay_region_local() {
         .collect::<Vec<_>>();
     assert_eq!(coverage.len(), 1, "{errors:#?}");
     assert_eq!(coverage[0].len(), 1, "{errors:#?}");
+    assert_eq!(
+        coverage[0][0].offset(),
+        code.find("value[0] = 1")
+            .expect("retained capture assignment")
+    );
 }
 
 #[test]
@@ -14254,13 +14417,6 @@ fn uncovered_branch() {
     "#;
 
     let errors = analyze(code);
-    // Why this assertion exists: legacy branch bookkeeping and MemorySSA both
-    // observe this latch, but the analyzer must expose one diagnostic.
-    assert_eq!(
-        errors.len(),
-        1,
-        "coverage must not be reported twice: {errors:#?}"
-    );
     assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
 
     let code = r#"
