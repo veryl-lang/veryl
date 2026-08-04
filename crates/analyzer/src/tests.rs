@@ -10565,6 +10565,167 @@ fn combinational_loop_review_distinguishes_generic_function_specializations() {
 }
 
 #[test]
+#[ignore = "known bug: repeat concatenation loses positional bit correspondence"]
+fn combinational_loop_review_preserves_repeat_concatenation_positions() {
+    // Why this case exists: {value repeat 2} is {value, value}, so o[0]
+    // depends only on value[0]. Broadcasting value[1] to o[0] invents a loop.
+    assert_comb_loop_for_case(
+        "repeat concatenation keeps a disjoint low-bit path loop-free",
+        r#"
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<2>;
+            assign o = {value repeat 2};
+            assign value[0] = 0;
+            assign value[1] = o[0];
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: feeding o[0] back to value[0] selects the
+    // corresponding repeated bit and therefore is a real structural SCC.
+    assert_comb_loop_for_case(
+        "repeat concatenation still detects a corresponding-bit loop",
+        r#"
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<2>;
+            assign o = {value repeat 2};
+            assign value[0] = o[0];
+            assign value[1] = 0;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "known bug: instance actual mapping ignores constant shift positions"]
+fn combinational_loop_review_preserves_instance_shift_positions() {
+    // Why this case exists: (value << 1)[0] is an inserted constant zero.
+    // Falling back to every operand creates a fictitious value[1] path.
+    assert_comb_loop_for_case(
+        "an instance actual left shift keeps its inserted bit loop-free",
+        r#"
+        module Child (
+            i: input  logic<4>,
+            o: output logic<4>,
+        ) {
+            assign o = i;
+        }
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<4>;
+            var passed: logic<4>;
+            inst u: Child (
+                i: value << 1,
+                o: passed,
+            );
+            assign value[0] = 0;
+            assign value[1] = passed[0];
+            assign value[3:2] = 0;
+            assign o = passed;
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: passed[1] is value[0], so feeding it back to
+    // value[0] is the corresponding shifted-bit SCC and must remain detected.
+    assert_comb_loop_for_case(
+        "an instance actual left shift detects its live shifted bit",
+        r#"
+        module Child (
+            i: input  logic<4>,
+            o: output logic<4>,
+        ) {
+            assign o = i;
+        }
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<4>;
+            var passed: logic<4>;
+            inst u: Child (
+                i: value << 1,
+                o: passed,
+            );
+            assign value[0] = passed[1];
+            assign value[3:1] = 0;
+            assign o = passed;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "known bug: instance actual mapping ignores repeat-concat positions"]
+fn combinational_loop_review_preserves_instance_repeat_positions() {
+    // Why this case exists: {high repeat 2, low}[2] is high. Treating every
+    // operand as a source invents a low -> child_o -> low feedback path.
+    assert_comb_loop_for_case(
+        "an instance repeat actual keeps an unrelated operand loop-free",
+        r#"
+        module Child (
+            i: input  logic<3>,
+            o: output logic,
+        ) {
+            assign o = i[2];
+        }
+        module Top (
+            o: output logic,
+        ) {
+            var high: logic;
+            var low: logic;
+            var child_o: logic;
+            inst u: Child (
+                i: {high repeat 2, low},
+                o: child_o,
+            );
+            assign high = 0;
+            assign low = child_o;
+            assign o = child_o;
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: feeding child_o back to high closes the actual
+    // i[2] path and must remain a real loop after positional mapping.
+    assert_comb_loop_for_case(
+        "an instance repeat actual detects its selected repeated operand",
+        r#"
+        module Child (
+            i: input  logic<3>,
+            o: output logic,
+        ) {
+            assign o = i[2];
+        }
+        module Top (
+            o: output logic,
+        ) {
+            var high: logic;
+            var low: logic;
+            var child_o: logic;
+            inst u: Child (
+                i: {high repeat 2, low},
+                o: child_o,
+            );
+            assign high = child_o;
+            assign low = 0;
+            assign o = child_o;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn combinational_loop_memory_ssa_celox_regression_corpus() {
     // Ported from celox/tests/basic.rs::test_always_comb_read_before_write_uses_previous_value.
     assert_comb_loop_for_case(
