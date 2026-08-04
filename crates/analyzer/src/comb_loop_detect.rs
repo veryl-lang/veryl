@@ -69,6 +69,15 @@ struct SummaryWalk {
     dependencies: BTreeMap<(Region<VarId>, SummaryOutput), bool>,
 }
 
+struct SummaryWalkContext<'a> {
+    graph: &'a CausalGraph,
+    live_nodes: &'a [bool],
+    module: &'a Module,
+    bit_part: &'a BitPartition,
+    input_ids: &'a HashSet<VarId>,
+    output_ids: &'a HashSet<VarId>,
+}
+
 impl SummaryWalk {
     fn new(direction: SummaryDirection, endpoints: Vec<(NodeIndex, NodeKey)>) -> Self {
         Self {
@@ -85,16 +94,7 @@ impl SummaryWalk {
     /// Advance a bounded amount of graph work. Running forward and reverse
     /// walks in equal quanta lets the cheaper direction finish without an
     /// endpoint-count heuristic committing to an adversarially expensive side.
-    fn advance(
-        &mut self,
-        graph: &CausalGraph,
-        live_nodes: &[bool],
-        module: &Module,
-        bit_part: &BitPartition,
-        input_ids: &HashSet<VarId>,
-        output_ids: &HashSet<VarId>,
-        budget: usize,
-    ) -> bool {
+    fn advance(&mut self, context: &SummaryWalkContext, budget: usize) -> bool {
         let mut work = 0usize;
         while work < budget {
             if self.stack.is_empty() {
@@ -114,19 +114,21 @@ impl SummaryWalk {
                 continue;
             }
             let endpoint_key = self.current_key.expect("active summary endpoint");
-            let node_key = graph[node];
+            let node_key = context.graph[node];
             let pair = match self.direction {
-                SummaryDirection::Forward if output_ids.contains(&node_key.0) => {
+                SummaryDirection::Forward if context.output_ids.contains(&node_key.0) => {
                     Some((endpoint_key, node_key))
                 }
-                SummaryDirection::Reverse if input_ids.contains(&node_key.0) => {
+                SummaryDirection::Reverse if context.input_ids.contains(&node_key.0) => {
                     Some((node_key, endpoint_key))
                 }
                 SummaryDirection::Forward | SummaryDirection::Reverse => None,
             };
             if let Some((input_key, output_key)) = pair {
-                for input in node_key_regions(input_key, module, bit_part) {
-                    for output in node_key_summary_outputs(output_key, module, bit_part) {
+                for input in node_key_regions(input_key, context.module, context.bit_part) {
+                    for output in
+                        node_key_summary_outputs(output_key, context.module, context.bit_part)
+                    {
                         self.dependencies
                             .entry((input, output))
                             .and_modify(|aligned| *aligned &= path_aligned)
@@ -137,17 +139,19 @@ impl SummaryWalk {
             match self.direction {
                 SummaryDirection::Forward => {
                     self.stack.extend(
-                        graph
+                        context
+                            .graph
                             .edges(node)
-                            .filter(|edge| live_nodes[edge.target().index()])
+                            .filter(|edge| context.live_nodes[edge.target().index()])
                             .map(|edge| (edge.target(), path_aligned && edge.weight().aligned)),
                     );
                 }
                 SummaryDirection::Reverse => {
                     self.stack.extend(
-                        graph
+                        context
+                            .graph
                             .edges_directed(node, Incoming)
-                            .filter(|edge| live_nodes[edge.source().index()])
+                            .filter(|edge| context.live_nodes[edge.source().index()])
                             .map(|edge| (edge.source(), path_aligned && edge.weight().aligned)),
                     );
                 }
@@ -293,10 +297,31 @@ struct ModuleCombSummary {
     dependencies: Vec<ModuleCombDependency>,
 }
 
-/// Compatibility entry point: emit only proven loop diagnostics. Tools which
-/// need to surface analysis coverage must call [`check_detailed`].
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct CoverageDiagnosticKey {
+    identifier: String,
+    locations: Vec<TokenRange>,
+}
+
+type CoverageDiagnostic = (CoverageDiagnosticKey, AnalyzerError);
+
+#[derive(Default)]
+struct CoverageDiagnostics {
+    errors: Vec<AnalyzerError>,
+    keys: BTreeSet<CoverageDiagnosticKey>,
+}
+
+/// Compatibility entry point: emit only proven loop diagnostics.
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
     check_detailed(ir).errors
+}
+
+/// Ordinary analyzer entry point. Coverage and loop diagnostics consume the
+/// same internal MemorySSA run, while the public loop-only API stays stable.
+pub(crate) fn check_analyzer(ir: &Ir) -> Vec<AnalyzerError> {
+    let (mut result, mut coverage_errors) = analyze(ir, true);
+    result.errors.append(&mut coverage_errors);
+    result.errors
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -314,7 +339,12 @@ pub struct CombAnalysisResult {
 /// Run loop detection while retaining uncertainty which must not be promoted
 /// to a hard combinational-loop diagnostic.
 pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
+    analyze(ir, false).0
+}
+
+fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<AnalyzerError>) {
     let mut errors = Vec::new();
+    let mut coverage = CoverageDiagnostics::default();
     let mut incomplete = Vec::new();
     let mut summaries: HashMap<usize, ModuleCombSummary> = HashMap::default();
     let mut visiting_specializations = HashSet::default();
@@ -336,9 +366,13 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
                 &mut summaries,
                 &mut visiting_specializations,
                 &mut errors,
+                &mut coverage,
                 &mut incomplete,
+                collect_coverage,
             );
-            let (graph, mut reasons, _bit_part) = build_module_graph(module, &summaries);
+            let (graph, mut reasons, _bit_part, module_coverage) =
+                build_module_graph(module, &summaries, collect_coverage);
+            extend_unique_errors(&mut coverage, module_coverage);
             if recursion_affected_modules.contains(&idx) {
                 reasons.insert(IncompleteReason::RecursiveCall);
             }
@@ -352,7 +386,15 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
         }
     }
 
-    CombAnalysisResult { errors, incomplete }
+    (CombAnalysisResult { errors, incomplete }, coverage.errors)
+}
+
+fn extend_unique_errors(coverage: &mut CoverageDiagnostics, new_errors: Vec<CoverageDiagnostic>) {
+    for (key, error) in new_errors {
+        if coverage.keys.insert(key) {
+            coverage.errors.push(error);
+        }
+    }
 }
 
 fn component_summary_key(inst: &InstDeclaration) -> usize {
@@ -367,7 +409,9 @@ fn ensure_instance_summaries(
     summaries: &mut HashMap<usize, ModuleCombSummary>,
     visiting: &mut HashSet<usize>,
     errors: &mut Vec<AnalyzerError>,
+    coverage: &mut CoverageDiagnostics,
     incomplete: &mut Vec<IncompleteCombAnalysis>,
+    collect_coverage: bool,
 ) {
     for inst in walk_insts(module) {
         let Component::Module(child) = inst.component.as_ref() else {
@@ -384,8 +428,18 @@ fn ensure_instance_summaries(
             });
             continue;
         }
-        ensure_instance_summaries(child, summaries, visiting, errors, incomplete);
-        let (graph, reasons, bit_part) = build_module_graph(child, summaries);
+        ensure_instance_summaries(
+            child,
+            summaries,
+            visiting,
+            errors,
+            coverage,
+            incomplete,
+            collect_coverage,
+        );
+        let (graph, reasons, bit_part, child_coverage) =
+            build_module_graph(child, summaries, collect_coverage);
+        extend_unique_errors(coverage, child_coverage);
         check_graph(child, &graph, errors);
         let summary = compute_module_summary(child, &graph, &bit_part);
         summaries.insert(key, summary);
@@ -801,12 +855,28 @@ fn push_element_mask(
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<usize, ModuleCombSummary>,
-) -> (CausalGraph, BTreeSet<IncompleteReason>, BitPartition) {
+    collect_coverage: bool,
+) -> (
+    CausalGraph,
+    BTreeSet<IncompleteReason>,
+    BitPartition,
+    Vec<CoverageDiagnostic>,
+) {
     // Procedural combinational declarations use statement-ordered region
     // MemorySSA. Keep instance declarations on the existing bottom-up module
     // summary path until the same region vocabulary crosses module boundaries.
+    let function_cache = crate::comb_memory_ssa::FunctionAnalysisCache::default();
+    // Build each specialization once before entering Rayon. Procedure tasks
+    // then share an immutable summary table instead of racing to initialize
+    // the same callee behind a global mutex.
+    let all_function_analyses = crate::comb_memory_ssa::analyze_functions(module, &function_cache);
+    function_cache.freeze();
     let analyze_declaration = |declaration: &Declaration| match declaration {
-        Declaration::Comb(comb) => Some(crate::comb_memory_ssa::analyze(module, comb)),
+        Declaration::Comb(comb) => Some(crate::comb_memory_ssa::analyze(
+            module,
+            comb,
+            &function_cache,
+        )),
         Declaration::Ff(_)
         | Declaration::Inst(_)
         | Declaration::External(_)
@@ -828,24 +898,68 @@ fn build_module_graph(
         .filter_map(analyze_declaration)
         .collect::<Vec<_>>();
 
-    let instance_inputs = walk_insts(module)
-        .flat_map(|inst| inst.inputs.iter().map(|input| &input.expr))
-        .collect::<Vec<_>>();
+    let mut instance_observers = Vec::new();
+    for inst in walk_insts(module) {
+        instance_observers.extend(inst.inputs.iter().map(|input| &input.expr));
+        for destination in inst.outputs.iter().flat_map(|output| output.dst.iter()) {
+            instance_observers.extend(destination.index.0.iter());
+            instance_observers.extend(destination.select.0.iter());
+            instance_observers.extend(
+                destination
+                    .select
+                    .1
+                    .iter()
+                    .map(|(_, expression)| expression),
+            );
+        }
+    }
+    instance_observers
+        .retain(|expression| crate::comb_memory_ssa::expression_needs_observer(expression));
     #[cfg(not(target_family = "wasm"))]
     procedure_summaries.extend(
-        instance_inputs
+        instance_observers
             .par_iter()
             .map(|expression| {
-                crate::comb_memory_ssa::analyze_observer_expression(module, expression)
+                crate::comb_memory_ssa::analyze_observer_expression(
+                    module,
+                    expression,
+                    &function_cache,
+                )
             })
             .collect::<Vec<_>>(),
     );
+
     #[cfg(target_family = "wasm")]
-    procedure_summaries.extend(
-        instance_inputs.iter().map(|expression| {
-            crate::comb_memory_ssa::analyze_observer_expression(module, expression)
-        }),
-    );
+    procedure_summaries.extend(instance_observers.iter().map(|expression| {
+        crate::comb_memory_ssa::analyze_observer_expression(module, expression, &function_cache)
+    }));
+    let function_analyses = if collect_coverage {
+        all_function_analyses
+    } else {
+        Vec::new()
+    };
+    let coverage_sites = procedure_summaries
+        .iter()
+        .filter_map(|result| result.as_ref().ok())
+        .flat_map(|analysis| analysis.coverage_sites.iter().copied())
+        .chain(function_analyses.iter().flat_map(|analysis| {
+            analysis
+                .coverage_sites
+                .iter()
+                .copied()
+                .filter(|(region, _)| {
+                    region_object(*region).is_none_or(|object| {
+                        module.variables.get(&object).is_none_or(|variable| {
+                            variable.affiliation != crate::symbol::Affiliation::Module
+                        })
+                    })
+                })
+        }));
+    let coverage_errors = if collect_coverage {
+        retention_diagnostics(module, coverage_sites)
+    } else {
+        Vec::new()
+    };
 
     let mut partition_regions = procedure_summaries
         .iter()
@@ -885,7 +999,7 @@ fn build_module_graph(
     ctx.variables = module.variables.clone();
     ctx.functions = module.functions.clone();
     let (instance_regions, instance_periodic_transfers) =
-        collect_instance_summary_regions(module, summaries, &mut ctx);
+        collect_instance_summary_regions(module, summaries, &mut ctx, &function_cache);
     partition_regions.extend(instance_regions);
     periodic_transfers.extend(instance_periodic_transfers);
     let mut periodic_regions = periodic_transfers
@@ -983,6 +1097,7 @@ fn build_module_graph(
                     &module.variables,
                     &mut incomplete,
                     &mut ctx,
+                    &function_cache,
                 );
             }
             // SV black box: under-detect.
@@ -994,7 +1109,36 @@ fn build_module_graph(
         }
     }
 
-    (graph, incomplete, bit_part)
+    (graph, incomplete, bit_part, coverage_errors)
+}
+
+fn retention_diagnostics(
+    module: &Module,
+    coverage_sites: impl IntoIterator<Item = (Region<VarId>, TokenRange)>,
+) -> Vec<CoverageDiagnostic> {
+    let mut sites: BTreeMap<VarId, BTreeSet<TokenRange>> = BTreeMap::new();
+    for (region, token) in coverage_sites {
+        if let Some(object) = region_object(region) {
+            sites.entry(object).or_default().insert(token);
+        }
+    }
+    sites
+        .into_iter()
+        .filter_map(|(object, tokens)| {
+            let variable = module.variables.get(&object)?;
+            let tokens = tokens.into_iter().collect::<Vec<_>>();
+            let first = tokens.first()?;
+            let identifier = variable.path.to_string();
+            let key = CoverageDiagnosticKey {
+                identifier: identifier.clone(),
+                locations: tokens.clone(),
+            };
+            Some((
+                key,
+                AnalyzerError::uncovered_branch(&identifier, first, &tokens),
+            ))
+        })
+        .collect()
 }
 
 fn propagate_aligned_regions(
@@ -1574,6 +1718,7 @@ fn collect_instance_summary_regions(
     module: &Module,
     summaries: &HashMap<usize, ModuleCombSummary>,
     ctx: &mut Context,
+    functions: &crate::comb_memory_ssa::FunctionAnalysisCache,
 ) -> (Vec<Region<VarId>>, Vec<PeriodicTransferRegion>) {
     let mut regions = Vec::new();
     let mut periodic_transfers = Vec::new();
@@ -1615,6 +1760,7 @@ fn collect_instance_summary_regions(
                 &input.expr,
                 &module.variables,
                 ctx,
+                functions,
             );
             regions.extend(parent_inputs.iter().copied());
             match &dependency.output {
@@ -1697,6 +1843,7 @@ fn add_inst_feedthrough_edges(
     parent_vars: &HashMap<VarId, Variable>,
     incomplete: &mut BTreeSet<IncompleteReason>,
     ctx: &mut Context,
+    functions: &crate::comb_memory_ssa::FunctionAnalysisCache,
 ) {
     for dependency in &summary.dependencies {
         let Some(child_input) = region_object(dependency.input) else {
@@ -1720,8 +1867,14 @@ fn add_inst_feedthrough_edges(
             incomplete.insert(IncompleteReason::HierarchicalReference);
         }
         if let SummaryOutput::Periodic(periodic) = &dependency.output {
-            let parent_inputs =
-                map_child_input_region(dependency.input, child, &input.expr, parent_vars, ctx);
+            let parent_inputs = map_child_input_region(
+                dependency.input,
+                child,
+                &input.expr,
+                parent_vars,
+                ctx,
+                functions,
+            );
             let Some(parent_outputs) =
                 map_child_periodic_output(periodic, child, &output.dst, parent_vars, ctx)
             else {
@@ -1786,6 +1939,7 @@ fn add_inst_feedthrough_edges(
                 &input.expr,
                 input_type,
                 child_input_span,
+                functions,
             )
             && let Some(parent_outputs) =
                 map_destinations_span_positioned(&output.dst, child_output_span, parent_vars, ctx)
@@ -1808,8 +1962,14 @@ fn add_inst_feedthrough_edges(
             }
             continue;
         }
-        let parent_input_regions =
-            map_child_input_region(dependency.input, child, &input.expr, parent_vars, ctx);
+        let parent_input_regions = map_child_input_region(
+            dependency.input,
+            child,
+            &input.expr,
+            parent_vars,
+            ctx,
+            functions,
+        );
         let parent_output_regions =
             map_child_output_region(dependency_output, child, &output.dst, parent_vars, ctx);
         let pairs = parent_input_regions
@@ -1985,6 +2145,7 @@ fn map_child_input_region(
     actual: &Expression,
     parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
+    functions: &crate::comb_memory_ssa::FunctionAnalysisCache,
 ) -> Vec<Region<VarId>> {
     let Some((span, uncertain)) = child_region_span(region, child) else {
         return Vec::new();
@@ -1997,6 +2158,7 @@ fn map_child_input_region(
                 actual,
                 &variable.r#type,
                 span,
+                functions,
             )
         })
         .map(|positioned| {
@@ -2005,7 +2167,7 @@ fn map_child_input_region(
                 .map(|positioned| positioned.region)
                 .collect()
         })
-        .or_else(|| map_expression_span_to_regions(actual, span, parent_vars, ctx))
+        .or_else(|| map_expression_span_to_regions(actual, span, parent_vars, ctx, functions))
         .unwrap_or_else(|| collect_expression_regions(actual, parent_vars, ctx));
     retain_uncertainty(mapped, uncertain)
 }
@@ -2146,6 +2308,7 @@ fn map_expression_span_to_regions(
     requested: Span,
     variables: &HashMap<VarId, Variable>,
     ctx: &mut Context,
+    functions: &crate::comb_memory_ssa::FunctionAnalysisCache,
 ) -> Option<Vec<Region<VarId>>> {
     let expression_type = &expression.comptime().r#type;
     let expression_length = expression_type
@@ -2154,7 +2317,9 @@ fn map_expression_span_to_regions(
     if requested.end()? > expression_length {
         return None;
     }
-    if let Some(mapped) = crate::comb_memory_ssa::map_expression_span(ctx, expression, requested) {
+    if let Some(mapped) =
+        crate::comb_memory_ssa::map_expression_span(ctx, expression, requested, functions)
+    {
         return Some(mapped);
     }
     match expression {
@@ -2179,7 +2344,7 @@ fn map_expression_span_to_regions(
             Factor::Value(_) => Some(Vec::new()),
             Factor::SystemFunctionCall(call) => match &call.kind {
                 SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
-                    map_expression_span_to_regions(&input.0, requested, variables, ctx)
+                    map_expression_span_to_regions(&input.0, requested, variables, ctx, functions)
                 }
                 _ => None,
             },
@@ -2206,6 +2371,7 @@ fn map_expression_span_to_regions(
                         },
                         variables,
                         ctx,
+                        functions,
                     )?);
                 }
                 low = low.checked_add(width)?;
@@ -2217,7 +2383,7 @@ fn map_expression_span_to_regions(
                 && operand.comptime().r#type.total_width()?
                     == expression.comptime().r#type.total_width()? =>
         {
-            map_expression_span_to_regions(operand, requested, variables, ctx)
+            map_expression_span_to_regions(operand, requested, variables, ctx, functions)
         }
         Expression::Binary(left, op, right, _)
             if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor)
@@ -2226,9 +2392,10 @@ fn map_expression_span_to_regions(
                 && right.comptime().r#type.total_width()?
                     == expression.comptime().r#type.total_width()? =>
         {
-            let mut mapped = map_expression_span_to_regions(left, requested, variables, ctx)?;
+            let mut mapped =
+                map_expression_span_to_regions(left, requested, variables, ctx, functions)?;
             mapped.extend(map_expression_span_to_regions(
-                right, requested, variables, ctx,
+                right, requested, variables, ctx, functions,
             )?);
             Some(mapped)
         }
@@ -2830,6 +2997,14 @@ fn compute_module_summary(
     if input_nodes.is_empty() || output_nodes.is_empty() {
         return ModuleCombSummary::default();
     }
+    let walk_context = SummaryWalkContext {
+        graph,
+        live_nodes: &live_nodes,
+        module,
+        bit_part,
+        input_ids: &input_ids,
+        output_ids: &output_ids,
+    };
 
     const QUANTUM: usize = 512;
     let winning_walks = if graph.node_count() < QUANTUM {
@@ -2839,15 +3014,7 @@ fn compute_module_summary(
             (SummaryDirection::Reverse, output_nodes)
         };
         let mut walk = SummaryWalk::new(direction, endpoints);
-        while !walk.advance(
-            graph,
-            &live_nodes,
-            module,
-            bit_part,
-            &input_ids,
-            &output_ids,
-            QUANTUM,
-        ) {}
+        while !walk.advance(&walk_context, QUANTUM) {}
         vec![walk]
     } else {
         #[cfg(not(target_family = "wasm"))]
@@ -2872,32 +3039,12 @@ fn compute_module_summary(
                 #[cfg(not(target_family = "wasm"))]
                 let complete = walks
                     .par_iter_mut()
-                    .map(|walk| {
-                        walk.advance(
-                            graph,
-                            &live_nodes,
-                            module,
-                            bit_part,
-                            &input_ids,
-                            &output_ids,
-                            QUANTUM,
-                        )
-                    })
+                    .map(|walk| walk.advance(&walk_context, QUANTUM))
                     .collect::<Vec<_>>();
                 #[cfg(target_family = "wasm")]
                 let complete = walks
                     .iter_mut()
-                    .map(|walk| {
-                        walk.advance(
-                            graph,
-                            &live_nodes,
-                            module,
-                            bit_part,
-                            &input_ids,
-                            &output_ids,
-                            QUANTUM,
-                        )
-                    })
+                    .map(|walk| walk.advance(&walk_context, QUANTUM))
                     .collect::<Vec<_>>();
                 complete.into_iter().all(|complete| complete)
             };

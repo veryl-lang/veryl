@@ -10,9 +10,7 @@ use crate::ir::{
 use crate::symbol::ClockDomain;
 use crate::value::ValueBigUint;
 use indent::indent_all_by;
-use std::collections::BTreeSet;
 use std::fmt;
-use veryl_causal::region::Region;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
@@ -74,49 +72,6 @@ impl Module {
             let snapshot = std::mem::take(&mut new_table.refernced);
             self.per_decl_refs.insert(i, snapshot);
             assign_table.merge_by_or_from(context, &mut new_table, true, true);
-        }
-
-        // Dynamic destinations are weak writes: one evaluation writes only
-        // the selected region and leaves other candidates untouched. The
-        // enumerating AssignTable cannot represent that fact for unknown or
-        // oversized arrays, so use the sparse MemorySSA coverage summary to
-        // report it here. Entry retention itself is deliberately not added to
-        // the combinational dependency graph.
-        for declaration in &self.declarations {
-            let Declaration::Comb(comb) = declaration else {
-                continue;
-            };
-            let Ok(analysis) = crate::comb_memory_ssa::analyze(self, comb) else {
-                continue;
-            };
-            let mut diagnosed_writes = BTreeSet::new();
-            for retained in &analysis.retained_outputs {
-                let Some(write) = retained.origin else {
-                    // Ordinary control-flow retention is handled by the
-                    // existing branch and runtime-loop coverage checks.
-                    continue;
-                };
-                if !diagnosed_writes.insert(write) {
-                    continue;
-                }
-                let Some(token) = analysis.write_tokens.get(&write) else {
-                    continue;
-                };
-                let object = match retained.output {
-                    Region::Exact { object, .. }
-                    | Region::UnknownRegion { object, .. }
-                    | Region::UnknownObject(object) => object,
-                    Region::UnknownAll => continue,
-                };
-                let Some(variable) = self.variables.get(&object) else {
-                    continue;
-                };
-                context.insert_error(crate::AnalyzerError::uncovered_branch(
-                    &variable.path.to_string(),
-                    token,
-                    &[*token],
-                ));
-            }
         }
 
         for x in self.functions.values() {

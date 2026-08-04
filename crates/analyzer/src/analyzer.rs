@@ -266,7 +266,7 @@ impl Analyzer {
 
         ret.append(&mut symbol_table::check_unused_variable());
         ret.append(&mut symbol_table::check_wavedrom());
-        ret.append(&mut comb_loop_detect::check(ir));
+        ret.append(&mut comb_loop_detect::check_analyzer(ir));
 
         ret
     }

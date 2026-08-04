@@ -862,7 +862,18 @@ where
                     } else {
                         path_origin.or(current_write)
                     };
-                    let next_retention_origin = if weak_previous {
+                    let next_active_read = if preserve_active_read {
+                        active_read
+                    } else {
+                        source_read
+                    };
+                    let next_retention_origin = if next_active_read.is_some() {
+                        // Once a source read is active, this path is a causal
+                        // dependency rather than source-read-free retention.
+                        // Canonicalize provenance so reconvergent weak writes
+                        // can share the same visited state.
+                        None
+                    } else if weak_previous {
                         path_retention_origin.or(current_write)
                     } else {
                         path_retention_origin
@@ -915,11 +926,7 @@ where
                         combine_edge_kinds(path_kind, kind),
                         next_aligned,
                         path_uncertain_input || uncertain_input,
-                        if preserve_active_read {
-                            active_read
-                        } else {
-                            source_read
-                        },
+                        next_active_read,
                         next_translation,
                         next_periodic_output,
                         next_origin,
@@ -1384,7 +1391,7 @@ fn expand<O: Copy + Ord>(
         Region::Exact { object, span } => (object, Some(span)),
         Region::UnknownRegion { object, span } => (object, Some(span)),
         Region::UnknownObject(object) => (object, None),
-        Region::UnknownAll => return Vec::new(),
+        Region::UnknownAll => return (0..atoms.len()).collect(),
     };
     let Some(object_atoms) = atoms_by_object.get(&object) else {
         return Vec::new();

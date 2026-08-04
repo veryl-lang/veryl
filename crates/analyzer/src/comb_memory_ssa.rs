@@ -1,13 +1,15 @@
 //! Veryl IR adapter for the IR-independent region MemorySSA engine.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::conv::Context;
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CombDeclaration, Expression, Factor,
     ForBound, ForRange, FunctionCall, Module, Op, Statement, SystemFunctionCall,
-    SystemFunctionKind, TypeKind, VarId, VarIndex, VarSelect,
+    SystemFunctionKind, TypeKind, VarId, VarIndex, VarKind, VarSelect,
 };
+use crate::value::Value;
 use veryl_causal::graph::{EdgeKind, IncompleteReason};
 use veryl_causal::procedure::{
     self, AlignedDependency, Event, MustAliasCandidate, Procedure, ProcedureError,
@@ -16,9 +18,42 @@ use veryl_causal::procedure::{
 use veryl_causal::region::{Region, Span};
 use veryl_parser::token_range::TokenRange;
 
+#[derive(Debug)]
 pub(crate) struct ProcedureAnalysis {
     pub summary: ProcedureSummary<VarId>,
     pub write_tokens: BTreeMap<WriteId, TokenRange>,
+    pub coverage_sites: Vec<(Region<VarId>, TokenRange)>,
+}
+
+type FunctionKey = (VarId, usize);
+type FunctionSummaries = BTreeMap<FunctionKey, Option<Arc<ProcedureAnalysis>>>;
+
+enum FunctionCacheEntry {
+    Building,
+    Ready(Option<Arc<ProcedureAnalysis>>),
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct FunctionAnalysisCache {
+    entries: Arc<Mutex<BTreeMap<FunctionKey, FunctionCacheEntry>>>,
+    ready: Arc<OnceLock<Arc<FunctionSummaries>>>,
+}
+
+impl FunctionAnalysisCache {
+    pub(crate) fn freeze(&self) {
+        let entries = self
+            .entries
+            .lock()
+            .expect("function analysis cache lock poisoned");
+        let ready = entries
+            .iter()
+            .filter_map(|(&key, entry)| match entry {
+                FunctionCacheEntry::Ready(value) => Some((key, value.clone())),
+                FunctionCacheEntry::Building => None,
+            })
+            .collect::<BTreeMap<_, _>>();
+        let _ = self.ready.set(Arc::new(ready));
+    }
 }
 
 impl std::ops::Deref for ProcedureAnalysis {
@@ -32,37 +67,92 @@ impl std::ops::Deref for ProcedureAnalysis {
 pub(crate) fn analyze(
     module: &Module,
     declaration: &CombDeclaration,
+    functions: &FunctionAnalysisCache,
 ) -> Result<ProcedureAnalysis, ProcedureError> {
-    let mut builder = Builder::new(module);
+    let mut builder = Builder::new(module, functions.clone());
     let exit = builder
         .lower_statements(&declaration.statements, 0, &[], None)
         .unwrap_or(0);
     builder.procedure.exit = exit;
-    if let Some(message) = builder.model_error {
-        return Err(ProcedureError::Model(message));
-    }
     let summary = procedure::analyze(&builder.procedure)?;
-    Ok(ProcedureAnalysis {
-        summary,
-        write_tokens: builder.write_tokens,
-    })
+    Ok(builder.finish(summary))
 }
 
 pub(crate) fn analyze_observer_expression(
     module: &Module,
     expression: &Expression,
+    functions: &FunctionAnalysisCache,
 ) -> Result<ProcedureAnalysis, ProcedureError> {
-    let mut builder = Builder::new(module);
+    let mut builder = Builder::new(module, functions.clone());
     builder.lower_observer_expression(0, expression);
     builder.procedure.exit = 0;
-    if let Some(message) = builder.model_error {
-        return Err(ProcedureError::Model(message));
-    }
     let summary = procedure::analyze(&builder.procedure)?;
-    Ok(ProcedureAnalysis {
-        summary,
-        write_tokens: builder.write_tokens,
-    })
+    Ok(builder.finish(summary))
+}
+
+pub(crate) fn analyze_functions(
+    module: &Module,
+    functions: &FunctionAnalysisCache,
+) -> Vec<Arc<ProcedureAnalysis>> {
+    let builder = Builder::new(module, functions.clone());
+    module
+        .functions
+        .values()
+        .flat_map(|function| {
+            (0..function.functions.len())
+                .filter_map(|index| builder.cached_function((function.id, index)))
+        })
+        .collect()
+}
+
+/// Observer procedures exist only to retain side effects and incomplete
+/// boundaries in instance actuals. Plain values and variable reads are already
+/// represented by the instance connection graph and need no empty MemorySSA.
+pub(crate) fn expression_needs_observer(expression: &Expression) -> bool {
+    fn factor_needs_observer(factor: &Factor) -> bool {
+        match factor {
+            Factor::Variable(_, index, select, _) => index
+                .0
+                .iter()
+                .chain(select.0.iter())
+                .chain(select.1.iter().map(|(_, expression)| expression))
+                .any(expression_needs_observer),
+            Factor::FunctionCall(_)
+            | Factor::SystemFunctionCall(_)
+            | Factor::HierVariable(_)
+            | Factor::Unknown(_) => true,
+            Factor::Value(_) | Factor::Anonymous(_) => false,
+        }
+    }
+
+    match expression {
+        Expression::Term(factor) => factor_needs_observer(factor),
+        Expression::Unary(_, expression, _) => expression_needs_observer(expression),
+        Expression::Binary(left, _, right, _) => {
+            expression_needs_observer(left) || expression_needs_observer(right)
+        }
+        Expression::Ternary(condition, left, right, _) => {
+            expression_needs_observer(condition)
+                || expression_needs_observer(left)
+                || expression_needs_observer(right)
+        }
+        Expression::Concatenation(parts, _) => parts.iter().any(|(expression, repeat)| {
+            expression_needs_observer(expression)
+                || repeat.as_ref().is_some_and(expression_needs_observer)
+        }),
+        Expression::ArrayLiteral(items, _) => items.iter().any(|item| match item {
+            ArrayLiteralItem::Value(expression, repeat) => {
+                expression_needs_observer(expression)
+                    || repeat
+                        .as_ref()
+                        .is_some_and(|repeat| expression_needs_observer(repeat))
+            }
+            ArrayLiteralItem::Defaul(expression) => expression_needs_observer(expression),
+        }),
+        Expression::StructConstructor(_, fields, _) => fields
+            .iter()
+            .any(|(_, expression)| expression_needs_observer(expression)),
+    }
 }
 
 /// Map a result-bit span to the module regions which structurally supply it.
@@ -71,11 +161,13 @@ pub(crate) fn map_expression_span(
     context: &Context,
     expression: &Expression,
     requested: Span,
+    functions: &FunctionAnalysisCache,
 ) -> Option<Vec<Region<VarId>>> {
     let mut nested_context = Context::default();
     nested_context.variables = context.variables.clone();
     nested_context.functions = context.functions.clone();
-    Builder::with_context(nested_context).map_expression_span_to_actual(expression, requested)
+    Builder::with_context(nested_context, functions.clone())
+        .map_expression_span_to_actual(expression, requested)
 }
 
 #[derive(Clone, Copy)]
@@ -96,11 +188,12 @@ pub(crate) fn map_expression_span_positioned(
     context: &Context,
     expression: &Expression,
     requested: Span,
+    functions: &FunctionAnalysisCache,
 ) -> Option<Vec<PositionedRegion>> {
     let mut nested_context = Context::default();
     nested_context.variables = context.variables.clone();
     nested_context.functions = context.functions.clone();
-    Builder::with_context(nested_context)
+    Builder::with_context(nested_context, functions.clone())
         .map_expression_span_positioned_to_actual(expression, requested)
 }
 
@@ -113,12 +206,13 @@ pub(crate) fn map_expression_span_positioned_as(
     expression: &Expression,
     expected: &crate::ir::Type,
     requested: Span,
+    functions: &FunctionAnalysisCache,
 ) -> Option<Vec<PositionedRegion>> {
     let mut expression = expression.clone();
     if matches!(expression, Expression::ArrayLiteral(_, _)) {
         expression.comptime_mut().r#type = expected.clone();
     }
-    map_expression_span_positioned(context, &expression, requested)
+    map_expression_span_positioned(context, &expression, requested, functions)
 }
 
 fn exact_regions_have_equal_length(left: Region<VarId>, right: Region<VarId>) -> bool {
@@ -131,15 +225,26 @@ fn exact_regions_have_equal_length(left: Region<VarId>, right: Region<VarId>) ->
     )
 }
 
+fn weak_region(region: Region<VarId>) -> Region<VarId> {
+    match region {
+        Region::Exact { object, span } => Region::UnknownRegion { object, span },
+        region => region,
+    }
+}
+
 struct Builder {
     context: Context,
     procedure: Procedure<VarId>,
     next_read: usize,
     next_write: usize,
     unresolved_writes: BTreeMap<String, Vec<(usize, Vec<usize>)>>,
-    call_stack: Vec<VarId>,
+    call_stack: Vec<FunctionKey>,
     write_tokens: BTreeMap<WriteId, TokenRange>,
-    model_error: Option<&'static str>,
+    uncertain_loop_depth: usize,
+    uncertain_writes: BTreeSet<WriteId>,
+    coverage_writes: BTreeMap<VarId, BTreeSet<(Region<VarId>, TokenRange)>>,
+    coverage_sites: Vec<(Region<VarId>, TokenRange)>,
+    function_cache: FunctionAnalysisCache,
 }
 
 #[derive(Clone, Copy)]
@@ -151,14 +256,14 @@ struct MappedFunctionRead {
 }
 
 impl Builder {
-    fn new(module: &Module) -> Self {
+    fn new(module: &Module, function_cache: FunctionAnalysisCache) -> Self {
         let mut context = Context::default();
         context.variables = module.variables.clone();
         context.functions = module.functions.clone();
-        Self::with_context(context)
+        Self::with_context(context, function_cache)
     }
 
-    fn with_context(context: Context) -> Self {
+    fn with_context(context: Context, function_cache: FunctionAnalysisCache) -> Self {
         let object_spans = context
             .variables
             .iter()
@@ -185,11 +290,15 @@ impl Builder {
             unresolved_writes: BTreeMap::new(),
             call_stack: Vec::new(),
             write_tokens: BTreeMap::new(),
-            model_error: None,
+            uncertain_loop_depth: 0,
+            uncertain_writes: BTreeSet::new(),
+            coverage_writes: BTreeMap::new(),
+            coverage_sites: Vec::new(),
+            function_cache,
         }
     }
 
-    fn nested(&self, callee: VarId) -> Self {
+    fn nested(&self, callee: FunctionKey) -> Self {
         let mut context = Context::default();
         context.variables = self.context.variables.clone();
         context.functions = self.context.functions.clone();
@@ -211,8 +320,63 @@ impl Builder {
             unresolved_writes: BTreeMap::new(),
             call_stack,
             write_tokens: BTreeMap::new(),
-            model_error: None,
+            uncertain_loop_depth: 0,
+            uncertain_writes: BTreeSet::new(),
+            coverage_writes: BTreeMap::new(),
+            coverage_sites: Vec::new(),
+            function_cache: self.function_cache.clone(),
         }
+    }
+
+    fn cached_function(&self, key: FunctionKey) -> Option<Arc<ProcedureAnalysis>> {
+        if let Some(ready) = self.function_cache.ready.get() {
+            return ready.get(&key).cloned().flatten();
+        }
+        let owner = {
+            let mut entries = self
+                .function_cache
+                .entries
+                .lock()
+                .expect("function analysis cache lock poisoned");
+            match entries.get(&key) {
+                Some(FunctionCacheEntry::Ready(result)) => return result.clone(),
+                Some(FunctionCacheEntry::Building) => false,
+                None => {
+                    entries.insert(key, FunctionCacheEntry::Building);
+                    true
+                }
+            }
+        };
+
+        // Never wait for another in-progress root: mutually recursive roots
+        // can be initialized concurrently by Rayon. A racing thread computes
+        // a local copy, while only the reserving owner publishes its result.
+        let result = self.build_function(key);
+        if owner {
+            self.function_cache
+                .entries
+                .lock()
+                .expect("function analysis cache lock poisoned")
+                .insert(key, FunctionCacheEntry::Ready(result.clone()));
+        }
+        result
+    }
+
+    fn build_function(&self, key: FunctionKey) -> Option<Arc<ProcedureAnalysis>> {
+        let body = self
+            .context
+            .functions
+            .get(&key.0)?
+            .functions
+            .get(key.1)?
+            .clone();
+        let mut nested = self.nested(key);
+        let exit = nested
+            .lower_statements(&body.statements, 0, &[], None)
+            .unwrap_or(0);
+        nested.procedure.exit = exit;
+        let summary = procedure::analyze(&nested.procedure).ok()?;
+        Some(Arc::new(nested.finish(summary)))
     }
 
     fn new_block(&mut self) -> usize {
@@ -224,6 +388,170 @@ impl Builder {
 
     fn edge(&mut self, from: usize, to: usize) {
         self.procedure.successors[from].push(to);
+    }
+
+    fn unknown_effect(&mut self, block: usize) -> usize {
+        self.procedure
+            .incomplete
+            .insert(IncompleteReason::MalformedModel);
+        self.unknown_clobber(block)
+    }
+
+    fn unknown_clobber(&mut self, block: usize) -> usize {
+        let dependency = self.unknown_read(block);
+        for (&object, &span) in &self.procedure.object_spans {
+            let id = self.next_write;
+            self.next_write += 1;
+            self.procedure.events[block].push(Event::Write {
+                id,
+                region: Region::Exact { object, span },
+                dependencies: vec![(dependency, EdgeKind::Unknown)],
+                aligned_dependencies: Vec::new(),
+            });
+        }
+        dependency
+    }
+
+    fn retained_coverage_sites(
+        &self,
+        summary: &ProcedureSummary<VarId>,
+    ) -> Vec<(Region<VarId>, TokenRange)> {
+        let mut sites = BTreeSet::new();
+        let mut retained_spans = BTreeMap::<VarId, Vec<Span>>::new();
+        for retained in &summary.retained_outputs {
+            let object = match retained.output {
+                Region::Exact { object, .. }
+                | Region::UnknownRegion { object, .. }
+                | Region::UnknownObject(object) => object,
+                Region::UnknownAll => continue,
+            };
+            let externally_visible = self.context.variables.get(&object).is_some_and(|variable| {
+                variable.affiliation == crate::symbol::Affiliation::Module
+                    || variable.kind == VarKind::Output
+            });
+            let supplies_live_read = summary
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.input.may_alias(retained.output))
+                || summary
+                    .periodic_dependencies
+                    .iter()
+                    .any(|dependency| dependency.input.may_alias(retained.output));
+            if !externally_visible && !supplies_live_read {
+                continue;
+            }
+            match retained.output {
+                Region::Exact { object, span } | Region::UnknownRegion { object, span } => {
+                    retained_spans.entry(object).or_default().push(span);
+                }
+                Region::UnknownObject(object) => {
+                    if let Some(span) = self.procedure.object_spans.get(&object) {
+                        retained_spans.entry(object).or_default().push(*span);
+                    }
+                }
+                Region::UnknownAll => continue,
+            }
+        }
+
+        for spans in retained_spans.values_mut() {
+            spans.sort_unstable_by_key(|span| (span.start, span.length));
+            let mut merged = Vec::<Span>::with_capacity(spans.len());
+            for span in spans.drain(..) {
+                if let Some(previous) = merged.last_mut()
+                    && previous.end().is_some_and(|end| span.start <= end)
+                {
+                    if let (Some(previous_end), Some(span_end)) = (previous.end(), span.end()) {
+                        previous.length = previous_end.max(span_end) - previous.start;
+                    }
+                    continue;
+                }
+                merged.push(span);
+            }
+            *spans = merged;
+        }
+
+        for (&object, writes) in &self.coverage_writes {
+            let Some(retained) = retained_spans.get(&object) else {
+                continue;
+            };
+            for &(write, token) in writes {
+                let write_span = match write {
+                    Region::Exact { span, .. } | Region::UnknownRegion { span, .. } => Some(span),
+                    Region::UnknownObject(_) => self.procedure.object_spans.get(&object).copied(),
+                    Region::UnknownAll => None,
+                };
+                let Some(write_span) = write_span else {
+                    continue;
+                };
+                let Some(write_end) = write_span.end() else {
+                    continue;
+                };
+                let low = retained
+                    .partition_point(|span| span.end().is_some_and(|end| end <= write_span.start));
+                let high = retained.partition_point(|span| span.start < write_end);
+                for &retained_span in &retained[low..high] {
+                    if let Some(span) = retained_span.intersection(write_span) {
+                        sites.insert((Region::Exact { object, span }, token));
+                    }
+                }
+            }
+        }
+        sites.into_iter().collect()
+    }
+
+    fn finish(mut self, mut summary: ProcedureSummary<VarId>) -> ProcedureAnalysis {
+        for dependency in &mut summary.dependencies {
+            if dependency
+                .origin
+                .is_some_and(|write| self.uncertain_writes.contains(&write))
+            {
+                dependency.kind = EdgeKind::Unknown;
+            }
+        }
+        for dependency in &mut summary.periodic_dependencies {
+            if dependency
+                .origin
+                .is_some_and(|write| self.uncertain_writes.contains(&write))
+            {
+                dependency.kind = EdgeKind::Unknown;
+            }
+        }
+        self.coverage_sites
+            .extend(self.retained_coverage_sites(&summary));
+        self.coverage_sites.sort_unstable();
+        self.coverage_sites.dedup();
+        ProcedureAnalysis {
+            summary,
+            write_tokens: self.write_tokens,
+            coverage_sites: self.coverage_sites,
+        }
+    }
+
+    fn record_write(
+        &mut self,
+        id: WriteId,
+        region: Region<VarId>,
+        token: TokenRange,
+        diagnostic: bool,
+    ) {
+        self.write_tokens.insert(id, token);
+        if self.uncertain_loop_depth != 0 {
+            self.uncertain_writes.insert(id);
+        }
+        if diagnostic && self.uncertain_loop_depth == 0 {
+            let object = match region {
+                Region::Exact { object, .. }
+                | Region::UnknownRegion { object, .. }
+                | Region::UnknownObject(object) => Some(object),
+                Region::UnknownAll => None,
+            };
+            if let Some(object) = object {
+                self.coverage_writes
+                    .entry(object)
+                    .or_default()
+                    .insert((region, token));
+            }
+        }
     }
 
     fn lower_statements(
@@ -331,13 +659,14 @@ impl Builder {
         let read = self.push_read(block, source);
         let id = self.next_write;
         self.next_write += 1;
-        self.write_tokens.insert(id, first.dst[0].token);
+        let region = Region::Exact {
+            object,
+            span: output,
+        };
+        self.record_write(id, region, first.dst[0].token, true);
         self.procedure.events[block].push(Event::Write {
             id,
-            region: Region::Exact {
-                object,
-                span: output,
-            },
+            region,
             dependencies: controls.to_vec(),
             aligned_dependencies: vec![AlignedDependency {
                 read,
@@ -385,6 +714,14 @@ impl Builder {
                 let condition = self.read_expression(block, &statement.cond, EdgeKind::Control);
                 let mut nested_controls = controls.to_vec();
                 nested_controls.extend(condition);
+                if let Some(value) = self.constant_condition(&statement.cond) {
+                    let selected = if value {
+                        &statement.true_side
+                    } else {
+                        &statement.false_side
+                    };
+                    return self.lower_statements(selected, block, &nested_controls, break_target);
+                }
                 let true_block = self.new_block();
                 let false_block = self.new_block();
                 self.edge(block, true_block);
@@ -440,6 +777,34 @@ impl Builder {
                 }
                 let mut nested_controls = controls.to_vec();
                 nested_controls.extend(condition);
+                let selected = statement
+                    .case_target
+                    .clone()
+                    .eval_value(&mut self.context)
+                    .and_then(|target| {
+                        let mut selected = Some(statement.default.as_slice());
+                        'arms: for arm in &statement.arms {
+                            let mut undecided = false;
+                            for pattern in &arm.patterns {
+                                match pattern.matches(&target, &mut self.context) {
+                                    Some(true) => {
+                                        selected = Some(arm.body.as_slice());
+                                        break 'arms;
+                                    }
+                                    Some(false) => {}
+                                    None => undecided = true,
+                                }
+                            }
+                            if undecided {
+                                selected = None;
+                                break;
+                            }
+                        }
+                        selected
+                    });
+                if let Some(selected) = selected {
+                    return self.lower_statements(selected, block, &nested_controls, break_target);
+                }
                 let mut exits = Vec::new();
                 for arm in &statement.arms {
                     let arm_block = self.new_block();
@@ -470,14 +835,60 @@ impl Builder {
                 }
             }
             Statement::For(statement) => {
+                if let Some(iterations) = statement.range.eval_iter(&mut self.context) {
+                    if iterations.is_empty() {
+                        return Some(block);
+                    }
+                    let saved_iterator = self.context.variables.get(&statement.var_id).cloned();
+                    let exit = self.new_block();
+                    let mut continuation = Some(block);
+                    for value in iterations {
+                        let Some(from) = continuation else {
+                            break;
+                        };
+                        if let Some(variable) = self.context.variables.get_mut(&statement.var_id)
+                            && let Some(width) = statement.var_type.total_width()
+                        {
+                            variable.set_value(
+                                &[],
+                                Value::new(value as u64, width, statement.var_type.signed),
+                                None,
+                            );
+                        } else {
+                            self.procedure
+                                .incomplete
+                                .insert(IncompleteReason::MalformedModel);
+                        }
+                        let body = self.new_block();
+                        self.edge(from, body);
+                        continuation =
+                            self.lower_statements(&statement.body, body, controls, Some(exit));
+                    }
+                    if let Some(saved_iterator) = saved_iterator {
+                        self.context
+                            .variables
+                            .insert(statement.var_id, saved_iterator);
+                    }
+                    if let Some(continuation) = continuation {
+                        self.edge(continuation, exit);
+                    }
+                    return Some(exit);
+                }
+
+                // Dynamic or deliberately non-expanded loops cannot supply a
+                // hard dependency: their iterator values and trip paths are
+                // not represented by this compact CFG. Preserve uncertainty
+                // while keeping the graph declaration-width independent.
                 self.procedure
                     .incomplete
                     .insert(IncompleteReason::RuntimeLoop);
-                let header = self.new_block();
+                let suppress_hard_dependencies =
+                    statement.range.is_over_size_limit(&mut self.context);
                 let body = self.new_block();
                 let exit = self.new_block();
+                let header = self.new_block();
+                let mut nested_controls = controls.to_vec();
                 self.edge(block, header);
-                let mut condition = Vec::new();
                 let bounds = match &statement.range {
                     ForRange::Forward { start, end, .. }
                     | ForRange::Reverse { start, end, .. }
@@ -485,20 +896,24 @@ impl Builder {
                 };
                 for bound in bounds {
                     if let ForBound::Expression(expression) = bound {
-                        condition.extend(self.read_expression(
+                        nested_controls.extend(self.read_expression(
                             header,
                             expression,
                             EdgeKind::Control,
                         ));
                     }
                 }
-                let mut nested_controls = controls.to_vec();
-                nested_controls.extend(condition);
                 self.edge(header, body);
                 self.edge(header, exit);
-                if let Some(body_exit) =
-                    self.lower_statements(&statement.body, body, &nested_controls, Some(exit))
-                {
+                if suppress_hard_dependencies {
+                    self.uncertain_loop_depth += 1;
+                }
+                let body_exit =
+                    self.lower_statements(&statement.body, body, &nested_controls, Some(exit));
+                if suppress_hard_dependencies {
+                    self.uncertain_loop_depth -= 1;
+                }
+                if let Some(body_exit) = body_exit {
                     self.edge(body_exit, header);
                 }
                 Some(exit)
@@ -527,26 +942,21 @@ impl Builder {
                 Some(block)
             }
             Statement::IfReset(_) => {
-                self.model_error
-                    .get_or_insert("always_comb contains an always_ff-only if_reset statement");
+                self.unknown_effect(block);
                 Some(block)
             }
             Statement::Break => {
-                self.procedure
-                    .incomplete
-                    .insert(IncompleteReason::RuntimeLoop);
                 if let Some(target) = break_target {
                     self.edge(block, target);
                 } else {
-                    self.model_error
-                        .get_or_insert("break appears outside a lowered loop");
+                    self.procedure
+                        .incomplete
+                        .insert(IncompleteReason::MalformedModel);
                 }
                 None
             }
             Statement::Unsupported(_) => {
-                self.model_error.get_or_insert(
-                    "always_comb contains a statement rejected during IR conversion",
-                );
+                self.unknown_effect(block);
                 Some(block)
             }
             Statement::Null => Some(block),
@@ -734,60 +1144,63 @@ impl Builder {
         controls: &[(usize, EdgeKind)],
     ) -> Vec<(usize, EdgeKind)> {
         let mut actual_inputs = BTreeMap::<VarId, (Expression, Vec<(usize, EdgeKind)>)>::new();
-        let function_body = self.context.functions.get(&call.id).and_then(|function| {
-            if let Some(index) = &call.index {
-                function.get_function(index)
-            } else {
-                function.get_function(&[])
-            }
-        });
-
-        let Some(function_body) = function_body else {
-            self.model_error
-                .get_or_insert("resolved function call has no instantiated function body");
-            return vec![(self.unknown_read(block), EdgeKind::Unknown)];
+        let Some(function) = self.context.functions.get(&call.id) else {
+            return vec![(self.unknown_effect(block), EdgeKind::Unknown)];
         };
+        let call_index = call.index.as_deref().unwrap_or(&[]);
+        let Some(function_index) = function.array.calc_index(call_index) else {
+            return vec![(self.unknown_effect(block), EdgeKind::Unknown)];
+        };
+        let Some(function_body) = function.functions.get(function_index) else {
+            return vec![(self.unknown_effect(block), EdgeKind::Unknown)];
+        };
+        let function_args = function_body.arg_map.clone();
+        let function_return = function_body.ret;
         for (path, input) in &call.inputs {
             let reads = self.read_expression(block, input, EdgeKind::Value);
-            if let Some(&formal) = function_body.arg_map.get(path) {
+            if let Some(&formal) = function_args.get(path) {
                 actual_inputs.insert(formal, (input.clone(), reads));
             }
         }
 
-        if self.call_stack.contains(&call.id) {
+        let function_key = (call.id, function_index);
+        if self.call_stack.contains(&function_key) {
             self.procedure
                 .incomplete
                 .insert(IncompleteReason::RecursiveCall);
-            return vec![(self.unknown_read(block), EdgeKind::Unknown)];
+            return vec![(self.unknown_clobber(block), EdgeKind::Unknown)];
         }
 
-        let mut nested = self.nested(call.id);
-        let exit = nested
-            .lower_statements(&function_body.statements, 0, &[], None)
-            .unwrap_or(0);
-        nested.procedure.exit = exit;
-        if self.model_error.is_none() {
-            self.model_error = nested.model_error;
-        }
-        if self.model_error.is_some() {
-            return vec![(self.unknown_read(block), EdgeKind::Unknown)];
-        }
-        let Ok(summary) = procedure::analyze(&nested.procedure) else {
-            self.model_error
-                .get_or_insert("function body produced an invalid causal model");
-            return vec![(self.unknown_read(block), EdgeKind::Unknown)];
+        let Some(nested) = self.cached_function(function_key) else {
+            return vec![(self.unknown_effect(block), EdgeKind::Unknown)];
         };
+        let summary = &nested.summary;
+        let mut captured_coverage = Vec::<(Region<VarId>, TokenRange)>::new();
+        for &(region, token) in &nested.coverage_sites {
+            let object = match region {
+                Region::Exact { object, .. }
+                | Region::UnknownRegion { object, .. }
+                | Region::UnknownObject(object) => object,
+                Region::UnknownAll => continue,
+            };
+            if self
+                .context
+                .variables
+                .get(&object)
+                .is_some_and(|variable| variable.affiliation == crate::symbol::Affiliation::Module)
+            {
+                captured_coverage.push((region, token));
+            } else {
+                self.coverage_sites.push((region, token));
+            }
+        }
         if !summary.incomplete.is_empty() {
             self.procedure
                 .incomplete
                 .extend(summary.incomplete.iter().copied());
         }
 
-        let formal_ids = function_body
-            .arg_map
-            .values()
-            .copied()
-            .collect::<BTreeSet<_>>();
+        let formal_ids = function_args.values().copied().collect::<BTreeSet<_>>();
         let mut dependencies_by_output = BTreeMap::<Region<VarId>, Vec<MappedFunctionRead>>::new();
         for dependency in &summary.dependencies {
             let mut mapped = Vec::new();
@@ -843,8 +1256,9 @@ impl Builder {
                         && exact_regions_have_equal_length(dependency.input, dependency.output),
                 });
             } else if input_object.is_some_and(|object| formal_ids.contains(&object)) {
-                self.model_error
-                    .get_or_insert("function dependency refers to an unmapped input argument");
+                self.procedure
+                    .incomplete
+                    .insert(IncompleteReason::MalformedModel);
                 continue;
             } else {
                 self.procedure
@@ -872,6 +1286,61 @@ impl Builder {
             dependencies_by_output.entry(output).or_default();
         }
 
+        let retained_outputs = summary
+            .retained_outputs
+            .iter()
+            .map(|retained| retained.output)
+            .collect::<BTreeSet<_>>();
+        let mut outputs_by_object = BTreeMap::<VarId, Vec<(Span, Region<VarId>)>>::new();
+        for &output in dependencies_by_output.keys() {
+            if let Region::Exact { object, span } = output {
+                outputs_by_object
+                    .entry(object)
+                    .or_default()
+                    .push((span, output));
+            }
+        }
+        for outputs in outputs_by_object.values_mut() {
+            outputs.sort_unstable_by_key(|(span, _)| (span.start, span.length));
+        }
+        let mut captured_coverage_by_output =
+            BTreeMap::<Region<VarId>, BTreeSet<TokenRange>>::new();
+        for (region, token) in captured_coverage {
+            let (object, span) = match region {
+                Region::Exact { object, span } | Region::UnknownRegion { object, span } => {
+                    (object, Some(span))
+                }
+                Region::UnknownObject(object) => (object, None),
+                Region::UnknownAll => continue,
+            };
+            let Some(outputs) = outputs_by_object.get(&object) else {
+                continue;
+            };
+            let (low, high) = if let Some(span) = span {
+                let Some(end) = span.end() else {
+                    continue;
+                };
+                (
+                    outputs.partition_point(|(output, _)| {
+                        output
+                            .end()
+                            .is_some_and(|output_end| output_end <= span.start)
+                    }),
+                    outputs.partition_point(|(output, _)| output.start < end),
+                )
+            } else {
+                (0, outputs.len())
+            };
+            for &(output_span, output) in &outputs[low..high] {
+                if span.is_none_or(|span| span.intersection(output_span).is_some()) {
+                    captured_coverage_by_output
+                        .entry(output)
+                        .or_default()
+                        .insert(token);
+                }
+            }
+        }
+
         for (&output, dependencies) in &dependencies_by_output {
             let output_object = match output {
                 Region::Exact { object, .. }
@@ -892,21 +1361,39 @@ impl Builder {
                 .map(|dependency| (dependency.read, dependency.kind))
                 .collect::<Vec<_>>();
             dependencies.extend_from_slice(controls);
+            let retained = retained_outputs.contains(&output);
+            let caller_output = if retained {
+                weak_region(output)
+            } else {
+                output
+            };
             let id = self.next_write;
             self.next_write += 1;
-            self.write_tokens.insert(id, call.comptime.token);
+            self.record_write(id, caller_output, call.comptime.token, false);
+            if retained
+                && self.uncertain_loop_depth == 0
+                && let Some(tokens) = captured_coverage_by_output.get(&output)
+            {
+                for &token in tokens {
+                    self.coverage_writes
+                        .entry(output_object)
+                        .or_default()
+                        .insert((output, token));
+                }
+            }
             self.procedure.events[block].push(Event::Write {
                 id,
-                region: output,
+                region: caller_output,
                 dependencies,
                 aligned_dependencies: Vec::new(),
             });
         }
 
         for (path, outputs) in &call.outputs {
-            let Some(&formal) = function_body.arg_map.get(path) else {
-                self.model_error
-                    .get_or_insert("function call output has no formal argument mapping");
+            let Some(&formal) = function_args.get(path) else {
+                self.procedure
+                    .incomplete
+                    .insert(IncompleteReason::MalformedModel);
                 continue;
             };
             let mapped_dependencies = dependencies_by_output
@@ -946,7 +1433,7 @@ impl Builder {
             }
         }
 
-        if let Some(ret) = function_body.ret {
+        if let Some(ret) = function_return {
             let mut dependencies = dependencies_by_output
                 .into_iter()
                 .filter_map(|(output, dependencies)| match output {
@@ -1416,9 +1903,12 @@ impl Builder {
                     requested,
                     expression.comptime().r#type.signed,
                 ),
-            Expression::Binary(left, op, right, _)
-                if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor) =>
-            {
+            Expression::Binary(
+                left,
+                Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor,
+                right,
+                _,
+            ) => {
                 let result_signed = expression.comptime().r#type.signed;
                 let mut mapped = self.map_expression_span_positioned_with_signed(
                     left,
@@ -1707,36 +2197,28 @@ impl Builder {
         call: &FunctionCall,
         requested: Span,
     ) -> Option<Vec<(Region<VarId>, Span, bool)>> {
-        if self.call_stack.contains(&call.id) {
+        let function = self.context.functions.get(&call.id)?;
+        let function_index = function
+            .array
+            .calc_index(call.index.as_deref().unwrap_or(&[]))?;
+        let function_key = (call.id, function_index);
+        if self.call_stack.contains(&function_key) {
             return None;
         }
-        let function_body = self.context.functions.get(&call.id).and_then(|function| {
-            if let Some(index) = &call.index {
-                function.get_function(index)
-            } else {
-                function.get_function(&[])
-            }
-        })?;
+        let function_body = function.functions.get(function_index)?;
         let ret = function_body.ret?;
+        let function_args = function_body.arg_map.clone();
 
         let mut actual_inputs = BTreeMap::<VarId, &Expression>::new();
         for (path, input) in &call.inputs {
-            if let Some(&formal) = function_body.arg_map.get(path) {
+            if let Some(&formal) = function_args.get(path) {
                 actual_inputs.insert(formal, input);
             }
         }
 
-        let mut nested = self.nested(call.id);
-        let exit = nested
-            .lower_statements(&function_body.statements, 0, &[], None)
-            .unwrap_or(0);
-        nested.procedure.exit = exit;
-        if nested.model_error.is_some() {
-            return None;
-        }
-        let summary = procedure::analyze(&nested.procedure).ok()?;
+        let summary = self.cached_function(function_key)?;
         let mut mapped = Vec::new();
-        for dependency in summary.dependencies {
+        for dependency in summary.dependencies.iter().copied() {
             let Region::Exact {
                 object: output,
                 span: output_span,
@@ -1870,13 +2352,31 @@ impl Builder {
     fn lower_observer_expression(&mut self, block: usize, expression: &Expression) {
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
+                Factor::Variable(_, index, select, _) => {
+                    for selector in index.0.iter().chain(select.0.iter()) {
+                        self.lower_observer_expression(block, selector);
+                    }
+                    if let Some((_, width)) = &select.1 {
+                        self.lower_observer_expression(block, width);
+                    }
+                }
+                Factor::HierVariable(_) => {
+                    self.procedure
+                        .incomplete
+                        .insert(IncompleteReason::HierarchicalReference);
+                }
                 Factor::FunctionCall(call) => {
                     self.lower_function_call(block, call, &[]);
                 }
                 Factor::SystemFunctionCall(call) => {
                     self.lower_system_function(block, call, false);
                 }
-                _ => {}
+                Factor::Unknown(_) => {
+                    self.procedure
+                        .incomplete
+                        .insert(IncompleteReason::MalformedModel);
+                }
+                Factor::Value(_) | Factor::Anonymous(_) => {}
             },
             Expression::Unary(_, expression, _) => {
                 self.lower_observer_expression(block, expression);
@@ -1930,6 +2430,21 @@ impl Builder {
     }
 
     fn constant_condition(&mut self, expression: &Expression) -> Option<bool> {
+        if let Expression::Binary(left, op, right, _) = expression {
+            match op {
+                Op::LogicAnd => match self.constant_condition(left) {
+                    Some(false) => return Some(false),
+                    Some(true) => return self.constant_condition(right),
+                    None => {}
+                },
+                Op::LogicOr => match self.constant_condition(left) {
+                    Some(true) => return Some(true),
+                    Some(false) => return self.constant_condition(right),
+                    None => {}
+                },
+                _ => {}
+            }
+        }
         let value = expression.clone().eval_value(&mut self.context)?;
         (!value.is_xz()).then(|| value.is_positive())
     }
@@ -1966,7 +2481,7 @@ impl Builder {
         {
             let id = self.next_write;
             self.next_write += 1;
-            self.write_tokens.insert(id, destination.token);
+            self.record_write(id, region, destination.token, true);
             if let Some(key) = Self::unresolved_access_key(
                 destination.id,
                 &destination.index,
