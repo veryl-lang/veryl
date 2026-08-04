@@ -22599,6 +22599,50 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
 }
 
 #[test]
+fn combinational_loop_whole_unpacked_instance_is_sparse_and_precise() {
+    // Why these cases exist: a whole-array module connection must not create
+    // one graph node per declared element. A sparse access far inside a
+    // 200,000-element array still has to meet its positionally corresponding
+    // feedthrough, while two different positions must remain disjoint.
+    for (name, output_index, expected) in [
+        ("a distant matching element retains feedback", 123_456, true),
+        (
+            "distant disjoint elements remain independent",
+            65_432,
+            false,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Identity (
+                    i: input  logic [200000],
+                    o: output logic [200000],
+                ) {{
+                    assign o = i;
+                }}
+
+                module Top (
+                    o: output logic,
+                ) {{
+                    var feedback: logic [200000];
+                    var passed  : logic [200000];
+                    inst u: Identity (
+                        i: feedback,
+                        o: passed,
+                    );
+                    assign feedback[123456] = passed[{output_index}];
+                    assign o = passed[0];
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
 fn combinational_loop_review_uses_structural_selector_overlap() {
     // Why these cases exist: structural feedback compares each access's
     // independently possible region. Both `idx` and `~idx` can address
