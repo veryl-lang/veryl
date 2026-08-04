@@ -11187,6 +11187,55 @@ fn combinational_loop_review_preserves_unpacked_port_element_positions() {
 }
 
 #[test]
+#[ignore = "captured final-review regression: unpacked function actual collapses elements"]
+fn combinational_loop_review_preserves_unpacked_function_actual_positions() {
+    // Why this case exists: high reads only unpacked element one. Feeding its
+    // result to value[0] is element-disjoint and must not fall back to reading
+    // the whole actual because packed width excludes the unpacked count.
+    assert_comb_loop_for_case(
+        "an unpacked function actual keeps disjoint elements loop-free",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function high (
+                x: input logic [2],
+            ) -> logic {
+                return x[1];
+            }
+            var value: logic [2];
+            assign o = high(value);
+            assign value[0] = o;
+            assign value[1] = 0;
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: returning the function result to the same
+    // value[1] element closes the real function-boundary loop.
+    assert_comb_loop_for_case(
+        "an unpacked function actual detects same-element feedback",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function high (
+                x: input logic [2],
+            ) -> logic {
+                return x[1];
+            }
+            var value: logic [2];
+            assign o = high(value);
+            assign value[0] = 0;
+            assign value[1] = o;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 #[ignore = "captured final-review regression: local right shift loses zero-fill positions"]
 fn combinational_loop_review_preserves_local_right_shift_positions() {
     // Why this case exists: (value >> 1)[3] is an inserted zero. Returning
