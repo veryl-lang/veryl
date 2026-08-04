@@ -12,7 +12,7 @@ use crate::ir::{
 use crate::value::Value;
 use veryl_causal::graph::{EdgeKind, IncompleteReason};
 use veryl_causal::procedure::{
-    self, AlignedDependency, Event, MustAliasCandidate, Procedure, ProcedureError,
+    self, AlignedDependency, Event, MustAliasCandidate, PeriodicAxis, Procedure, ProcedureError,
     ProcedureSummary, WriteId,
 };
 use veryl_causal::region::{Region, Span};
@@ -170,7 +170,7 @@ pub(crate) fn map_expression_span(
         .map_expression_span_to_actual(expression, requested)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct PositionedRegion {
     pub region: Region<VarId>,
     /// Bit coordinates in the mapped expression which this region supplies.
@@ -179,9 +179,152 @@ pub(crate) struct PositionedRegion {
     pub aligned: bool,
     /// Value for data (including replicated fill); Control for selectors.
     pub kind: EdgeKind,
-    /// Regular copies of this source-to-expression mapping.
-    pub repetitions: usize,
-    pub expression_stride: usize,
+    /// Cartesian expression-copy axes, innermost first.
+    pub axes: Vec<PeriodicAxis>,
+}
+
+fn positioned_extent(length: usize, axes: &[PeriodicAxis]) -> Option<usize> {
+    axes.iter().try_fold(length, |extent, axis| {
+        if axis.repetitions == 0 || axis.destination_stride < extent {
+            return None;
+        }
+        axis.destination_stride
+            .checked_mul(axis.repetitions - 1)
+            .and_then(|offset| extent.checked_add(offset))
+    })
+}
+
+fn clip_aligned_dependency(
+    dependency: &AlignedDependency,
+    destination: Span,
+) -> Option<Vec<AlignedDependency>> {
+    fn visit(
+        dependency: &AlignedDependency,
+        source: Span,
+        output: Span,
+        axes: &[PeriodicAxis],
+        query: Span,
+        clipped: &mut Vec<AlignedDependency>,
+    ) -> Option<()> {
+        let pattern_end = output
+            .start
+            .checked_add(positioned_extent(output.length, axes)?)?;
+        let query_end = query.end()?;
+        if pattern_end <= query.start || query_end <= output.start {
+            return Some(());
+        }
+        if query.start <= output.start && pattern_end <= query_end {
+            clipped.push(AlignedDependency {
+                read: dependency.read,
+                kind: dependency.kind,
+                source,
+                destination: Span {
+                    start: output.start.checked_sub(query.start)?,
+                    length: output.length,
+                },
+                axes: axes.to_vec(),
+            });
+            return Some(());
+        }
+        let Some((outer, inner_axes)) = axes.split_last() else {
+            let overlap = output.intersection(query)?;
+            let relative = overlap.start.checked_sub(output.start)?;
+            clipped.push(AlignedDependency {
+                read: dependency.read,
+                kind: dependency.kind,
+                source: Span {
+                    start: source.start.checked_add(relative)?,
+                    length: overlap.length,
+                },
+                destination: Span {
+                    start: overlap.start.checked_sub(query.start)?,
+                    length: overlap.length,
+                },
+                axes: Vec::new(),
+            });
+            return Some(());
+        };
+        let inner_extent = positioned_extent(output.length, inner_axes)?;
+        let inner_end = output.start.checked_add(inner_extent)?;
+        let first = if query.start < inner_end {
+            0
+        } else {
+            query
+                .start
+                .checked_sub(inner_end)?
+                .checked_div(outer.destination_stride)?
+                .checked_add(1)?
+        }
+        .min(outer.repetitions);
+        let end = if query_end <= output.start {
+            0
+        } else {
+            query_end
+                .checked_sub(output.start)?
+                .checked_add(outer.destination_stride - 1)?
+                .checked_div(outer.destination_stride)?
+        }
+        .min(outer.repetitions);
+        if first >= end {
+            return Some(());
+        }
+        let shifted = |copy: usize| {
+            copy.checked_mul(outer.destination_stride)
+                .and_then(|offset| output.start.checked_add(offset))
+                .map(|start| Span {
+                    start,
+                    length: output.length,
+                })
+        };
+        let mut full_first = first;
+        let mut full_end = end;
+        let first_output = shifted(first)?;
+        if query.start > first_output.start
+            || first_output.start.checked_add(inner_extent)? > query_end
+        {
+            visit(dependency, source, first_output, inner_axes, query, clipped)?;
+            full_first += 1;
+        }
+        if full_first < full_end {
+            let last = full_end - 1;
+            let last_output = shifted(last)?;
+            if query.start > last_output.start
+                || last_output.start.checked_add(inner_extent)? > query_end
+            {
+                visit(dependency, source, last_output, inner_axes, query, clipped)?;
+                full_end -= 1;
+            }
+        }
+        if full_first < full_end {
+            let mut axes = inner_axes.to_vec();
+            axes.push(PeriodicAxis {
+                repetitions: full_end - full_first,
+                destination_stride: outer.destination_stride,
+            });
+            clipped.push(AlignedDependency {
+                read: dependency.read,
+                kind: dependency.kind,
+                source,
+                destination: Span {
+                    start: shifted(full_first)?.start.checked_sub(query.start)?,
+                    length: output.length,
+                },
+                axes,
+            });
+        }
+        Some(())
+    }
+
+    let mut clipped = Vec::new();
+    visit(
+        dependency,
+        dependency.source,
+        dependency.destination,
+        &dependency.axes,
+        destination,
+        &mut clipped,
+    )?;
+    Some(clipped)
 }
 
 pub(crate) fn map_expression_span_positioned(
@@ -679,8 +822,13 @@ impl Builder {
                     start: 0,
                     length: source_span.length,
                 },
-                repetitions: destinations.len(),
-                destination_stride: source_span.length,
+                axes: (destinations.len() > 1)
+                    .then_some(PeriodicAxis {
+                        repetitions: destinations.len(),
+                        destination_stride: source_span.length,
+                    })
+                    .into_iter()
+                    .collect(),
             }],
         });
         Some(destinations.len())
@@ -1531,8 +1679,7 @@ impl Builder {
                             start: overlap.start.checked_sub(destination_span.start)?,
                             length: overlap.length,
                         },
-                        repetitions: 1,
-                        destination_stride: 0,
+                        axes: Vec::new(),
                     });
                 }
             }
@@ -1631,8 +1778,7 @@ impl Builder {
                         expression: extension,
                         aligned: false,
                         kind: EdgeKind::Value,
-                        repetitions: 1,
-                        expression_stride: 0,
+                        axes: Vec::new(),
                     }),
                 );
             }
@@ -1662,8 +1808,7 @@ impl Builder {
                         expression: requested,
                         aligned: true,
                         kind: EdgeKind::Value,
-                        repetitions: 1,
-                        expression_stride: 0,
+                        axes: Vec::new(),
                     }])
                 }
                 Factor::Value(_) => Some(Vec::new()),
@@ -1689,8 +1834,7 @@ impl Builder {
                                 },
                                 aligned,
                                 kind: EdgeKind::Value,
-                                repetitions: 1,
-                                expression_stride: 0,
+                                axes: Vec::new(),
                             })
                             .collect()
                     }),
@@ -1729,8 +1873,7 @@ impl Builder {
                         expression: requested,
                         aligned: false,
                         kind: EdgeKind::Control,
-                        repetitions: 1,
-                        expression_stride: 0,
+                        axes: Vec::new(),
                     }),
                 );
                 Some(mapped)
@@ -1745,36 +1888,71 @@ impl Builder {
                     } else {
                         1
                     };
-                    for copy in 0..repeat {
-                        let copy_start = low.checked_add(copy.checked_mul(width)?)?;
-                        let copy_span = Span {
-                            start: copy_start,
-                            length: width,
-                        };
-                        let Some(overlap) = requested.intersection(copy_span) else {
-                            continue;
-                        };
-                        let local = Span {
-                            start: overlap.start.checked_sub(copy_start)?,
-                            length: overlap.length,
-                        };
-                        mapped.extend(
-                            self.map_expression_span_positioned_to_actual(part, local)?
-                                .into_iter()
-                                .map(|positioned| PositionedRegion {
-                                    region: positioned.region,
-                                    expression: Span {
-                                        start: positioned.expression.start + copy_start,
-                                        length: positioned.expression.length,
-                                    },
-                                    aligned: positioned.aligned,
-                                    kind: positioned.kind,
-                                    repetitions: positioned.repetitions,
-                                    expression_stride: positioned.expression_stride,
-                                }),
-                        );
+                    let repeated_length = width.checked_mul(repeat)?;
+                    let covered = Span {
+                        start: low,
+                        length: repeated_length,
+                    };
+                    if let Some(overlap) = requested.intersection(covered) {
+                        let relative_start = overlap.start.checked_sub(low)?;
+                        let relative_end = overlap.end()?.checked_sub(low)?;
+                        let first_copy = relative_start / width;
+                        let last_copy = relative_end.checked_sub(1)? / width;
+                        for copy in [
+                            Some(first_copy),
+                            (last_copy != first_copy).then_some(last_copy),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        {
+                            let copy_start = low.checked_add(copy.checked_mul(width)?)?;
+                            let copy_span = Span {
+                                start: copy_start,
+                                length: width,
+                            };
+                            let copy_overlap = requested.intersection(copy_span)?;
+                            if copy_overlap == copy_span {
+                                continue;
+                            }
+                            let local = Span {
+                                start: copy_overlap.start.checked_sub(copy_start)?,
+                                length: copy_overlap.length,
+                            };
+                            for mut positioned in
+                                self.map_expression_span_positioned_to_actual(part, local)?
+                            {
+                                positioned.expression.start =
+                                    positioned.expression.start.checked_add(copy_start)?;
+                                mapped.push(positioned);
+                            }
+                        }
+
+                        let first_full =
+                            relative_start.checked_add(width - 1)?.checked_div(width)?;
+                        let end_full = relative_end.checked_div(width)?;
+                        if first_full < end_full {
+                            let copies = end_full - first_full;
+                            let copy_start = low.checked_add(first_full.checked_mul(width)?)?;
+                            for mut positioned in self.map_expression_span_positioned_to_actual(
+                                part,
+                                Span {
+                                    start: 0,
+                                    length: width,
+                                },
+                            )? {
+                                positioned.expression.start =
+                                    positioned.expression.start.checked_add(copy_start)?;
+                                if copies > 1 {
+                                    positioned.axes.push(PeriodicAxis {
+                                        repetitions: copies,
+                                        destination_stride: width,
+                                    });
+                                }
+                                mapped.push(positioned);
+                            }
+                        }
                     }
-                    low = low.checked_add(width.checked_mul(repeat)?)?;
+                    low = low.checked_add(repeated_length)?;
                 }
                 Some(mapped)
             }
@@ -1825,8 +2003,7 @@ impl Builder {
                             },
                             aligned: positioned.aligned,
                             kind: positioned.kind,
-                            repetitions: positioned.repetitions,
-                            expression_stride: positioned.expression_stride,
+                            axes: positioned.axes,
                         });
                     }
                 }
@@ -1955,8 +2132,7 @@ impl Builder {
                             },
                             aligned: positioned.aligned,
                             kind: positioned.kind,
-                            repetitions: positioned.repetitions,
-                            expression_stride: positioned.expression_stride,
+                            axes: positioned.axes,
                         })
                         .collect(),
                 )
@@ -1992,8 +2168,7 @@ impl Builder {
                             },
                             aligned: positioned.aligned,
                             kind: positioned.kind,
-                            repetitions: positioned.repetitions,
-                            expression_stride: positioned.expression_stride,
+                            axes: positioned.axes,
                         })
                         .collect(),
                 )
@@ -2030,8 +2205,7 @@ impl Builder {
                                 },
                                 aligned: positioned.aligned,
                                 kind: positioned.kind,
-                                repetitions: positioned.repetitions,
-                                expression_stride: positioned.expression_stride,
+                                axes: positioned.axes,
                             }),
                     );
                 }
@@ -2053,8 +2227,7 @@ impl Builder {
                             expression: fill,
                             aligned: false,
                             kind: EdgeKind::Value,
-                            repetitions: 1,
-                            expression_stride: 0,
+                            axes: Vec::new(),
                         }),
                     );
                 }
@@ -2142,8 +2315,7 @@ impl Builder {
                     },
                     aligned: positioned.aligned,
                     kind: positioned.kind,
-                    repetitions: positioned.repetitions,
-                    expression_stride: positioned.expression_stride,
+                    axes: positioned.axes,
                 });
             }
         }
@@ -2162,29 +2334,10 @@ impl Builder {
                 positioned.expression.start =
                     positioned.expression.start.checked_add(copy_start)?;
                 if copies > 1 {
-                    if positioned.repetitions == 1 {
-                        positioned.repetitions = copies;
-                        positioned.expression_stride = element_length;
-                    } else if positioned
-                        .expression_stride
-                        .checked_mul(positioned.repetitions)
-                        == Some(element_length)
-                    {
-                        positioned.repetitions = positioned.repetitions.checked_mul(copies)?;
-                    } else {
-                        // A non-flattenable nested pattern retains one compact
-                        // inner pattern per outer copy. The number of explicit
-                        // items then reflects source structure, not bit width.
-                        for copy in 0..copies {
-                            let mut positioned = positioned;
-                            positioned.expression.start = positioned
-                                .expression
-                                .start
-                                .checked_add(copy.checked_mul(element_length)?)?;
-                            mapped.push(positioned);
-                        }
-                        continue;
-                    }
+                    positioned.axes.push(PeriodicAxis {
+                        repetitions: copies,
+                        destination_stride: element_length,
+                    });
                 }
                 mapped.push(positioned);
             }
@@ -2560,8 +2713,7 @@ impl Builder {
                         length: span.length,
                     },
                     destination: positioned.expression,
-                    repetitions: positioned.repetitions,
-                    destination_stride: positioned.expression_stride,
+                    axes: positioned.axes,
                 });
             } else {
                 retained.push((read, positioned.kind));
@@ -2570,66 +2722,8 @@ impl Builder {
         *dependencies = retained;
         let mut ret = vec![Vec::new(); destinations.len()];
         for dependency in aligned {
-            let pattern_end = dependency
-                .destination_stride
-                .checked_mul(dependency.repetitions.saturating_sub(1))?
-                .checked_add(dependency.destination.end()?)?;
-            if dependency.repetitions > 1
-                && let Some((index, destination)) = destination_spans
-                    .iter()
-                    .copied()
-                    .enumerate()
-                    .find(|(_, destination)| {
-                        dependency.destination.start >= destination.start
-                            && pattern_end <= destination.end().unwrap_or(0)
-                    })
-            {
-                ret[index].push(AlignedDependency {
-                    read: dependency.read,
-                    kind: dependency.kind,
-                    source: dependency.source,
-                    destination: Span {
-                        start: dependency
-                            .destination
-                            .start
-                            .checked_sub(destination.start)?,
-                        length: dependency.destination.length,
-                    },
-                    repetitions: dependency.repetitions,
-                    destination_stride: dependency.destination_stride,
-                });
-                continue;
-            }
             for (index, destination) in destination_spans.iter().copied().enumerate() {
-                for copy in 0..dependency.repetitions {
-                    let copy_start = dependency
-                        .destination
-                        .start
-                        .checked_add(copy.checked_mul(dependency.destination_stride)?)?;
-                    let copy_span = Span {
-                        start: copy_start,
-                        length: dependency.destination.length,
-                    };
-                    let Some(overlap) = copy_span.intersection(destination) else {
-                        continue;
-                    };
-                    let source_offset = overlap.start.checked_sub(copy_span.start)?;
-                    let destination_offset = overlap.start.checked_sub(destination.start)?;
-                    ret[index].push(AlignedDependency {
-                        read: dependency.read,
-                        kind: dependency.kind,
-                        source: Span {
-                            start: dependency.source.start.checked_add(source_offset)?,
-                            length: overlap.length,
-                        },
-                        destination: Span {
-                            start: destination_offset,
-                            length: overlap.length,
-                        },
-                        repetitions: 1,
-                        destination_stride: 0,
-                    });
-                }
+                ret[index].extend(clip_aligned_dependency(&dependency, destination)?);
             }
         }
         Some(ret)

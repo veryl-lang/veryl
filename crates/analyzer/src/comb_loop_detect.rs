@@ -667,68 +667,70 @@ fn propagate_periodic_partition_regions(
 }
 
 fn periodic_overlaps_span(periodic: &PeriodicRegion, query: Span) -> bool {
-    let Some(query_end) = query.end() else {
-        return false;
-    };
-    let mut inner_extents = Vec::with_capacity(periodic.axes.len() + 1);
-    inner_extents.push(periodic.output.length);
-    for axis in &periodic.axes {
-        let inner_extent = inner_extents[inner_extents.len() - 1];
-        if axis.repetitions == 0 || axis.destination_stride < inner_extent {
-            return false;
-        }
-        let Some(extent) = axis
-            .destination_stride
-            .checked_mul(axis.repetitions.saturating_sub(1))
-            .and_then(|offset| inner_extent.checked_add(offset))
-        else {
-            return false;
+    fn overlaps(output: Span, axes: &[PeriodicAxis], query: Span) -> Option<bool> {
+        let query_end = query.end()?;
+        let Some((outer, inner_axes)) = axes.split_last() else {
+            return Some(output.intersection(query).is_some());
         };
-        inner_extents.push(extent);
-    }
-    let mut stack = vec![(periodic.output.start, periodic.axes.len())];
-    while let Some((base_start, depth)) = stack.pop() {
-        if depth == 0 {
-            if (Span {
-                start: base_start,
-                length: periodic.output.length,
-            })
-            .intersection(query)
-            .is_some()
-            {
-                return true;
+        let inner_extent = inner_axes.iter().try_fold(output.length, |extent, axis| {
+            if axis.repetitions == 0 || axis.destination_stride < extent {
+                return None;
             }
-            continue;
+            axis.destination_stride
+                .checked_mul(axis.repetitions - 1)
+                .and_then(|offset| extent.checked_add(offset))
+        })?;
+        if outer.repetitions == 0 || outer.destination_stride < inner_extent {
+            return None;
         }
-        let axis = periodic.axes[depth - 1];
-        let Some(inner_end) = base_start.checked_add(inner_extents[depth - 1]) else {
-            continue;
-        };
+        let inner_end = output.start.checked_add(inner_extent)?;
         let first = if query.start < inner_end {
             0
         } else {
-            (query.start - inner_end) / axis.destination_stride + 1
-        };
-        let end = if query_end <= base_start {
+            query
+                .start
+                .checked_sub(inner_end)?
+                .checked_div(outer.destination_stride)?
+                .checked_add(1)?
+        }
+        .min(outer.repetitions);
+        let end = if query_end <= output.start {
             0
         } else {
             query_end
-                .saturating_sub(base_start)
-                .saturating_add(axis.destination_stride - 1)
-                / axis.destination_stride
+                .checked_sub(output.start)?
+                .checked_add(outer.destination_stride - 1)?
+                .checked_div(outer.destination_stride)?
         }
-        .min(axis.repetitions);
-        for copy in first..end {
-            let Some(start) = copy
-                .checked_mul(axis.destination_stride)
-                .and_then(|offset| base_start.checked_add(offset))
-            else {
-                continue;
-            };
-            stack.push((start, depth - 1));
+        .min(outer.repetitions);
+        if first >= end {
+            return Some(false);
         }
+        let shifted = |copy: usize| {
+            copy.checked_mul(outer.destination_stride)
+                .and_then(|offset| output.start.checked_add(offset))
+                .map(|start| Span {
+                    start,
+                    length: output.length,
+                })
+        };
+        if overlaps(shifted(first)?, inner_axes, query)? {
+            return Some(true);
+        }
+        if end - first > 2 {
+            // A group strictly between the boundary candidates is wholly
+            // contained by the query, and every valid group has a nonempty
+            // innermost copy.
+            return Some(true);
+        }
+        end.checked_sub(1)
+            .filter(|&last| last != first)
+            .and_then(shifted)
+            .and_then(|last| overlaps(last, inner_axes, query))
+            .or(Some(false))
     }
-    false
+
+    overlaps(periodic.output, &periodic.axes, query).unwrap_or(false)
 }
 
 fn collect_region_masks(
@@ -2203,7 +2205,7 @@ fn map_child_periodic_output(
     if mapped.len() != 1 {
         return None;
     }
-    let positioned = mapped[0];
+    let positioned = &mapped[0];
     let Region::Exact {
         object,
         span: destination,
@@ -2475,8 +2477,7 @@ fn map_destinations_span_positioned(
                 expression: overlap,
                 aligned: true,
                 kind: EdgeKind::Value,
-                repetitions: 1,
-                expression_stride: 0,
+                axes: Vec::new(),
             });
         }
         low = low.checked_add(span.length)?;
