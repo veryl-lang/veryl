@@ -10294,7 +10294,6 @@ fn combinational_loop_review_aliases_overlapping_unknown_regions() {
 }
 
 #[test]
-#[ignore = "known bug: module summaries discard aligned bit coordinates"]
 fn combinational_loop_review_preserves_module_summary_positions() {
     // Why this case exists: Child is a bitwise identity. child_o[1] is driven
     // by the constant child_i[1], so feeding it to child_i[0] is acyclic.

@@ -26,8 +26,8 @@ use daggy::petgraph::graph::NodeIndex;
 use daggy::petgraph::visit::EdgeRef;
 #[cfg(not(target_family = "wasm"))]
 use rayon::prelude::*;
-use std::collections::BTreeSet;
 use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet};
 use veryl_causal::graph::{EdgeKind, IncompleteReason};
 use veryl_causal::procedure::ProcedureSummary;
 use veryl_causal::region::{Region, Span};
@@ -84,6 +84,7 @@ impl BitPartition {
 struct ModuleCombDependency {
     input: Region<VarId>,
     output: Region<VarId>,
+    aligned: bool,
 }
 
 /// Region-preserving combinational feedthrough across one module boundary.
@@ -360,7 +361,11 @@ fn collect_region_mask(
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<StrId, ModuleCombSummary>,
-) -> (Graph<NodeKey, ()>, BTreeSet<IncompleteReason>, BitPartition) {
+) -> (
+    Graph<NodeKey, bool>,
+    BTreeSet<IncompleteReason>,
+    BitPartition,
+) {
     // Procedural combinational declarations use statement-ordered region
     // MemorySSA. Keep instance declarations on the existing bottom-up module
     // summary path until the same region vocabulary crosses module boundaries.
@@ -402,7 +407,7 @@ fn build_module_graph(
     ));
     let bit_part = build_bit_partition(module, &partition_regions);
 
-    let mut graph: Graph<NodeKey, ()> = Graph::new();
+    let mut graph: Graph<NodeKey, bool> = Graph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
     let mut incomplete = BTreeSet::new();
 
@@ -564,7 +569,7 @@ fn add_memory_ssa_edges(
     module: &Module,
     summary: &ProcedureSummary<VarId>,
     bit_part: &BitPartition,
-    graph: &mut Graph<NodeKey, ()>,
+    graph: &mut Graph<NodeKey, bool>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
 ) {
     // Incomplete effects are represented by Unknown edges/regions in the
@@ -577,7 +582,9 @@ fn add_memory_ssa_edges(
         }
         let input = sparse_input_region(summary, dependency.input, dependency.output);
         let output = sparse_output_region(summary, dependency.output);
-        let pairs = if dependency.aligned {
+        let preserve_alignment =
+            dependency.aligned && exact_regions_have_equal_length(input, output);
+        let pairs = if preserve_alignment {
             aligned_region_node_pairs(input, output, &module.variables, bit_part)
         } else {
             let sources = region_node_keys(input, &module.variables, bit_part);
@@ -601,7 +608,7 @@ fn add_memory_ssa_edges(
             }
             let source = ensure_node(graph, node_map, source);
             let destination = ensure_node(graph, node_map, destination);
-            graph.add_edge(source, destination, ());
+            graph.add_edge(source, destination, preserve_alignment);
         }
     }
 }
@@ -865,7 +872,7 @@ fn collect_instance_summary_regions(
 fn add_inst_output_address_edges(
     inst: &InstDeclaration,
     bit_part: &BitPartition,
-    graph: &mut Graph<NodeKey, ()>,
+    graph: &mut Graph<NodeKey, bool>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
@@ -889,7 +896,7 @@ fn add_inst_output_address_edges(
                     for destination in region_node_keys(destination_region, parent_vars, bit_part) {
                         let source = ensure_node(graph, node_map, source);
                         let destination = ensure_node(graph, node_map, destination);
-                        graph.add_edge(source, destination, ());
+                        graph.add_edge(source, destination, false);
                     }
                 }
             }
@@ -903,7 +910,7 @@ fn add_inst_feedthrough_edges(
     child: &Module,
     summary: &ModuleCombSummary,
     bit_part: &BitPartition,
-    graph: &mut Graph<NodeKey, ()>,
+    graph: &mut Graph<NodeKey, bool>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     parent_vars: &HashMap<VarId, Variable>,
     incomplete: &mut BTreeSet<IncompleteReason>,
@@ -934,18 +941,56 @@ fn add_inst_feedthrough_edges(
             map_child_input_region(dependency.input, child, &input.expr, parent_vars, ctx);
         let parent_output_regions =
             map_child_output_region(dependency.output, child, &output.dst, parent_vars, ctx);
-        for input_region in parent_input_regions {
-            for source in region_node_keys(input_region, parent_vars, bit_part) {
-                for &output_region in &parent_output_regions {
-                    for destination in region_node_keys(output_region, parent_vars, bit_part) {
-                        let source = ensure_node(graph, node_map, source);
-                        let destination = ensure_node(graph, node_map, destination);
-                        graph.add_edge(source, destination, ());
-                    }
-                }
-            }
+        let preserve_alignment = dependency.aligned
+            && parent_input_regions.len() == 1
+            && parent_output_regions.len() == 1
+            && exact_regions_have_equal_length(parent_input_regions[0], parent_output_regions[0]);
+        let pairs = if preserve_alignment {
+            aligned_region_node_pairs(
+                parent_input_regions[0],
+                parent_output_regions[0],
+                parent_vars,
+                bit_part,
+            )
+        } else {
+            parent_input_regions
+                .iter()
+                .copied()
+                .flat_map(|input_region| {
+                    let destinations = parent_output_regions
+                        .iter()
+                        .copied()
+                        .flat_map(|output_region| {
+                            region_node_keys(output_region, parent_vars, bit_part)
+                        })
+                        .collect::<Vec<_>>();
+                    region_node_keys(input_region, parent_vars, bit_part)
+                        .into_iter()
+                        .flat_map(move |source| {
+                            destinations
+                                .clone()
+                                .into_iter()
+                                .map(move |destination| (source, destination))
+                        })
+                })
+                .collect()
+        };
+        for (source, destination) in pairs {
+            let source = ensure_node(graph, node_map, source);
+            let destination = ensure_node(graph, node_map, destination);
+            graph.add_edge(source, destination, preserve_alignment);
         }
     }
+}
+
+fn exact_regions_have_equal_length(left: Region<VarId>, right: Region<VarId>) -> bool {
+    matches!(
+        (left, right),
+        (
+            Region::Exact { span: left, .. },
+            Region::Exact { span: right, .. }
+        ) if left.length == right.length
+    )
 }
 
 fn region_object(region: Region<VarId>) -> Option<VarId> {
@@ -1423,7 +1468,7 @@ fn is_pure_input_or_output(id: VarId, vars: &HashMap<VarId, Variable>, want: Dir
     actual == want
 }
 
-fn check_graph(module: &Module, graph: &Graph<NodeKey, ()>, errors: &mut Vec<AnalyzerError>) {
+fn check_graph(module: &Module, graph: &Graph<NodeKey, bool>, errors: &mut Vec<AnalyzerError>) {
     let sccs = tarjan_scc(graph);
     let mut reported: HashSet<Vec<NodeKey>> = HashSet::default();
     for scc in sccs {
@@ -1443,14 +1488,14 @@ fn check_graph(module: &Module, graph: &Graph<NodeKey, ()>, errors: &mut Vec<Ana
 }
 
 fn ensure_node(
-    graph: &mut Graph<NodeKey, ()>,
+    graph: &mut Graph<NodeKey, bool>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     key: NodeKey,
 ) -> NodeIndex {
     *node_map.entry(key).or_insert_with(|| graph.add_node(key))
 }
 
-fn has_self_edge(graph: &Graph<NodeKey, ()>, node: NodeIndex) -> bool {
+fn has_self_edge(graph: &Graph<NodeKey, bool>, node: NodeIndex) -> bool {
     graph
         .edges(node)
         .any(|e| e.source() == node && e.target() == node)
@@ -1504,7 +1549,7 @@ fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool 
 
 fn compute_module_summary(
     module: &Module,
-    graph: &Graph<NodeKey, ()>,
+    graph: &Graph<NodeKey, bool>,
     bit_part: &BitPartition,
 ) -> ModuleCombSummary {
     use crate::ir::VarKind;
@@ -1523,9 +1568,9 @@ fn compute_module_summary(
         }
     }
 
-    let mut dependencies = BTreeSet::new();
-    let mut visited: HashSet<NodeIndex> = HashSet::default();
-    let mut stack: Vec<NodeIndex> = Vec::new();
+    let mut dependencies = BTreeMap::new();
+    let mut visited: HashSet<(NodeIndex, bool)> = HashSet::default();
+    let mut stack: Vec<(NodeIndex, bool)> = Vec::new();
     for ni in graph.node_indices() {
         let key = graph[ni];
         if !input_ids.contains(&key.0) {
@@ -1533,26 +1578,36 @@ fn compute_module_summary(
         }
         visited.clear();
         stack.clear();
-        stack.push(ni);
-        while let Some(n) = stack.pop() {
-            if !visited.insert(n) {
+        stack.push((ni, true));
+        while let Some((n, path_aligned)) = stack.pop() {
+            if !visited.insert((n, path_aligned)) {
                 continue;
             }
             let nk = graph[n];
             if output_ids.contains(&nk.0) {
                 for input in node_key_regions(key, module, bit_part) {
                     for output in node_key_regions(nk, module, bit_part) {
-                        dependencies.insert(ModuleCombDependency { input, output });
+                        dependencies
+                            .entry((input, output))
+                            .and_modify(|aligned| *aligned &= path_aligned)
+                            .or_insert(path_aligned);
                     }
                 }
             }
             for e in graph.edges(n) {
-                stack.push(e.target());
+                stack.push((e.target(), path_aligned && *e.weight()));
             }
         }
     }
     ModuleCombSummary {
-        dependencies: dependencies.into_iter().collect(),
+        dependencies: dependencies
+            .into_iter()
+            .map(|((input, output), aligned)| ModuleCombDependency {
+                input,
+                output,
+                aligned,
+            })
+            .collect(),
     }
 }
 
