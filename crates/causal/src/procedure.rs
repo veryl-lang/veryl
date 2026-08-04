@@ -783,25 +783,109 @@ fn build_atoms<O: Copy + Ord>(
     // Copy relationships form a sparse coordinate graph. Propagate only
     // observed access boundaries through it, so even million-bit objects cost
     // O(accesses + propagated endpoints), never O(width).
-    let mut transfer_index = BTreeMap::<O, Vec<(usize, bool)>>::new();
+    #[derive(Clone, Copy)]
+    struct TransferRef {
+        index: usize,
+        from_source: bool,
+        start: usize,
+        end: usize,
+    }
+
+    struct TransferIndex {
+        transfers: Vec<TransferRef>,
+        leaf_base: usize,
+        max_end: Vec<usize>,
+    }
+
+    impl TransferIndex {
+        fn new(mut transfers: Vec<TransferRef>) -> Self {
+            transfers.sort_unstable_by_key(|transfer| transfer.start);
+            let leaf_base = transfers.len().next_power_of_two().max(1);
+            let mut max_end = vec![0; leaf_base * 2];
+            for (index, transfer) in transfers.iter().enumerate() {
+                max_end[leaf_base + index] = transfer.end;
+            }
+            for index in (1..leaf_base).rev() {
+                max_end[index] = max_end[index * 2].max(max_end[index * 2 + 1]);
+            }
+            Self {
+                transfers,
+                leaf_base,
+                max_end,
+            }
+        }
+
+        fn containing(&self, point: usize) -> Vec<TransferRef> {
+            let high = self
+                .transfers
+                .partition_point(|transfer| transfer.start <= point);
+            let mut matches = Vec::new();
+            self.visit_containing(1, 0, self.leaf_base, high, point, &mut matches);
+            matches
+        }
+
+        fn visit_containing(
+            &self,
+            node: usize,
+            low: usize,
+            high: usize,
+            query_high: usize,
+            point: usize,
+            matches: &mut Vec<TransferRef>,
+        ) {
+            if low >= query_high || self.max_end[node] < point {
+                return;
+            }
+            if high - low == 1 {
+                if let Some(&transfer) = self.transfers.get(low)
+                    && transfer.end >= point
+                {
+                    matches.push(transfer);
+                }
+                return;
+            }
+            let middle = low + (high - low) / 2;
+            self.visit_containing(node * 2, low, middle, query_high, point, matches);
+            self.visit_containing(node * 2 + 1, middle, high, query_high, point, matches);
+        }
+    }
+
+    let mut transfer_refs = BTreeMap::<O, Vec<TransferRef>>::new();
     for (index, transfer) in transfers.iter().enumerate() {
-        transfer_index
+        transfer_refs
             .entry(transfer.source_object)
             .or_default()
-            .push((index, true));
-        transfer_index
+            .push(TransferRef {
+                index,
+                from_source: true,
+                start: transfer.source_span.start,
+                end: transfer.source_span.end().unwrap_or(usize::MAX),
+            });
+        transfer_refs
             .entry(transfer.destination_object)
             .or_default()
-            .push((index, false));
+            .push(TransferRef {
+                index,
+                from_source: false,
+                start: transfer.destination_span.start,
+                end: transfer.destination_span.end().unwrap_or(usize::MAX),
+            });
     }
+    let transfer_index = transfer_refs
+        .into_iter()
+        .map(|(object, transfers)| (object, TransferIndex::new(transfers)))
+        .collect::<BTreeMap<_, _>>();
     let mut pending = std::collections::VecDeque::new();
     for (&object, points) in &endpoints {
         pending.extend(points.keys().map(|&point| (object, point)));
     }
     while let Some((object, point)) = pending.pop_front() {
-        for &(index, from_source) in transfer_index.get(&object).into_iter().flatten() {
-            let transfer = transfers[index];
-            let (from, to_object, to) = if from_source {
+        let Some(object_transfers) = transfer_index.get(&object) else {
+            continue;
+        };
+        for transfer_ref in object_transfers.containing(point) {
+            let transfer = transfers[transfer_ref.index];
+            let (from, to_object, to) = if transfer_ref.from_source {
                 (
                     transfer.source_span,
                     transfer.destination_object,
@@ -814,12 +898,6 @@ fn build_atoms<O: Copy + Ord>(
                     transfer.source_span,
                 )
             };
-            let Some(from_end) = from.end() else {
-                return Err(ProcedureError::Model("aligned transfer overflows usize"));
-            };
-            if point < from.start || point > from_end {
-                continue;
-            }
             let Some(mapped) = point
                 .checked_sub(from.start)
                 .and_then(|offset| to.start.checked_add(offset))
@@ -877,18 +955,27 @@ fn expand<O: Copy + Ord>(
         Region::UnknownObject(object) => (object, None),
         Region::UnknownAll => return Vec::new(),
     };
-    atoms_by_object
-        .get(&object)
-        .map(|object_atoms| {
-            object_atoms
-                .iter()
-                .copied()
-                .filter(|&atom| {
-                    span.is_none_or(|span| atoms[atom].span.intersection(span).is_some())
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    let Some(object_atoms) = atoms_by_object.get(&object) else {
+        return Vec::new();
+    };
+    let Some(span) = span else {
+        return object_atoms.clone();
+    };
+    let Some(end) = span.end() else {
+        return Vec::new();
+    };
+
+    // Object atoms are disjoint and ordered by start. Query only the interval
+    // which can overlap this region instead of scanning every atom of a wide
+    // object for every individual read or write.
+    let low = object_atoms.partition_point(|&atom| {
+        atoms[atom]
+            .span
+            .end()
+            .is_some_and(|atom_end| atom_end <= span.start)
+    });
+    let high = object_atoms.partition_point(|&atom| atoms[atom].span.start < end);
+    object_atoms[low..high].to_vec()
 }
 
 #[cfg(test)]

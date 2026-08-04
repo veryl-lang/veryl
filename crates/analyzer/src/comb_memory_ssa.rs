@@ -1703,10 +1703,11 @@ impl Builder {
     }
 
     fn binary_rhs_is_reachable(&mut self, left: &Expression, op: Op) -> bool {
-        !matches!(
-            (op, self.constant_condition(left)),
-            (Op::LogicAnd, Some(false)) | (Op::LogicOr, Some(true))
-        )
+        match op {
+            Op::LogicAnd => self.constant_condition(left) != Some(false),
+            Op::LogicOr => self.constant_condition(left) != Some(true),
+            _ => true,
+        }
     }
 
     fn write_destination(

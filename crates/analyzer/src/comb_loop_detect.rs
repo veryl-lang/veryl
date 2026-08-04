@@ -9,7 +9,6 @@
 //! simulator's `analyze_dependency` is the backup safety net.
 
 use crate::AnalyzerError;
-use crate::BigUint;
 use crate::HashMap;
 use crate::HashSet;
 use crate::conv::Context;
@@ -19,7 +18,6 @@ use crate::ir::{
     InstDeclaration, Ir, Module, Op, SystemFunctionKind, VarIndex, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
-use crate::value::ValueBigUint;
 use daggy::petgraph::Direction::Incoming;
 use daggy::petgraph::Graph;
 use daggy::petgraph::graph::NodeIndex;
@@ -187,7 +185,7 @@ const DENSE_REGION_INDEX: usize = usize::MAX - 1;
 /// iff they appear in the same set of per-decl masks.
 #[derive(Default)]
 struct BitPartition {
-    ranges: HashMap<VarId, BTreeMap<usize, Vec<BigUint>>>,
+    ranges: HashMap<VarId, BTreeMap<usize, Vec<Span>>>,
     /// Symbolic full-element interiors of large exact spans. Their graph-node
     /// count depends on observed spans, not on unpacked array length.
     dense_regions: Vec<Region<VarId>>,
@@ -198,7 +196,7 @@ struct BitPartition {
 
 impl BitPartition {
     /// Empty slice means the variable's bits are untouched.
-    fn ranges_of(&self, key: IdxKey) -> &[BigUint] {
+    fn ranges_of(&self, key: IdxKey) -> &[Span] {
         self.ranges
             .get(&key.0)
             .and_then(|elements| elements.get(&key.1))
@@ -428,69 +426,49 @@ fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
 
 /// Group bits into atomic ranges by signature: bits with the same set
 /// of containing masks form one range. Bits in zero masks are dropped.
-fn atomic_ranges(masks: &[BigUint], width: usize) -> Vec<BigUint> {
-    // Split only at mask transitions. The previous implementation visited
-    // every declared bit and built a signature BigUint for it, making a sparse
-    // access to a million-bit object take O(width * accesses). Here the work is
-    // O(mask limbs + transitions * accesses), independent of untouched spans.
-    let mut endpoints = BTreeSet::new();
-    endpoints.insert(0usize);
-    endpoints.insert(width);
+fn atomic_ranges(masks: &[Span], width: usize) -> Vec<Span> {
+    // Every mask is already a compact interval. Sweep its endpoints instead
+    // of constructing width-sized BigUints or comparing every interval with
+    // every mask. A finer split at each transition is causally equivalent to
+    // merging non-contiguous intervals with the same signature.
+    let mut events = BTreeMap::<usize, isize>::new();
     for mask in masks {
-        let digits = mask.iter_u64_digits().collect::<Vec<_>>();
-        let mut previous_bit = false;
-        for word_index in 0..=digits.len() {
-            let word = digits.get(word_index).copied().unwrap_or(0);
-            let shifted = word.wrapping_shl(1) | u64::from(previous_bit);
-            let mut transitions = word ^ shifted;
-            while transitions != 0 {
-                let bit = transitions.trailing_zeros() as usize;
-                let endpoint = word_index.saturating_mul(64).saturating_add(bit);
-                if endpoint <= width {
-                    endpoints.insert(endpoint);
-                }
-                transitions &= transitions - 1;
-            }
-            previous_bit = word >> 63 != 0;
-        }
-    }
-
-    let mut by_sig: HashMap<BigUint, BigUint> = HashMap::default();
-    let one = BigUint::from(1u32);
-    let endpoints = endpoints.into_iter().collect::<Vec<_>>();
-    for window in endpoints.windows(2) {
-        let start = window[0];
-        let end = window[1];
+        let Some(end) = mask.end().map(|end| end.min(width)) else {
+            continue;
+        };
+        let start = mask.start.min(width);
         if start >= end {
             continue;
         }
-        let mut sig = BigUint::default();
-        for (i, m) in masks.iter().enumerate() {
-            if m.bit(start as u64) {
-                sig |= &one << i;
-            }
-        }
-        if sig == BigUint::default() {
-            continue;
-        }
-        let entry = by_sig.entry(sig).or_default();
-        *entry |= ValueBigUint::gen_mask_range(end - 1, start);
+        *events.entry(start).or_default() += 1;
+        *events.entry(end).or_default() -= 1;
     }
-    let mut ret: Vec<BigUint> = by_sig.into_values().collect();
-    // Stable order by lowest set bit so NodeKey range_idx is deterministic.
-    ret.sort_by_key(|m| m.trailing_zeros().unwrap_or(0));
-    ret
+
+    let mut active = 0isize;
+    let mut previous = 0usize;
+    let mut ranges = Vec::new();
+    for (endpoint, delta) in events {
+        if active > 0 && previous < endpoint {
+            ranges.push(Span {
+                start: previous,
+                length: endpoint - previous,
+            });
+        }
+        active += delta;
+        previous = endpoint;
+    }
+    ranges
 }
 
 fn build_bit_partition(module: &Module, memory_ssa_regions: &[Region<VarId>]) -> BitPartition {
-    let mut masks: HashMap<VarId, BTreeMap<usize, Vec<BigUint>>> = HashMap::default();
+    let mut masks: HashMap<VarId, BTreeMap<usize, Vec<Span>>> = HashMap::default();
 
     // A shifted copy can propagate every observed endpoint through the copy
     // relation. Feed those sparse spans into the shared partition so distinct
     // causal atoms do not collapse into a spurious self-edge.
     let dense_regions = collect_region_masks(memory_ssa_regions, module, &mut masks);
 
-    let mut ranges: HashMap<VarId, BTreeMap<usize, Vec<BigUint>>> = HashMap::default();
+    let mut ranges: HashMap<VarId, BTreeMap<usize, Vec<Span>>> = HashMap::default();
     for (object, elements) in masks {
         let width = module
             .variables
@@ -530,7 +508,7 @@ fn build_bit_partition(module: &Module, memory_ssa_regions: &[Region<VarId>]) ->
 fn collect_region_masks(
     regions: &[Region<VarId>],
     module: &Module,
-    masks: &mut HashMap<VarId, BTreeMap<usize, Vec<BigUint>>>,
+    masks: &mut HashMap<VarId, BTreeMap<usize, Vec<Span>>>,
 ) -> Vec<Region<VarId>> {
     // Full-element interiors are homogeneous. Materialize only their boundary
     // representatives and any sparse element already observed by another
@@ -562,14 +540,20 @@ fn collect_region_masks(
             masks,
             object,
             first,
-            ValueBigUint::gen_mask_range(first_end - first * width - 1, span.start % width),
+            Span {
+                start: span.start % width,
+                length: first_end - span.start,
+            },
         );
         if last != first {
             push_element_mask(
                 masks,
                 object,
                 last,
-                ValueBigUint::gen_mask_range(end - last * width - 1, 0),
+                Span {
+                    start: 0,
+                    length: end - last * width,
+                },
             );
         }
 
@@ -594,7 +578,10 @@ fn collect_region_masks(
         else {
             continue;
         };
-        let full_mask = ValueBigUint::gen_mask_range(width - 1, 0);
+        let full_mask = Span {
+            start: 0,
+            length: width,
+        };
         let elements = masks.entry(object).or_default();
         for (start, end) in intervals {
             dense_regions.push(Region::Exact {
@@ -616,7 +603,7 @@ fn collect_region_masks(
                 elements
                     .get_mut(&element)
                     .expect("materialized element")
-                    .push(full_mask.clone());
+                    .push(full_mask);
             }
         }
     }
@@ -626,10 +613,10 @@ fn collect_region_masks(
 }
 
 fn push_element_mask(
-    masks: &mut HashMap<VarId, BTreeMap<usize, Vec<BigUint>>>,
+    masks: &mut HashMap<VarId, BTreeMap<usize, Vec<Span>>>,
     object: VarId,
     element: usize,
-    mask: BigUint,
+    mask: Span,
 ) {
     masks
         .entry(object)
@@ -1146,12 +1133,15 @@ fn sparse_exact_node_keys(
         };
         let local_start = overlap.start - element_start;
         let local_end = local_start + overlap.length;
-        let mask = ValueBigUint::gen_mask_range(local_end - 1, local_start);
+        let selected = Span {
+            start: local_start,
+            length: local_end - local_start,
+        };
         keys.extend(
             ranges
                 .iter()
                 .enumerate()
-                .filter(|(_, range)| (*range & &mask) != BigUint::default())
+                .filter(|(_, range)| range.intersection(selected).is_some())
                 .map(|(range, _)| (object, element, range)),
         );
     }
@@ -1902,10 +1892,18 @@ fn collect_expression_regions(
             Expression::Unary(_, operand, _) => collect(operand, variables, ctx, regions),
             Expression::Binary(left, op, right, _) => {
                 collect(left, variables, ctx, regions);
-                let left_value = left.clone().eval_value(ctx);
-                let rhs_reachable = match (op, left_value.as_ref()) {
-                    (Op::LogicAnd, Some(value)) if !value.is_xz() && !value.is_positive() => false,
-                    (Op::LogicOr, Some(value)) if !value.is_xz() && value.is_positive() => false,
+                let rhs_reachable = match op {
+                    Op::LogicAnd | Op::LogicOr => {
+                        let left_value = left.clone().eval_value(ctx);
+                        !matches!(
+                            (op, left_value.as_ref()),
+                            (Op::LogicAnd, Some(value))
+                                if !value.is_xz() && !value.is_positive()
+                        ) && !matches!(
+                            (op, left_value.as_ref()),
+                            (Op::LogicOr, Some(value)) if !value.is_xz() && value.is_positive()
+                        )
+                    }
                     _ => true,
                 };
                 if rhs_reachable {
@@ -2381,60 +2379,23 @@ fn node_key_regions_for_variables(
     let Some(width) = variables.get(&key.0).and_then(Variable::total_width) else {
         return Vec::new();
     };
-    let Some(mask) = bit_part.ranges_of((key.0, key.1)).get(key.2) else {
+    let Some(span) = bit_part.ranges_of((key.0, key.1)).get(key.2) else {
         return Vec::new();
     };
-    mask_spans(mask, width)
-        .into_iter()
-        .filter_map(|span| {
-            let start = key.1.checked_mul(width)?.checked_add(span.start)?;
-            Some(Region::Exact {
-                object: key.0,
-                span: Span {
-                    start,
-                    length: span.length,
-                },
-            })
-        })
-        .collect()
-}
-
-fn mask_spans(mask: &BigUint, width: usize) -> Vec<Span> {
-    let digits = mask.iter_u64_digits().collect::<Vec<_>>();
-    let mut spans = Vec::new();
-    let mut start = None;
-    for word_index in 0..=digits.len() {
-        let word = digits.get(word_index).copied().unwrap_or(0);
-        let previous_bit = word_index
-            .checked_sub(1)
-            .and_then(|index| digits.get(index))
-            .is_some_and(|word| word >> 63 != 0);
-        let mut transitions = word ^ (word.wrapping_shl(1) | u64::from(previous_bit));
-        while transitions != 0 {
-            let bit = transitions.trailing_zeros() as usize;
-            let point = word_index.saturating_mul(64).saturating_add(bit).min(width);
-            if mask.bit(point as u64) {
-                start = Some(point);
-            } else if let Some(span_start) = start.take()
-                && span_start < point
-            {
-                spans.push(Span {
-                    start: span_start,
-                    length: point - span_start,
-                });
-            }
-            transitions &= transitions - 1;
-        }
-    }
-    if let Some(span_start) = start
-        && span_start < width
-    {
-        spans.push(Span {
-            start: span_start,
-            length: width - span_start,
-        });
-    }
-    spans
+    let Some(start) = key
+        .1
+        .checked_mul(width)
+        .and_then(|base| base.checked_add(span.start))
+    else {
+        return Vec::new();
+    };
+    vec![Region::Exact {
+        object: key.0,
+        span: Span {
+            start,
+            length: span.length,
+        },
+    }]
 }
 
 #[cfg(test)]
@@ -2486,48 +2447,80 @@ mod memory_ssa_tests {
 
     #[test]
     fn atomic_ranges_split_at_sparse_mask_transitions() {
+        // Why this case exists: sparse endpoints on a huge packed object must
+        // cost O(accesses), not O(declared width).
         let width = 1_000_000;
-        let low = ValueBigUint::gen_mask_range(15, 8);
-        let high = ValueBigUint::gen_mask_range(width - 9, width - 16);
-        let ranges = atomic_ranges(&[low.clone(), high.clone()], width);
-        assert_eq!(ranges.len(), 2);
-        assert!(ranges.contains(&low));
-        assert!(ranges.contains(&high));
+        let low = Span {
+            start: 8,
+            length: 8,
+        };
+        let high = Span {
+            start: width - 16,
+            length: 8,
+        };
+        assert_eq!(atomic_ranges(&[low, high], width), vec![low, high]);
     }
 
     #[test]
     fn atomic_ranges_preserve_shared_and_disjoint_signatures() {
-        let first = ValueBigUint::gen_mask_range(127, 0);
-        let second = ValueBigUint::gen_mask_range(191, 64);
+        // Why this case exists: an event sweep may use a finer partition than
+        // signature merging, but it must split at both overlap boundaries.
+        let first = Span {
+            start: 0,
+            length: 128,
+        };
+        let second = Span {
+            start: 64,
+            length: 128,
+        };
         let ranges = atomic_ranges(&[first, second], 192);
-        assert_eq!(ranges.len(), 3);
-        assert_eq!(ranges[0], ValueBigUint::gen_mask_range(63, 0));
-        assert_eq!(ranges[1], ValueBigUint::gen_mask_range(127, 64));
-        assert_eq!(ranges[2], ValueBigUint::gen_mask_range(191, 128));
-    }
-
-    #[test]
-    fn module_summary_masks_split_across_word_boundaries() {
-        let mask = ValueBigUint::gen_mask_range(1, 0)
-            | ValueBigUint::gen_mask_range(65, 63)
-            | ValueBigUint::gen_mask_range(127, 127);
         assert_eq!(
-            mask_spans(&mask, 192),
+            ranges,
             vec![
                 Span {
                     start: 0,
-                    length: 2,
+                    length: 64,
                 },
                 Span {
-                    start: 63,
-                    length: 3,
+                    start: 64,
+                    length: 64,
                 },
                 Span {
-                    start: 127,
-                    length: 1,
+                    start: 128,
+                    length: 64,
                 },
             ]
         );
-        assert!(mask_spans(&BigUint::default(), 192).is_empty());
+    }
+
+    #[test]
+    fn atomic_ranges_keep_adjacent_signature_transitions() {
+        // Why this case exists: two masks ending and starting at the same bit
+        // leave coverage nonzero, but still require distinct causal atoms.
+        assert_eq!(
+            atomic_ranges(
+                &[
+                    Span {
+                        start: 0,
+                        length: 64,
+                    },
+                    Span {
+                        start: 64,
+                        length: 64,
+                    },
+                ],
+                128,
+            ),
+            vec![
+                Span {
+                    start: 0,
+                    length: 64,
+                },
+                Span {
+                    start: 64,
+                    length: 64,
+                },
+            ]
+        );
     }
 }
