@@ -4665,3 +4665,35 @@ endinterface
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn hoisted_declaration_keeps_ifdef_guard() {
+    // Statement-block declarations are hoisted to the top of the begin/end
+    // block; the hoist used to flatten the groups and drop their
+    // `ifdef/`else guards, emitting both arms' declarations unguarded into
+    // the same scope (duplicate declaration, rejected by every SV tool).
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M {
+    var x: logic;
+    always_comb {
+        #[ifdef(DEFINE_E)]
+        let e: logic<8> = 1;
+        #[else]
+        let e: logic<16> = 3;
+        x = e[0];
+    }
+}
+"#;
+    let ret = emit(&metadata, code);
+    let hoist = ret.find("logic [8-1:0] e;").unwrap();
+    let guarded = &ret[..hoist];
+    assert!(
+        guarded.trim_end().ends_with("`ifdef DEFINE_E"),
+        "hoisted declaration must sit inside its ifdef guard:\n{ret}"
+    );
+    assert!(
+        ret.contains("`else\n        logic [16-1:0] e;\n        `endif"),
+        "else-arm declaration must sit inside the guard:\n{ret}"
+    );
+}
