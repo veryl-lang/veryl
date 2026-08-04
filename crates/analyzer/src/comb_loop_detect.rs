@@ -2997,4 +2997,97 @@ mod memory_ssa_tests {
             ]
         );
     }
+
+    #[test]
+    fn periodic_overlap_matches_exhaustive_multiaxis_oracle() {
+        // Why this case exists: periodic outputs stay symbolic in the bit
+        // partition. Their arithmetic overlap predicate must agree exactly
+        // with concrete expansion for both copied bits and holes, while a
+        // distant query must not iterate over every preceding copy.
+        let periodic = PeriodicRegion {
+            object: VarId::from_raw(0),
+            output: Span {
+                start: 0,
+                length: 1,
+            },
+            axes: vec![
+                PeriodicAxis {
+                    repetitions: 2,
+                    destination_stride: 2,
+                },
+                PeriodicAxis {
+                    repetitions: 2,
+                    destination_stride: 10,
+                },
+            ],
+        };
+        let concrete = periodic.axes.iter().fold(
+            vec![periodic.output],
+            |copies, axis| {
+                copies
+                    .into_iter()
+                    .flat_map(|copy| {
+                        (0..axis.repetitions).map(move |index| Span {
+                            start: copy.start + index * axis.destination_stride,
+                            length: copy.length,
+                        })
+                    })
+                    .collect()
+            },
+        );
+        for start in 0..14 {
+            for length in 1..=4 {
+                let query = Span { start, length };
+                let expected = concrete
+                    .iter()
+                    .any(|copy| copy.intersection(query).is_some());
+                assert_eq!(
+                    periodic_overlaps_span(&periodic, query),
+                    expected,
+                    "query={query:?}, copies={concrete:?}"
+                );
+            }
+        }
+
+        let copies = 200_000usize;
+        let huge = PeriodicRegion {
+            object: VarId::from_raw(0),
+            output: Span {
+                start: 0,
+                length: 1,
+            },
+            axes: vec![
+                PeriodicAxis {
+                    repetitions: copies,
+                    destination_stride: 2,
+                },
+                PeriodicAxis {
+                    repetitions: copies,
+                    destination_stride: 500_000,
+                },
+            ],
+        };
+        let last = (copies - 1) * 2 + (copies - 1) * 500_000;
+        assert!(periodic_overlaps_span(
+            &huge,
+            Span {
+                start: last,
+                length: 1,
+            }
+        ));
+        assert!(!periodic_overlaps_span(
+            &huge,
+            Span {
+                start: 499_999,
+                length: 1,
+            }
+        ));
+        assert!(!periodic_overlaps_span(
+            &huge,
+            Span {
+                start: last + 1,
+                length: 1,
+            }
+        ));
+    }
 }

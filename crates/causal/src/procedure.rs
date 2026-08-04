@@ -1587,16 +1587,26 @@ mod tests {
             assert_eq!(
                 phase
                     .iter()
-                    .map(|dependency| dependency.repetitions)
+                    .map(|dependency| {
+                        dependency
+                            .axes
+                            .iter()
+                            .map(|axis| axis.repetitions)
+                            .product::<usize>()
+                    })
                     .sum::<usize>(),
                 copies,
                 "{summary:#?}"
             );
-            assert!(phase.iter().all(|dependency| {
-                dependency.output.length == 1
-                    && dependency.output.start % 2 == bit
-                    && dependency.destination_stride == 2
-            }));
+            assert!(
+                phase.iter().all(|dependency| {
+                    dependency.output.length == 1
+                        && dependency.output.start % 2 == bit
+                        && dependency.axes.len() == 1
+                        && dependency.axes[0].destination_stride == 2
+                }),
+                "{summary:#?}"
+            );
         }
         let final_inputs = summary
             .dependencies
@@ -1605,6 +1615,101 @@ mod tests {
             .map(|dependency| dependency.input)
             .collect::<BTreeSet<_>>();
         assert_eq!(final_inputs, [exact(1, 0, 1)].into());
+    }
+
+    #[test]
+    fn nested_periodic_copy_keeps_summary_size_independent_of_axis_counts() {
+        // Why this case exists: composing two non-flattenable periodic copies
+        // used to emit one inner projection per outer copy. Both axes must
+        // remain exact while summary size stays independent of 200,000²
+        // concrete destinations.
+        let copies = 200_000usize;
+        let inner_stride = 2usize;
+        let inner_length = (copies - 1) * inner_stride + 1;
+        let outer_stride = 500_000usize;
+        let outer_length = (copies - 1) * outer_stride + inner_length;
+        let procedure = Procedure {
+            entry: 0,
+            exit: 0,
+            successors: vec![vec![]],
+            events: vec![vec![
+                Event::Read {
+                    id: 0,
+                    region: exact(1, 0, 1),
+                },
+                Event::Write {
+                    id: 0,
+                    region: exact(2, 0, inner_length),
+                    dependencies: vec![],
+                    aligned_dependencies: vec![AlignedDependency {
+                        read: 0,
+                        kind: EdgeKind::Value,
+                        source: Span {
+                            start: 0,
+                            length: 1,
+                        },
+                        destination: Span {
+                            start: 0,
+                            length: 1,
+                        },
+                        repetitions: copies,
+                        destination_stride: inner_stride,
+                    }],
+                },
+                Event::Read {
+                    id: 1,
+                    region: exact(2, 0, inner_length),
+                },
+                Event::Write {
+                    id: 1,
+                    region: exact(3, 0, outer_length),
+                    dependencies: vec![],
+                    aligned_dependencies: vec![AlignedDependency {
+                        read: 1,
+                        kind: EdgeKind::Value,
+                        source: Span {
+                            start: 0,
+                            length: inner_length,
+                        },
+                        destination: Span {
+                            start: 0,
+                            length: inner_length,
+                        },
+                        repetitions: copies,
+                        destination_stride: outer_stride,
+                    }],
+                },
+            ]],
+            object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
+            incomplete: BTreeSet::new(),
+        };
+
+        let summary = analyze(&procedure).unwrap();
+        assert!(summary.atom_count < 16, "{summary:#?}");
+        assert!(summary.periodic_dependencies.len() < 16, "{summary:#?}");
+        let nested = summary
+            .periodic_dependencies
+            .iter()
+            .filter(|dependency| {
+                dependency.input == exact(1, 0, 1) && dependency.output_object == 3
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(nested.len(), 1, "{summary:#?}");
+        assert_eq!(nested[0].output, Span { start: 0, length: 1 });
+        assert_eq!(
+            nested[0].axes,
+            vec![
+                PeriodicAxis {
+                    repetitions: copies,
+                    destination_stride: inner_stride,
+                },
+                PeriodicAxis {
+                    repetitions: copies,
+                    destination_stride: outer_stride,
+                },
+            ]
+        );
     }
 
     #[test]
