@@ -22745,3 +22745,91 @@ fn combinational_loop_review_maps_instance_actual_function_captures() {
         );
     }
 }
+
+#[test]
+fn combinational_loop_review_preserves_sparse_selector_regions() {
+    // Why these cases exist: for a one-bit two-state selector, `idx * 2` has
+    // the independently provable non-contiguous candidate set {0,2}. Element
+    // one is unreachable, while feedback into element two is a real loop.
+    for (name, target, expected) in [
+        (
+            "a non-contiguous selector excludes an unreachable array element",
+            1,
+            false,
+        ),
+        (
+            "a non-contiguous selector retains a reachable array element",
+            2,
+            true,
+        ),
+    ] {
+        let clears = (0..3)
+            .filter(|index| *index != target)
+            .map(|index| format!("assign mem[{index}] = 0;"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Top (
+                    idx: input  bit,
+                    o  : output logic,
+                ) {{
+                    var mem: logic [3];
+                    assign o = mem[idx * 2];
+                    assign mem[{target}] = o;
+                    {clears}
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+
+    // Why these cases exist: an unpacked formal span is packed_width times
+    // element_count. Applying a non-position-preserving operator to element
+    // one must not make an instance actual's element zero overlap it.
+    for (name, target, expected) in [
+        (
+            "an unaligned unpacked instance input keeps element zero disjoint",
+            0,
+            false,
+        ),
+        (
+            "an unaligned unpacked instance input retains element one feedback",
+            1,
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Child (
+                    i: input  logic [2],
+                    o: output logic,
+                ) {{
+                    assign o = !i[1];
+                }}
+
+                module Top (
+                    o: output logic,
+                ) {{
+                    var value : logic [2];
+                    var passed: logic;
+                    inst u: Child (
+                        i: value,
+                        o: passed,
+                    );
+                    assign value[{target}] = passed;
+                    assign value[{}] = 0;
+                    assign o = passed;
+                }}
+                "#,
+                1 - target
+            ),
+            expected,
+        );
+    }
+}
