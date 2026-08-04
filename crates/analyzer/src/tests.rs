@@ -13634,6 +13634,66 @@ fn combinational_loop_break_before_write_retains_coverage() {
 }
 
 #[test]
+fn combinational_loop_runtime_form_cardinality_variants() {
+    // Why this case exists: inclusive, reverse, and stepped ranges share the
+    // same source-level cardinality rules even when break prevents unrolling.
+    // Singleton bodies have an early-break coverage path; empty bodies have no
+    // reachable assignment or dependency at all.
+    for range in ["0..=0", "rev 0..1", "0..1 step += 2"] {
+        assert_incomplete_assignment_without_comb_loop(
+            "a singleton runtime-form range can break before its write",
+            &format!(
+                r#"
+                module Top (
+                    stop: input  logic,
+                    o   : output logic,
+                ) {{
+                    var value: logic;
+                    always_comb {{
+                        for _index in {range} {{
+                            if stop {{
+                                break;
+                            }}
+                            value = 1;
+                        }}
+                        o = value;
+                    }}
+                }}
+                "#
+            ),
+        );
+    }
+
+    for range in ["1..1", "rev 1..1", "1..1 step += 2"] {
+        let errors = analyze(&format!(
+            r#"
+            module Top (
+                o: output logic,
+            ) {{
+                var a: logic;
+                var b: logic;
+                always_comb {{
+                    for _index in {range} {{
+                        a = b;
+                        break;
+                    }}
+                }}
+                assign b = a;
+                assign o = b;
+            }}
+            "#
+        ));
+        assert!(
+            errors.iter().all(|error| !matches!(
+                error,
+                AnalyzerError::CombinationalLoop { .. } | AnalyzerError::UncoveredBranch { .. }
+            )),
+            "an empty {range} loop has no body path: {errors:#?}"
+        );
+    }
+}
+
+#[test]
 fn combinational_loop_function_output_weak_write_retains_coverage() {
     // Why this case exists: a function output argument is copied back to its
     // caller, but a dynamic write inside the function still leaves unselected
@@ -13701,6 +13761,33 @@ fn combinational_loop_function_capture_coverage_obeys_caller_order() {
 }
 
 #[test]
+fn combinational_loop_function_capture_without_default_retains_coverage() {
+    // Why this case exists: the caller-order kill controls above need a
+    // positive control. Without a caller default, a captured dynamic write
+    // still leaves unselected bits unassigned at the always_comb exit.
+    assert_incomplete_assignment_without_comb_loop(
+        "a captured weak write without a caller default remains incomplete",
+        r#"
+        module Top (
+            index: input  logic<2>,
+            o    : output logic,
+        ) {
+            var value: logic<4>;
+            function write_selected (
+                index: input logic<2>,
+            ) {
+                value[index] = 1;
+            }
+            always_comb {
+                write_selected(index);
+                o = value[0];
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
 fn combinational_loop_uncalled_function_still_checks_output_coverage() {
     // Why this case exists: output-argument completeness is a property of the
     // function definition, not of whether an always_comb happens to call it.
@@ -13722,6 +13809,78 @@ fn combinational_loop_uncalled_function_still_checks_output_coverage() {
             assign o = 0;
         }
         "#,
+    );
+}
+
+#[test]
+fn combinational_loop_function_summary_fanout_is_memoized() {
+    // Why this case exists: each function calls the previous specialization
+    // twice, so per-call recursive analysis grows as 2^N. The source contains
+    // only N unique function bodies and must be analyzed in O(N) summaries.
+    let mut functions = String::from(
+        r#"
+        function f0 (
+            x: input logic,
+        ) -> logic {
+            return x;
+        }
+        "#,
+    );
+    for depth in 1..=14 {
+        functions.push_str(&format!(
+            r#"
+            function f{depth} (
+                x: input logic,
+            ) -> logic {{
+                return f{previous}(x) ^ f{previous}(x);
+            }}
+            "#,
+            previous = depth - 1,
+        ));
+    }
+    let errors = analyze(&format!(
+        r#"
+        module Top (
+            i: input  logic,
+            o: output logic,
+        ) {{
+            {functions}
+            assign o = f14(i);
+        }}
+        "#
+    ));
+    assert!(
+        errors.is_empty(),
+        "acyclic function fanout is valid: {errors:#?}"
+    );
+}
+
+#[test]
+fn combinational_loop_malformed_effect_keeps_proven_edges_in_same_procedure() {
+    // Why this case exists: one statement rejected during IR conversion makes
+    // the procedure incomplete, but must not discard an independent exact
+    // cycle lowered from the remaining statements in that same always_comb.
+    let errors = analyze(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                missing_function();
+                a = b;
+                b = a;
+                o = b;
+            }
+        }
+        "#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "malformed uncertainty must not erase an independently proven loop: {errors:#?}"
     );
 }
 
