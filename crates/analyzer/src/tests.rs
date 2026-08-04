@@ -13340,6 +13340,29 @@ fn combinational_loop_dynamic_element_retention_is_not_feedback() {
 }
 
 #[test]
+fn combinational_loop_oversized_dynamic_retention_is_sparse_and_not_feedback() {
+    // Why this case exists: the legacy assignment table skips arrays above its
+    // enumeration limit. Retention coverage must stay declaration-width
+    // independent instead of either disappearing or expanding 131072 elements,
+    // and it still must not enter the combinational SCC graph.
+    assert_incomplete_assignment_without_comb_loop(
+        "an oversized dynamic store is diagnosed without element enumeration",
+        r#"
+        module Top (
+            index: input  logic<17>,
+            o    : output logic,
+        ) {
+            var held: logic [131072];
+            always_comb {
+                held[index] = 1;
+                o = held[0];
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
 fn combinational_loop_missing_if_arm_retention_is_not_feedback() {
     // Why this case exists: the existing uncovered-branch checker already
     // identifies this latch. The causal graph must not add a second and
