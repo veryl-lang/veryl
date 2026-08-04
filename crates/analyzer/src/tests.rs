@@ -10914,6 +10914,66 @@ fn combinational_loop_review_short_circuits_logical_rhs_side_effects() {
 }
 
 #[test]
+#[ignore = "captured final-review regression: instance fallback retains dead logical RHS"]
+fn combinational_loop_review_short_circuits_instance_logical_actuals() {
+    let case = |name: &str, expression: &str, expected: bool| {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Pass (
+                    i: input  logic,
+                    o: output logic,
+                ) {{
+                    assign o = i;
+                }}
+                module Top (
+                    o: output logic,
+                ) {{
+                    var feedback: logic;
+                    var passed: logic;
+                    inst u: Pass (
+                        i: {expression},
+                        o: passed,
+                    );
+                    assign feedback = passed;
+                    assign o = passed;
+                }}
+                "#
+            ),
+            expected,
+        );
+    };
+
+    // Why these cases exist: short-circuiting is part of the value feeding an
+    // instance port, not only function-effect lowering. A dead RHS cannot
+    // create a feedback edge through a pass-through child.
+    case(
+        "a false logical-and instance actual drops its dead RHS",
+        "1'b0 && feedback",
+        false,
+    );
+    case(
+        "a true logical-or instance actual drops its dead RHS",
+        "1'b1 || feedback",
+        false,
+    );
+
+    // Why these controls exist: when the constant LHS requires RHS
+    // evaluation, the pass-through child closes a real feedback path.
+    case(
+        "a true logical-and instance actual retains its live RHS",
+        "1'b1 && feedback",
+        true,
+    );
+    case(
+        "a false logical-or instance actual retains its live RHS",
+        "1'b0 || feedback",
+        true,
+    );
+}
+
+#[test]
 #[ignore = "captured final-review regression: nested ternary loses bit positions"]
 fn combinational_loop_review_preserves_nested_vector_ternary_positions() {
     // Why this case exists: bitwise negation does not change bit positions.
