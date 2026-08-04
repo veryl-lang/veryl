@@ -423,6 +423,20 @@ struct ModuleCombSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct LoopDiagnosticKey {
+    identifier: String,
+    locations: Vec<TokenRange>,
+}
+
+type LoopDiagnostic = (LoopDiagnosticKey, AnalyzerError);
+
+#[derive(Default)]
+struct LoopDiagnostics {
+    errors: Vec<AnalyzerError>,
+    keys: BTreeSet<LoopDiagnosticKey>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct CoverageDiagnosticKey {
     identifier: String,
     locations: Vec<TokenRange>,
@@ -468,7 +482,7 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
 }
 
 fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<AnalyzerError>) {
-    let mut errors = Vec::new();
+    let mut loops = LoopDiagnostics::default();
     let mut coverage = CoverageDiagnostics::default();
     let mut incomplete = Vec::new();
     let mut summaries: HashMap<usize, ModuleCombSummary> = HashMap::default();
@@ -490,7 +504,7 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
                 module,
                 &mut summaries,
                 &mut visiting_specializations,
-                &mut errors,
+                &mut loops,
                 &mut coverage,
                 &mut incomplete,
                 collect_coverage,
@@ -498,7 +512,7 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
             let (graph, reasons, _bit_part, module_coverage) =
                 build_module_graph(module, &summaries, collect_coverage);
             extend_unique_errors(&mut coverage, module_coverage);
-            check_graph(module, &graph, &mut errors);
+            check_graph(module, &graph, &mut loops);
             if !reasons.is_empty() {
                 incomplete.push(IncompleteCombAnalysis {
                     module: module.name.to_string(),
@@ -508,7 +522,20 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
         }
     }
 
-    (CombAnalysisResult { errors, incomplete }, coverage.errors)
+    (
+        CombAnalysisResult {
+            errors: loops.errors,
+            incomplete,
+        },
+        coverage.errors,
+    )
+}
+
+fn extend_unique_loops(loops: &mut LoopDiagnostics, new_loop: LoopDiagnostic) {
+    let (key, error) = new_loop;
+    if loops.keys.insert(key) {
+        loops.errors.push(error);
+    }
 }
 
 fn extend_unique_errors(coverage: &mut CoverageDiagnostics, new_errors: Vec<CoverageDiagnostic>) {
@@ -530,7 +557,7 @@ fn ensure_instance_summaries(
     module: &Module,
     summaries: &mut HashMap<usize, ModuleCombSummary>,
     visiting: &mut HashSet<usize>,
-    errors: &mut Vec<AnalyzerError>,
+    loops: &mut LoopDiagnostics,
     coverage: &mut CoverageDiagnostics,
     incomplete: &mut Vec<IncompleteCombAnalysis>,
     collect_coverage: bool,
@@ -554,7 +581,7 @@ fn ensure_instance_summaries(
             child,
             summaries,
             visiting,
-            errors,
+            loops,
             coverage,
             incomplete,
             collect_coverage,
@@ -562,7 +589,7 @@ fn ensure_instance_summaries(
         let (graph, reasons, bit_part, child_coverage) =
             build_module_graph(child, summaries, collect_coverage);
         extend_unique_errors(coverage, child_coverage);
-        check_graph(child, &graph, errors);
+        check_graph(child, &graph, loops);
         let summary = compute_module_summary(child, &graph, &bit_part);
         summaries.insert(key, summary);
         if !reasons.is_empty() {
@@ -2884,7 +2911,7 @@ fn is_pure_input_or_output(id: VarId, vars: &HashMap<VarId, Variable>, want: Dir
     actual == want
 }
 
-fn check_graph(module: &Module, graph: &CausalGraph, errors: &mut Vec<AnalyzerError>) {
+fn check_graph(module: &Module, graph: &CausalGraph, loops: &mut LoopDiagnostics) {
     let sccs = strongly_connected_components(graph);
     let mut reported: HashSet<Vec<NodeKey>> = HashSet::default();
     for scc in sccs {
@@ -2896,8 +2923,8 @@ fn check_graph(module: &Module, graph: &CausalGraph, errors: &mut Vec<AnalyzerEr
         if !reported.insert(keys.clone()) {
             continue;
         }
-        if let Some(error) = build_error(module, graph, &witness) {
-            errors.push(error);
+        if let Some(new_loop) = build_error(module, graph, &witness) {
+            extend_unique_loops(loops, new_loop);
         }
     }
 }
@@ -3071,7 +3098,7 @@ fn build_error(
     module: &Module,
     graph: &CausalGraph,
     witness: &[EdgeIndex],
-) -> Option<AnalyzerError> {
+) -> Option<LoopDiagnostic> {
     let anchor = *witness.first()?;
     let (_, anchor_target) = graph.edge_endpoints(anchor)?;
     let identifier = module
@@ -3095,11 +3122,12 @@ fn build_error(
     }
     let primary = *tokens.first()?;
     let participants: Vec<_> = tokens.iter().skip(1).copied().collect();
-    Some(AnalyzerError::combinational_loop(
-        &identifier,
-        &primary,
-        &participants,
-    ))
+    let key = LoopDiagnosticKey {
+        identifier: identifier.clone(),
+        locations: tokens,
+    };
+    let error = AnalyzerError::combinational_loop(&identifier, &primary, &participants);
+    Some((key, error))
 }
 
 fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {

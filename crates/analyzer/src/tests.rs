@@ -13412,6 +13412,83 @@ fn comb_loop_incomplete_effect_does_not_erase_proven_edges() {
 }
 
 #[test]
+fn comb_loop_child_definition_has_one_diagnostic_across_instances() {
+    // Why this case exists: a child graph is checked once as a declaration and
+    // again while each parent specialization requests its causal summary. An
+    // internal loop belongs to the child source definition, so repeated
+    // instantiation must not repeat the same source diagnostic.
+    let detailed = analyze_comb_detailed(
+        r#"
+        module Child (
+            x: output logic,
+            y: output logic,
+        ) {
+            assign x = y;
+            assign y = x;
+        }
+
+        module Top (
+            x0: output logic,
+            y0: output logic,
+            x1: output logic,
+            y1: output logic,
+        ) {
+            inst u0: Child (x: x0, y: y0);
+            inst u1: Child (x: x1, y: y1);
+        }
+        "#,
+    );
+    let loop_count = detailed
+        .errors
+        .iter()
+        .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+        .count();
+    assert_eq!(loop_count, 1, "{detailed:#?}");
+}
+
+#[test]
+fn comb_loop_distinct_child_definitions_keep_distinct_diagnostics() {
+    // Why this case exists: diagnostic deduplication is source-backed, not a
+    // name- or shape-based approximation. Two definitions with the same port
+    // names and loop structure remain two actionable source diagnostics.
+    let detailed = analyze_comb_detailed(
+        r#"
+        module ChildA (
+            x: output logic,
+            y: output logic,
+        ) {
+            assign x = y;
+            assign y = x;
+        }
+
+        module ChildB (
+            x: output logic,
+            y: output logic,
+        ) {
+            assign x = y;
+            assign y = x;
+        }
+
+        module Top (
+            ax: output logic,
+            ay: output logic,
+            bx: output logic,
+            by: output logic,
+        ) {
+            inst a: ChildA (x: ax, y: ay);
+            inst b: ChildB (x: bx, y: by);
+        }
+        "#,
+    );
+    let loop_count = detailed
+        .errors
+        .iter()
+        .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+        .count();
+    assert_eq!(loop_count, 2, "{detailed:#?}");
+}
+
+#[test]
 fn comb_loop_diagnostic_uses_short_assignment_cycle_witness() {
     // Why this case exists: all four variables belong to one maximal SCC, and
     // `a` has two reaching assignments in different branches. The actionable
