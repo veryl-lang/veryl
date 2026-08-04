@@ -15,6 +15,15 @@ use crate::ssa::{self, Event as SsaEvent, Version};
 pub type ReadId = usize;
 pub type WriteId = usize;
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MustAliasCandidate {
+    pub read: ReadId,
+    pub write: WriteId,
+    /// Corresponding reads which determine the unresolved selectors. The
+    /// candidate is proven only when every pair observes the same SSA version.
+    pub selector_reads: Vec<(ReadId, ReadId)>,
+}
+
 /// A width-preserving positional transfer from a read region to a write
 /// region. Boundaries discovered on either side are propagated to the other;
 /// no per-bit expansion is required.
@@ -57,6 +66,10 @@ pub struct Procedure<O> {
     /// are partitioned only at observed access endpoints; they are never
     /// expanded into individual bits or elements.
     pub object_spans: BTreeMap<O, Span>,
+    /// Syntactically corresponding unresolved accesses. MemorySSA additionally
+    /// requires the write to dominate the read and every selector input to
+    /// observe the same SSA version before accepting a must-alias proof.
+    pub must_alias: BTreeSet<MustAliasCandidate>,
     pub incomplete: BTreeSet<IncompleteReason>,
 }
 
@@ -78,10 +91,11 @@ pub struct ProcedureSummary<O> {
     /// Objects touched through an unresolved region. Exact dependencies on
     /// other objects remain independently provable.
     pub uncertain_objects: BTreeSet<O>,
-    /// Original unresolved read regions. MemorySSA expands these to sparse
-    /// exact atoms internally; adapters use this set to restore the declared
-    /// uncertainty without widening a known static prefix.
-    pub uncertain_read_regions: BTreeSet<Region<O>>,
+    /// Original unresolved regions which can source an entry dependency.
+    /// These include reads and the retained previous value of a may-write.
+    /// MemorySSA expands them to sparse exact atoms internally; adapters use
+    /// this set to restore uncertainty without widening a known prefix.
+    pub uncertain_input_regions: BTreeSet<Region<O>>,
     /// Exact atom dependency pairs which originated at an unresolved read.
     /// This prevents adapters from widening an unrelated exact read merely
     /// because the same procedure also reads that object dynamically.
@@ -90,7 +104,7 @@ pub struct ProcedureSummary<O> {
     /// narrower set when exact SSA atoms must be projected back to a sparse
     /// object-level destination without conflating dynamic reads with writes.
     pub uncertain_write_objects: BTreeSet<O>,
-    /// Original unresolved write regions; see `uncertain_read_regions`.
+    /// Original unresolved write regions; see `uncertain_input_regions`.
     pub uncertain_write_regions: BTreeSet<Region<O>>,
     pub unknown_all: bool,
     pub atom_count: usize,
@@ -145,8 +159,19 @@ struct Definition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Usage {
-    Read { read: ReadId, atom: usize },
-    Exit { atom: usize },
+    Read {
+        read: ReadId,
+        atom: usize,
+    },
+    /// The previous value retained by a may-write when this atom is not the
+    /// dynamically selected destination.
+    WeakWrite {
+        write: WriteId,
+        atom: usize,
+    },
+    Exit {
+        atom: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -155,6 +180,7 @@ struct DepVersion<O> {
     kind: EdgeKind,
     aligned: bool,
     uncertain_input: bool,
+    active_read: Option<ReadId>,
     marker: std::marker::PhantomData<O>,
 }
 
@@ -186,16 +212,19 @@ where
     >::new();
     let mut incomplete = procedure.incomplete.clone();
     let mut uncertain_objects = BTreeSet::new();
-    let mut uncertain_read_regions = BTreeSet::new();
+    let mut uncertain_input_regions = BTreeSet::new();
     let mut uncertain_write_objects = BTreeSet::new();
     let mut uncertain_write_regions = BTreeSet::new();
     let mut unknown_all = false;
     let mut ssa_events = vec![Vec::new(); procedure.events.len()];
+    let mut read_locations = BTreeMap::new();
+    let mut write_locations = BTreeMap::new();
 
     for (block, events) in procedure.events.iter().enumerate() {
-        for event in events {
+        for (position, event) in events.iter().enumerate() {
             match event {
                 Event::Read { id, region } => {
+                    read_locations.insert(*id, (block, position));
                     let expanded = expand(*region, &atoms, &atoms_by_object);
                     record_unknown_region(
                         *region,
@@ -204,7 +233,7 @@ where
                         &mut unknown_all,
                     );
                     if !region.is_exact() {
-                        uncertain_read_regions.insert(*region);
+                        uncertain_input_regions.insert(*region);
                     }
                     if read_atoms
                         .insert(*id, (*region, expanded.clone()))
@@ -223,6 +252,7 @@ where
                     dependencies,
                     aligned_dependencies,
                 } => {
+                    write_locations.insert(*id, (block, position));
                     let expanded = expand(*region, &atoms, &atoms_by_object);
                     record_unknown_region(
                         *region,
@@ -234,6 +264,7 @@ where
                         Region::UnknownRegion { object, .. } | Region::UnknownObject(object) => {
                             uncertain_write_objects.insert(*object);
                             uncertain_write_regions.insert(*region);
+                            uncertain_input_regions.insert(*region);
                         }
                         Region::Exact { .. } | Region::UnknownAll => {}
                     }
@@ -251,12 +282,18 @@ where
                     {
                         return Err(ProcedureError::Model("duplicate write identity"));
                     }
-                    ssa_events[block].extend(expanded.into_iter().map(|atom| {
-                        SsaEvent::Definition {
+                    for atom in expanded {
+                        if !region.is_exact() {
+                            ssa_events[block].push(SsaEvent::Use {
+                                variable: atom,
+                                usage: Usage::WeakWrite { write: *id, atom },
+                            });
+                        }
+                        ssa_events[block].push(SsaEvent::Definition {
                             variable: atom,
                             definition: Definition { write: *id, atom },
-                        }
-                    }));
+                        });
+                    }
                 }
             }
         }
@@ -272,10 +309,59 @@ where
     }));
 
     let ssa = ssa::build(&cfg, &ssa_events)?;
+    let must_alias = procedure
+        .must_alias
+        .iter()
+        .filter_map(|candidate| {
+            let &(write_block, write_position) = write_locations.get(&candidate.write)?;
+            let &(read_block, read_position) = read_locations.get(&candidate.read)?;
+            let ordered = if write_block == read_block {
+                write_position < read_position
+            } else {
+                cfg.dominators.dominates(write_block, read_block)
+            };
+            if !ordered {
+                return None;
+            }
+            let same_versions =
+                candidate
+                    .selector_reads
+                    .iter()
+                    .all(|&(write_selector, read_selector)| {
+                        let Some((_, write_atoms)) = read_atoms.get(&write_selector) else {
+                            return false;
+                        };
+                        let Some((_, read_atoms)) = read_atoms.get(&read_selector) else {
+                            return false;
+                        };
+                        write_atoms.len() == read_atoms.len()
+                            && write_atoms.iter().zip(read_atoms).all(
+                                |(&write_atom, &read_atom)| {
+                                    ssa.uses.get(&Usage::Read {
+                                        read: write_selector,
+                                        atom: write_atom,
+                                    }) == ssa.uses.get(&Usage::Read {
+                                        read: read_selector,
+                                        atom: read_atom,
+                                    })
+                                },
+                            )
+                    });
+            same_versions.then_some((candidate.read, candidate.write))
+        })
+        .collect::<BTreeSet<_>>();
     let definitions = writes.values().map(|(_, atoms, _, _)| atoms.len()).sum();
     let mut version_deps = BTreeMap::<
         Version<usize, Definition>,
-        BTreeSet<(Version<usize, Definition>, EdgeKind, bool, bool)>,
+        BTreeSet<(
+            Version<usize, Definition>,
+            EdgeKind,
+            bool,
+            bool,
+            Option<ReadId>,
+            bool,
+            bool,
+        )>,
     >::new();
 
     for phi in &ssa.phis {
@@ -283,7 +369,7 @@ where
         deps.extend(
             phi.inputs
                 .iter()
-                .map(|(_, input)| (*input, EdgeKind::Value, true, false)),
+                .map(|(_, input)| (*input, EdgeKind::Value, true, false, None, true, false)),
         );
     }
     for (&write, (write_region, write_atoms, dependencies, aligned_dependencies)) in &writes {
@@ -296,12 +382,25 @@ where
             };
             for &atom in atoms {
                 if let Some(&version) = ssa.uses.get(&Usage::Read { read, atom }) {
-                    incoming.insert((version, kind, false, !read_region.is_exact()));
+                    incoming.insert((
+                        version,
+                        kind,
+                        false,
+                        !read_region.is_exact(),
+                        Some(read),
+                        false,
+                        false,
+                    ));
                 }
             }
         }
         for &atom in write_atoms {
             let mut atom_incoming = incoming.clone();
+            if !write_region.is_exact()
+                && let Some(&previous) = ssa.uses.get(&Usage::WeakWrite { write, atom })
+            {
+                atom_incoming.insert((previous, EdgeKind::Value, true, true, None, true, true));
+            }
             for dependency in aligned_dependencies {
                 let Some((read_region, source_atoms)) = read_atoms.get(&dependency.read) else {
                     return Err(ProcedureError::Model(
@@ -373,7 +472,15 @@ where
                             atom: source_atom,
                         })
                     {
-                        atom_incoming.insert((version, dependency.kind, true, false));
+                        atom_incoming.insert((
+                            version,
+                            dependency.kind,
+                            true,
+                            false,
+                            Some(dependency.read),
+                            false,
+                            false,
+                        ));
                     }
                 }
             }
@@ -393,54 +500,97 @@ where
         let Some(&output_version) = ssa.uses.get(&Usage::Exit { atom: output_atom }) else {
             continue;
         };
-        let mut stack = vec![(output_version, EdgeKind::Value, true, false)];
+        let mut stack = vec![(output_version, EdgeKind::Value, true, false, None)];
         let mut visited = BTreeSet::new();
-        while let Some((version, path_kind, path_aligned, path_uncertain_input)) = stack.pop() {
+        while let Some((version, path_kind, path_aligned, path_uncertain_input, active_read)) =
+            stack.pop()
+        {
             if !visited.insert(DepVersion::<O> {
                 version,
                 kind: path_kind,
                 aligned: path_aligned,
                 uncertain_input: path_uncertain_input,
+                active_read,
                 marker: std::marker::PhantomData,
             }) {
                 continue;
             }
-            match version {
-                Version::Entry(input_atom) => {
-                    let dependency = Dependency {
-                        input: atom_region(atoms[input_atom]),
-                        output: atom_region(atoms[output_atom]),
-                        kind: path_kind,
-                        aligned: path_aligned,
-                    };
-                    dependencies.insert(dependency);
-                    if path_uncertain_input {
-                        uncertain_input_dependencies.insert((dependency.input, dependency.output));
-                    }
+            if let Version::Entry(input_atom) = version {
+                let dependency = Dependency {
+                    input: atom_region(atoms[input_atom]),
+                    output: atom_region(atoms[output_atom]),
+                    kind: path_kind,
+                    aligned: path_aligned,
+                };
+                dependencies.insert(dependency);
+                if path_uncertain_input {
+                    uncertain_input_dependencies.insert((dependency.input, dependency.output));
                 }
-                Version::Definition { .. } | Version::Phi { .. } => {
-                    if let Some(inputs) = version_deps.get(&version) {
-                        stack.extend(inputs.iter().map(
-                            |&(input, kind, aligned, uncertain_input)| {
-                                (
-                                    input,
-                                    combine_edge_kinds(path_kind, kind),
-                                    path_aligned && aligned,
-                                    path_uncertain_input || uncertain_input,
-                                )
-                            },
-                        ));
+                continue;
+            }
+            let current_write = match version {
+                Version::Definition { definition, .. } => Some(definition.write),
+                Version::Entry(_) | Version::Phi { .. } => None,
+            };
+            if let Some(inputs) = version_deps.get(&version) {
+                for &(
+                    input,
+                    kind,
+                    aligned,
+                    uncertain_input,
+                    source_read,
+                    preserve_active_read,
+                    weak_previous,
+                ) in inputs
+                {
+                    if weak_previous {
+                        let Some(read) = active_read else {
+                            // Retention by itself is not value feedback. It
+                            // becomes observable only through a later read of
+                            // a possibly unselected candidate.
+                            continue;
+                        };
+                        if current_write.is_some_and(|write| must_alias.contains(&(read, write))) {
+                            continue;
+                        }
                     }
+                    stack.push((
+                        input,
+                        combine_edge_kinds(path_kind, kind),
+                        path_aligned && aligned,
+                        path_uncertain_input || uncertain_input,
+                        if preserve_active_read {
+                            active_read
+                        } else {
+                            source_read
+                        },
+                    ));
                 }
             }
         }
     }
 
+    let mut collapsed_dependencies = BTreeMap::new();
+    for dependency in dependencies {
+        collapsed_dependencies
+            .entry((dependency.input, dependency.output, dependency.kind))
+            .and_modify(|aligned| *aligned &= dependency.aligned)
+            .or_insert(dependency.aligned);
+    }
+
     Ok(ProcedureSummary {
-        dependencies: dependencies.into_iter().collect(),
+        dependencies: collapsed_dependencies
+            .into_iter()
+            .map(|((input, output, kind), aligned)| Dependency {
+                input,
+                output,
+                kind,
+                aligned,
+            })
+            .collect(),
         incomplete,
         uncertain_objects,
-        uncertain_read_regions,
+        uncertain_input_regions,
         uncertain_input_dependencies,
         uncertain_write_objects,
         uncertain_write_regions,
@@ -769,6 +919,7 @@ mod tests {
                 },
             ]],
             object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
             incomplete: BTreeSet::new(),
         };
         let summary = analyze(&procedure).unwrap();
@@ -793,6 +944,7 @@ mod tests {
                 vec![],
             ],
             object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
             incomplete: BTreeSet::new(),
         };
         let summary = analyze(&procedure).unwrap();
@@ -827,6 +979,7 @@ mod tests {
                 },
             ]],
             object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
             incomplete: BTreeSet::new(),
         };
         let summary = analyze(&procedure).unwrap();
@@ -874,6 +1027,7 @@ mod tests {
                 },
             ]],
             object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
             incomplete: BTreeSet::new(),
         };
 
@@ -921,6 +1075,7 @@ mod tests {
                 },
             ]],
             object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
             incomplete: BTreeSet::new(),
         };
 
@@ -968,13 +1123,14 @@ mod tests {
                 },
             ]],
             object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
             incomplete: BTreeSet::new(),
         };
 
         let summary = analyze(&procedure).unwrap();
         assert_eq!(summary.atom_count, 1);
         assert_eq!(summary.definition_count, 1);
-        assert_eq!(summary.uncertain_read_regions, BTreeSet::from([prefix]));
+        assert_eq!(summary.uncertain_input_regions, BTreeSet::from([prefix]));
         assert_eq!(summary.uncertain_write_regions, BTreeSet::from([prefix]));
     }
 
@@ -995,6 +1151,7 @@ mod tests {
                     length: 8,
                 },
             )]),
+            must_alias: BTreeSet::new(),
             incomplete: BTreeSet::new(),
         };
 
@@ -1028,6 +1185,7 @@ mod tests {
                     length: 8,
                 },
             )]),
+            must_alias: BTreeSet::new(),
             incomplete: BTreeSet::new(),
         };
 
@@ -1056,6 +1214,7 @@ mod tests {
                 aligned_dependencies: vec![],
             }]],
             object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
             incomplete: BTreeSet::new(),
         };
 

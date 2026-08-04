@@ -678,7 +678,7 @@ fn sparse_input_region(
         .uncertain_input_dependencies
         .contains(&(input, output))
     {
-        restore_uncertain_region(&summary.uncertain_read_regions, input)
+        restore_uncertain_region(&summary.uncertain_input_regions, input)
     } else {
         input
     }

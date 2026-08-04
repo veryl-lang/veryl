@@ -10,7 +10,7 @@ use crate::ir::{
 };
 use veryl_causal::graph::{EdgeKind, IncompleteReason};
 use veryl_causal::procedure::{
-    self, AlignedDependency, Event, Procedure, ProcedureError, ProcedureSummary,
+    self, AlignedDependency, Event, MustAliasCandidate, Procedure, ProcedureError, ProcedureSummary,
 };
 use veryl_causal::region::{Region, Span};
 
@@ -47,6 +47,7 @@ struct Builder {
     procedure: Procedure<VarId>,
     next_read: usize,
     next_write: usize,
+    unresolved_writes: BTreeMap<String, Vec<(usize, Vec<usize>)>>,
     call_stack: Vec<VarId>,
     model_error: Option<&'static str>,
 }
@@ -78,10 +79,12 @@ impl Builder {
                 successors: vec![Vec::new()],
                 events: vec![Vec::new()],
                 object_spans,
+                must_alias: BTreeSet::new(),
                 incomplete: BTreeSet::new(),
             },
             next_read: 0,
             next_write: 0,
+            unresolved_writes: BTreeMap::new(),
             call_stack: Vec::new(),
             model_error: None,
         }
@@ -101,10 +104,12 @@ impl Builder {
                 successors: vec![Vec::new()],
                 events: vec![Vec::new()],
                 object_spans: self.procedure.object_spans.clone(),
+                must_alias: BTreeSet::new(),
                 incomplete: BTreeSet::new(),
             },
             next_read: 0,
             next_write: 0,
+            unresolved_writes: BTreeMap::new(),
             call_stack,
             model_error: None,
         }
@@ -403,14 +408,27 @@ impl Builder {
     ) {
         match factor {
             Factor::Variable(id, index, select, _) => {
+                let mut selector_reads = Vec::new();
                 for expression in index.0.iter().chain(select.0.iter()) {
-                    reads.extend(self.read_expression(block, expression, EdgeKind::Address));
+                    selector_reads.extend(self.read_expression(
+                        block,
+                        expression,
+                        EdgeKind::Address,
+                    ));
                 }
                 if let Some((_, expression)) = &select.1 {
-                    reads.extend(self.read_expression(block, expression, EdgeKind::Address));
+                    selector_reads.extend(self.read_expression(
+                        block,
+                        expression,
+                        EdgeKind::Address,
+                    ));
                 }
+                reads.extend(selector_reads.iter().copied());
                 let region = self.variable_region(*id, index, select);
-                reads.push((self.push_read(block, region), kind));
+                reads.push((
+                    self.push_variable_read(block, *id, index, select, region, &selector_reads),
+                    kind,
+                ));
             }
             Factor::HierVariable(_) => {
                 self.procedure
@@ -924,20 +942,33 @@ impl Builder {
         mut dependencies: Vec<(usize, EdgeKind)>,
         aligned_dependencies: Vec<AlignedDependency>,
     ) {
+        let mut selector_reads = Vec::new();
         for expression in destination
             .index
             .0
             .iter()
             .chain(destination.select.0.iter())
         {
-            dependencies.extend(self.read_expression(block, expression, EdgeKind::Address));
+            selector_reads.extend(self.read_expression(block, expression, EdgeKind::Address));
         }
         if let Some((_, expression)) = &destination.select.1 {
-            dependencies.extend(self.read_expression(block, expression, EdgeKind::Address));
+            selector_reads.extend(self.read_expression(block, expression, EdgeKind::Address));
         }
+        dependencies.extend(selector_reads.iter().copied());
         let region = self.variable_region(destination.id, &destination.index, &destination.select);
         let id = self.next_write;
         self.next_write += 1;
+        if let Some(key) = Self::unresolved_access_key(
+            destination.id,
+            &destination.index,
+            &destination.select,
+            region,
+        ) {
+            self.unresolved_writes
+                .entry(key)
+                .or_default()
+                .push((id, selector_reads.iter().map(|&(read, _)| read).collect()));
+        }
         self.procedure.events[block].push(Event::Write {
             id,
             region,
@@ -1208,6 +1239,49 @@ impl Builder {
         self.next_read += 1;
         self.procedure.events[block].push(Event::Read { id, region });
         id
+    }
+
+    fn push_variable_read(
+        &mut self,
+        block: usize,
+        object: VarId,
+        index: &VarIndex,
+        select: &VarSelect,
+        region: Region<VarId>,
+        selector_reads: &[(usize, EdgeKind)],
+    ) -> usize {
+        let read = self.push_read(block, region);
+        if let Some(key) = Self::unresolved_access_key(object, index, select, region) {
+            let read_selectors = selector_reads
+                .iter()
+                .map(|&(selector, _)| selector)
+                .collect::<Vec<_>>();
+            if let Some(writes) = self.unresolved_writes.get(&key) {
+                for (write, write_selectors) in writes {
+                    if write_selectors.len() == read_selectors.len() {
+                        self.procedure.must_alias.insert(MustAliasCandidate {
+                            read,
+                            write: *write,
+                            selector_reads: write_selectors
+                                .iter()
+                                .copied()
+                                .zip(read_selectors.iter().copied())
+                                .collect(),
+                        });
+                    }
+                }
+            }
+        }
+        read
+    }
+
+    fn unresolved_access_key(
+        object: VarId,
+        index: &VarIndex,
+        select: &VarSelect,
+        region: Region<VarId>,
+    ) -> Option<String> {
+        (!region.is_exact()).then(|| format!("{object:?}{index}{select}"))
     }
 
     fn unknown_read(&mut self, block: usize) -> usize {

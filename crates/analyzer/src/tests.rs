@@ -10200,7 +10200,6 @@ fn combinational_loop_review_preserves_constant_shift_positions() {
 }
 
 #[test]
-#[ignore = "known bug: an unresolved write is modeled as a strong update of every candidate"]
 fn combinational_loop_review_dynamic_write_is_a_weak_update() {
     // Why this case exists: o[idx] writes exactly one candidate. For idx != 1,
     // the old o[1] remains live through o[0] = o[1]; o[1] = o[0], so a real
