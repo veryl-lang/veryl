@@ -20,7 +20,7 @@ use crate::ir::{
 use crate::symbol::{Affiliation, Direction};
 use petgraph::Direction::Incoming;
 use petgraph::Graph;
-use petgraph::graph::NodeIndex;
+use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 #[cfg(not(target_family = "wasm"))]
 use rayon::prelude::*;
@@ -30,6 +30,7 @@ use veryl_causal::graph::{EdgeKind, IncompleteReason};
 use veryl_causal::procedure::{PeriodicAxis, ProcedureSummary};
 use veryl_causal::region::{Region, Span};
 use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 
 /// One concrete unpacked-array element. Bit-precision lives in masks.
 type IdxKey = (VarId, usize);
@@ -37,6 +38,20 @@ type IdxKey = (VarId, usize);
 /// `(VarId, array_idx, range_idx)`. `range_idx` indexes the variable's
 /// `BitPartition`, so bit-disjoint reads/writes form disjoint nodes.
 type NodeKey = (VarId, usize, usize);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CausalEdge {
+    aligned: bool,
+    origin: Option<TokenRange>,
+}
+
+impl CausalEdge {
+    fn new(aligned: bool, origin: Option<TokenRange>) -> Self {
+        Self { aligned, origin }
+    }
+}
+
+type CausalGraph = Graph<NodeKey, CausalEdge>;
 
 #[derive(Clone, Copy)]
 enum SummaryDirection {
@@ -72,7 +87,7 @@ impl SummaryWalk {
     /// endpoint-count heuristic committing to an adversarially expensive side.
     fn advance(
         &mut self,
-        graph: &Graph<NodeKey, bool>,
+        graph: &CausalGraph,
         live_nodes: &[bool],
         module: &Module,
         bit_part: &BitPartition,
@@ -125,7 +140,7 @@ impl SummaryWalk {
                         graph
                             .edges(node)
                             .filter(|edge| live_nodes[edge.target().index()])
-                            .map(|edge| (edge.target(), path_aligned && *edge.weight())),
+                            .map(|edge| (edge.target(), path_aligned && edge.weight().aligned)),
                     );
                 }
                 SummaryDirection::Reverse => {
@@ -133,7 +148,7 @@ impl SummaryWalk {
                         graph
                             .edges_directed(node, Incoming)
                             .filter(|edge| live_nodes[edge.source().index()])
-                            .map(|edge| (edge.source(), path_aligned && *edge.weight())),
+                            .map(|edge| (edge.source(), path_aligned && edge.weight().aligned)),
                     );
                 }
             }
@@ -143,7 +158,7 @@ impl SummaryWalk {
 }
 
 fn live_summary_nodes(
-    graph: &Graph<NodeKey, bool>,
+    graph: &CausalGraph,
     inputs: &[(NodeIndex, NodeKey)],
     outputs: &[(NodeIndex, NodeKey)],
 ) -> Vec<bool> {
@@ -786,11 +801,7 @@ fn push_element_mask(
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<usize, ModuleCombSummary>,
-) -> (
-    Graph<NodeKey, bool>,
-    BTreeSet<IncompleteReason>,
-    BitPartition,
-) {
+) -> (CausalGraph, BTreeSet<IncompleteReason>, BitPartition) {
     // Procedural combinational declarations use statement-ordered region
     // MemorySSA. Keep instance declarations on the existing bottom-up module
     // summary path until the same region vocabulary crosses module boundaries.
@@ -890,7 +901,7 @@ fn build_module_graph(
     periodic_regions.dedup();
     let bit_part = build_bit_partition(module, &partition_regions, &periodic_regions);
 
-    let mut graph: Graph<NodeKey, bool> = Graph::new();
+    let mut graph = CausalGraph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
     let mut incomplete = BTreeSet::new();
 
@@ -988,7 +999,10 @@ fn build_module_graph(
 
 fn propagate_aligned_regions(
     regions: Vec<Region<VarId>>,
-    summaries: &[Result<ProcedureSummary<VarId>, veryl_causal::procedure::ProcedureError>],
+    summaries: &[Result<
+        crate::comb_memory_ssa::ProcedureAnalysis,
+        veryl_causal::procedure::ProcedureError,
+    >],
 ) -> Vec<Region<VarId>> {
     #[derive(Clone, Copy)]
     struct Transfer {
@@ -1128,9 +1142,9 @@ fn propagate_aligned_regions(
 
 fn add_memory_ssa_edges(
     module: &Module,
-    summary: &ProcedureSummary<VarId>,
+    summary: &crate::comb_memory_ssa::ProcedureAnalysis,
     bit_part: &BitPartition,
-    graph: &mut Graph<NodeKey, bool>,
+    graph: &mut CausalGraph,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
 ) {
     // Incomplete effects are represented by Unknown edges/regions in the
@@ -1145,6 +1159,10 @@ fn add_memory_ssa_edges(
         let output = sparse_output_region(summary, dependency.output);
         let preserve_alignment =
             dependency.aligned && exact_regions_have_equal_length(input, output);
+        let origin = dependency
+            .origin
+            .and_then(|write| summary.write_tokens.get(&write))
+            .copied();
         let pairs = if preserve_alignment {
             aligned_region_node_pairs(input, output, &module.variables, bit_part)
         } else {
@@ -1169,16 +1187,20 @@ fn add_memory_ssa_edges(
             }
             let source = ensure_node(graph, node_map, source);
             let destination = ensure_node(graph, node_map, destination);
-            graph.add_edge(source, destination, preserve_alignment);
+            graph.add_edge(
+                source,
+                destination,
+                CausalEdge::new(preserve_alignment, origin),
+            );
         }
     }
 }
 
 fn add_periodic_memory_ssa_edges(
     module: &Module,
-    summary: &ProcedureSummary<VarId>,
+    summary: &crate::comb_memory_ssa::ProcedureAnalysis,
     bit_part: &BitPartition,
-    graph: &mut Graph<NodeKey, bool>,
+    graph: &mut CausalGraph,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
 ) {
     for dependency in &summary.periodic_dependencies {
@@ -1191,6 +1213,10 @@ fn add_periodic_memory_ssa_edges(
             output: dependency.output,
             axes: dependency.axes.clone(),
         };
+        let origin = dependency
+            .origin
+            .and_then(|write| summary.write_tokens.get(&write))
+            .copied();
         let pairs = if dependency.aligned {
             aligned_periodic_node_pairs(input, periodic, &module.variables, bit_part)
         } else {
@@ -1214,7 +1240,11 @@ fn add_periodic_memory_ssa_edges(
             }
             let source = ensure_node(graph, node_map, source);
             let destination = ensure_node(graph, node_map, destination);
-            graph.add_edge(source, destination, dependency.aligned);
+            graph.add_edge(
+                source,
+                destination,
+                CausalEdge::new(dependency.aligned, origin),
+            );
         }
     }
 }
@@ -1623,13 +1653,14 @@ fn collect_instance_summary_regions(
 fn add_inst_output_address_edges(
     inst: &InstDeclaration,
     bit_part: &BitPartition,
-    graph: &mut Graph<NodeKey, bool>,
+    graph: &mut CausalGraph,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
 ) {
     for output in &inst.outputs {
         for destination in &output.dst {
+            let origin = destination.token;
             let destination_region = variable_access_region(
                 destination.id,
                 &destination.index,
@@ -1647,7 +1678,7 @@ fn add_inst_output_address_edges(
                     for destination in region_node_keys(destination_region, parent_vars, bit_part) {
                         let source = ensure_node(graph, node_map, source);
                         let destination = ensure_node(graph, node_map, destination);
-                        graph.add_edge(source, destination, false);
+                        graph.add_edge(source, destination, CausalEdge::new(false, Some(origin)));
                     }
                 }
             }
@@ -1661,7 +1692,7 @@ fn add_inst_feedthrough_edges(
     child: &Module,
     summary: &ModuleCombSummary,
     bit_part: &BitPartition,
-    graph: &mut Graph<NodeKey, bool>,
+    graph: &mut CausalGraph,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     parent_vars: &HashMap<VarId, Variable>,
     incomplete: &mut BTreeSet<IncompleteReason>,
@@ -1721,7 +1752,11 @@ fn add_inst_feedthrough_edges(
                     for (source, destination) in pairs {
                         let source = ensure_node(graph, node_map, source);
                         let destination = ensure_node(graph, node_map, destination);
-                        graph.add_edge(source, destination, dependency.aligned);
+                        graph.add_edge(
+                            source,
+                            destination,
+                            CausalEdge::new(dependency.aligned, Some(inst.token)),
+                        );
                     }
                 }
             }
@@ -1765,7 +1800,11 @@ fn add_inst_feedthrough_edges(
             ) {
                 let source = ensure_node(graph, node_map, source);
                 let destination = ensure_node(graph, node_map, destination);
-                graph.add_edge(source, destination, aligned);
+                graph.add_edge(
+                    source,
+                    destination,
+                    CausalEdge::new(aligned, Some(inst.token)),
+                );
             }
             continue;
         }
@@ -1797,7 +1836,11 @@ fn add_inst_feedthrough_edges(
         for (source, destination) in pairs {
             let source = ensure_node(graph, node_map, source);
             let destination = ensure_node(graph, node_map, destination);
-            graph.add_edge(source, destination, false);
+            graph.add_edge(
+                source,
+                destination,
+                CausalEdge::new(false, Some(inst.token)),
+            );
         }
     }
 }
@@ -2512,26 +2555,122 @@ fn is_pure_input_or_output(id: VarId, vars: &HashMap<VarId, Variable>, want: Dir
     actual == want
 }
 
-fn check_graph(module: &Module, graph: &Graph<NodeKey, bool>, errors: &mut Vec<AnalyzerError>) {
+fn check_graph(module: &Module, graph: &CausalGraph, errors: &mut Vec<AnalyzerError>) {
     let sccs = strongly_connected_components(graph);
     let mut reported: HashSet<Vec<NodeKey>> = HashSet::default();
     for scc in sccs {
-        let is_loop = scc.len() > 1 || (scc.len() == 1 && has_self_edge(graph, scc[0]));
-        if !is_loop {
+        let Some(witness) = diagnostic_cycle_witness(graph, &scc) else {
             continue;
-        }
+        };
         let mut keys: Vec<NodeKey> = scc.iter().map(|n| graph[*n]).collect();
         keys.sort();
         if !reported.insert(keys.clone()) {
             continue;
         }
-        if let Some(error) = build_error(module, &keys) {
+        if let Some(error) = build_error(module, graph, &witness) {
             errors.push(error);
         }
     }
 }
 
-fn strongly_connected_components(graph: &Graph<NodeKey, bool>) -> Vec<Vec<NodeIndex>> {
+fn diagnostic_edge_key(
+    graph: &CausalGraph,
+    edge: EdgeIndex,
+) -> (bool, TokenRange, NodeKey, NodeKey, usize) {
+    let (source, target) = graph.edge_endpoints(edge).expect("live causal edge");
+    let weight = graph.edge_weight(edge).expect("live causal edge");
+    (
+        weight.origin.is_none(),
+        weight.origin.unwrap_or_default(),
+        graph[source],
+        graph[target],
+        edge.index(),
+    )
+}
+
+/// Select a stable source-level anchor, then find the shortest directed return
+/// path to it inside the SCC. The result is one real simple cycle rather than
+/// every node in the maximal SCC, while avoiding an all-sources shortest-cycle
+/// search whose worst-case cost is quadratic in a malicious component.
+fn diagnostic_cycle_witness(graph: &CausalGraph, scc: &[NodeIndex]) -> Option<Vec<EdgeIndex>> {
+    if scc.is_empty() {
+        return None;
+    }
+    let node_bound = graph
+        .node_indices()
+        .map(NodeIndex::index)
+        .max()
+        .map_or(0, |index| index + 1);
+    let mut inside = vec![false; node_bound];
+    for &node in scc {
+        inside[node.index()] = true;
+    }
+
+    let mut internal_edges = scc
+        .iter()
+        .flat_map(|&node| graph.edges(node).map(|edge| edge.id()))
+        .filter(|&edge| {
+            graph
+                .edge_endpoints(edge)
+                .is_some_and(|(_, target)| inside[target.index()])
+        })
+        .collect::<Vec<_>>();
+    internal_edges.sort_unstable_by_key(|&edge| diagnostic_edge_key(graph, edge));
+    internal_edges.dedup();
+
+    if let Some(&edge) = internal_edges.iter().find(|&&edge| {
+        graph
+            .edge_endpoints(edge)
+            .is_some_and(|(source, target)| source == target)
+    }) {
+        return Some(vec![edge]);
+    }
+
+    let anchor = *internal_edges.first()?;
+    let (anchor_source, anchor_target) = graph.edge_endpoints(anchor)?;
+    let mut predecessor = vec![None::<(NodeIndex, EdgeIndex)>; node_bound];
+    let mut discovered = vec![false; node_bound];
+    let mut pending = VecDeque::from([anchor_target]);
+    discovered[anchor_target.index()] = true;
+
+    while let Some(node) = pending.pop_front() {
+        if node == anchor_source {
+            break;
+        }
+        let mut outgoing = graph
+            .edges(node)
+            .filter(|edge| inside[edge.target().index()])
+            .map(|edge| edge.id())
+            .collect::<Vec<_>>();
+        outgoing.sort_unstable_by_key(|&edge| diagnostic_edge_key(graph, edge));
+        for edge in outgoing {
+            let (_, target) = graph.edge_endpoints(edge)?;
+            if std::mem::replace(&mut discovered[target.index()], true) {
+                continue;
+            }
+            predecessor[target.index()] = Some((node, edge));
+            pending.push_back(target);
+        }
+    }
+    if !discovered[anchor_source.index()] {
+        return None;
+    }
+
+    let mut return_path = Vec::new();
+    let mut current = anchor_source;
+    while current != anchor_target {
+        let (previous, edge) = predecessor[current.index()]?;
+        return_path.push(edge);
+        current = previous;
+    }
+    return_path.reverse();
+    let mut witness = Vec::with_capacity(return_path.len() + 1);
+    witness.push(anchor);
+    witness.extend(return_path);
+    Some(witness)
+}
+
+fn strongly_connected_components(graph: &CausalGraph) -> Vec<Vec<NodeIndex>> {
     let node_bound = graph
         .node_indices()
         .map(NodeIndex::index)
@@ -2592,45 +2731,35 @@ fn strongly_connected_components(graph: &Graph<NodeKey, bool>) -> Vec<Vec<NodeIn
 }
 
 fn ensure_node(
-    graph: &mut Graph<NodeKey, bool>,
+    graph: &mut CausalGraph,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     key: NodeKey,
 ) -> NodeIndex {
     *node_map.entry(key).or_insert_with(|| graph.add_node(key))
 }
 
-fn has_self_edge(graph: &Graph<NodeKey, bool>, node: NodeIndex) -> bool {
-    graph
-        .edges(node)
-        .any(|e| e.source() == node && e.target() == node)
-}
-
-fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
-    let mut tokens: Vec<veryl_parser::token_range::TokenRange> = Vec::new();
-    let mut identifier: Option<String> = None;
-    let mut seen_var: HashSet<VarId> = HashSet::default();
-    for (id, _idx, _range) in keys {
-        if !seen_var.insert(*id) {
-            continue;
-        }
-        let variable = module.variables.get(id);
-        if let Some(var) = variable
-            && identifier.is_none()
-        {
-            identifier = Some(var.path.to_string());
-        }
-        if let Some(toks) = module.assign_tokens.get(id)
-            && !toks.is_empty()
-        {
-            tokens.extend(toks.iter().copied());
-        } else if let Some(var) = variable {
-            // Large dynamic assignments intentionally do not allocate the
-            // legacy per-element AssignTable, so no assignment-token vector
-            // exists. The declaration still provides a stable diagnostic
-            // anchor for a loop proven by the sparse causal graph.
-            tokens.push(var.token);
-        }
-    }
+fn build_error(
+    module: &Module,
+    graph: &CausalGraph,
+    witness: &[EdgeIndex],
+) -> Option<AnalyzerError> {
+    let anchor = *witness.first()?;
+    let (_, anchor_target) = graph.edge_endpoints(anchor)?;
+    let identifier = module
+        .variables
+        .get(&graph[anchor_target].0)
+        .map(|variable| variable.path.to_string())
+        .unwrap_or_else(|| "?".to_string());
+    let mut tokens = witness
+        .iter()
+        .filter_map(|&edge| {
+            let (_, target) = graph.edge_endpoints(edge)?;
+            graph
+                .edge_weight(edge)?
+                .origin
+                .or_else(|| module.variables.get(&graph[target].0).map(|var| var.token))
+        })
+        .collect::<Vec<_>>();
     {
         let mut seen: HashSet<_> = HashSet::default();
         tokens.retain(|t| seen.insert(*t));
@@ -2638,7 +2767,7 @@ fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
     let primary = *tokens.first()?;
     let participants: Vec<_> = tokens.iter().skip(1).copied().collect();
     Some(AnalyzerError::combinational_loop(
-        identifier.as_deref().unwrap_or("?"),
+        &identifier,
         &primary,
         &participants,
     ))
@@ -2653,7 +2782,7 @@ fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool 
 
 fn compute_module_summary(
     module: &Module,
-    graph: &Graph<NodeKey, bool>,
+    graph: &CausalGraph,
     bit_part: &BitPartition,
 ) -> ModuleCombSummary {
     use crate::ir::VarKind;
@@ -2906,12 +3035,12 @@ mod memory_ssa_tests {
         // SCC discovery must use heap-backed worklists regardless of graph
         // depth; every node in this chain is its own component.
         let count = 25_600usize;
-        let mut graph = Graph::<NodeKey, bool>::new();
+        let mut graph = CausalGraph::new();
         let nodes = (0..count)
             .map(|index| graph.add_node((VarId::from_raw(index as u32), 0, 0)))
             .collect::<Vec<_>>();
         for pair in nodes.windows(2) {
-            graph.add_edge(pair[0], pair[1], false);
+            graph.add_edge(pair[0], pair[1], CausalEdge::new(false, None));
         }
 
         let components = strongly_connected_components(&graph);

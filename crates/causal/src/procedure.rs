@@ -63,6 +63,10 @@ pub struct PeriodicDependency<O> {
     pub kind: EdgeKind,
     /// Each output copy preserves positions within `input`.
     pub aligned: bool,
+    /// The first concrete write encountered from the procedure exit toward
+    /// this input. `None` denotes retained entry state rather than an
+    /// assignment which can anchor a source diagnostic.
+    pub origin: Option<WriteId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +114,10 @@ pub struct Dependency<O> {
     /// may safely project a requested output subspan back to the same relative
     /// input subspan only when this is true.
     pub aligned: bool,
+    /// The first concrete write encountered from the procedure exit toward
+    /// this input. Distinct reaching assignments remain distinct dependencies
+    /// so adapters can attach an exact source location to each causal edge.
+    pub origin: Option<WriteId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,6 +224,7 @@ struct DepVersion<O> {
     active_read: Option<ReadId>,
     translation: Option<i128>,
     periodic_output: Option<PeriodicProjection>,
+    origin: Option<WriteId>,
     marker: std::marker::PhantomData<O>,
 }
 
@@ -732,6 +741,7 @@ where
             None,
             Some(0i128),
             None,
+            None,
         )];
         let mut visited = BTreeSet::new();
         while let Some((
@@ -742,6 +752,7 @@ where
             active_read,
             path_translation,
             path_periodic_output,
+            path_origin,
         )) = stack.pop()
         {
             if !visited.insert(DepVersion::<O> {
@@ -752,6 +763,7 @@ where
                 active_read,
                 translation: path_translation,
                 periodic_output: path_periodic_output.clone(),
+                origin: path_origin,
                 marker: std::marker::PhantomData,
             }) {
                 continue;
@@ -766,6 +778,7 @@ where
                         axes: periodic.axes,
                         kind: path_kind,
                         aligned: path_aligned,
+                        origin: path_origin,
                     });
                 } else {
                     let dependency = Dependency {
@@ -773,6 +786,7 @@ where
                         output: atom_region(atoms[output_atom]),
                         kind: path_kind,
                         aligned: path_aligned,
+                        origin: path_origin,
                     };
                     dependencies.insert(dependency);
                     if path_uncertain_input {
@@ -785,6 +799,7 @@ where
                 Version::Definition { definition, .. } => Some(definition.write),
                 Version::Entry(_) | Version::Phi { .. } => None,
             };
+            let next_origin = path_origin.or(current_write);
             if let Some(inputs) = version_deps.get(&version) {
                 for (
                     input,
@@ -872,6 +887,7 @@ where
                         },
                         next_translation,
                         next_periodic_output,
+                        next_origin,
                     ));
                 }
             }
@@ -881,7 +897,12 @@ where
     let mut collapsed_dependencies = BTreeMap::new();
     for dependency in dependencies {
         collapsed_dependencies
-            .entry((dependency.input, dependency.output, dependency.kind))
+            .entry((
+                dependency.input,
+                dependency.output,
+                dependency.kind,
+                dependency.origin,
+            ))
             .and_modify(|aligned| *aligned &= dependency.aligned)
             .or_insert(dependency.aligned);
     }
@@ -889,11 +910,12 @@ where
     Ok(ProcedureSummary {
         dependencies: collapsed_dependencies
             .into_iter()
-            .map(|((input, output, kind), aligned)| Dependency {
+            .map(|((input, output, kind, origin), aligned)| Dependency {
                 input,
                 output,
                 kind,
                 aligned,
+                origin,
             })
             .collect(),
         periodic_dependencies: periodic_dependencies.into_iter().collect(),
@@ -1422,6 +1444,7 @@ mod tests {
                 output: exact(1, 0, 1),
                 kind: EdgeKind::Value,
                 aligned: true,
+                origin: None,
             }]
         );
         assert_eq!(summary.phi_count, 1);
@@ -1515,6 +1538,7 @@ mod tests {
                 output: exact(3, 0, 1),
                 kind: EdgeKind::Value,
                 aligned: false,
+                origin: Some(1),
             }]
         );
     }
@@ -1755,6 +1779,7 @@ mod tests {
                 output: exact(2, 0, 1),
                 kind: EdgeKind::Value,
                 aligned: false,
+                origin: Some(1),
             }]
         );
     }
@@ -1862,6 +1887,7 @@ mod tests {
                 output: exact(1, 0, 8),
                 kind: EdgeKind::Value,
                 aligned: false,
+                origin: Some(0),
             }]
         );
     }

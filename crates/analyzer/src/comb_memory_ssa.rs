@@ -10,14 +10,29 @@ use crate::ir::{
 };
 use veryl_causal::graph::{EdgeKind, IncompleteReason};
 use veryl_causal::procedure::{
-    self, AlignedDependency, Event, MustAliasCandidate, Procedure, ProcedureError, ProcedureSummary,
+    self, AlignedDependency, Event, MustAliasCandidate, Procedure, ProcedureError,
+    ProcedureSummary, WriteId,
 };
 use veryl_causal::region::{Region, Span};
+use veryl_parser::token_range::TokenRange;
+
+pub(crate) struct ProcedureAnalysis {
+    pub summary: ProcedureSummary<VarId>,
+    pub write_tokens: BTreeMap<WriteId, TokenRange>,
+}
+
+impl std::ops::Deref for ProcedureAnalysis {
+    type Target = ProcedureSummary<VarId>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.summary
+    }
+}
 
 pub(crate) fn analyze(
     module: &Module,
     declaration: &CombDeclaration,
-) -> Result<ProcedureSummary<VarId>, ProcedureError> {
+) -> Result<ProcedureAnalysis, ProcedureError> {
     let mut builder = Builder::new(module);
     let exit = builder
         .lower_statements(&declaration.statements, 0, &[], None)
@@ -26,20 +41,28 @@ pub(crate) fn analyze(
     if let Some(message) = builder.model_error {
         return Err(ProcedureError::Model(message));
     }
-    procedure::analyze(&builder.procedure)
+    let summary = procedure::analyze(&builder.procedure)?;
+    Ok(ProcedureAnalysis {
+        summary,
+        write_tokens: builder.write_tokens,
+    })
 }
 
 pub(crate) fn analyze_observer_expression(
     module: &Module,
     expression: &Expression,
-) -> Result<ProcedureSummary<VarId>, ProcedureError> {
+) -> Result<ProcedureAnalysis, ProcedureError> {
     let mut builder = Builder::new(module);
     builder.lower_observer_expression(0, expression);
     builder.procedure.exit = 0;
     if let Some(message) = builder.model_error {
         return Err(ProcedureError::Model(message));
     }
-    procedure::analyze(&builder.procedure)
+    let summary = procedure::analyze(&builder.procedure)?;
+    Ok(ProcedureAnalysis {
+        summary,
+        write_tokens: builder.write_tokens,
+    })
 }
 
 /// Map a result-bit span to the module regions which structurally supply it.
@@ -115,6 +138,7 @@ struct Builder {
     next_write: usize,
     unresolved_writes: BTreeMap<String, Vec<(usize, Vec<usize>)>>,
     call_stack: Vec<VarId>,
+    write_tokens: BTreeMap<WriteId, TokenRange>,
     model_error: Option<&'static str>,
 }
 
@@ -160,6 +184,7 @@ impl Builder {
             next_write: 0,
             unresolved_writes: BTreeMap::new(),
             call_stack: Vec::new(),
+            write_tokens: BTreeMap::new(),
             model_error: None,
         }
     }
@@ -185,6 +210,7 @@ impl Builder {
             next_write: 0,
             unresolved_writes: BTreeMap::new(),
             call_stack,
+            write_tokens: BTreeMap::new(),
             model_error: None,
         }
     }
@@ -305,6 +331,7 @@ impl Builder {
         let read = self.push_read(block, source);
         let id = self.next_write;
         self.next_write += 1;
+        self.write_tokens.insert(id, first.dst[0].token);
         self.procedure.events[block].push(Event::Write {
             id,
             region: Region::Exact {
@@ -867,6 +894,7 @@ impl Builder {
             dependencies.extend_from_slice(controls);
             let id = self.next_write;
             self.next_write += 1;
+            self.write_tokens.insert(id, call.comptime.token);
             self.procedure.events[block].push(Event::Write {
                 id,
                 region: output,
@@ -1938,6 +1966,7 @@ impl Builder {
         {
             let id = self.next_write;
             self.next_write += 1;
+            self.write_tokens.insert(id, destination.token);
             if let Some(key) = Self::unresolved_access_key(
                 destination.id,
                 &destination.index,
