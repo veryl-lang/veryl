@@ -27,7 +27,7 @@ use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
 use veryl_causal::graph::{EdgeKind, IncompleteReason};
-use veryl_causal::procedure::{PeriodicAxis, ProcedureSummary};
+use veryl_causal::procedure::{AlignedDependency, PeriodicAxis, ProcedureSummary};
 use veryl_causal::region::{Region, Span};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -2031,16 +2031,30 @@ fn aligned_instance_region_pairs(
         else {
             continue;
         };
+        let transfer = AlignedDependency {
+            read: 0,
+            kind: input.kind,
+            source: if input.aligned {
+                input_region
+            } else {
+                Span {
+                    start: 0,
+                    length: input.expression.length,
+                }
+            },
+            destination: input_relative,
+            axes: input.axes.clone(),
+        };
         for output in outputs {
+            if !output.axes.is_empty() {
+                continue;
+            }
             let Some(output_start) = output.expression.start.checked_sub(child_output.start) else {
                 continue;
             };
             let output_relative = Span {
                 start: output_start,
                 length: output.expression.length,
-            };
-            let Some(overlap) = input_relative.intersection(output_relative) else {
-                continue;
             };
             let Region::Exact {
                 object: output_object,
@@ -2049,36 +2063,42 @@ fn aligned_instance_region_pairs(
             else {
                 continue;
             };
-            let Some(output_offset) = overlap.start.checked_sub(output_relative.start) else {
+            let Some(clipped) =
+                crate::comb_memory_ssa::clip_aligned_dependency(&transfer, output_relative)
+            else {
                 continue;
             };
-            let output_region = Region::Exact {
-                object: output_object,
-                span: Span {
-                    start: output_region.start + output_offset,
-                    length: overlap.length,
-                },
-            };
-            if input.aligned {
-                let Some(input_offset) = overlap.start.checked_sub(input_relative.start) else {
+            for clipped in clipped {
+                let Some(destination_start) =
+                    output_region.start.checked_add(clipped.destination.start)
+                else {
                     continue;
                 };
-                let input_region = Region::Exact {
-                    object: input_object,
-                    span: Span {
-                        start: input_region.start + input_offset,
-                        length: overlap.length,
+                let periodic = PeriodicRegion {
+                    object: output_object,
+                    output: Span {
+                        start: destination_start,
+                        length: clipped.destination.length,
                     },
+                    axes: clipped.axes,
                 };
-                pairs.extend(
-                    aligned_region_node_pairs(input_region, output_region, parent_vars, bit_part)
-                        .into_iter()
-                        .map(|(source, destination)| (source, destination, true)),
-                );
-            } else {
-                for source in region_node_keys(input.region, parent_vars, bit_part) {
-                    for destination in region_node_keys(output_region, parent_vars, bit_part) {
-                        pairs.insert((source, destination, false));
+                if input.aligned && output.aligned {
+                    let input_region = Region::Exact {
+                        object: input_object,
+                        span: clipped.source,
+                    };
+                    pairs.extend(
+                        aligned_periodic_node_pairs(input_region, periodic, parent_vars, bit_part)
+                            .into_iter()
+                            .map(|(source, destination)| (source, destination, true)),
+                    );
+                } else {
+                    for source in region_node_keys(input.region, parent_vars, bit_part) {
+                        for destination in
+                            periodic_region_node_keys(periodic.clone(), parent_vars, bit_part)
+                        {
+                            pairs.insert((source, destination, false));
+                        }
                     }
                 }
             }

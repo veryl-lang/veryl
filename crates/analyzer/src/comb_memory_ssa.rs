@@ -194,7 +194,7 @@ fn positioned_extent(length: usize, axes: &[PeriodicAxis]) -> Option<usize> {
     })
 }
 
-fn clip_aligned_dependency(
+pub(crate) fn clip_aligned_dependency(
     dependency: &AlignedDependency,
     destination: Span,
 ) -> Option<Vec<AlignedDependency>> {
