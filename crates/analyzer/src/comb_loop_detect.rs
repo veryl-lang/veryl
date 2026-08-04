@@ -1025,7 +1025,7 @@ fn add_inst_feedthrough_edges(
             && let Some(parent_outputs) =
                 map_destinations_span_positioned(&output.dst, child_output_span, parent_vars, ctx)
         {
-            for (source, destination) in aligned_instance_region_pairs(
+            for (source, destination, aligned) in aligned_instance_region_pairs(
                 &parent_inputs,
                 &parent_outputs,
                 child_input_span,
@@ -1035,7 +1035,7 @@ fn add_inst_feedthrough_edges(
             ) {
                 let source = ensure_node(graph, node_map, source);
                 let destination = ensure_node(graph, node_map, destination);
-                graph.add_edge(source, destination, true);
+                graph.add_edge(source, destination, aligned);
             }
             continue;
         }
@@ -1079,7 +1079,7 @@ fn aligned_instance_region_pairs(
     child_output: Span,
     parent_vars: &HashMap<VarId, Variable>,
     bit_part: &BitPartition,
-) -> Vec<(NodeKey, NodeKey)> {
+) -> Vec<(NodeKey, NodeKey, bool)> {
     let mut pairs = BTreeSet::new();
     for input in inputs {
         let Some(input_start) = input.expression.start.checked_sub(child_input.start) else {
@@ -1114,18 +1114,8 @@ fn aligned_instance_region_pairs(
             else {
                 continue;
             };
-            let Some(input_offset) = overlap.start.checked_sub(input_relative.start) else {
-                continue;
-            };
             let Some(output_offset) = overlap.start.checked_sub(output_relative.start) else {
                 continue;
-            };
-            let input_region = Region::Exact {
-                object: input_object,
-                span: Span {
-                    start: input_region.start + input_offset,
-                    length: overlap.length,
-                },
             };
             let output_region = Region::Exact {
                 object: output_object,
@@ -1134,12 +1124,29 @@ fn aligned_instance_region_pairs(
                     length: overlap.length,
                 },
             };
-            pairs.extend(aligned_region_node_pairs(
-                input_region,
-                output_region,
-                parent_vars,
-                bit_part,
-            ));
+            if input.aligned {
+                let Some(input_offset) = overlap.start.checked_sub(input_relative.start) else {
+                    continue;
+                };
+                let input_region = Region::Exact {
+                    object: input_object,
+                    span: Span {
+                        start: input_region.start + input_offset,
+                        length: overlap.length,
+                    },
+                };
+                pairs.extend(
+                    aligned_region_node_pairs(input_region, output_region, parent_vars, bit_part)
+                        .into_iter()
+                        .map(|(source, destination)| (source, destination, true)),
+                );
+            } else {
+                for source in region_node_keys(input.region, parent_vars, bit_part) {
+                    for destination in region_node_keys(output_region, parent_vars, bit_part) {
+                        pairs.insert((source, destination, false));
+                    }
+                }
+            }
         }
     }
     pairs.into_iter().collect()
@@ -1458,6 +1465,7 @@ fn map_destinations_span_positioned(
                     },
                 },
                 expression: overlap,
+                aligned: true,
             });
         }
         low = low.checked_add(span.length)?;
@@ -1647,6 +1655,15 @@ fn exact_variable_region(
     }
     let variable = variables.get(&id)?;
     let width = variable.total_width()?;
+    if index.0.is_empty() && select.0.is_empty() && select.1.is_none() {
+        return Some(Region::Exact {
+            object: id,
+            span: Span {
+                start: 0,
+                length: variable.r#type.total_array()?.checked_mul(width)?,
+            },
+        });
+    }
     let index_path = index.eval_value(ctx)?;
     let array_index = variable.r#type.array.calc_index(&index_path)?;
     let (high, low) = select.eval_value(ctx, &variable.r#type, false)?;

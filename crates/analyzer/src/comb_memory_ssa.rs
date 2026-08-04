@@ -60,6 +60,9 @@ pub(crate) struct PositionedRegion {
     pub region: Region<VarId>,
     /// Bit coordinates in the mapped expression which this region supplies.
     pub expression: Span,
+    /// False when this region controls the mapped expression span instead of
+    /// supplying corresponding data bits.
+    pub aligned: bool,
 }
 
 pub(crate) fn map_expression_span_positioned(
@@ -628,8 +631,13 @@ impl Builder {
                 {
                     let preserve_alignment = dependency.aligned
                         && actual_regions.len() == 1
-                        && exact_regions_have_equal_length(actual_regions[0], dependency.output);
-                    mapped.extend(actual_regions.into_iter().map(|actual_region| {
+                        && actual_regions[0].aligned
+                        && exact_regions_have_equal_length(
+                            actual_regions[0].region,
+                            dependency.output,
+                        );
+                    mapped.extend(actual_regions.into_iter().map(|actual| {
+                        let actual_region = actual.region;
                         MappedFunctionRead {
                             read: self.push_read(block, actual_region),
                             kind: dependency.kind,
@@ -871,17 +879,22 @@ impl Builder {
         &mut self,
         expression: &Expression,
         formal_region: Region<VarId>,
-    ) -> Option<Vec<Region<VarId>>> {
+    ) -> Option<Vec<PositionedRegion>> {
         let Region::Exact {
             span: formal_span, ..
         } = formal_region
         else {
             return None;
         };
-        if formal_span.end()? > expression.comptime().r#type.total_width()? {
+        let expression_length = expression
+            .comptime()
+            .r#type
+            .total_width()?
+            .checked_mul(expression.comptime().r#type.total_array().unwrap_or(1))?;
+        if formal_span.end()? > expression_length {
             return None;
         }
-        self.map_expression_span_to_actual(expression, formal_span)
+        self.map_expression_span_positioned_to_actual(expression, formal_span)
     }
 
     /// Maps a low-bit-based span of an expression to the source variable
@@ -929,6 +942,7 @@ impl Builder {
                             },
                         },
                         expression: requested,
+                        aligned: true,
                     }])
                 }
                 Factor::Value(_) => Some(Vec::new()),
@@ -946,17 +960,45 @@ impl Builder {
                     .map(|mapped| {
                         mapped
                             .into_iter()
-                            .map(|(region, relative)| PositionedRegion {
+                            .map(|(region, relative, aligned)| PositionedRegion {
                                 region,
                                 expression: Span {
                                     start: requested.start + relative.start,
                                     length: relative.length,
                                 },
+                                aligned,
                             })
                             .collect()
                     }),
                 _ => None,
             },
+            Expression::Ternary(condition, left, right, _) => {
+                if let Some(selected) = self.constant_condition(condition) {
+                    return self.map_expression_span_positioned_to_actual(
+                        if selected { left } else { right },
+                        requested,
+                    );
+                }
+                let mut mapped = self.map_expression_span_positioned_to_actual(left, requested)?;
+                mapped.extend(self.map_expression_span_positioned_to_actual(right, requested)?);
+                let condition_width = condition.comptime().r#type.total_width()?;
+                mapped.extend(
+                    self.map_expression_span_positioned_to_actual(
+                        condition,
+                        Span {
+                            start: 0,
+                            length: condition_width,
+                        },
+                    )?
+                    .into_iter()
+                    .map(|condition| PositionedRegion {
+                        region: condition.region,
+                        expression: requested,
+                        aligned: false,
+                    }),
+                );
+                Some(mapped)
+            }
             Expression::Concatenation(parts, _) => {
                 let mut low = 0usize;
                 let mut mapped = Vec::new();
@@ -989,6 +1031,7 @@ impl Builder {
                                         start: positioned.expression.start + copy_start,
                                         length: positioned.expression.length,
                                     },
+                                    aligned: positioned.aligned,
                                 }),
                         );
                     }
@@ -996,11 +1039,7 @@ impl Builder {
                 }
                 Some(mapped)
             }
-            Expression::Unary(op, operand, _)
-                if matches!(op, Op::BitNot | Op::Add)
-                    && operand.comptime().r#type.total_width()?
-                        == expression.comptime().r#type.total_width()? =>
-            {
+            Expression::Unary(op, operand, _) if matches!(op, Op::BitNot | Op::Add) => {
                 self.map_expression_span_positioned_to_actual(operand, requested)
             }
             Expression::Binary(left, op, right, _)
@@ -1045,6 +1084,7 @@ impl Builder {
                                 start: positioned.expression.start + shift,
                                 length: positioned.expression.length,
                             },
+                            aligned: positioned.aligned,
                         })
                         .collect(),
                 )
@@ -1078,9 +1118,66 @@ impl Builder {
                                 start: positioned.expression.start - shift,
                                 length: positioned.expression.length,
                             },
+                            aligned: positioned.aligned,
                         })
                         .collect(),
                 )
+            }
+            Expression::Binary(left, Op::ArithShiftR, right, _)
+                if left.comptime().r#type.signed
+                    && left.comptime().r#type.total_width()?
+                        == expression.comptime().r#type.total_width()? =>
+            {
+                let width = expression.comptime().r#type.total_width()?;
+                let shift = right
+                    .clone()
+                    .eval_value(&mut self.context)?
+                    .to_usize()?
+                    .min(width);
+                let live_length = width.checked_sub(shift)?;
+                let mut mapped = Vec::new();
+                if let Some(overlap) = requested.intersection(Span {
+                    start: 0,
+                    length: live_length,
+                }) {
+                    let source = Span {
+                        start: overlap.start.checked_add(shift)?,
+                        length: overlap.length,
+                    };
+                    mapped.extend(
+                        self.map_expression_span_positioned_to_actual(left, source)?
+                            .into_iter()
+                            .map(|positioned| PositionedRegion {
+                                region: positioned.region,
+                                expression: Span {
+                                    start: positioned.expression.start - shift,
+                                    length: positioned.expression.length,
+                                },
+                                aligned: positioned.aligned,
+                            }),
+                    );
+                }
+                if let Some(fill) = requested.intersection(Span {
+                    start: live_length,
+                    length: shift,
+                }) {
+                    mapped.extend(
+                        self.map_expression_span_positioned_to_actual(
+                            left,
+                            Span {
+                                start: width.checked_sub(1)?,
+                                length: 1,
+                            },
+                        )?
+                        .into_iter()
+                        .map(|sign| PositionedRegion {
+                            region: sign.region,
+                            expression: fill,
+                            aligned: false,
+                        }),
+                    );
+                }
+                Some(mapped)
             }
             _ => None,
         }
@@ -1090,7 +1187,7 @@ impl Builder {
         &mut self,
         call: &FunctionCall,
         requested: Span,
-    ) -> Option<Vec<(Region<VarId>, Span)>> {
+    ) -> Option<Vec<(Region<VarId>, Span, bool)>> {
         if self.call_stack.contains(&call.id) {
             return None;
         }
@@ -1160,7 +1257,8 @@ impl Builder {
                 },
             };
             let actual_regions = self.map_formal_region_to_actual(actual, formal_region)?;
-            for actual_region in actual_regions {
+            for actual in actual_regions {
+                let actual_region = actual.region;
                 let Region::Exact {
                     span: actual_span, ..
                 } = actual_region
@@ -1176,6 +1274,7 @@ impl Builder {
                         start: output_overlap.start.checked_sub(requested.start)?,
                         length: output_overlap.length,
                     },
+                    actual.aligned,
                 ));
             }
         }
@@ -1362,9 +1461,8 @@ impl Builder {
         destinations: &[AssignDestination],
         dependencies: &mut Vec<(usize, EdgeKind)>,
     ) -> Option<Vec<Vec<AlignedDependency>>> {
-        let expression_width = expression.comptime().r#type.total_width()?;
-        let mut high = expression_width;
-        let mut destination_spans = Vec::with_capacity(destinations.len());
+        let mut expression_width = 0usize;
+        let mut destination_lengths = Vec::with_capacity(destinations.len());
         for destination in destinations {
             let Region::Exact {
                 span: destination_span,
@@ -1373,33 +1471,51 @@ impl Builder {
             else {
                 return None;
             };
-            high = high.checked_sub(destination_span.length)?;
+            expression_width = expression_width.checked_add(destination_span.length)?;
+            destination_lengths.push(destination_span.length);
+        }
+        let mut high = expression_width;
+        let mut destination_spans = Vec::with_capacity(destinations.len());
+        for length in destination_lengths {
+            high = high.checked_sub(length)?;
             destination_spans.push(Span {
                 start: high,
-                length: destination_span.length,
+                length,
             });
         }
-        if high != 0 {
-            return None;
-        }
 
-        let mut dependency_cursor = 0usize;
         let mut aligned = Vec::new();
-        self.collect_aligned_expression_dependencies(
-            block,
+        let positioned = self.map_expression_span_positioned_to_actual(
             expression,
             Span {
                 start: 0,
                 length: expression_width,
             },
-            dependencies,
-            &mut dependency_cursor,
-            &mut aligned,
         )?;
-        if dependency_cursor != dependencies.len() {
-            return None;
+        let mut retained = Vec::new();
+        for positioned in positioned {
+            let Region::Exact { span, .. } = positioned.region else {
+                return None;
+            };
+            let read = self.push_read(block, positioned.region);
+            if positioned.aligned {
+                if span.length != positioned.expression.length {
+                    return None;
+                }
+                aligned.push(AlignedDependency {
+                    read,
+                    kind: EdgeKind::Value,
+                    source: Span {
+                        start: 0,
+                        length: span.length,
+                    },
+                    destination: positioned.expression,
+                });
+            } else {
+                retained.push((read, EdgeKind::Control));
+            }
         }
-        dependencies.clear();
+        *dependencies = retained;
         let mut ret = vec![Vec::new(); destinations.len()];
         for dependency in aligned {
             for (index, destination) in destination_spans.iter().copied().enumerate() {
@@ -1423,214 +1539,6 @@ impl Builder {
             }
         }
         Some(ret)
-    }
-
-    fn collect_aligned_expression_dependencies(
-        &mut self,
-        block: usize,
-        expression: &Expression,
-        destination: Span,
-        dependencies: &[(usize, EdgeKind)],
-        dependency_cursor: &mut usize,
-        aligned: &mut Vec<AlignedDependency>,
-    ) -> Option<()> {
-        if expression.comptime().r#type.total_width()? != destination.length {
-            return None;
-        }
-        match expression {
-            Expression::Term(factor) => match factor.as_ref() {
-                Factor::Value(_) => Some(()),
-                Factor::Variable(id, index, select, _) => {
-                    let Region::Exact {
-                        span: source_span, ..
-                    } = self.variable_region(*id, index, select)
-                    else {
-                        return None;
-                    };
-                    if source_span.length != destination.length {
-                        return None;
-                    }
-                    let &(read, kind) = dependencies.get(*dependency_cursor)?;
-                    if kind != EdgeKind::Value {
-                        return None;
-                    }
-                    *dependency_cursor += 1;
-                    aligned.push(AlignedDependency {
-                        read,
-                        kind,
-                        source: Span {
-                            start: 0,
-                            length: source_span.length,
-                        },
-                        destination,
-                    });
-                    Some(())
-                }
-                Factor::FunctionCall(call) => {
-                    let regions = self.map_function_return_spans_to_actual(
-                        call,
-                        Span {
-                            start: 0,
-                            length: destination.length,
-                        },
-                    )?;
-                    let dependency_count = regions.len();
-                    for (region, mapped_destination) in regions {
-                        let Region::Exact { span, .. } = region else {
-                            return None;
-                        };
-                        if span.length != mapped_destination.length {
-                            return None;
-                        }
-                        aligned.push(AlignedDependency {
-                            read: self.push_read(block, region),
-                            kind: EdgeKind::Value,
-                            source: Span {
-                                start: 0,
-                                length: span.length,
-                            },
-                            destination: Span {
-                                start: destination.start.checked_add(mapped_destination.start)?,
-                                length: mapped_destination.length,
-                            },
-                        });
-                    }
-                    for _ in 0..dependency_count {
-                        let (_, kind) = *dependencies.get(*dependency_cursor)?;
-                        if kind != EdgeKind::Value {
-                            return None;
-                        }
-                        *dependency_cursor += 1;
-                    }
-                    Some(())
-                }
-                _ => None,
-            },
-            Expression::Concatenation(parts, _) => {
-                let mut low = destination.end()?;
-                for (part, repeat) in parts {
-                    let width = part.comptime().r#type.total_width()?;
-                    let repeat = if let Some(repeat) = repeat {
-                        repeat.clone().eval_value(&mut self.context)?.to_usize()?
-                    } else {
-                        1
-                    };
-                    let group_width = width.checked_mul(repeat)?;
-                    low = low.checked_sub(group_width)?;
-                    let mut part_dependencies = Vec::new();
-                    self.collect_aligned_expression_dependencies(
-                        block,
-                        part,
-                        Span {
-                            start: 0,
-                            length: width,
-                        },
-                        dependencies,
-                        dependency_cursor,
-                        &mut part_dependencies,
-                    )?;
-                    for copy in 0..repeat {
-                        let copy_start = low.checked_add(copy.checked_mul(width)?)?;
-                        aligned.extend(part_dependencies.iter().map(|dependency| {
-                            AlignedDependency {
-                                read: dependency.read,
-                                kind: dependency.kind,
-                                source: dependency.source,
-                                destination: Span {
-                                    start: copy_start + dependency.destination.start,
-                                    length: dependency.destination.length,
-                                },
-                            }
-                        }));
-                    }
-                }
-                (low == destination.start).then_some(())
-            }
-            Expression::Unary(op, operand, _)
-                if matches!(op, Op::BitNot | Op::Add)
-                    && operand.comptime().r#type.total_width()? == destination.length =>
-            {
-                self.collect_aligned_expression_dependencies(
-                    block,
-                    operand,
-                    destination,
-                    dependencies,
-                    dependency_cursor,
-                    aligned,
-                )
-            }
-            Expression::Binary(left, op, right, _)
-                if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor)
-                    && left.comptime().r#type.total_width()? == destination.length
-                    && right.comptime().r#type.total_width()? == destination.length =>
-            {
-                self.collect_aligned_expression_dependencies(
-                    block,
-                    left,
-                    destination,
-                    dependencies,
-                    dependency_cursor,
-                    aligned,
-                )?;
-                self.collect_aligned_expression_dependencies(
-                    block,
-                    right,
-                    destination,
-                    dependencies,
-                    dependency_cursor,
-                    aligned,
-                )
-            }
-            Expression::Binary(left, op, right, _)
-                if matches!(op, Op::LogicShiftL | Op::ArithShiftL)
-                    && left.comptime().r#type.total_width()? == destination.length =>
-            {
-                let shift = right
-                    .clone()
-                    .eval_value(&mut self.context)?
-                    .to_usize()?
-                    .min(destination.length);
-                let mut shifted = Vec::new();
-                self.collect_aligned_expression_dependencies(
-                    block,
-                    left,
-                    Span {
-                        start: 0,
-                        length: destination.length,
-                    },
-                    dependencies,
-                    dependency_cursor,
-                    &mut shifted,
-                )?;
-                let live_source = Span {
-                    start: 0,
-                    length: destination.length.checked_sub(shift)?,
-                };
-                for dependency in shifted {
-                    let Some(overlap) = dependency.destination.intersection(live_source) else {
-                        continue;
-                    };
-                    let offset = overlap.start.checked_sub(dependency.destination.start)?;
-                    aligned.push(AlignedDependency {
-                        read: dependency.read,
-                        kind: dependency.kind,
-                        source: Span {
-                            start: dependency.source.start.checked_add(offset)?,
-                            length: overlap.length,
-                        },
-                        destination: Span {
-                            start: destination
-                                .start
-                                .checked_add(overlap.start)?
-                                .checked_add(shift)?,
-                            length: overlap.length,
-                        },
-                    });
-                }
-                Some(())
-            }
-            _ => None,
-        }
     }
 
     fn push_read(&mut self, block: usize, region: Region<VarId>) -> usize {
@@ -1699,6 +1607,19 @@ impl Builder {
         let Some(width) = variable.total_width() else {
             return Region::UnknownObject(id);
         };
+        if index.0.is_empty() && select.0.is_empty() && select.1.is_none() {
+            let Some(length) = variable
+                .r#type
+                .total_array()
+                .and_then(|elements| elements.checked_mul(width))
+            else {
+                return Region::UnknownObject(id);
+            };
+            return Region::Exact {
+                object: id,
+                span: Span { start: 0, length },
+            };
+        }
         // Preserve the longest statically known prefix. `eval_value` maps an
         // X/Z numeric index to zero for simulation convenience, so alias
         // analysis must inspect every constant before accepting its value.

@@ -10974,7 +10974,6 @@ fn combinational_loop_review_short_circuits_instance_logical_actuals() {
 }
 
 #[test]
-#[ignore = "captured final-review regression: nested ternary loses bit positions"]
 fn combinational_loop_review_preserves_nested_vector_ternary_positions() {
     // Why this case exists: bitwise negation does not change bit positions.
     // The nested ternary still maps o[0] only from value[0] (or a constant),
@@ -11015,7 +11014,6 @@ fn combinational_loop_review_preserves_nested_vector_ternary_positions() {
 }
 
 #[test]
-#[ignore = "captured final-review regression: ternary positions disappear at call boundaries"]
 fn combinational_loop_review_preserves_ternary_positions_across_boundaries() {
     // Why this case exists: low reads only bit zero of its formal. A ternary
     // actual preserves that bit position, so feedback into value[1] is
@@ -11124,7 +11122,6 @@ fn combinational_loop_review_preserves_ternary_positions_across_boundaries() {
 }
 
 #[test]
-#[ignore = "captured final-review regression: unpacked module ports collapse element positions"]
 fn combinational_loop_review_preserves_unpacked_port_element_positions() {
     // Why this case exists: Child is an element-wise identity over an unpacked
     // array. Returning child_o[1] to child_i[0] crosses distinct elements and
@@ -11187,7 +11184,6 @@ fn combinational_loop_review_preserves_unpacked_port_element_positions() {
 }
 
 #[test]
-#[ignore = "captured final-review regression: unpacked function actual collapses elements"]
 fn combinational_loop_review_preserves_unpacked_function_actual_positions() {
     // Why this case exists: high reads only unpacked element one. Feeding its
     // result to value[0] is element-disjoint and must not fall back to reading
@@ -11236,7 +11232,6 @@ fn combinational_loop_review_preserves_unpacked_function_actual_positions() {
 }
 
 #[test]
-#[ignore = "captured final-review regression: local right shift loses zero-fill positions"]
 fn combinational_loop_review_preserves_local_right_shift_positions() {
     // Why this case exists: (value >> 1)[3] is an inserted zero. Returning
     // that discarded high bit to value[0] cannot form feedback.
@@ -11275,7 +11270,6 @@ fn combinational_loop_review_preserves_local_right_shift_positions() {
 }
 
 #[test]
-#[ignore = "captured final-review regression: arithmetic right shift loses source positions"]
 fn combinational_loop_review_preserves_arithmetic_right_shift_positions() {
     // Why this case exists: for a one-bit arithmetic right shift, o[0] is
     // value[1]; discarded value[0] cannot influence it. Whole-vector fallback
