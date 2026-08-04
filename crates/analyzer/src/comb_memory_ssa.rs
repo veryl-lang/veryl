@@ -1520,9 +1520,6 @@ impl Builder {
             if dependency.kind == EdgeKind::Unknown {
                 continue;
             }
-            if !dependency.aligned {
-                return None;
-            }
             let Region::Exact {
                 object: input,
                 span: input_span,
@@ -1530,38 +1527,51 @@ impl Builder {
             else {
                 continue;
             };
-            let actual = actual_inputs.get(&input)?;
-            if input_span.length != output_span.length {
-                return None;
-            }
-            let relative_start = output_overlap.start.checked_sub(output_span.start)?;
-            let formal_region = Region::Exact {
-                object: input,
-                span: Span {
-                    start: input_span.start.checked_add(relative_start)?,
-                    length: output_overlap.length,
-                },
+            let relative_output = Span {
+                start: output_overlap.start.checked_sub(requested.start)?,
+                length: output_overlap.length,
             };
-            let actual_regions = self.map_formal_region_to_actual(actual, formal_region)?;
-            for actual in actual_regions {
-                let actual_region = actual.region;
-                let Region::Exact {
-                    span: actual_span, ..
-                } = actual_region
-                else {
-                    return None;
-                };
-                if actual_span.length != output_overlap.length {
+
+            let mapped_input = if dependency.aligned {
+                if input_span.length != output_span.length {
                     return None;
                 }
-                mapped.push((
-                    actual_region,
-                    Span {
-                        start: output_overlap.start.checked_sub(requested.start)?,
+                let relative_start = output_overlap.start.checked_sub(output_span.start)?;
+                Region::Exact {
+                    object: input,
+                    span: Span {
+                        start: input_span.start.checked_add(relative_start)?,
                         length: output_overlap.length,
                     },
-                    actual.aligned,
-                ));
+                }
+            } else {
+                dependency.input
+            };
+
+            if let Some(actual) = actual_inputs.get(&input) {
+                for actual in self.map_formal_region_to_actual(actual, mapped_input)? {
+                    let actual_region = actual.region;
+                    let Region::Exact {
+                        span: actual_span, ..
+                    } = actual_region
+                    else {
+                        return None;
+                    };
+                    let aligned = dependency.aligned && actual.aligned;
+                    if aligned && actual_span.length != output_overlap.length {
+                        return None;
+                    }
+                    mapped.push((actual_region, relative_output, aligned));
+                }
+            } else if self
+                .context
+                .variables
+                .get(&input)
+                .is_some_and(|variable| variable.affiliation == crate::symbol::Affiliation::Module)
+            {
+                mapped.push((mapped_input, relative_output, dependency.aligned));
+            } else {
+                return None;
             }
         }
         mapped.sort_unstable();
