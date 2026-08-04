@@ -22203,3 +22203,134 @@ fn combinational_loop_review_bounds_dynamic_selector_values() {
         );
     }
 }
+
+#[test]
+#[ignore = "captured third-review follow-up: coercions and correlated selectors"]
+fn combinational_loop_review_preserves_coercions_and_selector_correlation() {
+    // Why these cases exist: both ternary operands are signed and four bits
+    // wide after context sizing. Its high result bit depends only on the
+    // two-bit value's sign bit, not on value[0].
+    for (name, target, expected) in [
+        (
+            "a signed ternary high bit is disjoint from a non-sign bit",
+            0,
+            false,
+        ),
+        (
+            "a signed ternary high bit retains its sign-bit dependency",
+            1,
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Top (
+                    sel: input  logic,
+                    o  : output logic<4>,
+                ) {{
+                    var value: logic<2>;
+                    assign o = if sel ? $signed(value) : 4'sb0;
+                    assign value[{target}] = o[3];
+                    assign value[{}] = 0;
+                }}
+                "#,
+                1 - target
+            ),
+            expected,
+        );
+    }
+
+    // Why these cases exist: numeric casts truncate or zero-extend at their
+    // declared width, and mixed-width bitwise operands are coerced to their
+    // common expression width before applying the operator.
+    for (name, expression, feedback, expected) in [
+        (
+            "a widening cast zero-fills its high bits",
+            "value as 4",
+            "o[3]",
+            false,
+        ),
+        (
+            "a widening cast retains its low bits",
+            "value as 4",
+            "o[0]",
+            true,
+        ),
+        (
+            "a narrowing cast discards its high source bits",
+            "value as 2",
+            "o[3]",
+            false,
+        ),
+        (
+            "a narrowing cast retains its low source bits",
+            "value as 2",
+            "o[0]",
+            true,
+        ),
+        (
+            "mixed-width bitwise zero-fills a short unsigned operand",
+            "value | 4'b0",
+            "o[3]",
+            false,
+        ),
+        (
+            "mixed-width bitwise retains a corresponding short operand bit",
+            "value | 4'b0",
+            "o[0]",
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Top (
+                    o: output logic<4>,
+                ) {{
+                    var value: logic<2>;
+                    assign o = {expression};
+                    assign value[0] = {feedback};
+                    assign value[1] = 0;
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+
+    // Why these cases exist: bounded evaluation must preserve correlation
+    // between a read and write selector. For one-bit two-state idx, idx and
+    // ~idx are always distinct, while two identical selectors may alias.
+    for (name, write_index, expected) in [
+        (
+            "complementary selectors cannot address the same bit",
+            "~idx",
+            false,
+        ),
+        (
+            "identical selectors retain a possible same-bit cycle",
+            "idx",
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Top (
+                    idx: input  bit,
+                    o  : output logic,
+                ) {{
+                    var value: logic<2>;
+                    assign o = value[idx];
+                    assign value[{write_index}] = o;
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+}
