@@ -24117,6 +24117,38 @@ fn combinational_loop_nested_repeat_actual_survives_module_boundary() {
 }
 
 #[test]
+fn combinational_loop_periodic_output_maps_concatenated_actual() {
+    // Why this case exists: a child periodic output may legally connect to a
+    // concatenated parent lvalue. Each output fragment must be clipped in the
+    // child's coordinates; requiring one whole destination silently drops the
+    // real a -> child.o[0] -> a feedback path.
+    assert_comb_loop_for_case(
+        "a periodic child output survives a concatenated parent destination",
+        r#"
+        module Fanout (
+            i: input  logic,
+            o: output logic<2>,
+        ) {
+            assign o = {i repeat 2};
+        }
+
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            inst u: Fanout (
+                i: a,
+                o: {b, a},
+            );
+            assign o = b;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn combinational_loop_review_uses_structural_selector_overlap() {
     // Why these cases exist: structural feedback compares each access's
     // independently possible region. Both `idx` and `~idx` can address
