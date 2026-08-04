@@ -10855,7 +10855,6 @@ fn combinational_loop_review_short_circuits_instance_actual_side_effects() {
 }
 
 #[test]
-#[ignore = "captured final-review regression: logical operators evaluate dead RHS effects"]
 fn combinational_loop_review_short_circuits_logical_rhs_side_effects() {
     let case = |name: &str, expression: &str, expected: bool| {
         assert_comb_loop_for_case(

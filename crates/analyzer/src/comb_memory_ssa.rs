@@ -446,9 +446,11 @@ impl Builder {
             Expression::Unary(_, expression, _) => {
                 reads.extend(self.read_expression(block, expression, kind));
             }
-            Expression::Binary(left, _, right, _) => {
+            Expression::Binary(left, op, right, _) => {
                 reads.extend(self.read_expression(block, left, kind));
-                reads.extend(self.read_expression(block, right, kind));
+                if self.binary_rhs_is_reachable(left, *op) {
+                    reads.extend(self.read_expression(block, right, kind));
+                }
             }
             Expression::Ternary(condition, left, right, _) => {
                 reads.extend(self.read_expression(block, condition, EdgeKind::Control));
@@ -1251,9 +1253,11 @@ impl Builder {
             Expression::Unary(_, expression, _) => {
                 self.lower_observer_expression(block, expression);
             }
-            Expression::Binary(left, _, right, _) => {
+            Expression::Binary(left, op, right, _) => {
                 self.lower_observer_expression(block, left);
-                self.lower_observer_expression(block, right);
+                if self.binary_rhs_is_reachable(left, *op) {
+                    self.lower_observer_expression(block, right);
+                }
             }
             Expression::Ternary(condition, left, right, _) => {
                 self.lower_observer_expression(block, condition);
@@ -1300,6 +1304,13 @@ impl Builder {
     fn constant_condition(&mut self, expression: &Expression) -> Option<bool> {
         let value = expression.clone().eval_value(&mut self.context)?;
         (!value.is_xz()).then(|| value.is_positive())
+    }
+
+    fn binary_rhs_is_reachable(&mut self, left: &Expression, op: Op) -> bool {
+        match (op, self.constant_condition(left)) {
+            (Op::LogicAnd, Some(false)) | (Op::LogicOr, Some(true)) => false,
+            _ => true,
+        }
     }
 
     fn write_destination(
