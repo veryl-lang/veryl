@@ -27,7 +27,7 @@ use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
 use veryl_causal::graph::{EdgeKind, IncompleteReason};
-use veryl_causal::procedure::ProcedureSummary;
+use veryl_causal::procedure::{PeriodicAxis, ProcedureSummary};
 use veryl_causal::region::{Region, Span};
 use veryl_parser::resource_table::StrId;
 
@@ -182,22 +182,40 @@ const UNKNOWN_REGION_INDEX: usize = usize::MAX;
 const DENSE_REGION_INDEX: usize = usize::MAX - 1;
 const PERIODIC_REGION_INDEX: usize = usize::MAX - 2;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct PeriodicRegion {
     object: VarId,
     output: Span,
-    repetitions: usize,
-    stride: usize,
+    axes: Vec<PeriodicAxis>,
 }
 
-#[derive(Clone, Copy, Debug)]
+impl PeriodicRegion {
+    fn extent(&self) -> Option<usize> {
+        self.axes
+            .iter()
+            .try_fold(self.output.length, |extent, axis| {
+                if axis.repetitions == 0 || axis.destination_stride < extent {
+                    return None;
+                }
+                axis.destination_stride
+                    .checked_mul(axis.repetitions - 1)
+                    .and_then(|offset| extent.checked_add(offset))
+            })
+    }
+
+    fn end(&self) -> Option<usize> {
+        self.output.start.checked_add(self.extent()?)
+    }
+}
+
+#[derive(Clone, Debug)]
 struct PeriodicTransferRegion {
     input: Region<VarId>,
     output: PeriodicRegion,
     aligned: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum SummaryOutput {
     Region(Region<VarId>),
     Periodic(PeriodicRegion),
@@ -247,7 +265,7 @@ impl BitPartition {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct ModuleCombDependency {
     input: Region<VarId>,
     output: SummaryOutput,
@@ -491,11 +509,10 @@ fn build_bit_partition(
 ) -> BitPartition {
     let mut masks: HashMap<VarId, BTreeMap<usize, Vec<Span>>> = HashMap::default();
 
-    // A shifted copy can propagate every observed endpoint through the copy
-    // relation. Feed those sparse spans into the shared partition so distinct
-    // causal atoms do not collapse into a spurious self-edge.
+    // Exact accesses define the materialized partition. Periodic transfers
+    // remain symbolic and are connected to those atoms by arithmetic overlap
+    // tests, so neither packed width nor repetition count expands this table.
     let dense_regions = collect_region_masks(memory_ssa_regions, module, &mut masks);
-    collect_periodic_masks(periodic_regions, module, &mut masks);
 
     let mut ranges: HashMap<VarId, BTreeMap<usize, Vec<Span>>> = HashMap::default();
     for (object, elements) in masks {
@@ -532,67 +549,6 @@ fn build_bit_partition(
         dense_regions,
         periodic_regions: periodic_regions.to_vec(),
         wildcards,
-    }
-}
-
-fn collect_periodic_masks(
-    periodic_regions: &[PeriodicRegion],
-    module: &Module,
-    masks: &mut HashMap<VarId, BTreeMap<usize, Vec<Span>>>,
-) {
-    for &periodic in periodic_regions {
-        if periodic.repetitions == 0 || periodic.output.length == 0 {
-            continue;
-        }
-        let Some(width) = module
-            .variables
-            .get(&periodic.object)
-            .and_then(Variable::total_width)
-        else {
-            continue;
-        };
-        if width == 0 {
-            continue;
-        }
-        let Some(last_start) = periodic
-            .stride
-            .checked_mul(periodic.repetitions - 1)
-            .and_then(|offset| periodic.output.start.checked_add(offset))
-        else {
-            continue;
-        };
-        let Some(pattern_end) = last_start.checked_add(periodic.output.length) else {
-            continue;
-        };
-        let first_element = periodic.output.start / width;
-        masks
-            .entry(periodic.object)
-            .or_default()
-            .entry(first_element)
-            .or_default();
-        let elements = masks.entry(periodic.object).or_default();
-        let materialized = elements
-            .range(first_element..=((pattern_end - 1) / width))
-            .map(|(&element, _)| element)
-            .collect::<Vec<_>>();
-        for element in materialized {
-            let Some(element_start) = element.checked_mul(width) else {
-                continue;
-            };
-            let query = Span {
-                start: element_start,
-                length: width,
-            };
-            for overlap in periodic_span_intersections(periodic, query) {
-                elements
-                    .get_mut(&element)
-                    .expect("materialized periodic element")
-                    .push(Span {
-                        start: overlap.start - element_start,
-                        length: overlap.length,
-                    });
-            }
-        }
     }
 }
 
@@ -635,62 +591,75 @@ fn propagate_periodic_partition_regions(
                     start,
                     length: overlap.length,
                 },
-                repetitions: transfer.output.repetitions,
-                stride: transfer.output.stride,
+                axes: transfer.output.axes.clone(),
             });
         }
     }
 }
 
-fn periodic_span_intersections(periodic: PeriodicRegion, query: Span) -> Vec<Span> {
+fn periodic_overlaps_span(periodic: &PeriodicRegion, query: Span) -> bool {
     let Some(query_end) = query.end() else {
-        return Vec::new();
+        return false;
     };
-    let Some(phase_end) = periodic.output.end() else {
-        return Vec::new();
-    };
-    if periodic.repetitions == 0 || periodic.stride == 0 {
-        return periodic.output.intersection(query).into_iter().collect();
-    }
-    if periodic.output.length == periodic.stride {
-        let Some(length) = periodic.stride.checked_mul(periodic.repetitions) else {
-            return Vec::new();
+    let mut inner_extents = Vec::with_capacity(periodic.axes.len() + 1);
+    inner_extents.push(periodic.output.length);
+    for axis in &periodic.axes {
+        let inner_extent = inner_extents[inner_extents.len() - 1];
+        if axis.repetitions == 0 || axis.destination_stride < inner_extent {
+            return false;
+        }
+        let Some(extent) = axis
+            .destination_stride
+            .checked_mul(axis.repetitions.saturating_sub(1))
+            .and_then(|offset| inner_extent.checked_add(offset))
+        else {
+            return false;
         };
-        return (Span {
-            start: periodic.output.start,
-            length,
-        })
-        .intersection(query)
-        .into_iter()
-        .collect();
+        inner_extents.push(extent);
     }
-    let first = if query.start < phase_end {
-        0
-    } else {
-        (query.start - phase_end) / periodic.stride + 1
-    };
-    let end = if query_end <= periodic.output.start {
-        0
-    } else {
-        query_end
-            .saturating_sub(periodic.output.start)
-            .saturating_add(periodic.stride - 1)
-            / periodic.stride
-    }
-    .min(periodic.repetitions);
-    (first..end)
-        .filter_map(|copy| {
-            let start = periodic
-                .output
-                .start
-                .checked_add(copy.checked_mul(periodic.stride)?)?;
-            (Span {
-                start,
+    let mut stack = vec![(periodic.output.start, periodic.axes.len())];
+    while let Some((base_start, depth)) = stack.pop() {
+        if depth == 0 {
+            if (Span {
+                start: base_start,
                 length: periodic.output.length,
             })
             .intersection(query)
-        })
-        .collect()
+            .is_some()
+            {
+                return true;
+            }
+            continue;
+        }
+        let axis = periodic.axes[depth - 1];
+        let Some(inner_end) = base_start.checked_add(inner_extents[depth - 1]) else {
+            continue;
+        };
+        let first = if query.start < inner_end {
+            0
+        } else {
+            (query.start - inner_end) / axis.destination_stride + 1
+        };
+        let end = if query_end <= base_start {
+            0
+        } else {
+            query_end
+                .saturating_sub(base_start)
+                .saturating_add(axis.destination_stride - 1)
+                / axis.destination_stride
+        }
+        .min(axis.repetitions);
+        for copy in first..end {
+            let Some(start) = copy
+                .checked_mul(axis.destination_stride)
+                .and_then(|offset| base_start.checked_add(offset))
+            else {
+                continue;
+            };
+            stack.push((start, depth - 1));
+        }
+    }
+    false
 }
 
 fn collect_region_masks(
@@ -896,8 +865,7 @@ fn build_module_graph(
             output: PeriodicRegion {
                 object: dependency.output_object,
                 output: dependency.output,
-                repetitions: dependency.repetitions,
-                stride: dependency.destination_stride,
+                axes: dependency.axes.clone(),
             },
             aligned: dependency.aligned,
         })
@@ -911,7 +879,7 @@ fn build_module_graph(
     periodic_transfers.extend(instance_periodic_transfers);
     let mut periodic_regions = periodic_transfers
         .iter()
-        .map(|transfer| transfer.output)
+        .map(|transfer| transfer.output.clone())
         .collect::<Vec<_>>();
     propagate_periodic_partition_regions(
         &partition_regions,
@@ -1221,8 +1189,7 @@ fn add_periodic_memory_ssa_edges(
         let periodic = PeriodicRegion {
             object: dependency.output_object,
             output: dependency.output,
-            repetitions: dependency.repetitions,
-            stride: dependency.destination_stride,
+            axes: dependency.axes.clone(),
         };
         let pairs = if dependency.aligned {
             aligned_periodic_node_pairs(input, periodic, &module.variables, bit_part)
@@ -1288,8 +1255,7 @@ fn aligned_periodic_node_pairs(
                     start: output_start,
                     length: overlap.length,
                 },
-                repetitions: periodic.repetitions,
-                stride: periodic.stride,
+                axes: periodic.axes.clone(),
             };
             pairs.extend(
                 periodic_region_node_keys(mapped, variables, bit_part)
@@ -1511,14 +1477,7 @@ fn periodic_region_node_keys(
     else {
         return keys;
     };
-    let Some(last_start) = periodic
-        .stride
-        .checked_mul(periodic.repetitions.saturating_sub(1))
-        .and_then(|offset| periodic.output.start.checked_add(offset))
-    else {
-        return keys;
-    };
-    let Some(end) = last_start.checked_add(periodic.output.length) else {
+    let Some(end) = periodic.end() else {
         return keys;
     };
     let Some(elements) = bit_part.ranges.get(&periodic.object) else {
@@ -1537,7 +1496,7 @@ fn periodic_region_node_keys(
                 start,
                 length: range.length,
             };
-            if !periodic_span_intersections(periodic, query).is_empty() {
+            if periodic_overlaps_span(&periodic, query) {
                 keys.push((periodic.object, element, range_index));
             }
         }
@@ -1611,7 +1570,7 @@ fn collect_instance_summary_regions(
             let Some(child_input) = region_object(dependency.input) else {
                 continue;
             };
-            let Some(child_output) = summary_output_object(dependency.output) else {
+            let Some(child_output) = summary_output_object(&dependency.output) else {
                 continue;
             };
             let Some(input) = inst.inputs.iter().find(|input| input.id == child_input) else {
@@ -1628,9 +1587,9 @@ fn collect_instance_summary_regions(
                 ctx,
             );
             regions.extend(parent_inputs.iter().copied());
-            match dependency.output {
+            match &dependency.output {
                 SummaryOutput::Region(region) => regions.extend(map_child_output_region(
-                    region,
+                    *region,
                     child,
                     &output.dst,
                     &module.variables,
@@ -1646,10 +1605,10 @@ fn collect_instance_summary_regions(
                     )
                     .unwrap_or_default();
                     for &input in &parent_inputs {
-                        for &output in &parent_outputs {
+                        for output in &parent_outputs {
                             periodic_transfers.push(PeriodicTransferRegion {
                                 input,
-                                output,
+                                output: output.clone(),
                                 aligned: dependency.aligned,
                             });
                         }
@@ -1712,7 +1671,7 @@ fn add_inst_feedthrough_edges(
         let Some(child_input) = region_object(dependency.input) else {
             continue;
         };
-        let Some(child_output) = summary_output_object(dependency.output) else {
+        let Some(child_output) = summary_output_object(&dependency.output) else {
             continue;
         };
         if !is_pure_input_or_output(child_input, &child.variables, Direction::Input)
@@ -1729,7 +1688,7 @@ fn add_inst_feedthrough_edges(
         if expression_has_hierarchical_reference(&input.expr) {
             incomplete.insert(IncompleteReason::HierarchicalReference);
         }
-        if let SummaryOutput::Periodic(periodic) = dependency.output {
+        if let SummaryOutput::Periodic(periodic) = &dependency.output {
             let parent_inputs =
                 map_child_input_region(dependency.input, child, &input.expr, parent_vars, ctx);
             let Some(parent_outputs) =
@@ -1738,17 +1697,17 @@ fn add_inst_feedthrough_edges(
                 continue;
             };
             for input_region in parent_inputs {
-                for &parent_output in &parent_outputs {
+                for parent_output in &parent_outputs {
                     let pairs = if dependency.aligned {
                         aligned_periodic_node_pairs(
                             input_region,
-                            parent_output,
+                            parent_output.clone(),
                             parent_vars,
                             bit_part,
                         )
                     } else {
                         let destinations =
-                            periodic_region_node_keys(parent_output, parent_vars, bit_part);
+                            periodic_region_node_keys(parent_output.clone(), parent_vars, bit_part);
                         region_node_keys(input_region, parent_vars, bit_part)
                             .into_iter()
                             .flat_map(|source| {
@@ -1942,9 +1901,9 @@ fn region_object(region: Region<VarId>) -> Option<VarId> {
     }
 }
 
-fn summary_output_object(output: SummaryOutput) -> Option<VarId> {
+fn summary_output_object(output: &SummaryOutput) -> Option<VarId> {
     match output {
-        SummaryOutput::Region(region) => region_object(region),
+        SummaryOutput::Region(region) => region_object(*region),
         SummaryOutput::Periodic(periodic) => Some(periodic.object),
     }
 }
@@ -2024,7 +1983,7 @@ fn map_child_output_region(
 }
 
 fn map_child_periodic_output(
-    periodic: PeriodicRegion,
+    periodic: &PeriodicRegion,
     child: &Module,
     destinations: &[AssignDestination],
     variables: &HashMap<VarId, Variable>,
@@ -2060,8 +2019,7 @@ fn map_child_periodic_output(
             start: destination.start.checked_add(periodic.output.start)?,
             length: periodic.output.length,
         },
-        repetitions: periodic.repetitions,
-        stride: periodic.stride,
+        axes: periodic.axes.clone(),
     }])
 }
 
@@ -2903,7 +2861,7 @@ fn node_key_summary_outputs(
         return bit_part
             .periodic_regions
             .get(key.2)
-            .copied()
+            .cloned()
             .map(SummaryOutput::Periodic)
             .into_iter()
             .collect();

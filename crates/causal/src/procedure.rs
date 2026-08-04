@@ -45,13 +45,21 @@ pub struct AlignedDependency {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PeriodicAxis {
+    pub repetitions: usize,
+    pub destination_stride: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PeriodicDependency<O> {
     pub input: Region<O>,
     pub output_object: O,
     /// The first output copy influenced by `input`.
     pub output: Span,
-    pub repetitions: usize,
-    pub destination_stride: usize,
+    /// Cartesian repetition axes, ordered from the innermost to the
+    /// outermost transfer. Representation size depends on nesting depth, not
+    /// on the number of copies along any axis.
+    pub axes: Vec<PeriodicAxis>,
     pub kind: EdgeKind,
     /// Each output copy preserves positions within `input`.
     pub aligned: bool,
@@ -199,7 +207,7 @@ enum Usage {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct DepVersion<O> {
     version: Version<usize, Definition>,
     kind: EdgeKind,
@@ -211,12 +219,77 @@ struct DepVersion<O> {
     marker: std::marker::PhantomData<O>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct PeriodicProjection {
     source: Span,
     output: Span,
-    repetitions: usize,
-    destination_stride: usize,
+    axes: Vec<PeriodicAxis>,
+}
+
+fn normalize_periodic_axes(axes: &mut Vec<PeriodicAxis>) -> Option<()> {
+    if axes.iter().any(|axis| axis.repetitions == 0) {
+        return None;
+    }
+    axes.retain(|axis| axis.repetitions > 1);
+    let mut normalized: Vec<PeriodicAxis> = Vec::with_capacity(axes.len());
+    for axis in axes.drain(..) {
+        if axis.destination_stride == 0 {
+            return None;
+        }
+        if let Some(inner) = normalized.last_mut()
+            && inner
+                .destination_stride
+                .checked_mul(inner.repetitions)
+                == Some(axis.destination_stride)
+        {
+            inner.repetitions = inner.repetitions.checked_mul(axis.repetitions)?;
+            continue;
+        }
+        normalized.push(axis);
+    }
+    *axes = normalized;
+    Some(())
+}
+
+fn periodic_extent(length: usize, axes: &[PeriodicAxis]) -> Option<usize> {
+    axes.iter().try_fold(length, |extent, axis| {
+        if axis.repetitions == 0 || axis.destination_stride < extent {
+            return None;
+        }
+        axis.destination_stride
+            .checked_mul(axis.repetitions - 1)
+            .and_then(|offset| extent.checked_add(offset))
+    })
+}
+
+fn periodic_end(output: Span, axes: &[PeriodicAxis]) -> Option<usize> {
+    output
+        .start
+        .checked_add(periodic_extent(output.length, axes)?)
+}
+
+fn compose_periodic_projections(
+    inner: &PeriodicProjection,
+    outer: &PeriodicProjection,
+) -> Option<PeriodicProjection> {
+    let relative = inner.output.start.checked_sub(outer.source.start)?;
+    if periodic_end(inner.output, &inner.axes)? > outer.source.end()? {
+        return None;
+    }
+    let start = outer.output.start.checked_add(relative)?;
+    let mut axes = Vec::with_capacity(inner.axes.len().checked_add(outer.axes.len())?);
+    axes.extend_from_slice(&inner.axes);
+    axes.extend_from_slice(&outer.axes);
+    normalize_periodic_axes(&mut axes)?;
+    periodic_extent(inner.output.length, &axes)?;
+    Some(PeriodicProjection {
+        source: inner.source,
+        output: Span {
+            start,
+            length: inner.output.length,
+        },
+        axes,
+    })
 }
 
 /// Build a region MemorySSA summary for one procedure.
@@ -575,8 +648,10 @@ where
                                 start: first_start,
                                 length: phase.length,
                             },
-                            repetitions: end - first,
-                            destination_stride: dependency.destination_stride,
+                            axes: vec![PeriodicAxis {
+                                repetitions: end - first,
+                                destination_stride: dependency.destination_stride,
+                            }],
                         };
                         if let Some(&version) = ssa.uses.get(&Usage::Read {
                             read: dependency.read,
@@ -678,7 +753,7 @@ where
                 uncertain_input: path_uncertain_input,
                 active_read,
                 translation: path_translation,
-                periodic_output: path_periodic_output,
+                periodic_output: path_periodic_output.clone(),
                 marker: std::marker::PhantomData,
             }) {
                 continue;
@@ -690,8 +765,7 @@ where
                         input,
                         output_object: atoms[output_atom].object,
                         output: periodic.output,
-                        repetitions: periodic.repetitions,
-                        destination_stride: periodic.destination_stride,
+                        axes: periodic.axes,
                         kind: path_kind,
                         aligned: path_aligned,
                     });
@@ -714,7 +788,7 @@ where
                 Version::Entry(_) | Version::Phi { .. } => None,
             };
             if let Some(inputs) = version_deps.get(&version) {
-                for &(
+                for (
                     input,
                     kind,
                     aligned,
@@ -726,6 +800,14 @@ where
                     periodic_output,
                 ) in inputs
                 {
+                    let input = *input;
+                    let kind = *kind;
+                    let aligned = *aligned;
+                    let uncertain_input = *uncertain_input;
+                    let source_read = *source_read;
+                    let preserve_active_read = *preserve_active_read;
+                    let weak_previous = *weak_previous;
+                    let translation = *translation;
                     if weak_previous {
                         let Some(read) = active_read else {
                             // Retention by itself is not value feedback. It
@@ -741,81 +823,12 @@ where
                     let (next_translation, next_periodic_output) = if let Some(periodic) =
                         periodic_output
                     {
-                        if let Some(outer) = path_periodic_output {
-                            let flattens_with_outer = periodic
-                                .destination_stride
-                                .checked_mul(periodic.repetitions)
-                                == Some(outer.destination_stride);
-                            let Some(relative) =
-                                periodic.output.start.checked_sub(outer.source.start)
+                        if let Some(outer) = &path_periodic_output {
+                            let Some(composed) = compose_periodic_projections(periodic, outer)
                             else {
                                 continue;
                             };
-                            if flattens_with_outer {
-                                let Some(start) = outer.output.start.checked_add(relative) else {
-                                    continue;
-                                };
-                                let Some(repetitions) =
-                                    periodic.repetitions.checked_mul(outer.repetitions)
-                                else {
-                                    continue;
-                                };
-                                (
-                                    None,
-                                    Some(PeriodicProjection {
-                                        source: periodic.source,
-                                        output: Span {
-                                            start,
-                                            length: periodic.output.length,
-                                        },
-                                        repetitions,
-                                        destination_stride: periodic.destination_stride,
-                                    }),
-                                )
-                            } else {
-                                // Keep a genuinely two-dimensional set
-                                // exact by retaining one inner periodic
-                                // segment per outer copy. Regular nested
-                                // repeats tile and take the constant-size
-                                // flattening path above; this fallback has
-                                // no arbitrary expansion guard.
-                                for copy in 0..outer.repetitions {
-                                    let Some(start) = copy
-                                        .checked_mul(outer.destination_stride)
-                                        .and_then(|copy_offset| {
-                                            outer
-                                                .output
-                                                .start
-                                                .checked_add(relative)?
-                                                .checked_add(copy_offset)
-                                        })
-                                    else {
-                                        continue;
-                                    };
-                                    stack.push((
-                                        input,
-                                        combine_edge_kinds(path_kind, kind),
-                                        next_aligned,
-                                        path_uncertain_input || uncertain_input,
-                                        if preserve_active_read {
-                                            active_read
-                                        } else {
-                                            source_read
-                                        },
-                                        None,
-                                        Some(PeriodicProjection {
-                                            source: periodic.source,
-                                            output: Span {
-                                                start,
-                                                length: periodic.output.length,
-                                            },
-                                            repetitions: periodic.repetitions,
-                                            destination_stride: periodic.destination_stride,
-                                        }),
-                                    ));
-                                }
-                                continue;
-                            }
+                            (None, Some(composed))
                         } else if let Some(offset) = path_translation {
                             let shifted = if offset >= 0 {
                                 periodic.output.start.checked_add(offset as usize)
@@ -833,8 +846,7 @@ where
                                         start,
                                         length: periodic.output.length,
                                     },
-                                    repetitions: periodic.repetitions,
-                                    destination_stride: periodic.destination_stride,
+                                    axes: periodic.axes.clone(),
                                 }),
                             )
                         } else {
@@ -842,7 +854,7 @@ where
                             (None, None)
                         }
                     } else if path_periodic_output.is_some() {
-                        (None, path_periodic_output)
+                        (None, path_periodic_output.clone())
                     } else {
                         (
                             path_translation.and_then(|path| {
