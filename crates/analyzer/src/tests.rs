@@ -22694,4 +22694,54 @@ fn combinational_loop_review_maps_instance_actual_function_captures() {
         "#,
         false,
     );
+
+    // Why these cases exist: an unaligned return still has a semantic
+    // function summary. Falling back to every syntactic actual would revive
+    // the unused `b`, while the used `a` remains a real feedthrough.
+    for (name, actual, expected) in [
+        (
+            "an unaligned function return ignores an unused actual",
+            "only_a(0, feedback)",
+            false,
+        ),
+        (
+            "an unaligned function return retains its used actual",
+            "only_a(feedback, 0)",
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Child (
+                    i: input  logic,
+                    o: output logic,
+                ) {{
+                    assign o = i;
+                }}
+
+                module Top (
+                    o: output logic,
+                ) {{
+                    var feedback: logic;
+                    var passed  : logic;
+                    function only_a (
+                        a: input logic,
+                        b: input logic,
+                    ) -> logic {{
+                        return !a;
+                    }}
+                    inst u: Child (
+                        i: {actual},
+                        o: passed,
+                    );
+                    assign feedback = passed;
+                    assign o = passed;
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
 }
