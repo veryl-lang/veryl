@@ -13791,6 +13791,72 @@ fn combinational_loop_runtime_form_iterator_constants_prune_dead_edges() {
 }
 
 #[test]
+fn combinational_loop_runtime_form_iterator_constants_prune_dead_case_arms() {
+    // Why this case exists: case selection uses the same per-iteration SV
+    // value as if selection. A dead i==0 arm in a singleton i==1 loop cannot
+    // contribute a hard dependency merely because break prevented frontend
+    // unrolling.
+    assert_comb_loop_for_case(
+        "a runtime-form singleton prunes dead case arms",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for i in 1..2 {
+                    case i {
+                        0      : a = b;
+                        default: a = 0;
+                    }
+                    break;
+                }
+            }
+            assign b = a;
+            assign o = b;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn combinational_loop_over_limit_const_loop_does_not_prove_dead_edges() {
+    // Why this case exists: the same const iterator semantics apply above the
+    // compiler's expansion limit. If exact bounded lowering is deliberately
+    // skipped, its approximation is incomplete and cannot become a hard loop.
+    let detailed = analyze_comb_detailed(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for i in 1..2000000 {
+                    if i == 0 {
+                        a = b;
+                    } else {
+                        a = 0;
+                    }
+                    break;
+                }
+            }
+            assign b = a;
+            assign o = b;
+        }
+        "#,
+    );
+    assert!(detailed.errors.is_empty(), "{detailed:#?}");
+    assert!(detailed.incomplete.iter().any(|module| {
+        module
+            .reasons
+            .contains(&veryl_causal::graph::IncompleteReason::RuntimeLoop)
+    }));
+}
+
+#[test]
 fn combinational_loop_runtime_form_iterator_constants_preserve_must_write() {
     // Why this case exists: the two const iterations are i=0 and i=1, and the
     // only reachable break follows the i=1 assignment. Every exit is covered;
@@ -14417,9 +14483,11 @@ fn uncovered_branch() {
     "#;
 
     let errors = analyze(code);
-    assert!(errors
-        .iter()
-        .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+    );
 
     let code = r#"
     module ModuleA {
@@ -14440,9 +14508,11 @@ fn uncovered_branch() {
     "#;
 
     let errors = analyze(code);
-    assert!(errors
-        .iter()
-        .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+    );
 
     let code = r#"
     module ModuleA {
@@ -14463,9 +14533,11 @@ fn uncovered_branch() {
     // after existing assignment diagnostics, and their relative order is not
     // part of the analyzer contract.
     let errors = analyze(code);
-    assert!(errors
-        .iter()
-        .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+    );
 
     let code = r#"
     module ModuleA {
