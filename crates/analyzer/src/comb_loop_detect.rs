@@ -1962,7 +1962,7 @@ fn is_pure_input_or_output(id: VarId, vars: &HashMap<VarId, Variable>, want: Dir
 }
 
 fn check_graph(module: &Module, graph: &Graph<NodeKey, bool>, errors: &mut Vec<AnalyzerError>) {
-    let sccs = tarjan_scc(graph);
+    let sccs = strongly_connected_components(graph);
     let mut reported: HashSet<Vec<NodeKey>> = HashSet::default();
     for scc in sccs {
         let is_loop = scc.len() > 1 || (scc.len() == 1 && has_self_edge(graph, scc[0]));
@@ -1978,6 +1978,10 @@ fn check_graph(module: &Module, graph: &Graph<NodeKey, bool>, errors: &mut Vec<A
             errors.push(error);
         }
     }
+}
+
+fn strongly_connected_components(graph: &Graph<NodeKey, bool>) -> Vec<Vec<NodeIndex>> {
+    tarjan_scc(graph)
 }
 
 fn ensure_node(
@@ -2284,6 +2288,26 @@ mod memory_ssa_tests {
         let (order, affected) = order_from_dependencies(&is_module, &deps, &rev_deps);
         assert_eq!(order, vec![1, 3, 0, 2]);
         assert_eq!(affected, set(&[0, 2]));
+    }
+
+    #[test]
+    fn scc_handles_a_deep_valid_chain_without_recursion() {
+        // Why this case exists: a valid 25,600-node acyclic dependency chain
+        // overflowed the process stack in petgraph's recursive Tarjan DFS.
+        // SCC discovery must use heap-backed worklists regardless of graph
+        // depth; every node in this chain is its own component.
+        let count = 25_600usize;
+        let mut graph = Graph::<NodeKey, bool>::new();
+        let nodes = (0..count)
+            .map(|index| graph.add_node((VarId::from_raw(index as u32), 0, 0)))
+            .collect::<Vec<_>>();
+        for pair in nodes.windows(2) {
+            graph.add_edge(pair[0], pair[1], false);
+        }
+
+        let components = strongly_connected_components(&graph);
+        assert_eq!(components.len(), count);
+        assert!(components.iter().all(|component| component.len() == 1));
     }
 
     #[test]
