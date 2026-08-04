@@ -22302,6 +22302,154 @@ fn combinational_loop_review_preserves_expression_coercions() {
 }
 
 #[test]
+fn combinational_loop_review_preserves_assignment_pattern_positions() {
+    // Why these cases exist: IEEE 1800-2023 10.9.2 evaluates each structure
+    // constructor expression in the assignment context of its named member.
+    // A dependency supplying `b` must not be widened to the unrelated `a`.
+    for (name, constructor, expected) in [
+        (
+            "a structure constructor keeps an unrelated member loop-free",
+            "Pair'{a: 0, b: o}",
+            false,
+        ),
+        (
+            "a structure constructor retains corresponding-member feedback",
+            "Pair'{a: o, b: 0}",
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Top (
+                    o: output logic,
+                ) {{
+                    struct Pair {{
+                        a: logic,
+                        b: logic,
+                    }}
+                    var pair: Pair;
+                    assign pair = {constructor};
+                    assign o = pair.a;
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+
+    // Why these cases exist: IEEE 1800-2023 10.9.1 maps array-pattern
+    // expressions element by element. The module reads only element zero, so
+    // an actual dependency in element one is disjoint while element-zero
+    // feedback remains a real loop.
+    for (name, actual, expected) in [
+        (
+            "an array literal keeps an unrelated instance element loop-free",
+            "'{0, feedback}",
+            false,
+        ),
+        (
+            "an array literal retains corresponding-element feedback",
+            "'{feedback, 0}",
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Pick (
+                    i: input  logic [2],
+                    o: output logic,
+                ) {{
+                    assign o = i[0];
+                }}
+
+                module Top (
+                    o: output logic,
+                ) {{
+                    var feedback: logic;
+                    var passed  : logic;
+                    inst u: Pick (
+                        i: {actual},
+                        o: passed,
+                    );
+                    assign feedback = passed;
+                    assign o = passed;
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+
+    // Why these cases exist: `default` and replication copy the same typed
+    // element value into every destination element. They retain bit-to-bit
+    // correspondence within each copy rather than becoming all-to-all.
+    for (name, actual, observed, feedback_bit, expected) in [
+        (
+            "an array default preserves corresponding bits in every element",
+            "'{default: value}",
+            "i[1][0]",
+            1,
+            false,
+        ),
+        (
+            "an array default retains same-bit feedback",
+            "'{default: value}",
+            "i[1][0]",
+            0,
+            true,
+        ),
+        (
+            "an array repeat preserves corresponding bits in every element",
+            "'{value repeat 2}",
+            "i[1][0]",
+            1,
+            false,
+        ),
+        (
+            "an array repeat retains same-bit feedback",
+            "'{value repeat 2}",
+            "i[1][0]",
+            0,
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Pick (
+                    i: input  logic<2> [2],
+                    o: output logic,
+                ) {{
+                    assign o = {observed};
+                }}
+
+                module Top (
+                    o: output logic,
+                ) {{
+                    var value : logic<2>;
+                    var passed: logic;
+                    inst u: Pick (
+                        i: {actual},
+                        o: passed,
+                    );
+                    assign value[{feedback_bit}] = passed;
+                    assign value[{}] = 0;
+                    assign o = passed;
+                }}
+                "#,
+                1 - feedback_bit
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
 #[ignore = "captured third-review follow-up: correlated selectors need guarded regions"]
 fn combinational_loop_review_preserves_selector_correlation() {
     // Why these cases exist: bounded evaluation must preserve correlation
