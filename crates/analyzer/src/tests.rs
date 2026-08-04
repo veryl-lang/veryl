@@ -13604,6 +13604,51 @@ fn combinational_loop_function_output_weak_write_retains_coverage() {
 }
 
 #[test]
+fn combinational_loop_branch_weak_writes_share_one_coverage_diagnostic() {
+    // Why this case exists: distinct weak writes can reach the same retained
+    // object through different branches. Coverage reporting should present one
+    // coherent variable diagnostic containing both assignment sites.
+    let errors = analyze(
+        r#"
+        module Top (
+            condition: input  logic,
+            left     : input  logic<2>,
+            right    : input  logic<2>,
+            o        : output logic,
+        ) {
+            var value: logic<4>;
+            always_comb {
+                if condition {
+                    value[left] = 1;
+                } else {
+                    value[right] = 0;
+                }
+                o = value[0];
+            }
+        }
+        "#,
+    );
+    let coverage = errors
+        .iter()
+        .filter(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+        .collect::<Vec<_>>();
+    assert_eq!(coverage.len(), 1, "{errors:#?}");
+    let AnalyzerError::UncoveredBranch {
+        error_locations, ..
+    } = coverage[0]
+    else {
+        unreachable!()
+    };
+    assert_eq!(error_locations.len(), 2, "{errors:#?}");
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "implicit preservation is not combinational feedback: {errors:#?}"
+    );
+}
+
+#[test]
 fn comb_loop_ifstmt_feed_forward_array() {
     // False positive: an always_comb for-loop over cross-coupled arrays that
     // reads index i and writes i+1 (a feed-forward / acyclic CORDIC-style
