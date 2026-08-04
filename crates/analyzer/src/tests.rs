@@ -10723,6 +10723,284 @@ fn combinational_loop_review_preserves_instance_repeat_positions() {
 }
 
 #[test]
+#[ignore = "captured independent-review regression: generic module summaries ignore specialization"]
+fn combinational_loop_review_distinguishes_generic_module_specializations() {
+    // Why this case exists: ENABLE: 1 elaborates Child into an identity even
+    // though its declaration default is zero. Reusing the default summary for
+    // the specialization hides the real feedback through this instance.
+    assert_comb_loop_for_case(
+        "an enabled generic-module specialization retains its feedthrough",
+        r#"
+        module Child #(
+            param ENABLE: u32 = 0,
+        )(
+            i: input  logic,
+            o: output logic,
+        ) {
+            if ENABLE :g_enabled {
+                assign o = i;
+            } else {
+                assign o = 0;
+            }
+        }
+        module Top (
+            o: output logic,
+        ) {
+            var feedback: logic;
+            var passed: logic;
+            inst u: Child #(
+                ENABLE: 1,
+            )(
+                i: feedback,
+                o: passed,
+            );
+            assign feedback = passed;
+            assign o = feedback;
+        }
+        "#,
+        true,
+    );
+
+    // Why this control exists: ENABLE: 0 elaborates the output to a constant
+    // even though the declaration default is one, so there is no return path.
+    assert_comb_loop_for_case(
+        "a disabled generic-module specialization does not inherit feedthrough",
+        r#"
+        module Child #(
+            param ENABLE: u32 = 1,
+        )(
+            i: input  logic,
+            o: output logic,
+        ) {
+            if ENABLE :g_enabled {
+                assign o = i;
+            } else {
+                assign o = 0;
+            }
+        }
+        module Top (
+            o: output logic,
+        ) {
+            var feedback: logic;
+            var passed: logic;
+            inst u: Child #(
+                ENABLE: 0,
+            )(
+                i: feedback,
+                o: passed,
+            );
+            assign feedback = passed;
+            assign o = feedback;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "captured independent-review regression: constant ternary evaluates dead side effects"]
+fn combinational_loop_review_short_circuits_instance_actual_side_effects() {
+    // Why this case exists: IEEE 1800-2023 11.4.11 evaluates only the selected
+    // ternary branch. touch(o) is in the constant-dead branch, so it cannot
+    // write x or form an o -> x -> o feedback path.
+    assert_comb_loop_for_case(
+        "a constant-dead instance actual branch has no function side effect",
+        r#"
+        module Sink (
+            i: input logic,
+        ) {}
+        module Top (
+            o: output logic,
+        ) {
+            var x: logic;
+            function touch (
+                a: input logic,
+            ) -> logic {
+                x = a;
+                return 0;
+            }
+            inst u: Sink (
+                i: if 1'b1 ? 0 : touch(o),
+            );
+            assign o = x;
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: choosing the touch branch evaluates the call,
+    // so its captured write closes the real o -> x -> o path.
+    assert_comb_loop_for_case(
+        "a constant-taken instance actual branch retains its function side effect",
+        r#"
+        module Sink (
+            i: input logic,
+        ) {}
+        module Top (
+            o: output logic,
+        ) {
+            var x: logic;
+            function touch (
+                a: input logic,
+            ) -> logic {
+                x = a;
+                return 0;
+            }
+            inst u: Sink (
+                i: if 1'b0 ? 0 : touch(o),
+            );
+            assign o = x;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "captured independent-review regression: function actual shift loses bit positions"]
+fn combinational_loop_review_preserves_function_actual_shift_positions() {
+    // Why this case exists: (value << 1)[0] is an inserted zero. Passing the
+    // shifted vector through a function must not broadcast value[1] to o.
+    assert_comb_loop_for_case(
+        "a function actual left shift keeps its inserted bit loop-free",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function low (
+                x: input logic<4>,
+            ) -> logic {
+                return x[0];
+            }
+            var value: logic<4>;
+            assign o = low(value << 1);
+            assign value[0] = 0;
+            assign value[1] = o;
+            assign value[3:2] = 0;
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: shifted bit one is value[0], so returning it to
+    // value[0] is a real corresponding-bit loop.
+    assert_comb_loop_for_case(
+        "a function actual left shift detects its live shifted bit",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function bit_one (
+                x: input logic<4>,
+            ) -> logic {
+                return x[1];
+            }
+            var value: logic<4>;
+            assign o = bit_one(value << 1);
+            assign value[0] = o;
+            assign value[3:1] = 0;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "captured independent-review regression: vector ternary loses bit positions"]
+fn combinational_loop_review_preserves_vector_ternary_positions() {
+    // Why this case exists: both branches preserve vector bit positions, so
+    // o[0] can read only value[0] (or the constant), never value[1].
+    assert_comb_loop_for_case(
+        "a vector ternary keeps a disjoint bit loop-free",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic<2>,
+        ) {
+            var value: logic<2>;
+            assign o = if sel ? value : 0;
+            assign value[0] = 0;
+            assign value[1] = o[0];
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: returning o[0] to value[0] closes the selected
+    // branch's real same-bit path and must remain detected.
+    assert_comb_loop_for_case(
+        "a vector ternary detects its corresponding-bit loop",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic<2>,
+        ) {
+            var value: logic<2>;
+            assign o = if sel ? value : 0;
+            assign value[0] = o[0];
+            assign value[1] = 0;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "captured independent-review regression: function concat output loses destinations"]
+fn combinational_loop_review_preserves_function_concat_output_positions() {
+    // Why this case exists: y = x copied into {o[1], o[0]} still maps x[0]
+    // only to o[0]. Treating the concatenated output actual as all-to-all
+    // invents value[1] -> o[0] feedback.
+    assert_comb_loop_for_case(
+        "a concatenated function output keeps a disjoint bit loop-free",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            function copy (
+                x: input  logic<2>,
+                y: output logic<2>,
+            ) {
+                y = x;
+            }
+            var value: logic<2>;
+            always_comb {
+                copy(value, {o[1], o[0]});
+            }
+            assign value[0] = 0;
+            assign value[1] = o[0];
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: value[0] copied to o[0] and fed back to the
+    // same bit is a real loop through the concatenated output destination.
+    assert_comb_loop_for_case(
+        "a concatenated function output detects its corresponding-bit loop",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            function copy (
+                x: input  logic<2>,
+                y: output logic<2>,
+            ) {
+                y = x;
+            }
+            var value: logic<2>;
+            always_comb {
+                copy(value, {o[1], o[0]});
+            }
+            assign value[0] = o[0];
+            assign value[1] = 0;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn combinational_loop_memory_ssa_celox_regression_corpus() {
     // Ported from celox/tests/basic.rs::test_always_comb_read_before_write_uses_previous_value.
     assert_comb_loop_for_case(
