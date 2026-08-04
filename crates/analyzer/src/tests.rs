@@ -22447,6 +22447,105 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
             expected,
         );
     }
+
+    // Why these cases exist: each brace level corresponds to one unpacked
+    // dimension. Flattening all literal items without preserving that nesting
+    // would swap or merge unrelated inner elements.
+    for (name, actual, expected) in [
+        (
+            "a nested array literal keeps an inner element loop-free",
+            "'{'{0, feedback}, '{0, 0}}",
+            false,
+        ),
+        (
+            "a nested array literal retains inner-element feedback",
+            "'{'{feedback, 0}, '{0, 0}}",
+            true,
+        ),
+    ] {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Pick (
+                    i: input  logic [2, 2],
+                    o: output logic,
+                ) {{
+                    assign o = i[0][0];
+                }}
+
+                module Top (
+                    o: output logic,
+                ) {{
+                    var feedback: logic;
+                    var passed  : logic;
+                    inst u: Pick (
+                        i: {actual},
+                        o: passed,
+                    );
+                    assign feedback = passed;
+                    assign o = passed;
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+
+    // Why this case exists: projecting only the constructor member consumed
+    // as a value must not remove effects of a function called in another
+    // member. The function writes `state`, closing a real loop through `o`.
+    assert_comb_loop_for_case(
+        "a structure constructor retains effects from an unobserved member",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            struct Pair {
+                a: logic,
+                b: logic,
+            }
+            var pair : Pair;
+            var state: logic;
+            function touch (x: input logic) -> logic {
+                state = x;
+                return 0;
+            }
+            assign pair = Pair'{a: 0, b: touch(o)};
+            assign o = state;
+        }
+        "#,
+        true,
+    );
+
+    // Why this case exists: a sparse query through a large replication should
+    // inspect only the selected copy, not materialize every declared element.
+    assert_comb_loop_for_case(
+        "a large array repeat remains sparse and bit-precise",
+        r#"
+        module Pick (
+            i: input  logic<2> [200000],
+            o: output logic,
+        ) {
+            assign o = i[199999][0];
+        }
+
+        module Top (
+            o: output logic,
+        ) {
+            var value : logic<2>;
+            var passed: logic;
+            inst u: Pick (
+                i: '{value repeat 200000},
+                o: passed,
+            );
+            assign value[1] = passed;
+            assign value[0] = 0;
+            assign o = passed;
+        }
+        "#,
+        false,
+    );
 }
 
 #[test]
