@@ -14417,7 +14417,9 @@ fn uncovered_branch() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+    assert!(errors
+        .iter()
+        .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })));
 
     let code = r#"
     module ModuleA {
@@ -14438,7 +14440,9 @@ fn uncovered_branch() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+    assert!(errors
+        .iter()
+        .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })));
 
     let code = r#"
     module ModuleA {
@@ -14455,8 +14459,13 @@ fn uncovered_branch() {
     }
     "#;
 
+    // Why this assertion does not use errors[0]: MemorySSA coverage is emitted
+    // after existing assignment diagnostics, and their relative order is not
+    // part of the analyzer contract.
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+    assert!(errors
+        .iter()
+        .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })));
 
     let code = r#"
     module ModuleA {
