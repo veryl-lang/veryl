@@ -10355,7 +10355,6 @@ fn combinational_loop_review_preserves_module_summary_positions() {
 }
 
 #[test]
-#[ignore = "known bug: a dynamic instance output drops its address dependency"]
 fn combinational_loop_review_keeps_instance_output_address_dependency() {
     // Why this case exists: idx selects the instance output destination and
     // is itself read from one candidate destination. This is the same address

@@ -462,6 +462,14 @@ fn build_module_graph(
                 {
                     incomplete.insert(IncompleteReason::InoutPort);
                 }
+                add_inst_output_address_edges(
+                    inst,
+                    &bit_part,
+                    &mut graph,
+                    &mut node_map,
+                    &module.variables,
+                    &mut ctx,
+                );
                 let Some(summary) = summaries.get(&child.name) else {
                     continue;
                 };
@@ -807,6 +815,18 @@ fn collect_instance_summary_regions(
         let Component::Module(child) = inst.component.as_ref() else {
             continue;
         };
+        for output in &inst.outputs {
+            regions.extend(collect_destination_regions(
+                &output.dst,
+                &module.variables,
+                ctx,
+            ));
+            regions.extend(collect_destination_address_regions(
+                &output.dst,
+                &module.variables,
+                ctx,
+            ));
+        }
         let Some(summary) = summaries.get(&child.name) else {
             continue;
         };
@@ -840,6 +860,41 @@ fn collect_instance_summary_regions(
         }
     }
     regions
+}
+
+fn add_inst_output_address_edges(
+    inst: &InstDeclaration,
+    bit_part: &BitPartition,
+    graph: &mut Graph<NodeKey, ()>,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+    parent_vars: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) {
+    for output in &inst.outputs {
+        for destination in &output.dst {
+            let destination_region = variable_access_region(
+                destination.id,
+                &destination.index,
+                &destination.select,
+                parent_vars,
+                ctx,
+            );
+            let address_regions = collect_destination_address_regions(
+                std::slice::from_ref(destination),
+                parent_vars,
+                ctx,
+            );
+            for address_region in address_regions {
+                for source in region_node_keys(address_region, parent_vars, bit_part) {
+                    for destination in region_node_keys(destination_region, parent_vars, bit_part) {
+                        let source = ensure_node(graph, node_map, source);
+                        let destination = ensure_node(graph, node_map, destination);
+                        graph.add_edge(source, destination, ());
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1294,6 +1349,30 @@ fn collect_destination_regions(
             )
         })
         .collect::<Vec<_>>();
+    regions.sort_unstable();
+    regions.dedup();
+    regions
+}
+
+fn collect_destination_address_regions(
+    destinations: &[AssignDestination],
+    variables: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Vec<Region<VarId>> {
+    let mut regions = Vec::new();
+    for destination in destinations {
+        for expression in destination
+            .index
+            .0
+            .iter()
+            .chain(destination.select.0.iter())
+        {
+            regions.extend(collect_expression_regions(expression, variables, ctx));
+        }
+        if let Some((_, expression)) = &destination.select.1 {
+            regions.extend(collect_expression_regions(expression, variables, ctx));
+        }
+    }
     regions.sort_unstable();
     regions.dedup();
     regions
