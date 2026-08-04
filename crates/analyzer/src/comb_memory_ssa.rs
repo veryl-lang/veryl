@@ -79,6 +79,23 @@ pub(crate) fn map_expression_span_positioned(
         .map_expression_span_positioned_to_actual(expression, requested)
 }
 
+/// Map an expression after applying the assignment context supplied by a
+/// formal port or argument. Array literals are context-determined, so their
+/// own IR node does not necessarily retain the aggregate shape needed to map
+/// a child summary back into the actual expression.
+pub(crate) fn map_expression_span_positioned_as(
+    context: &Context,
+    expression: &Expression,
+    expected: &crate::ir::Type,
+    requested: Span,
+) -> Option<Vec<PositionedRegion>> {
+    let mut expression = expression.clone();
+    if matches!(expression, Expression::ArrayLiteral(_, _)) {
+        expression.comptime_mut().r#type = expected.clone();
+    }
+    map_expression_span_positioned(context, &expression, requested)
+}
+
 fn exact_regions_have_equal_length(left: Region<VarId>, right: Region<VarId>) -> bool {
     matches!(
         (left, right),
@@ -1114,6 +1131,120 @@ impl Builder {
                 }
                 Some(mapped)
             }
+            Expression::StructConstructor(r#type, fields, _) => {
+                let TypeKind::Struct(structure) = &r#type.kind else {
+                    return None;
+                };
+                if structure.members.len() != fields.len() {
+                    return None;
+                }
+
+                // A packed structure is laid out like a concatenation in
+                // declaration order: the first member occupies the most
+                // significant bits. The IR constructor has already expanded
+                // `default` and normalized named fields into that order.
+                let mut high = r#type.total_width()?;
+                let mut mapped = Vec::new();
+                for (member, (name, value)) in structure.members.iter().zip(fields) {
+                    if member.name != *name {
+                        return None;
+                    }
+                    let member_width = member.r#type.total_width()?;
+                    high = high.checked_sub(member_width)?;
+                    let member_span = Span {
+                        start: high,
+                        length: member_width,
+                    };
+                    let Some(overlap) = requested.intersection(member_span) else {
+                        continue;
+                    };
+                    let local = Span {
+                        start: overlap.start.checked_sub(member_span.start)?,
+                        length: overlap.length,
+                    };
+                    for positioned in self.map_expression_span_positioned_with_signed(
+                        value,
+                        local,
+                        member.r#type.signed,
+                    )? {
+                        mapped.push(PositionedRegion {
+                            region: positioned.region,
+                            expression: Span {
+                                start: positioned
+                                    .expression
+                                    .start
+                                    .checked_add(member_span.start)?,
+                                length: positioned.expression.length,
+                            },
+                            aligned: positioned.aligned,
+                            kind: positioned.kind,
+                        });
+                    }
+                }
+                (high == 0).then_some(mapped)
+            }
+            Expression::ArrayLiteral(items, _) => {
+                let dimensions = expression_type.array.as_slice();
+                let element_count = dimensions.first().copied().flatten()?;
+                let inner_count = dimensions[1..]
+                    .iter()
+                    .try_fold(1usize, |count, dimension| count.checked_mul((*dimension)?))?;
+                let element_length = packed_width.checked_mul(inner_count)?;
+                let mut element_type = expression_type.clone();
+                element_type.array = crate::ir::Shape::from(&dimensions[1..]);
+                element_type.set_array_expr(Vec::new());
+                let mut next_element = 0usize;
+                let mut default = None;
+                let mut mapped = Vec::new();
+
+                for item in items {
+                    let (value, copies) = match item {
+                        ArrayLiteralItem::Value(value, repeat) => {
+                            let copies = if let Some(repeat) = repeat {
+                                repeat.clone().eval_value(&mut self.context)?.to_usize()?
+                            } else {
+                                1
+                            };
+                            (value.as_ref(), copies)
+                        }
+                        ArrayLiteralItem::Defaul(value) => {
+                            if default.replace(value.as_ref()).is_some() {
+                                return None;
+                            }
+                            continue;
+                        }
+                    };
+                    let end_element = next_element.checked_add(copies)?;
+                    if end_element > element_count {
+                        return None;
+                    }
+                    self.map_repeated_array_item(
+                        value,
+                        next_element,
+                        end_element,
+                        element_length,
+                        requested,
+                        &element_type,
+                        &mut mapped,
+                    )?;
+                    next_element = end_element;
+                }
+
+                if next_element < element_count {
+                    let default = default?;
+                    self.map_repeated_array_item(
+                        default,
+                        next_element,
+                        element_count,
+                        element_length,
+                        requested,
+                        &element_type,
+                        &mut mapped,
+                    )?;
+                    next_element = element_count;
+                }
+                (next_element == element_count).then_some(mapped)
+            }
             Expression::Unary(Op::BitNot | Op::Add, operand, _) => {
                 self.map_expression_span_positioned_to_actual(operand, requested)
             }
@@ -1271,6 +1402,71 @@ impl Builder {
             }
             _ => None,
         }
+    }
+
+    /// Project only the repeated array copies intersected by `requested`.
+    /// This keeps a sparse element query independent of the declared array
+    /// length while preserving bit positions inside every repeated copy.
+    #[allow(clippy::too_many_arguments)]
+    fn map_repeated_array_item(
+        &mut self,
+        value: &Expression,
+        first_element: usize,
+        end_element: usize,
+        element_length: usize,
+        requested: Span,
+        element_type: &crate::ir::Type,
+        mapped: &mut Vec<PositionedRegion>,
+    ) -> Option<()> {
+        if first_element == end_element || element_length == 0 {
+            return Some(());
+        }
+        let covered = Span {
+            start: first_element.checked_mul(element_length)?,
+            length: end_element
+                .checked_sub(first_element)?
+                .checked_mul(element_length)?,
+        };
+        let Some(overlap) = requested.intersection(covered) else {
+            return Some(());
+        };
+        let mut contextual_value = None;
+        if matches!(value, Expression::ArrayLiteral(_, _)) {
+            let mut value = value.clone();
+            value.comptime_mut().r#type = element_type.clone();
+            contextual_value = Some(value);
+        }
+        let value = contextual_value.as_ref().unwrap_or(value);
+        let first_copy = overlap.start / element_length;
+        let last_copy = overlap.end()?.checked_sub(1)?.checked_div(element_length)?;
+        for copy in first_copy..=last_copy {
+            let copy_start = copy.checked_mul(element_length)?;
+            let copy_span = Span {
+                start: copy_start,
+                length: element_length,
+            };
+            let Some(copy_overlap) = requested.intersection(copy_span) else {
+                continue;
+            };
+            let local = Span {
+                start: copy_overlap.start.checked_sub(copy_start)?,
+                length: copy_overlap.length,
+            };
+            for positioned in
+                self.map_expression_span_positioned_with_signed(value, local, element_type.signed)?
+            {
+                mapped.push(PositionedRegion {
+                    region: positioned.region,
+                    expression: Span {
+                        start: positioned.expression.start.checked_add(copy_start)?,
+                        length: positioned.expression.length,
+                    },
+                    aligned: positioned.aligned,
+                    kind: positioned.kind,
+                });
+            }
+        }
+        Some(())
     }
 
     fn map_function_return_spans_to_actual(

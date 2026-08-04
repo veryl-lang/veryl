@@ -1249,9 +1249,14 @@ fn add_inst_feedthrough_edges(
                 },
             ) = (dependency.input, dependency.output)
             && child_input_span.length == child_output_span.length
-            && let Some(parent_inputs) = crate::comb_memory_ssa::map_expression_span_positioned(
+            && let Some(input_type) = child
+                .variables
+                .get(&child_input)
+                .map(|variable| &variable.r#type)
+            && let Some(parent_inputs) = crate::comb_memory_ssa::map_expression_span_positioned_as(
                 ctx,
                 &input.expr,
+                input_type,
                 child_input_span,
             )
             && let Some(parent_outputs) =
@@ -1441,7 +1446,23 @@ fn map_child_input_region(
     let Some((span, uncertain)) = child_region_span(region, child) else {
         return Vec::new();
     };
-    let mapped = map_expression_span_to_regions(actual, span, parent_vars, ctx)
+    let mapped = region_object(region)
+        .and_then(|object| child.variables.get(&object))
+        .and_then(|variable| {
+            crate::comb_memory_ssa::map_expression_span_positioned_as(
+                ctx,
+                actual,
+                &variable.r#type,
+                span,
+            )
+        })
+        .map(|positioned| {
+            positioned
+                .into_iter()
+                .map(|positioned| positioned.region)
+                .collect()
+        })
+        .or_else(|| map_expression_span_to_regions(actual, span, parent_vars, ctx))
         .unwrap_or_else(|| collect_expression_regions(actual, parent_vars, ctx));
     retain_uncertainty(mapped, uncertain)
 }
@@ -1542,7 +1563,11 @@ fn map_expression_span_to_regions(
     variables: &HashMap<VarId, Variable>,
     ctx: &mut Context,
 ) -> Option<Vec<Region<VarId>>> {
-    if requested.end()? > expression.comptime().r#type.total_width()? {
+    let expression_type = &expression.comptime().r#type;
+    let expression_length = expression_type
+        .total_width()?
+        .checked_mul(expression_type.total_array().unwrap_or(1))?;
+    if requested.end()? > expression_length {
         return None;
     }
     if let Some(mapped) = crate::comb_memory_ssa::map_expression_span(ctx, expression, requested) {
