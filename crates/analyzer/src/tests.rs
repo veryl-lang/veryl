@@ -10526,6 +10526,38 @@ fn combinational_loop_review_keeps_instance_actual_function_side_effect() {
 }
 
 #[test]
+fn combinational_loop_review_keeps_instance_selector_function_side_effect() {
+    // Why this case exists: an otherwise plain instance actual still evaluates
+    // the expressions in its selectors. Skipping the observer for mem[touch(o)]
+    // would lose touch's module-scope write and hide the x -> o -> x cycle.
+    assert_comb_loop_for_case(
+        "an instance input selector retains a called function global write",
+        r#"
+        module Sink (
+            i: input logic,
+        ) {}
+        module Top (
+            mem: input  logic<2>,
+            o  : output logic,
+        ) {
+            var x: logic;
+            function touch (
+                a: input logic,
+            ) -> logic {
+                x = a;
+                return 0;
+            }
+            inst u: Sink (
+                i: mem[touch(o)],
+            );
+            assign o = x;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn combinational_loop_review_preserves_vector_function_output_bits() {
     // Why this case exists: output argument y is a vector identity of x.
     // Broadcasting all x bits to all y bits invents value[1] -> o[0] feedback.
@@ -13694,6 +13726,35 @@ fn combinational_loop_runtime_form_cardinality_variants() {
 }
 
 #[test]
+fn combinational_loop_singleton_break_is_not_runtime_incomplete() {
+    // Why this case exists: break makes this const singleton use the compact
+    // runtime-form CFG, but there is no loop backedge and therefore no
+    // RuntimeLoop uncertainty to expose through check_detailed.
+    let detailed = analyze_comb_detailed(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var value: logic;
+            always_comb {
+                for _index in 0..1 {
+                    value = 1;
+                    break;
+                }
+                o = value;
+            }
+        }
+        "#,
+    );
+    assert!(detailed.errors.is_empty(), "{detailed:#?}");
+    assert!(detailed.incomplete.iter().all(|module| {
+        !module
+            .reasons
+            .contains(&veryl_causal::graph::IncompleteReason::RuntimeLoop)
+    }));
+}
+
+#[test]
 fn combinational_loop_finite_runtime_form_recurrence_is_not_feedback() {
     // Why this case exists: a conditional break keeps a finite const loop in
     // runtime-form IR. Its loop-carried value is a bounded combinational chain
@@ -13887,10 +13948,10 @@ fn combinational_loop_function_summary_fanout_is_memoized() {
 }
 
 #[test]
-fn combinational_loop_malformed_effect_keeps_proven_edges_in_same_procedure() {
-    // Why this case exists: one statement rejected during IR conversion makes
-    // the procedure incomplete, but must not discard an independent exact
-    // cycle lowered from the remaining statements in that same always_comb.
+fn combinational_loop_malformed_effect_is_a_causal_barrier() {
+    // Why this case exists: a rejected statement may have unknown side
+    // effects, so a cycle which crosses it is not proven. The malformed
+    // procedure must not suppress a separate exact cycle in another procedure.
     let errors = analyze(
         r#"
         module Top (
@@ -13898,20 +13959,31 @@ fn combinational_loop_malformed_effect_keeps_proven_edges_in_same_procedure() {
         ) {
             var a: logic;
             var b: logic;
+            var c: logic;
+            var d: logic;
             always_comb {
-                missing_function();
                 a = b;
+                missing_function();
                 b = a;
-                o = b;
+            }
+            always_comb {
+                c = d;
+                d = c;
+                o = d;
             }
         }
         "#,
     );
+    let loops = errors
+        .iter()
+        .filter_map(|error| match error {
+            AnalyzerError::CombinationalLoop { identifier, .. } => Some(identifier.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     assert!(
-        errors
-            .iter()
-            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
-        "malformed uncertainty must not erase an independently proven loop: {errors:#?}"
+        loops.len() == 1 && matches!(loops[0], "c" | "d"),
+        "only the cycle independent of the malformed barrier is proven: {errors:#?}"
     );
 }
 
@@ -13958,6 +14030,87 @@ fn combinational_loop_branch_weak_writes_share_one_coverage_diagnostic() {
             .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
         "implicit preservation is not combinational feedback: {errors:#?}"
     );
+}
+
+#[test]
+fn combinational_loop_runtime_coverage_sites_stay_region_local() {
+    // Why this case exists: value[1] is fully defined even though it is also
+    // written in a runtime loop. Its loop assignment must not be reported as a
+    // covered site for the independently retained value[0].
+    let code = r#"
+        module Top (
+            n        : input  logic<32>,
+            condition: input  logic,
+            o        : output logic<2>,
+        ) {
+            var value: logic<2>;
+            always_comb {
+                value[1] = 0;
+                for _index in 0..n {
+                    value[1] = 1;
+                }
+                if condition {
+                    value[0] = 1;
+                }
+                o = value;
+            }
+        }
+    "#;
+    let errors = analyze(code);
+    let coverage = errors
+        .iter()
+        .filter_map(|error| match error {
+            AnalyzerError::UncoveredBranch {
+                error_locations, ..
+            } => Some(error_locations),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(coverage.len(), 1, "{errors:#?}");
+    assert_eq!(coverage[0].len(), 1, "{errors:#?}");
+}
+
+#[test]
+fn combinational_loop_captured_coverage_sites_stay_region_local() {
+    // Why this case exists: function summary coverage is mapped back into the
+    // caller one captured region at a time. A caller default for value[1] must
+    // prevent that bit's function assignment from appearing in value[0]'s
+    // remaining coverage diagnostic.
+    let code = r#"
+        module Top (
+            n: input  logic<32>,
+            o: output logic,
+        ) {
+            var value: logic<2>;
+            function write_bits (
+                n: input logic<32>,
+            ) {
+                for _index in 0..n {
+                    value[0] = 1;
+                }
+                for _index in 0..n {
+                    value[1] = 1;
+                }
+            }
+            always_comb {
+                value[1] = 0;
+                write_bits(n);
+                o = value[0];
+            }
+        }
+    "#;
+    let errors = analyze(code);
+    let coverage = errors
+        .iter()
+        .filter_map(|error| match error {
+            AnalyzerError::UncoveredBranch {
+                error_locations, ..
+            } => Some(error_locations),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(coverage.len(), 1, "{errors:#?}");
+    assert_eq!(coverage[0].len(), 1, "{errors:#?}");
 }
 
 #[test]
