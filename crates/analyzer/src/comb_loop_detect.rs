@@ -1880,6 +1880,7 @@ fn add_inst_feedthrough_edges(
             let Some(parent_outputs) =
                 map_child_periodic_output(periodic, child, &output.dst, parent_vars, ctx)
             else {
+                incomplete.insert(IncompleteReason::DynamicRegion);
                 continue;
             };
             for input_region in parent_inputs {
@@ -2222,32 +2223,45 @@ fn map_child_periodic_output(
         .checked_mul(variable.r#type.total_array().unwrap_or(1))?;
     let mapped =
         map_destinations_span_positioned(destinations, Span { start: 0, length }, variables, ctx)?;
-    if mapped.len() != 1 {
-        return None;
-    }
-    let positioned = &mapped[0];
-    let Region::Exact {
-        object,
-        span: destination,
-    } = positioned.region
-    else {
-        return None;
-    };
-    if !positioned.aligned
-        || positioned.expression.start != 0
-        || positioned.expression.length != length
-        || destination.length != length
-    {
-        return None;
-    }
-    Some(vec![PeriodicRegion {
-        object,
-        output: Span {
-            start: destination.start.checked_add(periodic.output.start)?,
+    let transfer = AlignedDependency {
+        read: 0,
+        kind: EdgeKind::Value,
+        source: Span {
+            start: 0,
             length: periodic.output.length,
         },
+        destination: periodic.output,
         axes: periodic.axes.clone(),
-    }])
+    };
+    let mut outputs = Vec::new();
+    for positioned in mapped {
+        let Region::Exact {
+            object,
+            span: destination,
+        } = positioned.region
+        else {
+            return None;
+        };
+        if !positioned.aligned
+            || !positioned.axes.is_empty()
+            || destination.length != positioned.expression.length
+        {
+            return None;
+        }
+        for clipped in
+            crate::comb_memory_ssa::clip_aligned_dependency(&transfer, positioned.expression)?
+        {
+            outputs.push(PeriodicRegion {
+                object,
+                output: Span {
+                    start: destination.start.checked_add(clipped.destination.start)?,
+                    length: clipped.destination.length,
+                },
+                axes: clipped.axes,
+            });
+        }
+    }
+    Some(outputs)
 }
 
 fn expression_has_hierarchical_reference(expression: &Expression) -> bool {
