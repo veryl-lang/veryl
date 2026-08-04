@@ -49,6 +49,9 @@ const UNKNOWN_REGION_INDEX: usize = usize::MAX;
 #[derive(Default)]
 struct BitPartition {
     ranges: HashMap<IdxKey, Vec<BigUint>>,
+    /// Stable identities for unresolved regions. They are graph nodes, not
+    /// array elements, so their count depends on accesses rather than width.
+    wildcards: Vec<Region<VarId>>,
 }
 
 impl BitPartition {
@@ -57,14 +60,16 @@ impl BitPartition {
         self.ranges.get(&key).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    fn overlapping(&self, key: IdxKey, mask: &BigUint) -> Vec<usize> {
-        let zero = BigUint::default();
-        self.ranges_of(key)
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| (*m & mask) != zero)
-            .map(|(i, _)| i)
-            .collect()
+    fn wildcard_key(&self, region: Region<VarId>) -> Option<NodeKey> {
+        self.wildcards
+            .binary_search(&region)
+            .ok()
+            .and_then(|index| match region {
+                Region::UnknownRegion { object, .. } | Region::UnknownObject(object) => {
+                    Some((object, UNKNOWN_REGION_INDEX, index))
+                }
+                Region::Exact { .. } | Region::UnknownAll => None,
+            })
     }
 }
 
@@ -291,7 +296,20 @@ fn build_bit_partition(module: &Module, memory_ssa_regions: &[Region<VarId>]) ->
         }
     }
 
-    BitPartition { ranges }
+    let wildcards = memory_ssa_regions
+        .iter()
+        .copied()
+        .filter(|region| {
+            matches!(
+                region,
+                Region::UnknownRegion { .. } | Region::UnknownObject(_)
+            )
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    BitPartition { ranges, wildcards }
 }
 
 fn collect_region_mask(
@@ -356,7 +374,7 @@ fn build_module_graph(
         .flat_map(|summary| {
             summary.dependencies.iter().flat_map(|dependency| {
                 [
-                    dependency.input,
+                    sparse_input_region(summary, dependency.input, dependency.output),
                     sparse_output_region(summary, dependency.output),
                 ]
             })
@@ -536,11 +554,12 @@ fn add_memory_ssa_edges(
         if dependency.kind == EdgeKind::Unknown {
             continue;
         }
+        let input = sparse_input_region(summary, dependency.input, dependency.output);
         let output = sparse_output_region(summary, dependency.output);
         let pairs = if dependency.aligned {
-            aligned_region_node_pairs(dependency.input, output, &module.variables, bit_part)
+            aligned_region_node_pairs(input, output, &module.variables, bit_part)
         } else {
-            let sources = region_node_keys(dependency.input, &module.variables, bit_part);
+            let sources = region_node_keys(input, &module.variables, bit_part);
             let destinations = region_node_keys(output, &module.variables, bit_part);
             sources
                 .into_iter()
@@ -644,17 +663,94 @@ fn aligned_region_node_pairs(
     pairs.into_iter().collect()
 }
 
-/// Memory SSA expands an unknown-object write over its sparse atom endpoints
-/// so kill/phi semantics stay exact. Do not turn the resulting large exact
-/// output spans back into per-element graph nodes: the object-local alias node
-/// carries the same uncertainty and aliases only regions touched elsewhere.
-fn sparse_output_region(summary: &ProcedureSummary<VarId>, output: Region<VarId>) -> Region<VarId> {
-    match output {
-        Region::Exact { object, .. } if summary.uncertain_write_objects.contains(&object) => {
-            Region::UnknownObject(object)
-        }
-        output => output,
+fn sparse_input_region(
+    summary: &ProcedureSummary<VarId>,
+    input: Region<VarId>,
+    output: Region<VarId>,
+) -> Region<VarId> {
+    if summary
+        .uncertain_input_dependencies
+        .contains(&(input, output))
+    {
+        restore_uncertain_region(&summary.uncertain_read_regions, input)
+    } else {
+        input
     }
+}
+
+/// Memory SSA expands an unresolved write over its sparse atom endpoints
+/// so kill/phi semantics stay exact. Do not turn the resulting large exact
+/// spans back into per-element graph nodes. Restore the narrowest original
+/// uncertain region, retaining any statically known prefix.
+fn sparse_output_region(summary: &ProcedureSummary<VarId>, output: Region<VarId>) -> Region<VarId> {
+    restore_uncertain_region(&summary.uncertain_write_regions, output)
+}
+
+fn restore_uncertain_region(
+    uncertain: &BTreeSet<Region<VarId>>,
+    exact: Region<VarId>,
+) -> Region<VarId> {
+    let Region::Exact { object, span } = exact else {
+        return exact;
+    };
+    uncertain
+        .iter()
+        .copied()
+        .filter(|region| match region {
+            Region::UnknownRegion {
+                object: candidate,
+                span: candidate_span,
+            } => *candidate == object && candidate_span.intersection(span) == Some(span),
+            Region::UnknownObject(candidate) => *candidate == object,
+            Region::Exact { .. } | Region::UnknownAll => false,
+        })
+        .min_by_key(|region| match region {
+            Region::UnknownRegion { span, .. } => span.length,
+            Region::UnknownObject(_) => usize::MAX,
+            Region::Exact { .. } | Region::UnknownAll => 0,
+        })
+        .unwrap_or(exact)
+}
+
+fn sparse_exact_node_keys(
+    object: VarId,
+    span: Span,
+    variables: &HashMap<VarId, Variable>,
+    bit_part: &BitPartition,
+) -> Vec<NodeKey> {
+    let Some(width) = variables.get(&object).and_then(Variable::total_width) else {
+        return Vec::new();
+    };
+    if span.end().is_none() {
+        return Vec::new();
+    }
+    let mut keys = Vec::new();
+    for (&(candidate, element), ranges) in &bit_part.ranges {
+        if candidate != object {
+            continue;
+        }
+        let Some(element_start) = element.checked_mul(width) else {
+            continue;
+        };
+        let Some(overlap) = (Span {
+            start: element_start,
+            length: width,
+        })
+        .intersection(span) else {
+            continue;
+        };
+        let local_start = overlap.start - element_start;
+        let local_end = local_start + overlap.length;
+        let mask = ValueBigUint::gen_mask_range(local_end - 1, local_start);
+        keys.extend(
+            ranges
+                .iter()
+                .enumerate()
+                .filter(|(_, range)| (*range & &mask) != BigUint::default())
+                .map(|(range, _)| (object, element, range)),
+        );
+    }
+    keys
 }
 
 /// Convert the MemorySSA engine's flattened, half-open bit region back to the
@@ -665,50 +761,28 @@ fn region_node_keys(
     variables: &HashMap<VarId, Variable>,
     bit_part: &BitPartition,
 ) -> Vec<NodeKey> {
-    let (object, span) = match region {
-        Region::Exact { object, span } => (object, span),
-        Region::UnknownObject(object) => {
-            // Alias every region of this object which is otherwise observable
-            // in the sparse partition. This is proportional to touched
-            // regions, not to the declared array size.
-            let mut keys = bit_part
-                .ranges
-                .keys()
-                .filter(|(candidate, _)| *candidate == object)
-                .flat_map(|&(candidate, element)| {
-                    (0..bit_part.ranges_of((candidate, element)).len())
-                        .map(move |range| (candidate, element, range))
-                })
-                .collect::<Vec<_>>();
-            keys.push((object, UNKNOWN_REGION_INDEX, UNKNOWN_REGION_INDEX));
-            keys.sort_unstable();
-            keys.dedup();
-            return keys;
+    let mut keys = match region {
+        Region::Exact { object, span } => {
+            return sparse_exact_node_keys(object, span, variables, bit_part);
         }
+        Region::UnknownRegion { object, span } => {
+            sparse_exact_node_keys(object, span, variables, bit_part)
+        }
+        Region::UnknownObject(object) => bit_part
+            .ranges
+            .iter()
+            .filter(|((candidate, _), _)| *candidate == object)
+            .flat_map(|(&(candidate, element), ranges)| {
+                (0..ranges.len()).map(move |range| (candidate, element, range))
+            })
+            .collect(),
         Region::UnknownAll => return Vec::new(),
     };
-    let Some(width) = variables.get(&object).and_then(Variable::total_width) else {
-        return Vec::new();
-    };
-    let Some(end) = span.end() else {
-        return Vec::new();
-    };
-    let mut keys = Vec::new();
-    let mut cursor = span.start;
-    while cursor < end {
-        let element = cursor / width;
-        let bit_start = cursor % width;
-        let element_end = end.min((element + 1).saturating_mul(width));
-        let bit_end = element_end - element * width;
-        let mask = ValueBigUint::gen_mask_range(bit_end - 1, bit_start);
-        keys.extend(
-            bit_part
-                .overlapping((object, element), &mask)
-                .into_iter()
-                .map(|range| (object, element, range)),
-        );
-        cursor = element_end;
+    if let Some(wildcard) = bit_part.wildcard_key(region) {
+        keys.push(wildcard);
     }
+    keys.sort_unstable();
+    keys.dedup();
     keys
 }
 
@@ -726,18 +800,10 @@ fn collect_instance_summary_regions(
             continue;
         };
         for dependency in &summary.dependencies {
-            let Region::Exact {
-                object: child_input,
-                span: input_span,
-            } = dependency.input
-            else {
+            let Some(child_input) = region_object(dependency.input) else {
                 continue;
             };
-            let Region::Exact {
-                object: child_output,
-                span: output_span,
-            } = dependency.output
-            else {
+            let Some(child_output) = region_object(dependency.output) else {
                 continue;
             };
             let Some(input) = inst.inputs.iter().find(|input| input.id == child_input) else {
@@ -746,18 +812,20 @@ fn collect_instance_summary_regions(
             let Some(output) = inst.outputs.iter().find(|output| output.id == child_output) else {
                 continue;
             };
-            regions.extend(
-                map_expression_span_to_regions(&input.expr, input_span, &module.variables, ctx)
-                    .unwrap_or_else(|| {
-                        collect_expression_regions(&input.expr, &module.variables, ctx)
-                    }),
-            );
-            regions.extend(
-                map_destinations_span_to_regions(&output.dst, output_span, &module.variables, ctx)
-                    .unwrap_or_else(|| {
-                        collect_destination_regions(&output.dst, &module.variables, ctx)
-                    }),
-            );
+            regions.extend(map_child_input_region(
+                dependency.input,
+                child,
+                &input.expr,
+                &module.variables,
+                ctx,
+            ));
+            regions.extend(map_child_output_region(
+                dependency.output,
+                child,
+                &output.dst,
+                &module.variables,
+                ctx,
+            ));
         }
     }
     regions
@@ -776,18 +844,10 @@ fn add_inst_feedthrough_edges(
     ctx: &mut Context,
 ) {
     for dependency in &summary.dependencies {
-        let Region::Exact {
-            object: child_input,
-            span: input_span,
-        } = dependency.input
-        else {
+        let Some(child_input) = region_object(dependency.input) else {
             continue;
         };
-        let Region::Exact {
-            object: child_output,
-            span: output_span,
-        } = dependency.output
-        else {
+        let Some(child_output) = region_object(dependency.output) else {
             continue;
         };
         if !is_pure_input_or_output(child_input, &child.variables, Direction::Input)
@@ -805,11 +865,9 @@ fn add_inst_feedthrough_edges(
             incomplete.insert(IncompleteReason::HierarchicalReference);
         }
         let parent_input_regions =
-            map_expression_span_to_regions(&input.expr, input_span, parent_vars, ctx)
-                .unwrap_or_else(|| collect_expression_regions(&input.expr, parent_vars, ctx));
+            map_child_input_region(dependency.input, child, &input.expr, parent_vars, ctx);
         let parent_output_regions =
-            map_destinations_span_to_regions(&output.dst, output_span, parent_vars, ctx)
-                .unwrap_or_else(|| collect_destination_regions(&output.dst, parent_vars, ctx));
+            map_child_output_region(dependency.output, child, &output.dst, parent_vars, ctx);
         for input_region in parent_input_regions {
             for source in region_node_keys(input_region, parent_vars, bit_part) {
                 for &output_region in &parent_output_regions {
@@ -822,6 +880,73 @@ fn add_inst_feedthrough_edges(
             }
         }
     }
+}
+
+fn region_object(region: Region<VarId>) -> Option<VarId> {
+    match region {
+        Region::Exact { object, .. }
+        | Region::UnknownRegion { object, .. }
+        | Region::UnknownObject(object) => Some(object),
+        Region::UnknownAll => None,
+    }
+}
+
+fn child_region_span(region: Region<VarId>, child: &Module) -> Option<(Span, bool)> {
+    match region {
+        Region::Exact { span, .. } => Some((span, false)),
+        Region::UnknownRegion { span, .. } => Some((span, true)),
+        Region::UnknownObject(object) => {
+            let variable = child.variables.get(&object)?;
+            let length = variable
+                .total_width()?
+                .checked_mul(variable.r#type.total_array().unwrap_or(1))?;
+            Some((Span { start: 0, length }, true))
+        }
+        Region::UnknownAll => None,
+    }
+}
+
+fn retain_uncertainty(regions: Vec<Region<VarId>>, uncertain: bool) -> Vec<Region<VarId>> {
+    if !uncertain {
+        return regions;
+    }
+    regions
+        .into_iter()
+        .map(|region| match region {
+            Region::Exact { object, span } => Region::UnknownRegion { object, span },
+            region => region,
+        })
+        .collect()
+}
+
+fn map_child_input_region(
+    region: Region<VarId>,
+    child: &Module,
+    actual: &Expression,
+    parent_vars: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Vec<Region<VarId>> {
+    let Some((span, uncertain)) = child_region_span(region, child) else {
+        return Vec::new();
+    };
+    let mapped = map_expression_span_to_regions(actual, span, parent_vars, ctx)
+        .unwrap_or_else(|| collect_expression_regions(actual, parent_vars, ctx));
+    retain_uncertainty(mapped, uncertain)
+}
+
+fn map_child_output_region(
+    region: Region<VarId>,
+    child: &Module,
+    actual: &[AssignDestination],
+    parent_vars: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Vec<Region<VarId>> {
+    let Some((span, uncertain)) = child_region_span(region, child) else {
+        return Vec::new();
+    };
+    let mapped = map_destinations_span_to_regions(actual, span, parent_vars, ctx)
+        .unwrap_or_else(|| collect_destination_regions(actual, parent_vars, ctx));
+    retain_uncertainty(mapped, uncertain)
 }
 
 fn expression_has_hierarchical_reference(expression: &Expression) -> bool {
@@ -1342,8 +1467,8 @@ fn compute_module_summary(
 }
 
 fn node_key_regions(key: NodeKey, module: &Module, bit_part: &BitPartition) -> Vec<Region<VarId>> {
-    if key.1 == UNKNOWN_REGION_INDEX || key.2 == UNKNOWN_REGION_INDEX {
-        return Vec::new();
+    if key.1 == UNKNOWN_REGION_INDEX {
+        return bit_part.wildcards.get(key.2).copied().into_iter().collect();
     }
     let Some(width) = module.variables.get(&key.0).and_then(Variable::total_width) else {
         return Vec::new();

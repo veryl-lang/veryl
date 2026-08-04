@@ -496,7 +496,9 @@ impl Builder {
         for dependency in &summary.dependencies {
             let mut mapped = Vec::new();
             let input_object = match dependency.input {
-                Region::Exact { object, .. } | Region::UnknownObject(object) => Some(object),
+                Region::Exact { object, .. }
+                | Region::UnknownRegion { object, .. }
+                | Region::UnknownObject(object) => Some(object),
                 Region::UnknownAll => None,
             };
             if let Some(formal) =
@@ -544,7 +546,9 @@ impl Builder {
 
         for (&output, dependencies) in &dependencies_by_output {
             let output_object = match output {
-                Region::Exact { object, .. } | Region::UnknownObject(object) => object,
+                Region::Exact { object, .. }
+                | Region::UnknownRegion { object, .. }
+                | Region::UnknownObject(object) => object,
                 Region::UnknownAll => continue,
             };
             let is_module_capture = self
@@ -1222,21 +1226,97 @@ impl Builder {
         let Some(width) = variable.total_width() else {
             return Region::UnknownObject(id);
         };
-        // `eval_value` maps an X/Z numeric index to zero for simulation
-        // convenience. Alias analysis must not mistake that fallback for a
-        // statically resolved address.
-        if !index.is_const() || !select.is_const_with_range() {
-            return Region::UnknownObject(id);
+        // Preserve the longest statically known prefix. `eval_value` maps an
+        // X/Z numeric index to zero for simulation convenience, so alias
+        // analysis must inspect every constant before accepting its value.
+        let mut index_path = Vec::new();
+        for expression in &index.0 {
+            if !expression.comptime().is_const {
+                break;
+            }
+            let Some(value) = expression.eval_value(&mut self.context) else {
+                break;
+            };
+            let Some(value) = (!value.is_xz()).then(|| value.to_usize()).flatten() else {
+                break;
+            };
+            index_path.push(value);
         }
-        let Some(index_path) = index.eval_value(&mut self.context) else {
-            return Region::UnknownObject(id);
-        };
+        if index_path.len() != index.0.len() {
+            let Some((first, last)) = variable.r#type.array.calc_range(&index_path) else {
+                return Region::UnknownObject(id);
+            };
+            let Some(start) = first.checked_mul(width) else {
+                return Region::UnknownObject(id);
+            };
+            let Some(length) = last
+                .checked_sub(first)
+                .and_then(|count| count.checked_add(1))
+                .and_then(|count| count.checked_mul(width))
+            else {
+                return Region::UnknownObject(id);
+            };
+            return Region::UnknownRegion {
+                object: id,
+                span: Span { start, length },
+            };
+        }
         let Some(array_index) = variable.r#type.array.calc_index(&index_path) else {
             return Region::UnknownObject(id);
         };
-        let Some((high, low)) = select.eval_value(&mut self.context, &variable.r#type, false)
-        else {
+        let Some(array_base) = array_index.checked_mul(width) else {
             return Region::UnknownObject(id);
+        };
+
+        let mut select_prefix = 0;
+        for expression in &select.0 {
+            if !expression.comptime().is_const {
+                break;
+            }
+            let Some(value) = expression.eval_value(&mut self.context) else {
+                break;
+            };
+            if value.is_xz() || value.to_usize().is_none() {
+                break;
+            }
+            select_prefix += 1;
+        }
+        let range_is_known = select.1.as_ref().is_none_or(|(_, expression)| {
+            expression.comptime().is_const
+                && expression
+                    .eval_value(&mut self.context)
+                    .is_some_and(|value| !value.is_xz() && value.to_usize().is_some())
+        });
+        if select_prefix == select.0.len() && range_is_known {
+            let Some((high, low)) = select.eval_value(&mut self.context, &variable.r#type, false)
+            else {
+                return Region::UnknownObject(id);
+            };
+            let Some(start) = array_base.checked_add(low) else {
+                return Region::UnknownObject(id);
+            };
+            let Some(length) = high.checked_sub(low).and_then(|delta| delta.checked_add(1)) else {
+                return Region::UnknownObject(id);
+            };
+            return Region::Exact {
+                object: id,
+                span: Span { start, length },
+            };
+        }
+
+        // An unresolved range bound invalidates its base dimension too: the
+        // selected interval may extend beyond that one element.
+        if select_prefix == select.0.len() && !range_is_known {
+            select_prefix = select_prefix.saturating_sub(1);
+        }
+        let (high, low) = if select_prefix == 0 {
+            (width.saturating_sub(1), 0)
+        } else {
+            let prefix = VarSelect(select.0[..select_prefix].to_vec(), None);
+            let Some(span) = prefix.eval_value(&mut self.context, &variable.r#type, false) else {
+                return Region::UnknownObject(id);
+            };
+            span
         };
         let start = match array_index
             .checked_mul(width)
@@ -1248,7 +1328,7 @@ impl Builder {
         let Some(length) = high.checked_sub(low).and_then(|delta| delta.checked_add(1)) else {
             return Region::UnknownObject(id);
         };
-        Region::Exact {
+        Region::UnknownRegion {
             object: id,
             span: Span { start, length },
         }

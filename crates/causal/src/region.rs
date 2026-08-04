@@ -35,7 +35,15 @@ impl Span {
 /// depends on it is a warning, a hard error, or merely an optimization barrier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Region<O> {
-    Exact { object: O, span: Span },
+    Exact {
+        object: O,
+        span: Span,
+    },
+    /// An unresolved suffix confined to a statically known prefix span.
+    UnknownRegion {
+        object: O,
+        span: Span,
+    },
     UnknownObject(O),
     UnknownAll,
 }
@@ -45,7 +53,35 @@ impl<O: Copy + Eq> Region<O> {
     pub fn may_alias(self, other: Self) -> bool {
         match (self, other) {
             (Self::UnknownAll, _) | (_, Self::UnknownAll) => true,
+            (
+                Self::UnknownRegion {
+                    object: left,
+                    span: left_span,
+                },
+                Self::UnknownRegion {
+                    object: right,
+                    span: right_span,
+                },
+            ) => left == right && left_span.intersection(right_span).is_some(),
+            (
+                Self::UnknownRegion { object, span },
+                Self::Exact {
+                    object: other,
+                    span: other_span,
+                },
+            )
+            | (
+                Self::Exact {
+                    object: other,
+                    span: other_span,
+                },
+                Self::UnknownRegion { object, span },
+            ) => object == other && span.intersection(other_span).is_some(),
             (Self::UnknownObject(left), Self::UnknownObject(right)) => left == right,
+            (Self::UnknownObject(object), Self::UnknownRegion { object: other, .. })
+            | (Self::UnknownRegion { object: other, .. }, Self::UnknownObject(object)) => {
+                object == other
+            }
             (Self::UnknownObject(object), Self::Exact { object: other, .. })
             | (Self::Exact { object: other, .. }, Self::UnknownObject(object)) => object == other,
             (
@@ -89,5 +125,19 @@ mod tests {
     fn unknown_object_does_not_become_unknown_all() {
         assert!(Region::UnknownObject(1).may_alias(exact(1, 1 << 30, 1)));
         assert!(!Region::UnknownObject(1).may_alias(exact(2, 0, 1)));
+    }
+
+    #[test]
+    fn unknown_region_aliases_only_its_static_prefix() {
+        let prefix = Region::UnknownRegion {
+            object: 1,
+            span: Span {
+                start: 8,
+                length: 8,
+            },
+        };
+        assert!(prefix.may_alias(exact(1, 12, 1)));
+        assert!(!prefix.may_alias(exact(1, 0, 8)));
+        assert!(!prefix.may_alias(exact(2, 12, 1)));
     }
 }

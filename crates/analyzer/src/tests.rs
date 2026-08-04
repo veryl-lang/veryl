@@ -9120,8 +9120,8 @@ fn unassignable_output() {
 #[test]
 fn combinational_loop_oversized_array_is_sparse_and_complete() {
     // Why this case exists: a sequential memory with a combinational read must
-    // remain loop-free, and its analysis cost must not scale with all 8M
-    // declared elements merely because both accesses use a dynamic index.
+    // remain loop-free even when its declared index space is too large for the
+    // analyzer's ordinary elaboration limit.
     let code = r#"
     module ModuleA (
         clk:  input  clock,
@@ -9868,7 +9868,6 @@ fn assert_comb_loop_for_case(case: &str, code: &str, expected: bool) {
 }
 
 #[test]
-#[ignore = "known bug: a dynamic suffix currently erases its longest static prefix"]
 fn combinational_loop_review_preserves_longest_static_prefix() {
     // Why this case exists: IEEE 1800-2023 11.5.3 confines buff[0][idx]
     // to the statically selected row. Aliasing it with buff[1] rejects legal,
@@ -10003,7 +10002,6 @@ fn combinational_loop_review_keeps_function_global_write() {
 }
 
 #[test]
-#[ignore = "known bug: dynamic output regions disappear from module summaries"]
 fn combinational_loop_review_keeps_dynamic_region_across_modules() {
     // Why this case exists: an instance port is a SystemVerilog data path, so
     // a child wildcard output must remain a wildcard through every summary.
