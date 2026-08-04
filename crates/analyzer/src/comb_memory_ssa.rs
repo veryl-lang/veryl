@@ -65,6 +65,9 @@ pub(crate) struct PositionedRegion {
     pub aligned: bool,
     /// Value for data (including replicated fill); Control for selectors.
     pub kind: EdgeKind,
+    /// Regular copies of this source-to-expression mapping.
+    pub repetitions: usize,
+    pub expression_stride: usize,
 }
 
 pub(crate) fn map_expression_span_positioned(
@@ -205,10 +208,127 @@ impl Builder {
         controls: &[(usize, EdgeKind)],
         break_target: Option<usize>,
     ) -> Option<usize> {
-        for statement in statements {
-            block = self.lower_statement(statement, block, controls, break_target)?;
+        let mut index = 0usize;
+        while index < statements.len() {
+            if let Some(consumed) =
+                self.lower_periodic_variable_assignments(&statements[index..], block, controls)
+            {
+                index += consumed;
+                continue;
+            }
+            block = self.lower_statement(&statements[index], block, controls, break_target)?;
+            index += 1;
         }
         Some(block)
+    }
+
+    /// Collapse an elaborated run such as `b[i] = a` into one periodic
+    /// transfer. The front-end expands array assignment patterns for codegen;
+    /// rebuilding their regular structure here prevents causal analysis from
+    /// inheriting a declaration-width-sized event list.
+    fn lower_periodic_variable_assignments(
+        &mut self,
+        statements: &[Statement],
+        block: usize,
+        controls: &[(usize, EdgeKind)],
+    ) -> Option<usize> {
+        let Statement::Assign(first) = statements.first()? else {
+            return None;
+        };
+        if first.dst.len() != 1 {
+            return None;
+        }
+        let Expression::Term(first_factor) = &first.expr else {
+            return None;
+        };
+        let Factor::Variable(source_id, source_index, source_select, _) = first_factor.as_ref()
+        else {
+            return None;
+        };
+        let source = self.variable_region(*source_id, source_index, source_select);
+        let Region::Exact {
+            span: source_span, ..
+        } = source
+        else {
+            return None;
+        };
+
+        let mut destinations = Vec::new();
+        for statement in statements {
+            let Statement::Assign(assign) = statement else {
+                break;
+            };
+            if assign.dst.len() != 1 {
+                break;
+            }
+            let Expression::Term(factor) = &assign.expr else {
+                break;
+            };
+            let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+                break;
+            };
+            if self.variable_region(*id, index, select) != source {
+                break;
+            }
+            let Region::Exact { object, span } = self.variable_region(
+                assign.dst[0].id,
+                &assign.dst[0].index,
+                &assign.dst[0].select,
+            ) else {
+                break;
+            };
+            if span.length != source_span.length {
+                break;
+            }
+            destinations.push((object, span));
+        }
+        if destinations.len() < 2 {
+            return None;
+        }
+        let object = destinations[0].0;
+        if destinations
+            .iter()
+            .any(|(candidate, _)| *candidate != object)
+        {
+            return None;
+        }
+        destinations.sort_unstable_by_key(|(_, span)| span.start);
+        if destinations
+            .windows(2)
+            .any(|pair| pair[0].1.end().is_none_or(|end| end != pair[1].1.start))
+        {
+            return None;
+        }
+        let output = Span {
+            start: destinations[0].1.start,
+            length: source_span.length.checked_mul(destinations.len())?,
+        };
+        let read = self.push_read(block, source);
+        let id = self.next_write;
+        self.next_write += 1;
+        self.procedure.events[block].push(Event::Write {
+            id,
+            region: Region::Exact {
+                object,
+                span: output,
+            },
+            dependencies: controls.to_vec(),
+            aligned_dependencies: vec![AlignedDependency {
+                read,
+                kind: EdgeKind::Value,
+                source: Span {
+                    start: 0,
+                    length: source_span.length,
+                },
+                destination: Span {
+                    start: 0,
+                    length: source_span.length,
+                },
+                repetitions: destinations.len(),
+                destination_stride: source_span.length,
+            }],
+        });
+        Some(destinations.len())
     }
 
     fn lower_statement(
@@ -897,6 +1017,8 @@ impl Builder {
                             start: overlap.start.checked_sub(destination_span.start)?,
                             length: overlap.length,
                         },
+                        repetitions: 1,
+                        destination_stride: 0,
                     });
                 }
             }
@@ -995,6 +1117,8 @@ impl Builder {
                         expression: extension,
                         aligned: false,
                         kind: EdgeKind::Value,
+                        repetitions: 1,
+                        expression_stride: 0,
                     }),
                 );
             }
@@ -1024,6 +1148,8 @@ impl Builder {
                         expression: requested,
                         aligned: true,
                         kind: EdgeKind::Value,
+                        repetitions: 1,
+                        expression_stride: 0,
                     }])
                 }
                 Factor::Value(_) => Some(Vec::new()),
@@ -1049,6 +1175,8 @@ impl Builder {
                                 },
                                 aligned,
                                 kind: EdgeKind::Value,
+                                repetitions: 1,
+                                expression_stride: 0,
                             })
                             .collect()
                     }),
@@ -1087,6 +1215,8 @@ impl Builder {
                         expression: requested,
                         aligned: false,
                         kind: EdgeKind::Control,
+                        repetitions: 1,
+                        expression_stride: 0,
                     }),
                 );
                 Some(mapped)
@@ -1125,6 +1255,8 @@ impl Builder {
                                     },
                                     aligned: positioned.aligned,
                                     kind: positioned.kind,
+                                    repetitions: positioned.repetitions,
+                                    expression_stride: positioned.expression_stride,
                                 }),
                         );
                     }
@@ -1179,6 +1311,8 @@ impl Builder {
                             },
                             aligned: positioned.aligned,
                             kind: positioned.kind,
+                            repetitions: positioned.repetitions,
+                            expression_stride: positioned.expression_stride,
                         });
                     }
                 }
@@ -1304,6 +1438,8 @@ impl Builder {
                             },
                             aligned: positioned.aligned,
                             kind: positioned.kind,
+                            repetitions: positioned.repetitions,
+                            expression_stride: positioned.expression_stride,
                         })
                         .collect(),
                 )
@@ -1339,6 +1475,8 @@ impl Builder {
                             },
                             aligned: positioned.aligned,
                             kind: positioned.kind,
+                            repetitions: positioned.repetitions,
+                            expression_stride: positioned.expression_stride,
                         })
                         .collect(),
                 )
@@ -1375,6 +1513,8 @@ impl Builder {
                                 },
                                 aligned: positioned.aligned,
                                 kind: positioned.kind,
+                                repetitions: positioned.repetitions,
+                                expression_stride: positioned.expression_stride,
                             }),
                     );
                 }
@@ -1396,6 +1536,8 @@ impl Builder {
                             expression: fill,
                             aligned: false,
                             kind: EdgeKind::Value,
+                            repetitions: 1,
+                            expression_stride: 0,
                         }),
                     );
                 }
@@ -1440,7 +1582,23 @@ impl Builder {
         let value = contextual_value.as_ref().unwrap_or(value);
         let first_copy = overlap.start / element_length;
         let last_copy = overlap.end()?.checked_sub(1)?.checked_div(element_length)?;
-        for copy in first_copy..=last_copy {
+        let first_full = overlap
+            .start
+            .checked_add(element_length - 1)?
+            .checked_div(element_length)?
+            .max(first_copy);
+        let end_full = overlap
+            .end()?
+            .checked_div(element_length)?
+            .min(last_copy.saturating_add(1));
+
+        for copy in [
+            Some(first_copy),
+            (last_copy != first_copy).then_some(last_copy),
+        ]
+        .into_iter()
+        .flatten()
+        {
             let copy_start = copy.checked_mul(element_length)?;
             let copy_span = Span {
                 start: copy_start,
@@ -1449,6 +1607,9 @@ impl Builder {
             let Some(copy_overlap) = requested.intersection(copy_span) else {
                 continue;
             };
+            if copy_overlap == copy_span {
+                continue;
+            }
             let local = Span {
                 start: copy_overlap.start.checked_sub(copy_start)?,
                 length: copy_overlap.length,
@@ -1464,7 +1625,51 @@ impl Builder {
                     },
                     aligned: positioned.aligned,
                     kind: positioned.kind,
+                    repetitions: positioned.repetitions,
+                    expression_stride: positioned.expression_stride,
                 });
+            }
+        }
+
+        if first_full < end_full {
+            let copies = end_full - first_full;
+            let copy_start = first_full.checked_mul(element_length)?;
+            for mut positioned in self.map_expression_span_positioned_with_signed(
+                value,
+                Span {
+                    start: 0,
+                    length: element_length,
+                },
+                element_type.signed,
+            )? {
+                positioned.expression.start =
+                    positioned.expression.start.checked_add(copy_start)?;
+                if copies > 1 {
+                    if positioned.repetitions == 1 {
+                        positioned.repetitions = copies;
+                        positioned.expression_stride = element_length;
+                    } else if positioned
+                        .expression_stride
+                        .checked_mul(positioned.repetitions)
+                        == Some(element_length)
+                    {
+                        positioned.repetitions = positioned.repetitions.checked_mul(copies)?;
+                    } else {
+                        // A non-flattenable nested pattern retains one compact
+                        // inner pattern per outer copy. The number of explicit
+                        // items then reflects source structure, not bit width.
+                        for copy in 0..copies {
+                            let mut positioned = positioned;
+                            positioned.expression.start = positioned
+                                .expression
+                                .start
+                                .checked_add(copy.checked_mul(element_length)?)?;
+                            mapped.push(positioned);
+                        }
+                        continue;
+                    }
+                }
+                mapped.push(positioned);
             }
         }
         Some(())
@@ -1812,6 +2017,8 @@ impl Builder {
                         length: span.length,
                     },
                     destination: positioned.expression,
+                    repetitions: positioned.repetitions,
+                    destination_stride: positioned.expression_stride,
                 });
             } else {
                 retained.push((read, positioned.kind));
@@ -1820,24 +2027,66 @@ impl Builder {
         *dependencies = retained;
         let mut ret = vec![Vec::new(); destinations.len()];
         for dependency in aligned {
-            for (index, destination) in destination_spans.iter().copied().enumerate() {
-                let Some(overlap) = dependency.destination.intersection(destination) else {
-                    continue;
-                };
-                let source_offset = overlap.start.checked_sub(dependency.destination.start)?;
-                let destination_offset = overlap.start.checked_sub(destination.start)?;
+            let pattern_end = dependency
+                .destination_stride
+                .checked_mul(dependency.repetitions.saturating_sub(1))?
+                .checked_add(dependency.destination.end()?)?;
+            if dependency.repetitions > 1
+                && let Some((index, destination)) = destination_spans
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .find(|(_, destination)| {
+                        dependency.destination.start >= destination.start
+                            && pattern_end <= destination.end().unwrap_or(0)
+                    })
+            {
                 ret[index].push(AlignedDependency {
                     read: dependency.read,
                     kind: dependency.kind,
-                    source: Span {
-                        start: dependency.source.start.checked_add(source_offset)?,
-                        length: overlap.length,
-                    },
+                    source: dependency.source,
                     destination: Span {
-                        start: destination_offset,
-                        length: overlap.length,
+                        start: dependency
+                            .destination
+                            .start
+                            .checked_sub(destination.start)?,
+                        length: dependency.destination.length,
                     },
+                    repetitions: dependency.repetitions,
+                    destination_stride: dependency.destination_stride,
                 });
+                continue;
+            }
+            for (index, destination) in destination_spans.iter().copied().enumerate() {
+                for copy in 0..dependency.repetitions {
+                    let copy_start = dependency
+                        .destination
+                        .start
+                        .checked_add(copy.checked_mul(dependency.destination_stride)?)?;
+                    let copy_span = Span {
+                        start: copy_start,
+                        length: dependency.destination.length,
+                    };
+                    let Some(overlap) = copy_span.intersection(destination) else {
+                        continue;
+                    };
+                    let source_offset = overlap.start.checked_sub(copy_span.start)?;
+                    let destination_offset = overlap.start.checked_sub(destination.start)?;
+                    ret[index].push(AlignedDependency {
+                        read: dependency.read,
+                        kind: dependency.kind,
+                        source: Span {
+                            start: dependency.source.start.checked_add(source_offset)?,
+                            length: overlap.length,
+                        },
+                        destination: Span {
+                            start: destination_offset,
+                            length: overlap.length,
+                        },
+                        repetitions: 1,
+                        destination_stride: 0,
+                    });
+                }
             }
         }
         Some(ret)

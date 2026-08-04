@@ -51,7 +51,7 @@ struct SummaryWalk {
     current_key: Option<NodeKey>,
     visited: HashSet<(NodeIndex, bool)>,
     stack: Vec<(NodeIndex, bool)>,
-    dependencies: BTreeMap<(Region<VarId>, Region<VarId>), bool>,
+    dependencies: BTreeMap<(Region<VarId>, SummaryOutput), bool>,
 }
 
 impl SummaryWalk {
@@ -111,7 +111,7 @@ impl SummaryWalk {
             };
             if let Some((input_key, output_key)) = pair {
                 for input in node_key_regions(input_key, module, bit_part) {
-                    for output in node_key_regions(output_key, module, bit_part) {
+                    for output in node_key_summary_outputs(output_key, module, bit_part) {
                         self.dependencies
                             .entry((input, output))
                             .and_modify(|aligned| *aligned &= path_aligned)
@@ -180,6 +180,28 @@ fn live_summary_nodes(
 /// deliberately occupies no real array element or bit-partition slot.
 const UNKNOWN_REGION_INDEX: usize = usize::MAX;
 const DENSE_REGION_INDEX: usize = usize::MAX - 1;
+const PERIODIC_REGION_INDEX: usize = usize::MAX - 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct PeriodicRegion {
+    object: VarId,
+    output: Span,
+    repetitions: usize,
+    stride: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PeriodicTransferRegion {
+    input: Region<VarId>,
+    output: PeriodicRegion,
+    aligned: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum SummaryOutput {
+    Region(Region<VarId>),
+    Periodic(PeriodicRegion),
+}
 
 /// Per `IdxKey`, atomic bit-range masks. Two bits are in the same range
 /// iff they appear in the same set of per-decl masks.
@@ -189,6 +211,7 @@ struct BitPartition {
     /// Symbolic full-element interiors of large exact spans. Their graph-node
     /// count depends on observed spans, not on unpacked array length.
     dense_regions: Vec<Region<VarId>>,
+    periodic_regions: Vec<PeriodicRegion>,
     /// Stable identities for unresolved regions. They are graph nodes, not
     /// array elements, so their count depends on accesses rather than width.
     wildcards: Vec<Region<VarId>>,
@@ -227,7 +250,7 @@ impl BitPartition {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct ModuleCombDependency {
     input: Region<VarId>,
-    output: Region<VarId>,
+    output: SummaryOutput,
     aligned: bool,
 }
 
@@ -331,7 +354,8 @@ fn ensure_instance_summaries(
         ensure_instance_summaries(child, summaries, visiting, errors, incomplete);
         let (graph, reasons, bit_part) = build_module_graph(child, summaries);
         check_graph(child, &graph, errors);
-        summaries.insert(key, compute_module_summary(child, &graph, &bit_part));
+        let summary = compute_module_summary(child, &graph, &bit_part);
+        summaries.insert(key, summary);
         if !reasons.is_empty() {
             incomplete.push(IncompleteCombAnalysis {
                 module: child.name.to_string(),
@@ -460,13 +484,18 @@ fn atomic_ranges(masks: &[Span], width: usize) -> Vec<Span> {
     ranges
 }
 
-fn build_bit_partition(module: &Module, memory_ssa_regions: &[Region<VarId>]) -> BitPartition {
+fn build_bit_partition(
+    module: &Module,
+    memory_ssa_regions: &[Region<VarId>],
+    periodic_regions: &[PeriodicRegion],
+) -> BitPartition {
     let mut masks: HashMap<VarId, BTreeMap<usize, Vec<Span>>> = HashMap::default();
 
     // A shifted copy can propagate every observed endpoint through the copy
     // relation. Feed those sparse spans into the shared partition so distinct
     // causal atoms do not collapse into a spurious self-edge.
     let dense_regions = collect_region_masks(memory_ssa_regions, module, &mut masks);
+    collect_periodic_masks(periodic_regions, module, &mut masks);
 
     let mut ranges: HashMap<VarId, BTreeMap<usize, Vec<Span>>> = HashMap::default();
     for (object, elements) in masks {
@@ -501,8 +530,167 @@ fn build_bit_partition(module: &Module, memory_ssa_regions: &[Region<VarId>]) ->
     BitPartition {
         ranges,
         dense_regions,
+        periodic_regions: periodic_regions.to_vec(),
         wildcards,
     }
+}
+
+fn collect_periodic_masks(
+    periodic_regions: &[PeriodicRegion],
+    module: &Module,
+    masks: &mut HashMap<VarId, BTreeMap<usize, Vec<Span>>>,
+) {
+    for &periodic in periodic_regions {
+        if periodic.repetitions == 0 || periodic.output.length == 0 {
+            continue;
+        }
+        let Some(width) = module
+            .variables
+            .get(&periodic.object)
+            .and_then(Variable::total_width)
+        else {
+            continue;
+        };
+        if width == 0 {
+            continue;
+        }
+        let Some(last_start) = periodic
+            .stride
+            .checked_mul(periodic.repetitions - 1)
+            .and_then(|offset| periodic.output.start.checked_add(offset))
+        else {
+            continue;
+        };
+        let Some(pattern_end) = last_start.checked_add(periodic.output.length) else {
+            continue;
+        };
+        let first_element = periodic.output.start / width;
+        masks
+            .entry(periodic.object)
+            .or_default()
+            .entry(first_element)
+            .or_default();
+        let elements = masks.entry(periodic.object).or_default();
+        let materialized = elements
+            .range(first_element..=((pattern_end - 1) / width))
+            .map(|(&element, _)| element)
+            .collect::<Vec<_>>();
+        for element in materialized {
+            let Some(element_start) = element.checked_mul(width) else {
+                continue;
+            };
+            let query = Span {
+                start: element_start,
+                length: width,
+            };
+            for overlap in periodic_span_intersections(periodic, query) {
+                elements
+                    .get_mut(&element)
+                    .expect("materialized periodic element")
+                    .push(Span {
+                        start: overlap.start - element_start,
+                        length: overlap.length,
+                    });
+            }
+        }
+    }
+}
+
+fn propagate_periodic_partition_regions(
+    regions: &[Region<VarId>],
+    transfers: &[PeriodicTransferRegion],
+    periodic_regions: &mut Vec<PeriodicRegion>,
+) {
+    for transfer in transfers.iter().filter(|transfer| transfer.aligned) {
+        let Region::Exact {
+            object: input_object,
+            span: input_span,
+        } = transfer.input
+        else {
+            continue;
+        };
+        for &region in regions {
+            let Region::Exact {
+                object,
+                span: region_span,
+            } = region
+            else {
+                continue;
+            };
+            if object != input_object {
+                continue;
+            }
+            let Some(overlap) = region_span.intersection(input_span) else {
+                continue;
+            };
+            let Some(offset) = overlap.start.checked_sub(input_span.start) else {
+                continue;
+            };
+            let Some(start) = transfer.output.output.start.checked_add(offset) else {
+                continue;
+            };
+            periodic_regions.push(PeriodicRegion {
+                object: transfer.output.object,
+                output: Span {
+                    start,
+                    length: overlap.length,
+                },
+                repetitions: transfer.output.repetitions,
+                stride: transfer.output.stride,
+            });
+        }
+    }
+}
+
+fn periodic_span_intersections(periodic: PeriodicRegion, query: Span) -> Vec<Span> {
+    let Some(query_end) = query.end() else {
+        return Vec::new();
+    };
+    let Some(phase_end) = periodic.output.end() else {
+        return Vec::new();
+    };
+    if periodic.repetitions == 0 || periodic.stride == 0 {
+        return periodic.output.intersection(query).into_iter().collect();
+    }
+    if periodic.output.length == periodic.stride {
+        let Some(length) = periodic.stride.checked_mul(periodic.repetitions) else {
+            return Vec::new();
+        };
+        return (Span {
+            start: periodic.output.start,
+            length,
+        })
+        .intersection(query)
+        .into_iter()
+        .collect();
+    }
+    let first = if query.start < phase_end {
+        0
+    } else {
+        (query.start - phase_end) / periodic.stride + 1
+    };
+    let end = if query_end <= periodic.output.start {
+        0
+    } else {
+        query_end
+            .saturating_sub(periodic.output.start)
+            .saturating_add(periodic.stride - 1)
+            / periodic.stride
+    }
+    .min(periodic.repetitions);
+    (first..end)
+        .filter_map(|copy| {
+            let start = periodic
+                .output
+                .start
+                .checked_add(copy.checked_mul(periodic.stride)?)?;
+            (Span {
+                start,
+                length: periodic.output.length,
+            })
+            .intersection(query)
+        })
+        .collect()
 }
 
 fn collect_region_masks(
@@ -691,14 +879,48 @@ fn build_module_graph(
             })
         })
         .collect::<Vec<_>>();
+    partition_regions.extend(
+        procedure_summaries
+            .iter()
+            .filter_map(|result| result.as_ref().ok())
+            .flat_map(|summary| &summary.periodic_dependencies)
+            .map(|dependency| dependency.input),
+    );
     partition_regions = propagate_aligned_regions(partition_regions, &procedure_summaries);
+    let mut periodic_transfers = procedure_summaries
+        .iter()
+        .filter_map(|result| result.as_ref().ok())
+        .flat_map(|summary| &summary.periodic_dependencies)
+        .map(|dependency| PeriodicTransferRegion {
+            input: dependency.input,
+            output: PeriodicRegion {
+                object: dependency.output_object,
+                output: dependency.output,
+                repetitions: dependency.repetitions,
+                stride: dependency.destination_stride,
+            },
+            aligned: dependency.aligned,
+        })
+        .collect::<Vec<_>>();
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.functions = module.functions.clone();
-    partition_regions.extend(collect_instance_summary_regions(
-        module, summaries, &mut ctx,
-    ));
-    let bit_part = build_bit_partition(module, &partition_regions);
+    let (instance_regions, instance_periodic_transfers) =
+        collect_instance_summary_regions(module, summaries, &mut ctx);
+    partition_regions.extend(instance_regions);
+    periodic_transfers.extend(instance_periodic_transfers);
+    let mut periodic_regions = periodic_transfers
+        .iter()
+        .map(|transfer| transfer.output)
+        .collect::<Vec<_>>();
+    propagate_periodic_partition_regions(
+        &partition_regions,
+        &periodic_transfers,
+        &mut periodic_regions,
+    );
+    periodic_regions.sort_unstable();
+    periodic_regions.dedup();
+    let bit_part = build_bit_partition(module, &partition_regions, &periodic_regions);
 
     let mut graph: Graph<NodeKey, bool> = Graph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
@@ -733,6 +955,13 @@ fn build_module_graph(
             Ok(summary) => {
                 incomplete.extend(summary.incomplete.iter().copied());
                 add_memory_ssa_edges(module, summary, &bit_part, &mut graph, &mut node_map);
+                add_periodic_memory_ssa_edges(
+                    module,
+                    summary,
+                    &bit_part,
+                    &mut graph,
+                    &mut node_map,
+                );
             }
             Err(error) => {
                 incomplete.insert(IncompleteReason::MalformedModel);
@@ -977,6 +1206,101 @@ fn add_memory_ssa_edges(
     }
 }
 
+fn add_periodic_memory_ssa_edges(
+    module: &Module,
+    summary: &ProcedureSummary<VarId>,
+    bit_part: &BitPartition,
+    graph: &mut Graph<NodeKey, bool>,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+) {
+    for dependency in &summary.periodic_dependencies {
+        if dependency.kind == EdgeKind::Unknown {
+            continue;
+        }
+        let input = restore_uncertain_region(&summary.uncertain_input_regions, dependency.input);
+        let periodic = PeriodicRegion {
+            object: dependency.output_object,
+            output: dependency.output,
+            repetitions: dependency.repetitions,
+            stride: dependency.destination_stride,
+        };
+        let pairs = if dependency.aligned {
+            aligned_periodic_node_pairs(input, periodic, &module.variables, bit_part)
+        } else {
+            let destinations = periodic_region_node_keys(periodic, &module.variables, bit_part);
+            region_node_keys(input, &module.variables, bit_part)
+                .into_iter()
+                .flat_map(|source| {
+                    destinations
+                        .iter()
+                        .copied()
+                        .map(move |destination| (source, destination))
+                })
+                .collect()
+        };
+        for (source, destination) in pairs {
+            if !is_module_scope_var(source.0, &module.variables) {
+                continue;
+            }
+            if !is_module_scope_var(destination.0, &module.variables) {
+                continue;
+            }
+            let source = ensure_node(graph, node_map, source);
+            let destination = ensure_node(graph, node_map, destination);
+            graph.add_edge(source, destination, dependency.aligned);
+        }
+    }
+}
+
+fn aligned_periodic_node_pairs(
+    input: Region<VarId>,
+    periodic: PeriodicRegion,
+    variables: &HashMap<VarId, Variable>,
+    bit_part: &BitPartition,
+) -> Vec<(NodeKey, NodeKey)> {
+    let Region::Exact {
+        span: input_span, ..
+    } = input
+    else {
+        return Vec::new();
+    };
+    let mut pairs = BTreeSet::new();
+    for source in region_node_keys(input, variables, bit_part) {
+        for source_region in node_key_regions_for_variables(source, variables, bit_part) {
+            let Region::Exact {
+                span: source_span, ..
+            } = source_region
+            else {
+                continue;
+            };
+            let Some(overlap) = source_span.intersection(input_span) else {
+                continue;
+            };
+            let Some(offset) = overlap.start.checked_sub(input_span.start) else {
+                continue;
+            };
+            let Some(output_start) = periodic.output.start.checked_add(offset) else {
+                continue;
+            };
+            let mapped = PeriodicRegion {
+                object: periodic.object,
+                output: Span {
+                    start: output_start,
+                    length: overlap.length,
+                },
+                repetitions: periodic.repetitions,
+                stride: periodic.stride,
+            };
+            pairs.extend(
+                periodic_region_node_keys(mapped, variables, bit_part)
+                    .into_iter()
+                    .map(|destination| (source, destination)),
+            );
+        }
+    }
+    pairs.into_iter().collect()
+}
+
 fn aligned_region_node_pairs(
     input: Region<VarId>,
     output: Region<VarId>,
@@ -1170,6 +1494,59 @@ fn dense_region_node_keys(object: VarId, span: Span, bit_part: &BitPartition) ->
         .collect()
 }
 
+fn periodic_region_node_keys(
+    periodic: PeriodicRegion,
+    variables: &HashMap<VarId, Variable>,
+    bit_part: &BitPartition,
+) -> Vec<NodeKey> {
+    let mut keys = bit_part
+        .periodic_regions
+        .iter()
+        .position(|candidate| *candidate == periodic)
+        .map(|index| vec![(periodic.object, PERIODIC_REGION_INDEX, index)])
+        .unwrap_or_default();
+    let Some(width) = variables
+        .get(&periodic.object)
+        .and_then(Variable::total_width)
+    else {
+        return keys;
+    };
+    let Some(last_start) = periodic
+        .stride
+        .checked_mul(periodic.repetitions.saturating_sub(1))
+        .and_then(|offset| periodic.output.start.checked_add(offset))
+    else {
+        return keys;
+    };
+    let Some(end) = last_start.checked_add(periodic.output.length) else {
+        return keys;
+    };
+    let Some(elements) = bit_part.ranges.get(&periodic.object) else {
+        return keys;
+    };
+    for (&element, ranges) in elements.range((periodic.output.start / width)..=((end - 1) / width))
+    {
+        let Some(element_start) = element.checked_mul(width) else {
+            continue;
+        };
+        for (range_index, range) in ranges.iter().enumerate() {
+            let Some(start) = element_start.checked_add(range.start) else {
+                continue;
+            };
+            let query = Span {
+                start,
+                length: range.length,
+            };
+            if !periodic_span_intersections(periodic, query).is_empty() {
+                keys.push((periodic.object, element, range_index));
+            }
+        }
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    keys
+}
+
 /// Convert the MemorySSA engine's flattened, half-open bit region back to the
 /// graph `(array element, bit partition)` coordinates. The loop is
 /// proportional to touched elements, never to the declared array size.
@@ -1208,8 +1585,9 @@ fn collect_instance_summary_regions(
     module: &Module,
     summaries: &HashMap<usize, ModuleCombSummary>,
     ctx: &mut Context,
-) -> Vec<Region<VarId>> {
+) -> (Vec<Region<VarId>>, Vec<PeriodicTransferRegion>) {
     let mut regions = Vec::new();
+    let mut periodic_transfers = Vec::new();
     for inst in walk_insts(module) {
         let Component::Module(child) = inst.component.as_ref() else {
             continue;
@@ -1233,7 +1611,7 @@ fn collect_instance_summary_regions(
             let Some(child_input) = region_object(dependency.input) else {
                 continue;
             };
-            let Some(child_output) = region_object(dependency.output) else {
+            let Some(child_output) = summary_output_object(dependency.output) else {
                 continue;
             };
             let Some(input) = inst.inputs.iter().find(|input| input.id == child_input) else {
@@ -1242,23 +1620,45 @@ fn collect_instance_summary_regions(
             let Some(output) = inst.outputs.iter().find(|output| output.id == child_output) else {
                 continue;
             };
-            regions.extend(map_child_input_region(
+            let parent_inputs = map_child_input_region(
                 dependency.input,
                 child,
                 &input.expr,
                 &module.variables,
                 ctx,
-            ));
-            regions.extend(map_child_output_region(
-                dependency.output,
-                child,
-                &output.dst,
-                &module.variables,
-                ctx,
-            ));
+            );
+            regions.extend(parent_inputs.iter().copied());
+            match dependency.output {
+                SummaryOutput::Region(region) => regions.extend(map_child_output_region(
+                    region,
+                    child,
+                    &output.dst,
+                    &module.variables,
+                    ctx,
+                )),
+                SummaryOutput::Periodic(periodic) => {
+                    let parent_outputs = map_child_periodic_output(
+                        periodic,
+                        child,
+                        &output.dst,
+                        &module.variables,
+                        ctx,
+                    )
+                    .unwrap_or_default();
+                    for &input in &parent_inputs {
+                        for &output in &parent_outputs {
+                            periodic_transfers.push(PeriodicTransferRegion {
+                                input,
+                                output,
+                                aligned: dependency.aligned,
+                            });
+                        }
+                    }
+                }
+            }
         }
     }
-    regions
+    (regions, periodic_transfers)
 }
 
 fn add_inst_output_address_edges(
@@ -1312,7 +1712,7 @@ fn add_inst_feedthrough_edges(
         let Some(child_input) = region_object(dependency.input) else {
             continue;
         };
-        let Some(child_output) = region_object(dependency.output) else {
+        let Some(child_output) = summary_output_object(dependency.output) else {
             continue;
         };
         if !is_pure_input_or_output(child_input, &child.variables, Direction::Input)
@@ -1329,6 +1729,48 @@ fn add_inst_feedthrough_edges(
         if expression_has_hierarchical_reference(&input.expr) {
             incomplete.insert(IncompleteReason::HierarchicalReference);
         }
+        if let SummaryOutput::Periodic(periodic) = dependency.output {
+            let parent_inputs =
+                map_child_input_region(dependency.input, child, &input.expr, parent_vars, ctx);
+            let Some(parent_outputs) =
+                map_child_periodic_output(periodic, child, &output.dst, parent_vars, ctx)
+            else {
+                continue;
+            };
+            for input_region in parent_inputs {
+                for &parent_output in &parent_outputs {
+                    let pairs = if dependency.aligned {
+                        aligned_periodic_node_pairs(
+                            input_region,
+                            parent_output,
+                            parent_vars,
+                            bit_part,
+                        )
+                    } else {
+                        let destinations =
+                            periodic_region_node_keys(parent_output, parent_vars, bit_part);
+                        region_node_keys(input_region, parent_vars, bit_part)
+                            .into_iter()
+                            .flat_map(|source| {
+                                destinations
+                                    .iter()
+                                    .copied()
+                                    .map(move |destination| (source, destination))
+                            })
+                            .collect()
+                    };
+                    for (source, destination) in pairs {
+                        let source = ensure_node(graph, node_map, source);
+                        let destination = ensure_node(graph, node_map, destination);
+                        graph.add_edge(source, destination, dependency.aligned);
+                    }
+                }
+            }
+            continue;
+        }
+        let SummaryOutput::Region(dependency_output) = dependency.output else {
+            continue;
+        };
         if dependency.aligned
             && let (
                 Region::Exact {
@@ -1339,7 +1781,7 @@ fn add_inst_feedthrough_edges(
                     span: child_output_span,
                     ..
                 },
-            ) = (dependency.input, dependency.output)
+            ) = (dependency.input, dependency_output)
             && child_input_span.length == child_output_span.length
             && let Some(input_type) = child
                 .variables
@@ -1371,7 +1813,7 @@ fn add_inst_feedthrough_edges(
         let parent_input_regions =
             map_child_input_region(dependency.input, child, &input.expr, parent_vars, ctx);
         let parent_output_regions =
-            map_child_output_region(dependency.output, child, &output.dst, parent_vars, ctx);
+            map_child_output_region(dependency_output, child, &output.dst, parent_vars, ctx);
         let pairs = parent_input_regions
             .iter()
             .copied()
@@ -1500,6 +1942,13 @@ fn region_object(region: Region<VarId>) -> Option<VarId> {
     }
 }
 
+fn summary_output_object(output: SummaryOutput) -> Option<VarId> {
+    match output {
+        SummaryOutput::Region(region) => region_object(region),
+        SummaryOutput::Periodic(periodic) => Some(periodic.object),
+    }
+}
+
 fn child_region_span(region: Region<VarId>, child: &Module) -> Option<(Span, bool)> {
     match region {
         Region::Exact { span, .. } => Some((span, false)),
@@ -1572,6 +2021,48 @@ fn map_child_output_region(
     let mapped = map_destinations_span_to_regions(actual, span, parent_vars, ctx)
         .unwrap_or_else(|| collect_destination_regions(actual, parent_vars, ctx));
     retain_uncertainty(mapped, uncertain)
+}
+
+fn map_child_periodic_output(
+    periodic: PeriodicRegion,
+    child: &Module,
+    destinations: &[AssignDestination],
+    variables: &HashMap<VarId, Variable>,
+    ctx: &mut Context,
+) -> Option<Vec<PeriodicRegion>> {
+    let variable = child.variables.get(&periodic.object)?;
+    let length = variable
+        .total_width()?
+        .checked_mul(variable.r#type.total_array().unwrap_or(1))?;
+    let mapped =
+        map_destinations_span_positioned(destinations, Span { start: 0, length }, variables, ctx)?;
+    if mapped.len() != 1 {
+        return None;
+    }
+    let positioned = mapped[0];
+    let Region::Exact {
+        object,
+        span: destination,
+    } = positioned.region
+    else {
+        return None;
+    };
+    if !positioned.aligned
+        || positioned.expression.start != 0
+        || positioned.expression.length != length
+        || destination.length != length
+    {
+        return None;
+    }
+    Some(vec![PeriodicRegion {
+        object,
+        output: Span {
+            start: destination.start.checked_add(periodic.output.start)?,
+            length: periodic.output.length,
+        },
+        repetitions: periodic.repetitions,
+        stride: periodic.stride,
+    }])
 }
 
 fn expression_has_hierarchical_reference(expression: &Expression) -> bool {
@@ -1816,6 +2307,8 @@ fn map_destinations_span_positioned(
                 expression: overlap,
                 aligned: true,
                 kind: EdgeKind::Value,
+                repetitions: 1,
+                expression_stride: 0,
             });
         }
         low = low.checked_add(span.length)?;
@@ -2365,6 +2858,9 @@ fn node_key_regions_for_variables(
     variables: &HashMap<VarId, Variable>,
     bit_part: &BitPartition,
 ) -> Vec<Region<VarId>> {
+    if key.1 == PERIODIC_REGION_INDEX {
+        return Vec::new();
+    }
     if key.1 == UNKNOWN_REGION_INDEX {
         return bit_part.wildcards.get(key.2).copied().into_iter().collect();
     }
@@ -2396,6 +2892,26 @@ fn node_key_regions_for_variables(
             length: span.length,
         },
     }]
+}
+
+fn node_key_summary_outputs(
+    key: NodeKey,
+    module: &Module,
+    bit_part: &BitPartition,
+) -> Vec<SummaryOutput> {
+    if key.1 == PERIODIC_REGION_INDEX {
+        return bit_part
+            .periodic_regions
+            .get(key.2)
+            .copied()
+            .map(SummaryOutput::Periodic)
+            .into_iter()
+            .collect();
+    }
+    node_key_regions(key, module, bit_part)
+        .into_iter()
+        .map(SummaryOutput::Region)
+        .collect()
 }
 
 #[cfg(test)]

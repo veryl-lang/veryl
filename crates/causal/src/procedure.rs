@@ -35,6 +35,26 @@ pub struct AlignedDependency {
     pub source: Span,
     /// LSB-based span relative to the enclosing write region.
     pub destination: Span,
+    /// Number of copies of this transfer. A value greater than one represents
+    /// the same source span at regularly spaced destination positions without
+    /// materializing one dependency per copy.
+    pub repetitions: usize,
+    /// Distance in bits between consecutive destination copies. Ignored when
+    /// `repetitions == 1`.
+    pub destination_stride: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PeriodicDependency<O> {
+    pub input: Region<O>,
+    pub output_object: O,
+    /// The first output copy influenced by `input`.
+    pub output: Span,
+    pub repetitions: usize,
+    pub destination_stride: usize,
+    pub kind: EdgeKind,
+    /// Each output copy preserves positions within `input`.
+    pub aligned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +107,8 @@ pub struct Dependency<O> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcedureSummary<O> {
     pub dependencies: Vec<Dependency<O>>,
+    /// Regular one-to-many transfers retained without expanding every copy.
+    pub periodic_dependencies: Vec<PeriodicDependency<O>>,
     /// Sparse output atoms which can be written on exit, including writes
     /// whose assigned value has no signal dependency.
     pub outputs: Vec<Region<O>>,
@@ -184,7 +206,17 @@ struct DepVersion<O> {
     aligned: bool,
     uncertain_input: bool,
     active_read: Option<ReadId>,
+    translation: Option<i128>,
+    periodic_output: Option<PeriodicProjection>,
     marker: std::marker::PhantomData<O>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct PeriodicProjection {
+    source: Span,
+    output: Span,
+    repetitions: usize,
+    destination_stride: usize,
 }
 
 /// Build a region MemorySSA summary for one procedure.
@@ -364,16 +396,26 @@ where
             Option<ReadId>,
             bool,
             bool,
+            Option<i128>,
+            Option<PeriodicProjection>,
         )>,
     >::new();
 
     for phi in &ssa.phis {
         let deps = version_deps.entry(phi.version).or_default();
-        deps.extend(
-            phi.inputs
-                .iter()
-                .map(|(_, input)| (*input, EdgeKind::Value, true, false, None, true, false)),
-        );
+        deps.extend(phi.inputs.iter().map(|(_, input)| {
+            (
+                *input,
+                EdgeKind::Value,
+                true,
+                false,
+                None,
+                true,
+                false,
+                Some(0),
+                None,
+            )
+        }));
     }
     for (&write, (write_region, write_atoms, dependencies, aligned_dependencies)) in &writes {
         let mut incoming = BTreeSet::new();
@@ -393,6 +435,8 @@ where
                         Some(read),
                         false,
                         false,
+                        None,
+                        None,
                     ));
                 }
             }
@@ -402,7 +446,17 @@ where
             if !write_region.is_exact()
                 && let Some(&previous) = ssa.uses.get(&Usage::WeakWrite { write, atom })
             {
-                atom_incoming.insert((previous, EdgeKind::Value, true, true, None, true, true));
+                atom_incoming.insert((
+                    previous,
+                    EdgeKind::Value,
+                    true,
+                    true,
+                    None,
+                    true,
+                    true,
+                    Some(0),
+                    None,
+                ));
             }
             for dependency in aligned_dependencies {
                 let Some((read_region, source_atoms)) = read_atoms.get(&dependency.read) else {
@@ -424,10 +478,17 @@ where
                     continue;
                 };
                 if dependency.source.length != dependency.destination.length
+                    || dependency.repetitions == 0
                     || dependency.source.end().is_none()
                     || dependency.source.end() > Some(source_span.length)
                     || dependency.destination.end().is_none()
-                    || dependency.destination.end() > Some(destination_span.length)
+                    || dependency
+                        .destination_stride
+                        .checked_mul(dependency.repetitions.saturating_sub(1))
+                        .and_then(|offset| dependency.destination.end()?.checked_add(offset))
+                        > Some(destination_span.length)
+                    || (dependency.repetitions > 1
+                        && dependency.destination_stride < dependency.destination.length)
                 {
                     return Err(ProcedureError::Model(
                         "aligned dependency does not fit its source and destination",
@@ -452,6 +513,90 @@ where
                     length: dependency.destination.length,
                 };
                 let output_atom = atoms[atom].span;
+                if dependency.repetitions > 1 {
+                    let Some(output_end) = output_atom.end() else {
+                        return Err(ProcedureError::Model("output atom overflows usize"));
+                    };
+                    for &source_atom in source_atoms {
+                        let Some(source_overlap) =
+                            atoms[source_atom].span.intersection(transfer_source)
+                        else {
+                            continue;
+                        };
+                        let Some(relative) =
+                            source_overlap.start.checked_sub(transfer_source.start)
+                        else {
+                            continue;
+                        };
+                        let Some(phase_start) = transfer_destination.start.checked_add(relative)
+                        else {
+                            return Err(ProcedureError::Model("periodic transfer overflows usize"));
+                        };
+                        let phase = Span {
+                            start: phase_start,
+                            length: source_overlap.length,
+                        };
+                        let Some(phase_end) = phase.end() else {
+                            return Err(ProcedureError::Model("periodic transfer overflows usize"));
+                        };
+                        let first = if output_atom.start < phase_end {
+                            0
+                        } else {
+                            output_atom
+                                .start
+                                .checked_sub(phase_end)
+                                .map(|distance| distance / dependency.destination_stride + 1)
+                                .unwrap_or(0)
+                        };
+                        let end = if output_end <= phase.start {
+                            0
+                        } else {
+                            output_end
+                                .checked_sub(phase.start)
+                                .and_then(|distance| {
+                                    distance.checked_add(dependency.destination_stride - 1)
+                                })
+                                .map(|distance| distance / dependency.destination_stride)
+                                .unwrap_or(dependency.repetitions)
+                        }
+                        .min(dependency.repetitions);
+                        if first >= end {
+                            continue;
+                        }
+                        let Some(first_start) = first
+                            .checked_mul(dependency.destination_stride)
+                            .and_then(|offset| phase.start.checked_add(offset))
+                        else {
+                            return Err(ProcedureError::Model("periodic transfer overflows usize"));
+                        };
+                        let projection = PeriodicProjection {
+                            source: source_overlap,
+                            output: Span {
+                                start: first_start,
+                                length: phase.length,
+                            },
+                            repetitions: end - first,
+                            destination_stride: dependency.destination_stride,
+                        };
+                        if let Some(&version) = ssa.uses.get(&Usage::Read {
+                            read: dependency.read,
+                            atom: source_atom,
+                        }) {
+                            atom_incoming.insert((
+                                version,
+                                dependency.kind,
+                                true,
+                                false,
+                                Some(dependency.read),
+                                false,
+                                false,
+                                None,
+                                Some(projection),
+                            ));
+                        }
+                    }
+                    continue;
+                }
                 let Some(overlap) = output_atom.intersection(transfer_destination) else {
                     continue;
                 };
@@ -483,6 +628,8 @@ where
                             Some(dependency.read),
                             false,
                             false,
+                            Some(overlap.start as i128 - mapped.start as i128),
+                            None,
                         ));
                     }
                 }
@@ -498,15 +645,31 @@ where
     }
 
     let mut dependencies = BTreeSet::new();
+    let mut periodic_dependencies = BTreeSet::new();
     let mut uncertain_input_dependencies = BTreeSet::new();
     for &output_atom in &written_atoms {
         let Some(&output_version) = ssa.uses.get(&Usage::Exit { atom: output_atom }) else {
             continue;
         };
-        let mut stack = vec![(output_version, EdgeKind::Value, true, false, None)];
+        let mut stack = vec![(
+            output_version,
+            EdgeKind::Value,
+            true,
+            false,
+            None,
+            Some(0i128),
+            None,
+        )];
         let mut visited = BTreeSet::new();
-        while let Some((version, path_kind, path_aligned, path_uncertain_input, active_read)) =
-            stack.pop()
+        while let Some((
+            version,
+            path_kind,
+            path_aligned,
+            path_uncertain_input,
+            active_read,
+            path_translation,
+            path_periodic_output,
+        )) = stack.pop()
         {
             if !visited.insert(DepVersion::<O> {
                 version,
@@ -514,20 +677,35 @@ where
                 aligned: path_aligned,
                 uncertain_input: path_uncertain_input,
                 active_read,
+                translation: path_translation,
+                periodic_output: path_periodic_output,
                 marker: std::marker::PhantomData,
             }) {
                 continue;
             }
             if let Version::Entry(input_atom) = version {
-                let dependency = Dependency {
-                    input: atom_region(atoms[input_atom]),
-                    output: atom_region(atoms[output_atom]),
-                    kind: path_kind,
-                    aligned: path_aligned,
-                };
-                dependencies.insert(dependency);
-                if path_uncertain_input {
-                    uncertain_input_dependencies.insert((dependency.input, dependency.output));
+                let input = atom_region(atoms[input_atom]);
+                if let Some(periodic) = path_periodic_output {
+                    periodic_dependencies.insert(PeriodicDependency {
+                        input,
+                        output_object: atoms[output_atom].object,
+                        output: periodic.output,
+                        repetitions: periodic.repetitions,
+                        destination_stride: periodic.destination_stride,
+                        kind: path_kind,
+                        aligned: path_aligned,
+                    });
+                } else {
+                    let dependency = Dependency {
+                        input,
+                        output: atom_region(atoms[output_atom]),
+                        kind: path_kind,
+                        aligned: path_aligned,
+                    };
+                    dependencies.insert(dependency);
+                    if path_uncertain_input {
+                        uncertain_input_dependencies.insert((dependency.input, dependency.output));
+                    }
                 }
                 continue;
             }
@@ -544,6 +722,8 @@ where
                     source_read,
                     preserve_active_read,
                     weak_previous,
+                    translation,
+                    periodic_output,
                 ) in inputs
                 {
                     if weak_previous {
@@ -557,16 +737,132 @@ where
                             continue;
                         }
                     }
+                    let mut next_aligned = path_aligned && aligned;
+                    let (next_translation, next_periodic_output) = if let Some(periodic) =
+                        periodic_output
+                    {
+                        if let Some(outer) = path_periodic_output {
+                            let flattens_with_outer = periodic
+                                .destination_stride
+                                .checked_mul(periodic.repetitions)
+                                == Some(outer.destination_stride);
+                            let Some(relative) =
+                                periodic.output.start.checked_sub(outer.source.start)
+                            else {
+                                continue;
+                            };
+                            if flattens_with_outer {
+                                let Some(start) = outer.output.start.checked_add(relative) else {
+                                    continue;
+                                };
+                                let Some(repetitions) =
+                                    periodic.repetitions.checked_mul(outer.repetitions)
+                                else {
+                                    continue;
+                                };
+                                (
+                                    None,
+                                    Some(PeriodicProjection {
+                                        source: periodic.source,
+                                        output: Span {
+                                            start,
+                                            length: periodic.output.length,
+                                        },
+                                        repetitions,
+                                        destination_stride: periodic.destination_stride,
+                                    }),
+                                )
+                            } else {
+                                // Keep a genuinely two-dimensional set
+                                // exact by retaining one inner periodic
+                                // segment per outer copy. Regular nested
+                                // repeats tile and take the constant-size
+                                // flattening path above; this fallback has
+                                // no arbitrary expansion guard.
+                                for copy in 0..outer.repetitions {
+                                    let Some(start) = copy
+                                        .checked_mul(outer.destination_stride)
+                                        .and_then(|copy_offset| {
+                                            outer
+                                                .output
+                                                .start
+                                                .checked_add(relative)?
+                                                .checked_add(copy_offset)
+                                        })
+                                    else {
+                                        continue;
+                                    };
+                                    stack.push((
+                                        input,
+                                        combine_edge_kinds(path_kind, kind),
+                                        next_aligned,
+                                        path_uncertain_input || uncertain_input,
+                                        if preserve_active_read {
+                                            active_read
+                                        } else {
+                                            source_read
+                                        },
+                                        None,
+                                        Some(PeriodicProjection {
+                                            source: periodic.source,
+                                            output: Span {
+                                                start,
+                                                length: periodic.output.length,
+                                            },
+                                            repetitions: periodic.repetitions,
+                                            destination_stride: periodic.destination_stride,
+                                        }),
+                                    ));
+                                }
+                                continue;
+                            }
+                        } else if let Some(offset) = path_translation {
+                            let shifted = if offset >= 0 {
+                                periodic.output.start.checked_add(offset as usize)
+                            } else {
+                                periodic.output.start.checked_sub((-offset) as usize)
+                            };
+                            let Some(start) = shifted else {
+                                continue;
+                            };
+                            (
+                                None,
+                                Some(PeriodicProjection {
+                                    source: periodic.source,
+                                    output: Span {
+                                        start,
+                                        length: periodic.output.length,
+                                    },
+                                    repetitions: periodic.repetitions,
+                                    destination_stride: periodic.destination_stride,
+                                }),
+                            )
+                        } else {
+                            next_aligned = false;
+                            (None, None)
+                        }
+                    } else if path_periodic_output.is_some() {
+                        (None, path_periodic_output)
+                    } else {
+                        (
+                            path_translation.and_then(|path| {
+                                translation.and_then(|edge| path.checked_add(edge))
+                            }),
+                            None,
+                        )
+                    };
                     stack.push((
                         input,
                         combine_edge_kinds(path_kind, kind),
-                        path_aligned && aligned,
+                        next_aligned,
                         path_uncertain_input || uncertain_input,
                         if preserve_active_read {
                             active_read
                         } else {
                             source_read
                         },
+                        next_translation,
+                        next_periodic_output,
                     ));
                 }
             }
@@ -591,6 +887,7 @@ where
                 aligned,
             })
             .collect(),
+        periodic_dependencies: periodic_dependencies.into_iter().collect(),
         outputs: written_atoms
             .iter()
             .copied()
@@ -717,6 +1014,8 @@ fn build_atoms<O: Copy + Ord>(
         source_span: Span,
         destination_object: O,
         destination_span: Span,
+        repetitions: usize,
+        destination_stride: usize,
     }
 
     let mut transfers = Vec::<Transfer<O>>::new();
@@ -745,10 +1044,17 @@ fn build_atoms<O: Copy + Ord>(
                 continue;
             };
             if dependency.source.length != dependency.destination.length
+                || dependency.repetitions == 0
                 || dependency.source.end().is_none()
                 || dependency.source.end() > Some(source_span.length)
                 || dependency.destination.end().is_none()
-                || dependency.destination.end() > Some(destination_span.length)
+                || dependency
+                    .destination_stride
+                    .checked_mul(dependency.repetitions.saturating_sub(1))
+                    .and_then(|offset| dependency.destination.end()?.checked_add(offset))
+                    > Some(destination_span.length)
+                || (dependency.repetitions > 1
+                    && dependency.destination_stride < dependency.destination.length)
             {
                 return Err(ProcedureError::Model(
                     "aligned dependency regions have different lengths",
@@ -776,6 +1082,8 @@ fn build_atoms<O: Copy + Ord>(
                 source_span: mapped_source,
                 destination_object,
                 destination_span: mapped_destination,
+                repetitions: dependency.repetitions,
+                destination_stride: dependency.destination_stride,
             });
         }
     }
@@ -868,7 +1176,11 @@ fn build_atoms<O: Copy + Ord>(
                 index,
                 from_source: false,
                 start: transfer.destination_span.start,
-                end: transfer.destination_span.end().unwrap_or(usize::MAX),
+                end: transfer
+                    .destination_stride
+                    .checked_mul(transfer.repetitions.saturating_sub(1))
+                    .and_then(|offset| transfer.destination_span.end()?.checked_add(offset))
+                    .unwrap_or(usize::MAX),
             });
     }
     let transfer_index = transfer_refs
@@ -885,6 +1197,57 @@ fn build_atoms<O: Copy + Ord>(
         };
         for transfer_ref in object_transfers.containing(point) {
             let transfer = transfers[transfer_ref.index];
+            if transfer.repetitions > 1 {
+                if transfer_ref.from_source {
+                    // Destination copy boundaries stay symbolic. Observed
+                    // destination boundaries are projected back below.
+                    continue;
+                }
+                let Some(relative) = point.checked_sub(transfer.destination_span.start) else {
+                    continue;
+                };
+                let copy = relative / transfer.destination_stride;
+                for candidate in [copy.checked_sub(1), Some(copy)]
+                    .into_iter()
+                    .flatten()
+                    .filter(|copy| *copy < transfer.repetitions)
+                {
+                    let Some(copy_start) = candidate
+                        .checked_mul(transfer.destination_stride)
+                        .and_then(|offset| transfer.destination_span.start.checked_add(offset))
+                    else {
+                        continue;
+                    };
+                    let Some(copy_end) = copy_start.checked_add(transfer.destination_span.length)
+                    else {
+                        continue;
+                    };
+                    if point < copy_start || point > copy_end {
+                        continue;
+                    }
+                    let Some(mapped) = point
+                        .checked_sub(copy_start)
+                        .and_then(|offset| transfer.source_span.start.checked_add(offset))
+                    else {
+                        return Err(ProcedureError::Model("aligned transfer overflows usize"));
+                    };
+                    let inserted = match endpoints
+                        .entry(transfer.source_object)
+                        .or_default()
+                        .entry(mapped)
+                    {
+                        std::collections::btree_map::Entry::Vacant(entry) => {
+                            entry.insert(0);
+                            true
+                        }
+                        std::collections::btree_map::Entry::Occupied(_) => false,
+                    };
+                    if inserted {
+                        pending.push_back((transfer.source_object, mapped));
+                    }
+                }
+                continue;
+            }
             let (from, to_object, to) = if transfer_ref.from_source {
                 (
                     transfer.source_span,
@@ -1108,6 +1471,8 @@ mod tests {
                             start: 0,
                             length: 1 << 30,
                         },
+                        repetitions: 1,
+                        destination_stride: 0,
                     }],
                 },
                 Event::Read {
@@ -1143,6 +1508,91 @@ mod tests {
                 aligned: false,
             }]
         );
+    }
+
+    #[test]
+    fn periodic_copy_keeps_summary_size_and_phase_independent_of_copy_count() {
+        // Why this case exists: a replicated aligned transfer is succinct in
+        // RTL but used to create one transfer and atom boundary per copy. A
+        // distant sparse read must project back to the matching source phase
+        // while the summary remains constant-sized at 200,000 copies.
+        let copies = 200_000usize;
+        let procedure = Procedure {
+            entry: 0,
+            exit: 0,
+            successors: vec![vec![]],
+            events: vec![vec![
+                Event::Read {
+                    id: 0,
+                    region: exact(1, 0, 2),
+                },
+                Event::Write {
+                    id: 0,
+                    region: exact(2, 0, copies * 2),
+                    dependencies: vec![],
+                    aligned_dependencies: vec![AlignedDependency {
+                        read: 0,
+                        kind: EdgeKind::Value,
+                        source: Span {
+                            start: 0,
+                            length: 2,
+                        },
+                        destination: Span {
+                            start: 0,
+                            length: 2,
+                        },
+                        repetitions: copies,
+                        destination_stride: 2,
+                    }],
+                },
+                Event::Read {
+                    id: 1,
+                    region: exact(2, 123_456 * 2, 1),
+                },
+                Event::Write {
+                    id: 1,
+                    region: exact(3, 0, 1),
+                    dependencies: vec![(1, EdgeKind::Value)],
+                    aligned_dependencies: vec![],
+                },
+            ]],
+            object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
+            incomplete: BTreeSet::new(),
+        };
+
+        let summary = analyze(&procedure).unwrap();
+        assert!(summary.atom_count < 16, "{summary:#?}");
+        assert!(summary.periodic_dependencies.len() < 8, "{summary:#?}");
+        for bit in 0..2 {
+            let phase = summary
+                .periodic_dependencies
+                .iter()
+                .filter(|dependency| {
+                    dependency.input == exact(1, bit, 1) && dependency.output_object == 2
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                phase
+                    .iter()
+                    .map(|dependency| dependency.repetitions)
+                    .sum::<usize>(),
+                copies,
+                "{summary:#?}"
+            );
+            assert!(phase.iter().all(|dependency| {
+                dependency.output.length == 1
+                    && dependency.output.start % 2 == bit
+                    && dependency.destination_stride == 2
+            }));
+        }
+        let final_inputs = summary
+            .dependencies
+            .iter()
+            .filter(|dependency| dependency.output == exact(3, 0, 1))
+            .map(|dependency| dependency.input)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(final_inputs, [exact(1, 0, 1)].into());
     }
 
     #[test]
