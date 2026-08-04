@@ -65,6 +65,10 @@ pub struct Dependency<O> {
     pub input: Region<O>,
     pub output: Region<O>,
     pub kind: EdgeKind,
+    /// Every step from input to output preserves bit position. Call adapters
+    /// may safely project a requested output subspan back to the same relative
+    /// input subspan only when this is true.
+    pub aligned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +143,7 @@ enum Usage {
 struct DepVersion<O> {
     version: Version<usize, Definition>,
     kind: EdgeKind,
+    aligned: bool,
     marker: std::marker::PhantomData<O>,
 }
 
@@ -250,7 +255,7 @@ where
     let definitions = writes.values().map(|(_, atoms, _, _)| atoms.len()).sum();
     let mut version_deps = BTreeMap::<
         Version<usize, Definition>,
-        BTreeSet<(Version<usize, Definition>, EdgeKind)>,
+        BTreeSet<(Version<usize, Definition>, EdgeKind, bool)>,
     >::new();
 
     for phi in &ssa.phis {
@@ -258,7 +263,7 @@ where
         deps.extend(
             phi.inputs
                 .iter()
-                .map(|(_, input)| (*input, EdgeKind::Value)),
+                .map(|(_, input)| (*input, EdgeKind::Value, true)),
         );
     }
     for (&write, (write_region, write_atoms, dependencies, aligned_dependencies)) in &writes {
@@ -271,7 +276,7 @@ where
             };
             for &atom in atoms {
                 if let Some(&version) = ssa.uses.get(&Usage::Read { read, atom }) {
-                    incoming.insert((version, kind));
+                    incoming.insert((version, kind, false));
                 }
             }
         }
@@ -348,7 +353,7 @@ where
                             atom: source_atom,
                         })
                     {
-                        atom_incoming.insert((version, dependency.kind));
+                        atom_incoming.insert((version, dependency.kind, true));
                     }
                 }
             }
@@ -367,12 +372,13 @@ where
         let Some(&output_version) = ssa.uses.get(&Usage::Exit { atom: output_atom }) else {
             continue;
         };
-        let mut stack = vec![(output_version, EdgeKind::Value)];
+        let mut stack = vec![(output_version, EdgeKind::Value, true)];
         let mut visited = BTreeSet::new();
-        while let Some((version, path_kind)) = stack.pop() {
+        while let Some((version, path_kind, path_aligned)) = stack.pop() {
             if !visited.insert(DepVersion::<O> {
                 version,
                 kind: path_kind,
+                aligned: path_aligned,
                 marker: std::marker::PhantomData,
             }) {
                 continue;
@@ -383,15 +389,18 @@ where
                         input: atom_region(atoms[input_atom]),
                         output: atom_region(atoms[output_atom]),
                         kind: path_kind,
+                        aligned: path_aligned,
                     });
                 }
                 Version::Definition { .. } | Version::Phi { .. } => {
                     if let Some(inputs) = version_deps.get(&version) {
-                        stack.extend(
-                            inputs
-                                .iter()
-                                .map(|&(input, kind)| (input, combine_edge_kinds(path_kind, kind))),
-                        );
+                        stack.extend(inputs.iter().map(|&(input, kind, aligned)| {
+                            (
+                                input,
+                                combine_edge_kinds(path_kind, kind),
+                                path_aligned && aligned,
+                            )
+                        }));
                     }
                 }
             }
@@ -750,6 +759,7 @@ mod tests {
                 input: exact(1, 0, 1),
                 output: exact(1, 0, 1),
                 kind: EdgeKind::Value,
+                aligned: true,
             }]
         );
         assert_eq!(summary.phi_count, 1);
@@ -838,6 +848,7 @@ mod tests {
                 input: exact(1, 7, 1),
                 output: exact(3, 0, 1),
                 kind: EdgeKind::Value,
+                aligned: false,
             }]
         );
     }
@@ -880,6 +891,7 @@ mod tests {
                 input: exact(2, 0, 1),
                 output: exact(2, 0, 1),
                 kind: EdgeKind::Value,
+                aligned: false,
             }]
         );
     }
@@ -944,6 +956,7 @@ mod tests {
                 input: exact(1, 0, 8),
                 output: exact(1, 0, 8),
                 kind: EdgeKind::Value,
+                aligned: false,
             }]
         );
     }

@@ -10,7 +10,7 @@ use crate::ir::{
 };
 use veryl_causal::graph::{EdgeKind, IncompleteReason};
 use veryl_causal::procedure::{
-    self, AlignedDependency, Dependency, Event, Procedure, ProcedureError, ProcedureSummary,
+    self, AlignedDependency, Event, Procedure, ProcedureError, ProcedureSummary,
 };
 use veryl_causal::region::{Region, Span};
 
@@ -145,7 +145,12 @@ impl Builder {
             Statement::Assign(assign) => {
                 let mut dependencies = self.read_expression(block, &assign.expr, EdgeKind::Value);
                 let aligned_by_destination = self
-                    .aligned_assignment_dependencies(&assign.expr, &assign.dst, &mut dependencies)
+                    .aligned_assignment_dependencies(
+                        block,
+                        &assign.expr,
+                        &assign.dst,
+                        &mut dependencies,
+                    )
                     .unwrap_or_else(|| vec![Vec::new(); assign.dst.len()]);
                 dependencies.extend_from_slice(controls);
                 for (destination, aligned_dependencies) in
@@ -482,29 +487,22 @@ impl Builder {
                 .extend(summary.incomplete.iter().copied());
         }
 
-        let mut sources_by_output = BTreeMap::<VarId, Vec<Dependency<VarId>>>::new();
+        let formal_ids = function_body
+            .arg_map
+            .values()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let mut dependencies_by_output = BTreeMap::<Region<VarId>, Vec<(usize, EdgeKind)>>::new();
         for dependency in &summary.dependencies {
-            let Region::Exact { object: output, .. } = dependency.output else {
-                continue;
-            };
-            sources_by_output
-                .entry(output)
-                .or_default()
-                .push(*dependency);
-        }
-
-        let mut dependencies_by_output = BTreeMap::<VarId, Vec<(usize, EdgeKind)>>::new();
-        for (&output, dependencies) in &sources_by_output {
             let mut mapped = Vec::new();
-            for dependency in dependencies {
-                let Region::Exact { object: formal, .. } = dependency.input else {
-                    continue;
-                };
-                let Some((actual_expression, fallback_reads)) = actual_inputs.get(&formal) else {
-                    self.model_error
-                        .get_or_insert("function dependency refers to an unmapped input argument");
-                    continue;
-                };
+            let input_object = match dependency.input {
+                Region::Exact { object, .. } | Region::UnknownObject(object) => Some(object),
+                Region::UnknownAll => None,
+            };
+            if let Some(formal) =
+                input_object.and_then(|object| actual_inputs.get_key_value(&object))
+            {
+                let (_, (actual_expression, fallback_reads)) = formal;
                 if let Some(actual_regions) =
                     self.map_formal_region_to_actual(actual_expression, dependency.input)
                 {
@@ -516,10 +514,57 @@ impl Builder {
                         (read, combine_edge_kinds(dependency.kind, actual_kind))
                     }));
                 }
+            } else if input_object.is_some_and(|object| {
+                self.context.variables.get(&object).is_some_and(|variable| {
+                    variable.affiliation == crate::symbol::Affiliation::Module
+                })
+            }) {
+                mapped.push((self.push_read(block, dependency.input), dependency.kind));
+            } else if input_object.is_some_and(|object| formal_ids.contains(&object)) {
+                self.model_error
+                    .get_or_insert("function dependency refers to an unmapped input argument");
+                continue;
+            } else {
+                self.procedure
+                    .incomplete
+                    .insert(IncompleteReason::MalformedModel);
+                mapped.push((self.unknown_read(block), EdgeKind::Unknown));
             }
             mapped.sort_unstable();
             mapped.dedup();
-            dependencies_by_output.insert(output, mapped);
+            dependencies_by_output
+                .entry(dependency.output)
+                .or_default()
+                .extend(mapped);
+        }
+        for dependencies in dependencies_by_output.values_mut() {
+            dependencies.sort_unstable();
+            dependencies.dedup();
+        }
+
+        for (&output, dependencies) in &dependencies_by_output {
+            let output_object = match output {
+                Region::Exact { object, .. } | Region::UnknownObject(object) => object,
+                Region::UnknownAll => continue,
+            };
+            let is_module_capture = self
+                .context
+                .variables
+                .get(&output_object)
+                .is_some_and(|variable| variable.affiliation == crate::symbol::Affiliation::Module);
+            if !is_module_capture {
+                continue;
+            }
+            let mut dependencies = dependencies.clone();
+            dependencies.extend_from_slice(controls);
+            let id = self.next_write;
+            self.next_write += 1;
+            self.procedure.events[block].push(Event::Write {
+                id,
+                region: output,
+                dependencies,
+                aligned_dependencies: Vec::new(),
+            });
         }
 
         for (path, outputs) in &call.outputs {
@@ -529,9 +574,19 @@ impl Builder {
                 continue;
             };
             let mut dependencies = dependencies_by_output
-                .get(&formal)
-                .cloned()
-                .unwrap_or_default();
+                .iter()
+                .filter_map(|(output, dependencies)| match output {
+                    Region::Exact { object, .. } | Region::UnknownObject(object)
+                        if *object == formal =>
+                    {
+                        Some(dependencies.iter().copied())
+                    }
+                    _ => None,
+                })
+                .flatten()
+                .collect::<Vec<_>>();
+            dependencies.sort_unstable();
+            dependencies.dedup();
             dependencies.extend_from_slice(controls);
             for destination in outputs {
                 self.write_destination(block, destination, dependencies.clone(), Vec::new());
@@ -539,7 +594,21 @@ impl Builder {
         }
 
         if let Some(ret) = function_body.ret {
-            dependencies_by_output.remove(&ret).unwrap_or_default()
+            let mut dependencies = dependencies_by_output
+                .into_iter()
+                .filter_map(|(output, dependencies)| match output {
+                    Region::Exact { object, .. } | Region::UnknownObject(object)
+                        if object == ret =>
+                    {
+                        Some(dependencies)
+                    }
+                    _ => None,
+                })
+                .flatten()
+                .collect::<Vec<_>>();
+            dependencies.sort_unstable();
+            dependencies.dedup();
+            dependencies
         } else {
             Vec::new()
         }
@@ -697,17 +766,38 @@ impl Builder {
             else {
                 continue;
             };
-            if output != ret || output_span.intersection(requested).is_none() {
+            let Some(output_overlap) = output_span.intersection(requested) else {
+                continue;
+            };
+            if output != ret {
                 continue;
             }
             if dependency.kind == EdgeKind::Unknown {
                 continue;
             }
-            let Region::Exact { object: input, .. } = dependency.input else {
+            if !dependency.aligned {
+                return None;
+            }
+            let Region::Exact {
+                object: input,
+                span: input_span,
+            } = dependency.input
+            else {
                 continue;
             };
             let actual = actual_inputs.get(&input)?;
-            mapped.extend(self.map_formal_region_to_actual(actual, dependency.input)?);
+            if input_span.length != output_span.length {
+                return None;
+            }
+            let relative_start = output_overlap.start.checked_sub(output_span.start)?;
+            let formal_region = Region::Exact {
+                object: input,
+                span: Span {
+                    start: input_span.start.checked_add(relative_start)?,
+                    length: output_overlap.length,
+                },
+            };
+            mapped.extend(self.map_formal_region_to_actual(actual, formal_region)?);
         }
         mapped.sort_unstable();
         mapped.dedup();
@@ -854,6 +944,7 @@ impl Builder {
 
     fn aligned_assignment_dependencies(
         &mut self,
+        block: usize,
         expression: &Expression,
         destinations: &[AssignDestination],
         dependencies: &mut Vec<(usize, EdgeKind)>,
@@ -882,6 +973,7 @@ impl Builder {
         let mut dependency_cursor = 0usize;
         let mut aligned = Vec::new();
         self.collect_aligned_expression_dependencies(
+            block,
             expression,
             Span {
                 start: 0,
@@ -922,6 +1014,7 @@ impl Builder {
 
     fn collect_aligned_expression_dependencies(
         &mut self,
+        block: usize,
         expression: &Expression,
         destination: Span,
         dependencies: &[(usize, EdgeKind)],
@@ -960,6 +1053,41 @@ impl Builder {
                     });
                     Some(())
                 }
+                Factor::FunctionCall(call) => {
+                    let regions = self.map_function_return_span_to_actual(
+                        call,
+                        Span {
+                            start: 0,
+                            length: destination.length,
+                        },
+                    )?;
+                    let dependency_count = regions.len();
+                    for region in regions {
+                        let Region::Exact { span, .. } = region else {
+                            return None;
+                        };
+                        if span.length != destination.length {
+                            return None;
+                        }
+                        aligned.push(AlignedDependency {
+                            read: self.push_read(block, region),
+                            kind: EdgeKind::Value,
+                            source: Span {
+                                start: 0,
+                                length: span.length,
+                            },
+                            destination,
+                        });
+                    }
+                    for _ in 0..dependency_count {
+                        let (_, kind) = *dependencies.get(*dependency_cursor)?;
+                        if kind != EdgeKind::Value {
+                            return None;
+                        }
+                        *dependency_cursor += 1;
+                    }
+                    Some(())
+                }
                 _ => None,
             },
             Expression::Concatenation(parts, _) => {
@@ -971,6 +1099,7 @@ impl Builder {
                     let width = part.comptime().r#type.total_width()?;
                     low = low.checked_sub(width)?;
                     self.collect_aligned_expression_dependencies(
+                        block,
                         part,
                         Span {
                             start: low,
@@ -988,6 +1117,7 @@ impl Builder {
                     && operand.comptime().r#type.total_width()? == destination.length =>
             {
                 self.collect_aligned_expression_dependencies(
+                    block,
                     operand,
                     destination,
                     dependencies,
@@ -1001,6 +1131,7 @@ impl Builder {
                     && right.comptime().r#type.total_width()? == destination.length =>
             {
                 self.collect_aligned_expression_dependencies(
+                    block,
                     left,
                     destination,
                     dependencies,
@@ -1008,6 +1139,7 @@ impl Builder {
                     aligned,
                 )?;
                 self.collect_aligned_expression_dependencies(
+                    block,
                     right,
                     destination,
                     dependencies,
@@ -1026,6 +1158,7 @@ impl Builder {
                     .min(destination.length);
                 let mut shifted = Vec::new();
                 self.collect_aligned_expression_dependencies(
+                    block,
                     left,
                     Span {
                         start: 0,

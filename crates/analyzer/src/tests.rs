@@ -9897,7 +9897,6 @@ fn combinational_loop_review_preserves_longest_static_prefix() {
 }
 
 #[test]
-#[ignore = "known bug: function summaries do not preserve module-scope reads"]
 fn combinational_loop_review_keeps_function_global_read() {
     // Why this case exists: IEEE 1800-2023 9.2.2.2.1 includes variables read
     // by a called function in always_comb. A global capture is not a formal
@@ -9922,10 +9921,33 @@ fn combinational_loop_review_keeps_function_global_read() {
         "#,
         true,
     );
+
+    // Why this control exists: a captured read alone is not feedback. Its
+    // source may be driven independently from an input without a return path.
+    assert_comb_loop_for_case(
+        "a captured function read remains feed-forward without a return path",
+        r#"
+        module Top (
+            i: input  logic,
+            o: output logic,
+        ) {
+            var x: logic;
+            function get_x () -> logic {
+                return x;
+            }
+            always_comb {
+                o = get_x();
+            }
+            always_comb {
+                x = i;
+            }
+        }
+        "#,
+        false,
+    );
 }
 
 #[test]
-#[ignore = "known bug: function summaries do not preserve module-scope writes"]
 fn combinational_loop_review_keeps_function_global_write() {
     // Why this case exists: IEEE 1800-2023 9.2.2.2 treats a variable written
     // by a called function as written by the always_comb process. Side effects
@@ -9951,6 +9973,32 @@ fn combinational_loop_review_keeps_function_global_write() {
         }
         "#,
         true,
+    );
+
+    // Why this control exists: a captured function write from an independent
+    // input is a normal feed-forward side effect, not a loop by itself.
+    assert_comb_loop_for_case(
+        "a captured function write remains feed-forward without a return path",
+        r#"
+        module Top (
+            i: input  logic,
+            o: output logic,
+        ) {
+            var x: logic;
+            function set_x (
+                a: input logic,
+            ) {
+                x = a;
+            }
+            always_comb {
+                set_x(i);
+            }
+            always_comb {
+                o = x;
+            }
+        }
+        "#,
+        false,
     );
 }
 
@@ -10028,7 +10076,6 @@ fn combinational_loop_review_drops_unreachable_statements_after_break() {
 }
 
 #[test]
-#[ignore = "known bug: vector function returns lose result-bit correspondence"]
 fn combinational_loop_review_preserves_vector_function_return_bits() {
     // Why this case exists: identity(value)[0] depends only on value[0].
     // Collapsing a vector return to an object-wide dependency invents the
@@ -10051,6 +10098,28 @@ fn combinational_loop_review_preserves_vector_function_return_bits() {
         }
         "#,
         false,
+    );
+
+    // Why this control exists: output bit zero corresponds to input bit zero
+    // through identity. Feeding that same bit back must remain a real loop.
+    assert_comb_loop_for_case(
+        "a vector function return retains same-bit feedback",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            function identity (
+                x: input logic<2>,
+            ) -> logic<2> {
+                return x;
+            }
+            var value: logic<2>;
+            assign o = identity(value);
+            assign value[0] = o[0];
+            assign value[1] = 0;
+        }
+        "#,
+        true,
     );
 }
 

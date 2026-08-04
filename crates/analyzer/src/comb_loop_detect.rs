@@ -362,6 +362,7 @@ fn build_module_graph(
             })
         })
         .collect::<Vec<_>>();
+    partition_regions = propagate_aligned_regions(partition_regions, &procedure_summaries);
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.functions = module.functions.clone();
@@ -457,6 +458,69 @@ fn build_module_graph(
     (graph, incomplete, bit_part)
 }
 
+fn propagate_aligned_regions(
+    regions: Vec<Region<VarId>>,
+    summaries: &[Result<ProcedureSummary<VarId>, veryl_causal::procedure::ProcedureError>],
+) -> Vec<Region<VarId>> {
+    let transfers = summaries
+        .iter()
+        .filter_map(|summary| summary.as_ref().ok())
+        .flat_map(|summary| &summary.dependencies)
+        .filter_map(|dependency| match (dependency.input, dependency.output) {
+            (
+                Region::Exact {
+                    object: input_object,
+                    span: input_span,
+                },
+                Region::Exact {
+                    object: output_object,
+                    span: output_span,
+                },
+            ) if dependency.aligned && input_span.length == output_span.length => {
+                Some(((input_object, input_span), (output_object, output_span)))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut known = regions.into_iter().collect::<BTreeSet<_>>();
+    let mut pending = known
+        .iter()
+        .copied()
+        .collect::<std::collections::VecDeque<_>>();
+    while let Some(region) = pending.pop_front() {
+        let Region::Exact { object, span } = region else {
+            continue;
+        };
+        for &(left, right) in &transfers {
+            for (from, to) in [(left, right), (right, left)] {
+                if object != from.0 {
+                    continue;
+                }
+                let Some(overlap) = span.intersection(from.1) else {
+                    continue;
+                };
+                let Some(offset) = overlap.start.checked_sub(from.1.start) else {
+                    continue;
+                };
+                let Some(start) = to.1.start.checked_add(offset) else {
+                    continue;
+                };
+                let mapped = Region::Exact {
+                    object: to.0,
+                    span: Span {
+                        start,
+                        length: overlap.length,
+                    },
+                };
+                if known.insert(mapped) {
+                    pending.push_back(mapped);
+                }
+            }
+        }
+    }
+    known.into_iter().collect()
+}
+
 fn add_memory_ssa_edges(
     module: &Module,
     summary: &ProcedureSummary<VarId>,
@@ -472,26 +536,112 @@ fn add_memory_ssa_edges(
         if dependency.kind == EdgeKind::Unknown {
             continue;
         }
-        let sources = region_node_keys(dependency.input, &module.variables, bit_part);
-        let destinations = region_node_keys(
-            sparse_output_region(summary, dependency.output),
-            &module.variables,
-            bit_part,
-        );
-        for source in &sources {
+        let output = sparse_output_region(summary, dependency.output);
+        let pairs = if dependency.aligned {
+            aligned_region_node_pairs(dependency.input, output, &module.variables, bit_part)
+        } else {
+            let sources = region_node_keys(dependency.input, &module.variables, bit_part);
+            let destinations = region_node_keys(output, &module.variables, bit_part);
+            sources
+                .into_iter()
+                .flat_map(|source| {
+                    destinations
+                        .iter()
+                        .copied()
+                        .map(move |destination| (source, destination))
+                })
+                .collect()
+        };
+        for (source, destination) in pairs {
             if !is_module_scope_var(source.0, &module.variables) {
                 continue;
             }
-            for destination in &destinations {
-                if !is_module_scope_var(destination.0, &module.variables) {
-                    continue;
-                }
-                let source = ensure_node(graph, node_map, *source);
-                let destination = ensure_node(graph, node_map, *destination);
-                graph.add_edge(source, destination, ());
+            if !is_module_scope_var(destination.0, &module.variables) {
+                continue;
             }
+            let source = ensure_node(graph, node_map, source);
+            let destination = ensure_node(graph, node_map, destination);
+            graph.add_edge(source, destination, ());
         }
     }
+}
+
+fn aligned_region_node_pairs(
+    input: Region<VarId>,
+    output: Region<VarId>,
+    variables: &HashMap<VarId, Variable>,
+    bit_part: &BitPartition,
+) -> Vec<(NodeKey, NodeKey)> {
+    let (
+        Region::Exact {
+            object: input_object,
+            span: input_span,
+        },
+        Region::Exact {
+            object: output_object,
+            span: output_span,
+        },
+    ) = (input, output)
+    else {
+        let sources = region_node_keys(input, variables, bit_part);
+        let destinations = region_node_keys(output, variables, bit_part);
+        return sources
+            .into_iter()
+            .flat_map(|source| {
+                destinations
+                    .iter()
+                    .copied()
+                    .map(move |destination| (source, destination))
+            })
+            .collect();
+    };
+    if input_span.length != output_span.length {
+        return Vec::new();
+    }
+    let Some(input_width) = variables.get(&input_object).and_then(Variable::total_width) else {
+        return Vec::new();
+    };
+    let mut pairs = BTreeSet::new();
+    for source in region_node_keys(input, variables, bit_part) {
+        let Some(mask) = bit_part.ranges_of((source.0, source.1)).get(source.2) else {
+            continue;
+        };
+        for local in mask_spans(mask, input_width) {
+            let Some(global_start) = source
+                .1
+                .checked_mul(input_width)
+                .and_then(|base| base.checked_add(local.start))
+            else {
+                continue;
+            };
+            let Some(overlap) = (Span {
+                start: global_start,
+                length: local.length,
+            })
+            .intersection(input_span) else {
+                continue;
+            };
+            let Some(offset) = overlap.start.checked_sub(input_span.start) else {
+                continue;
+            };
+            let Some(mapped_start) = output_span.start.checked_add(offset) else {
+                continue;
+            };
+            let mapped = Region::Exact {
+                object: output_object,
+                span: Span {
+                    start: mapped_start,
+                    length: overlap.length,
+                },
+            };
+            pairs.extend(
+                region_node_keys(mapped, variables, bit_part)
+                    .into_iter()
+                    .map(|destination| (source, destination)),
+            );
+        }
+    }
+    pairs.into_iter().collect()
 }
 
 /// Memory SSA expands an unknown-object write over its sparse atom endpoints
