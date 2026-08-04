@@ -10241,7 +10241,6 @@ fn combinational_loop_review_dynamic_write_is_a_weak_update() {
 }
 
 #[test]
-#[ignore = "known bug: overlapping bounded wildcard regions are disconnected graph nodes"]
 fn combinational_loop_review_aliases_overlapping_unknown_regions() {
     // Why this case exists: mem[i][j] and mem[0][k] can denote the same
     // element when i == 0 and j == k. Region::may_alias already says these

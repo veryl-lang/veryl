@@ -60,16 +60,23 @@ impl BitPartition {
         self.ranges.get(&key).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    fn wildcard_key(&self, region: Region<VarId>) -> Option<NodeKey> {
+    fn wildcard_keys(&self, region: Region<VarId>) -> Vec<NodeKey> {
         self.wildcards
-            .binary_search(&region)
-            .ok()
-            .and_then(|index| match region {
-                Region::UnknownRegion { object, .. } | Region::UnknownObject(object) => {
-                    Some((object, UNKNOWN_REGION_INDEX, index))
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(index, wildcard)| {
+                if !region.may_alias(wildcard) {
+                    return None;
                 }
-                Region::Exact { .. } | Region::UnknownAll => None,
+                match wildcard {
+                    Region::UnknownRegion { object, .. } | Region::UnknownObject(object) => {
+                        Some((object, UNKNOWN_REGION_INDEX, index))
+                    }
+                    Region::Exact { .. } | Region::UnknownAll => None,
+                }
             })
+            .collect()
     }
 }
 
@@ -784,9 +791,7 @@ fn region_node_keys(
             .collect(),
         Region::UnknownAll => return Vec::new(),
     };
-    if let Some(wildcard) = bit_part.wildcard_key(region) {
-        keys.push(wildcard);
-    }
+    keys.extend(bit_part.wildcard_keys(region));
     keys.sort_unstable();
     keys.dedup();
     keys
