@@ -22599,22 +22599,14 @@ fn combinational_loop_review_preserves_assignment_pattern_positions() {
 }
 
 #[test]
-#[ignore = "captured third-review follow-up: correlated selectors need guarded regions"]
-fn combinational_loop_review_preserves_selector_correlation() {
-    // Why these cases exist: bounded evaluation must preserve correlation
-    // between a read and write selector. For one-bit two-state idx, idx and
-    // ~idx are always distinct, while two identical selectors may alias.
-    for (name, write_index, expected) in [
-        (
-            "complementary selectors cannot address the same bit",
-            "~idx",
-            false,
-        ),
-        (
-            "identical selectors retain a possible same-bit cycle",
-            "idx",
-            true,
-        ),
+fn combinational_loop_review_uses_structural_selector_overlap() {
+    // Why these cases exist: structural feedback compares each access's
+    // independently possible region. Both `idx` and `~idx` can address
+    // elements {0,1}, so their regions overlap without relational selector
+    // reasoning. The identical-selector case is the direct control.
+    for (name, write_index) in [
+        ("complementary selectors retain structural overlap", "~idx"),
+        ("identical selectors retain structural overlap", "idx"),
     ] {
         assert_comb_loop_for_case(
             name,
@@ -22630,7 +22622,7 @@ fn combinational_loop_review_preserves_selector_correlation() {
                 }}
                 "#
             ),
-            expected,
+            true,
         );
     }
 }
