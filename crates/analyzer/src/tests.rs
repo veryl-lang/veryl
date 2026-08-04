@@ -10855,6 +10855,146 @@ fn combinational_loop_review_short_circuits_instance_actual_side_effects() {
 }
 
 #[test]
+#[ignore = "captured final-review regression: logical operators evaluate dead RHS effects"]
+fn combinational_loop_review_short_circuits_logical_rhs_side_effects() {
+    let case = |name: &str, expression: &str, expected: bool| {
+        assert_comb_loop_for_case(
+            name,
+            &format!(
+                r#"
+                module Sink (
+                    i: input logic,
+                ) {{}}
+                module Top (
+                    o: output logic,
+                ) {{
+                    var x: logic;
+                    function touch (
+                        a: input logic,
+                    ) -> logic {{
+                        x = a;
+                        return 0;
+                    }}
+                    inst u: Sink (
+                        i: {expression},
+                    );
+                    assign o = x;
+                }}
+                "#
+            ),
+            expected,
+        );
+    };
+
+    // Why these cases exist: IEEE 1800-2023 11.4.7 evaluates the RHS of &&
+    // only when a constant LHS is true. touch(o) in the false-LHS case cannot
+    // write x; the true-LHS control proves the live RHS still forms feedback.
+    case(
+        "a false logical-and LHS suppresses RHS function side effects",
+        "1'b0 && touch(o)",
+        false,
+    );
+    case(
+        "a true logical-and LHS retains RHS function side effects",
+        "1'b1 && touch(o)",
+        true,
+    );
+
+    // Why these cases exist: || evaluates its RHS only when a constant LHS is
+    // false. The true-LHS case is dead, while the false-LHS control is a loop.
+    case(
+        "a true logical-or LHS suppresses RHS function side effects",
+        "1'b1 || touch(o)",
+        false,
+    );
+    case(
+        "a false logical-or LHS retains RHS function side effects",
+        "1'b0 || touch(o)",
+        true,
+    );
+}
+
+#[test]
+#[ignore = "captured final-review regression: nested ternary loses bit positions"]
+fn combinational_loop_review_preserves_nested_vector_ternary_positions() {
+    // Why this case exists: bitwise negation does not change bit positions.
+    // The nested ternary still maps o[0] only from value[0] (or a constant),
+    // so broadcasting value[1] through the outer unary operator is fictitious.
+    assert_comb_loop_for_case(
+        "a nested vector ternary keeps a disjoint bit loop-free",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic<2>,
+        ) {
+            var value: logic<2>;
+            assign o = ~(if sel ? value : 0);
+            assign value[0] = 0;
+            assign value[1] = o[0];
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: feeding o[0] back to its corresponding
+    // value[0] closes a real path through both ternary and negation.
+    assert_comb_loop_for_case(
+        "a nested vector ternary detects its corresponding-bit loop",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic<2>,
+        ) {
+            var value: logic<2>;
+            assign o = ~(if sel ? value : 0);
+            assign value[0] = o[0];
+            assign value[1] = 0;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "captured final-review regression: local right shift loses zero-fill positions"]
+fn combinational_loop_review_preserves_local_right_shift_positions() {
+    // Why this case exists: (value >> 1)[3] is an inserted zero. Returning
+    // that discarded high bit to value[0] cannot form feedback.
+    assert_comb_loop_for_case(
+        "a local logical right shift keeps its inserted bit loop-free",
+        r#"
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<4>;
+            assign o = value >> 1;
+            assign value[0] = o[3];
+            assign value[3:1] = 0;
+        }
+        "#,
+        false,
+    );
+
+    // Why this control exists: o[0] is value[1], so feeding it back to
+    // value[1] is the real shifted-bit SCC.
+    assert_comb_loop_for_case(
+        "a local logical right shift detects its live shifted bit",
+        r#"
+        module Top (
+            o: output logic<4>,
+        ) {
+            var value: logic<4>;
+            assign o = value >> 1;
+            assign value[0] = 0;
+            assign value[1] = o[0];
+            assign value[3:2] = 0;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn combinational_loop_review_preserves_function_actual_shift_positions() {
     // Why this case exists: (value << 1)[0] is an inserted zero. Passing the
     // shifted vector through a function must not broadcast value[1] to o.
