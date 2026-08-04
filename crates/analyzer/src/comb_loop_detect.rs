@@ -624,43 +624,47 @@ fn build_bit_partition(
 fn propagate_periodic_partition_regions(
     regions: &[Region<VarId>],
     transfers: &[PeriodicTransferRegion],
-    periodic_regions: &mut Vec<PeriodicRegion>,
+    periodic_regions: &mut BTreeSet<PeriodicRegion>,
 ) {
-    for transfer in transfers.iter().filter(|transfer| transfer.aligned) {
+    let mut regions_by_object = BTreeMap::<VarId, BTreeSet<Span>>::new();
+    for &region in regions {
+        if let Region::Exact { object, span } = region {
+            regions_by_object.entry(object).or_default().insert(span);
+        }
+    }
+    let transfers = transfers
+        .iter()
+        .filter(|transfer| transfer.aligned)
+        .map(|transfer| (transfer.input, transfer.output.clone()))
+        .collect::<BTreeSet<_>>();
+    for (input, output) in transfers {
         let Region::Exact {
             object: input_object,
             span: input_span,
-        } = transfer.input
+        } = input
         else {
             continue;
         };
-        for &region in regions {
-            let Region::Exact {
-                object,
-                span: region_span,
-            } = region
-            else {
-                continue;
-            };
-            if object != input_object {
-                continue;
-            }
+        let Some(object_regions) = regions_by_object.get(&input_object) else {
+            continue;
+        };
+        for &region_span in object_regions {
             let Some(overlap) = region_span.intersection(input_span) else {
                 continue;
             };
             let Some(offset) = overlap.start.checked_sub(input_span.start) else {
                 continue;
             };
-            let Some(start) = transfer.output.output.start.checked_add(offset) else {
+            let Some(start) = output.output.start.checked_add(offset) else {
                 continue;
             };
-            periodic_regions.push(PeriodicRegion {
-                object: transfer.output.object,
+            periodic_regions.insert(PeriodicRegion {
+                object: output.object,
                 output: Span {
                     start,
                     length: overlap.length,
                 },
-                axes: transfer.output.axes.clone(),
+                axes: output.axes.clone(),
             });
         }
     }
@@ -1007,14 +1011,13 @@ fn build_module_graph(
     let mut periodic_regions = periodic_transfers
         .iter()
         .map(|transfer| transfer.output.clone())
-        .collect::<Vec<_>>();
+        .collect::<BTreeSet<_>>();
     propagate_periodic_partition_regions(
         &partition_regions,
         &periodic_transfers,
         &mut periodic_regions,
     );
-    periodic_regions.sort_unstable();
-    periodic_regions.dedup();
+    let periodic_regions = periodic_regions.into_iter().collect::<Vec<_>>();
     let bit_part = build_bit_partition(module, &partition_regions, &periodic_regions);
 
     let mut graph = CausalGraph::new();
@@ -1643,8 +1646,8 @@ fn periodic_region_node_keys(
 ) -> Vec<NodeKey> {
     let mut keys = bit_part
         .periodic_regions
-        .iter()
-        .position(|candidate| *candidate == periodic)
+        .binary_search(&periodic)
+        .ok()
         .map(|index| vec![(periodic.object, PERIODIC_REGION_INDEX, index)])
         .unwrap_or_default();
     let Some(width) = variables
