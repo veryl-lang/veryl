@@ -8,7 +8,7 @@ references.
 The Veryl analyzer's user-visible acceptance bounds are specified in
 [`crates/analyzer/COMBINATIONAL_LOOP_ANALYSIS.md`](../analyzer/COMBINATIONAL_LOOP_ANALYSIS.md).
 
-The design has three constraints:
+The design has four constraints:
 
 - Region endpoints form the version domain. Analysis cost depends on accesses,
   definitions, phis and CFG edges, not on a signal's declared bit width or an
