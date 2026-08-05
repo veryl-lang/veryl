@@ -1086,7 +1086,8 @@ fn build_module_graph(
     // Build each specialization once before entering Rayon. Procedure tasks
     // then share an immutable summary table instead of racing to initialize
     // the same callee behind a global mutex.
-    let all_function_analyses = crate::comb_memory_ssa::analyze_functions(module, &function_cache);
+    let (all_function_analyses, mut analysis_context) =
+        crate::comb_memory_ssa::analyze_functions(module, &function_cache);
     function_cache.freeze();
     let analyze_declaration = |declaration: &Declaration| match declaration {
         Declaration::Comb(comb) => Some(crate::comb_memory_ssa::analyze(
@@ -1119,7 +1120,20 @@ fn build_module_graph(
         module
             .declarations
             .iter()
-            .filter_map(analyze_declaration)
+            .filter_map(|declaration| match declaration {
+                Declaration::Comb(comb) => Some(crate::comb_memory_ssa::analyze_in_context(
+                    &mut analysis_context,
+                    comb,
+                    &function_cache,
+                )),
+                Declaration::Ff(_)
+                | Declaration::Inst(_)
+                | Declaration::External(_)
+                | Declaration::Initial(_)
+                | Declaration::Final(_)
+                | Declaration::Unsupported(_)
+                | Declaration::Null => None,
+            })
             .collect::<Vec<_>>()
     };
     #[cfg(target_family = "wasm")]
@@ -1162,8 +1176,8 @@ fn build_module_graph(
         instance_observers
             .iter()
             .map(|expression| {
-                crate::comb_memory_ssa::analyze_observer_expression(
-                    module,
+                crate::comb_memory_ssa::analyze_observer_expression_in_context(
+                    &mut analysis_context,
                     expression,
                     &function_cache,
                 )
@@ -1173,7 +1187,11 @@ fn build_module_graph(
 
     #[cfg(target_family = "wasm")]
     procedure_summaries.extend(instance_observers.iter().map(|expression| {
-        crate::comb_memory_ssa::analyze_observer_expression(module, expression, &function_cache)
+        crate::comb_memory_ssa::analyze_observer_expression_in_context(
+            &mut analysis_context,
+            expression,
+            &function_cache,
+        )
     }));
     let function_analyses = if collect_coverage {
         all_function_analyses

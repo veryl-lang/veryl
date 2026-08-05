@@ -519,6 +519,53 @@ where
         && procedure.entry == 0
         && procedure.exit == 0
         && procedure.successors[0].is_empty();
+    // Exact constant writes cannot observe an earlier SSA version and cannot
+    // retain entry state. They still use the normal sparse atom builder so
+    // overlap partitioning and model validation remain identical.
+    if is_linear
+        && procedure.events[0].iter().all(|event| match event {
+            Event::Write {
+                region: Region::Exact { .. },
+                dependencies,
+                aligned_dependencies,
+                ..
+            } => dependencies.is_empty() && aligned_dependencies.is_empty(),
+            Event::SuppressRetentionDiagnostic => true,
+            Event::Read { .. } | Event::Write { .. } => false,
+        })
+    {
+        let (atoms, atoms_by_object) = build_atoms(&procedure.events, &procedure.object_spans)?;
+        let mut writes = BTreeSet::new();
+        let mut outputs = BTreeSet::new();
+        let mut definition_count = 0usize;
+        for event in &procedure.events[0] {
+            let Event::Write { id, region, .. } = event else {
+                continue;
+            };
+            if !writes.insert(*id) {
+                return Err(ProcedureError::Model("duplicate write identity"));
+            }
+            let expanded = expand(*region, &atoms, &atoms_by_object);
+            definition_count += expanded.len();
+            outputs.extend(expanded.into_iter().map(|atom| atom_region(atoms[atom])));
+        }
+        return Ok(ProcedureSummary {
+            dependencies: Vec::new(),
+            periodic_dependencies: Vec::new(),
+            retained_outputs: Vec::new(),
+            outputs: outputs.into_iter().collect(),
+            incomplete: procedure.incomplete.clone(),
+            uncertain_objects: BTreeSet::new(),
+            uncertain_input_regions: BTreeSet::new(),
+            uncertain_input_dependencies: BTreeSet::new(),
+            uncertain_write_objects: BTreeSet::new(),
+            uncertain_write_regions: BTreeSet::new(),
+            unknown_all: false,
+            atom_count: atoms.len(),
+            definition_count,
+            phi_count: 0,
+        });
+    }
     let cfg = if is_linear {
         None
     } else {
@@ -1813,6 +1860,46 @@ mod tests {
         };
         let summary = analyze(&procedure).unwrap();
         assert!(summary.dependencies.is_empty());
+    }
+
+    #[test]
+    fn linear_constant_writes_still_partition_overlapping_outputs() {
+        // Why this case exists: constant-only straight-line procedures take a
+        // reduced analysis path. Overlapping writes must retain the same atom
+        // boundaries and accounting as the general MemorySSA construction.
+        let procedure: Procedure<u8> = Procedure {
+            entry: 0,
+            exit: 0,
+            successors: vec![vec![]],
+            events: vec![vec![
+                Event::Write {
+                    id: 0,
+                    region: exact(1, 0, 8),
+                    dependencies: vec![],
+                    aligned_dependencies: vec![],
+                },
+                Event::Write {
+                    id: 1,
+                    region: exact(1, 4, 8),
+                    dependencies: vec![],
+                    aligned_dependencies: vec![],
+                },
+            ]],
+            object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
+            incomplete: BTreeSet::new(),
+        };
+
+        let summary = analyze(&procedure).unwrap();
+        assert_eq!(
+            summary.outputs,
+            vec![exact(1, 0, 4), exact(1, 4, 4), exact(1, 8, 4)]
+        );
+        assert!(summary.dependencies.is_empty());
+        assert!(summary.retained_outputs.is_empty());
+        assert_eq!(summary.atom_count, 3);
+        assert_eq!(summary.definition_count, 4);
+        assert_eq!(summary.phi_count, 0);
     }
 
     #[test]

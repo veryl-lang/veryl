@@ -125,6 +125,44 @@ pub(crate) fn analyze(
     Ok(builder.finish((*summary).clone()))
 }
 
+#[derive(Default)]
+pub(crate) struct ModuleAnalysisContext {
+    // Why these are returned by each serial analysis: they are immutable
+    // module seed data apart from loop iterators, which lowering restores.
+    // Moving them between builders avoids cloning every variable and
+    // recomputing every declared object span for each small procedure.
+    context: Context,
+    object_spans: BTreeMap<VarId, Span>,
+}
+
+pub(crate) fn analyze_in_context(
+    context: &mut ModuleAnalysisContext,
+    declaration: &CombDeclaration,
+    functions: &FunctionAnalysisCache,
+) -> Result<ProcedureAnalysis, ProcedureError> {
+    let mut builder = Builder::with_context_and_object_spans(
+        std::mem::take(&mut context.context),
+        std::mem::take(&mut context.object_spans),
+        functions.clone(),
+    );
+    let exit = builder
+        .lower_statements(&declaration.statements, 0, &[], None)
+        .unwrap_or(0);
+    builder.procedure.exit = exit;
+    let summary = match functions.procedures.analyze(&builder.procedure) {
+        Ok(summary) => summary,
+        Err(error) => {
+            (context.context, context.object_spans) = builder.into_reusable_context();
+            return Err(error);
+        }
+    };
+    let (analysis, restored_context, restored_spans) =
+        builder.finish_with_context((*summary).clone());
+    context.context = restored_context;
+    context.object_spans = restored_spans;
+    Ok(analysis)
+}
+
 pub(crate) fn analyze_observer_expression(
     module: &Module,
     expression: &Expression,
@@ -137,19 +175,53 @@ pub(crate) fn analyze_observer_expression(
     Ok(builder.finish((*summary).clone()))
 }
 
+pub(crate) fn analyze_observer_expression_in_context(
+    context: &mut ModuleAnalysisContext,
+    expression: &Expression,
+    functions: &FunctionAnalysisCache,
+) -> Result<ProcedureAnalysis, ProcedureError> {
+    let mut builder = Builder::with_context_and_object_spans(
+        std::mem::take(&mut context.context),
+        std::mem::take(&mut context.object_spans),
+        functions.clone(),
+    );
+    builder.lower_observer_expression(0, expression);
+    builder.procedure.exit = 0;
+    let summary = match functions.procedures.analyze(&builder.procedure) {
+        Ok(summary) => summary,
+        Err(error) => {
+            (context.context, context.object_spans) = builder.into_reusable_context();
+            return Err(error);
+        }
+    };
+    let (analysis, restored_context, restored_spans) =
+        builder.finish_with_context((*summary).clone());
+    context.context = restored_context;
+    context.object_spans = restored_spans;
+    Ok(analysis)
+}
+
 pub(crate) fn analyze_functions(
     module: &Module,
     functions: &FunctionAnalysisCache,
-) -> Vec<Arc<ProcedureAnalysis>> {
+) -> (Vec<Arc<ProcedureAnalysis>>, ModuleAnalysisContext) {
     let builder = Builder::new(module, functions.clone());
-    module
+    let analyses = module
         .functions
         .values()
         .flat_map(|function| {
             (0..function.functions.len())
                 .filter_map(|index| builder.cached_function((function.id, index)))
         })
-        .collect()
+        .collect();
+    let (context, object_spans) = builder.into_reusable_context();
+    (
+        analyses,
+        ModuleAnalysisContext {
+            context,
+            object_spans,
+        },
+    )
 }
 
 /// Observer procedures exist only to retain side effects and incomplete
@@ -464,6 +536,14 @@ impl Builder {
                     .map(|length| (id, Span { start: 0, length }))
             })
             .collect();
+        Self::with_context_and_object_spans(context, object_spans, function_cache)
+    }
+
+    fn with_context_and_object_spans(
+        context: Context,
+        object_spans: BTreeMap<VarId, Span>,
+        function_cache: FunctionAnalysisCache,
+    ) -> Self {
         Self {
             context,
             procedure: Procedure {
@@ -696,7 +776,21 @@ impl Builder {
         sites.into_iter().collect()
     }
 
-    fn finish(mut self, mut summary: ProcedureSummary<VarId>) -> ProcedureAnalysis {
+    fn finish(self, summary: ProcedureSummary<VarId>) -> ProcedureAnalysis {
+        self.finish_with_context(summary).0
+    }
+
+    fn into_reusable_context(mut self) -> (Context, BTreeMap<VarId, Span>) {
+        (
+            self.context,
+            std::mem::take(&mut self.procedure.object_spans),
+        )
+    }
+
+    fn finish_with_context(
+        mut self,
+        mut summary: ProcedureSummary<VarId>,
+    ) -> (ProcedureAnalysis, Context, BTreeMap<VarId, Span>) {
         for dependency in &mut summary.dependencies {
             if dependency
                 .origin
@@ -717,11 +811,16 @@ impl Builder {
             .extend(self.retained_coverage_sites(&summary));
         self.coverage_sites.sort_unstable();
         self.coverage_sites.dedup();
-        ProcedureAnalysis {
-            summary,
-            write_tokens: self.write_tokens,
-            coverage_sites: self.coverage_sites,
-        }
+        let object_spans = std::mem::take(&mut self.procedure.object_spans);
+        (
+            ProcedureAnalysis {
+                summary,
+                write_tokens: self.write_tokens,
+                coverage_sites: self.coverage_sites,
+            },
+            self.context,
+            object_spans,
+        )
     }
 
     fn record_write(
