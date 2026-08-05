@@ -10993,6 +10993,77 @@ fn comb_loop_distinguishes_generic_module_specializations() {
 }
 
 #[test]
+fn comb_loop_analyzes_each_instantiated_generic_specialization() {
+    // Why this case exists: seeing one concrete child may suppress the
+    // redundant source-template pass, but it must not suppress a different
+    // concrete specialization. The disabled instance is intentionally first;
+    // the enabled instance still closes a real parent feedback path.
+    assert_comb_loop(
+        "each concrete generic-module specialization receives its own summary",
+        r#"
+        module Child #(
+            param ENABLE: u32 = 0,
+        )(
+            i: input  logic,
+            o: output logic,
+        ) {
+            if ENABLE :g_enabled {
+                assign o = i;
+            } else {
+                assign o = 0;
+            }
+        }
+        module Top (
+            o: output logic<2>,
+        ) {
+            var feedback: logic<2>;
+            var passed  : logic<2>;
+            inst disabled: Child #(
+                ENABLE: 0,
+            )(
+                i: feedback[0],
+                o: passed[0],
+            );
+            inst enabled: Child #(
+                ENABLE: 1,
+            )(
+                i: feedback[1],
+                o: passed[1],
+            );
+            assign feedback = passed;
+            assign o = feedback;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_analyzes_uninstantiated_modules() {
+    // Why this case exists: roots are analyzed first to reuse child summaries,
+    // but an uninstantiated source module is itself a root. Its internal loop
+    // remains an error even when another unrelated root is also present.
+    assert_comb_loop(
+        "an uninstantiated module retains its internal loop diagnostic",
+        r#"
+        module Uninstantiated (
+            x: output logic,
+            y: output logic,
+        ) {
+            assign x = y;
+            assign y = x;
+        }
+        module Top (
+            o: output logic,
+        ) {
+            assign o = 0;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_short_circuits_instance_actual_side_effects() {
     // Why this case exists: IEEE 1800-2023 11.4.11 evaluates only the selected
     // ternary branch. touch(o) is in the constant-dead branch, so it cannot
@@ -13413,10 +13484,11 @@ fn comb_loop_incomplete_effect_does_not_erase_proven_edges() {
 
 #[test]
 fn comb_loop_child_definition_has_one_diagnostic_across_instances() {
-    // Why this case exists: a child graph is checked once as a declaration and
-    // again while each parent specialization requests its causal summary. An
-    // internal loop belongs to the child source definition, so repeated
-    // instantiation must not repeat the same source diagnostic.
+    // Why this case exists: parent-first analysis checks a concrete child and
+    // derives its causal summary in one graph build. Repeated instances must
+    // reuse that result, while the child's port-independent internal loop is
+    // still diagnosed exactly once rather than being lost with the standalone
+    // source-template pass.
     let detailed = analyze_comb_detailed(
         r#"
         module Child (
