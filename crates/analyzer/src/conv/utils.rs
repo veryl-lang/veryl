@@ -3278,6 +3278,7 @@ pub fn get_component(
                 let component: IrResult<ir::Module> = Conv::conv(c, (x, header_only));
                 match component {
                     Ok(mut component) => {
+                        component.specialization = Some(sig.clone());
                         if !c.config.retain_component_body {
                             component.functions.clear();
                             component.declarations.clear();
@@ -3327,6 +3328,7 @@ pub fn get_component(
                 let component: IrResult<ir::Module> = Conv::conv(c, x);
                 match component {
                     Ok(mut component) => {
+                        component.specialization = Some(sig.clone());
                         if !c.config.retain_component_body {
                             component.functions.clear();
                             component.declarations.clear();

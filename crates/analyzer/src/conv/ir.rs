@@ -305,6 +305,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         upper_context.inherit(&mut context);
 
         Ok(ir::Module {
+            specialization: None,
             name: module_declaration.identifier.text(),
             token: module_declaration.identifier.as_ref().into(),
             ports,
@@ -529,6 +530,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
         upper_context.inherit(&mut context);
 
         Ok(ir::Module {
+            specialization: None,
             name: value.identifier.text(),
             token: value.identifier.as_ref().into(),
             ports,

@@ -27,6 +27,39 @@ pub(crate) struct ProcedureAnalysis {
 
 type FunctionKey = (VarId, usize);
 type FunctionSummaries = BTreeMap<FunctionKey, Option<Arc<ProcedureAnalysis>>>;
+type ProcedureSummaries = BTreeMap<Procedure<VarId>, Arc<ProcedureSummary<VarId>>>;
+
+#[derive(Clone, Default)]
+pub(crate) struct ProcedureSummaryCache {
+    entries: Arc<Mutex<ProcedureSummaries>>,
+}
+
+impl ProcedureSummaryCache {
+    fn analyze(
+        &self,
+        procedure: &Procedure<VarId>,
+    ) -> Result<Arc<ProcedureSummary<VarId>>, ProcedureError> {
+        if let Some(summary) = self
+            .entries
+            .lock()
+            .expect("procedure summary cache lock poisoned")
+            .get(procedure)
+            .cloned()
+        {
+            return Ok(summary);
+        }
+
+        let summary = Arc::new(procedure::analyze(procedure)?);
+        let mut entries = self
+            .entries
+            .lock()
+            .expect("procedure summary cache lock poisoned");
+        Ok(entries
+            .entry(procedure.clone())
+            .or_insert_with(|| summary.clone())
+            .clone())
+    }
+}
 
 enum FunctionCacheEntry {
     Building,
@@ -42,9 +75,18 @@ enum PeriodicAssignmentRun {
 pub(crate) struct FunctionAnalysisCache {
     entries: Arc<Mutex<BTreeMap<FunctionKey, FunctionCacheEntry>>>,
     ready: Arc<OnceLock<Arc<FunctionSummaries>>>,
+    procedures: ProcedureSummaryCache,
 }
 
 impl FunctionAnalysisCache {
+    pub(crate) fn new(procedures: ProcedureSummaryCache) -> Self {
+        Self {
+            entries: Arc::default(),
+            ready: Arc::default(),
+            procedures,
+        }
+    }
+
     pub(crate) fn freeze(&self) {
         let entries = self
             .entries
@@ -79,8 +121,8 @@ pub(crate) fn analyze(
         .lower_statements(&declaration.statements, 0, &[], None)
         .unwrap_or(0);
     builder.procedure.exit = exit;
-    let summary = procedure::analyze(&builder.procedure)?;
-    Ok(builder.finish(summary))
+    let summary = functions.procedures.analyze(&builder.procedure)?;
+    Ok(builder.finish((*summary).clone()))
 }
 
 pub(crate) fn analyze_observer_expression(
@@ -91,8 +133,8 @@ pub(crate) fn analyze_observer_expression(
     let mut builder = Builder::new(module, functions.clone());
     builder.lower_observer_expression(0, expression);
     builder.procedure.exit = 0;
-    let summary = procedure::analyze(&builder.procedure)?;
-    Ok(builder.finish(summary))
+    let summary = functions.procedures.analyze(&builder.procedure)?;
+    Ok(builder.finish((*summary).clone()))
 }
 
 pub(crate) fn analyze_functions(
@@ -523,8 +565,12 @@ impl Builder {
             .lower_statements(&body.statements, 0, &[], None)
             .unwrap_or(0);
         nested.procedure.exit = exit;
-        let summary = procedure::analyze(&nested.procedure).ok()?;
-        Some(Arc::new(nested.finish(summary)))
+        let summary = self
+            .function_cache
+            .procedures
+            .analyze(&nested.procedure)
+            .ok()?;
+        Some(Arc::new(nested.finish((*summary).clone())))
     }
 
     fn new_block(&mut self) -> usize {
@@ -2997,5 +3043,43 @@ fn combine_edge_kinds(left: EdgeKind, right: EdgeKind) -> EdgeKind {
         EdgeKind::Address
     } else {
         EdgeKind::Value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identical_procedures_share_their_ir_independent_summary() {
+        // Why this case exists: the same elaborated procedure can appear as a
+        // declaration and again behind an instance boundary. Re-running the
+        // pure causal analysis made large unrolled procedures dominate whole
+        // project analysis even though source diagnostics remain module-local.
+        let object = VarId::default();
+        let procedure = Procedure {
+            entry: 0,
+            exit: 0,
+            successors: vec![vec![]],
+            events: vec![vec![Event::Read {
+                id: 0,
+                region: Region::Exact {
+                    object,
+                    span: Span {
+                        start: 0,
+                        length: 1,
+                    },
+                },
+            }]],
+            object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
+            incomplete: BTreeSet::new(),
+        };
+        let cache = ProcedureSummaryCache::default();
+
+        let first = cache.analyze(&procedure).unwrap();
+        let second = cache.analyze(&procedure).unwrap();
+
+        assert!(Arc::ptr_eq(&first, &second));
     }
 }

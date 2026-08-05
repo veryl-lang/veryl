@@ -5,7 +5,7 @@ use crate::attribute_table;
 use crate::conv::Context;
 use crate::ir::assign_table::{AssignTable, ReferencedEntry};
 use crate::ir::{
-    Declaration, FfTable, Function, Type, VarId, VarIndex, VarKind, VarPath, Variable,
+    Declaration, FfTable, Function, Signature, Type, VarId, VarIndex, VarKind, VarPath, Variable,
 };
 use crate::symbol::ClockDomain;
 use crate::value::ValueBigUint;
@@ -21,6 +21,10 @@ pub type AssignTokens = HashMap<VarId, Vec<TokenRange>>;
 
 #[derive(Clone)]
 pub struct Module {
+    /// Exact elaboration identity. Generic arguments and connected modport
+    /// specializations participate in this key; source-level templates which
+    /// have not been concretely elaborated have no identity.
+    pub(crate) specialization: Option<Signature>,
     pub name: StrId,
     pub token: TokenRange,
     pub ports: HashMap<VarPath, VarId>,

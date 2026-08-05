@@ -27,7 +27,7 @@ pub struct MustAliasCandidate {
 /// A width-preserving positional transfer from a read region to a write
 /// region. Boundaries discovered on either side are propagated to the other;
 /// no per-bit expansion is required.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AlignedDependency {
     pub read: ReadId,
     pub kind: EdgeKind,
@@ -66,7 +66,7 @@ pub struct PeriodicDependency<O> {
     pub origin: Option<WriteId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Event<O> {
     Read {
         id: ReadId,
@@ -88,7 +88,7 @@ pub enum Event<O> {
     SuppressRetentionDiagnostic,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Procedure<O> {
     pub entry: usize,
     pub exit: usize,
@@ -215,6 +215,19 @@ struct Definition {
     atom: usize,
 }
 
+type VersionKey = Version<usize, Definition>;
+type VersionDependency = (
+    VersionKey,
+    EdgeKind,
+    bool,
+    bool,
+    Option<ReadId>,
+    bool,
+    bool,
+    Option<i128>,
+    Option<PeriodicProjection>,
+);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Usage {
     Read {
@@ -252,6 +265,19 @@ struct PeriodicProjection {
     source: Span,
     output: Span,
     axes: Vec<PeriodicAxis>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct ResolvedPath {
+    input_atom: usize,
+    kind: EdgeKind,
+    aligned: bool,
+    uncertain_input: bool,
+    has_active_read: bool,
+    translation: Option<i128>,
+    origin: Option<WriteId>,
+    /// The deepest phi on this path overrides outer coverage annotations.
+    coverage_override: Option<bool>,
 }
 
 fn normalize_periodic_axes(axes: &mut Vec<PeriodicAxis>) -> Option<()> {
@@ -675,20 +701,7 @@ where
         })
         .collect::<BTreeSet<_>>();
     let definitions = writes.values().map(|(_, atoms, _, _)| atoms.len()).sum();
-    let mut version_deps = BTreeMap::<
-        Version<usize, Definition>,
-        BTreeSet<(
-            Version<usize, Definition>,
-            EdgeKind,
-            bool,
-            bool,
-            Option<ReadId>,
-            bool,
-            bool,
-            Option<i128>,
-            Option<PeriodicProjection>,
-        )>,
-    >::new();
+    let mut version_deps = BTreeMap::<VersionKey, BTreeSet<VersionDependency>>::new();
 
     for phi in &ssa.phis {
         let deps = version_deps.entry(phi.version).or_default();
@@ -917,82 +930,133 @@ where
     let mut dependencies = BTreeSet::new();
     let mut periodic_dependencies = BTreeSet::new();
     let mut uncertain_input_dependencies = BTreeSet::new();
-    for &output_atom in &written_atoms {
-        let Some(&output_version) = ssa.uses.get(&Usage::Exit { atom: output_atom }) else {
-            continue;
-        };
-        let mut stack = vec![(
-            output_version,
-            EdgeKind::Value,
-            true,
-            false,
-            None,
-            Some(0i128),
-            None,
-            None,
-            None,
-            true,
-        )];
-        let mut visited = BTreeSet::new();
-        while let Some((
-            version,
-            path_kind,
-            path_aligned,
-            path_uncertain_input,
-            active_read,
-            path_translation,
-            path_periodic_output,
-            path_origin,
-            path_retention_origin,
-            path_retention_coverage_diagnostic,
-        )) = stack.pop()
-        {
-            if !visited.insert(DepVersion::<O> {
+    let output_versions = written_atoms
+        .iter()
+        .filter_map(|&output_atom| {
+            ssa.uses
+                .get(&Usage::Exit { atom: output_atom })
+                .copied()
+                .map(|version| (output_atom, version))
+        })
+        .collect::<Vec<_>>();
+    let roots = output_versions
+        .iter()
+        .map(|(_, version)| *version)
+        .collect::<Vec<_>>();
+    if must_alias.is_empty()
+        && let Some(resolved) =
+            resolve_acyclic_paths(&roots, &version_deps, &suppressed_retention_blocks)
+    {
+        for (output_atom, output_version) in output_versions {
+            let Some(paths) = resolved.get(&output_version) else {
+                continue;
+            };
+            for path in paths {
+                if !path.has_active_read {
+                    retained_outputs.insert(RetainedOutput {
+                        output: atom_region(atoms[output_atom]),
+                        origin: None,
+                        coverage_diagnostic: path.coverage_override.unwrap_or(true),
+                    });
+                    continue;
+                }
+                let dependency = Dependency {
+                    input: atom_region(atoms[path.input_atom]),
+                    output: atom_region(atoms[output_atom]),
+                    kind: path.kind,
+                    aligned: path.aligned,
+                    origin: path.origin,
+                };
+                dependencies.insert(dependency);
+                if path.uncertain_input {
+                    uncertain_input_dependencies.insert((dependency.input, dependency.output));
+                }
+            }
+        }
+    } else {
+        let mut pending = BTreeMap::<DepVersion<O>, BTreeSet<usize>>::new();
+        for (output_atom, output_version) in output_versions {
+            pending
+                .entry(DepVersion::<O> {
+                    version: output_version,
+                    kind: EdgeKind::Value,
+                    aligned: true,
+                    uncertain_input: false,
+                    active_read: None,
+                    translation: Some(0),
+                    periodic_output: None,
+                    origin: None,
+                    retention_origin: None,
+                    retention_coverage_diagnostic: true,
+                    marker: std::marker::PhantomData,
+                })
+                .or_default()
+                .insert(output_atom);
+        }
+
+        // Many output atoms of a wide procedure converge on exactly the same
+        // dependency suffix. Propagate those outputs together instead of walking
+        // the suffix independently for every atom. `visited[state]` records the
+        // output atoms already processed at that state, so each (state, output)
+        // pair follows precisely the same transitions as the per-output DFS while
+        // cycles still reach a finite fixed point.
+        let mut visited = BTreeMap::<DepVersion<O>, BTreeSet<usize>>::new();
+        while let Some((state, pending_outputs)) = pending.pop_first() {
+            let visited_outputs = visited.entry(state.clone()).or_default();
+            let output_atoms = pending_outputs
+                .into_iter()
+                .filter(|output| visited_outputs.insert(*output))
+                .collect::<Vec<_>>();
+            if output_atoms.is_empty() {
+                continue;
+            }
+            let DepVersion {
                 version,
                 kind: path_kind,
                 aligned: path_aligned,
                 uncertain_input: path_uncertain_input,
                 active_read,
                 translation: path_translation,
-                periodic_output: path_periodic_output.clone(),
+                periodic_output: path_periodic_output,
                 origin: path_origin,
                 retention_origin: path_retention_origin,
                 retention_coverage_diagnostic: path_retention_coverage_diagnostic,
-                marker: std::marker::PhantomData,
-            }) {
-                continue;
-            }
+                marker: _,
+            } = state;
             if let Version::Entry(input_atom) = version {
-                if active_read.is_none() {
-                    retained_outputs.insert(RetainedOutput {
-                        output: atom_region(atoms[output_atom]),
-                        origin: path_retention_origin,
-                        coverage_diagnostic: path_retention_coverage_diagnostic,
-                    });
-                    continue;
-                }
-                let input = atom_region(atoms[input_atom]);
-                if let Some(periodic) = path_periodic_output {
-                    periodic_dependencies.insert(PeriodicDependency {
-                        input,
-                        output_object: atoms[output_atom].object,
-                        output: periodic.output,
-                        axes: periodic.axes,
-                        kind: path_kind,
-                        aligned: path_aligned,
-                        origin: path_origin,
-                    });
-                } else {
-                    let dependency = Dependency {
-                        input,
-                        output: atom_region(atoms[output_atom]),
-                        kind: path_kind,
-                        aligned: path_aligned,
-                        origin: path_origin,
-                    };
-                    dependencies.insert(dependency);
-                    if path_uncertain_input {
-                        uncertain_input_dependencies.insert((dependency.input, dependency.output));
+                for output_atom in output_atoms {
+                    if active_read.is_none() {
+                        retained_outputs.insert(RetainedOutput {
+                            output: atom_region(atoms[output_atom]),
+                            origin: path_retention_origin,
+                            coverage_diagnostic: path_retention_coverage_diagnostic,
+                        });
+                        continue;
+                    }
+                    let input = atom_region(atoms[input_atom]);
+                    if let Some(periodic) = &path_periodic_output {
+                        periodic_dependencies.insert(PeriodicDependency {
+                            input,
+                            output_object: atoms[output_atom].object,
+                            output: periodic.output,
+                            axes: periodic.axes.clone(),
+                            kind: path_kind,
+                            aligned: path_aligned,
+                            origin: path_origin,
+                        });
+                    } else {
+                        let dependency = Dependency {
+                            input,
+                            output: atom_region(atoms[output_atom]),
+                            kind: path_kind,
+                            aligned: path_aligned,
+                            origin: path_origin,
+                        };
+                        dependencies.insert(dependency);
+                        if path_uncertain_input {
+                            uncertain_input_dependencies
+                                .insert((dependency.input, dependency.output));
+                        }
                     }
                 }
                 continue;
@@ -1049,11 +1113,19 @@ where
                     } else {
                         path_origin.or(current_write)
                     };
-                    let next_active_read = if preserve_active_read {
+                    let mut next_active_read = if preserve_active_read {
                         active_read
                     } else {
                         source_read
                     };
+                    // Read identity is observable only by a proven dynamic
+                    // read/write must-alias pair. Exact-only procedures can merge
+                    // all causal-read states; retaining every syntactic ReadId
+                    // here otherwise makes reconvergent unrolled arithmetic grow
+                    // a distinct path state for each historical read.
+                    if must_alias.is_empty() {
+                        next_active_read = next_active_read.map(|_| usize::MAX);
+                    }
                     let next_retention_origin = if next_active_read.is_some() {
                         // Once a source read is active, this path is a causal
                         // dependency rather than source-read-free retention.
@@ -1108,23 +1180,26 @@ where
                                 None,
                             )
                         };
-                    stack.push((
-                        input,
-                        combine_edge_kinds(path_kind, kind),
-                        next_aligned,
-                        path_uncertain_input || uncertain_input,
-                        next_active_read,
-                        next_translation,
-                        next_periodic_output,
-                        next_origin,
-                        next_retention_origin,
-                        next_retention_coverage_diagnostic,
-                    ));
+                    pending
+                        .entry(DepVersion::<O> {
+                            version: input,
+                            kind: combine_edge_kinds(path_kind, kind),
+                            aligned: next_aligned,
+                            uncertain_input: path_uncertain_input || uncertain_input,
+                            active_read: next_active_read,
+                            translation: next_translation,
+                            periodic_output: next_periodic_output,
+                            origin: next_origin,
+                            retention_origin: next_retention_origin,
+                            retention_coverage_diagnostic: next_retention_coverage_diagnostic,
+                            marker: std::marker::PhantomData,
+                        })
+                        .or_default()
+                        .extend(output_atoms.iter().copied());
                 }
             }
         }
     }
-
     let mut collapsed_dependencies = BTreeMap::new();
     for dependency in dependencies {
         collapsed_dependencies
@@ -1204,6 +1279,117 @@ fn combine_edge_kinds(outer: EdgeKind, inner: EdgeKind) -> EdgeKind {
     } else {
         EdgeKind::Value
     }
+}
+
+/// Resolve an acyclic exact-write dependency graph once per SSA version.
+///
+/// Weak writes need the caller's active ReadId and periodic transfers need the
+/// caller's positional projection, so those context-sensitive cases use the
+/// general worklist below. Ordinary unrolled RTL has neither: memoizing its
+/// suffixes avoids enumerating every path from every output independently.
+fn resolve_acyclic_paths(
+    roots: &[VersionKey],
+    version_deps: &BTreeMap<VersionKey, BTreeSet<VersionDependency>>,
+    suppressed_retention_blocks: &BTreeSet<usize>,
+) -> Option<BTreeMap<VersionKey, BTreeSet<ResolvedPath>>> {
+    if version_deps
+        .values()
+        .flatten()
+        .any(|(_, _, _, _, _, _, weak_previous, _, periodic)| *weak_previous || periodic.is_some())
+    {
+        return None;
+    }
+
+    let mut reachable = BTreeSet::new();
+    let mut stack = roots.to_vec();
+    while let Some(version) = stack.pop() {
+        if !reachable.insert(version) {
+            continue;
+        }
+        if let Some(inputs) = version_deps.get(&version) {
+            stack.extend(inputs.iter().map(|(input, ..)| *input));
+        }
+    }
+
+    let mut remaining_inputs = BTreeMap::<VersionKey, usize>::new();
+    let mut parents = BTreeMap::<VersionKey, BTreeSet<VersionKey>>::new();
+    for &version in &reachable {
+        let inputs = version_deps
+            .get(&version)
+            .into_iter()
+            .flatten()
+            .map(|(input, ..)| *input)
+            .collect::<BTreeSet<_>>();
+        remaining_inputs.insert(version, inputs.len());
+        for input in inputs {
+            parents.entry(input).or_default().insert(version);
+        }
+    }
+
+    let mut ready = remaining_inputs
+        .iter()
+        .filter_map(|(&version, &count)| (count == 0).then_some(version))
+        .collect::<BTreeSet<_>>();
+    let mut resolved = BTreeMap::<VersionKey, BTreeSet<ResolvedPath>>::new();
+    let mut resolved_count = 0usize;
+    while let Some(version) = ready.pop_first() {
+        let mut paths = BTreeSet::new();
+        if let Version::Entry(input_atom) = version {
+            paths.insert(ResolvedPath {
+                input_atom,
+                kind: EdgeKind::Value,
+                aligned: true,
+                uncertain_input: false,
+                has_active_read: false,
+                translation: Some(0),
+                origin: None,
+                coverage_override: None,
+            });
+        } else if let Some(inputs) = version_deps.get(&version) {
+            let current_write = match version {
+                Version::Definition { definition, .. } => Some(definition.write),
+                Version::Entry(_) | Version::Phi { .. } => None,
+            };
+            let coverage_override = match version {
+                Version::Phi { block, .. } => Some(!suppressed_retention_blocks.contains(&block)),
+                Version::Entry(_) | Version::Definition { .. } => None,
+            };
+            for (input, kind, aligned, uncertain_input, source_read, _, _, translation, _) in inputs
+            {
+                let input_paths = resolved.get(input)?;
+                for input_path in input_paths {
+                    paths.insert(ResolvedPath {
+                        input_atom: input_path.input_atom,
+                        kind: combine_edge_kinds(*kind, input_path.kind),
+                        aligned: *aligned && input_path.aligned,
+                        uncertain_input: *uncertain_input || input_path.uncertain_input,
+                        has_active_read: source_read.is_some() || input_path.has_active_read,
+                        translation: translation.and_then(|outer| {
+                            input_path
+                                .translation
+                                .and_then(|inner| outer.checked_add(inner))
+                        }),
+                        origin: current_write.or(input_path.origin),
+                        coverage_override: input_path.coverage_override.or(coverage_override),
+                    });
+                }
+            }
+        }
+        resolved.insert(version, paths);
+        resolved_count += 1;
+
+        if let Some(version_parents) = parents.get(&version) {
+            for parent in version_parents {
+                let remaining = remaining_inputs.get_mut(parent)?;
+                *remaining = remaining.checked_sub(1)?;
+                if *remaining == 0 {
+                    ready.insert(*parent);
+                }
+            }
+        }
+    }
+
+    (resolved_count == reachable.len()).then_some(resolved)
 }
 
 fn atom_region<O>(atom: Atom<O>) -> Region<O> {
@@ -2422,5 +2608,103 @@ mod tests {
                 .incomplete
                 .contains(&IncompleteReason::DynamicRegion)
         );
+    }
+
+    #[test]
+    fn many_outputs_share_an_acyclic_reconvergent_suffix() {
+        // Why this case exists: unrolled arithmetic produces long diamond
+        // chains whose final value fans out to many output atoms. Walking the
+        // same suffix once per output made analysis scale as outputs * chain.
+        const STAGES: usize = 256;
+        const OUTPUTS: usize = 256;
+
+        let input = 0u16;
+        let temporary = 1u16;
+        let bit = |object| Region::Exact {
+            object,
+            span: Span {
+                start: 0,
+                length: 1,
+            },
+        };
+        let mut successors = vec![Vec::new()];
+        let mut events = vec![vec![
+            Event::Read {
+                id: 0,
+                region: bit(input),
+            },
+            Event::Write {
+                id: 0,
+                region: bit(temporary),
+                dependencies: vec![(0, EdgeKind::Value)],
+                aligned_dependencies: vec![],
+            },
+        ]];
+        let mut current = 0;
+        let mut next_read = 1;
+        let mut next_write = 1;
+        for _ in 0..STAGES {
+            let left = events.len();
+            let right = left + 1;
+            let join = left + 2;
+            successors[current] = vec![left, right];
+            successors.push(vec![join]);
+            successors.push(vec![join]);
+            successors.push(Vec::new());
+            let branch = |read, write| {
+                vec![
+                    Event::Read {
+                        id: read,
+                        region: bit(temporary),
+                    },
+                    Event::Write {
+                        id: write,
+                        region: bit(temporary),
+                        dependencies: vec![(read, EdgeKind::Value)],
+                        aligned_dependencies: vec![],
+                    },
+                ]
+            };
+            events.push(branch(next_read, next_write));
+            next_read += 1;
+            next_write += 1;
+            events.push(branch(next_read, next_write));
+            next_read += 1;
+            next_write += 1;
+            events.push(Vec::new());
+            current = join;
+        }
+
+        events[current].push(Event::Read {
+            id: next_read,
+            region: bit(temporary),
+        });
+        for output in 0..OUTPUTS {
+            events[current].push(Event::Write {
+                id: next_write + output,
+                region: bit((output + 2) as u16),
+                dependencies: vec![(next_read, EdgeKind::Value)],
+                aligned_dependencies: vec![],
+            });
+        }
+
+        let summary = analyze(&Procedure {
+            entry: 0,
+            exit: current,
+            successors,
+            events,
+            object_spans: BTreeMap::new(),
+            must_alias: BTreeSet::new(),
+            incomplete: BTreeSet::new(),
+        })
+        .unwrap();
+
+        for output in 0..OUTPUTS {
+            assert!(summary.dependencies.iter().any(|dependency| {
+                dependency.input == bit(input)
+                    && dependency.output == bit((output + 2) as u16)
+                    && dependency.origin == Some(next_write + output)
+            }));
+        }
     }
 }

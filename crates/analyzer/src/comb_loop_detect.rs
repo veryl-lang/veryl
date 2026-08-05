@@ -140,7 +140,7 @@ use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, Component, Declaration, Expression, Factor,
-    InstDeclaration, Ir, Module, Op, SystemFunctionKind, VarIndex, VarSelect, Variable,
+    InstDeclaration, Ir, Module, Op, Signature, SystemFunctionKind, VarIndex, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use petgraph::Direction::Incoming;
@@ -435,6 +435,18 @@ struct ModuleCombSummary {
     dependencies: Vec<ModuleCombDependency>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum ComponentSummaryKey {
+    Specialization(Signature),
+    Allocation(usize),
+}
+
+#[derive(Default)]
+struct CombSummaryCache {
+    modules: HashMap<ComponentSummaryKey, ModuleCombSummary>,
+    procedures: crate::comb_memory_ssa::ProcedureSummaryCache,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct LoopDiagnosticKey {
     identifier: String,
@@ -498,11 +510,10 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
     let mut loops = LoopDiagnostics::default();
     let mut coverage = CoverageDiagnostics::default();
     let mut incomplete = Vec::new();
-    let mut summaries: HashMap<usize, ModuleCombSummary> = HashMap::default();
+    let mut summaries = CombSummaryCache::default();
     let mut visiting_specializations = HashSet::default();
 
     let order = module_analysis_order(ir);
-
     for &idx in &order {
         if let Component::Module(module) = &ir.components[idx] {
             // Unevaluable generic params do not have a concrete module shape.
@@ -522,8 +533,12 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
                 &mut incomplete,
                 collect_coverage,
             );
-            let (graph, reasons, _bit_part, module_coverage) =
-                build_module_graph(module, &summaries, collect_coverage);
+            let (graph, reasons, bit_part, module_coverage) = build_module_graph(
+                module,
+                &summaries.modules,
+                collect_coverage,
+                &summaries.procedures,
+            );
             extend_unique_errors(&mut coverage, module_coverage);
             check_graph(module, &graph, &mut loops);
             if !reasons.is_empty() {
@@ -531,6 +546,12 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
                     module: module.name.to_string(),
                     reasons,
                 });
+            }
+            if let Some(specialization) = &module.specialization {
+                summaries
+                    .modules
+                    .entry(ComponentSummaryKey::Specialization(specialization.clone()))
+                    .or_insert_with(|| compute_module_summary(module, &graph, &bit_part));
             }
         }
     }
@@ -559,17 +580,26 @@ fn extend_unique_errors(coverage: &mut CoverageDiagnostics, new_errors: Vec<Cove
     }
 }
 
-fn component_summary_key(inst: &InstDeclaration) -> usize {
-    std::sync::Arc::as_ptr(&inst.component) as *const () as usize
+fn component_summary_key(inst: &InstDeclaration) -> ComponentSummaryKey {
+    if let Component::Module(module) = inst.component.as_ref()
+        && let Some(specialization) = &module.specialization
+    {
+        ComponentSummaryKey::Specialization(specialization.clone())
+    } else {
+        ComponentSummaryKey::Allocation(
+            std::sync::Arc::as_ptr(&inst.component) as *const () as usize
+        )
+    }
 }
 
-/// Analyze the concrete module carried by each instance. Generic parameter
-/// overrides are already elaborated in this `Arc<Component>` and therefore
-/// cannot share the declaration-default summary keyed only by module name.
+/// Analyze the concrete module carried by each instance. Normalized
+/// specialization signatures allow exact reuse across separately allocated
+/// components, while the allocation identity remains the fallback for IR
+/// producers which do not attach an elaboration signature.
 fn ensure_instance_summaries(
     module: &Module,
-    summaries: &mut HashMap<usize, ModuleCombSummary>,
-    visiting: &mut HashSet<usize>,
+    summaries: &mut CombSummaryCache,
+    visiting: &mut HashSet<ComponentSummaryKey>,
     loops: &mut LoopDiagnostics,
     coverage: &mut CoverageDiagnostics,
     incomplete: &mut Vec<IncompleteCombAnalysis>,
@@ -580,10 +610,10 @@ fn ensure_instance_summaries(
             continue;
         };
         let key = component_summary_key(inst);
-        if summaries.contains_key(&key) {
+        if summaries.modules.contains_key(&key) {
             continue;
         }
-        if !visiting.insert(key) {
+        if !visiting.insert(key.clone()) {
             incomplete.push(IncompleteCombAnalysis {
                 module: child.name.to_string(),
                 reasons: [IncompleteReason::RecursiveCall].into(),
@@ -599,12 +629,16 @@ fn ensure_instance_summaries(
             incomplete,
             collect_coverage,
         );
-        let (graph, reasons, bit_part, child_coverage) =
-            build_module_graph(child, summaries, collect_coverage);
+        let (graph, reasons, bit_part, child_coverage) = build_module_graph(
+            child,
+            &summaries.modules,
+            collect_coverage,
+            &summaries.procedures,
+        );
         extend_unique_errors(coverage, child_coverage);
         check_graph(child, &graph, loops);
         let summary = compute_module_summary(child, &graph, &bit_part);
-        summaries.insert(key, summary);
+        summaries.modules.insert(key.clone(), summary);
         if !reasons.is_empty() {
             incomplete.push(IncompleteCombAnalysis {
                 module: child.name.to_string(),
@@ -1024,8 +1058,9 @@ fn push_element_mask(
 
 fn build_module_graph(
     module: &Module,
-    summaries: &HashMap<usize, ModuleCombSummary>,
+    summaries: &HashMap<ComponentSummaryKey, ModuleCombSummary>,
     collect_coverage: bool,
+    procedure_summaries: &crate::comb_memory_ssa::ProcedureSummaryCache,
 ) -> (
     CausalGraph,
     BTreeSet<IncompleteReason>,
@@ -1035,7 +1070,8 @@ fn build_module_graph(
     // Procedural combinational declarations use statement-ordered region
     // MemorySSA. Keep instance declarations on the existing bottom-up module
     // summary path until the same region vocabulary crosses module boundaries.
-    let function_cache = crate::comb_memory_ssa::FunctionAnalysisCache::default();
+    let function_cache =
+        crate::comb_memory_ssa::FunctionAnalysisCache::new(procedure_summaries.clone());
     // Build each specialization once before entering Rayon. Procedure tasks
     // then share an immutable summary table instead of racing to initialize
     // the same callee behind a global mutex.
@@ -1910,7 +1946,7 @@ fn region_node_keys(
 
 fn collect_instance_summary_regions(
     module: &Module,
-    summaries: &HashMap<usize, ModuleCombSummary>,
+    summaries: &HashMap<ComponentSummaryKey, ModuleCombSummary>,
     ctx: &mut Context,
     functions: &crate::comb_memory_ssa::FunctionAnalysisCache,
 ) -> (Vec<Region<VarId>>, Vec<PeriodicTransferRegion>) {
