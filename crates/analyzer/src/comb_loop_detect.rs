@@ -45,13 +45,10 @@
 //!    spans and regular repeated copies have symbolic nodes, so graph size is
 //!    normally a function of accesses and boundaries rather than declared bit
 //!    width or unpacked-array length.
-//! 3. Traversal starts at source modules which are not instantiated by another
-//!    source template. Concrete child modules are analyzed before their parent;
-//!    the same child graph emits definition-local diagnostics and produces its
-//!    input-to-output summary, so the standalone template is not rebuilt.
-//!    Uninstantiated modules are roots and remain independently checked.
-//!    Instance actuals project child regions back into the parent, preserving
-//!    bit positions, aggregate layout, and Cartesian repetition axes when that
+//! 3. Child modules are analyzed before parents. A module summary contains only
+//!    input-to-output feedthrough proven in the child graph. Instance actuals
+//!    project the child's regions back into the parent, preserving bit
+//!    positions, aggregate layout, and Cartesian repetition axes when that
 //!    mapping is representable.
 //! 4. Iterative SCC discovery finds cyclic components without using the process
 //!    stack. For each SCC, diagnostics choose a stable source-backed edge and
@@ -459,7 +456,6 @@ enum ComponentSummaryKey {
 struct CombSummaryCache {
     modules: HashMap<ComponentSummaryKey, ModuleCombSummary>,
     procedures: crate::comb_memory_ssa::ProcedureSummaryCache,
-    analyzed_templates: HashSet<StrId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -531,21 +527,12 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
     let order = module_analysis_order(ir);
     for &idx in &order {
         if let Component::Module(module) = &ir.components[idx] {
-            // A concrete instance analysis already checked this source
-            // template and produced the summary its parent consumes. Generic
-            // specializations are still all visited by
-            // `ensure_instance_summaries`; this skips only the redundant
-            // standalone template pass.
-            if summaries.analyzed_templates.contains(&module.name) {
-                continue;
-            }
             // Unevaluable generic params do not have a concrete module shape.
             if module.suppress_unassigned {
                 incomplete.push(IncompleteCombAnalysis {
                     module: module.name.to_string(),
                     reasons: [IncompleteReason::UnevaluatedGeneric].into(),
                 });
-                summaries.analyzed_templates.insert(module.name);
                 continue;
             }
             ensure_instance_summaries(
@@ -565,7 +552,6 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
             );
             extend_unique_errors(&mut coverage, module_coverage);
             check_graph(module, &graph, &mut loops);
-            summaries.analyzed_templates.insert(module.name);
             if !reasons.is_empty() {
                 incomplete.push(IncompleteCombAnalysis {
                     module: module.name.to_string(),
@@ -662,7 +648,6 @@ fn ensure_instance_summaries(
         );
         extend_unique_errors(coverage, child_coverage);
         check_graph(child, &graph, loops);
-        summaries.analyzed_templates.insert(child.name);
         let summary = compute_module_summary(child, &graph, &bit_part);
         summaries.modules.insert(key.clone(), summary);
         if !reasons.is_empty() {
@@ -710,24 +695,7 @@ fn module_analysis_order(ir: &Ir) -> Vec<usize> {
         .iter()
         .map(|component| matches!(component, Component::Module(_)))
         .collect::<Vec<_>>();
-    let order = order_from_dependencies(&is_module, &deps, &rev_deps);
-    prioritize_module_roots(order, &rev_deps)
-}
-
-fn prioritize_module_roots(
-    order: Vec<usize>,
-    reverse_dependencies: &[HashSet<usize>],
-) -> Vec<usize> {
-    // Start from modules which are not instantiated by another source
-    // template. Their recursive summary walk checks concrete children before
-    // those children's redundant standalone entries are encountered. Keep
-    // the previous deterministic order within both groups; a name-cycle has
-    // no root and remains in the fallback group.
-    let (mut roots, remaining): (Vec<_>, Vec<_>) = order
-        .into_iter()
-        .partition(|index| reverse_dependencies[*index].is_empty());
-    roots.extend(remaining);
-    roots
+    order_from_dependencies(&is_module, &deps, &rev_deps)
 }
 
 fn order_from_dependencies(
@@ -3533,12 +3501,6 @@ mod memory_ssa_tests {
 
         let order = order_from_dependencies(&is_module, &deps, &rev_deps);
         assert_eq!(order, vec![1, 3, 0, 2]);
-
-        // Why this case exists: concrete instance summaries are discovered
-        // only while visiting a parent. Roots must therefore run before the
-        // child-first fallback order, while a source-name cycle remains in a
-        // deterministic fallback position instead of disappearing.
-        assert_eq!(prioritize_module_roots(order, &rev_deps), vec![3, 2, 1, 0]);
     }
 
     #[test]
