@@ -14316,6 +14316,61 @@ fn comb_loop_function_summary_fanout_is_memoized() {
 }
 
 #[test]
+fn comb_loop_instance_summary_region_mapping_is_reused() {
+    // Why this case exists: every child output depends on every child input,
+    // so its summary contains a Cartesian product with the same input and
+    // output regions repeated many times. Mapping those regions into the
+    // parent's actuals must be proportional to the distinct regions, while
+    // the exact all-to-all dependencies still retain the feedback below.
+    const WIDTH: usize = 32;
+    let reduction = (0..WIDTH)
+        .map(|index| format!("x[{index}]"))
+        .collect::<Vec<_>>()
+        .join(" ^ ");
+    let outputs = (0..WIDTH)
+        .map(|index| format!("assign o[{index}] = mix(i);"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let clears = (1..WIDTH)
+        .map(|index| format!("assign feedback[{index}] = 0;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_comb_loop(
+        "an instance summary Cartesian product retains parent feedback",
+        &format!(
+            r#"
+            module Child (
+                i: input  logic<{WIDTH}>,
+                o: output logic<{WIDTH}>,
+            ) {{
+                function mix (
+                    x: input logic<{WIDTH}>,
+                ) -> logic {{
+                    return {reduction};
+                }}
+                {outputs}
+            }}
+
+            module Top (
+                o: output logic<{WIDTH}>,
+            ) {{
+                var feedback: logic<{WIDTH}>;
+                var passed  : logic<{WIDTH}>;
+                inst u: Child (
+                    i: feedback,
+                    o: passed,
+                );
+                assign feedback[0] = passed[0];
+                {clears}
+                assign o = passed;
+            }}
+            "#
+        ),
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_rejected_periodic_run_is_scanned_once() {
     // Why this case exists: a long run with one source but the same exact
     // destination is legal sequential overwrite, not a periodic transfer.

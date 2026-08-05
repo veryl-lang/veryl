@@ -372,6 +372,17 @@ struct PeriodicTransferRegion {
     aligned: bool,
 }
 
+struct MappedUnalignedDependency {
+    inputs: Vec<Region<VarId>>,
+    outputs: Vec<Region<VarId>>,
+}
+
+// The outer order follows module instances in `walk_insts`; each inner order
+// follows that instance summary's dependencies. These are the exact mappings
+// already computed while collecting partition boundaries, not a second
+// approximation of the child-to-parent transfer.
+type MappedInstanceDependencies = Vec<Vec<Option<MappedUnalignedDependency>>>;
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum SummaryOutput {
     Region(Region<VarId>),
@@ -1229,7 +1240,7 @@ fn build_module_graph(
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.functions = module.functions.clone();
-    let (instance_regions, instance_periodic_transfers) =
+    let (instance_regions, instance_periodic_transfers, mapped_instance_dependencies) =
         collect_instance_summary_regions(module, summaries, &mut ctx, &function_cache);
     partition_regions.extend(instance_regions);
     periodic_transfers.extend(instance_periodic_transfers);
@@ -1296,9 +1307,12 @@ fn build_module_graph(
         }
     }
 
+    let mut module_instance_index = 0;
     for inst in walk_insts(module) {
         match inst.component.as_ref() {
             Component::Module(child) => {
+                let mapped_dependency_index = module_instance_index;
+                module_instance_index += 1;
                 if child
                     .variables
                     .values()
@@ -1328,6 +1342,10 @@ fn build_module_graph(
                     &mut incomplete,
                     &mut ctx,
                     &function_cache,
+                    mapped_instance_dependencies
+                        .get(mapped_dependency_index)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default(),
                 );
             }
             // SV black box: under-detect.
@@ -1949,13 +1967,19 @@ fn collect_instance_summary_regions(
     summaries: &HashMap<ComponentSummaryKey, ModuleCombSummary>,
     ctx: &mut Context,
     functions: &crate::comb_memory_ssa::FunctionAnalysisCache,
-) -> (Vec<Region<VarId>>, Vec<PeriodicTransferRegion>) {
+) -> (
+    Vec<Region<VarId>>,
+    Vec<PeriodicTransferRegion>,
+    MappedInstanceDependencies,
+) {
     let mut regions = Vec::new();
     let mut periodic_transfers = Vec::new();
+    let mut mapped_dependencies = Vec::new();
     for inst in walk_insts(module) {
         let Component::Module(child) = inst.component.as_ref() else {
             continue;
         };
+        let mut mapped_dependencies_for_instance = Vec::new();
         for output in &inst.outputs {
             regions.extend(collect_destination_regions(
                 &output.dst,
@@ -1969,9 +1993,13 @@ fn collect_instance_summary_regions(
             ));
         }
         let Some(summary) = summaries.get(&component_summary_key(inst)) else {
+            mapped_dependencies.push(mapped_dependencies_for_instance);
             continue;
         };
-        for dependency in &summary.dependencies {
+        mapped_dependencies_for_instance.resize_with(summary.dependencies.len(), || None);
+        let mut input_mappings = BTreeMap::<Region<VarId>, Vec<Region<VarId>>>::new();
+        let mut output_mappings = BTreeMap::<Region<VarId>, Vec<Region<VarId>>>::new();
+        for (dependency_index, dependency) in summary.dependencies.iter().enumerate() {
             let Some(child_input) = region_object(dependency.input) else {
                 continue;
             };
@@ -1984,23 +2012,45 @@ fn collect_instance_summary_regions(
             let Some(output) = inst.outputs.iter().find(|output| output.id == child_output) else {
                 continue;
             };
-            let parent_inputs = map_child_input_region(
-                dependency.input,
-                child,
-                &input.expr,
-                &module.variables,
-                ctx,
-                functions,
-            );
-            regions.extend(parent_inputs.iter().copied());
-            match &dependency.output {
-                SummaryOutput::Region(region) => regions.extend(map_child_output_region(
-                    *region,
+            let parent_inputs = if let Some(mapped) = input_mappings.get(&dependency.input) {
+                mapped.clone()
+            } else {
+                let mapped = map_child_input_region(
+                    dependency.input,
                     child,
-                    &output.dst,
+                    &input.expr,
                     &module.variables,
                     ctx,
-                )),
+                    functions,
+                );
+                input_mappings.insert(dependency.input, mapped.clone());
+                mapped
+            };
+            regions.extend(parent_inputs.iter().copied());
+            match &dependency.output {
+                SummaryOutput::Region(region) => {
+                    let parent_outputs = if let Some(mapped) = output_mappings.get(region) {
+                        mapped.clone()
+                    } else {
+                        let mapped = map_child_output_region(
+                            *region,
+                            child,
+                            &output.dst,
+                            &module.variables,
+                            ctx,
+                        );
+                        output_mappings.insert(*region, mapped.clone());
+                        mapped
+                    };
+                    regions.extend(parent_outputs.iter().copied());
+                    if !dependency.aligned {
+                        mapped_dependencies_for_instance[dependency_index] =
+                            Some(MappedUnalignedDependency {
+                                inputs: parent_inputs,
+                                outputs: parent_outputs,
+                            });
+                    }
+                }
                 SummaryOutput::Periodic(periodic) => {
                     let parent_outputs = map_child_periodic_output(
                         periodic,
@@ -2022,8 +2072,9 @@ fn collect_instance_summary_regions(
                 }
             }
         }
+        mapped_dependencies.push(mapped_dependencies_for_instance);
     }
-    (regions, periodic_transfers)
+    (regions, periodic_transfers, mapped_dependencies)
 }
 
 fn add_inst_output_address_edges(
@@ -2074,8 +2125,9 @@ fn add_inst_feedthrough_edges(
     incomplete: &mut BTreeSet<IncompleteReason>,
     ctx: &mut Context,
     functions: &crate::comb_memory_ssa::FunctionAnalysisCache,
+    mapped_dependencies: &[Option<MappedUnalignedDependency>],
 ) {
-    for dependency in &summary.dependencies {
+    for (dependency_index, dependency) in summary.dependencies.iter().enumerate() {
         let Some(child_input) = region_object(dependency.input) else {
             continue;
         };
@@ -2193,16 +2245,25 @@ fn add_inst_feedthrough_edges(
             }
             continue;
         }
-        let parent_input_regions = map_child_input_region(
-            dependency.input,
-            child,
-            &input.expr,
-            parent_vars,
-            ctx,
-            functions,
-        );
-        let parent_output_regions =
-            map_child_output_region(dependency_output, child, &output.dst, parent_vars, ctx);
+        let mapped = mapped_dependencies
+            .get(dependency_index)
+            .and_then(Option::as_ref);
+        let (owned_inputs, owned_outputs);
+        let (parent_input_regions, parent_output_regions) = if let Some(mapped) = mapped {
+            (mapped.inputs.as_slice(), mapped.outputs.as_slice())
+        } else {
+            owned_inputs = map_child_input_region(
+                dependency.input,
+                child,
+                &input.expr,
+                parent_vars,
+                ctx,
+                functions,
+            );
+            owned_outputs =
+                map_child_output_region(dependency_output, child, &output.dst, parent_vars, ctx);
+            (owned_inputs.as_slice(), owned_outputs.as_slice())
+        };
         let pairs = parent_input_regions
             .iter()
             .copied()
