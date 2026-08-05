@@ -18,6 +18,9 @@ The design has three constraints:
   for a hard combinational-loop diagnostic; external components, hierarchy,
   timed effects and unsupported syntax are retained as explicit incomplete
   reasons rather than guessed as feedthrough.
+- Incomplete reasons distinguish opaque input boundaries from behavior which
+  is available but was not resolved by the current analysis. Malformed causal
+  IR is an analysis failure, not an incomplete boundary.
 - Procedures are independent work items. Their summaries are deterministic and
   immutable, so callers may build them concurrently and merge them in source or
   module-topology order.

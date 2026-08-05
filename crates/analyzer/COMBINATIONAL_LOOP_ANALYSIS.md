@@ -317,6 +317,11 @@ incomplete for the affected behavior. Known dependencies found in the loop or
 the surrounding procedure remain usable. Treating an unanalyzed loop as always
 zero-trip or silently dropping all of its effects is not a complete result.
 
+An implementation shall distinguish a dynamic trip count from a statically
+known loop declined because of an expansion or resource limit. Both make the
+affected behavior incomplete, but only the latter can be retried by increasing
+that limit without changing the analysis algorithm.
+
 The same rule applies when an implementation declines to evaluate a bound
 which could in principle be evaluated. Resource limits may reduce completeness;
 they shall not create guessed edges outside the whole-dependency boundary.
@@ -324,10 +329,23 @@ they shall not create guessed edges outside the whole-dependency boundary.
 ## Incomplete analysis
 
 An analysis is **incomplete** when some relevant dependency cannot be placed
-within the acceptance bounds. Causes include opaque boundaries, `inout`,
-unresolved hierarchy, unresolved recursive calls or cyclic concrete
-specialization graphs, unevaluated generic shapes, unanalyzed loops, timed or
-event effects, and legal constructs not yet represented by the analyzer.
+within the acceptance bounds. Completeness remains one predicate: either every
+relevant dependency is represented or the result is incomplete. Incomplete
+reasons additionally carry one of two provenance classes:
+
+- An **opaque boundary** means the analysis input does not expose enough
+  behavior to establish feedthrough. External components, `inout`, timed or
+  event effects, unbounded dynamic regions, unevaluated generic shapes, and
+  source constructs retained without a causal model are opaque.
+- An **analysis gap** means the behavior is defined and available, but this
+  analysis run did not derive its dependency relation. Unresolved hierarchy or
+  region mapping, unresolved recursion, dynamic loop trip counts, and
+  configured loop-expansion limits are analysis gaps.
+
+Both classes prevent an empty diagnostic list from proving acyclicity. The
+classification instead describes remediation: an opaque boundary requires a
+model or more input information, while an analysis gap may be removed by a
+stronger algorithm or a different resource limit.
 
 A dynamic access is not incomplete merely because its exact selected region is
 unknown. If its object or longest static prefix has a known shape, whole
@@ -349,6 +367,12 @@ complete. Incomplete behavior has these rules:
   result is incomplete.
 - Failure to represent otherwise valid analyzer IR is an implementation defect,
   not a new user-language restriction.
+
+An analyzer invariant violation or malformed analyzer IR is an **analysis
+failure**, not a third incomplete class. Failures shall be exposed separately
+from incomplete reasons. A partial result may retain known dependencies and
+incomplete boundaries for debugging, but callers shall not treat a failed run
+as a valid completeness result.
 
 ## Diagnostics
 

@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::cfg::{CfgError, ForwardControlFlowGraph};
-use crate::graph::{EdgeKind, IncompleteReason};
+use crate::graph::{EdgeKind, IncompleteReason, OpaqueBoundary};
 use crate::region::{Region, Span};
 use crate::ssa::{self, Event as SsaEvent, Version};
 
@@ -1306,11 +1306,11 @@ fn record_unknown_region<O: Copy + Ord>(
         Region::UnknownObject(object) => {
             uncertain_objects.insert(object);
             if !object_spans.contains_key(&object) {
-                incomplete.insert(IncompleteReason::DynamicRegion);
+                incomplete.insert(IncompleteReason::Opaque(OpaqueBoundary::UnboundedRegion));
             }
         }
         Region::UnknownAll => {
-            incomplete.insert(IncompleteReason::DynamicRegion);
+            incomplete.insert(IncompleteReason::Opaque(OpaqueBoundary::UnboundedRegion));
             *unknown_all = true;
         }
     }
@@ -2554,7 +2554,7 @@ mod tests {
         assert!(
             summary
                 .incomplete
-                .contains(&IncompleteReason::DynamicRegion),
+                .contains(&IncompleteReason::Opaque(OpaqueBoundary::UnboundedRegion)),
             "{summary:#?}"
         );
     }
@@ -2693,7 +2693,7 @@ mod tests {
         assert!(
             summary
                 .incomplete
-                .contains(&IncompleteReason::DynamicRegion)
+                .contains(&IncompleteReason::Opaque(OpaqueBoundary::UnboundedRegion))
         );
     }
 

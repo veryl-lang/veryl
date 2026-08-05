@@ -13,21 +13,47 @@ pub enum EdgeKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IncompleteReason {
+    /// The analysis input does not expose enough behavior to establish a
+    /// dependency across this boundary.
+    Opaque(OpaqueBoundary),
+    /// The behavior is defined and available, but this analysis run did not
+    /// derive its dependency relation.
+    Analysis(AnalysisGap),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OpaqueBoundary {
     /// A dynamic access could not be bounded to a known object or static
-    /// prefix. Bounded dynamic accesses are conservative but complete.
-    DynamicRegion,
+    /// prefix. Bounded dynamic accesses are conservative and complete.
+    UnboundedRegion,
     ExternalComponent,
-    HierarchicalReference,
     InoutPort,
-    RecursiveCall,
-    RuntimeLoop,
     TimedOrEventEffect,
-    /// The frontend produced an IR shape which violates the causal adapter's
-    /// invariants. This is an analyzer defect, not a user-language feature
-    /// which callers may silently leave unsupported.
-    MalformedModel,
-    /// Generic elaboration could not determine the concrete module shape.
+    /// Generic elaboration did not produce a concrete module shape.
     UnevaluatedGeneric,
+    /// Earlier conversion retained a source construct without a causal model.
+    UnsupportedConstruct,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AnalysisGap {
+    UnresolvedHierarchy,
+    RecursiveCall,
+    Loop(LoopAnalysisGap),
+    RegionMapping,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum LoopAnalysisGap {
+    DynamicTripCount,
+    ExpansionLimit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AnalysisFailure {
+    /// The frontend produced an IR shape which violates the causal adapter's
+    /// invariants. This is an analyzer defect, not analysis incompleteness.
+    MalformedModel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -120,6 +146,9 @@ mod tests {
 
     #[test]
     fn definite_paths_win_over_conservative_paths() {
+        // Why both reasons are present: completeness is one predicate, while
+        // clients still need to distinguish missing input behavior from a
+        // dependency the current analysis declined to derive.
         let graph = CausalGraph::from_parts(
             [
                 Edge {
@@ -138,9 +167,24 @@ mod tests {
                     kind: EdgeKind::Control,
                 },
             ],
-            [IncompleteReason::ExternalComponent],
+            [
+                IncompleteReason::Opaque(OpaqueBoundary::ExternalComponent),
+                IncompleteReason::Analysis(AnalysisGap::Loop(LoopAnalysisGap::ExpansionLimit)),
+            ],
         );
         assert_eq!(graph.reaches(0, 1), Reachability::Proven);
-        assert_eq!(graph.incomplete().len(), 1);
+        assert_eq!(graph.incomplete().len(), 2);
+        assert!(
+            graph
+                .incomplete()
+                .contains(&IncompleteReason::Opaque(OpaqueBoundary::ExternalComponent))
+        );
+        assert!(
+            graph
+                .incomplete()
+                .contains(&IncompleteReason::Analysis(AnalysisGap::Loop(
+                    LoopAnalysisGap::ExpansionLimit
+                )))
+        );
     }
 }

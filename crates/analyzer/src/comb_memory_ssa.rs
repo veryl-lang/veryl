@@ -10,7 +10,9 @@ use crate::ir::{
     SystemFunctionKind, TypeKind, VarId, VarIndex, VarKind, VarSelect,
 };
 use crate::value::Value;
-use veryl_causal::graph::{EdgeKind, IncompleteReason};
+use veryl_causal::graph::{
+    AnalysisFailure, AnalysisGap, EdgeKind, IncompleteReason, LoopAnalysisGap, OpaqueBoundary,
+};
 use veryl_causal::procedure::{
     self, AlignedDependency, Event, MustAliasCandidate, PeriodicAxis, Procedure, ProcedureError,
     ProcedureSummary, WriteId,
@@ -21,6 +23,7 @@ use veryl_parser::token_range::TokenRange;
 #[derive(Debug)]
 pub(crate) struct ProcedureAnalysis {
     pub summary: ProcedureSummary<VarId>,
+    pub failures: BTreeSet<AnalysisFailure>,
     pub write_tokens: BTreeMap<WriteId, TokenRange>,
     pub coverage_sites: Vec<(Region<VarId>, TokenRange)>,
 }
@@ -76,6 +79,7 @@ pub(crate) struct FunctionAnalysisCache {
     entries: Arc<Mutex<BTreeMap<FunctionKey, FunctionCacheEntry>>>,
     ready: Arc<OnceLock<Arc<FunctionSummaries>>>,
     procedures: ProcedureSummaryCache,
+    failures: Arc<Mutex<BTreeSet<AnalysisFailure>>>,
 }
 
 impl FunctionAnalysisCache {
@@ -84,7 +88,15 @@ impl FunctionAnalysisCache {
             entries: Arc::default(),
             ready: Arc::default(),
             procedures,
+            failures: Arc::default(),
         }
+    }
+
+    pub(crate) fn failures(&self) -> BTreeSet<AnalysisFailure> {
+        self.failures
+            .lock()
+            .expect("function analysis failure lock poisoned")
+            .clone()
     }
 
     pub(crate) fn freeze(&self) {
@@ -506,6 +518,7 @@ struct Builder {
     uncertain_writes: BTreeSet<WriteId>,
     coverage_writes: BTreeMap<VarId, BTreeSet<(Region<VarId>, TokenRange)>>,
     coverage_sites: Vec<(Region<VarId>, TokenRange)>,
+    failures: BTreeSet<AnalysisFailure>,
     function_cache: FunctionAnalysisCache,
 }
 
@@ -564,6 +577,7 @@ impl Builder {
             uncertain_writes: BTreeSet::new(),
             coverage_writes: BTreeMap::new(),
             coverage_sites: Vec::new(),
+            failures: BTreeSet::new(),
             function_cache,
         }
     }
@@ -594,6 +608,7 @@ impl Builder {
             uncertain_writes: BTreeSet::new(),
             coverage_writes: BTreeMap::new(),
             coverage_sites: Vec::new(),
+            failures: BTreeSet::new(),
             function_cache: self.function_cache.clone(),
         }
     }
@@ -645,11 +660,17 @@ impl Builder {
             .lower_statements(&body.statements, 0, &[], None)
             .unwrap_or(0);
         nested.procedure.exit = exit;
-        let summary = self
-            .function_cache
-            .procedures
-            .analyze(&nested.procedure)
-            .ok()?;
+        let summary = match self.function_cache.procedures.analyze(&nested.procedure) {
+            Ok(summary) => summary,
+            Err(_) => {
+                self.function_cache
+                    .failures
+                    .lock()
+                    .expect("function analysis failure lock poisoned")
+                    .insert(AnalysisFailure::MalformedModel);
+                return None;
+            }
+        };
         Some(Arc::new(nested.finish((*summary).clone())))
     }
 
@@ -664,10 +685,15 @@ impl Builder {
         self.procedure.successors[from].push(to);
     }
 
-    fn unknown_effect(&mut self, block: usize) -> usize {
+    fn malformed_effect(&mut self, block: usize) -> usize {
+        self.failures.insert(AnalysisFailure::MalformedModel);
+        self.unknown_clobber(block)
+    }
+
+    fn opaque_effect(&mut self, block: usize, boundary: OpaqueBoundary) -> usize {
         self.procedure
             .incomplete
-            .insert(IncompleteReason::MalformedModel);
+            .insert(IncompleteReason::Opaque(boundary));
         self.unknown_clobber(block)
     }
 
@@ -815,6 +841,7 @@ impl Builder {
         (
             ProcedureAnalysis {
                 summary,
+                failures: self.failures,
                 write_tokens: self.write_tokens,
                 coverage_sites: self.coverage_sites,
             },
@@ -1174,9 +1201,7 @@ impl Builder {
                                 None,
                             );
                         } else {
-                            self.procedure
-                                .incomplete
-                                .insert(IncompleteReason::MalformedModel);
+                            self.failures.insert(AnalysisFailure::MalformedModel);
                         }
                         let body = self.new_block();
                         self.edge(from, body);
@@ -1198,11 +1223,17 @@ impl Builder {
                 // hard dependency: their iterator values and trip paths are
                 // not represented by this compact CFG. Preserve uncertainty
                 // while keeping the graph declaration-width independent.
-                self.procedure
-                    .incomplete
-                    .insert(IncompleteReason::RuntimeLoop);
                 let suppress_hard_dependencies =
                     statement.range.is_over_size_limit(&mut self.context);
+                self.procedure
+                    .incomplete
+                    .insert(IncompleteReason::Analysis(AnalysisGap::Loop(
+                        if suppress_hard_dependencies {
+                            LoopAnalysisGap::ExpansionLimit
+                        } else {
+                            LoopAnalysisGap::DynamicTripCount
+                        },
+                    )));
                 let body = self.new_block();
                 let exit = self.new_block();
                 let header = self.new_block();
@@ -1248,7 +1279,7 @@ impl Builder {
             Statement::TbMethodCall(call) => {
                 self.procedure
                     .incomplete
-                    .insert(IncompleteReason::TimedOrEventEffect);
+                    .insert(IncompleteReason::Opaque(OpaqueBoundary::TimedOrEventEffect));
                 if let Some(destination) = &call.ret {
                     let unknown = self.unknown_read(block);
                     self.write_destination(
@@ -1261,21 +1292,19 @@ impl Builder {
                 Some(block)
             }
             Statement::IfReset(_) => {
-                self.unknown_effect(block);
+                self.opaque_effect(block, OpaqueBoundary::TimedOrEventEffect);
                 Some(block)
             }
             Statement::Break => {
                 if let Some(target) = break_target {
                     self.edge(block, target);
                 } else {
-                    self.procedure
-                        .incomplete
-                        .insert(IncompleteReason::MalformedModel);
+                    self.failures.insert(AnalysisFailure::MalformedModel);
                 }
                 None
             }
             Statement::Unsupported(_) => {
-                self.unknown_effect(block);
+                self.opaque_effect(block, OpaqueBoundary::UnsupportedConstruct);
                 Some(block)
             }
             Statement::Null => Some(block),
@@ -1440,7 +1469,7 @@ impl Builder {
             Factor::HierVariable(_) => {
                 self.procedure
                     .incomplete
-                    .insert(IncompleteReason::HierarchicalReference);
+                    .insert(IncompleteReason::Analysis(AnalysisGap::UnresolvedHierarchy));
                 reads.push((self.unknown_read(block), EdgeKind::Unknown));
             }
             Factor::SystemFunctionCall(call) => {
@@ -1464,14 +1493,14 @@ impl Builder {
     ) -> Vec<(usize, EdgeKind)> {
         let mut actual_inputs = BTreeMap::<VarId, (Expression, Vec<(usize, EdgeKind)>)>::new();
         let Some(function) = self.context.functions.get(&call.id) else {
-            return vec![(self.unknown_effect(block), EdgeKind::Unknown)];
+            return vec![(self.malformed_effect(block), EdgeKind::Unknown)];
         };
         let call_index = call.index.as_deref().unwrap_or(&[]);
         let Some(function_index) = function.array.calc_index(call_index) else {
-            return vec![(self.unknown_effect(block), EdgeKind::Unknown)];
+            return vec![(self.malformed_effect(block), EdgeKind::Unknown)];
         };
         let Some(function_body) = function.functions.get(function_index) else {
-            return vec![(self.unknown_effect(block), EdgeKind::Unknown)];
+            return vec![(self.malformed_effect(block), EdgeKind::Unknown)];
         };
         let function_args = function_body.arg_map.clone();
         let function_return = function_body.ret;
@@ -1486,13 +1515,14 @@ impl Builder {
         if self.call_stack.contains(&function_key) {
             self.procedure
                 .incomplete
-                .insert(IncompleteReason::RecursiveCall);
+                .insert(IncompleteReason::Analysis(AnalysisGap::RecursiveCall));
             return vec![(self.unknown_clobber(block), EdgeKind::Unknown)];
         }
 
         let Some(nested) = self.cached_function(function_key) else {
-            return vec![(self.unknown_effect(block), EdgeKind::Unknown)];
+            return vec![(self.malformed_effect(block), EdgeKind::Unknown)];
         };
+        self.failures.extend(nested.failures.iter().copied());
         let summary = &nested.summary;
         let mut captured_coverage = Vec::<(Region<VarId>, TokenRange)>::new();
         for &(region, token) in &nested.coverage_sites {
@@ -1575,14 +1605,10 @@ impl Builder {
                         && exact_regions_have_equal_length(dependency.input, dependency.output),
                 });
             } else if input_object.is_some_and(|object| formal_ids.contains(&object)) {
-                self.procedure
-                    .incomplete
-                    .insert(IncompleteReason::MalformedModel);
+                self.failures.insert(AnalysisFailure::MalformedModel);
                 continue;
             } else {
-                self.procedure
-                    .incomplete
-                    .insert(IncompleteReason::MalformedModel);
+                self.failures.insert(AnalysisFailure::MalformedModel);
                 mapped.push(MappedFunctionRead {
                     read: self.unknown_read(block),
                     kind: EdgeKind::Unknown,
@@ -1710,9 +1736,7 @@ impl Builder {
 
         for (path, outputs) in &call.outputs {
             let Some(&formal) = function_args.get(path) else {
-                self.procedure
-                    .incomplete
-                    .insert(IncompleteReason::MalformedModel);
+                self.failures.insert(AnalysisFailure::MalformedModel);
                 continue;
             };
             let mapped_dependencies = dependencies_by_output
@@ -2636,7 +2660,7 @@ impl Builder {
             SystemFunctionKind::Readmemh(input, output) => {
                 self.procedure
                     .incomplete
-                    .insert(IncompleteReason::TimedOrEventEffect);
+                    .insert(IncompleteReason::Opaque(OpaqueBoundary::TimedOrEventEffect));
                 let dependencies = self.read_expression(block, &input.0, EdgeKind::Unknown);
                 for destination in &output.0 {
                     self.write_destination(block, destination, dependencies.clone(), Vec::new());
@@ -2687,7 +2711,7 @@ impl Builder {
                 Factor::HierVariable(_) => {
                     self.procedure
                         .incomplete
-                        .insert(IncompleteReason::HierarchicalReference);
+                        .insert(IncompleteReason::Analysis(AnalysisGap::UnresolvedHierarchy));
                 }
                 Factor::FunctionCall(call) => {
                     self.lower_function_call(block, call, &[]);
@@ -2696,9 +2720,9 @@ impl Builder {
                     self.lower_system_function(block, call, false);
                 }
                 Factor::Unknown(_) => {
-                    self.procedure
-                        .incomplete
-                        .insert(IncompleteReason::MalformedModel);
+                    self.procedure.incomplete.insert(IncompleteReason::Opaque(
+                        OpaqueBoundary::UnsupportedConstruct,
+                    ));
                 }
                 Factor::Value(_) | Factor::Anonymous(_) => {}
             },
@@ -3148,6 +3172,26 @@ fn combine_edge_kinds(left: EdgeKind, right: EdgeKind) -> EdgeKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_model_is_failure_not_incompleteness() {
+        // Why this case exists: malformed analyzer IR invalidates the analysis
+        // itself. It must not be presented to clients as another unsupported
+        // user-language boundary which a model or larger limit could resolve.
+        let mut builder = Builder::with_context(
+            Context::default(),
+            FunctionAnalysisCache::new(ProcedureSummaryCache::default()),
+        );
+        let exit = builder
+            .lower_statements(&[Statement::Break], 0, &[], None)
+            .unwrap_or(0);
+        builder.procedure.exit = exit;
+        let summary = procedure::analyze(&builder.procedure).unwrap();
+        let analysis = builder.finish(summary);
+
+        assert!(analysis.summary.incomplete.is_empty(), "{analysis:#?}");
+        assert_eq!(analysis.failures, [AnalysisFailure::MalformedModel].into());
+    }
 
     #[test]
     fn identical_procedures_share_their_ir_independent_summary() {

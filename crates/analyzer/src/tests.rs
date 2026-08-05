@@ -3,6 +3,9 @@ use crate::ir::Ir;
 use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
 use std::collections::HashMap;
 use std::thread;
+use veryl_causal::graph::{
+    AnalysisFailure, AnalysisGap, IncompleteReason, LoopAnalysisGap, OpaqueBoundary,
+};
 use veryl_metadata::{Lint, Metadata, ProjectProperty};
 use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
@@ -9877,7 +9880,7 @@ fn comb_loop_bounded_dynamic_write_is_complete() {
     assert!(
         result.incomplete.iter().all(|module| !module
             .reasons
-            .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)),
+            .contains(&IncompleteReason::Opaque(OpaqueBoundary::UnboundedRegion))),
         "a dynamic write bounded to values must be complete: {result:#?}"
     );
 
@@ -9925,7 +9928,7 @@ fn comb_loop_function_dynamic_read_is_complete() {
     assert!(
         dynamic_function.incomplete.iter().all(|module| !module
             .reasons
-            .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)),
+            .contains(&IncompleteReason::Opaque(OpaqueBoundary::UnboundedRegion))),
         "a dynamic function read bounded to its formal must be complete: {dynamic_function:#?}"
     );
 }
@@ -9968,7 +9971,7 @@ fn comb_loop_bounded_dynamic_read_retains_feedback() {
     assert!(
         dynamic_loop.incomplete.iter().all(|module| !module
             .reasons
-            .contains(&veryl_causal::graph::IncompleteReason::DynamicRegion)),
+            .contains(&IncompleteReason::Opaque(OpaqueBoundary::UnboundedRegion))),
         "a conservative bounded loop is complete: {dynamic_loop:#?}"
     );
 }
@@ -13130,7 +13133,7 @@ fn comb_loop_finite_recursive_module_specializations_are_complete() {
     assert!(
         acyclic.incomplete.iter().all(|module| !module
             .reasons
-            .contains(&veryl_causal::graph::IncompleteReason::RecursiveCall)),
+            .contains(&IncompleteReason::Analysis(AnalysisGap::RecursiveCall))),
         "finite concrete specialization recursion must be complete: {acyclic:#?}"
     );
 
@@ -13159,7 +13162,7 @@ fn comb_loop_finite_recursive_module_specializations_are_complete() {
     assert!(
         cyclic.incomplete.iter().all(|module| !module
             .reasons
-            .contains(&veryl_causal::graph::IncompleteReason::RecursiveCall)),
+            .contains(&IncompleteReason::Analysis(AnalysisGap::RecursiveCall))),
         "a finite recursive chain is not an incomplete boundary: {cyclic:#?}"
     );
 }
@@ -13187,7 +13190,7 @@ fn comb_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
         module.module == "Top"
             && module
                 .reasons
-                .contains(&veryl_causal::graph::IncompleteReason::ExternalComponent)
+                .contains(&IncompleteReason::Opaque(OpaqueBoundary::ExternalComponent))
     }));
 
     let inout = analyze_comb_detailed(
@@ -13202,7 +13205,7 @@ fn comb_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
         module.module == "Top"
             && module
                 .reasons
-                .contains(&veryl_causal::graph::IncompleteReason::InoutPort)
+                .contains(&IncompleteReason::Opaque(OpaqueBoundary::InoutPort))
     }));
 
     // Why this case exists: even a fully modeled expression on an SV input
@@ -13235,7 +13238,7 @@ fn comb_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
         module.module == "Top"
             && module
                 .reasons
-                .contains(&veryl_causal::graph::IncompleteReason::ExternalComponent)
+                .contains(&IncompleteReason::Opaque(OpaqueBoundary::ExternalComponent))
     }));
 
     // Why this case exists: incomplete coverage and a proven loop are
@@ -13271,7 +13274,7 @@ fn comb_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
         module.module == "Top"
             && module
                 .reasons
-                .contains(&veryl_causal::graph::IncompleteReason::ExternalComponent)
+                .contains(&IncompleteReason::Opaque(OpaqueBoundary::ExternalComponent))
     }));
     let diagnostics = analyze(external_and_proven_loop_code);
     assert!(
@@ -13314,11 +13317,12 @@ fn comb_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
         function_actual_loop.errors
     );
     assert!(
-        function_actual_loop.incomplete.iter().all(|module| !module
-            .reasons
-            .contains(&veryl_causal::graph::IncompleteReason::MalformedModel)),
+        function_actual_loop
+            .failures
+            .iter()
+            .all(|module| !module.reasons.contains(&AnalysisFailure::MalformedModel)),
         "a legal function-call actual is not an unsupported causal model: {:#?}",
-        function_actual_loop.incomplete
+        function_actual_loop.failures
     );
 
     let ignored_function_argument = analyze_comb_detailed(
@@ -13352,20 +13356,18 @@ fn comb_loop_opaque_boundaries_are_incomplete_without_hard_errors() {
     );
     assert!(
         ignored_function_argument
-            .incomplete
+            .failures
             .iter()
-            .all(|module| !module
-                .reasons
-                .contains(&veryl_causal::graph::IncompleteReason::MalformedModel)),
+            .all(|module| !module.reasons.contains(&AnalysisFailure::MalformedModel)),
         "a legal constant-returning function is fully modeled: {:#?}",
-        ignored_function_argument.incomplete
+        ignored_function_argument.failures
     );
 }
 
 #[test]
 fn comb_loop_incomplete_effect_does_not_erase_proven_edges() {
     // Why this case exists: a nonconstant bound prevents frontend unrolling,
-    // so the causal adapter must retain RuntimeLoop coverage provenance. That
+    // so the causal adapter must retain a DynamicTripCount analysis gap. That
     // uncertainty must not discard an independent, exact dependency from the
     // same block or replace its hard loop diagnostic.
     let code = r#"
@@ -13399,7 +13401,9 @@ fn comb_loop_incomplete_effect_does_not_erase_proven_edges() {
         module.module == "Top"
             && module
                 .reasons
-                .contains(&veryl_causal::graph::IncompleteReason::RuntimeLoop)
+                .contains(&IncompleteReason::Analysis(AnalysisGap::Loop(
+                    LoopAnalysisGap::DynamicTripCount,
+                )))
     }));
 
     let diagnostics = analyze(code);
@@ -13409,6 +13413,66 @@ fn comb_loop_incomplete_effect_does_not_erase_proven_edges() {
             .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
         "the ordinary analyzer must diagnose the proven loop: {diagnostics:#?}"
     );
+}
+
+#[test]
+fn comb_loop_incomplete_provenance_classes_coexist() {
+    // Why this case exists: opaque feedthrough and an unanalyzed language
+    // construct both make the result incomplete, but have different remedies.
+    // Their provenance must survive together without weakening a third,
+    // independently proven cycle.
+    let detailed = analyze_comb_detailed(
+        r#"
+        module Top (
+            n: input  logic<32>,
+            o: output logic,
+        ) {
+            var from_sv: logic;
+            var a      : logic;
+            var b      : logic;
+            inst u: $sv::Ext (
+                i_data: a,
+                o_data: from_sv,
+            );
+            always_comb {
+                for index in 0..n {
+                    $display("index=%d", index);
+                }
+            }
+            assign a = b;
+            assign b = a;
+            assign o = b | from_sv;
+        }
+        "#,
+    );
+
+    assert_eq!(
+        detailed
+            .errors
+            .iter()
+            .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+            .count(),
+        1,
+        "the proven cycle remains the only hard loop: {detailed:#?}"
+    );
+    let top = detailed
+        .incomplete
+        .iter()
+        .find(|module| module.module == "Top")
+        .expect("Top must expose both incomplete causes");
+    assert!(
+        top.reasons
+            .contains(&IncompleteReason::Opaque(OpaqueBoundary::ExternalComponent))
+    );
+    assert!(
+        top.reasons
+            .contains(&IncompleteReason::Analysis(AnalysisGap::Loop(
+                LoopAnalysisGap::DynamicTripCount
+            )))
+    );
+    assert!(detailed.failures.is_empty(), "{detailed:#?}");
+    assert!(detailed.is_valid(), "{detailed:#?}");
+    assert!(!detailed.is_complete(), "{detailed:#?}");
 }
 
 #[test]
@@ -14034,7 +14098,9 @@ fn comb_loop_over_limit_const_loop_does_not_prove_dead_edges() {
     assert!(detailed.incomplete.iter().any(|module| {
         module
             .reasons
-            .contains(&veryl_causal::graph::IncompleteReason::RuntimeLoop)
+            .contains(&IncompleteReason::Analysis(AnalysisGap::Loop(
+                LoopAnalysisGap::ExpansionLimit,
+            )))
     }));
 }
 
@@ -14074,7 +14140,7 @@ fn comb_loop_const_iterator_preserves_must_write_paths() {
 fn comb_loop_singleton_break_is_fully_analyzed() {
     // Why this case exists: break makes this const singleton use the compact
     // runtime-form CFG, but there is no loop backedge and therefore no
-    // RuntimeLoop uncertainty to expose through check_detailed.
+    // loop-analysis gap to expose through check_detailed.
     let detailed = analyze_comb_detailed(
         r#"
         module Top (
@@ -14093,9 +14159,10 @@ fn comb_loop_singleton_break_is_fully_analyzed() {
     );
     assert!(detailed.errors.is_empty(), "{detailed:#?}");
     assert!(detailed.incomplete.iter().all(|module| {
-        !module
+        module
             .reasons
-            .contains(&veryl_causal::graph::IncompleteReason::RuntimeLoop)
+            .iter()
+            .all(|reason| !matches!(reason, IncompleteReason::Analysis(AnalysisGap::Loop(_))))
     }));
 }
 

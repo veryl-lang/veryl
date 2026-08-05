@@ -95,23 +95,27 @@
 //! the same procedure or module.
 //!
 //! [`check`] returns only hard loop errors for compatibility.
-//! [`check_detailed`] additionally exposes per-module incomplete reasons. The
-//! important incomplete boundaries are:
+//! [`check_detailed`] additionally exposes per-module incomplete reasons,
+//! classified by provenance:
 //!
-//! - SystemVerilog/external components and `inout` ports;
-//! - hierarchical references and instance actual/destination mappings which
-//!   cannot preserve a region;
-//! - recursive functions or cyclic concrete module-specialization graphs;
-//! - runtime-bound loops and constant loops deliberately left above the
-//!   evaluation-size limit;
-//! - timed/event effects, unsupported or malformed analyzer IR, and generic
-//!   modules whose concrete shape was not elaborated.
+//! - opaque boundaries include SystemVerilog/external components, `inout`,
+//!   timed/event effects, unbounded regions, and unsupported source retained
+//!   without a causal model;
+//! - analysis gaps include unresolved hierarchy or region mapping, recursive
+//!   summaries, dynamic loop trip counts, and constant loops deliberately left
+//!   above the evaluation-size limit. Unevaluated generic shapes are opaque
+//!   because no concrete behavior exists in the analysis input.
 //!
 //! These cases may still contain a real loop that this pass cannot prove. No
 //! guessed feedthrough is added across an opaque boundary. Callers that require
 //! a completeness guarantee must inspect `CombAnalysisResult::incomplete`
 //! rather than interpreting an empty `errors` list as proof that the design is
 //! acyclic.
+//!
+//! Malformed analyzer IR is reported separately in
+//! `CombAnalysisResult::failures`. It is an analyzer failure rather than an
+//! incomplete user design, and invalidates a completeness conclusion even when
+//! the partial result also contains useful known dependencies.
 //!
 //! # Complexity and limits
 //!
@@ -151,7 +155,9 @@ use petgraph::visit::EdgeRef;
 use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
-use veryl_causal::graph::{EdgeKind, IncompleteReason};
+use veryl_causal::graph::{
+    AnalysisFailure, AnalysisGap, EdgeKind, IncompleteReason, OpaqueBoundary,
+};
 use veryl_causal::procedure::{AlignedDependency, PeriodicAxis, ProcedureSummary};
 use veryl_causal::region::{Region, Span};
 use veryl_parser::resource_table::StrId;
@@ -505,10 +511,39 @@ pub struct IncompleteCombAnalysis {
     pub reasons: BTreeSet<IncompleteReason>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailedCombAnalysis {
+    pub module: String,
+    pub reasons: BTreeSet<AnalysisFailure>,
+}
+
+#[derive(Default)]
+struct CombAnalysisProvenance {
+    incomplete: Vec<IncompleteCombAnalysis>,
+    failures: Vec<FailedCombAnalysis>,
+}
+
 #[derive(Debug, Default)]
 pub struct CombAnalysisResult {
     pub errors: Vec<AnalyzerError>,
     pub incomplete: Vec<IncompleteCombAnalysis>,
+    pub failures: Vec<FailedCombAnalysis>,
+}
+
+impl CombAnalysisResult {
+    /// Whether the analyzer completed without violating its own IR/model
+    /// invariants. This is independent of whether the design contains a loop.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        self.failures.is_empty()
+    }
+
+    /// Whether every relevant dependency was represented. Proven loop errors
+    /// do not make an otherwise complete analysis incomplete.
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.is_valid() && self.incomplete.is_empty()
+    }
 }
 
 /// Run loop detection while retaining uncertainty which must not be promoted
@@ -520,7 +555,7 @@ pub fn check_detailed(ir: &Ir) -> CombAnalysisResult {
 fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<AnalyzerError>) {
     let mut loops = LoopDiagnostics::default();
     let mut coverage = CoverageDiagnostics::default();
-    let mut incomplete = Vec::new();
+    let mut provenance = CombAnalysisProvenance::default();
     let mut summaries = CombSummaryCache::default();
     let mut visiting_specializations = HashSet::default();
 
@@ -529,9 +564,9 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
         if let Component::Module(module) = &ir.components[idx] {
             // Unevaluable generic params do not have a concrete module shape.
             if module.suppress_unassigned {
-                incomplete.push(IncompleteCombAnalysis {
+                provenance.incomplete.push(IncompleteCombAnalysis {
                     module: module.name.to_string(),
-                    reasons: [IncompleteReason::UnevaluatedGeneric].into(),
+                    reasons: [IncompleteReason::Opaque(OpaqueBoundary::UnevaluatedGeneric)].into(),
                 });
                 continue;
             }
@@ -541,10 +576,10 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
                 &mut visiting_specializations,
                 &mut loops,
                 &mut coverage,
-                &mut incomplete,
+                &mut provenance,
                 collect_coverage,
             );
-            let (graph, reasons, bit_part, module_coverage) = build_module_graph(
+            let (graph, reasons, module_failures, bit_part, module_coverage) = build_module_graph(
                 module,
                 &summaries.modules,
                 collect_coverage,
@@ -553,9 +588,15 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
             extend_unique_errors(&mut coverage, module_coverage);
             check_graph(module, &graph, &mut loops);
             if !reasons.is_empty() {
-                incomplete.push(IncompleteCombAnalysis {
+                provenance.incomplete.push(IncompleteCombAnalysis {
                     module: module.name.to_string(),
                     reasons,
+                });
+            }
+            if !module_failures.is_empty() {
+                provenance.failures.push(FailedCombAnalysis {
+                    module: module.name.to_string(),
+                    reasons: module_failures,
                 });
             }
             if let Some(specialization) = &module.specialization {
@@ -570,7 +611,8 @@ fn analyze(ir: &Ir, collect_coverage: bool) -> (CombAnalysisResult, Vec<Analyzer
     (
         CombAnalysisResult {
             errors: loops.errors,
-            incomplete,
+            incomplete: provenance.incomplete,
+            failures: provenance.failures,
         },
         coverage.errors,
     )
@@ -613,7 +655,7 @@ fn ensure_instance_summaries(
     visiting: &mut HashSet<ComponentSummaryKey>,
     loops: &mut LoopDiagnostics,
     coverage: &mut CoverageDiagnostics,
-    incomplete: &mut Vec<IncompleteCombAnalysis>,
+    provenance: &mut CombAnalysisProvenance,
     collect_coverage: bool,
 ) {
     for inst in walk_insts(module) {
@@ -625,9 +667,9 @@ fn ensure_instance_summaries(
             continue;
         }
         if !visiting.insert(key.clone()) {
-            incomplete.push(IncompleteCombAnalysis {
+            provenance.incomplete.push(IncompleteCombAnalysis {
                 module: child.name.to_string(),
-                reasons: [IncompleteReason::RecursiveCall].into(),
+                reasons: [IncompleteReason::Analysis(AnalysisGap::RecursiveCall)].into(),
             });
             continue;
         }
@@ -637,10 +679,10 @@ fn ensure_instance_summaries(
             visiting,
             loops,
             coverage,
-            incomplete,
+            provenance,
             collect_coverage,
         );
-        let (graph, reasons, bit_part, child_coverage) = build_module_graph(
+        let (graph, reasons, child_failures, bit_part, child_coverage) = build_module_graph(
             child,
             &summaries.modules,
             collect_coverage,
@@ -651,9 +693,15 @@ fn ensure_instance_summaries(
         let summary = compute_module_summary(child, &graph, &bit_part);
         summaries.modules.insert(key.clone(), summary);
         if !reasons.is_empty() {
-            incomplete.push(IncompleteCombAnalysis {
+            provenance.incomplete.push(IncompleteCombAnalysis {
                 module: child.name.to_string(),
                 reasons,
+            });
+        }
+        if !child_failures.is_empty() {
+            provenance.failures.push(FailedCombAnalysis {
+                module: child.name.to_string(),
+                reasons: child_failures,
             });
         }
         visiting.remove(&key);
@@ -1075,6 +1123,7 @@ fn build_module_graph(
 ) -> (
     CausalGraph,
     BTreeSet<IncompleteReason>,
+    BTreeSet<AnalysisFailure>,
     BitPartition,
     Vec<CoverageDiagnostic>,
 ) {
@@ -1088,6 +1137,10 @@ fn build_module_graph(
     // the same callee behind a global mutex.
     let (all_function_analyses, mut analysis_context) =
         crate::comb_memory_ssa::analyze_functions(module, &function_cache);
+    let function_failures = all_function_analyses
+        .iter()
+        .flat_map(|analysis| analysis.failures.iter().copied())
+        .collect::<BTreeSet<_>>();
     function_cache.freeze();
     let analyze_declaration = |declaration: &Declaration| match declaration {
         Declaration::Comb(comb) => Some(crate::comb_memory_ssa::analyze(
@@ -1277,22 +1330,26 @@ fn build_module_graph(
     let mut graph = CausalGraph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
     let mut incomplete = BTreeSet::new();
+    let mut failures = function_cache.failures();
+    failures.extend(function_failures);
 
     if module
         .variables
         .values()
         .any(|variable| matches!(variable.kind, crate::ir::VarKind::Inout))
     {
-        incomplete.insert(IncompleteReason::InoutPort);
+        incomplete.insert(IncompleteReason::Opaque(OpaqueBoundary::InoutPort));
     }
 
     for declaration in &module.declarations {
         match declaration {
             Declaration::External(_) => {
-                incomplete.insert(IncompleteReason::ExternalComponent);
+                incomplete.insert(IncompleteReason::Opaque(OpaqueBoundary::ExternalComponent));
             }
             Declaration::Unsupported(_) => {
-                incomplete.insert(IncompleteReason::MalformedModel);
+                incomplete.insert(IncompleteReason::Opaque(
+                    OpaqueBoundary::UnsupportedConstruct,
+                ));
             }
             Declaration::Comb(_)
             | Declaration::Ff(_)
@@ -1306,6 +1363,7 @@ fn build_module_graph(
         match result {
             Ok(summary) => {
                 incomplete.extend(summary.incomplete.iter().copied());
+                failures.extend(summary.failures.iter().copied());
                 add_memory_ssa_edges(module, summary, &bit_part, &mut graph, &mut node_map);
                 add_periodic_memory_ssa_edges(
                     module,
@@ -1316,7 +1374,7 @@ fn build_module_graph(
                 );
             }
             Err(error) => {
-                incomplete.insert(IncompleteReason::MalformedModel);
+                failures.insert(AnalysisFailure::MalformedModel);
                 log::debug!(
                     "failed to build comb MemorySSA for {}: {error}",
                     module.name
@@ -1336,7 +1394,7 @@ fn build_module_graph(
                     .values()
                     .any(|variable| matches!(variable.kind, crate::ir::VarKind::Inout))
                 {
-                    incomplete.insert(IncompleteReason::InoutPort);
+                    incomplete.insert(IncompleteReason::Opaque(OpaqueBoundary::InoutPort));
                 }
                 add_inst_output_address_edges(
                     inst,
@@ -1368,14 +1426,14 @@ fn build_module_graph(
             }
             // SV black box: under-detect.
             Component::SystemVerilog(_) => {
-                incomplete.insert(IncompleteReason::ExternalComponent);
+                incomplete.insert(IncompleteReason::Opaque(OpaqueBoundary::ExternalComponent));
             }
             // Interface signals are already lifted into the parent.
             Component::Interface(_) => {}
         }
     }
 
-    (graph, incomplete, bit_part, coverage_errors)
+    (graph, incomplete, failures, bit_part, coverage_errors)
 }
 
 fn retention_diagnostics(
@@ -2164,7 +2222,7 @@ fn add_inst_feedthrough_edges(
             continue;
         };
         if expression_has_hierarchical_reference(&input.expr) {
-            incomplete.insert(IncompleteReason::HierarchicalReference);
+            incomplete.insert(IncompleteReason::Analysis(AnalysisGap::UnresolvedHierarchy));
         }
         if let SummaryOutput::Periodic(periodic) = &dependency.output {
             let parent_inputs = map_child_input_region(
@@ -2178,7 +2236,7 @@ fn add_inst_feedthrough_edges(
             let Some(parent_outputs) =
                 map_child_periodic_output(periodic, child, &output.dst, parent_vars, ctx)
             else {
-                incomplete.insert(IncompleteReason::DynamicRegion);
+                incomplete.insert(IncompleteReason::Analysis(AnalysisGap::RegionMapping));
                 continue;
             };
             for input_region in parent_inputs {
