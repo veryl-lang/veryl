@@ -2893,6 +2893,9 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         let c_path = cache_dir.join(format!("veryl_aot_{hash}.c"));
         let tmp_c = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.c"));
         let tmp_so = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.so"));
+        // Where the compiler's own output goes: removed on success, left
+        // beside the kept `.c` on failure.
+        let log_path = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.log"));
         std::fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
 
         // The compile AND the publish run through one shell so the cache
@@ -2906,12 +2909,15 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         let out = {
             let mut cmd = Command::new("/bin/sh");
             cmd.arg("-c").arg(COMPILE_SCRIPT).args(compile_script_args(
-                &cc_name,
-                &tmp_so,
-                &tmp_c,
-                &c_path,
-                &so_path,
-                lock_path.as_deref(),
+                &CompileScriptPaths {
+                    cc: &cc_name,
+                    tmp_so: &tmp_so,
+                    tmp_c: &tmp_c,
+                    published_c: &c_path,
+                    published_so: &so_path,
+                    lock: lock_path.as_deref(),
+                    log: &log_path,
+                },
                 &flags,
             ));
             // Own process group: a group-delivered signal (Ctrl-C on the
@@ -2951,12 +2957,18 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
             out
         };
         if !out.status.success() {
+            // The compiler's output went to `log_path`, not to our pipes, so
+            // read it back; fall back to whatever the shell itself said.
+            let diag = std::fs::read_to_string(&log_path)
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| String::from_utf8_lossy(&out.stderr).into_owned());
             // Leave the temp .c for inspection.
             return Err(format!(
                 "cc {} failed: {}\n{}",
                 tmp_c.display(),
                 out.status,
-                String::from_utf8_lossy(&out.stderr),
+                diag,
             ));
         }
     }
@@ -3000,34 +3012,44 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
 /// failure path too, and an empty `$lk` (an `Unlocked` ticket) skips it without
 /// disturbing the exit status.
 ///
+/// It also redirects its whole output to `$lg` up front.  The shell outlives
+/// this process by design, but our pipes do not: once we exit, a `cc` that
+/// writes a diagnostic gets SIGPIPE and dies, taking the artifact with it.
+///
 /// Read the parameters with [`compile_script_args`]: the `shift` count here and
 /// that argument list must agree, or a compiler flag silently lands in the
 /// slot after it and never reaches the compile.
 #[cfg(unix)]
-const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; shift 6; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; shift 7; exec > "$lg" 2>&1; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; rm -f "$lg"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+
+/// Paths [`COMPILE_SCRIPT`] works on.  Named rather than positional so the
+/// four `.c`/`.so` slots cannot be transposed at the call site.
+#[cfg(unix)]
+struct CompileScriptPaths<'a> {
+    cc: &'a str,
+    tmp_so: &'a Path,
+    tmp_c: &'a Path,
+    published_c: &'a Path,
+    published_so: &'a Path,
+    lock: Option<&'a Path>,
+    log: &'a Path,
+}
 
 /// Positional arguments for [`COMPILE_SCRIPT`], in the order it reads them.
-/// `$0` is the shell's own name; the flags follow the six it shifts away.
+/// `$0` is the shell's own name; the flags follow the seven it shifts away.
 #[cfg(unix)]
-fn compile_script_args(
-    cc_name: &str,
-    tmp_so: &Path,
-    tmp_c: &Path,
-    c_path: &Path,
-    so_path: &Path,
-    lock_path: Option<&Path>,
-    flags: &[String],
-) -> Vec<std::ffi::OsString> {
+fn compile_script_args(p: &CompileScriptPaths, flags: &[String]) -> Vec<std::ffi::OsString> {
     let mut args: Vec<std::ffi::OsString> = vec![
         "sh".into(),
-        cc_name.into(),
-        tmp_so.as_os_str().to_os_string(),
-        tmp_c.as_os_str().to_os_string(),
-        c_path.as_os_str().to_os_string(),
-        so_path.as_os_str().to_os_string(),
-        lock_path
-            .map(|p| p.as_os_str().to_os_string())
+        p.cc.into(),
+        p.tmp_so.as_os_str().to_os_string(),
+        p.tmp_c.as_os_str().to_os_string(),
+        p.published_c.as_os_str().to_os_string(),
+        p.published_so.as_os_str().to_os_string(),
+        p.lock
+            .map(|q| q.as_os_str().to_os_string())
             .unwrap_or_default(),
+        p.log.as_os_str().to_os_string(),
     ];
     args.extend(flags.iter().map(std::ffi::OsString::from));
     args
@@ -7991,6 +8013,7 @@ mod tests {
         let c_path = tmp.join("p.c");
         let so_path = tmp.join("p.so");
         let lock = tmp.join("p.lock");
+        let log = tmp.join("p.log");
         std::fs::write(&tmp_c, b"").unwrap();
         std::fs::write(&lock, b"").unwrap();
         let flags = ["-O3".to_string(), "-fPIC".to_string()];
@@ -7999,12 +8022,15 @@ mod tests {
             .arg("-c")
             .arg(COMPILE_SCRIPT)
             .args(compile_script_args(
-                &fake_cc.to_string_lossy(),
-                &tmp_so,
-                &tmp_c,
-                &c_path,
-                &so_path,
-                Some(&lock),
+                &CompileScriptPaths {
+                    cc: &fake_cc.to_string_lossy(),
+                    tmp_so: &tmp_so,
+                    tmp_c: &tmp_c,
+                    published_c: &c_path,
+                    published_so: &so_path,
+                    lock: Some(&lock),
+                    log: &log,
+                },
                 &flags,
             ))
             .status()
@@ -8019,6 +8045,7 @@ mod tests {
         }
         assert!(so_path.exists(), "the artifact must publish");
         assert!(c_path.exists(), "the source must publish beside it");
+        assert!(!log.exists(), "a successful compile leaves no log behind");
         assert!(!lock.exists(), "the script must release the lock");
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -8043,11 +8070,14 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("veryl_aot_pub_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
-        // A cc that outlives the child before writing its output.
+        // A cc that outlives the child, and that emits a diagnostic once it
+        // does — on our pipes that is a SIGPIPE, and the compile would die
+        // before writing anything.
         let slow_cc = tmp.join("slow_cc.sh");
         std::fs::write(
             &slow_cc,
-            "#!/bin/sh\nsleep 2\nwhile [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
+            "#!/bin/sh\nsleep 2\necho 'warning: probe diagnostic' >&2\n\
+             while [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
         )
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
