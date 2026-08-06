@@ -103,6 +103,7 @@ pub struct Emitter {
     in_direction_with_var: bool,
     in_import: bool,
     in_scalar_type: bool,
+    scalar_type_emitted: bool,
     in_expression: Vec<()>,
     in_attribute: bool,
     in_named_argument: Vec<bool>,
@@ -110,6 +111,7 @@ pub struct Emitter {
 
     // ----- Veryl semantic state (type / enum / clock-reset) ----------------
     scalar_width: usize,
+    scalar_type_width: Option<Box<Width>>,
     signed: bool,
     enum_width: usize,
     enum_type: Option<ScalarType>,
@@ -167,12 +169,14 @@ impl Default for Emitter {
             in_direction_with_var: false,
             in_import: false,
             in_scalar_type: false,
+            scalar_type_emitted: false,
             in_expression: Vec::new(),
             in_attribute: false,
             in_named_argument: Vec::new(),
             in_generate_block: Vec::new(),
 
             scalar_width: 0,
+            scalar_type_width: None,
             signed: false,
             enum_width: 0,
             enum_type: None,
@@ -692,20 +696,22 @@ impl Emitter {
         }
         match &*arg.scalar_type_group {
             ScalarTypeGroup::UserDefinedTypeScalarTypeOpt(x) => {
+                self.scalar_type_width = x.scalar_type_opt.as_ref().map(|x| x.width.clone());
+                self.scalar_type_emitted = false;
                 self.user_defined_type(&x.user_defined_type);
-                if self.signed {
-                    self.space(1);
-                    self.str("signed");
-                    self.signed = false;
-                }
-                self.align_finish(align_kind::TYPE);
-                self.align_start(align_kind::WIDTH);
-                if let Some(ref x) = x.scalar_type_opt {
-                    self.space(1);
-                    self.width(&x.width);
-                } else {
-                    let loc = self.align_last_location(align_kind::TYPE);
-                    self.align_dummy_location(align_kind::WIDTH, loc);
+                self.scalar_type_width = None;
+
+                if !self.scalar_type_emitted {
+                    self.emit_sign();
+                    self.align_finish(align_kind::TYPE);
+                    self.align_start(align_kind::WIDTH);
+                    if let Some(ref x) = x.scalar_type_opt {
+                        self.space(1);
+                        self.width(&x.width);
+                    } else {
+                        let loc = self.align_last_location(align_kind::TYPE);
+                        self.align_dummy_location(align_kind::WIDTH, loc);
+                    }
                 }
             }
             ScalarTypeGroup::FactorType(x) => self.factor_type(&x.factor_type),
@@ -713,6 +719,14 @@ impl Emitter {
         self.in_scalar_type = false;
         self.scalar_width = 0;
         self.align_finish(align_kind::WIDTH);
+    }
+
+    fn emit_sign(&mut self) {
+        if self.signed {
+            self.space(1);
+            self.str("signed");
+            self.signed = false;
+        }
     }
 
     fn emit_identifier(&mut self, arg: &Identifier, symbol: Option<&Symbol>) {
@@ -3260,21 +3274,27 @@ impl VerylWalker for Emitter {
                     });
 
                     if let GenericSymbolPathKind::VariableType(width) = &path.kind {
+                        self.emit_sign();
                         self.align_finish(align_kind::TYPE);
                         self.align_start(align_kind::WIDTH);
 
-                        if !width.is_empty() {
+                        if self.scalar_type_width.is_some() || !width.is_empty() {
                             let mut text = String::new();
                             for w in width {
                                 text.push_str(&format!("[{}-1:0]", w));
                             }
 
                             self.space(1);
+                            if let Some(type_width) = self.scalar_type_width.take() {
+                                self.width(&type_width);
+                            }
                             self.veryl_token(&arg.identifier().replace(&text));
                         } else {
                             let loc = self.align_last_location(align_kind::TYPE);
                             self.align_dummy_location(align_kind::WIDTH, loc);
                         }
+
+                        self.scalar_type_emitted = true;
                     }
                 }
                 _ => {}
@@ -4051,11 +4071,7 @@ impl VerylWalker for Emitter {
         match arg.factor_type_group.as_ref() {
             FactorTypeGroup::VariableTypeFactorTypeOpt(x) => {
                 self.variable_type(&x.variable_type);
-                if self.signed {
-                    self.space(1);
-                    self.str("signed");
-                    self.signed = false;
-                }
+                self.emit_sign();
                 if self.in_scalar_type {
                     self.align_finish(align_kind::TYPE);
                     self.align_start(align_kind::WIDTH);

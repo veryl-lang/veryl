@@ -3473,7 +3473,7 @@ module prj___ModuleB__1__2__3__4;
 
 
 
-    logic        [2-1:0] a; always_comb a = '0;
+    logic [2-1:0]        a; always_comb a = '0;
     logic [3-1:0][4-1:0] b; always_comb b = '0;
 
     prj___ModuleA__2__logic_3_4 u (
@@ -3520,6 +3520,36 @@ module ModuleA {
     always_comb begin
         __func__8();
     end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = if cfg!(windows) {
+        emit(&metadata, code).replace("\r\n", "\n")
+    } else {
+        emit(&metadata, code)
+    };
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"
+module ModuleA {
+    gen TA: type = logic<8>;
+    gen TB: type = logic<16, 8>;
+    let _a: TA<16> = 0;
+    let _b: TB<32> = 0;
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+
+
+
+    logic [16-1:0][8-1:0]         _a; always_comb _a = 0;
+    logic [32-1:0][16-1:0][8-1:0] _b; always_comb _b = 0;
 endmodule
 //# sourceMappingURL=test.sv.map
 "#;
