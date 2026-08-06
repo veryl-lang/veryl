@@ -15,10 +15,12 @@ use crate::ir::{
 };
 use std::collections::HashMap;
 use std::ffi::c_void;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 use veryl_analyzer::ir::Op;
 use veryl_analyzer::value::Value;
 
@@ -2862,7 +2864,22 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     ]);
     let so_path = cache_dir.join(format!("veryl_aot_{hash}.so"));
 
-    if !so_path.exists() {
+    // One compiler per artifact hash, across processes and pool workers alike.
+    // `Published` means someone else landed it while we waited; the second
+    // `exists` check closes the window between the first one and the lock.
+    let ticket = if so_path.exists() {
+        CompileTicket::Published
+    } else {
+        acquire_compile_lock(cache_dir, &hash, &so_path)
+    };
+    // Only the unix path hands the lock to the shell; elsewhere `Drop` alone
+    // releases it.
+    #[cfg(unix)]
+    let lock_path = match &ticket {
+        CompileTicket::Owned(l) => Some(l.path.clone()),
+        CompileTicket::Published | CompileTicket::Unlocked => None,
+    };
+    if !matches!(ticket, CompileTicket::Published) && !so_path.exists() {
         // Identical sources hash to the same `so_path`, so a `cc -o so_path`
         // from one thread can be dlopened half-written by another. Compile to a
         // unique temp, then `rename`/`mv` (atomic within the dir) to publish.
@@ -2888,9 +2905,14 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         #[cfg(unix)]
         let out = {
             let mut cmd = Command::new("/bin/sh");
+            // The trailing `rm` releases the lock from the script, not just
+            // from `Drop`: the shell outlives a killed run, and only it knows
+            // when the publish finished.  It runs on the failure path too, and
+            // an empty $lk (Unlocked ticket) skips it without disturbing the
+            // exit status.
             cmd.arg("-c")
                 .arg(
-                    r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; shift 5; "$cc" "$@" -o "$tso" "$tc" || { rm -f "$tso"; exit 1; }; mv -f "$tc" "$pc"; mv -f "$tso" "$pso""#,
+                    r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; shift 6; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#,
                 )
                 .arg("sh")
                 .arg(&cc_name)
@@ -2906,8 +2928,18 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
                 use std::os::unix::process::CommandExt;
                 cmd.process_group(0);
             }
-            cmd.output()
-                .map_err(|e| format!("spawn sh/cc: {e} (set VERYL_AOT_CC to override)"))?
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+            let child = cmd
+                .spawn()
+                .map_err(|e| format!("spawn sh/cc: {e} (set VERYL_AOT_CC to override)"))?;
+            // The shell, not us, owns the publish, so its pid is what tells
+            // a waiter whether the lock is still live (see `owner_alive`).
+            if let Some(lp) = &lock_path {
+                let _ = std::fs::write(lp, format!("{}\n", child.id()));
+            }
+            child
+                .wait_with_output()
+                .map_err(|e| format!("wait sh/cc: {e}"))?
         };
         #[cfg(not(unix))]
         let out = {
@@ -2967,6 +2999,119 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         unsafe { setter(cb as *mut c_void) };
     }
     Ok(EmittedModule { func, _lib: lib })
+}
+
+/// Per-artifact compile lock, released on drop and by the compile script's
+/// trailing `rm` (whichever happens first — the script outlives us when the
+/// process is killed mid-compile).
+struct CompileLock {
+    path: PathBuf,
+}
+
+impl Drop for CompileLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Outcome of trying to take the lock for one artifact hash.
+enum CompileTicket {
+    /// We own the lock: compile, then release.
+    Owned(CompileLock),
+    /// Another compiler published the artifact while we waited.
+    Published,
+    /// The lock file is unusable (unwritable cache dir, filesystem without
+    /// `O_EXCL` semantics): compile unlocked, exactly as before the lock.
+    Unlocked,
+}
+
+/// Backstop for a lock whose owner cannot be identified (the pid is not
+/// written yet, or this is not unix); set above any real compile — the
+/// largest source measured, 87 MB, takes ~4 min.  A provably dead owner is
+/// taken over at once instead — see [`owner_alive`].
+const COMPILE_LOCK_STALE: Duration = Duration::from_secs(600);
+
+/// Is the compile shell recorded in a lock file still running?
+///
+/// The publishing shell outlives us on purpose, so its pid — not ours — is
+/// what makes a lock meaningful.  Without this check a run killed mid-compile
+/// would hold the artifact hostage for [`COMPILE_LOCK_STALE`].
+/// `None` = no pid recorded yet; fall back to the age rule.
+fn owner_alive(lock_path: &Path) -> Option<bool> {
+    let pid: u32 = std::fs::read_to_string(lock_path)
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    // Linux: procfs is authoritative and free.  Guarded by /proc/self so a
+    // system without procfs doesn't read every pid as dead.
+    if Path::new("/proc/self").exists() {
+        return Some(Path::new(&format!("/proc/{pid}")).exists());
+    }
+    // Other unix: `kill -0` through the shell we already use, so this needs
+    // no libc dependency.
+    #[cfg(unix)]
+    let alive = Command::new("sh")
+        .arg("-c")
+        .arg(format!("kill -0 {pid} 2>/dev/null"))
+        .status()
+        .ok()
+        .map(|s| s.success());
+    #[cfg(not(unix))]
+    let alive = None;
+    alive
+}
+
+/// Take the compile lock for `hash`, waiting for the owner rather than
+/// duplicating its work.
+///
+/// Identical sources hash to one `.so`, so every process and pool worker
+/// reaching the compile would otherwise build the same translation unit
+/// independently — four concurrent `cc1` jobs over one 87 MB source have been
+/// observed within a single run, and concurrent runs duplicate that again.
+/// Waiting costs nothing: `compile_source_in` blocks for the full `cc` either
+/// way, so this only removes redundant work.
+///
+/// Declining instead of waiting would not be neutral: the caller's cell is a
+/// `OnceLock`, so a worker that gives up leaves that handle on Cranelift for
+/// the rest of the process.
+fn acquire_compile_lock(cache_dir: &Path, hash: &str, so_path: &Path) -> CompileTicket {
+    let path = cache_dir.join(format!("veryl_aot_{hash}.lock"));
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(_) => return CompileTicket::Owned(CompileLock { path }),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
+            Err(_) => return CompileTicket::Unlocked,
+        }
+        if so_path.exists() {
+            return CompileTicket::Published;
+        }
+        let dead = match owner_alive(&path) {
+            Some(alive) => !alive,
+            // Owner unknown (pid not written yet, or not unix): age it out.
+            None => std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .map(|t| t.elapsed().unwrap_or_default() > COMPILE_LOCK_STALE)
+                // A lock we cannot stat is gone or unreadable; retrying the
+                // create resolves both.
+                .unwrap_or(true),
+        };
+        if dead {
+            if diag_enabled() {
+                eprintln!(
+                    "[aot_c] taking over abandoned compile lock {}",
+                    path.display()
+                );
+            }
+            let _ = std::fs::remove_file(&path);
+            continue;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
 }
 
 fn aot_c_cache_dir() -> Result<PathBuf, String> {
@@ -5688,6 +5833,7 @@ mod tests {
         ExpressionContext, ProtoAssignStatement, ProtoDynamicBitSelect, ProtoIfStatement,
         ProtoSystemFunctionCall,
     };
+    use std::time::Instant;
     use veryl_analyzer::value::ValueU64;
     use veryl_parser::token_range::TokenRange;
 
@@ -6489,6 +6635,119 @@ mod tests {
             );
         }
         assert_eq!(read_u128(&comb, 32), v66);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn compile_lock_ticket_states() {
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_lock_{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let so = tmp.join("veryl_aot_deadbeef.so");
+        let lock = tmp.join("veryl_aot_deadbeef.lock");
+
+        // Fresh: we own the lock, and the file exists while we hold it.
+        let ticket = acquire_compile_lock(&tmp, "deadbeef", &so);
+        assert!(matches!(ticket, CompileTicket::Owned(_)));
+        assert!(lock.exists());
+
+        // A second caller must not compile the same hash.  It waits, so give
+        // it the exit the owner's publish provides.  (The lock carries no pid
+        // yet, so the age rule keeps it alive — exactly the spawn window.)
+        std::fs::write(&so, b"not a real object").unwrap();
+        assert!(matches!(
+            acquire_compile_lock(&tmp, "deadbeef", &so),
+            CompileTicket::Published
+        ));
+
+        std::fs::remove_file(&so).unwrap();
+
+        // Dropping the owner releases the lock even without the script's `rm`
+        // (the non-unix path and every early-return error path rely on this).
+        drop(ticket);
+        assert!(!lock.exists());
+
+        // A lock naming a dead owner is taken over at once rather than after
+        // the stale timeout: otherwise a run killed mid-compile would wedge
+        // this artifact out of the cache for ten minutes.  Only unix can
+        // identify the owner; elsewhere `owner_alive` yields the age rule.
+        #[cfg(unix)]
+        {
+            // `kill -0 0` addresses our own process group, so name a pid that
+            // cannot exist rather than 0.
+            std::fs::write(&lock, format!("{}\n", u32::MAX)).unwrap();
+            assert_eq!(owner_alive(&lock), Some(false));
+            let retaken = acquire_compile_lock(&tmp, "deadbeef", &so);
+            assert!(matches!(retaken, CompileTicket::Owned(_)));
+            drop(retaken);
+            assert!(!lock.exists());
+        }
+
+        // An unusable lock directory degrades to compiling unlocked rather
+        // than failing the compile.
+        assert!(matches!(
+            acquire_compile_lock(
+                &tmp.join("no").join("such").join("dir"),
+                "deadbeef",
+                &tmp.join("no").join("such").join("dir").join("x.so"),
+            ),
+            CompileTicket::Unlocked
+        ));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn compile_lock_serializes_identical_sources() {
+        // Concurrent callers of one hash: all must get a working module, the
+        // artifact must be published exactly once, and no lock may be left
+        // behind (a leaked lock would wedge the artifact until the stale
+        // takeover).
+        if !cc_available() {
+            eprintln!("compile_lock_serializes_identical_sources: cc unavailable, skipping");
+            return;
+        }
+        let src = "\
+            #include <stdint.h>\n\
+            __attribute__((visibility(\"default\")))\n\
+            void veryl_aot_eval(uint8_t *ff, uint8_t *comb, uint64_t *log, intptr_t ff_delta) {\n\
+                (void)ff; (void)log; (void)ff_delta;\n\
+                *(uint32_t*)(comb + 0) = 0x5a5a5a5a;\n\
+            }\n";
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_lock_cc_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let dir = tmp.clone();
+            handles.push(std::thread::spawn(move || {
+                compile_source_in(&dir, src).map(|_| ())
+            }));
+        }
+        let mut skip = false;
+        for h in handles {
+            match h.join().unwrap() {
+                Ok(()) => {}
+                Err(e) if e.starts_with("dlopen") || e.starts_with("dlsym") => skip = true,
+                Err(e) => panic!("concurrent compile: {e}"),
+            }
+        }
+        if skip {
+            eprintln!("compile_lock_serializes_identical_sources: .so not loadable here; skipping");
+            let _ = std::fs::remove_dir_all(&tmp);
+            return;
+        }
+        let mut so = 0usize;
+        let mut locks = 0usize;
+        for e in std::fs::read_dir(&tmp).unwrap() {
+            let name = e.unwrap().file_name().to_string_lossy().into_owned();
+            if name.ends_with(".so") {
+                so += 1;
+            } else if name.ends_with(".lock") {
+                locks += 1;
+            }
+        }
+        assert_eq!(so, 1, "one artifact per hash");
+        assert_eq!(locks, 0, "the compile lock must be released");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -7685,7 +7944,7 @@ mod tests {
             std::thread::spawn(move || {
                 let _ = compile_source_in(&dir, "// AOT-C publish probe\n");
             });
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::thread::sleep(Duration::from_millis(200));
             std::process::exit(0);
         }
 
@@ -7706,8 +7965,8 @@ mod tests {
             .arg("aot_cache_publish_survives_process_exit")
             .env(CHILD_DIR, &tmp)
             .env("VERYL_AOT_CC", &slow_cc)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status()
             .unwrap();
         assert!(status.success(), "child run failed");
@@ -7724,9 +7983,9 @@ mod tests {
                     n.starts_with("veryl_aot_") && n.ends_with(".so") && n.matches('.').count() == 1
                 })
         };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while !published() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(100));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !published() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
         }
         assert!(published(), "the .so must publish after the run exits");
         let _ = std::fs::remove_dir_all(&tmp);
