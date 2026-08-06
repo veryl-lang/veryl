@@ -2905,22 +2905,15 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         #[cfg(unix)]
         let out = {
             let mut cmd = Command::new("/bin/sh");
-            // The trailing `rm` releases the lock from the script, not just
-            // from `Drop`: the shell outlives a killed run, and only it knows
-            // when the publish finished.  It runs on the failure path too, and
-            // an empty $lk (Unlocked ticket) skips it without disturbing the
-            // exit status.
-            cmd.arg("-c")
-                .arg(
-                    r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; shift 6; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#,
-                )
-                .arg("sh")
-                .arg(&cc_name)
-                .arg(&tmp_so)
-                .arg(&tmp_c)
-                .arg(&c_path)
-                .arg(&so_path)
-                .args(&flags);
+            cmd.arg("-c").arg(COMPILE_SCRIPT).args(compile_script_args(
+                &cc_name,
+                &tmp_so,
+                &tmp_c,
+                &c_path,
+                &so_path,
+                lock_path.as_deref(),
+                &flags,
+            ));
             // Own process group: a group-delivered signal (Ctrl-C on the
             // run, a harness killing its group) must not take the publish
             // down with it.
@@ -2999,6 +2992,45 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         unsafe { setter(cb as *mut c_void) };
     }
     Ok(EmittedModule { func, _lib: lib })
+}
+
+/// Compile one source and publish it, releasing the compile lock (`$lk`) at
+/// the end — from the script, not just from `Drop`, because the shell outlives
+/// a killed run and only it knows when the publish finished.  It runs on the
+/// failure path too, and an empty `$lk` (an `Unlocked` ticket) skips it without
+/// disturbing the exit status.
+///
+/// Read the parameters with [`compile_script_args`]: the `shift` count here and
+/// that argument list must agree, or a compiler flag silently lands in the
+/// slot after it and never reaches the compile.
+#[cfg(unix)]
+const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; shift 6; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+
+/// Positional arguments for [`COMPILE_SCRIPT`], in the order it reads them.
+/// `$0` is the shell's own name; the flags follow the six it shifts away.
+#[cfg(unix)]
+fn compile_script_args(
+    cc_name: &str,
+    tmp_so: &Path,
+    tmp_c: &Path,
+    c_path: &Path,
+    so_path: &Path,
+    lock_path: Option<&Path>,
+    flags: &[String],
+) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "sh".into(),
+        cc_name.into(),
+        tmp_so.as_os_str().to_os_string(),
+        tmp_c.as_os_str().to_os_string(),
+        c_path.as_os_str().to_os_string(),
+        so_path.as_os_str().to_os_string(),
+        lock_path
+            .map(|p| p.as_os_str().to_os_string())
+            .unwrap_or_default(),
+    ];
+    args.extend(flags.iter().map(std::ffi::OsString::from));
+    args
 }
 
 /// Per-artifact compile lock, released on drop and by the compile script's
@@ -7931,6 +7963,66 @@ mod tests {
     /// Compile `src` end-to-end; return `None` when the built `.so`
     /// can't load on this host (e.g. cross-arch `cc` on Windows-on-ARM).
     /// Genuine compile failures still panic.
+    #[test]
+    #[cfg(unix)]
+    fn compile_script_hands_every_flag_to_the_compiler() {
+        // Regression: the script's `shift` count and the argument list must
+        // agree.  With one argument missing, `$lk` swallowed the first flag
+        // and `-O3` never reached the compile.
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_args_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let seen = tmp.join("seen.txt");
+        let fake_cc = tmp.join("record_cc.sh");
+        std::fs::write(
+            &fake_cc,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n\
+                 while [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
+                seen.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake_cc, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let tmp_c = tmp.join("t.c");
+        let tmp_so = tmp.join("t.so");
+        let c_path = tmp.join("p.c");
+        let so_path = tmp.join("p.so");
+        let lock = tmp.join("p.lock");
+        std::fs::write(&tmp_c, b"").unwrap();
+        std::fs::write(&lock, b"").unwrap();
+        let flags = ["-O3".to_string(), "-fPIC".to_string()];
+
+        let status = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(COMPILE_SCRIPT)
+            .args(compile_script_args(
+                &fake_cc.to_string_lossy(),
+                &tmp_so,
+                &tmp_c,
+                &c_path,
+                &so_path,
+                Some(&lock),
+                &flags,
+            ))
+            .status()
+            .unwrap();
+        assert!(status.success(), "the script must succeed");
+        let recorded = std::fs::read_to_string(&seen).unwrap();
+        for f in &flags {
+            assert!(
+                recorded.lines().any(|l| l == f),
+                "{f} must reach the compiler, got: {recorded}"
+            );
+        }
+        assert!(so_path.exists(), "the artifact must publish");
+        assert!(c_path.exists(), "the source must publish beside it");
+        assert!(!lock.exists(), "the script must release the lock");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     #[cfg(unix)]
     fn aot_cache_publish_survives_process_exit() {
