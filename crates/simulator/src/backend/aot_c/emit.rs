@@ -2865,7 +2865,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     if !so_path.exists() {
         // Identical sources hash to the same `so_path`, so a `cc -o so_path`
         // from one thread can be dlopened half-written by another. Compile to a
-        // unique temp, then `rename` (atomic within the dir) to publish.
+        // unique temp, then `rename`/`mv` (atomic within the dir) to publish.
         use std::sync::atomic::{AtomicU64, Ordering};
         static TMP_CTR: AtomicU64 = AtomicU64::new(0);
         let uniq = format!(
@@ -2878,14 +2878,54 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         let tmp_so = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.so"));
         std::fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
 
-        let mut cmd = Command::new(&cc_name);
-        cmd.args(&flags).arg("-o").arg(&tmp_so).arg(&tmp_c);
-
-        let out = cmd
-            .output()
-            .map_err(|e| format!("spawn cc: {e} (set VERYL_AOT_CC to override)"))?;
+        // The compile AND the publish run through one shell so the cache
+        // entry lands even when this process exits first: a short run
+        // finishes before cc does and the pool worker dies with it, so a
+        // rename on the Rust side would discard the orphaned cc's output
+        // and leave every rerun on the JIT path.  Orphan reparenting keeps
+        // the shell running.  Positional parameters keep the paths out of
+        // shell-quoting territory.
+        #[cfg(unix)]
+        let out = {
+            let mut cmd = Command::new("/bin/sh");
+            cmd.arg("-c")
+                .arg(
+                    r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; shift 5; "$cc" "$@" -o "$tso" "$tc" || { rm -f "$tso"; exit 1; }; mv -f "$tc" "$pc"; mv -f "$tso" "$pso""#,
+                )
+                .arg("sh")
+                .arg(&cc_name)
+                .arg(&tmp_so)
+                .arg(&tmp_c)
+                .arg(&c_path)
+                .arg(&so_path)
+                .args(&flags);
+            // Own process group: a group-delivered signal (Ctrl-C on the
+            // run, a harness killing its group) must not take the publish
+            // down with it.
+            {
+                use std::os::unix::process::CommandExt;
+                cmd.process_group(0);
+            }
+            cmd.output()
+                .map_err(|e| format!("spawn sh/cc: {e} (set VERYL_AOT_CC to override)"))?
+        };
+        #[cfg(not(unix))]
+        let out = {
+            let mut cmd = Command::new(&cc_name);
+            cmd.args(&flags).arg("-o").arg(&tmp_so).arg(&tmp_c);
+            let out = cmd
+                .output()
+                .map_err(|e| format!("spawn cc: {e} (set VERYL_AOT_CC to override)"))?;
+            if out.status.success() {
+                // A racing peer publishes an equally valid file (same
+                // source), so an overwrite either way is fine.
+                let _ = std::fs::rename(&tmp_c, &c_path);
+                std::fs::rename(&tmp_so, &so_path)
+                    .map_err(|e| format!("rename {}: {}", tmp_so.display(), e))?;
+            }
+            out
+        };
         if !out.status.success() {
-            let _ = std::fs::remove_file(&tmp_so);
             // Leave the temp .c for inspection.
             return Err(format!(
                 "cc {} failed: {}\n{}",
@@ -2894,11 +2934,6 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
                 String::from_utf8_lossy(&out.stderr),
             ));
         }
-        // A racing peer publishes an equally valid file (same source), so an
-        // overwrite either way is fine.
-        let _ = std::fs::rename(&tmp_c, &c_path);
-        std::fs::rename(&tmp_so, &so_path)
-            .map_err(|e| format!("rename {}: {}", tmp_so.display(), e))?;
     }
 
     // SAFETY: the .so was just compiled by us (or previously cached) and
@@ -7637,6 +7672,66 @@ mod tests {
     /// Compile `src` end-to-end; return `None` when the built `.so`
     /// can't load on this host (e.g. cross-arch `cc` on Windows-on-ARM).
     /// Genuine compile failures still panic.
+    #[test]
+    #[cfg(unix)]
+    fn aot_cache_publish_survives_process_exit() {
+        // A short run exits while cc is still going, so the publish must not
+        // depend on this process surviving to rename the temp files.  The
+        // test re-executes itself as a child that starts one compile and
+        // exits; the parent then waits for the artifact to appear.
+        const CHILD_DIR: &str = "VERYL_TEST_AOT_PUBLISH_DIR";
+        if let Ok(dir) = std::env::var(CHILD_DIR) {
+            let dir = PathBuf::from(dir);
+            std::thread::spawn(move || {
+                let _ = compile_source_in(&dir, "// AOT-C publish probe\n");
+            });
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::process::exit(0);
+        }
+
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_pub_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        // A cc that outlives the child before writing its output.
+        let slow_cc = tmp.join("slow_cc.sh");
+        std::fs::write(
+            &slow_cc,
+            "#!/bin/sh\nsleep 2\nwhile [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&slow_cc, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let status = Command::new(std::env::current_exe().unwrap())
+            .arg("aot_cache_publish_survives_process_exit")
+            .env(CHILD_DIR, &tmp)
+            .env("VERYL_AOT_CC", &slow_cc)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "child run failed");
+
+        // Published artifacts are `veryl_aot_<hash>.so`; the temps carry an
+        // extra `.<pid>.<n>` and must not count.
+        let published = || {
+            std::fs::read_dir(&tmp)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|e| {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    n.starts_with("veryl_aot_") && n.ends_with(".so") && n.matches('.').count() == 1
+                })
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !published() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(published(), "the .so must publish after the run exits");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     fn compile_for_test(cache_dir: &Path, src: &str, what: &str) -> Option<EmittedModule> {
         match compile_source_in(cache_dir, src) {
             Ok(m) => Some(m),
