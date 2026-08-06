@@ -904,8 +904,13 @@ fn emit_wide_operand(
     pre: &mut String,
 ) -> Option<WideRef> {
     let tnw = target_nb / 8;
-    if expr.builds_wide_pointer() {
-        let r = emit_wide_expr(expr, pre)?;
+    // A wide-pointer NODE whose wide emit has no arm may still be scalar-
+    // emittable when its RESULT is ≤128 bits (e.g. a dynamic select on a
+    // >128-bit var, which reads a 64..128-bit element into a register):
+    // fall through to the scalar promotion below instead of bailing.
+    if expr.builds_wide_pointer()
+        && let Some(r) = emit_wide_expr(expr, pre)
+    {
         if r.nb == target_nb {
             return Some(r);
         }
@@ -3044,14 +3049,10 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             // `__uint128_t` scalar path below (emit_expr_root) can't produce.
             // A 65-128-bit dst with a plain C-scalar RHS still takes the scalar
             // path.  A (bit-)select store IS emitted here (scalar fast path for
-            // <=64-bit fields, full wide RMW otherwise); only rhs_select stays
-            // on Cranelift (S1).
+            // <=64-bit fields, full wide RMW otherwise) and so is a plain
+            // rhs_select (field extract + store); the rhs_select + dst-select
+            // combination stays on Cranelift.
             if a.dst_width > 128 || (a.dst_width > 64 && eff_expr.builds_wide_pointer()) {
-                // A non-foldable rhs_select on a wide store (rhs isn't a plain
-                // variable) stays on Cranelift; dynamic_select bailed above.
-                if eff_rhs_select.is_some() {
-                    return None;
-                }
                 let VarOffset::Comb(store_off) = a.dst else {
                     return None;
                 };
@@ -3062,6 +3063,47 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 let nw = nb / 8;
                 let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
                 let dmask = wpack(nb, a.dst_width);
+                // Non-foldable rhs_select (rhs isn't a plain variable):
+                // materialize the wide RHS at its own width, extract
+                // `value.select(rhs_hi, rhs_lo)` (mask to the source width,
+                // shift right, mask to the field), then plain-store the field.
+                // Mirrors AssignStatement::eval_step's `value.select`.
+                if let Some((rhs_hi, rhs_lo)) = eff_rhs_select {
+                    if a.select.is_some() {
+                        return None;
+                    }
+                    let nbits = rhs_hi.checked_sub(rhs_lo)?.checked_add(1)?;
+                    let src_w = eff_expr.width();
+                    if src_w == 0 {
+                        return None;
+                    }
+                    let src_nb = native_bytes(src_w);
+                    let src_nw = src_nb / 8;
+                    let mut pre = String::new();
+                    let r = emit_wide_operand(eff_expr, src_nb, &mut pre)?;
+                    let fld = next_wide_tmp();
+                    pre.push_str(&format!(
+                        "uint64_t _w{fld}[{src_nw}]; \
+                         vw_copy((uint8_t*)_w{fld}, {src}, {src_nb}u); \
+                         vw_apply_mask((uint8_t*)_w{fld}, (const uint8_t*)0, {pks}u); \
+                         vw_lshr((uint8_t*)_w{fld}, (const uint8_t*)_w{fld}, {rhs_lo}ull, {src_nb}u); \
+                         vw_apply_mask((uint8_t*)_w{fld}, (const uint8_t*)0, {pkf}u); ",
+                        src = r.addr,
+                        pks = wpack(src_nb, src_w),
+                        pkf = wpack(src_nb, nbits),
+                    ));
+                    let store = if nb <= src_nb {
+                        format!("vw_copy({dst}, (const uint8_t*)_w{fld}, {nb}u); ")
+                    } else {
+                        format!(
+                            "__builtin_memset({dst}, 0, {nb}); \
+                             vw_copy({dst}, (const uint8_t*)_w{fld}, {src_nb}u); "
+                        )
+                    };
+                    return Some(format!(
+                        "{{ {pre}{store}vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}"
+                    ));
+                }
                 if let Some((hi, lo)) = a.select {
                     let nbits = hi.checked_sub(lo)?.checked_add(1)?;
                     // <=64-bit field → scalar word RMW (see
@@ -3112,6 +3154,38 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 return Some(format!(
                     "{{ {pre}vw_copy({dst}, {src}, {nb}u); \
                         vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}",
+                    src = r.addr,
+                ));
+            }
+            // A ≤64-bit destination fed by a wide-pointer RHS — SV's
+            // truncating `assign narrow = wide_op;`: materialize the RHS and
+            // store its low word masked to the destination width.
+            if a.dst_width > 0
+                && a.dst_width <= 64
+                && eff_expr.builds_wide_pointer()
+                && eff_rhs_select.is_none()
+                && a.select.is_none()
+                && a.dynamic_select.is_none()
+                && se_from.is_none()
+            {
+                let VarOffset::Comb(store_off) = a.dst else {
+                    return None;
+                };
+                if store_off < 0 {
+                    return None;
+                }
+                let nb = native_bytes(a.dst_width);
+                let cty = native_c_type(nb)?;
+                let src_w = eff_expr.width();
+                if src_w == 0 {
+                    return None;
+                }
+                let mut pre = String::new();
+                let r = emit_wide_operand(eff_expr, native_bytes(src_w), &mut pre)?;
+                let dwmask = width_mask(a.dst_width);
+                return Some(format!(
+                    "{{ {pre}*(({cty}*)(comb_values + {store_off:#x})) = \
+                       ({cty})(VW_RD({src}, 0) & 0x{dwmask:x}ULL); }}",
                     src = r.addr,
                 ));
             }
@@ -3794,29 +3868,89 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 if *var_full_width == 0
                     || dyn_sel.elem_width == 0
                     || dyn_sel.window == 0
-                    || dyn_sel.window >= 64
+                    || dyn_sel.window > 128
                     || dyn_sel.num_elements == 0
                 {
                     return None;
                 }
                 let idx_str = emit_expr(&dyn_sel.index_expr)?;
                 let max_idx = dyn_sel.num_elements.saturating_sub(1);
-                let mask = (1u64 << dyn_sel.window) - 1;
                 if *var_full_width <= 128 {
                     let load = emit_var_load(var_offset, *var_full_width)?;
-                    // Result is <= 64 bits (window < 64); cast down so a
-                    // __uint128_t load (65..128-bit var) still yields a scalar.
+                    if dyn_sel.window < 64 {
+                        let mask = (1u64 << dyn_sel.window) - 1;
+                        // Result is <= 64 bits; cast down so a __uint128_t
+                        // load (65..128-bit var) still yields a scalar.
+                        return Some(format!(
+                            "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
+                                uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+                                (uint64_t)((({load}) >> (_idx * {ew})) & 0x{mask:x}ULL); }})",
+                            idx = idx_str,
+                            max = max_idx,
+                            load = load,
+                            ew = dyn_sel.elem_width,
+                            mask = mask,
+                        ));
+                    }
+                    // 64..128-bit window (e.g. an 80-bit element of a 160-bit
+                    // pair): shift and mask in __uint128_t; the result stays a
+                    // u128-typed scalar.
+                    let m: u128 = if dyn_sel.window >= 128 {
+                        !0u128
+                    } else {
+                        (1u128 << dyn_sel.window) - 1
+                    };
+                    let (mhi, mlo) = ((m >> 64) as u64, m as u64);
                     return Some(format!(
                         "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                            (uint64_t)((({load}) >> (_idx * {ew})) & 0x{mask:x}ULL); }})",
+                            ((((__uint128_t)({load})) >> (_idx * {ew})) \
+                             & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)); }})",
                         idx = idx_str,
                         max = max_idx,
                         load = load,
                         ew = dyn_sel.elem_width,
-                        mask = mask,
                     ));
                 }
+                if dyn_sel.window > 64 {
+                    // Wide (>128-bit) var with a 65..128-bit window: 3-word
+                    // funnel read at the runtime bit offset, assembled into a
+                    // __uint128_t.  Reads past the end are guarded to 0.
+                    let (buf, off) = match var_offset {
+                        VarOffset::Ff(o) => ("ff_values", *o),
+                        VarOffset::Comb(o) => ("comb_values", *o),
+                    };
+                    if off < 0 {
+                        return None;
+                    }
+                    let nw = native_bytes(*var_full_width) / 8;
+                    let m: u128 = if dyn_sel.window >= 128 {
+                        !0u128
+                    } else {
+                        (1u128 << dyn_sel.window) - 1
+                    };
+                    let (mhi, mlo) = ((m >> 64) as u64, m as u64);
+                    return Some(format!(
+                        "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
+                            uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+                            uint64_t _bit = _idx * {ew}; uint64_t _w = _bit >> 6; uint32_t _s = (uint32_t)(_bit & 63); \
+                            const veryl_u64_ua* _p = (const veryl_u64_ua*)({b} + {off:#x}); \
+                            uint64_t _q0 = _w < {nw}ull ? _p[_w] : 0; \
+                            uint64_t _q1 = (_w + 1) < {nw}ull ? _p[_w + 1] : 0; \
+                            uint64_t _q2 = (_w + 2) < {nw}ull ? _p[_w + 2] : 0; \
+                            uint64_t _v0 = _s == 0 ? _q0 : ((_q0 >> _s) | (_q1 << (64 - _s))); \
+                            uint64_t _v1 = _s == 0 ? _q1 : ((_q1 >> _s) | (_q2 << (64 - _s))); \
+                            ((((__uint128_t)_v1 << 64) | (__uint128_t)_v0) \
+                             & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)); }})",
+                        idx = idx_str,
+                        max = max_idx,
+                        ew = dyn_sel.elem_width,
+                        b = buf,
+                        off = off,
+                        nw = nw,
+                    ));
+                }
+                let mask = width_mask(dyn_sel.window);
                 // Wide (>128-bit) underlying var: funnel-read a 64-bit window at
                 // the runtime bit offset idx*elem_width from the flat buffer,
                 // then mask to `window` bits.  Reads past the end (`_hi`) are
@@ -4335,8 +4469,46 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         shifted
                     });
                 }
+                // 65..128-bit Add/Sub/Mul with both operands ≤64 bits: C
+                // computes the both-narrow case in uint64_t and truncates, so
+                // promote both operands to __uint128_t first.  A 64x64
+                // product fits 128 bits exactly, and add/sub wrap in 128 then
+                // mask to w — the modulo-2^w SystemVerilog result.  Signed
+                // variants sign-extend each operand from its own width into
+                // __int128 (the low w bits of the infinite-precision result
+                // are identical), e.g. a 33x33→66 multiplier.
+                if expr_context.width > 64
+                    && expr_context.width <= 128
+                    && matches!(op, Op::Add | Op::Sub | Op::Mul)
+                    && x.width() <= 64
+                    && y.width() <= 64
+                {
+                    let w = expr_context.width;
+                    let promote = |s: &str, sw: usize| -> String {
+                        if expr_context.signed {
+                            if sw >= 64 {
+                                format!("((__int128_t)((int64_t)((uint64_t)({s}))))")
+                            } else {
+                                let sh = 64 - sw;
+                                format!(
+                                    "((__int128_t)(((int64_t)(((uint64_t)({s})) << {sh})) >> {sh}))"
+                                )
+                            }
+                        } else if sw >= 64 {
+                            format!("((__uint128_t)((uint64_t)({s})))")
+                        } else {
+                            format!(
+                                "((__uint128_t)(((uint64_t)({s})) & 0x{:x}ULL))",
+                                width_mask(sw)
+                            )
+                        }
+                    };
+                    let xm = promote(&xs, x.width());
+                    let ym = promote(&ys, y.width());
+                    let body = format!("((__uint128_t)(({xm}) {c_op} ({ym})))");
+                    return Some(if w < 128 { mask_u128(&body, w) } else { body });
+                }
                 let wide_truncates = match op {
-                    Op::Add | Op::Sub | Op::Mul => x.width() <= 64 && y.width() <= 64,
                     Op::LogicShiftL | Op::ArithShiftL => x.width() <= 64,
                     _ => false,
                 };
@@ -4755,16 +4927,34 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 let mut lower_width = 0usize;
                 for (sub, repeat, elem_width) in &elements[1..] {
                     let sub_width = sub.width();
-                    if sub_width == 0 || sub_width > 64 {
+                    if sub_width == 0 || sub_width > 128 {
                         return None;
                     }
                     let sub_str = emit_expr(sub)?;
+                    let ew = *elem_width;
+                    if sub_width > 64 {
+                        // Wide (65..128-bit) element under a leading sign
+                        // repeat, e.g. `{62{sign}, product66}`: total width
+                        // > 64 ⇒ `acc` is __uint128_t; mask in u128.
+                        let m: u128 = if sub_width >= 128 {
+                            !0u128
+                        } else {
+                            (1u128 << sub_width) - 1
+                        };
+                        let (mhi, mlo) = ((m >> 64) as u64, m as u64);
+                        for _ in 0..*repeat {
+                            acc = format!(
+                                "((({acc}) << {ew}) | (((__uint128_t)({sub_str})) & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)))"
+                            );
+                            lower_width += ew;
+                        }
+                        continue;
+                    }
                     let mask = if sub_width >= 64 {
                         u64::MAX
                     } else {
                         (1u64 << sub_width) - 1
                     };
-                    let ew = *elem_width;
                     for _ in 0..*repeat {
                         if wide_acc {
                             acc = format!(
@@ -5807,6 +5997,424 @@ mod tests {
         let s = emit_expr(&e).unwrap();
         assert!(s.contains("__uint128_t"));
         assert!(s.contains("(__uint128_t)0)"));
+    }
+
+    fn cc_available() -> bool {
+        Command::new(std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string()))
+            .arg("--version")
+            .output()
+            .is_ok()
+    }
+
+    fn read_u128(comb: &[u8], off: usize) -> u128 {
+        u128::from_le_bytes(comb[off..off + 16].try_into().unwrap())
+    }
+
+    #[test]
+    fn emit_narrow_operand_mul_widens_to_128() {
+        // A 33x33->66 multiplier: a 65..128-bit result from <=64-bit
+        // operands, which C would otherwise evaluate in uint64_t.
+        if !cc_available() {
+            eprintln!("emit_narrow_operand_mul_widens_to_128: cc unavailable, skipping");
+            return;
+        }
+        let mul = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0), 33)),
+            op: Op::Mul,
+            y: Box::new(var_expr(VarOffset::Comb(8), 33)),
+            width: 66,
+            expr_context: ctx(66, false),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(32),
+            dst_width: 66,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: mul,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign]).expect("66-bit product must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_wmul_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "emit_narrow_operand_mul_widens_to_128")
+        else {
+            return;
+        };
+        let a: u64 = 0x1_0000_0001;
+        let b: u64 = 0x1_0000_0003;
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 64];
+        comb[0..8].copy_from_slice(&a.to_le_bytes());
+        comb[8..16].copy_from_slice(&b.to_le_bytes());
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let expect = ((a as u128) * (b as u128)) & ((1u128 << 66) - 1);
+        assert_eq!(read_u128(&comb, 32), expect);
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        // Zero-extending the operands instead would make -3 a large positive.
+        let mul = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0), 33)),
+            op: Op::Mul,
+            y: Box::new(var_expr(VarOffset::Comb(8), 33)),
+            width: 66,
+            expr_context: ctx(66, true),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(32),
+            dst_width: 66,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: mul,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign]).expect("signed 66-bit product must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_wmuls_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "emit_narrow_operand_mul_signed") else {
+            return;
+        };
+        let neg3 = ((1u64 << 33) - 3) & ((1u64 << 33) - 1);
+        let five: u64 = 5;
+        comb[0..8].copy_from_slice(&neg3.to_le_bytes());
+        comb[8..16].copy_from_slice(&five.to_le_bytes());
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let expect = ((-15i128) as u128) & ((1u128 << 66) - 1);
+        assert_eq!(read_u128(&comb, 32), expect);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_concat_sign_repeat_with_wide_element() {
+        // `{62{sign}, value66}` — a >64-bit element under a leading 1-bit
+        // sign repeat (a widened multiply result), previously a
+        // whole-module bail.  dst: 128-bit at comb[32..48].
+        if !cc_available() {
+            eprintln!("emit_concat_sign_repeat_with_wide_element: cc unavailable, skipping");
+            return;
+        }
+        let concat = ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(var_expr(VarOffset::Comb(0), 1)), 62, 1),
+                (Box::new(var_expr(VarOffset::Comb(8), 66)), 1, 66),
+            ],
+            width: 128,
+            expr_context: ctx(128, false),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(32),
+            dst_width: 128,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: concat,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign])
+            .expect("sign-repeat concat with a 66-bit element must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_wcat_{}", std::process::id()));
+        let Some(module) =
+            compile_for_test(&tmp, &src, "emit_concat_sign_repeat_with_wide_element")
+        else {
+            return;
+        };
+        let v66: u128 = 0x2_DEAD_BEEF_1234_5678;
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 64];
+        comb[0] = 1; // sign bit set
+        comb[8..24].copy_from_slice(&v66.to_le_bytes());
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let expect = (((1u128 << 62) - 1) << 66) | v66;
+        assert_eq!(read_u128(&comb, 32), expect);
+        // Sign clear: upper 62 bits zero.
+        comb[0] = 0;
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        assert_eq!(read_u128(&comb, 32), v66);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_rhs_select_on_wide_pointer_store() {
+        // rhs_select on a non-foldable wide RHS: dst128 = (a192 | b192)
+        // [159:32] — the wide-pointer store path extracts the field with
+        // vw_lshr instead of bailing to Cranelift.
+        if !cc_available() {
+            eprintln!("emit_rhs_select_on_wide_pointer_store: cc unavailable, skipping");
+            return;
+        }
+        let or192 = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0), 192)),
+            op: Op::BitOr,
+            y: Box::new(var_expr(VarOffset::Comb(24), 192)),
+            width: 192,
+            expr_context: ctx(192, false),
+        };
+        assert!(
+            or192.builds_wide_pointer(),
+            "192-bit OR must be a wide-pointer expr"
+        );
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(48),
+            dst_width: 128,
+            select: None,
+            dynamic_select: None,
+            rhs_select: Some((159, 32)),
+            expr: or192,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign])
+            .expect("rhs_select on a wide-pointer RHS must stay AOT-covered");
+        assert!(
+            src.contains("vw_lshr"),
+            "field extract goes through vw_lshr"
+        );
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_wsel_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "emit_rhs_select_on_wide_pointer_store")
+        else {
+            return;
+        };
+        let a: [u64; 3] = [
+            0x1111_2222_3333_4444,
+            0x5555_6666_7777_8888,
+            0x9999_AAAA_BBBB_CCCC,
+        ];
+        let b: [u64; 3] = [
+            0x0F0F_0F0F_0F0F_0F0F,
+            0xF0F0_F0F0_F0F0_F0F0,
+            0x00FF_00FF_00FF_00FF,
+        ];
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 80];
+        for (i, w) in a.iter().enumerate() {
+            comb[i * 8..i * 8 + 8].copy_from_slice(&w.to_le_bytes());
+        }
+        for (i, w) in b.iter().enumerate() {
+            comb[24 + i * 8..24 + i * 8 + 8].copy_from_slice(&w.to_le_bytes());
+        }
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        // Expected: bits [159:32] of a|b, as a 128-bit value.
+        let or0 = a[0] | b[0];
+        let or1 = a[1] | b[1];
+        let or2 = a[2] | b[2];
+        // value >> 32 over the 192-bit [or2:or1:or0].
+        let expected_sel = ((or0 as u128) >> 32) | ((or1 as u128) << 32) | ((or2 as u128) << 96);
+        assert_eq!(read_u128(&comb, 48), expected_sel);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_narrow_dst_from_wide_pointer_rhs() {
+        // `assign bit1 = a192 & b192;` — SV truncation of a wide-op RHS
+        // into a ≤64-bit destination.
+        // dst: 1-bit at comb[48], operands at comb[0]/comb[24].
+        if !cc_available() {
+            eprintln!("emit_narrow_dst_from_wide_pointer_rhs: cc unavailable, skipping");
+            return;
+        }
+        let and192 = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0), 192)),
+            op: Op::BitAnd,
+            y: Box::new(var_expr(VarOffset::Comb(24), 192)),
+            width: 192,
+            expr_context: ctx(192, false),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(48),
+            dst_width: 1,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: and192,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign])
+            .expect("narrow dst fed by a wide-pointer RHS must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_ndw_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "emit_narrow_dst_from_wide_pointer_rhs")
+        else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 64];
+        comb[0] = 0x3; // a bit0/bit1 set
+        comb[24] = 0x1; // b bit0 set → (a&b) bit0 = 1
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        assert_eq!(comb[48] & 1, 1);
+        comb[24] = 0x2; // b bit1 only → (a&b) bit0 = 0
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        assert_eq!(comb[48] & 1, 0);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_dynamic_select_wide_windows() {
+        // Dynamic element reads with 64..128-bit windows: an 80-bit element
+        // of a 160-bit pair (u128 shift path) and a 96-bit element of a
+        // 288-bit triple (3-word funnel path).  Both were interpreter-only.
+        if !cc_available() {
+            eprintln!("emit_dynamic_select_wide_windows: cc unavailable, skipping");
+            return;
+        }
+        use crate::ir::ProtoDynamicBitSelect;
+        let mk_read = |base: isize, vfw: usize, ew: usize, ne: usize, idx_off: isize| {
+            ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(base),
+                select: None,
+                dynamic_select: Some(ProtoDynamicBitSelect {
+                    index_expr: Box::new(var_expr(VarOffset::Comb(idx_off), 32)),
+                    elem_width: ew,
+                    window: ew,
+                    num_elements: ne,
+                }),
+                width: ew,
+                var_full_width: vfw,
+                expr_context: ctx(ew, false),
+            }
+        };
+        let mk_assign = |dst: isize, dw: usize, e: ProtoExpression| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(dst),
+                dst_width: dw,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: e,
+                dst_ff_current_offset: 0,
+                token: dummy_token(),
+            })
+        };
+        // pair160 at comb[0..24] (idx at 96), triple288 at comb[24..64]
+        // (idx at 100); dst80 at comb[112..128], dst96 at comb[128..144].
+        let src = emit_function(&[
+            mk_assign(112, 80, mk_read(0, 160, 80, 2, 96)),
+            mk_assign(128, 96, mk_read(24, 288, 96, 3, 100)),
+            // vfw ≤ 128 with a full-64-bit window (u128 shift path).
+            mk_assign(144, 64, mk_read(64, 128, 64, 2, 104)),
+        ])
+        .expect("64..128-bit dynamic-select windows must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_dsw_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "emit_dynamic_select_wide_windows") else {
+            return;
+        };
+        // pair160 = element1(80b) : element0(80b)
+        let e0: u128 = 0x1234_5678_9ABC_DEF0_1122u128 & ((1u128 << 80) - 1);
+        let e1: u128 = 0xFEDC_BA98_7654_3210_3344u128 & ((1u128 << 80) - 1);
+        let pair: [u8; 20] = {
+            // 80 bits = 10 bytes per element, little-endian, byte-aligned.
+            let mut v = [0u8; 20];
+            for byte in 0..10 {
+                v[byte] = ((e0 >> (byte * 8)) & 0xff) as u8;
+                v[10 + byte] = ((e1 >> (byte * 8)) & 0xff) as u8;
+            }
+            v
+        };
+        // triple288: 96-bit elements t0,t1,t2
+        let t = [
+            0xAAAA_BBBB_CCCC_DDDD_EEEE_FFFFu128 & ((1u128 << 96) - 1),
+            0x0102_0304_0506_0708_090A_0B0Cu128 & ((1u128 << 96) - 1),
+            0xF00D_FACE_CAFE_BEEF_1234_5678u128 & ((1u128 << 96) - 1),
+        ];
+        let mut triple = [0u8; 36];
+        for (i, tv) in t.iter().enumerate() {
+            let bit = i * 96;
+            // Scatter tv into the little-endian byte array at bit offset.
+            for byte in 0..12 {
+                let val = ((tv >> (byte * 8)) & 0xff) as u8;
+                let pos_bit = bit + byte * 8;
+                let (pb, ps) = (pos_bit / 8, pos_bit % 8);
+                assert_eq!(ps, 0); // 96 is byte-aligned
+                triple[pb] |= val;
+            }
+        }
+        let g: [u64; 2] = [0xDEAD_BEEF_0BAD_F00D, 0x0123_4567_89AB_CDEF];
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 176];
+        comb[0..20].copy_from_slice(&pair);
+        comb[24..60].copy_from_slice(&triple);
+        comb[64..72].copy_from_slice(&g[0].to_le_bytes());
+        comb[72..80].copy_from_slice(&g[1].to_le_bytes());
+        let mut log = vec![0u64; 16];
+        for (idx, want80, want96, want64) in [
+            (0u32, e0, t[0], g[0]),
+            (1, e1, t[1], g[1]),
+            (2, e1, t[2], g[1]), // out-of-range indexes clamp to the last element
+        ] {
+            comb[96..100].copy_from_slice(&idx.min(7).to_le_bytes());
+            comb[100..104].copy_from_slice(&idx.to_le_bytes());
+            comb[104..108].copy_from_slice(&idx.to_le_bytes());
+            unsafe {
+                (module.func)(
+                    ff.as_mut_ptr(),
+                    comb.as_mut_ptr(),
+                    log.as_mut_ptr() as *mut u8,
+                    0,
+                );
+            }
+            assert_eq!(read_u128(&comb, 112) & ((1u128 << 80) - 1), want80);
+            assert_eq!(read_u128(&comb, 128) & ((1u128 << 96) - 1), want96);
+            assert_eq!(
+                u64::from_le_bytes(comb[144..152].try_into().unwrap()),
+                want64
+            );
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
