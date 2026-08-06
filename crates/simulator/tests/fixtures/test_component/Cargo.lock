@@ -101,7 +101,7 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "veryl-component"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "smallvec",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-component-macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -120,4 +120,4 @@ dependencies = [
 
 [[package]]
 name = "veryl-component-sys"
-version = "0.1.0"
+version = "0.1.1"
