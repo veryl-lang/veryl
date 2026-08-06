@@ -4775,13 +4775,16 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                                 mask = mask,
                             );
                         } else {
-                            acc = format!(
-                                "((({acc}) << {w}) | (({sub}) & 0x{mask:x}ULL))",
-                                acc = acc,
-                                w = ew,
-                                sub = sub_str,
-                                mask = mask,
-                            );
+                            let elem =
+                                format!("(({sub}) & 0x{mask:x}ULL)", sub = sub_str, mask = mask);
+                            // `acc << 64` is UB on a uint64_t: x86 shifts use
+                            // only the low 6 bits of the count, so it computes
+                            // `acc | elem` instead of dropping `acc`.
+                            acc = if ew >= 64 {
+                                elem
+                            } else {
+                                format!("((({acc}) << {w}) | {elem})", acc = acc, w = ew)
+                            };
                         }
                         lower_width += ew;
                     }
@@ -4854,13 +4857,13 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                             mask = mask,
                         );
                     } else {
-                        acc = format!(
-                            "((({acc}) << {w}) | (({sub}) & 0x{mask:x}ULL))",
-                            acc = acc,
-                            w = sub_width,
-                            sub = sub_str,
-                            mask = mask,
-                        );
+                        let elem = format!("(({sub}) & 0x{mask:x}ULL)", sub = sub_str, mask = mask);
+                        // Same UB as the sign-repeat fold above.
+                        acc = if sub_width >= 64 {
+                            elem
+                        } else {
+                            format!("((({acc}) << {w}) | {elem})", acc = acc, w = sub_width)
+                        };
                     }
                 }
             }
@@ -5804,6 +5807,38 @@ mod tests {
         let s = emit_expr(&e).unwrap();
         assert!(s.contains("__uint128_t"));
         assert!(s.contains("(__uint128_t)0)"));
+    }
+
+    #[test]
+    fn emit_expr_concatenation_64_bit_slot_drops_the_accumulator() {
+        // Regression: emitted `((0ULL) << 64) | elem`, which gcc warns on
+        // (-Wshift-count-overflow) and x86 evaluates as `acc | elem`.
+        let a = var_expr(VarOffset::Comb(0), 64);
+        let e = ProtoExpression::Concatenation {
+            elements: vec![(Box::new(a), 1, 64)],
+            width: 64,
+            expr_context: ctx(64, false),
+        };
+        let s = emit_expr(&e).unwrap();
+        assert!(
+            !s.contains("<< 64"),
+            "u64 accumulator must not shift by 64: {s}"
+        );
+
+        // A __uint128_t accumulator must keep its 64-bit shift.
+        let a = var_expr(VarOffset::Comb(0), 64);
+        let b = var_expr(VarOffset::Comb(8), 4);
+        let e = ProtoExpression::Concatenation {
+            elements: vec![(Box::new(a), 1, 64), (Box::new(b), 1, 4)],
+            width: 68,
+            expr_context: ctx(68, false),
+        };
+        let s = emit_expr(&e).unwrap();
+        assert!(s.contains("__uint128_t"));
+        assert!(
+            s.contains("(__uint128_t)0)) << 64"),
+            "u128 accumulator keeps its 64-bit shift: {s}"
+        );
     }
 
     #[test]
