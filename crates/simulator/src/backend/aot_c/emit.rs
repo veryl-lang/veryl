@@ -775,10 +775,6 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             var_full_width,
             ..
         } => {
-            // A dynamic-select on a wide var is interpreter-only here.
-            if dynamic_select.is_some() {
-                return None;
-            }
             let off = match var_offset {
                 VarOffset::Ff(o) | VarOffset::Comb(o) => *o,
             };
@@ -789,6 +785,37 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                 VarOffset::Ff(_) => "ff_values",
                 VarOffset::Comb(_) => "comb_values",
             };
+            // Dynamic element read with a >128-bit window.  A ≤128-bit
+            // window is a scalar (emit_expr's funnel paths) and a combined
+            // static select stays on Cranelift, so only this arm is left.
+            if let Some(dyn_sel) = dynamic_select {
+                if select.is_some()
+                    || dyn_sel.window <= 128
+                    || dyn_sel.elem_width == 0
+                    || dyn_sel.num_elements == 0
+                {
+                    return None;
+                }
+                let idx = emit_expr(&dyn_sel.index_expr)?;
+                let max_idx = dyn_sel.num_elements - 1;
+                let src_nb = native_bytes(*var_full_width);
+                let src_nw = src_nb / 8;
+                let t = next_wide_tmp();
+                pre.push_str(&format!(
+                    "uint64_t _w{t}[{src_nw}]; \
+                     {{ uint64_t _di_raw = (uint64_t)({idx}); \
+                        uint64_t _di = _di_raw < {max_idx}ull ? _di_raw : {max_idx}ull; \
+                        vw_lshr((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), _di * {ew}ull, {src_nb}u); }} \
+                     vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {mask}u); ",
+                    ew = dyn_sel.elem_width,
+                    mask = wpack(src_nb, dyn_sel.window),
+                ));
+                return Some(WideRef {
+                    addr: format!("((uint8_t*)_w{t})"),
+                    nb: native_bytes(dyn_sel.window),
+                    width: dyn_sel.window,
+                });
+            }
             // Wide-result static bit-select: extract [lo..hi] of the (wide)
             // source into a scratch = (src >> lo) masked to nbits.  A ≤128-bit
             // result is a scalar (builds_wide_pointer routes it away from here);
@@ -961,6 +988,96 @@ fn emit_wide_operand(
 
 /// `emit_wide_operand`, then sign-extend the value to the operation width
 /// when the context is signed (mirrors Cranelift's wide_resize marshaling).
+/// Scalar (≤64-bit) view of a wide-pointer sub-expression via a GCC
+/// statement expression — for concat elements whose VALUE is narrow but
+/// whose emit routes through the wide machinery (e.g. a narrow dynamic
+/// select on a >128-bit var).
+fn emit_scalar_sub_via_wide(sub: &ProtoExpression) -> Option<String> {
+    if !sub.builds_wide_pointer() || sub.width() == 0 || sub.width() > 64 {
+        return None;
+    }
+    let mut pre = String::new();
+    let r = emit_wide_operand(sub, native_bytes(sub.width()).max(8), &mut pre)?;
+    Some(format!(
+        "({{ {pre}(uint64_t)VW_RD({addr}, 0); }})",
+        addr = r.addr
+    ))
+}
+
+/// Extract `value.select(rhs_hi, rhs_lo)` from a wide RHS.  The scratch
+/// physically spans the SOURCE size class while the returned `nb`/`width`
+/// describe the field.  Mirrors AssignStatement::eval_step's `value.select`.
+fn emit_wide_rhs_field(
+    expr: &ProtoExpression,
+    rhs_hi: usize,
+    rhs_lo: usize,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let nbits = rhs_hi.checked_sub(rhs_lo)?.checked_add(1)?;
+    let src_w = expr.width();
+    if src_w == 0 {
+        return None;
+    }
+    let src_nb = native_bytes(src_w);
+    let src_nw = src_nb / 8;
+    let r = emit_wide_operand(expr, src_nb, pre)?;
+    let fld = next_wide_tmp();
+    pre.push_str(&format!(
+        "uint64_t _w{fld}[{src_nw}]; \
+         vw_copy((uint8_t*)_w{fld}, {src}, {src_nb}u); \
+         vw_apply_mask((uint8_t*)_w{fld}, (const uint8_t*)0, {pks}u); \
+         vw_lshr((uint8_t*)_w{fld}, (const uint8_t*)_w{fld}, {rhs_lo}ull, {src_nb}u); \
+         vw_apply_mask((uint8_t*)_w{fld}, (const uint8_t*)0, {pkf}u); ",
+        src = r.addr,
+        pks = wpack(src_nb, src_w),
+        pkf = wpack(src_nb, nbits),
+    ));
+    Some(WideRef {
+        addr: format!("((uint8_t*)_w{fld})"),
+        // vw_* helpers move whole 8-byte words (vw_copy with nb=4 copies
+        // NOTHING), so never advertise a sub-word size class.
+        nb: native_bytes(nbits).max(8).min(src_nb),
+        width: nbits,
+    })
+}
+
+/// Full wide RMW of a dst bit-select (2-state):
+///   new = (old & ~rangemask) | ((src << lo) & rangemask)
+/// where rangemask = fill_ones(nbits) << lo.  `old` is read from the
+/// destination BEFORE the final copy overwrites it.  `src` must span `nb`
+/// bytes.  Mirrors Cranelift emit_wide_select_rmw.
+#[allow(clippy::too_many_arguments)]
+fn emit_wide_select_rmw_store(
+    src: &str,
+    mut pre: String,
+    dst: &str,
+    nb: usize,
+    nw: usize,
+    lo: usize,
+    nbits: usize,
+    dmask: u32,
+) -> String {
+    let rmask = next_wide_tmp();
+    let srcsh = next_wide_tmp();
+    let newv = next_wide_tmp();
+    pre.push_str(&format!(
+        "uint64_t _w{rmask}[{nw}]; \
+         vw_fill_ones((uint8_t*)_w{rmask}, (const uint8_t*)0, {pkn}u); \
+         vw_shl((uint8_t*)_w{rmask}, (const uint8_t*)_w{rmask}, {lo}ull, {nb}u); \
+         uint64_t _w{srcsh}[{nw}]; \
+         vw_shl((uint8_t*)_w{srcsh}, {src}, {lo}ull, {nb}u); \
+         vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{rmask}, {nb}u); \
+         uint64_t _w{newv}[{nw}]; \
+         vw_band_not((uint8_t*)_w{newv}, {dst}, (const uint8_t*)_w{rmask}, {nb}u); \
+         vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); ",
+        pkn = wpack(nb, nbits),
+    ));
+    format!(
+        "{{ {pre}vw_copy({dst}, (const uint8_t*)_w{newv}, {nb}u); \
+            vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}"
+    )
+}
+
 fn emit_wide_operand_signed(
     expr: &ProtoExpression,
     target_nb: usize,
@@ -2957,10 +3074,9 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             } else {
                 None
             };
-            // Sign-extend is handled inline below only for a comb destination of
-            // width <= 128.  FF stores (emit_event_ff_assign doesn't sign-extend)
-            // and wider comb stores stay on Cranelift, which extends in-register.
-            if se_from.is_some() && (a.dst_width > 128 || a.dst.is_ff()) {
+            // FF stores stay on Cranelift because emit_event_ff_assign does
+            // not sign-extend; comb stores are covered at every width.
+            if se_from.is_some() && a.dst.is_ff() {
                 return None;
             }
             // Route every FF write through the shadow-slot + WriteLogEntry path
@@ -2975,7 +3091,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             // A runtime-indexed bit-slice store. A ≤64-bit dst is the scalar
             // RMW below; a wide (>64-bit) dst is handled here because that path
             // shifts the mask in u64 and so can't reach a field crossing the
-            // 64-bit word boundary (SIMT per-lane rows `logic<N, W>[idx] = v`).
+            // 64-bit word boundary (`logic<N, W>[idx] = v` rows).
             if let Some(dyn_sel) = &a.dynamic_select {
                 if a.dst_width == 0 {
                     return None;
@@ -3053,6 +3169,11 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             // rhs_select (field extract + store); the rhs_select + dst-select
             // combination stays on Cranelift.
             if a.dst_width > 128 || (a.dst_width > 64 && eff_expr.builds_wide_pointer()) {
+                // A sign-extending RHS combined with a dst bit-select isn't
+                // modelled here — only the plain-store arm sign-extends.
+                if se_from.is_some() && a.select.is_some() {
+                    return None;
+                }
                 let VarOffset::Comb(store_off) = a.dst else {
                     return None;
                 };
@@ -3064,40 +3185,44 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
                 let dmask = wpack(nb, a.dst_width);
                 // Non-foldable rhs_select (rhs isn't a plain variable):
-                // materialize the wide RHS at its own width, extract
-                // `value.select(rhs_hi, rhs_lo)` (mask to the source width,
-                // shift right, mask to the field), then plain-store the field.
-                // Mirrors AssignStatement::eval_step's `value.select`.
+                // extract `value.select(rhs_hi, rhs_lo)` from the wide RHS,
+                // then store the field — plain, or RMW into a dst bit-select.
                 if let Some((rhs_hi, rhs_lo)) = eff_rhs_select {
-                    if a.select.is_some() {
-                        return None;
-                    }
-                    let nbits = rhs_hi.checked_sub(rhs_lo)?.checked_add(1)?;
-                    let src_w = eff_expr.width();
-                    if src_w == 0 {
-                        return None;
-                    }
-                    let src_nb = native_bytes(src_w);
-                    let src_nw = src_nb / 8;
                     let mut pre = String::new();
-                    let r = emit_wide_operand(eff_expr, src_nb, &mut pre)?;
-                    let fld = next_wide_tmp();
-                    pre.push_str(&format!(
-                        "uint64_t _w{fld}[{src_nw}]; \
-                         vw_copy((uint8_t*)_w{fld}, {src}, {src_nb}u); \
-                         vw_apply_mask((uint8_t*)_w{fld}, (const uint8_t*)0, {pks}u); \
-                         vw_lshr((uint8_t*)_w{fld}, (const uint8_t*)_w{fld}, {rhs_lo}ull, {src_nb}u); \
-                         vw_apply_mask((uint8_t*)_w{fld}, (const uint8_t*)0, {pkf}u); ",
-                        src = r.addr,
-                        pks = wpack(src_nb, src_w),
-                        pkf = wpack(src_nb, nbits),
-                    ));
-                    let store = if nb <= src_nb {
-                        format!("vw_copy({dst}, (const uint8_t*)_w{fld}, {nb}u); ")
+                    let f = emit_wide_rhs_field(eff_expr, rhs_hi, rhs_lo, &mut pre)?;
+                    if let Some((hi, lo)) = a.select {
+                        // Resize the field to the dst size class, then run
+                        // the same wide RMW as the select-only arm below.
+                        let nbits2 = hi.checked_sub(lo)?.checked_add(1)?;
+                        if nbits2 == 0 || lo + nbits2 > nb * 8 {
+                            return None;
+                        }
+                        let t = next_wide_tmp();
+                        let cnb = f.nb.min(nb);
+                        pre.push_str(&format!(
+                            "uint64_t _w{t}[{nw}] = {{0}}; \
+                             vw_copy((uint8_t*)_w{t}, {src}, {cnb}u); ",
+                            src = f.addr,
+                        ));
+                        return Some(emit_wide_select_rmw_store(
+                            &format!("((uint8_t*)_w{t})"),
+                            pre,
+                            &dst,
+                            nb,
+                            nw,
+                            lo,
+                            nbits2,
+                            dmask,
+                        ));
+                    }
+                    let store = if nb <= f.nb {
+                        format!("vw_copy({dst}, {src}, {nb}u); ", src = f.addr)
                     } else {
                         format!(
                             "__builtin_memset({dst}, 0, {nb}); \
-                             vw_copy({dst}, (const uint8_t*)_w{fld}, {src_nb}u); "
+                             vw_copy({dst}, {src}, {fnb}u); ",
+                            src = f.addr,
+                            fnb = f.nb,
                         )
                     };
                     return Some(format!(
@@ -3116,34 +3241,23 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                             )
                         });
                     }
-                    // General multi-word field — full wide RMW (2-state):
-                    //   new = (old & ~rangemask) | ((src << lo) & rangemask)
-                    // where rangemask = fill_ones(nbits) << lo.  `old` is read
-                    // from the destination BEFORE the final copy overwrites it.
-                    // Mirrors Cranelift emit_wide_select_rmw.
+                    // General multi-word field — full wide RMW; see
+                    // emit_wide_select_rmw_store.
                     let mut pre = String::new();
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
-                    let src = r.addr;
-                    let rmask = next_wide_tmp();
-                    let srcsh = next_wide_tmp();
-                    let newv = next_wide_tmp();
-                    pre.push_str(&format!(
-                        "uint64_t _w{rmask}[{nw}]; \
-                         vw_fill_ones((uint8_t*)_w{rmask}, (const uint8_t*)0, {pkn}u); \
-                         vw_shl((uint8_t*)_w{rmask}, (const uint8_t*)_w{rmask}, {lo}ull, {nb}u); \
-                         uint64_t _w{srcsh}[{nw}]; \
-                         vw_shl((uint8_t*)_w{srcsh}, {src}, {lo}ull, {nb}u); \
-                         vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{rmask}, {nb}u); \
-                         uint64_t _w{newv}[{nw}]; \
-                         vw_band_not((uint8_t*)_w{newv}, {dst}, (const uint8_t*)_w{rmask}, {nb}u); \
-                         vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); ",
-                        pkn = wpack(nb, nbits),
-                        src = src,
-                        dst = dst,
+                    return Some(emit_wide_select_rmw_store(
+                        &r.addr, pre, &dst, nb, nw, lo, nbits, dmask,
                     ));
+                }
+                // Bare signed RHS narrower than the wide destination:
+                // sign-extend at the store (value.expand(dst_width, true)).
+                if let Some(w) = se_from {
+                    let mut pre = String::new();
+                    let r = emit_wide_operand(eff_expr, native_bytes(w).max(8), &mut pre)?;
                     return Some(format!(
-                        "{{ {pre}vw_copy({dst}, (const uint8_t*)_w{newv}, {nb}u); \
-                            vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}"
+                        "{{ {pre}vw_sext_copy({dst}, {src}, {w}u, {nb}u); \
+                            vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}",
+                        src = r.addr,
                     ));
                 }
                 // No select: plain wide store.  Copy into the destination, then
@@ -4930,7 +5044,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     if sub_width == 0 || sub_width > 128 {
                         return None;
                     }
-                    let sub_str = emit_expr(sub)?;
+                    let sub_str = emit_expr(sub).or_else(|| emit_scalar_sub_via_wide(sub))?;
                     let ew = *elem_width;
                     if sub_width > 64 {
                         // Wide (65..128-bit) element under a leading sign
@@ -5007,12 +5121,18 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     ));
                 }
             }
-            for (sub, repeat, _elem_width) in elements {
-                let sub_width = sub.width();
+            for (sub, repeat, elem_width) in elements {
+                // An unsized literal ('0/'1) reports width 0; the element
+                // tuple's declared width is the authoritative slot size.
+                let sub_width = if sub.width() == 0 {
+                    *elem_width
+                } else {
+                    sub.width()
+                };
                 if sub_width == 0 || sub_width > 128 {
                     return None;
                 }
-                let sub_str = emit_expr(sub)?;
+                let sub_str = emit_expr(sub).or_else(|| emit_scalar_sub_via_wide(sub))?;
                 if sub_width > 64 {
                     // Wide (65..128-bit) element: total width > 64 ⇒ `acc` is
                     // __uint128_t.  A full-128-bit shift is UB, so it clears
@@ -5537,6 +5657,17 @@ mod tests {
         }
     }
 
+    fn var_expr_signed(var_offset: VarOffset, width: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset,
+            select: None,
+            dynamic_select: None,
+            width,
+            var_full_width: width,
+            expr_context: ctx(width, true),
+        }
+    }
+
     #[test]
     fn comb_fallback_reason_names_uncovered_stmt() {
         // A $finish has no comb/cc emit (it affects sim state), so emit_stmt
@@ -6011,6 +6142,71 @@ mod tests {
     }
 
     #[test]
+    fn emit_sign_extending_store_above_128_stays_covered() {
+        // A bare signed RHS narrower than a >128-bit destination sign-extends
+        // at the store.  The value is right either way — the fallback path
+        // computes it too — so this asserts COVERAGE, which is what the
+        // vw_sext_copy store buys.
+        let src = var_expr_signed(VarOffset::Comb(0), 100);
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(64),
+            dst_width: 200,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: src,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        assert!(
+            emit_function(&[assign]).is_some(),
+            "a 100-bit signed RHS into a 200-bit dst must stay AOT-covered"
+        );
+    }
+
+    #[test]
+    fn emit_sign_extending_store_with_dst_select_declines() {
+        // The plain-store arm is the only one that sign-extends, so the same
+        // signed RHS combined with a dst bit-select must decline rather than
+        // store an unextended value.
+        let src = var_expr_signed(VarOffset::Comb(0), 100);
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(64),
+            dst_width: 200,
+            select: Some((150, 40)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: src,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        assert!(emit_function(&[assign]).is_none());
+    }
+
+    #[test]
+    fn emit_concat_zero_width_literal_uses_declared_slot() {
+        // An unsized literal ('0/'1) reports width 0, so the element tuple's
+        // declared width is the only source for the slot size — reading
+        // `sub.width()` rejected the whole concat.
+        let lit = ProtoExpression::Value {
+            value: crate::ir::Value::new(0, 0, false),
+            width: 0,
+            expr_context: ctx(0, false),
+        };
+        let a = var_expr(VarOffset::Comb(0), 8);
+        let e = ProtoExpression::Concatenation {
+            elements: vec![(Box::new(lit), 1, 8), (Box::new(a), 1, 8)],
+            width: 16,
+            expr_context: ctx(16, false),
+        };
+        let s = emit_expr(&e).expect("zero-width literal element must stay covered");
+        assert!(
+            s.contains("<< 8"),
+            "the literal still occupies its 8-bit slot: {s}"
+        );
+    }
+
+    #[test]
     fn emit_narrow_operand_mul_widens_to_128() {
         // A 33x33->66 multiplier: a 65..128-bit result from <=64-bit
         // operands, which C would otherwise evaluate in uint64_t.
@@ -6162,6 +6358,81 @@ mod tests {
             );
         }
         assert_eq!(read_u128(&comb, 32), v66);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_rhs_select_field_into_dst_select_rmw() {
+        // A per-bank extract: dst96[23:0] = (x700[174:0])[174:151] —
+        // a wide-pointer RHS with BOTH a dst bit-select and an rhs_select.
+        if !cc_available() {
+            eprintln!("emit_rhs_select_field_into_dst_select_rmw: cc unavailable, skipping");
+            return;
+        }
+        let slice = || ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0),
+            select: Some((174, 0)),
+            dynamic_select: None,
+            width: 175,
+            var_full_width: 700,
+            expr_context: ctx(175, false),
+        };
+        let mk = |dst: isize, sel: Option<(usize, usize)>, rsel: Option<(usize, usize)>| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(dst),
+                dst_width: 96,
+                select: sel,
+                dynamic_select: None,
+                rhs_select: rsel,
+                expr: slice(),
+                dst_ff_current_offset: 0,
+                token: dummy_token(),
+            })
+        };
+        let src = emit_function(&[
+            mk(0x100, Some((23, 0)), Some((174, 151))),
+            mk(0x140, None, None),
+            mk(0x160, None, Some((174, 151))),
+        ])
+        .expect("dst-select + rhs_select on a wide RHS must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_wselrmw_{}", std::process::id()));
+        let Some(module) =
+            compile_for_test(&tmp, &src, "emit_rhs_select_field_into_dst_select_rmw")
+        else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 0x200];
+        // x bits [151..174] = 0xB7_1FDF (24 bits); bit k lives at byte k/8.
+        let field: u64 = 0xB7_1FDF;
+        for k in 0..24u64 {
+            if (field >> k) & 1 == 1 {
+                let bit = 151 + k as usize;
+                comb[bit / 8] |= 1 << (bit % 8);
+            }
+        }
+        // Pre-set dst bits above the field to check the RMW keeps them.
+        comb[0x100 + 4] = 0xAA;
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let plain = u64::from_le_bytes(comb[0x140 + 16..0x140 + 24].try_into().unwrap());
+        // dst 0x140 = slice[95:0]; bits 151.. are beyond 96 — check bytes 18-21
+        // of the SOURCE slice landed... instead check low 96 truncation via a
+        // known bit: source bit 151+ not visible here, so just check the
+        // rhssel-only variant.
+        let _ = plain;
+        let fonly = u64::from_le_bytes(comb[0x160..0x168].try_into().unwrap());
+        assert_eq!(fonly & 0xFF_FFFF, field, "rhssel-only field");
+        let lo = u64::from_le_bytes(comb[0x100..0x108].try_into().unwrap());
+        assert_eq!(lo & 0xFF_FFFF, field, "field bits [23:0]");
+        assert_eq!((lo >> 32) & 0xFF, 0xAA, "RMW must keep untouched dst bits");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
