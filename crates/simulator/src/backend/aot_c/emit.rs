@@ -1304,6 +1304,31 @@ fn emit_wide_unary(op: Op, x: &ProtoExpression, width: usize, pre: &mut String) 
     }
 }
 
+/// Fallback for a ≤128-bit expression the scalar emitter declines because an
+/// INTERMEDIATE node is wider than 128 bits (e.g. `concat(184-bit) & mask`).
+/// Wide buffers are invariantly masked to their width, so the loaded scalar
+/// is clean regardless of `needs_clean`.
+fn emit_scalar_via_wide(e: &ProtoExpression) -> Option<String> {
+    let w = e.width();
+    if w == 0 || w > 128 {
+        return None;
+    }
+    let nb = native_bytes(w);
+    let mut pre = String::new();
+    let r = emit_wide_operand(e, nb, &mut pre)?;
+    Some(if nb <= 8 {
+        format!(
+            "({{ {pre}(uint64_t)*((const veryl_u64_ua*)({addr})); }})",
+            addr = r.addr
+        )
+    } else {
+        format!(
+            "({{ {pre}(__uint128_t)*((const veryl_u128_ua*)({addr})); }})",
+            addr = r.addr
+        )
+    })
+}
+
 /// Wide ternary: a narrow condition selects per-word between two wide arms
 /// (Cranelift `emit_wide_select`, expression.rs 287-299).
 fn emit_wide_ternary(
@@ -1316,8 +1341,32 @@ fn emit_wide_ternary(
     let nb = native_bytes(width);
     let nw = nb / 8;
     let c = emit_expr(cond)?;
-    let t_ref = emit_wide_operand(true_expr, nb, pre)?;
-    let f_ref = emit_wide_operand(false_expr, nb, pre)?;
+    let mut t_ref = emit_wide_operand(true_expr, nb, pre)?;
+    let mut f_ref = emit_wide_operand(false_expr, nb, pre)?;
+    // Both-signed branches narrower than the result sign-extend to it
+    // (LRM 11.4.11), but arrive zero-extended in their nb-byte buffer.
+    // Extend into a FRESH temporary — the operand ref may alias canonical
+    // storage.
+    let t_w = true_expr.width();
+    let f_w = false_expr.width();
+    let needs_sext = true_expr.expr_context().signed
+        && false_expr.expr_context().signed
+        && t_w > 0
+        && f_w > 0
+        && (t_w < width || f_w < width);
+    if needs_sext {
+        for (r, w) in [(&mut t_ref, t_w), (&mut f_ref, f_w)] {
+            if w >= width {
+                continue;
+            }
+            let s = next_wide_tmp();
+            pre.push_str(&format!(
+                "uint64_t _w{s}[{nw}]; vw_sext_copy((uint8_t*)_w{s}, {src}, {w}u, {nb}u); ",
+                src = r.addr,
+            ));
+            r.addr = format!("((uint8_t*)_w{s})");
+        }
+    }
     let t = next_wide_tmp();
     pre.push_str(&format!(
         "uint64_t _w{t}[{nw}]; int _c{t} = (({c}) != 0); \
@@ -1327,6 +1376,14 @@ fn emit_wide_ternary(
         tp = t_ref.addr,
         fp = f_ref.addr,
     ));
+    if needs_sext {
+        // Sign extension filled the bits above `width`; wide buffers are
+        // invariantly masked.
+        pre.push_str(&format!(
+            "vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {p}u); ",
+            p = wpack(nb, width),
+        ));
+    }
     Some(WideRef {
         addr: format!("((uint8_t*)_w{t})"),
         nb,
@@ -4942,33 +4999,72 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 && t_w > 0
                 && f_w > 0;
             if both_signed && (t_w < *width || f_w < *width) {
-                if *width == 0 || *width > 64 || t_w > 64 || f_w > 64 {
+                if *width == 0 || *width > 128 || t_w > 128 || f_w > 128 {
                     return None;
                 }
-                let t = emit_expr_inner(true_expr, true)?;
-                let f = emit_expr_inner(false_expr, true)?;
-                let sext = |s: &str, w: usize| -> String {
-                    if w == 64 {
-                        format!("((int64_t)((uint64_t)({})))", s)
+                // The 64-bit arm below cannot sign-extend a wider branch.
+                if *width <= 64 && (t_w > 64 || f_w > 64) {
+                    return None;
+                }
+                let t =
+                    emit_expr_inner(true_expr, true).or_else(|| emit_scalar_via_wide(true_expr))?;
+                let f = emit_expr_inner(false_expr, true)
+                    .or_else(|| emit_scalar_via_wide(false_expr))?;
+                if *width <= 64 {
+                    let sext = |s: &str, w: usize| -> String {
+                        if w == 64 {
+                            format!("((int64_t)((uint64_t)({})))", s)
+                        } else {
+                            let shift = 64 - w;
+                            format!("(((int64_t)((uint64_t)({}) << {})) >> {})", s, shift, shift)
+                        }
+                    };
+                    let inner = format!(
+                        "(({}) ? ({}) : ({}))",
+                        wrap_expect(&c),
+                        sext(&t, t_w),
+                        sext(&f, f_w)
+                    );
+                    if *width < 64 {
+                        let mask = (1u64 << *width) - 1;
+                        return Some(format!("(((uint64_t)({inner})) & 0x{mask:x}ULL)"));
+                    }
+                    return Some(format!("((uint64_t)({inner}))"));
+                }
+                // 65..=128.  A ≤64-bit operand is a uint64_t expression, so
+                // sign-extend it within 64 bits before widening; a wider one
+                // is already __uint128_t.
+                let sext128 = |s: &str, w: usize| -> String {
+                    if w == 128 {
+                        format!("((__int128)(__uint128_t)({s}))")
+                    } else if w > 64 {
+                        let sh = 128 - w;
+                        format!("(((__int128)((__uint128_t)({s}) << {sh})) >> {sh})")
+                    } else if w == 64 {
+                        format!("((__int128)(int64_t)(uint64_t)({s}))")
                     } else {
-                        let shift = 64 - w;
-                        format!("(((int64_t)((uint64_t)({}) << {})) >> {})", s, shift, shift)
+                        let sh = 64 - w;
+                        format!("((__int128)(((int64_t)((uint64_t)({s}) << {sh})) >> {sh}))")
                     }
                 };
                 let inner = format!(
                     "(({}) ? ({}) : ({}))",
                     wrap_expect(&c),
-                    sext(&t, t_w),
-                    sext(&f, f_w)
+                    sext128(&t, t_w),
+                    sext128(&f, f_w)
                 );
-                if *width < 64 {
-                    let mask = (1u64 << *width) - 1;
-                    return Some(format!("(((uint64_t)({inner})) & 0x{mask:x}ULL)"));
+                let r = format!("((__uint128_t)({inner}))");
+                if *width < 128 {
+                    return Some(mask_u128(&r, *width));
                 }
-                return Some(format!("((uint64_t)({inner}))"));
+                return Some(r);
             }
-            let t = emit_expr_inner(true_expr, needs_clean)?;
-            let f = emit_expr_inner(false_expr, needs_clean)?;
+            // A branch narrow enough for the scalar emitter can still need
+            // the wide pipeline for a >128-bit intermediate.
+            let t = emit_expr_inner(true_expr, needs_clean)
+                .or_else(|| emit_scalar_via_wide(true_expr))?;
+            let f = emit_expr_inner(false_expr, needs_clean)
+                .or_else(|| emit_scalar_via_wide(false_expr))?;
             Some(format!("(({}) ? ({}) : ({}))", wrap_expect(&c), t, f))
         }
         ProtoExpression::Concatenation {
@@ -7218,6 +7314,171 @@ mod tests {
         let s = emit_stmt(&ProtoStatement::CompiledBlock(cb)).unwrap();
         assert!(s.contains("comb_values + 0x110")); // actual offset, verbatim
         assert!(!s.contains("comb_values + 0x210")); // delta must NOT be re-added
+    }
+
+    #[test]
+    fn ternary_both_signed_sext_128() {
+        // Regression: a both-signed ternary whose branches are narrower than
+        // the result sign-extends each branch to the result width
+        // (LRM 11.4.11); results wider than 64 bits used to be declined.
+        let t64_signed = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x1800),
+            select: None,
+            dynamic_select: None,
+            width: 64,
+            var_full_width: 64,
+            expr_context: ctx(64, true),
+        };
+        let f8_signed = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x1810),
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            var_full_width: 8,
+            expr_context: ctx(8, true),
+        };
+        let tern = ProtoExpression::Ternary {
+            cond: Box::new(var_expr(VarOffset::Comb(0x1820), 1)),
+            true_expr: Box::new(t64_signed),
+            false_expr: Box::new(f8_signed),
+            width: 128,
+            expr_context: ctx(128, true),
+        };
+        let stmts = vec![comb_assign(0x2000, 128, None, tern)];
+        let src = emit_function(&stmts).expect("128-bit both-signed ternary must emit");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_tern128_{}", std::process::id()));
+        if let Some(module) = compile_for_test(&tmp, &src, "tern128") {
+            let mut ff = vec![0u8; 16];
+            let mut comb = vec![0u8; 0x2020];
+            let mut log = vec![0u64; 16];
+            // cond=0: f = -2 (signed 8-bit) → all-ones down to ...fe.
+            comb[0x1810] = 0xfe;
+            unsafe {
+                (module.func)(
+                    ff.as_mut_ptr(),
+                    comb.as_mut_ptr(),
+                    log.as_mut_ptr() as *mut u8,
+                    0,
+                );
+            }
+            let lo = u64::from_le_bytes(comb[0x2000..0x2008].try_into().unwrap());
+            let hi = u64::from_le_bytes(comb[0x2008..0x2010].try_into().unwrap());
+            assert_eq!(
+                (lo, hi),
+                (0xffff_ffff_ffff_fffe, 0xffff_ffff_ffff_ffff),
+                "8-bit -2 must sign-extend across all 128 bits"
+            );
+            // cond=1: t = 64-bit negative → high word all-ones.
+            comb[0x1820] = 1;
+            comb[0x1800..0x1808].copy_from_slice(&0x8000_0000_0000_0123u64.to_le_bytes());
+            unsafe {
+                (module.func)(
+                    ff.as_mut_ptr(),
+                    comb.as_mut_ptr(),
+                    log.as_mut_ptr() as *mut u8,
+                    0,
+                );
+            }
+            let lo = u64::from_le_bytes(comb[0x2000..0x2008].try_into().unwrap());
+            let hi = u64::from_le_bytes(comb[0x2008..0x2010].try_into().unwrap());
+            assert_eq!(
+                (lo, hi),
+                (0x8000_0000_0000_0123, 0xffff_ffff_ffff_ffff),
+                "negative 64-bit branch must sign-extend into the high word"
+            );
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+    }
+
+    #[test]
+    fn ternary_branch_via_wide_intermediate() {
+        // A ternary branch narrow enough for the scalar emitter but built on
+        // a 184-bit intermediate, which only the wide pipeline can compute.
+        // Without the fallback the branch declines and takes the whole
+        // statement off the AOT-C path.
+        let concat = ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(var_expr(VarOffset::Comb(0x1800), 92)), 1, 92),
+                (Box::new(var_expr(VarOffset::Comb(0x1820), 92)), 1, 92),
+            ],
+            width: 184,
+            expr_context: ctx(184, false),
+        };
+        let branch = ProtoExpression::Binary {
+            x: Box::new(concat),
+            op: Op::BitAnd,
+            y: Box::new(var_expr(VarOffset::Comb(0x1840), 184)),
+            width: 128,
+            expr_context: ctx(128, false),
+        };
+        let tern = ProtoExpression::Ternary {
+            cond: Box::new(var_expr(VarOffset::Comb(0x1860), 1)),
+            true_expr: Box::new(branch),
+            false_expr: Box::new(var_expr(VarOffset::Comb(0x1870), 128)),
+            width: 128,
+            expr_context: ctx(128, false),
+        };
+        let stmts = vec![comb_assign(0x2000, 128, None, tern)];
+        let src = emit_function(&stmts)
+            .expect("a wide-only ternary branch must not decline the statement");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_tvw_{}", std::process::id()));
+        if let Some(module) = compile_for_test(&tmp, &src, "tern_via_wide") {
+            let hi: u128 = 5;
+            let lo: u128 = 0x123_4567_89AB_CDEF_0123_4567;
+            let mut ff = vec![0u8; 16];
+            let mut comb = vec![0u8; 0x2010];
+            comb[0x1800..0x1810].copy_from_slice(&hi.to_le_bytes());
+            comb[0x1820..0x1830].copy_from_slice(&lo.to_le_bytes());
+            comb[0x1840..0x1857].fill(0xff); // 184-bit all-ones mask
+            comb[0x1860] = 1;
+            let mut log = vec![0u64; 16];
+            unsafe {
+                (module.func)(
+                    ff.as_mut_ptr(),
+                    comb.as_mut_ptr(),
+                    log.as_mut_ptr() as *mut u8,
+                    0,
+                );
+            }
+            assert_eq!(
+                u128::from_le_bytes(comb[0x2000..0x2010].try_into().unwrap()),
+                (hi << 92) | lo,
+                "the 184-bit concat must narrow to its low 128 bits"
+            );
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+    }
+
+    #[test]
+    fn ternary_both_signed_declines_branch_wider_than_result() {
+        // A both-signed ternary result narrower than one of its branches has
+        // no 64-bit sign-extension; it must decline instead of underflowing
+        // the shift count.
+        let t8_signed = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x1800),
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            var_full_width: 8,
+            expr_context: ctx(8, true),
+        };
+        let f100_signed = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x1810),
+            select: None,
+            dynamic_select: None,
+            width: 100,
+            var_full_width: 100,
+            expr_context: ctx(100, true),
+        };
+        let tern = ProtoExpression::Ternary {
+            cond: Box::new(var_expr(VarOffset::Comb(0x1830), 1)),
+            true_expr: Box::new(t8_signed),
+            false_expr: Box::new(f100_signed),
+            width: 64,
+            expr_context: ctx(64, true),
+        };
+        let stmts = vec![comb_assign(0x2000, 64, None, tern)];
+        assert!(emit_function(&stmts).is_none());
     }
 
     fn bogus_artifact() -> Arc<ChunkArtifact> {

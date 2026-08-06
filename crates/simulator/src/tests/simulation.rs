@@ -16994,6 +16994,44 @@ fn equality_sign_extends_mixed_width_signed_operands() {
 }
 
 #[test]
+fn wide_ternary_both_signed_sext_192() {
+    // Regression: the AOT-C wide path's per-word select placed a narrow
+    // both-signed branch zero-extended — 8-bit -1 came back as 0xff instead
+    // of 192'hfff…ff (LRM 11.4.11).
+    let code = r#"
+    module Top (
+        c : input  logic,
+        y : input  i8,
+        zp: input  signed logic<192>,
+        qp: output signed logic<192>,
+    ) {
+        assign qp = if c ? y : zp;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("c", Value::new(1, 1, false));
+        sim.set("y", Value::new(0xff, 8, true));
+        use num_bigint::BigUint;
+        sim.set("zp", Value::new_biguint(BigUint::from(5u32), 192, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("qp").unwrap().payload().into_owned(),
+            (BigUint::from(1u32) << 192) - BigUint::from(1u32),
+            "qp {config:?}"
+        );
+        sim.set("c", Value::new(0, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("qp").unwrap().payload().into_owned(),
+            BigUint::from(5u32),
+            "qp unselected branch {config:?}"
+        );
+    }
+}
+
+#[test]
 fn ternary_sign_extends_narrow_signed_branch() {
     // Regression: the ternary result took the selected branch at its own
     // width zero-extended, so `cond ? (i8 -1) : (i32 5)` produced
