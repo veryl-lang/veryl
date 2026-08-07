@@ -186,3 +186,95 @@ fn comb_loop_modport_connect_detects_feedback_to_its_source() {
         true,
     );
 }
+
+fn mixed_interface_code(target_assignment: &str, top_assignment: &str) -> String {
+    format!(
+        r#"
+        interface RequestIf::<W: u32> {{
+            var request: logic<W>;
+            modport target_request {{
+                request: input,
+            }}
+        }}
+        interface ResponseIf::<W: u32> {{
+            var response: logic<W>;
+            var status  : logic<W>;
+            modport target_response {{
+                response: output,
+                status  : input,
+            }}
+        }}
+        interface Bus::<W: u32> {{
+            mixin RequestIf::<W>;
+            mixin ResponseIf::<W>;
+            modport target {{
+                ..same(target_request, target_response)
+            }}
+        }}
+        module Target (
+            bus: modport Bus::<2>::target,
+        ) {{
+            {target_assignment}
+        }}
+        module Top {{
+            inst bus: Bus::<2>;
+            inst target: Target (
+                bus: bus,
+            );
+            {top_assignment}
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_mixed_interface_composite_modport_detects_feedback() {
+    assert_interface_comb_loop(
+        &mixed_interface_code(
+            "assign bus.response = bus.request;",
+            "assign bus.request = bus.response; assign bus.status = '0;",
+        ),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_mixed_interface_keeps_unrelated_members_out_of_feedthrough() {
+    assert_interface_comb_loop(
+        &mixed_interface_code(
+            "assign bus.response = bus.request;",
+            "assign bus.request = bus.status; assign bus.status = '0;",
+        ),
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_input_default_modport_detects_observed_member_feedback() {
+    assert_interface_comb_loop(
+        r#"
+        interface Bus {
+            var value: logic;
+            modport monitor {
+                ..input
+            }
+        }
+        module Observer (
+            bus: modport Bus::monitor,
+            o  : output logic,
+        ) {
+            assign o = bus.value;
+        }
+        module Top {
+            inst bus: Bus;
+            var observed: logic;
+            inst observer: Observer (
+                bus: bus,
+                o  : observed,
+            );
+            assign bus.value = observed;
+        }
+        "#,
+        true,
+    );
+}
