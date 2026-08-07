@@ -64,7 +64,7 @@ fn unaligned_instance_function_actual_code(actual: &str) -> String {
 
 comb_loop_case_ignored!(
     comb_loop_instance_actual_function_retains_module_capture,
-    "comb-loop migration: function effects and summaries",
+    "comb-loop migration: false positive; function effects and summaries",
     "an instance actual function retains a module-scope capture",
     r#"
     module Child (i: input logic, o: output logic) { assign o = i; }
@@ -107,7 +107,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_unaligned_function_return_retains_used_actual,
-    "comb-loop migration: function effects and summaries",
+    "comb-loop migration: false positive; function effects and summaries",
     "an unaligned function return retains its used actual",
     unaligned_instance_function_actual_code("only_a(feedback, 0)"),
     true
@@ -138,7 +138,7 @@ fn comb_loop_core_semantics_and_region_regressions_function_call_caller_side_fee
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; unused function actual is not a return dependency"]
 fn comb_loop_statement_order_and_observer_semantics_function_summaries_come_from_the_specialized_body_merely_evaluating_an()
  {
     // Function summaries come from the specialized body. Merely evaluating an
@@ -167,7 +167,7 @@ fn comb_loop_statement_order_and_observer_semantics_function_summaries_come_from
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_function_global_read_contributes_value_dependency_a_called_function_retains_a_captured_module_scope_read()
  {
     assert_comb_loop(
@@ -219,7 +219,7 @@ fn comb_loop_function_global_read_contributes_value_dependency_a_captured_functi
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_function_global_write_contributes_procedural_effect_a_called_function_retains_a_captured_module_scope_write()
  {
     assert_comb_loop(
@@ -275,7 +275,7 @@ fn comb_loop_function_global_write_contributes_procedural_effect_a_captured_func
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_preserves_vector_function_return_bits_a_vector_function_return_preserves_bit_identity()
 {
     assert_comb_loop(
@@ -324,7 +324,7 @@ fn comb_loop_preserves_vector_function_return_bits_a_vector_function_return_reta
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_function_write_without_value_dependency_is_recorded() {
     // Why this case exists: clear_x writes x even though the written value has
     // no signal dependency. That write kills LiveOnEntry before o reads x;
@@ -351,7 +351,7 @@ fn comb_loop_function_write_without_value_dependency_is_recorded() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_observer_function_side_effect_is_recorded() {
     // Why this case exists: IEEE 1800-2023 11.3.5 preserves side effects of
     // evaluated expressions. touch(o) is evaluated as a display argument, and
@@ -382,7 +382,7 @@ fn comb_loop_observer_function_side_effect_is_recorded() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_instance_actual_function_side_effect_is_recorded() {
     // Why this case exists: IEEE 1800-2023 4.9.6 models an input connection as
     // an implicit continuous assignment. Its actual expression is evaluated
@@ -442,7 +442,7 @@ fn comb_loop_preserves_vector_function_output_bits() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_preserves_split_function_return_bits() {
     // Why this case exists: {high, low}[0] is low. Returning o[0] to high is
     // acyclic when low is constant, even though the return uses two regions.
@@ -536,7 +536,7 @@ fn comb_loop_short_circuits_instance_actual_side_effects_a_constant_dead_instanc
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_short_circuits_instance_actual_side_effects_a_constant_taken_instance_actual_branch_retains_its_function_side_effect()
  {
     assert_comb_loop(
@@ -566,7 +566,7 @@ fn comb_loop_short_circuits_instance_actual_side_effects_a_constant_taken_instan
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_preserves_ternary_positions_across_boundaries_a_function_ternary_actual_keeps_a_disjoint_bit_loop_free()
  {
     assert_comb_loop(
@@ -641,7 +641,7 @@ fn comb_loop_preserves_unpacked_function_actual_positions_an_unpacked_function_a
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_preserves_unpacked_function_actual_positions_an_unpacked_function_actual_detects_same_element_feedback()
  {
     assert_comb_loop(
@@ -666,7 +666,7 @@ fn comb_loop_preserves_unpacked_function_actual_positions_an_unpacked_function_a
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_preserves_function_actual_shift_positions_a_function_actual_left_shift_keeps_its_inserted_bit_loop_free()
  {
     assert_comb_loop(
@@ -743,7 +743,7 @@ fn comb_loop_preserves_function_concat_output_positions_a_concatenated_function_
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_preserves_function_concat_output_positions_a_concatenated_function_output_detects_its_corresponding_bit_loop()
  {
     assert_comb_loop(
@@ -906,7 +906,7 @@ fn comb_loop_region_and_function_mapping_regressions_both_branch_arms_define_the
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_region_and_function_mapping_regressions_function_local_copy_retains_bit_precision_at_the_return()
  {
     assert_comb_loop(
@@ -957,7 +957,7 @@ fn comb_loop_region_and_function_mapping_regressions_function_branch_condition_i
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_region_and_function_mapping_regressions_function_branch_ignores_a_bit_absent_from_value_and_control_flow()
  {
     assert_comb_loop(
@@ -985,7 +985,7 @@ fn comb_loop_region_and_function_mapping_regressions_function_branch_ignores_a_b
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_region_and_function_mapping_regressions_function_output_writeback_participates_in_procedural_order()
  {
     assert_comb_loop(
@@ -1123,7 +1123,7 @@ fn comb_loop_region_and_function_mapping_regressions_dynamic_same_object_aliasin
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_alias_and_opaque_effect_boundaries_function_bit_select_must_not_taint_a_disjoint_actual_bit()
  {
     assert_comb_loop(
@@ -1169,7 +1169,7 @@ fn comb_loop_alias_and_opaque_effect_boundaries_function_bit_select_must_retain_
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_alias_and_opaque_effect_boundaries_function_bit_select_through_concatenation_ignores_high_operands()
  {
     assert_comb_loop(
@@ -1211,7 +1211,7 @@ fn comb_loop_alias_and_opaque_effect_boundaries_function_bit_select_through_conc
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_alias_and_opaque_effect_boundaries_function_bit_select_through_an_actual_slice_uses_its_low_bit()
  {
     assert_comb_loop(
@@ -1337,7 +1337,7 @@ fn comb_loop_function_capture_coverage_obeys_caller_order() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for captured function write"]
 fn comb_loop_function_capture_without_default_retains_coverage() {
     // Why this case exists: the caller-order kill controls above need a
     // positive control. Without a caller default, a captured dynamic write
@@ -1365,7 +1365,7 @@ fn comb_loop_function_capture_without_default_retains_coverage() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for uncalled function output"]
 fn comb_loop_uncalled_function_still_checks_output_coverage() {
     // Why this case exists: output-argument completeness is a property of the
     // function definition, not of whether an always_comb happens to call it.
@@ -1434,7 +1434,7 @@ fn comb_loop_function_summary_fanout_is_memoized() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: function effects and summaries"]
+#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_function_formal_high_bit_ignores_short_unsigned_actual() {
     assert_comb_loop(
         "a function formal high bit does not read an unsigned short actual",

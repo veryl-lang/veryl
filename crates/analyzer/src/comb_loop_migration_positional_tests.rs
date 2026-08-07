@@ -62,7 +62,7 @@ fn nested_repeat_code(through_instance: bool, output_bit: usize) -> String {
 
 comb_loop_case_ignored!(
     comb_loop_nested_repeat_retains_matching_phase,
-    "comb-loop migration: positional and periodic transfers",
+    "comb-loop migration: false negative; positional and periodic transfers",
     "nested periodic axes retain their matching packed phase",
     nested_repeat_code(false, 0),
     true
@@ -77,7 +77,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_nested_repeat_actual_retains_matching_phase,
-    "comb-loop migration: positional and periodic transfers",
+    "comb-loop migration: false negative; positional and periodic transfers",
     "nested actual axes retain their matching phase across a module",
     nested_repeat_code(true, 0),
     true
@@ -168,7 +168,7 @@ fn nested_array_actual_code(actual: &str) -> String {
 
 comb_loop_case_ignored!(
     comb_loop_structure_constructor_unrelated_member_is_disjoint,
-    "comb-loop migration: positional and periodic transfers",
+    "comb-loop migration: false positive; positional and periodic transfers",
     "a structure constructor keeps an unrelated member loop-free",
     structure_constructor_code("Pair'{a: 0, b: o}"),
     false
@@ -183,7 +183,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_structure_actual_unrelated_member_is_disjoint,
-    "comb-loop migration: positional and periodic transfers",
+    "comb-loop migration: false positive; positional and periodic transfers",
     "a structure actual keeps an unrelated member loop-free",
     structure_actual_code("Types::Pair'{a: 0, b: feedback}"),
     false
@@ -205,7 +205,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_array_literal_retains_corresponding_element,
-    "comb-loop migration: positional and periodic transfers",
+    "comb-loop migration: false positive; positional and periodic transfers",
     "an array literal retains corresponding-element feedback",
     array_literal_actual_code("'{feedback, 0}"),
     true
@@ -220,7 +220,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_array_default_retains_same_bit,
-    "comb-loop migration: positional and periodic transfers",
+    "comb-loop migration: false positive; positional and periodic transfers",
     "an array default retains same-bit feedback",
     array_copy_actual_code("'{default: value}", 0),
     true
@@ -235,7 +235,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_array_repeat_retains_same_bit,
-    "comb-loop migration: positional and periodic transfers",
+    "comb-loop migration: false positive; positional and periodic transfers",
     "an array repeat retains same-bit feedback",
     array_copy_actual_code("'{value repeat 2}", 0),
     true
@@ -250,7 +250,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_nested_array_literal_retains_inner_element,
-    "comb-loop migration: positional and periodic transfers",
+    "comb-loop migration: false positive; positional and periodic transfers",
     "a nested array literal retains inner-element feedback",
     nested_array_actual_code("'{'{feedback, 0}, '{0, 0}}"),
     true
@@ -258,7 +258,7 @@ comb_loop_case_ignored!(
 
 comb_loop_case_ignored!(
     comb_loop_structure_constructor_retains_unobserved_member_effects,
-    "comb-loop migration: positional and periodic transfers",
+    "comb-loop migration: false positive; positional and periodic transfers",
     "a structure constructor retains effects from an unobserved member",
     r#"
     module Top (o: output logic) {
@@ -324,7 +324,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_local_repeat_keeps_different_phase_disjoint,
-    "comb-loop migration: positional and periodic transfers",
+    "comb-loop migration: false positive; positional and periodic transfers",
     "local repeat keeps a different phase disjoint",
     periodic_repeat_code(false, 64, 42, 1),
     false
@@ -350,7 +350,7 @@ fn comb_loop_preserves_concatenated_lhs_bits_a_concatenated_assignment_destinati
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_preserves_concatenated_lhs_bits_a_concatenated_assignment_retains_same_bit_feedback() {
     assert_comb_loop(
         "a concatenated assignment retains same-bit feedback",
@@ -369,7 +369,7 @@ fn comb_loop_preserves_concatenated_lhs_bits_a_concatenated_assignment_retains_s
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_constant_shift_positions_a_constant_left_shift_preserves_its_zero_filled_low_bit()
  {
     assert_comb_loop(
@@ -409,7 +409,7 @@ fn comb_loop_preserves_constant_shift_positions_a_constant_left_shift_retains_di
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_repeat_concatenation_positions_repeat_concatenation_keeps_a_disjoint_low_bit_path_loop_free()
  {
     assert_comb_loop(
@@ -448,7 +448,7 @@ fn comb_loop_preserves_repeat_concatenation_positions_repeat_concatenation_still
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_nested_vector_ternary_positions_a_nested_vector_ternary_keeps_a_disjoint_bit_loop_free()
  {
     assert_comb_loop(
@@ -489,7 +489,7 @@ fn comb_loop_preserves_nested_vector_ternary_positions_a_nested_vector_ternary_d
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_local_right_shift_positions_a_local_logical_right_shift_keeps_its_inserted_bit_loop_free()
  {
     assert_comb_loop(
@@ -548,7 +548,7 @@ fn comb_loop_preserves_arithmetic_right_shift_positions_an_arithmetic_right_shif
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_preserves_arithmetic_right_shift_positions_an_arithmetic_right_shift_detects_its_live_shifted_bit()
  {
     assert_comb_loop(
@@ -569,7 +569,7 @@ fn comb_loop_preserves_arithmetic_right_shift_positions_an_arithmetic_right_shif
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_preserves_arithmetic_right_shift_positions_an_arithmetic_right_shift_retains_sign_fill_feedback()
  {
     assert_comb_loop(
@@ -589,7 +589,7 @@ fn comb_loop_preserves_arithmetic_right_shift_positions_an_arithmetic_right_shif
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_vector_ternary_positions_a_vector_ternary_keeps_a_disjoint_bit_loop_free() {
     assert_comb_loop(
         "a vector ternary keeps a disjoint bit loop-free",
@@ -629,7 +629,7 @@ fn comb_loop_preserves_vector_ternary_positions_a_vector_ternary_detects_its_cor
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_alias_and_opaque_effect_boundaries_local_concatenation_does_not_taint_a_constant_low_bit()
  {
     assert_comb_loop(
@@ -654,7 +654,7 @@ fn comb_loop_alias_and_opaque_effect_boundaries_local_concatenation_does_not_tai
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_alias_and_opaque_effect_boundaries_same_width_bitwise_operators_preserve_positional_provenance()
  {
     assert_comb_loop(
@@ -695,7 +695,7 @@ fn comb_loop_structural_dependency_semantics_identical_ternary_arms_do_not_cance
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_structural_dependency_semantics_overlapping_left_shift_is_a_directed_acyclic_bit_chain()
  {
     assert_comb_loop(
@@ -813,7 +813,7 @@ fn assert_signed_context_extension(target: usize, expected: bool) {
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_unsigned_extension_zero_fills_high_bit() {
     assert_unsigned_context_extension("o[3]", false);
 }
@@ -829,13 +829,13 @@ fn comb_loop_signed_extension_ignores_non_sign_bit() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_signed_extension_retains_sign_bit() {
     assert_signed_context_extension(1, true);
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_ternary_preserves_unsigned_zero_extension() {
     assert_comb_loop(
         "a ternary preserves unsigned zero extension",
@@ -892,13 +892,13 @@ fn comb_loop_signed_ternary_high_bit_is_disjoint_from_non_sign_bit() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_signed_ternary_high_bit_retains_sign_bit() {
     assert_signed_ternary_coercion(1, true);
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_widening_cast_zero_fills_high_bits() {
     assert_expression_coercion("value as 4", "o[3]", false);
 }
@@ -909,7 +909,7 @@ fn comb_loop_widening_cast_retains_low_bits() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_narrowing_cast_discards_high_source_bits() {
     assert_expression_coercion("value as 2", "o[3]", false);
 }
@@ -920,7 +920,7 @@ fn comb_loop_narrowing_cast_retains_low_source_bits() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_mixed_width_bitwise_zero_fills_short_operand() {
     assert_expression_coercion("value | 4'b0", "o[3]", false);
 }
@@ -931,7 +931,7 @@ fn comb_loop_mixed_width_bitwise_retains_corresponding_bit() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_periodic_output_maps_concatenated_actual() {
     // Why this case exists: a child periodic output may legally connect to a
     // concatenated parent lvalue. Each output fragment must be clipped in the

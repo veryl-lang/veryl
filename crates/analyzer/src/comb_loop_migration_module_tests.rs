@@ -70,7 +70,7 @@ fn assert_unaligned_unpacked_instance_input(target: usize, expected: bool) {
 
 comb_loop_case_ignored!(
     comb_loop_whole_unpacked_matching_element_retains_feedback,
-    "comb-loop migration: module feedthrough and instance mapping",
+    "comb-loop migration: false positive; module feedthrough and instance mapping",
     "a distant matching element retains feedback",
     whole_unpacked_instance_code(123_456),
     true
@@ -133,7 +133,7 @@ fn periodic_repeat_two_level_code(bit: usize) -> String {
 
 comb_loop_case_ignored!(
     comb_loop_instance_repeat_retains_matching_phase_at_scale,
-    "comb-loop migration: module feedthrough and instance mapping",
+    "comb-loop migration: false negative; module feedthrough and instance mapping",
     "instance repeat retains matching phase feedback",
     periodic_repeat_code(true, 200_000, 123_456, 0),
     true
@@ -148,7 +148,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_periodic_phase_survives_two_module_summaries,
-    "comb-loop migration: module feedthrough and instance mapping",
+    "comb-loop migration: false positive; module feedthrough and instance mapping",
     "a periodic phase survives two module summaries",
     periodic_repeat_two_level_code(0),
     true
@@ -281,7 +281,7 @@ fn comb_loop_dynamic_region_survives_module_summary() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_preserves_module_summary_positions_a_vector_identity_module_preserves_disjoint_bit_positions()
  {
     assert_comb_loop(
@@ -342,7 +342,7 @@ fn comb_loop_preserves_module_summary_positions_a_vector_identity_module_retains
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_instance_output_address_contributes_dependency() {
     // Why this case exists: idx selects the instance output destination and
     // is itself read from one candidate destination. This is the same address
@@ -375,7 +375,7 @@ fn comb_loop_instance_output_address_contributes_dependency() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_instance_input_selector_side_effect_is_recorded() {
     // Why this case exists: an otherwise plain instance actual still evaluates
     // the expressions in its selectors. Skipping the observer for mem[touch(o)]
@@ -408,7 +408,7 @@ fn comb_loop_instance_input_selector_side_effect_is_recorded() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_instance_output_selector_side_effect_is_recorded() {
     // Why this case exists: an output connection evaluates the selector in its
     // destination. The observer must retain touch(o)'s module-scope write even
@@ -443,7 +443,7 @@ fn comb_loop_instance_output_selector_side_effect_is_recorded() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_preserves_instance_shift_positions_an_instance_actual_left_shift_keeps_its_inserted_bit_loop_free()
  {
     assert_comb_loop(
@@ -505,7 +505,7 @@ fn comb_loop_preserves_instance_shift_positions_an_instance_actual_left_shift_de
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_preserves_instance_repeat_positions_an_instance_repeat_actual_keeps_an_unrelated_operand_loop_free()
  {
     assert_comb_loop(
@@ -568,7 +568,7 @@ fn comb_loop_preserves_instance_repeat_positions_an_instance_repeat_actual_detec
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_distinguishes_generic_module_specializations_an_enabled_generic_module_specialization_retains_its_feedthrough()
  {
     assert_comb_loop(
@@ -606,7 +606,7 @@ fn comb_loop_distinguishes_generic_module_specializations_an_enabled_generic_mod
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_distinguishes_generic_module_specializations_a_disabled_generic_module_specialization_does_not_inherit_feedthrough()
  {
     assert_comb_loop(
@@ -643,14 +643,9 @@ fn comb_loop_distinguishes_generic_module_specializations_a_disabled_generic_mod
     );
 }
 
-#[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
-fn comb_loop_short_circuits_instance_logical_actuals() {
-    let case = |name: &str, expression: &str, expected: bool| {
-        assert_comb_loop(
-            name,
-            &format!(
-                r#"
+fn instance_logical_actual_code(expression: &str) -> String {
+    format!(
+        r#"
                 module Pass (
                     i: input  logic,
                     o: output logic,
@@ -670,41 +665,51 @@ fn comb_loop_short_circuits_instance_logical_actuals() {
                     assign o = passed;
                 }}
                 "#
-            ),
-            expected,
-        );
-    };
+    )
+}
 
-    // Why these cases exist: short-circuiting is part of the value feeding an
-    // instance port, not only function-effect lowering. A dead RHS cannot
-    // create a feedback edge through a pass-through child.
-    case(
+#[test]
+#[ignore = "comb-loop migration: false positive; dead logical-and instance RHS"]
+fn comb_loop_false_logical_and_instance_actual_drops_rhs() {
+    assert_comb_loop(
         "a false logical-and instance actual drops its dead RHS",
-        "1'b0 && feedback",
+        &instance_logical_actual_code("1'b0 && feedback"),
         false,
     );
-    case(
-        "a true logical-or instance actual drops its dead RHS",
-        "1'b1 || feedback",
-        false,
-    );
+}
 
-    // Why these controls exist: when the constant LHS requires RHS
-    // evaluation, the pass-through child closes a real feedback path.
-    case(
-        "a true logical-and instance actual retains its live RHS",
-        "1'b1 && feedback",
-        true,
+#[test]
+#[ignore = "comb-loop migration: false positive; dead logical-or instance RHS"]
+fn comb_loop_true_logical_or_instance_actual_drops_rhs() {
+    assert_comb_loop(
+        "a true logical-or instance actual drops its dead RHS",
+        &instance_logical_actual_code("1'b1 || feedback"),
+        false,
     );
-    case(
-        "a false logical-or instance actual retains its live RHS",
-        "1'b0 || feedback",
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; live logical-and instance RHS"]
+fn comb_loop_true_logical_and_instance_actual_retains_rhs() {
+    assert_comb_loop(
+        "a true logical-and instance actual retains its live RHS",
+        &instance_logical_actual_code("1'b1 && feedback"),
         true,
     );
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false negative; live logical-or instance RHS"]
+fn comb_loop_false_logical_or_instance_actual_retains_rhs() {
+    assert_comb_loop(
+        "a false logical-or instance actual retains its live RHS",
+        &instance_logical_actual_code("1'b0 || feedback"),
+        true,
+    );
+}
+
+#[test]
+#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_preserves_ternary_positions_across_boundaries_an_instance_ternary_actual_keeps_a_disjoint_bit_loop_free()
  {
     assert_comb_loop(
@@ -798,7 +803,7 @@ fn comb_loop_preserves_unpacked_port_element_positions_an_unpacked_array_module_
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_preserves_unpacked_port_element_positions_an_unpacked_array_module_port_detects_same_element_feedback()
  {
     assert_comb_loop(
@@ -830,7 +835,7 @@ fn comb_loop_preserves_unpacked_port_element_positions_an_unpacked_array_module_
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_module_boundary_region_mapping_a_child_port_summary_must_not_turn_bit_disjoint_feedthrough_into_a_loop()
  {
     assert_comb_loop(
@@ -935,7 +940,7 @@ fn comb_loop_module_boundary_region_mapping_a_top_input_to_output_path_has_no_in
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_module_boundary_region_mapping_bit_precision_survives_two_module_boundaries() {
     assert_comb_loop(
         "bit precision survives two module boundaries",
@@ -1018,7 +1023,7 @@ fn comb_loop_module_boundary_region_mapping_a_real_loop_survives_two_region_pres
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_module_boundary_region_mapping_a_concatenated_instance_input_preserves_its_low_bit_source()
  {
     assert_comb_loop(
@@ -1167,7 +1172,7 @@ fn comb_loop_instance_summary_region_mapping_is_reused() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_module_formal_high_bit_ignores_short_unsigned_actual() {
     assert_comb_loop(
         "a module formal high bit does not read an unsigned short actual",
@@ -1185,7 +1190,7 @@ fn comb_loop_module_formal_high_bit_ignores_short_unsigned_actual() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: module feedthrough and instance mapping"]
+#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_unaligned_unpacked_instance_element_zero_is_disjoint() {
     assert_unaligned_unpacked_instance_input(0, false);
 }

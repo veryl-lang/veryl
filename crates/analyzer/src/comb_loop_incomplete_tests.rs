@@ -2,7 +2,7 @@
 use super::*;
 
 #[test]
-#[ignore = "comb-loop migration: incomplete-effect boundaries"]
+#[ignore = "comb-loop migration: false positive; malformed-effect cycle must be suppressed"]
 fn comb_loop_malformed_effect_is_a_causal_barrier() {
     // Why this case exists: a rejected statement may have unknown side
     // effects, so a cycle which crosses it is not proven. The malformed

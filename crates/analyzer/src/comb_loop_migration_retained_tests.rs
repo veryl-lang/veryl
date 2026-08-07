@@ -80,7 +80,7 @@ cond_type_case!(
 cond_type_case!(comb_coverage_dynamic_case_none, "case", "none", true);
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false positive; procedural control flow and retained state"]
 fn comb_loop_drops_unreachable_statements_after_break() {
     // Why this case exists: IEEE 1800-2023 12.8 makes break jump to the loop
     // exit. Statements after it are unreachable and cannot prove a hard SCC.
@@ -108,7 +108,7 @@ fn comb_loop_drops_unreachable_statements_after_break() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false positive; procedural control flow and retained state"]
 fn comb_loop_dynamic_write_kill_semantics_a_full_write_after_a_dynamic_self_store_kills_the_dead_feedback()
  {
     assert_comb_loop(
@@ -169,7 +169,7 @@ fn comb_loop_dynamic_write_kill_semantics_an_unrelated_exact_bit_write_cannot_ki
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false positive; procedural control flow and retained state"]
 fn comb_loop_dynamic_write_kill_semantics_all_branch_exits_overwriting_the_object_kill_earlier_dynamic_feedback()
  {
     assert_comb_loop(
@@ -238,7 +238,7 @@ fn comb_loop_dynamic_write_kill_semantics_a_dominating_value_write_also_kills_a_
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false negative; procedural control flow and retained state"]
 fn comb_loop_dynamic_write_kill_semantics_an_undominated_value_driving_its_own_dynamic_address_is_feedback()
  {
     assert_comb_loop(
@@ -258,7 +258,7 @@ fn comb_loop_dynamic_write_kill_semantics_an_undominated_value_driving_its_own_d
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false negative; missing UncoveredBranch on zero-trip loop"]
 fn comb_loop_dynamic_loop_zero_trip_retention_is_not_feedback() {
     // Why this case exists: a runtime loop can execute zero times. The value
     // retained on that path infers state, but it is not a same-evaluation read
@@ -283,7 +283,7 @@ fn comb_loop_dynamic_loop_zero_trip_retention_is_not_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for unwritten dynamic elements"]
 fn comb_loop_dynamic_element_retention_is_not_feedback() {
     // Why this case exists: one dynamic element write leaves every other
     // candidate element unchanged. May-write coverage must not masquerade as
@@ -307,7 +307,7 @@ fn comb_loop_dynamic_element_retention_is_not_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for oversized dynamic store"]
 fn comb_loop_oversized_dynamic_retention_is_sparse_and_not_feedback() {
     // Why this case exists: the legacy assignment table skips arrays above its
     // enumeration limit. Retention coverage must stay declaration-width
@@ -380,7 +380,7 @@ fn comb_loop_missing_switch_default_retention_is_not_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false negative; retained state hides a real cross-variable loop"]
 fn comb_loop_retention_does_not_hide_cross_variable_feedback() {
     // Why this case exists: retention itself is diagnosed as incomplete
     // assignment, but it must not erase the explicit held -> o -> enable
@@ -501,7 +501,7 @@ fn comb_loop_nonempty_const_loop_has_no_zero_trip_path() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false positive; unreachable empty-loop body creates diagnostics"]
 fn comb_loop_empty_const_loop_has_no_body_path() {
     // Why this case exists: `break` keeps this const-evaluable empty range in
     // runtime-form IR, but its body is still unreachable. Treating "empty" as
@@ -534,7 +534,7 @@ fn comb_loop_empty_const_loop_has_no_body_path() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false negative; missing UncoveredBranch after conditional break"]
 fn comb_loop_break_before_write_retains_coverage() {
     // Why this case exists: a const singleton loop is guaranteed to enter its
     // body, but a conditional break can still bypass a later assignment. The
@@ -615,43 +615,43 @@ fn assert_empty_const_range_has_no_body_path(range: &str) {
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for inclusive singleton range"]
 fn comb_loop_const_range_inclusive_singleton_retains_coverage() {
     assert_singleton_const_range_retains_coverage("0..=0");
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for reverse singleton range"]
 fn comb_loop_const_range_reverse_singleton_retains_coverage() {
     assert_singleton_const_range_retains_coverage("rev 0..1");
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for stepped singleton range"]
 fn comb_loop_const_range_stepped_singleton_retains_coverage() {
     assert_singleton_const_range_retains_coverage("1..2 step *= 2");
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false positive; exclusive empty range creates diagnostics"]
 fn comb_loop_const_range_exclusive_empty_has_no_body_path() {
     assert_empty_const_range_has_no_body_path("1..1");
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false positive; reverse empty range creates diagnostics"]
 fn comb_loop_const_range_reverse_empty_has_no_body_path() {
     assert_empty_const_range_has_no_body_path("rev 1..1");
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false positive; stepped empty range creates diagnostics"]
 fn comb_loop_const_range_stepped_empty_has_no_body_path() {
     assert_empty_const_range_has_no_body_path("2..2 step *= 2");
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false positive; procedural control flow and retained state"]
 fn comb_loop_const_iterator_prunes_dead_if_edges() {
     // Why this case exists: break keeps the singleton loop in runtime-form IR,
     // but its sole iterator value is still the constant 1. The unreachable
@@ -683,7 +683,7 @@ fn comb_loop_const_iterator_prunes_dead_if_edges() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false positive; procedural control flow and retained state"]
 fn comb_loop_const_iterator_prunes_dead_case_arms() {
     // Why this case exists: case selection uses the same per-iteration SV
     // value as if selection. A dead i==0 arm in a singleton i==1 loop cannot
@@ -715,7 +715,7 @@ fn comb_loop_const_iterator_prunes_dead_case_arms() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false positive; const iterator invents retained-state diagnostics"]
 fn comb_loop_const_iterator_preserves_must_write_paths() {
     // Why this case exists: the two const iterations are i=0 and i=1, and the
     // only reachable break follows the i=1 assignment. Every exit is covered;
@@ -807,7 +807,7 @@ fn comb_loop_unseeded_finite_recurrence_is_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: procedural control flow and retained state"]
+#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for function output weak write"]
 fn comb_loop_function_output_weak_write_retains_coverage() {
     // Why this case exists: a function output argument is copied back to its
     // caller, but a dynamic write inside the function still leaves unselected

@@ -105,7 +105,7 @@ fn comb_loop_oversized_array_is_sparse_and_complete_why_this_case_exists_a_seque
 }
 
 #[test]
-#[ignore = "comb-loop migration: sparse and dynamic regions"]
+#[ignore = "comb-loop migration: false negative; oversized sparse array feedback is missed"]
 fn comb_loop_oversized_array_is_sparse_and_complete_why_this_case_exists_the_former_size_guard_silently_discarded_every()
  {
     // Why this case exists: the former size guard silently discarded every
@@ -215,7 +215,7 @@ fn comb_loop_aliases_overlapping_unknown_regions_overlapping_dynamic_prefixes_re
 }
 
 #[test]
-#[ignore = "comb-loop migration: sparse and dynamic regions"]
+#[ignore = "comb-loop migration: false positive; sparse and dynamic regions"]
 fn comb_loop_aliases_overlapping_unknown_regions_disjoint_dynamic_prefixes_remain_independent() {
     assert_comb_loop(
         "disjoint dynamic prefixes remain independent",
@@ -241,7 +241,7 @@ fn comb_loop_aliases_overlapping_unknown_regions_disjoint_dynamic_prefixes_remai
 }
 
 #[test]
-#[ignore = "comb-loop migration: sparse and dynamic regions"]
+#[ignore = "comb-loop migration: false positive; sparse and dynamic regions"]
 fn comb_loop_alias_and_opaque_effect_boundaries_local_copy_chains_propagate_bit_identity_through_every_hop()
  {
     assert_comb_loop(
@@ -633,13 +633,13 @@ fn comb_loop_shifted_dynamic_index_overlaps_element_zero() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: positional and periodic transfers"]
+#[ignore = "comb-loop migration: false negative; shifted dynamic index can select element two"]
 fn comb_loop_shifted_dynamic_index_overlaps_element_two() {
     assert_structural_dynamic_selector_element(2);
 }
 
 #[test]
-#[ignore = "comb-loop migration: sparse and dynamic regions"]
+#[ignore = "comb-loop migration: false negative; dynamic part-select can overlap bit three"]
 fn comb_loop_dynamic_part_select_overlaps_bit_three() {
     assert_structural_dynamic_part_select_bit(3);
 }
@@ -650,13 +650,13 @@ fn comb_loop_dynamic_part_select_overlaps_bit_zero() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: sparse and dynamic regions"]
+#[ignore = "comb-loop migration: false negative; multiplied dynamic index can select element one"]
 fn comb_loop_multiplied_dynamic_index_overlaps_element_one() {
     assert_multiplied_dynamic_index_overlap(1);
 }
 
 #[test]
-#[ignore = "comb-loop migration: sparse and dynamic regions"]
+#[ignore = "comb-loop migration: false negative; multiplied dynamic index can select element two"]
 fn comb_loop_multiplied_dynamic_index_overlaps_element_two() {
     assert_multiplied_dynamic_index_overlap(2);
 }
