@@ -655,7 +655,6 @@ fn logical_rhs_side_effect_code(expression: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; dead logical-and RHS side effect"]
 fn comb_loop_false_logical_and_suppresses_rhs_side_effect() {
     assert_comb_loop(
         "a false logical-and LHS suppresses RHS function side effects",
@@ -675,7 +674,6 @@ fn comb_loop_true_logical_and_retains_rhs_side_effect() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; dead logical-or RHS side effect"]
 fn comb_loop_true_logical_or_suppresses_rhs_side_effect() {
     assert_comb_loop(
         "a true logical-or LHS suppresses RHS function side effects",

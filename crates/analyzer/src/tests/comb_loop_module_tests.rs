@@ -688,7 +688,6 @@ fn comb_loop_true_logical_or_instance_actual_drops_rhs() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; live logical-and instance RHS"]
 fn comb_loop_true_logical_and_instance_actual_retains_rhs() {
     assert_comb_loop(
         "a true logical-and instance actual retains its live RHS",
@@ -698,7 +697,6 @@ fn comb_loop_true_logical_and_instance_actual_retains_rhs() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; live logical-or instance RHS"]
 fn comb_loop_false_logical_or_instance_actual_retains_rhs() {
     assert_comb_loop(
         "a false logical-or instance actual retains its live RHS",
