@@ -13,13 +13,16 @@ use crate::ir::{
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement, ProtoSystemFunctionCall,
     VarOffset, native_bytes, veryl_aot_sysfn_print,
 };
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
+use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::thread;
 use std::time::Duration;
 use veryl_analyzer::ir::Op;
 use veryl_analyzer::value::Value;
@@ -278,21 +281,21 @@ fn reset_wide_tmp() {
 thread_local! {
     /// Comb offsets the caller marked unsafe to localize (read outside the
     /// comb function / dynamically / partial-written / port-visible).
-    static LOCALIZE_BLOCKLIST: std::cell::RefCell<std::collections::HashSet<isize>> =
-        std::cell::RefCell::new(std::collections::HashSet::new());
+    static LOCALIZE_BLOCKLIST: RefCell<HashSet<isize>> =
+        RefCell::new(HashSet::new());
     /// Comb offsets localized in the chunk currently being emitted.
-    static CURRENT_LOCAL: std::cell::RefCell<std::collections::HashSet<isize>> =
-        std::cell::RefCell::new(std::collections::HashSet::new());
+    static CURRENT_LOCAL: RefCell<HashSet<isize>> =
+        RefCell::new(HashSet::new());
     /// Runtime-indexed comb array ranges (base, num_elements, stride) — a
     /// candidate offset inside any of these is excluded (a constant-indexed
     /// element could be read dynamically by an event / another statement).
-    static LOCALIZE_RANGES: std::cell::RefCell<Vec<(isize, usize, isize)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
+    static LOCALIZE_RANGES: RefCell<Vec<(isize, usize, isize)>> =
+        const { RefCell::new(Vec::new()) };
     /// Byte ranges (offset, native_bytes) localized in the just-emitted comb —
     /// these comb_values bytes are intentionally left stale, so the validate
     /// dual-run must skip them.  Read by `prepare_comb` right after emit.
-    static LAST_LOCALIZED_BYTES: std::cell::RefCell<Vec<(isize, usize)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
+    static LAST_LOCALIZED_BYTES: RefCell<Vec<(isize, usize)>> =
+        const { RefCell::new(Vec::new()) };
     /// Set only between `set_localize_blocklist`/`clear_localize_blocklist`, i.e.
     /// when `module.rs` has installed a sound read-set.  `emit_function`
     /// localizes ONLY when armed, so a direct call (tests, diagnostics) never
@@ -317,10 +320,7 @@ fn localize_armed() -> bool {
 /// `VERYL_AOT_C_LOCALIZE` and only calls this when localization is on AND a
 /// sound global read-set has been computed.  Always paired with
 /// `clear_localize_blocklist`.
-pub fn set_localize_blocklist(
-    set: std::collections::HashSet<isize>,
-    ranges: Vec<(isize, usize, isize)>,
-) {
+pub fn set_localize_blocklist(set: HashSet<isize>, ranges: Vec<(isize, usize, isize)>) {
     LOCALIZE_BLOCKLIST.with(|b| *b.borrow_mut() = set);
     LOCALIZE_RANGES.with(|r| *r.borrow_mut() = ranges);
     LOCALIZE_ARMED.with(|a| a.set(true));
@@ -354,15 +354,22 @@ struct LocalAnalysis {
     write_chunk: HashMap<isize, Option<usize>>,
     /// Disqualified offsets (conditional / partial / wide / dynamic / array /
     /// CompiledBlock-touched write).
-    bad: std::collections::HashSet<isize>,
+    bad: HashSet<isize>,
     /// off -> Some(chunk) while read in one chunk only; None if read in 2+.
     read_chunk: HashMap<isize, Option<usize>>,
+    /// Offsets read before their (only) write in schedule order: the reader
+    /// consumes the PREVIOUS settle's value from `comb_values` (a certified
+    /// backward edge), which a fresh zero-initialized local cannot supply.
+    read_before_write: HashSet<isize>,
     /// off -> native storage byte width (for the validate skip-range).
     width: HashMap<isize, usize>,
 }
 
 impl LocalAnalysis {
     fn note_read(&mut self, off: isize, i: usize) {
+        if !self.write_chunk.contains_key(&off) {
+            self.read_before_write.insert(off);
+        }
         match self.read_chunk.get(&off) {
             None => {
                 self.read_chunk.insert(off, Some(i));
@@ -662,9 +669,9 @@ impl LocalAnalysis {
 /// that chunk, not blocklisted).  Empty vec of empty sets when the knob is off.
 fn compute_localize_sets(
     chunks: &[&[ProtoStatement]],
-    blocklist: &std::collections::HashSet<isize>,
+    blocklist: &HashSet<isize>,
     ranges: &[(isize, usize, isize)],
-) -> (Vec<std::collections::HashSet<isize>>, HashMap<isize, usize>) {
+) -> (Vec<HashSet<isize>>, HashMap<isize, usize>) {
     let in_range = |off: isize| -> bool {
         ranges.iter().any(|&(base, num, stride)| {
             if stride == 0 || num == 0 {
@@ -680,11 +687,14 @@ fn compute_localize_sets(
             a.walk_stmt(s, i, true);
         }
     }
-    let mut sets: Vec<std::collections::HashSet<isize>> =
-        vec![std::collections::HashSet::new(); chunks.len()];
+    let mut sets: Vec<HashSet<isize>> = vec![HashSet::new(); chunks.len()];
     for (off, wc) in &a.write_chunk {
         let Some(i) = wc else { continue };
-        if a.bad.contains(off) || blocklist.contains(off) || in_range(*off) {
+        if a.bad.contains(off)
+            || a.read_before_write.contains(off)
+            || blocklist.contains(off)
+            || in_range(*off)
+        {
             continue;
         }
         // Reads must be confined to the write chunk (or absent — a dead local
@@ -2462,7 +2472,7 @@ fn compile_jobs() -> usize {
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|&n| n > 0)
         .unwrap_or_else(|| {
-            std::thread::available_parallelism()
+            thread::available_parallelism()
                 .map(|n| (n.get() / 4).max(2))
                 .unwrap_or(2)
         })
@@ -2472,7 +2482,7 @@ fn compile_jobs() -> usize {
 /// queue; returns the job sender.
 ///
 /// In async mode each whole-module compile used to get its own detached
-/// `std::thread::spawn` → `cc`.  The simulator never blocks on them (it stays
+/// `thread::spawn` → `cc`.  The simulator never blocks on them (it stays
 /// on Cranelift until the `.so` lands), so the ~220-test fast suite spawned
 /// `cc` faster than they finished — hundreds at once, load average over 100.
 /// The pool caps in-flight `cc` like `make -jN`.
@@ -2486,7 +2496,7 @@ fn compile_pool() -> &'static Sender<CompileJob> {
         let rx = Arc::new(Mutex::new(rx));
         for _ in 0..compile_jobs() {
             let rx = Arc::clone(&rx);
-            let _ = std::thread::Builder::new()
+            let _ = thread::Builder::new()
                 .name("veryl-aot-cc".into())
                 .spawn(move || {
                     loop {
@@ -2817,7 +2827,7 @@ pub fn compile_source(src: &str) -> Result<EmittedModule, String> {
 /// concurrently (libtest runs tests multi-threaded by default).  Passing it
 /// as an argument keeps each test hermetic without touching shared state.
 fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, String> {
-    std::fs::create_dir_all(cache_dir).map_err(|e| format!("create_dir_all: {e}"))?;
+    fs::create_dir_all(cache_dir).map_err(|e| format!("create_dir_all: {e}"))?;
 
     let cc_name = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
     // Full flag list — built once and used for *both* the cache key and the
@@ -2896,7 +2906,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         // Where the compiler's own output goes: removed on success, left
         // beside the kept `.c` on failure.
         let log_path = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.log"));
-        std::fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
+        fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
 
         // The compile AND the publish run through one shell so the cache
         // entry lands even when this process exits first: a short run
@@ -2934,7 +2944,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
             // The shell, not us, owns the publish, so its pid is what tells
             // a waiter whether the lock is still live (see `owner_alive`).
             if let Some(lp) = &lock_path {
-                let _ = std::fs::write(lp, format!("{}\n", child.id()));
+                let _ = fs::write(lp, format!("{}\n", child.id()));
             }
             child
                 .wait_with_output()
@@ -2950,8 +2960,8 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
             if out.status.success() {
                 // A racing peer publishes an equally valid file (same
                 // source), so an overwrite either way is fine.
-                let _ = std::fs::rename(&tmp_c, &c_path);
-                std::fs::rename(&tmp_so, &so_path)
+                let _ = fs::rename(&tmp_c, &c_path);
+                fs::rename(&tmp_so, &so_path)
                     .map_err(|e| format!("rename {}: {}", tmp_so.display(), e))?;
             }
             out
@@ -2959,7 +2969,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         if !out.status.success() {
             // The compiler's output went to `log_path`, not to our pipes, so
             // read it back; fall back to whatever the shell itself said.
-            let diag = std::fs::read_to_string(&log_path)
+            let diag = fs::read_to_string(&log_path)
                 .ok()
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| String::from_utf8_lossy(&out.stderr).into_owned());
@@ -3064,7 +3074,7 @@ struct CompileLock {
 
 impl Drop for CompileLock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        let _ = fs::remove_file(&self.path);
     }
 }
 
@@ -3092,11 +3102,7 @@ const COMPILE_LOCK_STALE: Duration = Duration::from_secs(600);
 /// would hold the artifact hostage for [`COMPILE_LOCK_STALE`].
 /// `None` = no pid recorded yet; fall back to the age rule.
 fn owner_alive(lock_path: &Path) -> Option<bool> {
-    let pid: u32 = std::fs::read_to_string(lock_path)
-        .ok()?
-        .trim()
-        .parse()
-        .ok()?;
+    let pid: u32 = fs::read_to_string(lock_path).ok()?.trim().parse().ok()?;
     // Linux: procfs is authoritative and free.  Guarded by /proc/self so a
     // system without procfs doesn't read every pid as dead.
     if Path::new("/proc/self").exists() {
@@ -3132,7 +3138,7 @@ fn owner_alive(lock_path: &Path) -> Option<bool> {
 fn acquire_compile_lock(cache_dir: &Path, hash: &str, so_path: &Path) -> CompileTicket {
     let path = cache_dir.join(format!("veryl_aot_{hash}.lock"));
     loop {
-        match std::fs::OpenOptions::new()
+        match fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&path)
@@ -3147,7 +3153,7 @@ fn acquire_compile_lock(cache_dir: &Path, hash: &str, so_path: &Path) -> Compile
         let dead = match owner_alive(&path) {
             Some(alive) => !alive,
             // Owner unknown (pid not written yet, or not unix): age it out.
-            None => std::fs::metadata(&path)
+            None => fs::metadata(&path)
                 .and_then(|m| m.modified())
                 .map(|t| t.elapsed().unwrap_or_default() > COMPILE_LOCK_STALE)
                 // A lock we cannot stat is gone or unreadable; retrying the
@@ -3161,10 +3167,10 @@ fn acquire_compile_lock(cache_dir: &Path, hash: &str, so_path: &Path) -> Compile
                     path.display()
                 );
             }
-            let _ = std::fs::remove_file(&path);
+            let _ = fs::remove_file(&path);
             continue;
         }
-        std::thread::sleep(Duration::from_millis(250));
+        thread::sleep(Duration::from_millis(250));
     }
 }
 
@@ -3238,7 +3244,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     // that chunk and read only there (and not blocklisted) become C locals
     // instead of comb_values round-trips.  Empty sets when the knob is off.
     LAST_LOCALIZED_BYTES.with(|b| b.borrow_mut().clear());
-    let localize_sets: Vec<std::collections::HashSet<isize>> = if localize_armed() {
+    let localize_sets: Vec<HashSet<isize>> = if localize_armed() {
         let bl = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
         let rg = LOCALIZE_RANGES.with(|r| r.borrow().clone());
         let (sets, widths) = compute_localize_sets(&chunks, &bl, &rg);
@@ -3254,7 +3260,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         });
         sets
     } else {
-        vec![std::collections::HashSet::new(); chunks.len()]
+        vec![HashSet::new(); chunks.len()]
     };
     clear_current_local();
     let mut chunk_bodies: Vec<String> = Vec::with_capacity(chunks.len());
@@ -6585,7 +6591,7 @@ mod tests {
         }
         let expect = ((a as u128) * (b as u128)) & ((1u128 << 66) - 1);
         assert_eq!(read_u128(&comb, 32), expect);
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
 
         // Zero-extending the operands instead would make -3 a large positive.
         let mul = ProtoExpression::Binary {
@@ -6624,7 +6630,7 @@ mod tests {
         }
         let expect = ((-15i128) as u128) & ((1u128 << 66) - 1);
         assert_eq!(read_u128(&comb, 32), expect);
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -6689,13 +6695,13 @@ mod tests {
             );
         }
         assert_eq!(read_u128(&comb, 32), v66);
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn compile_lock_ticket_states() {
         let tmp = std::env::temp_dir().join(format!("veryl_aot_lock_{}", std::process::id()));
-        std::fs::create_dir_all(&tmp).unwrap();
+        fs::create_dir_all(&tmp).unwrap();
         let so = tmp.join("veryl_aot_deadbeef.so");
         let lock = tmp.join("veryl_aot_deadbeef.lock");
 
@@ -6707,13 +6713,13 @@ mod tests {
         // A second caller must not compile the same hash.  It waits, so give
         // it the exit the owner's publish provides.  (The lock carries no pid
         // yet, so the age rule keeps it alive — exactly the spawn window.)
-        std::fs::write(&so, b"not a real object").unwrap();
+        fs::write(&so, b"not a real object").unwrap();
         assert!(matches!(
             acquire_compile_lock(&tmp, "deadbeef", &so),
             CompileTicket::Published
         ));
 
-        std::fs::remove_file(&so).unwrap();
+        fs::remove_file(&so).unwrap();
 
         // Dropping the owner releases the lock even without the script's `rm`
         // (the non-unix path and every early-return error path rely on this).
@@ -6728,7 +6734,7 @@ mod tests {
         {
             // `kill -0 0` addresses our own process group, so name a pid that
             // cannot exist rather than 0.
-            std::fs::write(&lock, format!("{}\n", u32::MAX)).unwrap();
+            fs::write(&lock, format!("{}\n", u32::MAX)).unwrap();
             assert_eq!(owner_alive(&lock), Some(false));
             let retaken = acquire_compile_lock(&tmp, "deadbeef", &so);
             assert!(matches!(retaken, CompileTicket::Owned(_)));
@@ -6747,7 +6753,7 @@ mod tests {
             CompileTicket::Unlocked
         ));
 
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -6768,12 +6774,12 @@ mod tests {
                 *(uint32_t*)(comb + 0) = 0x5a5a5a5a;\n\
             }\n";
         let tmp = std::env::temp_dir().join(format!("veryl_aot_lock_cc_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
         let mut handles = Vec::new();
         for _ in 0..4 {
             let dir = tmp.clone();
-            handles.push(std::thread::spawn(move || {
+            handles.push(thread::spawn(move || {
                 compile_source_in(&dir, src).map(|_| ())
             }));
         }
@@ -6787,12 +6793,12 @@ mod tests {
         }
         if skip {
             eprintln!("compile_lock_serializes_identical_sources: .so not loadable here; skipping");
-            let _ = std::fs::remove_dir_all(&tmp);
+            let _ = fs::remove_dir_all(&tmp);
             return;
         }
         let mut so = 0usize;
         let mut locks = 0usize;
-        for e in std::fs::read_dir(&tmp).unwrap() {
+        for e in fs::read_dir(&tmp).unwrap() {
             let name = e.unwrap().file_name().to_string_lossy().into_owned();
             if name.ends_with(".so") {
                 so += 1;
@@ -6802,7 +6808,7 @@ mod tests {
         }
         assert_eq!(so, 1, "one artifact per hash");
         assert_eq!(locks, 0, "the compile lock must be released");
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -6877,7 +6883,7 @@ mod tests {
         let lo = u64::from_le_bytes(comb[0x100..0x108].try_into().unwrap());
         assert_eq!(lo & 0xFF_FFFF, field, "field bits [23:0]");
         assert_eq!((lo >> 32) & 0xFF, 0xAA, "RMW must keep untouched dst bits");
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -6955,7 +6961,7 @@ mod tests {
         // value >> 32 over the 192-bit [or2:or1:or0].
         let expected_sel = ((or0 as u128) >> 32) | ((or1 as u128) << 32) | ((or2 as u128) << 96);
         assert_eq!(read_u128(&comb, 48), expected_sel);
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -7015,7 +7021,7 @@ mod tests {
             );
         }
         assert_eq!(comb[48] & 1, 0);
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -7129,7 +7135,7 @@ mod tests {
                 want64
             );
         }
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -7734,7 +7740,7 @@ mod tests {
                 (0x8000_0000_0000_0123, 0xffff_ffff_ffff_ffff),
                 "negative 64-bit branch must sign-extend into the high word"
             );
-            let _ = std::fs::remove_dir_all(&tmp);
+            let _ = fs::remove_dir_all(&tmp);
         }
     }
 
@@ -7793,7 +7799,7 @@ mod tests {
                 (hi << 92) | lo,
                 "the 184-bit concat must narrow to its low 128 bits"
             );
-            let _ = std::fs::remove_dir_all(&tmp);
+            let _ = fs::remove_dir_all(&tmp);
         }
     }
 
@@ -7992,11 +7998,11 @@ mod tests {
         // agree.  With one argument missing, `$lk` swallowed the first flag
         // and `-O3` never reached the compile.
         let tmp = std::env::temp_dir().join(format!("veryl_aot_args_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
         let seen = tmp.join("seen.txt");
         let fake_cc = tmp.join("record_cc.sh");
-        std::fs::write(
+        fs::write(
             &fake_cc,
             format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n\
@@ -8006,7 +8012,7 @@ mod tests {
         )
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&fake_cc, std::fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&fake_cc, fs::Permissions::from_mode(0o755)).unwrap();
 
         let tmp_c = tmp.join("t.c");
         let tmp_so = tmp.join("t.so");
@@ -8014,8 +8020,8 @@ mod tests {
         let so_path = tmp.join("p.so");
         let lock = tmp.join("p.lock");
         let log = tmp.join("p.log");
-        std::fs::write(&tmp_c, b"").unwrap();
-        std::fs::write(&lock, b"").unwrap();
+        fs::write(&tmp_c, b"").unwrap();
+        fs::write(&lock, b"").unwrap();
         let flags = ["-O3".to_string(), "-fPIC".to_string()];
 
         let status = Command::new("/bin/sh")
@@ -8036,7 +8042,7 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success(), "the script must succeed");
-        let recorded = std::fs::read_to_string(&seen).unwrap();
+        let recorded = fs::read_to_string(&seen).unwrap();
         for f in &flags {
             assert!(
                 recorded.lines().any(|l| l == f),
@@ -8047,7 +8053,7 @@ mod tests {
         assert!(c_path.exists(), "the source must publish beside it");
         assert!(!log.exists(), "a successful compile leaves no log behind");
         assert!(!lock.exists(), "the script must release the lock");
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -8060,28 +8066,28 @@ mod tests {
         const CHILD_DIR: &str = "VERYL_TEST_AOT_PUBLISH_DIR";
         if let Ok(dir) = std::env::var(CHILD_DIR) {
             let dir = PathBuf::from(dir);
-            std::thread::spawn(move || {
+            thread::spawn(move || {
                 let _ = compile_source_in(&dir, "// AOT-C publish probe\n");
             });
-            std::thread::sleep(Duration::from_millis(200));
+            thread::sleep(Duration::from_millis(200));
             std::process::exit(0);
         }
 
         let tmp = std::env::temp_dir().join(format!("veryl_aot_pub_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
         // A cc that outlives the child, and that emits a diagnostic once it
         // does — on our pipes that is a SIGPIPE, and the compile would die
         // before writing anything.
         let slow_cc = tmp.join("slow_cc.sh");
-        std::fs::write(
+        fs::write(
             &slow_cc,
             "#!/bin/sh\nsleep 2\necho 'warning: probe diagnostic' >&2\n\
              while [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n: > \"$out\"\n",
         )
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&slow_cc, std::fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&slow_cc, fs::Permissions::from_mode(0o755)).unwrap();
 
         let status = Command::new(std::env::current_exe().unwrap())
             .arg("aot_cache_publish_survives_process_exit")
@@ -8096,21 +8102,17 @@ mod tests {
         // Published artifacts are `veryl_aot_<hash>.so`; the temps carry an
         // extra `.<pid>.<n>` and must not count.
         let published = || {
-            std::fs::read_dir(&tmp)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .any(|e| {
-                    let n = e.file_name().to_string_lossy().into_owned();
-                    n.starts_with("veryl_aot_") && n.ends_with(".so") && n.matches('.').count() == 1
-                })
+            fs::read_dir(&tmp).into_iter().flatten().flatten().any(|e| {
+                let n = e.file_name().to_string_lossy().into_owned();
+                n.starts_with("veryl_aot_") && n.ends_with(".so") && n.matches('.').count() == 1
+            })
         };
         let deadline = Instant::now() + Duration::from_secs(30);
         while !published() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(100));
+            thread::sleep(Duration::from_millis(100));
         }
         assert!(published(), "the .so must publish after the run exits");
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     fn compile_for_test(cache_dir: &Path, src: &str, what: &str) -> Option<EmittedModule> {
@@ -8213,7 +8215,7 @@ mod tests {
             "out-of-range idx should clamp to last element"
         );
 
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -8283,7 +8285,7 @@ mod tests {
         let written = u32::from_le_bytes(comb[0..4].try_into().unwrap());
         assert_eq!(written, 0xdeadbeef, "comb[0..4] should be 0xdeadbeef");
         // Best-effort cleanup; ignore failures.
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     // --- Chunk-local localization (compute_localize_sets) ---
@@ -8313,8 +8315,8 @@ mod tests {
         chunks: &[&[ProtoStatement]],
         blocklist: &[isize],
         ranges: &[(isize, usize, isize)],
-    ) -> Vec<std::collections::HashSet<isize>> {
-        let bl: std::collections::HashSet<isize> = blocklist.iter().copied().collect();
+    ) -> Vec<HashSet<isize>> {
+        let bl: HashSet<isize> = blocklist.iter().copied().collect();
         compute_localize_sets(chunks, &bl, ranges).0
     }
 
@@ -8395,6 +8397,21 @@ mod tests {
         assert!(
             !sets[0].contains(&0x108),
             "offset inside a dynamic array range must not localize"
+        );
+    }
+
+    #[test]
+    fn localize_skips_read_before_write() {
+        // `y = v` placed BEFORE `v = const` in the same chunk — see
+        // `LocalAnalysis::read_before_write`.
+        let c0 = vec![
+            comb_assign(0x20, 32, None, var_expr(VarOffset::Comb(0x10), 32)),
+            comb_assign(0x10, 32, None, const_expr(0, 32)),
+        ];
+        let sets = localize_sets(&[&c0], &[], &[]);
+        assert!(
+            !sets[0].contains(&0x10),
+            "read-before-write (backward edge) must not localize"
         );
     }
 
