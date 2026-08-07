@@ -1,4 +1,4 @@
-// Diagnostic ownership and provenance coverage for comb-loop migration.
+// Diagnostic ownership and provenance coverage for comb-loop analysis.
 use super::*;
 
 #[derive(Clone, Copy)]

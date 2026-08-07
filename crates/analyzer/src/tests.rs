@@ -13,23 +13,23 @@ mod comb_loop_diagnostic_tests;
 #[path = "comb_loop_incomplete_tests.rs"]
 mod comb_loop_incomplete_tests;
 
-#[path = "comb_loop_migration_procedural_tests.rs"]
-mod comb_loop_migration_procedural_tests;
+#[path = "comb_loop_procedural_tests.rs"]
+mod comb_loop_procedural_tests;
 
-#[path = "comb_loop_migration_retained_tests.rs"]
-mod comb_loop_migration_retained_tests;
+#[path = "comb_loop_retained_state_tests.rs"]
+mod comb_loop_retained_state_tests;
 
-#[path = "comb_loop_migration_function_tests.rs"]
-mod comb_loop_migration_function_tests;
+#[path = "comb_loop_function_tests.rs"]
+mod comb_loop_function_tests;
 
-#[path = "comb_loop_migration_module_tests.rs"]
-mod comb_loop_migration_module_tests;
+#[path = "comb_loop_module_tests.rs"]
+mod comb_loop_module_tests;
 
-#[path = "comb_loop_migration_positional_tests.rs"]
-mod comb_loop_migration_positional_tests;
+#[path = "comb_loop_positional_tests.rs"]
+mod comb_loop_positional_tests;
 
-#[path = "comb_loop_migration_sparse_tests.rs"]
-mod comb_loop_migration_sparse_tests;
+#[path = "comb_loop_sparse_tests.rs"]
+mod comb_loop_sparse_tests;
 
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {

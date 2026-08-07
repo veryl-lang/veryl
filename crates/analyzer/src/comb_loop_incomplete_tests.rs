@@ -1,4 +1,4 @@
-// Incomplete-effect boundary coverage for comb-loop migration.
+// Incomplete-effect boundary coverage for comb-loop analysis.
 use super::*;
 
 #[test]
