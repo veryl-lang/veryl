@@ -1,4 +1,4 @@
-use crate::backend::CompiledWhole;
+use crate::backend::{CompiledWhole, DispatchOutcome};
 use crate::component::loader::ComponentError;
 use crate::component::runtime::{RuntimeComponent, build_components};
 use crate::ir::write_log::{
@@ -8,11 +8,15 @@ use crate::ir::{
     Event, Ir, ModuleVariables, Statement, Value, VarId, VarPath, dispatch_stmt_fast,
     read_native_value, write_native_value,
 };
+use crate::residency;
 use crate::wave_dumper::{DumpVar, WaveDumper};
 use smallvec::SmallVec;
 use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
+#[cfg(feature = "profile")]
+use std::time::Instant;
 use veryl_analyzer::value::MaskCache;
 
 #[cfg(feature = "profile")]
@@ -455,7 +459,7 @@ impl Simulator {
     pub fn ensure_comb_updated(&mut self) {
         if self.comb_dirty {
             #[cfg(feature = "profile")]
-            let start = std::time::Instant::now();
+            let start = Instant::now();
 
             self.do_settle_comb();
             self.comb_dirty = false;
@@ -514,7 +518,7 @@ impl Simulator {
 
         if self.comb_dirty {
             #[cfg(feature = "profile")]
-            let start = std::time::Instant::now();
+            let start = Instant::now();
 
             self.do_settle_comb();
             self.comb_dirty = false;
@@ -690,7 +694,7 @@ impl Simulator {
     /// one pre-commit state and one commit.
     fn eval_event_stmts(&mut self, event: &Event) {
         #[cfg(feature = "profile")]
-        let event_start = std::time::Instant::now();
+        let event_start = Instant::now();
 
         // Cache both the per-stmt list AND the whole-event AOT-C handle for
         // the current event, keyed on `last_event`.  `event_statements` and
@@ -719,7 +723,6 @@ impl Simulator {
         // current values and pushes WriteLogEntries into the buffer
         // (3rd arg), exactly as the Cranelift event JIT does;
         // `ff_commit_from_log` below applies them.
-        use crate::backend::DispatchOutcome;
         let dispatched = if let Some(wptr) = whole_event_ptr {
             // SAFETY: `wptr` = `Arc::as_ptr` of an `Arc` owned by
             // `self.ir.whole_events`, which is never mutated after `Ir`
@@ -734,10 +737,21 @@ impl Simulator {
             let validate = self.ir.aot_c_validate;
 
             if !validate {
-                matches!(
-                    whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
-                    DispatchOutcome::Done,
-                )
+                match whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) {
+                    DispatchOutcome::Done => true,
+                    DispatchOutcome::NotReady => {
+                        // `false` degrades to the per-stmt path below
+                        // (see `residency`).
+                        if !self
+                            .ir
+                            .whole_event_fallback_recorded
+                            .swap(true, Ordering::Relaxed)
+                        {
+                            residency::record_fallback("whole_event", &self.ir.name.to_string());
+                        }
+                        false
+                    }
+                }
             } else {
                 // For validate, the wrapper compares the whole-event
                 // dispatch against the per-stmt Cranelift path and panics
@@ -768,7 +782,7 @@ impl Simulator {
     /// Apply the accumulated write log to FF storage and reset the buffer.
     fn commit_event_log(&mut self) {
         #[cfg(feature = "profile")]
-        let ff_start = std::time::Instant::now();
+        let ff_start = Instant::now();
 
         ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
 
@@ -1019,7 +1033,7 @@ impl Simulator {
         // Whole-event backend, then capture its pushed entries + ff/comb.
         if matches!(
             whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
-            crate::backend::DispatchOutcome::NotReady,
+            DispatchOutcome::NotReady,
         ) {
             return false;
         }

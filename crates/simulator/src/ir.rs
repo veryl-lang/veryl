@@ -40,12 +40,14 @@ pub use variable::{
 pub use veryl_analyzer::ir::{Op, Type, VarId, VarPath};
 pub use veryl_analyzer::value::Value;
 
-use crate::HashMap;
 use crate::backend::{self, BackendRegistry, CompiledWhole, DispatchOutcome};
+use crate::residency;
 use crate::simulator::SimProfile;
 use crate::simulator_error::SimulatorError;
-use std::sync::Arc;
-use std::sync::OnceLock;
+use crate::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::MaskCache;
@@ -126,15 +128,19 @@ pub struct Ir {
     /// Base directory for component file I/O (the project root). Relative
     /// reads resolve against it; relative writes go to a per-test output
     /// directory beneath it. `None` leaves paths process-CWD relative.
-    pub component_file_base: Option<std::path::PathBuf>,
+    pub component_file_base: Option<PathBuf>,
     /// See `Module::rtl_driven`.
-    pub rtl_driven: crate::HashSet<VarId>,
+    pub rtl_driven: HashSet<VarId>,
+    /// A failed compile leaves the cell empty forever, so the fallback is
+    /// taken every cycle; the residency table (a mutex) must be touched once.
+    whole_comb_fallback_recorded: AtomicBool,
+    pub(crate) whole_event_fallback_recorded: AtomicBool,
 }
 
 /// A built component library on disk and the type name to look up in it.
 #[derive(Clone, Debug)]
 pub struct ComponentLibrary {
-    pub path: std::path::PathBuf,
+    pub path: PathBuf,
     pub type_name: String,
 }
 
@@ -172,6 +178,8 @@ impl Ir {
             component_libraries: config.component_libraries.clone(),
             component_file_base: config.component_file_base.clone(),
             rtl_driven: module.rtl_driven,
+            whole_comb_fallback_recorded: Default::default(),
+            whole_event_fallback_recorded: Default::default(),
         };
         // Bake the WriteLogBuffer's heap-stable address into every
         // JIT-dispatched Compiled/CompiledBatch so emitted code can perform
@@ -373,7 +381,13 @@ impl Ir {
                         DispatchOutcome::Done => {}
                         DispatchOutcome::NotReady => {
                             // Async compile not finished yet — drop to
-                            // Cranelift for this cycle.
+                            // Cranelift for this cycle (see `residency`).
+                            if !self
+                                .whole_comb_fallback_recorded
+                                .swap(true, Ordering::Relaxed)
+                            {
+                                residency::record_fallback("whole_comb", &self.name.to_string());
+                            }
                             self.run_chunked_settle(mask_cache, profile);
                             return;
                         }
@@ -680,7 +694,7 @@ pub struct Config {
     /// name. Missing entries fall back to the static registry.
     pub component_libraries: std::collections::HashMap<String, ComponentLibrary>,
     /// See `Ir::component_file_base`.
-    pub component_file_base: Option<std::path::PathBuf>,
+    pub component_file_base: Option<PathBuf>,
 }
 
 impl Config {

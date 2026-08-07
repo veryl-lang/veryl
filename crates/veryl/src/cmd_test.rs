@@ -32,7 +32,13 @@ fn random_seed() -> u64 {
 struct TestSuiteReport {
     /// Bump on any breaking change to the report shape.
     format_version: u32,
+    /// The backend that was asked for; see `degraded_modules` for what ran.
     backend: String,
+    /// `kind:module` for every module that fell back, empty when the run used
+    /// `backend` throughout.  A timing comparison is only meaningful when this
+    /// is empty in both arms.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    degraded_modules: Vec<String>,
     passed: i32,
     failed: i32,
     ignored: usize,
@@ -684,6 +690,7 @@ impl CmdTest {
             let report = TestSuiteReport {
                 format_version: 1,
                 backend: backend_name.to_string(),
+                degraded_modules: veryl_simulator::residency::degraded_modules(),
                 passed: success,
                 failed: failure,
                 ignored: ignored_count,

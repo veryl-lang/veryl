@@ -5,6 +5,7 @@ pub mod file_table;
 pub mod ir;
 pub mod output_buffer;
 pub mod random_table;
+pub mod residency;
 pub mod simulator;
 pub mod simulator_error;
 pub mod testbench;
