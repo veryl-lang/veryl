@@ -469,3 +469,160 @@ fn comb_loop_generic_interface_enabled_specialization_retains_feedthrough() {
 fn comb_loop_generic_interface_disabled_specialization_has_no_feedthrough() {
     assert_interface_comb_loop(&specialized_interface_code(2), false);
 }
+
+fn formal_modport_connect_code(source_assignments: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var request : logic;
+            var response: logic;
+            modport initiator {{
+                request : output,
+                response: input,
+            }}
+            modport target {{
+                ..converse(initiator)
+            }}
+        }}
+        module Bridge (
+            producer: modport Bus::initiator,
+            consumer: modport Bus::target,
+        ) {{
+            connect producer <> consumer;
+        }}
+        module Top {{
+            inst producer: Bus;
+            inst consumer: Bus;
+            inst bridge: Bridge (
+                producer: producer,
+                consumer: consumer,
+            );
+            {source_assignments}
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_formal_modport_connect_detects_feedback() {
+    assert_interface_comb_loop(
+        &formal_modport_connect_code(
+            r#"assign consumer.request = consumer.response;
+            assign producer.response = producer.request;"#,
+        ),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_formal_modport_connect_with_constant_sources_has_no_feedback() {
+    assert_interface_comb_loop(
+        &formal_modport_connect_code(
+            r#"assign consumer.request = 0;
+            assign producer.response = 0;"#,
+        ),
+        false,
+    );
+}
+
+fn procedural_modport_connect_code(overrides: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var request : logic;
+            var response: logic;
+            modport initiator {{
+                request : output,
+                response: input,
+            }}
+            modport target {{
+                ..converse(initiator)
+            }}
+        }}
+        module Top {{
+            inst producer: Bus;
+            inst consumer: Bus;
+            always_comb {{
+                producer.initiator <> consumer.target;
+                {overrides}
+            }}
+            assign consumer.request = consumer.response;
+            assign producer.response = producer.request;
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_procedural_modport_connect_detects_feedback() {
+    assert_interface_comb_loop(&procedural_modport_connect_code(""), true);
+}
+
+#[test]
+#[ignore = "comb-loop migration: false positive; procedural modport connect killed by later overrides"]
+fn comb_loop_procedural_modport_connect_overrides_kill_feedback() {
+    assert_interface_comb_loop(
+        &procedural_modport_connect_code(
+            r#"producer.request = 0;
+            consumer.response = 0;"#,
+        ),
+        false,
+    );
+}
+
+fn partial_modport_connect_code(source_assignments: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var request : logic;
+            var response: logic;
+            modport initiator {{
+                request : output,
+                response: input,
+            }}
+            modport target_request {{
+                request: input,
+            }}
+        }}
+        module RequestBridge (
+            producer: modport Bus::initiator,
+            consumer: modport Bus::target_request,
+        ) {{
+            connect producer <> consumer;
+        }}
+        module Top {{
+            inst producer: Bus;
+            inst consumer: Bus;
+            inst bridge: RequestBridge (
+                producer: producer,
+                consumer: consumer,
+            );
+            {source_assignments}
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_partial_modport_connect_detects_shared_member_feedback() {
+    assert_interface_comb_loop(
+        &partial_modport_connect_code(
+            r#"assign consumer.request = producer.response;
+            assign producer.response = producer.request;
+            assign consumer.response = 0;"#,
+        ),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_partial_modport_connect_does_not_connect_absent_member() {
+    assert_interface_comb_loop(
+        &partial_modport_connect_code(
+            r#"assign consumer.request = 0;
+            assign consumer.response = producer.request;
+            assign producer.response = consumer.response;"#,
+        ),
+        false,
+    );
+}
