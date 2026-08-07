@@ -1,4 +1,3 @@
-// Behavioral comb-loop tests split by one condition and expectation per test.
 use super::*;
 
 fn assert_comb_loop(case: &str, code: &str, expected: bool) {
