@@ -13,13 +13,14 @@ use crate::ir::{
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement, ProtoSystemFunctionCall,
     VarOffset, native_bytes, veryl_aot_sysfn_print,
 };
+use crate::{HashMap, HashSet};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -270,22 +271,43 @@ fn reset_wide_tmp() {
 }
 
 // ---------------------------------------------------------------------------
-// Chunk-local comb intermediate localization (VERYL_AOT_C_LOCALIZE, default on,
-// `=0` to opt out).  A comb scalar written and read only within its emit chunk
-// is kept in a C local instead of round-tripping `comb_values` (gcc can't drop
-// the store — escaping restrict param — but the emitter's global read-set can).
+// Chunk-local comb intermediate localization (on by default;
+// `VERYL_AOT_C_LOCALIZE=0` or `force_disable_localize` opts out).  A comb
+// scalar written and read only within its emit chunk is kept in a C local
+// instead of round-tripping `comb_values` (gcc can't drop the store —
+// escaping restrict param — but the emitter's global read-set can).
 // Soundness: localize only a signal (a) written by one top-level unconditional
 // full-width scalar (≤64-bit) Assign, (b) read only in that chunk, (c) not
 // blocklisted (event-read / array-range / partial-write / port).  Blocklist
 // built in `module.rs`.
+
+/// Set by [`force_disable_localize`]; latches on and is never cleared, so
+/// localization can only ever be turned off, never back on.
+static LOCALIZE_FORCED_OFF: AtomicBool = AtomicBool::new(false);
+
+/// Whether chunk-local localization runs: on unless `VERYL_AOT_C_LOCALIZE=0`
+/// or a caller turned it off for the process.
+pub fn localize_enabled() -> bool {
+    if LOCALIZE_FORCED_OFF.load(Ordering::Relaxed) {
+        return false;
+    }
+    std::env::var("VERYL_AOT_C_LOCALIZE").as_deref() != Ok("0")
+}
+
+/// Latch the process-wide off switch; `super::force_disable_localize` is the
+/// public entry point and carries the rationale.
+pub fn force_disable_localize() {
+    LOCALIZE_FORCED_OFF.store(true, Ordering::Relaxed);
+}
+
 thread_local! {
     /// Comb offsets the caller marked unsafe to localize (read outside the
     /// comb function / dynamically / partial-written / port-visible).
     static LOCALIZE_BLOCKLIST: RefCell<HashSet<isize>> =
-        RefCell::new(HashSet::new());
+        RefCell::new(HashSet::default());
     /// Comb offsets localized in the chunk currently being emitted.
     static CURRENT_LOCAL: RefCell<HashSet<isize>> =
-        RefCell::new(HashSet::new());
+        RefCell::new(HashSet::default());
     /// Runtime-indexed comb array ranges (base, num_elements, stride) — a
     /// candidate offset inside any of these is excluded (a constant-indexed
     /// element could be read dynamically by an event / another statement).
@@ -687,7 +709,7 @@ fn compute_localize_sets(
             a.walk_stmt(s, i, true);
         }
     }
-    let mut sets: Vec<HashSet<isize>> = vec![HashSet::new(); chunks.len()];
+    let mut sets: Vec<HashSet<isize>> = vec![HashSet::default(); chunks.len()];
     for (off, wc) in &a.write_chunk {
         let Some(i) = wc else { continue };
         if a.bad.contains(off)
@@ -3389,7 +3411,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         });
         sets
     } else {
-        vec![HashSet::new(); chunks.len()]
+        vec![HashSet::default(); chunks.len()]
     };
     clear_current_local();
     let mut chunk_bodies: Vec<String> = Vec::with_capacity(chunks.len());
