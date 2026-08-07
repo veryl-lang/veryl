@@ -28,6 +28,9 @@ mod comb_loop_migration_module_tests;
 #[path = "comb_loop_migration_positional_tests.rs"]
 mod comb_loop_migration_positional_tests;
 
+#[path = "comb_loop_migration_sparse_tests.rs"]
+mod comb_loop_migration_sparse_tests;
+
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();
