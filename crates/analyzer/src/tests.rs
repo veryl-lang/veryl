@@ -7,28 +7,20 @@ use veryl_metadata::{Lint, Metadata, ProjectProperty};
 use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
 
-#[path = "comb_loop_diagnostic_tests.rs"]
 mod comb_loop_diagnostic_tests;
 
-#[path = "comb_loop_incomplete_tests.rs"]
 mod comb_loop_incomplete_tests;
 
-#[path = "comb_loop_procedural_tests.rs"]
 mod comb_loop_procedural_tests;
 
-#[path = "comb_loop_retained_state_tests.rs"]
 mod comb_loop_retained_state_tests;
 
-#[path = "comb_loop_function_tests.rs"]
 mod comb_loop_function_tests;
 
-#[path = "comb_loop_module_tests.rs"]
 mod comb_loop_module_tests;
 
-#[path = "comb_loop_positional_tests.rs"]
 mod comb_loop_positional_tests;
 
-#[path = "comb_loop_sparse_tests.rs"]
 mod comb_loop_sparse_tests;
 
 #[track_caller]
