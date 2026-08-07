@@ -257,6 +257,14 @@ fn wideops_table() -> WideOpsTable {
 thread_local! {
     static WIDE_TMP_CTR: Cell<usize> = const { Cell::new(0) };
 }
+/// 64-bit word count for a `native_bytes` size class — the length of the
+/// `uint64_t _wN[]` scratch that holds a value of that size.  Must round UP:
+/// `native_bytes` returns 4 for widths <= 32, and a truncating `/ 8` would
+/// declare a zero-length array whose word-0 store is out of bounds.
+fn wide_words(nb: usize) -> usize {
+    nb.div_ceil(8)
+}
+
 /// Fresh `_wN` index, unique within a function emit (monotonic; reset by
 /// `emit_function` / `emit_event_function` so emitted source is deterministic).
 fn next_wide_tmp() -> usize {
@@ -761,7 +769,7 @@ fn emit_wide_const(
     let (width, digits): (usize, Vec<u64>) = match value {
         Value::U64(x) if x.width == 0 => {
             let target = ctx_width.max(proto_width);
-            let count = native_bytes(target) / 8;
+            let count = wide_words(native_bytes(target));
             let d = if x.payload != 0 {
                 vec![u64::MAX; count]
             } else {
@@ -773,7 +781,7 @@ fn emit_wide_const(
         Value::BigUint(x) => (proto_width, x.payload.to_u64_digits()),
     };
     let nb = native_bytes(width);
-    let nw = nb / 8;
+    let nw = wide_words(nb);
     let t = next_wide_tmp();
     let mut init = String::new();
     for i in 0..nw {
@@ -833,7 +841,7 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                 let idx = emit_expr(&dyn_sel.index_expr)?;
                 let max_idx = dyn_sel.num_elements - 1;
                 let src_nb = native_bytes(*var_full_width);
-                let src_nw = src_nb / 8;
+                let src_nw = wide_words(src_nb);
                 let t = next_wide_tmp();
                 pre.push_str(&format!(
                     "uint64_t _w{t}[{src_nw}]; \
@@ -861,7 +869,7 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                     return None;
                 }
                 let src_nb = native_bytes(*var_full_width);
-                let src_nw = src_nb / 8;
+                let src_nw = wide_words(src_nb);
                 let res_nb = native_bytes(nbits);
                 let t = next_wide_tmp();
                 pre.push_str(&format!(
@@ -964,7 +972,7 @@ fn emit_wide_operand(
     target_nb: usize,
     pre: &mut String,
 ) -> Option<WideRef> {
-    let tnw = target_nb / 8;
+    let tnw = wide_words(target_nb);
     // A wide-pointer NODE whose wide emit has no arm may still be scalar-
     // emittable when its RESULT is ≤128 bits (e.g. a dynamic select on a
     // >128-bit var, which reads a 64..128-bit element into a register):
@@ -1053,7 +1061,7 @@ fn emit_wide_rhs_field(
         return None;
     }
     let src_nb = native_bytes(src_w);
-    let src_nw = src_nb / 8;
+    let src_nw = wide_words(src_nb);
     let r = emit_wide_operand(expr, src_nb, pre)?;
     let fld = next_wide_tmp();
     pre.push_str(&format!(
@@ -1122,7 +1130,7 @@ fn emit_wide_operand_signed(
     let w = expr.width();
     if signed && w > 0 && w < target_nb * 8 {
         let t = next_wide_tmp();
-        let tnw = target_nb / 8;
+        let tnw = wide_words(target_nb);
         pre.push_str(&format!(
             "uint64_t _w{t}[{tnw}]; vw_sext_copy((uint8_t*)_w{t}, {src}, {w}u, {target_nb}u); ",
             src = r.addr,
@@ -1229,7 +1237,7 @@ fn emit_wide_binary(
     let width = expr_context.width;
     let result_nb = native_bytes(width);
     let op_nb = native_bytes(width.max(x.width()).max(y.width()));
-    let nw = op_nb / 8;
+    let nw = wide_words(op_nb);
     let mask_pack = wpack(op_nb, width);
     match op {
         Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor | Op::Add | Op::Sub | Op::Mul => {
@@ -1307,7 +1315,7 @@ fn emit_wide_binary(
 /// mask after the op; identity is unmasked.
 fn emit_wide_unary(op: Op, x: &ProtoExpression, width: usize, pre: &mut String) -> Option<WideRef> {
     let nb = native_bytes(width);
-    let nw = nb / 8;
+    let nw = wide_words(nb);
     let x_ref = emit_wide_operand(x, nb, pre)?;
     match op {
         Op::Add => Some(WideRef {
@@ -1373,7 +1381,7 @@ fn emit_wide_ternary(
     pre: &mut String,
 ) -> Option<WideRef> {
     let nb = native_bytes(width);
-    let nw = nb / 8;
+    let nw = wide_words(nb);
     let c = emit_expr(cond)?;
     let mut t_ref = emit_wide_operand(true_expr, nb, pre)?;
     let mut f_ref = emit_wide_operand(false_expr, nb, pre)?;
@@ -1435,7 +1443,7 @@ fn emit_wide_concat(
     pre: &mut String,
 ) -> Option<WideRef> {
     let nb = native_bytes(width);
-    let nw = nb / 8;
+    let nw = wide_words(nb);
     let acc = next_wide_tmp();
     pre.push_str(&format!("uint64_t _w{acc}[{nw}] = {{0}}; "));
 
@@ -2283,7 +2291,7 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
     }
     let packed = dst_raw == cur_off;
     let nb = native_bytes(a.dst_width);
-    let nw = nb / 8;
+    let nw = wide_words(nb);
     let mut pre = String::new();
     // Build the RHS to `nb` bytes, then copy into a fresh scratch and mask it
     // there (the canonical FF slot must not be clobbered before commit; the
@@ -2549,7 +2557,7 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
         return None;
     }
     let nb = native_bytes(a.dst_width);
-    let nw = nb / 8;
+    let nw = wide_words(nb);
     let max_idx = a.dst_num_elements.saturating_sub(1);
     let idx = emit_expr(&a.dst_index_expr)?;
     let mut pre = String::new();
@@ -3560,7 +3568,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                         return None;
                     }
                     let nb = native_bytes(a.dst_width);
-                    let nw = nb / 8;
+                    let nw = wide_words(nb);
                     if win > nb * 8 {
                         return None;
                     }
@@ -3629,7 +3637,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                     return None;
                 }
                 let nb = native_bytes(a.dst_width);
-                let nw = nb / 8;
+                let nw = wide_words(nb);
                 let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
                 let dmask = wpack(nb, a.dst_width);
                 // Non-foldable rhs_select (rhs isn't a plain variable):
@@ -4075,7 +4083,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                     return None;
                 }
                 let nb = native_bytes(a.dst_width);
-                let nw = nb / 8;
+                let nw = wide_words(nb);
                 let max_idx = a.dst_num_elements.saturating_sub(1);
                 let idx_str = emit_expr(&a.dst_index_expr)?;
                 let dmask = wpack(nb, a.dst_width);
@@ -4495,7 +4503,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     if off < 0 {
                         return None;
                     }
-                    let nw = native_bytes(*var_full_width) / 8;
+                    let nw = wide_words(native_bytes(*var_full_width));
                     let m: u128 = if dyn_sel.window >= 128 {
                         !0u128
                     } else {
@@ -4534,7 +4542,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 if off < 0 {
                     return None;
                 }
-                let nw = native_bytes(*var_full_width) / 8;
+                let nw = wide_words(native_bytes(*var_full_width));
                 return Some(format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
@@ -5281,7 +5289,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                             return None;
                         }
                         let src_nb = native_bytes(x_w);
-                        let src_nw = src_nb / 8;
+                        let src_nw = wide_words(src_nb);
                         let mut pre = String::new();
                         let xr = emit_wide_operand(x, src_nb, &mut pre)?;
                         let count = emit_expr(y)?;
