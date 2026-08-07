@@ -278,3 +278,96 @@ fn comb_loop_input_default_modport_detects_observed_member_feedback() {
         true,
     );
 }
+
+fn imported_interface_read_code(top_assignments: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var observed : logic;
+            var unrelated: logic;
+            function read_observed () -> logic {{
+                return observed;
+            }}
+            modport monitor {{
+                read_observed: import,
+            }}
+        }}
+        module Observer (
+            bus: modport Bus::monitor,
+            o  : output logic,
+        ) {{
+            assign o = bus.read_observed();
+        }}
+        module Top {{
+            inst bus: Bus;
+            var observed: logic;
+            inst observer: Observer (
+                bus: bus,
+                o  : observed,
+            );
+            {top_assignments}
+        }}
+        "#
+    )
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; imported interface function member read"]
+fn comb_loop_imported_interface_read_detects_member_feedback() {
+    assert_interface_comb_loop(
+        &imported_interface_read_code("assign bus.observed = observed; assign bus.unrelated = 0;"),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_imported_interface_read_keeps_unrelated_member_independent() {
+    assert_interface_comb_loop(
+        &imported_interface_read_code("assign bus.observed = 0; assign bus.unrelated = observed;"),
+        false,
+    );
+}
+
+fn imported_interface_write_code(writer_input: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var written  : logic;
+            var unrelated: logic;
+            function write_written (value: input logic) {{
+                written = value;
+            }}
+            modport target {{
+                write_written: import,
+            }}
+        }}
+        module Writer (
+            i  : input logic,
+            bus: modport Bus::target,
+        ) {{
+            always_comb {{
+                bus.write_written(i);
+            }}
+        }}
+        module Top {{
+            inst bus: Bus;
+            inst writer: Writer (
+                i  : {writer_input},
+                bus: bus,
+            );
+            assign bus.unrelated = 0;
+        }}
+        "#
+    )
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; imported interface function member write"]
+fn comb_loop_imported_interface_write_detects_member_feedback() {
+    assert_interface_comb_loop(&imported_interface_write_code("bus.written"), true);
+}
+
+#[test]
+fn comb_loop_imported_interface_write_keeps_unrelated_member_independent() {
+    assert_interface_comb_loop(&imported_interface_write_code("bus.unrelated"), false);
+}
