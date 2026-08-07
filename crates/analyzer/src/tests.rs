@@ -7,6 +7,9 @@ use veryl_metadata::{Lint, Metadata, ProjectProperty};
 use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
 
+#[path = "comb_loop_diagnostic_tests.rs"]
+mod comb_loop_diagnostic_tests;
+
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();
