@@ -978,6 +978,60 @@ fn comb_loop_structural_dependency_semantics_observer_only_duplicate_reads_do_no
 }
 
 #[test]
+#[ignore = "comb-loop migration: false positive; inner break does not exit outer loop"]
+fn comb_loop_nested_break_exits_only_inner_loop_before_dominating_overwrite() {
+    assert_comb_loop(
+        "an inner break does not skip the outer loop's dominating overwrite",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for _outer in 0..1 {
+                    a = b;
+                    for _inner in 0..1 {
+                        break;
+                    }
+                    a = 0;
+                }
+            }
+            assign b = a;
+            assign o = b;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_nested_break_preserves_dependency_before_inner_exit() {
+    assert_comb_loop(
+        "an inner break retains the reachable dependency before it",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for _outer in 0..1 {
+                    for _inner in 0..1 {
+                        a = b;
+                        break;
+                    }
+                }
+            }
+            assign b = a;
+            assign o = b;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_explicit_self_read_remains_feedback() {
     // Why this case exists: removing entry-state retention edges wholesale
     // would also hide a real source read. The fix must distinguish an implicit

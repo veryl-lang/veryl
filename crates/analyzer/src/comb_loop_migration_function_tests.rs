@@ -1434,6 +1434,58 @@ fn comb_loop_function_summary_fanout_is_memoized() {
 }
 
 #[test]
+#[ignore = "comb-loop migration: false positive; unreachable code after function return"]
+fn comb_loop_early_return_excludes_unreachable_function_dependency() {
+    assert_comb_loop(
+        "a return makes the following function dependency unreachable",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function choose (
+                feedback: input logic,
+            ) -> logic {
+                return 0;
+                return feedback;
+            }
+            var feedback: logic;
+            assign o = choose(feedback);
+            assign feedback = o;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_branch_returns_preserve_reachable_function_dependency() {
+    assert_comb_loop(
+        "a reachable branch return preserves its feedback dependency",
+        r#"
+        module Top (
+            select: input  logic,
+            o     : output logic,
+        ) {
+            function choose (
+                select  : input logic,
+                feedback: input logic,
+            ) -> logic {
+                if select {
+                    return feedback;
+                } else {
+                    return 0;
+                }
+            }
+            var feedback: logic;
+            assign o = choose(select, feedback);
+            assign feedback = o;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 #[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_function_formal_high_bit_ignores_short_unsigned_actual() {
     assert_comb_loop(
