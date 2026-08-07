@@ -2106,6 +2106,135 @@ fn width_mask(width: usize) -> u64 {
     }
 }
 
+/// Clean-bits mask elision knob (`VERYL_AOT_C_CLEAN`, default on, `=0` to
+/// opt out — the A/B lever for the redundant-mask removal).
+fn clean_elide() -> bool {
+    std::env::var("VERYL_AOT_C_CLEAN").as_deref() != Ok("0")
+}
+
+/// Conservative cleanliness analysis: true when the C value that
+/// `emit_expr_inner(e, false)` emits provably has no bits above `e.width()`.
+/// Lets the consumer-side re-masks (store width mask, concat slot mask,
+/// reduction pre-mask, `x & C` wrappers) be elided.  gcc folds only some of
+/// them itself: it cannot see the storage canonicality invariant — every
+/// store masks to the variable's declared width — that this analysis starts
+/// from.
+///
+/// Soundness contract: an elided mask must leave the emitted C value
+/// BIT-IDENTICAL to the masked form (the VERYL_AOT_C_VALIDATE dual-run
+/// compares storage bytes against the JIT).  Every rule below mirrors the
+/// corresponding emitter arm's needs_clean=false emission; anything
+/// uncertain — width 0 / >64 results, dirty producers (~, unary/binary
+/// minus, <<, xnor/nand/nor, sign-extending forms), Pow, HierVariable —
+/// answers false.
+fn expr_emits_clean(e: &ProtoExpression) -> bool {
+    let w = e.width();
+    if w == 0 || w > 64 {
+        return false;
+    }
+    match e {
+        // emit_value masks the payload to the node width.
+        ProtoExpression::Value { .. } => true,
+        ProtoExpression::Variable {
+            select,
+            dynamic_select,
+            width,
+            var_full_width,
+            ..
+        } => {
+            if dynamic_select.is_some() || select.is_some() {
+                // Static selects emit `(v >> lo) & mask`; dynamic selects
+                // mask the funnel window — both canonical by construction.
+                true
+            } else {
+                // Full load: storage is canonical (every store path masks
+                // to the declared width), so the load carries no bits
+                // above the variable width.
+                *width == *var_full_width
+            }
+        }
+        // Element loads read canonical storage; select forms mask.
+        ProtoExpression::DynamicVariable { .. } => true,
+        ProtoExpression::Unary { op, .. } => match op {
+            // Predicates and reductions produce 0/1.
+            Op::LogicNot
+            | Op::BitOr
+            | Op::BitNor
+            | Op::BitAnd
+            | Op::BitNand
+            | Op::BitXor
+            | Op::BitXnor => true,
+            // `~x` / `-x` emitted with needs_clean=false stay dirty.
+            _ => false,
+        },
+        ProtoExpression::Binary {
+            x,
+            op,
+            y,
+            expr_context,
+            ..
+        } => {
+            let sub_clean = |s: &ProtoExpression| s.width() <= w && expr_emits_clean(s);
+            match op {
+                // Comparisons and logical connectives produce 0/1.  (The
+                // signed forms sign-extend OPERANDS, not the 0/1 result.)
+                Op::Less
+                | Op::Greater
+                | Op::LessEq
+                | Op::GreaterEq
+                | Op::Eq
+                | Op::Ne
+                | Op::EqWildcard
+                | Op::NeWildcard
+                | Op::LogicAnd
+                | Op::LogicOr => true,
+                // High bits of x&y are zero when either side's are; x|y and
+                // x^y when both sides'.  NOT under a signed context: the
+                // signed emission sign-extends narrow operands to the
+                // context width and the bitwise result is never re-masked.
+                Op::BitAnd if !expr_context.signed => sub_clean(x) || sub_clean(y),
+                Op::BitOr | Op::BitXor if !expr_context.signed => sub_clean(x) && sub_clean(y),
+                // Logical right shift of a clean value stays clean.  The
+                // arithmetic form sign-fills unless the context is
+                // unsigned (then it emits the logical form).
+                Op::LogicShiftR => sub_clean(x),
+                Op::ArithShiftR => !expr_context.signed && sub_clean(x),
+                // Unsigned quotient/remainder never exceed the dividend.
+                Op::Div | Op::Rem => !expr_context.signed && sub_clean(x),
+                // The cast op passes its operand through unchanged.
+                Op::As => sub_clean(x),
+                // Add/Sub/Mul (carry/borrow), Shl, xnor/nand/nor (~) are
+                // dirty under needs_clean=false; Pow is unsupported.
+                _ => false,
+            }
+        }
+        ProtoExpression::Ternary {
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            // The both-signed-narrower special case re-masks its result;
+            // the plain form selects one arm verbatim.
+            let t_w = true_expr.width();
+            let f_w = false_expr.width();
+            let both_signed = true_expr.expr_context().signed
+                && false_expr.expr_context().signed
+                && t_w > 0
+                && f_w > 0;
+            if both_signed && (t_w < w || f_w < w) {
+                true
+            } else {
+                t_w <= w && f_w <= w && expr_emits_clean(true_expr) && expr_emits_clean(false_expr)
+            }
+        }
+        // Concat assembly bounds every element into its slot (and after
+        // elision only provably-clean elements drop their slot mask), so
+        // the ≤64-bit accumulator never carries bits above the total width.
+        ProtoExpression::Concatenation { .. } => true,
+        ProtoExpression::HierVariable(_) => false,
+    }
+}
+
 /// Event-path WIDE FF write (static dst, `dst_width > 64`): materialize the
 /// masked RHS into a scratch and push it through the 64-byte WriteLogWideEntry
 /// pool (≤56-byte payload chunks).  Covers 65-128 bit (scalar promoted) and
@@ -3670,6 +3799,16 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 return None;
             };
             let buf = "comb_values";
+            // Clean-store elision (see expr_emits_clean): the stores below
+            // re-mask to dst_width only to canonicalize a dirty RHS.  Only
+            // the bare form qualifies — a sign-extending store dirties
+            // [w..dst_width) by design, and an rhs_select extraction is
+            // handled by its own field mask.
+            let rhs_clean = clean_elide()
+                && se_from.is_none()
+                && eff_rhs_select.is_none()
+                && eff_expr.width() <= a.dst_width
+                && expr_emits_clean(eff_expr);
             // Runtime-indexed field store (dst_width <= 64 guaranteed above):
             // idx = clamp(index_expr), field = [idx*elem_width ..
             // +window-1], RMW value's low `window` bits there.  Mirrors
@@ -3777,7 +3916,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 // (compute_localize_sets' candidate filter), so native_bits is
                 // 32 or 64 and a uint64_t local holds the value exactly.
                 let native_bits = nb * 8;
-                let val = if a.dst_width < native_bits && a.dst_width > 0 {
+                let val = if a.dst_width < native_bits && a.dst_width > 0 && !rhs_clean {
                     let mask = (1u64 << a.dst_width) - 1;
                     format!(
                         "(((uint64_t)({rhs})) & 0x{m:x}ULL)",
@@ -3795,7 +3934,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 // bits above the declared width set, whereas Cranelift masks
                 // to declared bits before storing.
                 let native_bits = nb * 8;
-                if a.dst_width > 64 && a.dst_width < native_bits {
+                if a.dst_width > 64 && a.dst_width < native_bits && !rhs_clean {
                     // Wide (65-127 bit) dst: mask in 128-bit arithmetic; a
                     // (uint64_t) cast here would drop the high bits.
                     let mask: u128 = (1u128 << a.dst_width) - 1;
@@ -3809,7 +3948,7 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                         hi = (mask >> 64) as u64,
                         lo = mask as u64,
                     ))
-                } else if a.dst_width < native_bits && a.dst_width > 0 {
+                } else if a.dst_width < native_bits && a.dst_width > 0 && !rhs_clean {
                     let mask = (1u64 << a.dst_width) - 1;
                     Some(format!(
                         "*(({ct}*)({b} + {o:#x})) = ({ct})(((uint64_t)({rhs})) & 0x{m:x}ULL);",
@@ -4549,7 +4688,13 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     }
                     if xw <= 64 {
                         let mask = if xw >= 64 { u64::MAX } else { (1u64 << xw) - 1 };
-                        let m = format!("(((uint64_t)({xs})) & 0x{mask:x}ULL)");
+                        // The pre-mask canonicalizes a dirty operand before
+                        // the reduction compares/parity — elide when clean.
+                        let m = if clean_elide() && expr_emits_clean(x) {
+                            format!("((uint64_t)({xs}))")
+                        } else {
+                            format!("(((uint64_t)({xs})) & 0x{mask:x}ULL)")
+                        };
                         Some(match op {
                             Op::BitOr => format!("((uint64_t)(({m}) != 0))"),
                             Op::BitNor => format!("((uint64_t)(({m}) == 0))"),
@@ -4669,6 +4814,25 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             };
             let xs = emit_expr_inner(x, operand_needs_clean)?;
             let ys = emit_expr_inner(y, operand_needs_clean)?;
+            // `x & C` where the constant covers every bit x can carry (the
+            // shape a canonicalization wrapper leaves behind): the AND is a
+            // bit-exact no-op, so emit x alone.  The result is clean because
+            // x is, so any `needs_clean` request is still honored.
+            if clean_elide()
+                && matches!(op, Op::BitAnd)
+                && !expr_context.signed
+                && let ProtoExpression::Value {
+                    value: Value::U64(v),
+                    ..
+                } = &**y
+                && v.mask_xz == 0
+                && x.width() > 0
+                && x.width() <= 64
+                && (v.payload & width_mask(x.width())) == width_mask(x.width())
+                && expr_emits_clean(x)
+            {
+                return Some(xs);
+            }
             // VERYL_AOT_C_BOOLFOLD: narrow LogicAnd/LogicOr as a branchless
             // bitwise reduce of the `!=0` predicates — force-evaluates the
             // short-circuited right arm to drop the data-dependent branch.
@@ -5468,7 +5632,10 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 if sub_width == 0 || sub_width > 128 {
                     return None;
                 }
-                let sub_str = emit_expr(sub).or_else(|| emit_scalar_sub_via_wide(sub))?;
+                let (sub_str, via_wide) = match emit_expr(sub) {
+                    Some(s) => (s, false),
+                    None => (emit_scalar_sub_via_wide(sub)?, true),
+                };
                 if sub_width > 64 {
                     // Wide (65..128-bit) element: total width > 64 ⇒ `acc` is
                     // __uint128_t.  A full-128-bit shift is UB, so it clears
@@ -5493,17 +5660,35 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 } else {
                     (1u64 << sub_width) - 1
                 };
+                // Slot-mask elision: a provably-clean element already carries
+                // nothing above its slot width, so the mask is a no-op.  The
+                // wide marshaling fallback and unsized literals keep it.
+                let sub_clean =
+                    clean_elide() && !via_wide && sub.width() == sub_width && expr_emits_clean(sub);
                 for _ in 0..*repeat {
                     if wide_acc {
-                        acc = format!(
-                            "((({acc}) << {w}) | (((__uint128_t)({sub})) & (__uint128_t)0x{mask:x}ULL))",
-                            acc = acc,
-                            w = sub_width,
-                            sub = sub_str,
-                            mask = mask,
-                        );
+                        acc = if sub_clean {
+                            format!(
+                                "((({acc}) << {w}) | ((__uint128_t)({sub})))",
+                                acc = acc,
+                                w = sub_width,
+                                sub = sub_str,
+                            )
+                        } else {
+                            format!(
+                                "((({acc}) << {w}) | (((__uint128_t)({sub})) & (__uint128_t)0x{mask:x}ULL))",
+                                acc = acc,
+                                w = sub_width,
+                                sub = sub_str,
+                                mask = mask,
+                            )
+                        };
                     } else {
-                        let elem = format!("(({sub}) & 0x{mask:x}ULL)", sub = sub_str, mask = mask);
+                        let elem = if sub_clean {
+                            format!("({sub})", sub = sub_str)
+                        } else {
+                            format!("(({sub}) & 0x{mask:x}ULL)", sub = sub_str, mask = mask)
+                        };
                         // Same UB as the sign-repeat fold above.
                         acc = if sub_width >= 64 {
                             elem
@@ -6429,10 +6614,10 @@ mod tests {
             expr_context: ctx(16, false),
         };
         let s = emit_expr(&e).unwrap();
-        // Two shift+OR steps: each iter shifts acc by 8 and ORs in
-        // the masked element.
+        // Two shift+OR steps; the elements are canonical full loads, so the
+        // clean-bits elision drops their slot masks.
         assert_eq!(s.matches("<< 8").count(), 2);
-        assert_eq!(s.matches("0xffULL").count(), 2);
+        assert_eq!(s.matches("0xffULL").count(), 0);
         assert!(s.contains("comb_values + 0x0"));
         assert!(s.contains("comb_values + 0x8"));
     }
@@ -6447,9 +6632,10 @@ mod tests {
             expr_context: ctx(12, false),
         };
         let s = emit_expr(&e).unwrap();
-        // repeat=3 yields three nested shift+OR pairs.
+        // repeat=3 yields three nested shift+OR pairs; the canonical load
+        // needs no slot mask (clean-bits elision).
         assert_eq!(s.matches("<< 4").count(), 3);
-        assert_eq!(s.matches("0xfULL").count(), 3);
+        assert_eq!(s.matches("0xfULL").count(), 0);
     }
 
     #[test]
@@ -7833,6 +8019,113 @@ mod tests {
         };
         let stmts = vec![comb_assign(0x2000, 64, None, tern)];
         assert!(emit_function(&stmts).is_none());
+    }
+
+    // --- Clean-bits mask elision (expr_emits_clean) ---
+    // A wrongly-elided mask stores dirty high bits (silent divergence from
+    // Cranelift, caught by VERYL_AOT_C_VALIDATE byte compares) — each rule
+    // direction gets a direct emit-string test.
+
+    #[test]
+    fn clean_store_elides_mask_for_predicate() {
+        // 1-bit dst, RHS = (a == b): the compare produces 0/1, so the store
+        // width mask is a no-op and must be gone.
+        let cmp = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x00), 32)),
+            op: Op::Eq,
+            y: Box::new(var_expr(VarOffset::Comb(0x08), 32)),
+            width: 1,
+            expr_context: ctx(1, false),
+        };
+        let s = emit_stmt(&comb_assign(0x10, 1, None, cmp)).unwrap();
+        assert!(!s.contains("& 0x1ULL"), "store mask must be elided: {s}");
+    }
+
+    #[test]
+    fn clean_store_keeps_mask_for_dirty_add() {
+        // 7-bit dst, RHS = a + b (carry can reach bit 7): mask must stay.
+        let add = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x00), 7)),
+            op: Op::Add,
+            y: Box::new(var_expr(VarOffset::Comb(0x08), 7)),
+            width: 7,
+            expr_context: ctx(7, false),
+        };
+        let s = emit_stmt(&comb_assign(0x10, 7, None, add)).unwrap();
+        assert!(s.contains("& 0x7fULL"), "dirty add keeps the mask: {s}");
+    }
+
+    #[test]
+    fn clean_wrapper_and_collapses_to_operand() {
+        // The wrapper shape `load & width_mask` over a canonical full load is
+        // an identity — the emitted C must be the bare load.
+        let wrapped = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x20), 32)),
+            op: Op::BitAnd,
+            y: Box::new(const_expr(0xffff_ffff, 32)),
+            width: 32,
+            expr_context: ctx(32, false),
+        };
+        let s = emit_expr(&wrapped).unwrap();
+        assert!(!s.contains('&'), "identity AND must vanish: {s}");
+    }
+
+    #[test]
+    fn clean_wrapper_and_kept_for_dirty_operand() {
+        // Same wrapper over `~x` (dirty under needs_clean=false): keep it.
+        let wrapped = ProtoExpression::Binary {
+            x: Box::new(ProtoExpression::Unary {
+                op: Op::BitNot,
+                x: Box::new(var_expr(VarOffset::Comb(0x20), 32)),
+                width: 32,
+                expr_context: ctx(32, false),
+            }),
+            op: Op::BitAnd,
+            y: Box::new(const_expr(0xffff_ffff, 32)),
+            width: 32,
+            expr_context: ctx(32, false),
+        };
+        let s = emit_expr_root(&wrapped).unwrap();
+        assert!(s.contains('&'), "dirty operand keeps the AND: {s}");
+    }
+
+    #[test]
+    fn clean_analysis_rejects_signed_bitwise() {
+        // Signed context sign-extends narrow operands and the bitwise
+        // result is not re-masked — never clean.
+        let e = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x00), 8)),
+            op: Op::BitOr,
+            y: Box::new(var_expr(VarOffset::Comb(0x08), 8)),
+            width: 16,
+            expr_context: ctx(16, true),
+        };
+        assert!(!expr_emits_clean(&e));
+    }
+
+    #[test]
+    fn clean_analysis_variable_rules() {
+        // Canonical full load: clean.  A width-mismatched load shape: not.
+        assert!(expr_emits_clean(&var_expr(VarOffset::Comb(0x00), 32)));
+        let partial = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x00),
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            var_full_width: 32,
+            expr_context: ctx(8, false),
+        };
+        assert!(!expr_emits_clean(&partial));
+        // Select extracts mask themselves: clean.
+        let sel = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x00),
+            select: Some((11, 4)),
+            dynamic_select: None,
+            width: 8,
+            var_full_width: 32,
+            expr_context: ctx(8, false),
+        };
+        assert!(expr_emits_clean(&sel));
     }
 
     fn bogus_artifact() -> Arc<ChunkArtifact> {
