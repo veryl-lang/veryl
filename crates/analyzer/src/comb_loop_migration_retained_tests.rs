@@ -258,7 +258,7 @@ fn comb_loop_dynamic_write_kill_semantics_an_undominated_value_driving_its_own_d
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; missing UncoveredBranch on zero-trip loop"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: zero-trip loop"]
 fn comb_loop_dynamic_loop_zero_trip_retention_is_not_feedback() {
     // Why this case exists: a runtime loop can execute zero times. The value
     // retained on that path infers state, but it is not a same-evaluation read
@@ -283,7 +283,7 @@ fn comb_loop_dynamic_loop_zero_trip_retention_is_not_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for unwritten dynamic elements"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: unwritten dynamic elements"]
 fn comb_loop_dynamic_element_retention_is_not_feedback() {
     // Why this case exists: one dynamic element write leaves every other
     // candidate element unchanged. May-write coverage must not masquerade as
@@ -307,7 +307,7 @@ fn comb_loop_dynamic_element_retention_is_not_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for oversized dynamic store"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: oversized dynamic store"]
 fn comb_loop_oversized_dynamic_retention_is_sparse_and_not_feedback() {
     // Why this case exists: the legacy assignment table skips arrays above its
     // enumeration limit. Retention coverage must stay declaration-width
@@ -534,7 +534,7 @@ fn comb_loop_empty_const_loop_has_no_body_path() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; missing UncoveredBranch after conditional break"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: conditional break"]
 fn comb_loop_break_before_write_retains_coverage() {
     // Why this case exists: a const singleton loop is guaranteed to enter its
     // body, but a conditional break can still bypass a later assignment. The
@@ -615,19 +615,19 @@ fn assert_empty_const_range_has_no_body_path(range: &str) {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for inclusive singleton range"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: inclusive singleton range"]
 fn comb_loop_const_range_inclusive_singleton_retains_coverage() {
     assert_singleton_const_range_retains_coverage("0..=0");
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for reverse singleton range"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: reverse singleton range"]
 fn comb_loop_const_range_reverse_singleton_retains_coverage() {
     assert_singleton_const_range_retains_coverage("rev 0..1");
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for stepped singleton range"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: stepped singleton range"]
 fn comb_loop_const_range_stepped_singleton_retains_coverage() {
     assert_singleton_const_range_retains_coverage("1..2 step *= 2");
 }
@@ -807,7 +807,7 @@ fn comb_loop_unseeded_finite_recurrence_is_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for function output weak write"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: function output weak write"]
 fn comb_loop_function_output_weak_write_retains_coverage() {
     // Why this case exists: a function output argument is copied back to its
     // caller, but a dynamic write inside the function still leaves unselected

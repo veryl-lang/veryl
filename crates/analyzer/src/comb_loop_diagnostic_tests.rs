@@ -2,7 +2,7 @@
 use super::*;
 
 #[test]
-#[ignore = "comb-loop migration: diagnostic mismatch; diagnostic ownership and provenance"]
+#[ignore = "comb-loop migration: diagnostic mismatch; short cycle witness provenance"]
 fn comb_loop_diagnostic_uses_short_assignment_cycle_witness() {
     // Why this case exists: all four variables belong to one maximal SCC, and
     // `a` has two reaching assignments in different branches. The actionable
@@ -72,7 +72,7 @@ fn comb_loop_diagnostic_uses_short_assignment_cycle_witness() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: diagnostic mismatch; diagnostic ownership and provenance"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: captured-region diagnostic provenance"]
 fn comb_loop_captured_coverage_sites_stay_region_local() {
     // Why this case exists: function summary coverage is mapped back into the
     // caller one captured region at a time. A caller default for value[1] must
@@ -121,7 +121,7 @@ fn comb_loop_captured_coverage_sites_stay_region_local() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: diagnostic mismatch; diagnostic ownership and provenance"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: merge weak-write diagnostics"]
 fn comb_loop_branch_weak_writes_share_one_coverage_diagnostic() {
     // Why this case exists: distinct weak writes can reach the same retained
     // object through different branches. Coverage reporting should present one

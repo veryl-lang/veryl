@@ -1337,7 +1337,7 @@ fn comb_loop_function_capture_coverage_obeys_caller_order() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for captured function write"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: captured function write"]
 fn comb_loop_function_capture_without_default_retains_coverage() {
     // Why this case exists: the caller-order kill controls above need a
     // positive control. Without a caller default, a captured dynamic write
@@ -1365,7 +1365,7 @@ fn comb_loop_function_capture_without_default_retains_coverage() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; missing UncoveredBranch for uncalled function output"]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: uncalled function output"]
 fn comb_loop_uncalled_function_still_checks_output_coverage() {
     // Why this case exists: output-argument completeness is a property of the
     // function definition, not of whether an always_comb happens to call it.
