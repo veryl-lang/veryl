@@ -380,8 +380,7 @@ fn comb_loop_missing_switch_default_retention_is_not_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; retained state hides a real cross-variable loop"]
-fn comb_loop_retention_does_not_hide_cross_variable_feedback() {
+fn comb_loop_retention_still_reports_incomplete_assignment() {
     // Why this case exists: retention itself is diagnosed as incomplete
     // assignment, but it must not erase the explicit held -> o -> enable
     // value/control dependencies. Those dependencies form proven structural
@@ -408,6 +407,28 @@ fn comb_loop_retention_does_not_hide_cross_variable_feedback() {
             .iter()
             .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })),
         "the missing assignment path must remain diagnosed: {errors:#?}"
+    );
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; retained state hides a real cross-variable loop"]
+fn comb_loop_retention_does_not_hide_cross_variable_feedback() {
+    let errors = analyze(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var enable: logic;
+            var held  : logic;
+            always_comb {
+                if enable {
+                    held = 0;
+                }
+                o = held;
+            }
+            assign enable = o;
+        }
+        "#,
     );
     assert!(
         errors
@@ -871,7 +892,7 @@ fn comb_coverage_cond_type_suppression_is_join_local() {
 }
 
 #[test]
-fn comb_loop_cond_type_suppresses_coverage_without_erasing_feedback() {
+fn comb_loop_cond_type_does_not_erase_feedback() {
     // Why this case exists: cond_type affects only incomplete-assignment
     // reporting. The retained value and explicit self-read remain in the
     // causal summary, so a proven structural loop must still be rejected.
@@ -895,6 +916,25 @@ fn comb_loop_cond_type_suppresses_coverage_without_erasing_feedback() {
             .iter()
             .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
         "cond_type must not erase a proven feedback dependency: {errors:#?}"
+    );
+}
+
+#[test]
+fn comb_loop_cond_type_suppresses_coverage() {
+    let errors = analyze(
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            always_comb {
+                #[cond_type(priority)]
+                if sel {
+                    o = o;
+                }
+            }
+        }
+        "#,
     );
     assert!(
         errors

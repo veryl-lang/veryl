@@ -1,9 +1,16 @@
 // Diagnostic ownership and provenance coverage for comb-loop migration.
 use super::*;
 
-#[test]
-#[ignore = "comb-loop migration: diagnostic mismatch; short cycle witness provenance"]
-fn comb_loop_diagnostic_uses_short_assignment_cycle_witness() {
+#[derive(Clone, Copy)]
+enum ShortCycleExpectation {
+    DiagnosticCount,
+    Identifier,
+    ParticipantCount,
+    PrimaryLocation,
+    ParticipantLocation,
+}
+
+fn assert_short_cycle_diagnostic(expectation: ShortCycleExpectation) {
     // Why this case exists: all four variables belong to one maximal SCC, and
     // `a` has two reaching assignments in different branches. The actionable
     // witness is the short a/b cycle; reporting a=d, c=b, or d=c would expose
@@ -35,7 +42,10 @@ fn comb_loop_diagnostic_uses_short_assignment_cycle_witness() {
         .iter()
         .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
         .collect::<Vec<_>>();
-    assert_eq!(loops.len(), 1, "{errors:#?}");
+    if matches!(expectation, ShortCycleExpectation::DiagnosticCount) {
+        assert_eq!(loops.len(), 1, "{errors:#?}");
+        return;
+    }
     let AnalyzerError::CombinationalLoop {
         identifier,
         input,
@@ -46,9 +56,6 @@ fn comb_loop_diagnostic_uses_short_assignment_cycle_witness() {
     else {
         unreachable!()
     };
-    assert_eq!(identifier, "a");
-    assert_eq!(loop_participants.len(), 1, "{errors:#?}");
-
     let local_offset = |absolute: usize| {
         let mut base = 0usize;
         for source in &input.sources {
@@ -59,21 +66,58 @@ fn comb_loop_diagnostic_uses_short_assignment_cycle_witness() {
         }
         panic!("diagnostic offset {absolute} is outside its sources")
     };
-    assert_eq!(
-        local_offset(error_location.offset()),
-        code.find("a = b;").expect("short-cycle assignment")
-    );
-    assert_eq!(
-        local_offset(loop_participants[0].offset()),
-        code.find("assign b = a;")
-            .expect("short-cycle return assignment")
-            + "assign ".len()
-    );
+    match expectation {
+        ShortCycleExpectation::DiagnosticCount => unreachable!(),
+        ShortCycleExpectation::Identifier => assert_eq!(identifier, "a"),
+        ShortCycleExpectation::ParticipantCount => {
+            assert_eq!(loop_participants.len(), 1, "{errors:#?}")
+        }
+        ShortCycleExpectation::PrimaryLocation => assert_eq!(
+            local_offset(error_location.offset()),
+            code.find("a = b;").expect("short-cycle assignment")
+        ),
+        ShortCycleExpectation::ParticipantLocation => {
+            assert_eq!(
+                local_offset(loop_participants[0].offset()),
+                code.find("assign b = a;")
+                    .expect("short-cycle return assignment")
+                    + "assign ".len()
+            )
+        }
+    }
 }
 
 #[test]
-#[ignore = "SSA latch coverage follow-up after comb-loop migration: captured-region diagnostic provenance"]
-fn comb_loop_captured_coverage_sites_stay_region_local() {
+#[ignore = "comb-loop migration: diagnostic mismatch; short cycle diagnostic count"]
+fn comb_loop_short_cycle_has_one_diagnostic() {
+    assert_short_cycle_diagnostic(ShortCycleExpectation::DiagnosticCount);
+}
+
+#[test]
+#[ignore = "comb-loop migration: diagnostic mismatch; short cycle identifier"]
+fn comb_loop_short_cycle_uses_expected_identifier() {
+    assert_short_cycle_diagnostic(ShortCycleExpectation::Identifier);
+}
+
+#[test]
+#[ignore = "comb-loop migration: diagnostic mismatch; short cycle participant count"]
+fn comb_loop_short_cycle_has_one_participant() {
+    assert_short_cycle_diagnostic(ShortCycleExpectation::ParticipantCount);
+}
+
+#[test]
+#[ignore = "comb-loop migration: diagnostic mismatch; short cycle primary location"]
+fn comb_loop_short_cycle_uses_short_assignment_location() {
+    assert_short_cycle_diagnostic(ShortCycleExpectation::PrimaryLocation);
+}
+
+#[test]
+#[ignore = "comb-loop migration: diagnostic mismatch; short cycle participant location"]
+fn comb_loop_short_cycle_uses_return_assignment_location() {
+    assert_short_cycle_diagnostic(ShortCycleExpectation::ParticipantLocation);
+}
+
+fn captured_coverage_observation() -> (usize, Option<usize>, Option<usize>) {
     // Why this case exists: function summary coverage is mapped back into the
     // caller one captured region at a time. A caller default for value[1] must
     // prevent that bit's function assignment from appearing in value[0]'s
@@ -111,18 +155,58 @@ fn comb_loop_captured_coverage_sites_stay_region_local() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(coverage.len(), 1, "{errors:#?}");
-    assert_eq!(coverage[0].len(), 1, "{errors:#?}");
-    assert_eq!(
-        coverage[0][0].offset(),
-        code.find("value[0] = 1")
-            .expect("retained capture assignment")
-    );
+    (
+        coverage.len(),
+        coverage.first().map(|sites| sites.len()),
+        coverage
+            .first()
+            .and_then(|sites| sites.first())
+            .map(|site| site.offset()),
+    )
 }
 
 #[test]
-#[ignore = "SSA latch coverage follow-up after comb-loop migration: merge weak-write diagnostics"]
-fn comb_loop_branch_weak_writes_share_one_coverage_diagnostic() {
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: captured-region diagnostic count"]
+fn comb_loop_captured_coverage_has_one_diagnostic() {
+    assert_eq!(captured_coverage_observation().0, 1);
+}
+
+#[test]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: captured-region site count"]
+fn comb_loop_captured_coverage_has_one_site() {
+    assert_eq!(captured_coverage_observation().1, Some(1));
+}
+
+#[test]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: captured-region site provenance"]
+fn comb_loop_captured_coverage_uses_retained_bit_site() {
+    let code = r#"
+        module Top (
+            n: input  logic<32>,
+            o: output logic,
+        ) {
+            var value: logic<2>;
+            function write_bits (
+                n: input logic<32>,
+            ) {
+                for _index in 0..n {
+                    value[0] = 1;
+                }
+                for _index in 0..n {
+                    value[1] = 1;
+                }
+            }
+            always_comb {
+                value[1] = 0;
+                write_bits(n);
+                o = value[0];
+            }
+        }
+    "#;
+    assert_eq!(captured_coverage_observation().2, code.find("value[0] = 1"));
+}
+
+fn branch_weak_write_observation() -> (usize, Option<usize>, bool) {
     // Why this case exists: distinct weak writes can reach the same retained
     // object through different branches. Coverage reporting should present one
     // coherent variable diagnostic containing both assignment sites.
@@ -150,20 +234,33 @@ fn comb_loop_branch_weak_writes_share_one_coverage_diagnostic() {
         .iter()
         .filter(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
         .collect::<Vec<_>>();
-    assert_eq!(coverage.len(), 1, "{errors:#?}");
-    let AnalyzerError::UncoveredBranch {
-        error_locations, ..
-    } = coverage[0]
-    else {
-        unreachable!()
-    };
-    assert_eq!(error_locations.len(), 2, "{errors:#?}");
-    assert!(
-        errors
-            .iter()
-            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
-        "implicit preservation is not combinational feedback: {errors:#?}"
-    );
+    let site_count = coverage.first().and_then(|error| match error {
+        AnalyzerError::UncoveredBranch {
+            error_locations, ..
+        } => Some(error_locations.len()),
+        _ => None,
+    });
+    let has_loop = errors
+        .iter()
+        .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }));
+    (coverage.len(), site_count, has_loop)
+}
+
+#[test]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: merge weak-write diagnostic count"]
+fn comb_loop_branch_weak_writes_share_one_coverage_diagnostic() {
+    assert_eq!(branch_weak_write_observation().0, 1);
+}
+
+#[test]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: merge weak-write sites"]
+fn comb_loop_branch_weak_write_diagnostic_contains_both_sites() {
+    assert_eq!(branch_weak_write_observation().1, Some(2));
+}
+
+#[test]
+fn comb_loop_branch_weak_writes_do_not_create_feedback() {
+    assert!(!branch_weak_write_observation().2);
 }
 
 #[test]
@@ -200,8 +297,7 @@ fn comb_loop_dynamic_loop_coverage_is_not_duplicated() {
     );
 }
 
-#[test]
-fn comb_loop_dynamic_loop_coverage_sites_stay_region_local() {
+fn dynamic_loop_coverage_observation() -> (usize, Option<usize>, Option<usize>) {
     // Why this case exists: value[1] is fully defined even though it is also
     // written in a runtime loop. Its loop assignment must not be reported as a
     // covered site for the independently retained value[0].
@@ -234,10 +330,49 @@ fn comb_loop_dynamic_loop_coverage_sites_stay_region_local() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(coverage.len(), 1, "{errors:#?}");
-    assert_eq!(coverage[0].len(), 1, "{errors:#?}");
+    (
+        coverage.len(),
+        coverage.first().map(|sites| sites.len()),
+        coverage
+            .first()
+            .and_then(|sites| sites.first())
+            .map(|site| site.offset()),
+    )
+}
+
+#[test]
+fn comb_loop_dynamic_loop_coverage_has_one_diagnostic() {
+    assert_eq!(dynamic_loop_coverage_observation().0, 1);
+}
+
+#[test]
+fn comb_loop_dynamic_loop_coverage_has_one_site() {
+    assert_eq!(dynamic_loop_coverage_observation().1, Some(1));
+}
+
+#[test]
+fn comb_loop_dynamic_loop_coverage_site_stays_region_local() {
+    let code = r#"
+        module Top (
+            n        : input  logic<32>,
+            condition: input  logic,
+            o        : output logic<2>,
+        ) {
+            var value: logic<2>;
+            always_comb {
+                value[1] = 0;
+                for _index in 0..n {
+                    value[1] = 1;
+                }
+                if condition {
+                    value[0] = 1;
+                }
+                o = value;
+            }
+        }
+    "#;
     assert_eq!(
-        coverage[0][0].offset(),
-        code.find("value[0] = 1").expect("retained bit assignment")
+        dynamic_loop_coverage_observation().2,
+        code.find("value[0] = 1")
     );
 }
