@@ -371,3 +371,101 @@ fn comb_loop_imported_interface_write_detects_member_feedback() {
 fn comb_loop_imported_interface_write_keeps_unrelated_member_independent() {
     assert_interface_comb_loop(&imported_interface_write_code("bus.unrelated"), false);
 }
+
+fn modport_array_code(top_assignments: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var request : logic;
+            var response: logic;
+            modport target {{
+                request : input,
+                response: output,
+            }}
+        }}
+        module Targets (
+            bus: modport Bus::target[2],
+        ) {{
+            assign bus[0].response = bus[0].request;
+            assign bus[1].response = bus[1].request;
+        }}
+        module Top {{
+            inst bus: Bus[2];
+            inst targets: Targets (
+                bus: bus,
+            );
+            {top_assignments}
+        }}
+        "#
+    )
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; same interface array element feedback"]
+fn comb_loop_modport_array_detects_same_element_feedback() {
+    assert_interface_comb_loop(
+        &modport_array_code("assign bus[0].request = bus[0].response; assign bus[1].request = 0;"),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_modport_array_keeps_one_way_cross_element_flow_loop_free() {
+    assert_interface_comb_loop(
+        &modport_array_code("assign bus[0].request = bus[1].response; assign bus[1].request = 0;"),
+        false,
+    );
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; cross-element interface array feedback"]
+fn comb_loop_modport_array_detects_cross_element_feedback() {
+    assert_interface_comb_loop(
+        &modport_array_code(
+            "assign bus[0].request = bus[1].response; assign bus[1].request = bus[0].response;",
+        ),
+        true,
+    );
+}
+
+fn specialized_interface_code(width: u32) -> String {
+    format!(
+        r#"
+        interface Bus::<W: u32> {{
+            var request : logic<W>;
+            var response: logic<W>;
+            modport target {{
+                request : input,
+                response: output,
+            }}
+        }}
+        module Target::<W: u32> (
+            bus: modport Bus::<W>::target,
+        ) {{
+            if W == 1 :g_enabled {{
+                assign bus.response = bus.request;
+            }} else {{
+                assign bus.response = '0;
+            }}
+        }}
+        module Top {{
+            inst bus: Bus::<{width}>;
+            inst target: Target::<{width}> (
+                bus: bus,
+            );
+            assign bus.request = bus.response;
+        }}
+        "#
+    )
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; enabled generic interface feedthrough"]
+fn comb_loop_generic_interface_enabled_specialization_retains_feedthrough() {
+    assert_interface_comb_loop(&specialized_interface_code(1), true);
+}
+
+#[test]
+fn comb_loop_generic_interface_disabled_specialization_has_no_feedthrough() {
+    assert_interface_comb_loop(&specialized_interface_code(2), false);
+}
