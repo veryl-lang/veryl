@@ -10,6 +10,9 @@ use veryl_parser::doc_comment_table;
 #[path = "comb_loop_diagnostic_tests.rs"]
 mod comb_loop_diagnostic_tests;
 
+#[path = "comb_loop_incomplete_tests.rs"]
+mod comb_loop_incomplete_tests;
+
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();
