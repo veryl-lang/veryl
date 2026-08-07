@@ -16,6 +16,9 @@ mod comb_loop_incomplete_tests;
 #[path = "comb_loop_migration_procedural_tests.rs"]
 mod comb_loop_migration_procedural_tests;
 
+#[path = "comb_loop_migration_retained_tests.rs"]
+mod comb_loop_migration_retained_tests;
+
 
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
