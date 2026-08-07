@@ -2910,16 +2910,15 @@ impl Conv<&air::Module> for ProtoModule {
             );
         }
 
-        // Chunk-local localization (VERYL_AOT_C_LOCALIZE): while events +
-        // derived-clock candidates are in scope, precompute the comb offsets the
-        // emitter must NOT localize — event-touched, in a runtime-indexed array
-        // range, or externally-visible (port / user-var / clock).
+        // Chunk-local localization (gated by `emit::localize_enabled`): while
+        // events + derived-clock candidates are in scope, precompute the comb
+        // offsets the emitter must NOT localize — event-touched, in a
+        // runtime-indexed array range, or externally-visible (port / user-var
+        // / clock).
         // LocalizeInfo = (blocklist offsets, array ranges).
-        type LocalizeInfo = (std::collections::HashSet<isize>, Vec<(isize, usize, isize)>);
+        type LocalizeInfo = (HashSet<isize>, Vec<(isize, usize, isize)>);
         #[cfg(not(target_family = "wasm"))]
-        let localize_info: Option<LocalizeInfo> = if std::env::var("VERYL_AOT_C_LOCALIZE")
-            .as_deref()
-            != Ok("0")
+        let localize_info: Option<LocalizeInfo> = if crate::backend::aot_c::emit::localize_enabled()
         {
             let event_slices: Vec<&[ProtoStatement]> = all_event_statements
                 .values()
@@ -2946,7 +2945,7 @@ impl Conv<&air::Module> for ProtoModule {
             for (_, off, _) in &nested_derived_clock_candidates {
                 block_vo.insert(*off);
             }
-            let mut block: std::collections::HashSet<isize> = std::collections::HashSet::new();
+            let mut block: HashSet<isize> = HashSet::default();
             for vo in &block_vo {
                 if !vo.is_ff() {
                     block.insert(vo.raw());
@@ -3256,7 +3255,7 @@ impl Conv<&air::Module> for ProtoModule {
             #[cfg(not(target_family = "wasm"))]
             if std::env::var("VERYL_AOT_C_DIAG").as_deref() == Ok("1") {
                 let census = crate::backend::aot_c::emit::comb_uncovered_census(&pre_jit_stmts);
-                let mut counts: std::collections::HashMap<String, usize> = Default::default();
+                let mut counts: HashMap<String, usize> = Default::default();
                 for c in census {
                     *counts.entry(c).or_default() += 1;
                 }

@@ -13,6 +13,20 @@ use crate::backend::{Backend, CompileCtx, CompiledWhole, DispatchOutcome};
 use crate::ir::{Event, ProtoStatement};
 use std::sync::Arc;
 
+/// Turn chunk-local comb localization off for this process.
+///
+/// Localization keeps a comb signal in a C local and leaves its `comb_values`
+/// word holding whatever it last held.  Nothing outside the chunk reads it,
+/// so the simulation is unaffected and the validate dual-run skips those
+/// bytes — but a waveform dump shows them, and then disagrees with a run that
+/// took the Cranelift or interpreted path.  Waveform dumping is the caller.
+///
+/// Latches: once off, localization never comes back on.  Must be called
+/// before analysis, since the blocklist is computed during conv.
+pub fn force_disable_localize() {
+    emit::force_disable_localize();
+}
+
 pub struct AotCBackend {
     async_mode: bool,
     /// When false, only whole-comb compile is attempted.

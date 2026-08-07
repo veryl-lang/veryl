@@ -173,6 +173,14 @@ impl CmdTest {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
+        // A dump wants every comb word, and localization leaves the ones no
+        // later reader needs holding stale values (see
+        // `aot_c::force_disable_localize`).  Before analysis: the blocklist is
+        // computed during conv.
+        if self.opt.wave {
+            veryl_simulator::backend::aot_c::force_disable_localize();
+        }
+
         // force filelist_type to absolute which can be refered from temporary directory
         metadata.build.filelist_type = FilelistType::Absolute;
 
