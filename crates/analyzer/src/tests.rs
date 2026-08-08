@@ -9009,6 +9009,389 @@ fn unassign_variable() {
 }
 
 #[test]
+fn mutable_dynamic_for_continuation_bound_is_warned() {
+    let code = r#"
+    module ModuleA {
+        var limits: logic<8>[4];
+        var index: logic<2>;
+        var selector: logic;
+        var limit: logic<8>;
+        var count: logic<8>;
+
+        function shrink_bound (
+            bound: output logic<8>,
+        ) {
+            bound = 1;
+        }
+
+        always_comb {
+            limits = '{1, 1, 4, 1};
+            index = 2;
+            count = 0;
+            for _i in 0..limits[index] {
+                count += 1;
+                limits[2] = 1;
+            }
+
+            limits = '{1, 1, 4, 1};
+            index = 2;
+            for _i in 0..limits[2] {
+                limits[index] = 1;
+            }
+
+            limits = '{1, 1, 4, 1};
+            selector = 1;
+            for _i in 0..(if selector ? limits[2] : limits[0]) {
+                selector = 0;
+            }
+
+            limit = 4;
+            for _i in 0..limit {
+                for _j in 0..1 {
+                    limit = 1;
+                }
+            }
+
+            limit = 4;
+            selector = 0;
+            for _i in 0..limit {
+                case selector {
+                    0: limit = 1;
+                    default: {}
+                }
+            }
+
+            limit = 4;
+            for _i in 0..limit {
+                shrink_bound(limit);
+            }
+
+            limit = 1;
+            for _i in 0..=limit {
+                limit = 4;
+            }
+
+            limits = '{1, 1, 0, 1};
+            index = 2;
+            for _i in rev limits[index]..4 {
+                limits[2] = 3;
+            }
+
+            limits = '{2, 1, 8, 1};
+            selector = 1;
+            for _i in 1..(if selector ? limits[2] : limits[0]) step *= 2 {
+                selector = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let mutable_bounds: Vec<_> = errors
+        .iter()
+        .filter(|error| matches!(error, AnalyzerError::MutableForBound { .. }))
+        .collect();
+    assert_eq!(mutable_bounds.len(), 9, "{errors:?}");
+    assert!(
+        mutable_bounds.iter().all(|warning| !warning.is_error()),
+        "{errors:?}",
+    );
+}
+
+#[test]
+fn mutable_dynamic_for_bound_warning_can_be_allowed() {
+    let code = r#"
+    module ModuleA {
+        var limit: logic<8>;
+        var count: logic<8>;
+
+        always_comb {
+            limit = 4;
+            count = 0;
+            #[allow(mutable_for_bound)]
+            for _i in 0..limit {
+                count += 1;
+                limit = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::MutableForBound { .. })),
+        "{errors:?}",
+    );
+}
+
+#[test]
+fn mutable_dynamic_for_bound_is_warned_in_functions_and_testbenches() {
+    let function_code = r#"
+    module ModuleA {
+        function count() -> u32 {
+            var limit: u32;
+            var result: u32;
+            limit = 4;
+            result = 0;
+            for _i in 0..limit {
+                result += 1;
+                limit = 1;
+            }
+            return result;
+        }
+        const RESULT: u32 = count();
+    }
+    "#;
+    let errors = analyze(function_code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::MutableForBound { .. })),
+        "{errors:?}",
+    );
+
+    let testbench_code = r#"
+    #[test(test_dynamic_bound)]
+    module test_dynamic_bound {
+        var limit: logic<32>;
+        initial {
+            limit = 4;
+            for _i in 0..limit {
+                limit = 1;
+            }
+            $finish();
+        }
+    }
+    "#;
+    let errors = analyze(testbench_code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::MutableForBound { .. })),
+        "{errors:?}",
+    );
+}
+
+#[test]
+fn mutable_dynamic_for_bound_tracks_function_global_dependencies() {
+    let code = r#"
+    module ModuleA {
+        var limit: logic<8>;
+        var count: logic<8>;
+
+        function read_limit() -> logic<8> {
+            return limit;
+        }
+
+        function shrink_limit() {
+            limit = 1;
+        }
+
+        always_comb {
+            limit = 4;
+            count = 0;
+            for _i in 0..read_limit() {
+                count += 1;
+                limit = 1;
+            }
+
+            limit = 4;
+            for _i in 0..limit {
+                shrink_limit();
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let mutable_bounds = errors
+        .iter()
+        .filter(|error| matches!(error, AnalyzerError::MutableForBound { .. }))
+        .count();
+    assert_eq!(mutable_bounds, 2, "{errors:?}");
+}
+
+#[test]
+fn dynamic_for_mutable_bound_dependency_is_bit_precise() {
+    let allowed = r#"
+    module ModuleA {
+        var bits: logic<8>;
+        var count: logic<8>;
+        always_comb {
+            bits = 4;
+            count = 0;
+            for _i in 0..bits[3:0] {
+                count += 1;
+                bits[7:4] = 1;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(allowed);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::MutableForBound { .. })),
+        "{errors:?}",
+    );
+
+    let rejected = r#"
+    module ModuleB {
+        var bits: logic<8>;
+        var count: logic<8>;
+        always_comb {
+            bits = 4;
+            count = 0;
+            for _i in 0..bits[3:0] {
+                count += 1;
+                bits[2:1] = 1;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(rejected);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::MutableForBound { .. })),
+        "{errors:?}",
+    );
+}
+
+#[test]
+fn dynamic_for_allows_invisible_ff_writes_and_noncontinuation_writes() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        var limit: logic<8>;
+        var limits: logic<8>[4];
+        var selector: logic<2>;
+
+        function read_limit() -> logic<8> {
+            return limit;
+        }
+
+        always_ff {
+            if_reset {
+                limit = 4;
+                limits = '{1, 1, 4, 1};
+                selector = 2;
+            } else {
+                var count: logic<8>;
+                var index: logic<2>;
+
+                count = 0;
+                for _i in 0..limit {
+                    count += 1;
+                    limit = 1;
+                }
+
+                count = 0;
+                for _i in 0..read_limit() {
+                    count += 1;
+                    limit = 1;
+                }
+
+                index = 2;
+                for _i in 0..limits[2] {
+                    limits[index] = 1;
+                }
+
+                count = 0;
+                for _i in 0..limits[selector] {
+                    count += 1;
+                    selector = 0;
+                }
+            }
+        }
+    }
+
+    module ModuleB {
+        var start: logic<8>;
+        var limits: logic<8>[2];
+        var count: logic<8>;
+        always_comb {
+            start = 0;
+            count = 0;
+            for _i in start..4 {
+                count += 1;
+                start = 3;
+            }
+
+            limits = '{4, 4};
+            for _i in 0..limits[0] {
+                limits[1] = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::MutableForBound { .. })),
+        "{errors:?}",
+    );
+
+    let local_code = r#"
+    module ModuleC (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        always_ff {
+            if_reset {
+            } else {
+                var limit: logic<8>;
+                limit = 4;
+                for _i in 0..limit {
+                    limit = 1;
+                }
+            }
+        }
+    }
+    "#;
+    let errors = analyze(local_code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::MutableForBound { .. })),
+        "{errors:?}",
+    );
+
+    let local_selector_code = r#"
+    module ModuleD (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        var limits: logic<8>[4];
+        always_ff {
+            if_reset {
+                limits = '{1, 1, 4, 1};
+            } else {
+                var index: logic<2>;
+                index = 2;
+                for _i in 0..limits[index] {
+                    index = 0;
+                }
+            }
+        }
+    }
+    "#;
+    let errors = analyze(local_selector_code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::MutableForBound { .. })),
+        "{errors:?}",
+    );
+}
+
+#[test]
 fn unassignable_output() {
     let code = r#"
     module ModuleA {
