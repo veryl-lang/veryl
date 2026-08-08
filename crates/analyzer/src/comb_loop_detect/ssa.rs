@@ -127,20 +127,24 @@ where
     }
 
     pub(super) fn merge(&mut self, states: &[BranchState<K>]) {
-        let mut keys = HashSet::default();
+        let mut inputs_by_key: HashMap<K, (Vec<VersionId>, usize)> = HashMap::default();
         for state in states {
-            keys.extend(state.bindings.keys().copied());
+            for (&key, &version) in &state.bindings {
+                let (inputs, bound_branches) =
+                    inputs_by_key.entry(key).or_insert_with(|| (Vec::new(), 0));
+                inputs.push(version);
+                *bound_branches += 1;
+            }
         }
-        for key in keys {
+        for (key, (mut inputs, bound_branches)) in inputs_by_key {
             let fallback = self
                 .current
                 .get(&key)
                 .copied()
                 .unwrap_or_else(|| self.entry(key));
-            let inputs = states
-                .iter()
-                .map(|state| state.bindings.get(&key).copied().unwrap_or(fallback))
-                .collect();
+            if bound_branches < states.len() {
+                inputs.push(fallback);
+            }
             let version = self.phi(inputs);
             self.bind(key, version);
         }
@@ -297,5 +301,21 @@ mod tests {
         assert_ne!(ssa.read("inner"), merged_inner);
         assert_eq!(outer_state.bindings["outer"], outer_definition);
         assert_eq!(outer_state.bindings["inner"], merged_inner);
+    }
+
+    #[test]
+    fn merge_cost_tracks_sparse_bindings_not_branch_key_product() {
+        let mut ssa = SsaStore::default();
+        let mut states = Vec::new();
+        for key in 0..10_000 {
+            let version = ssa.definition(Vec::new());
+            let mut bindings = HashMap::default();
+            bindings.insert(key, version);
+            states.push(BranchState { bindings });
+        }
+
+        ssa.merge(&states);
+
+        assert_eq!(ssa.current.len(), states.len());
     }
 }
