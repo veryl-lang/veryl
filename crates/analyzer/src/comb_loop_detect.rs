@@ -35,6 +35,10 @@ type IdxKey = (VarId, usize);
 /// `BitPartition`, so bit-disjoint reads/writes form disjoint nodes.
 type NodeKey = (VarId, usize, usize);
 
+/// Unpacked elements not separated by a constant-index access are represented
+/// by one split piece, regardless of the declared array length.
+const SPLIT_REMAINDER_INDEX: usize = usize::MAX;
+
 /// Per `IdxKey`, atomic bit-range masks. Two bits are in the same range
 /// iff they appear in the same set of per-decl masks.
 #[derive(Default)]
@@ -56,6 +60,33 @@ impl BitPartition {
             .filter(|(_, m)| (*m & mask) != zero)
             .map(|(i, _)| i)
             .collect()
+    }
+
+    fn overlapping_access(&self, id: VarId, index: usize, mask: &BigUint) -> Vec<NodeKey> {
+        if index != SPLIT_REMAINDER_INDEX {
+            return self
+                .overlapping((id, index), mask)
+                .into_iter()
+                .map(|range| (id, index, range))
+                .collect();
+        }
+
+        let zero = BigUint::default();
+        let mut keys = self
+            .ranges
+            .iter()
+            .filter(|((object, _), _)| *object == id)
+            .flat_map(|((_, split_index), ranges)| {
+                ranges
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, range)| (*range & mask) != zero)
+                    .map(|(range, _)| (id, *split_index, range))
+            })
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys.dedup();
+        keys
     }
 }
 
@@ -188,11 +219,6 @@ fn atomic_ranges(masks: &[BigUint], _width: usize) -> Vec<BigUint> {
     ret.sort_by_key(|m| m.trailing_zeros().unwrap_or(0));
     ret
 }
-
-/// The minimal SSA uses existing per-element coordinates. Whole or dynamic
-/// accesses above this limit are left for the sparse-array follow-up instead
-/// of expanding work with the declared element count.
-const OVERSIZED_ARRAY: usize = 1 << 16;
 
 fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
     let mut masks: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
@@ -660,9 +686,7 @@ fn collect_factor_node_keys(
     match factor {
         Factor::Variable(id, index, select, _) => {
             for (idx, mask) in var_reads(*id, index, select, ctx) {
-                for r in bit_part.overlapping((*id, idx), &mask) {
-                    out.push((*id, idx, r));
-                }
+                out.extend(bit_part.overlapping_access(*id, idx, &mask));
             }
         }
         Factor::FunctionCall(_) | Factor::SystemFunctionCall(_) => {
@@ -951,12 +975,7 @@ impl<'a> SsaProcedure<'a> {
     fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
         let mut keys = Vec::new();
         for (idx, mask) in var_reads(id, index, select, &mut self.ctx) {
-            keys.extend(
-                self.bit_part
-                    .overlapping((id, idx), &mask)
-                    .into_iter()
-                    .map(|range| (id, idx, range)),
-            );
+            keys.extend(self.bit_part.overlapping_access(id, idx, &mask));
         }
         keys.sort_unstable();
         keys.dedup();
@@ -966,12 +985,7 @@ impl<'a> SsaProcedure<'a> {
     fn write_keys(&mut self, destination: &AssignDestination) -> Vec<NodeKey> {
         let mut keys = Vec::new();
         for (idx, mask) in dst_writes(destination, &mut self.ctx) {
-            keys.extend(
-                self.bit_part
-                    .overlapping((destination.id, idx), &mask)
-                    .into_iter()
-                    .map(|range| (destination.id, idx, range)),
-            );
+            keys.extend(self.bit_part.overlapping_access(destination.id, idx, &mask));
         }
         keys.sort_unstable();
         keys.dedup();
@@ -1313,8 +1327,8 @@ impl<'a> SsaProcedure<'a> {
                         let mut reads = Vec::new();
                         for (idx, mask) in var_reads(*id, index, select, &mut self.ctx) {
                             let source_mask = &source_mask & mask;
-                            for range in self.bit_part.overlapping((*id, idx), &source_mask) {
-                                reads.push(self.current_version((*id, idx, range)));
+                            for key in self.bit_part.overlapping_access(*id, idx, &source_mask) {
+                                reads.push(self.current_version(key));
                             }
                         }
                         reads
@@ -1725,13 +1739,18 @@ fn dst_writes(dst: &AssignDestination, ctx: &mut Context) -> Vec<(usize, BigUint
     let is_index_const = dst.index.is_const();
     let is_select_const = dst.select.is_const();
 
-    if (!is_index_const || dst.index.0.is_empty())
-        && variable
-            .r#type
-            .total_array()
-            .is_some_and(|total| total > OVERSIZED_ARRAY)
+    let mask = if !is_select_const {
+        conservative_select_mask(&dst.select, &variable.r#type, ctx)
+    } else {
+        let Some((beg, end)) = dst.select.eval_value(ctx, &variable.r#type, false) else {
+            return Vec::new();
+        };
+        ValueBigUint::gen_mask_range(beg, end)
+    };
+
+    if variable.r#type.total_array().unwrap_or(2) > 1 && (!is_index_const || dst.index.0.is_empty())
     {
-        return Vec::new();
+        return vec![(SPLIT_REMAINDER_INDEX, mask)];
     }
 
     let range = if !is_index_const {
@@ -1741,15 +1760,6 @@ fn dst_writes(dst: &AssignDestination, ctx: &mut Context) -> Vec<(usize, BigUint
             return Vec::new();
         };
         variable.r#type.array.calc_range(&index)
-    };
-
-    let mask = if !is_select_const {
-        conservative_select_mask(&dst.select, &variable.r#type, ctx)
-    } else {
-        let Some((beg, end)) = dst.select.eval_value(ctx, &variable.r#type, false) else {
-            return Vec::new();
-        };
-        ValueBigUint::gen_mask_range(beg, end)
     };
 
     let mut out = Vec::new();
@@ -1770,14 +1780,6 @@ fn var_reads(
     let Some(variable) = ctx.variables.get(&id).cloned() else {
         return Vec::new();
     };
-    if (!index.is_const() || index.0.is_empty())
-        && variable
-            .r#type
-            .total_array()
-            .is_some_and(|total| total > OVERSIZED_ARRAY)
-    {
-        return Vec::new();
-    }
     let mask = if select.is_const_with_range()
         && let Some((beg, end)) = select.eval_value(ctx, &variable.r#type, false)
     {
@@ -1785,15 +1787,16 @@ fn var_reads(
     } else {
         conservative_select_mask(select, &variable.r#type, ctx)
     };
+    if variable.r#type.total_array().unwrap_or(2) > 1 && (!index.is_const() || index.0.is_empty()) {
+        return vec![(SPLIT_REMAINDER_INDEX, mask)];
+    }
     if index.is_const()
         && let Some(idx_path) = index.eval_value(ctx)
         && let Some(flat) = variable.r#type.array.calc_index(&idx_path)
     {
         return vec![(flat, mask)];
     }
-    // Dynamic index: conservatively treat every element as read.
-    let total = variable.r#type.total_array().unwrap_or(1);
-    (0..total).map(|i| (i, mask.clone())).collect()
+    vec![(SPLIT_REMAINDER_INDEX, mask)]
 }
 
 fn conservative_select_mask(
