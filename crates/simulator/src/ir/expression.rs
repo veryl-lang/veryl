@@ -361,6 +361,95 @@ impl ProtoExpression {
         }
     }
 
+    /// Like `gather_variable_offsets_expanded` but each read carries its
+    /// static bit range when known (`Some((msb, lsb))` from a constant bit
+    /// select — see [`RangedRead`]), `None` for full-width or
+    /// runtime-determined reads, plus the
+    /// read's native byte span (the FULL underlying variable / array
+    /// element, not the post-select width).  The span travels with the read
+    /// because meta-less storage (inlined-function and version-split
+    /// temps) cannot be sized by a variable-meta lookup later — an 8-byte
+    /// fallback there silently under-covers a wide temp's readers in the
+    /// incremental plan.  Dynamic array reads expand to every element
+    /// (full coverage), range-unknown.
+    pub fn gather_reads_expanded_ranged(&self, out: &mut Vec<RangedRead>) {
+        match self {
+            ProtoExpression::HierVariable(_) => {
+                unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
+            }
+            ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select,
+                var_full_width,
+                ..
+            } => {
+                let nb = crate::ir::variable::native_bytes(*var_full_width);
+                if let Some(dyn_sel) = dynamic_select {
+                    out.push((*var_offset, None, nb));
+                    dyn_sel.index_expr.gather_reads_expanded_ranged(out);
+                } else {
+                    out.push((*var_offset, *select, nb));
+                }
+            }
+            ProtoExpression::Value { .. } => (),
+            ProtoExpression::Unary { x, .. } => x.gather_reads_expanded_ranged(out),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.gather_reads_expanded_ranged(out);
+                y.gather_reads_expanded_ranged(out);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.gather_reads_expanded_ranged(out);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.gather_reads_expanded_ranged(out);
+                true_expr.gather_reads_expanded_ranged(out);
+                false_expr.gather_reads_expanded_ranged(out);
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                stride,
+                element_native_bytes,
+                index_expr,
+                num_elements,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.gather_reads_expanded_ranged(out);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.gather_reads_expanded_ranged(out);
+                }
+                // A whole-array read above the plan's per-entry expansion cap
+                // collapses to one whole-span dep: the plan downgrades any
+                // entry carrying such a span to always_run before per-element
+                // precision is ever consumed, while the expansion itself is
+                // GBs of resident deps on an SoC (a multi-M-element DRAM read
+                // is captured per chunk AND per sub-group).  The union only
+                // widens (stride padding gaps), never narrows, so coverage
+                // stays safe.
+                let span = (*stride as usize).saturating_mul(*num_elements);
+                if *stride > 0 && span > crate::ir::incremental::read_expand_cap_bytes() {
+                    out.push((*base_offset, None, span));
+                } else {
+                    for i in 0..*num_elements {
+                        let off = VarOffset::new(
+                            base_offset.is_ff(),
+                            base_offset.raw() + *stride * (i as isize),
+                        );
+                        out.push((off, None, *element_native_bytes));
+                    }
+                }
+            }
+        }
+    }
+
     /// Like `gather_variable_offsets` but each read carries its static bit
     /// range when known (`Some((msb, lsb))` from a constant bit select),
     /// `None` for full-width or runtime-determined reads.
@@ -573,6 +662,10 @@ pub struct DynamicBitSelect {
     pub window: usize,
     pub num_elements: usize,
 }
+
+/// One read gathered by `gather_reads_expanded_ranged`:
+/// `(offset, static bit range when known, native byte span of the read)`.
+pub type RangedRead = (VarOffset, Option<(usize, usize)>, usize);
 
 #[derive(Clone, Debug, Hash)]
 pub enum ProtoExpression {

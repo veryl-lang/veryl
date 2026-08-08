@@ -12,6 +12,8 @@ pub(crate) mod dup_assign_dce;
 pub(crate) mod load_cache_lookahead;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod multi_write_analysis;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod version_split;
 
 #[cfg(target_family = "wasm")]
 pub(crate) mod multi_write_analysis {
@@ -64,5 +66,24 @@ pub(crate) mod dead_var_dce {
         _event_slices: &[&[ProtoStatement]],
     ) -> (HashSet<VarOffset>, Vec<(isize, usize, isize)>) {
         (HashSet::default(), Vec::new())
+    }
+}
+
+#[cfg(target_family = "wasm")]
+pub(crate) mod version_split {
+    use crate::ir::ProtoStatement;
+
+    #[derive(Default, Debug)]
+    pub struct RunStats;
+
+    pub fn pass_enabled(_use_4state: bool) -> bool {
+        false
+    }
+    pub fn run(_stmts: &mut [ProtoStatement], _alloc: &mut dyn FnMut(usize) -> isize) -> RunStats {
+        RunStats
+    }
+    pub fn accumulate(_s: &RunStats) {}
+    pub fn totals_line() -> String {
+        String::new()
     }
 }

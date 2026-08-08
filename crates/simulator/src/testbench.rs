@@ -611,6 +611,26 @@ pub fn run_native_testbench_capped(
         eprintln!("  required_comb_passes:{}", sim.ir.required_comb_passes);
         eprintln!("===========================");
     }
+    sim.dump_event_diag();
+    if let Some(state) = &sim.incr_state
+        && crate::ir::incremental::diag_enabled()
+    {
+        state.dump_stats(sim.ir.comb_statements.len());
+        let (skipped, total) = sim.event_skip_stats();
+        if total > 0 {
+            let m = &state.stats_event_marks;
+            eprintln!(
+                "=== incr event skip: {:.1}% ({skipped}/{total} skippable chunk fires) marks: outdiff={} ext={} ff={} partial={} onrun={} full_seed={} ===",
+                skipped as f64 * 100.0 / total as f64,
+                m[0],
+                m[1],
+                m[2],
+                m[3],
+                m[4],
+                state.stats_seed_full,
+            );
+        }
+    }
 
     Ok(result)
 }
@@ -634,6 +654,7 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             sim.ensure_comb_updated();
             let flow = s.eval_step(&mut sim.mask_cache);
             sim.mark_comb_dirty();
+            sim.note_untracked_write();
             if flow == ControlFlow::Break {
                 ExecResult::Break
             } else {
@@ -773,6 +794,7 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                     unsafe {
                         write_native_value(lv.ptr, lv.native_bytes, lv.use_4state, &val);
                     }
+                    sim.note_ptr_write(lv.ptr, lv.native_bytes);
                     exec(sim, body)
                 };
                 let mut loop_result = ExecResult::Continue;
@@ -870,6 +892,7 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             ret,
         } => {
             sim.ensure_comb_updated();
+            sim.note_untracked_write();
             let mut host_args = Vec::with_capacity(args.len());
             for arg in args {
                 match arg {

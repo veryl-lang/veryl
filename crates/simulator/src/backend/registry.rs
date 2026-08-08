@@ -149,11 +149,30 @@ impl BackendRegistry {
         ctx: &CompileCtx,
         stmts: &[ProtoStatement],
     ) -> Option<Arc<ChunkArtifact>> {
+        // Dependency sets for the incremental settle plan, captured while
+        // the source statements are still at hand.  Env-stable within a
+        // process, so cross-test cache hits stay consistent.
+        let incr_deps = crate::ir::incremental::enabled()
+            .then(|| Arc::new(crate::ir::incremental::chunk_deps(stmts)));
+
         if !ctx.config.dut_reuse {
-            return self
+            let mut artifact = self
                 .backends
                 .iter_mut()
                 .find_map(|b| b.compile_chunk(ctx, stmts));
+            if let (Some(artifact), Some(deps)) = (&mut artifact, incr_deps) {
+                if let Some(a) = Arc::get_mut(artifact) {
+                    a.deps = Some(deps);
+                } else {
+                    // compile_chunk must return a uniquely-owned Arc; a shared
+                    // one would silently drop deps and decline the whole plan.
+                    debug_assert!(
+                        false,
+                        "compile_chunk returned a shared Arc<ChunkArtifact>; incremental deps not attached"
+                    );
+                }
+            }
+            return artifact;
         }
         let key = chunk_fingerprint(ctx.use_4state, ctx.contains_compiled_block, stmts);
         if let Some(artifact) = CHUNK_ARTIFACT_CACHE.lock().unwrap().get(&key) {
@@ -172,6 +191,12 @@ impl BackendRegistry {
             // Arc is fresh here (refcount 1), so `get_mut` always succeeds.
             if let Some(a) = Arc::get_mut(artifact) {
                 a.content_fp = Some(key);
+                a.deps = incr_deps;
+            } else {
+                debug_assert!(
+                    false,
+                    "compile_chunk returned a shared Arc<ChunkArtifact>; incremental deps not attached"
+                );
             }
             CHUNK_ARTIFACT_CACHE
                 .lock()

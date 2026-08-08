@@ -82,6 +82,12 @@ pub struct WriteLogBuffer {
     /// additional narrow/wide entries.  Called once from the AOT-C event
     /// prologue so the per-push code stays unchecked.
     pub reserve: unsafe extern "C" fn(*mut WriteLogBuffer, u32, u32),
+    /// Requested-sub mask slot for sub-guarded chunks (incremental settle):
+    /// the caller stores the mask just before the call; the chunk prologue
+    /// loads it and immediately clears it back to 0 (so a nested
+    /// CompiledBlock, or any caller that did not set it, runs whole —
+    /// 0 means "execute all sub-blocks").
+    pub incr_sub_mask: u32,
     /// Owning storage — keeps `narrow_entries_ptr` valid.
     _narrow_owner: Box<[WriteLogEntry]>,
     /// Owning storage — keeps `wide_entries_ptr` valid.
@@ -125,6 +131,9 @@ pub const WRITE_LOG_OFFSET_GROW_PUSH_WIDE: i32 =
     std::mem::offset_of!(WriteLogBuffer, grow_push_wide) as i32;
 #[allow(dead_code)]
 pub const WRITE_LOG_OFFSET_RESERVE: i32 = std::mem::offset_of!(WriteLogBuffer, reserve) as i32;
+#[allow(dead_code)]
+pub const WRITE_LOG_OFFSET_INCR_SUB_MASK: i32 =
+    std::mem::offset_of!(WriteLogBuffer, incr_sub_mask) as i32;
 
 #[allow(dead_code)]
 pub const WRITE_LOG_ENTRY_SIZE: i32 = std::mem::size_of::<WriteLogEntry>() as i32;
@@ -176,6 +185,7 @@ impl WriteLogBuffer {
             grow_push_narrow: write_log_grow_push_narrow,
             grow_push_wide: write_log_grow_push_wide,
             reserve: write_log_reserve,
+            incr_sub_mask: 0,
             _narrow_owner: narrow,
             _wide_owner: wide,
         }
@@ -317,11 +327,20 @@ impl WriteLogBuffer {
     }
 }
 
-/// Apply each log entry's payload to the FF current slot.  Narrow entries
-/// are applied first, then wide entries.  Within each pool, entries are
-/// processed in insertion order so multiple writes to the same offset
-/// apply last-write-wins, matching JIT/interpret semantics.
-pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
+/// Apply each log entry's payload to the FF current slot.  Narrow entries are
+/// applied first, then wide entries.  Within each pool, entries are processed
+/// in insertion order so multiple writes to the same offset apply
+/// last-write-wins, matching JIT/interpret semantics.
+///
+/// `changed` (when given) receives the ff-local WORD index of every store whose
+/// bytes actually differed — the dirty-seed feed for the incremental settle.
+/// Without a collector the old value is not read back at all: nothing would
+/// consume the comparison.
+pub fn ff_commit_from_log(
+    ff_values: &mut [u8],
+    buffer: &WriteLogBuffer,
+    mut changed: Option<&mut dyn FnMut(u32)>,
+) {
     let len = ff_values.len();
     let dst = ff_values.as_mut_ptr();
 
@@ -336,12 +355,46 @@ pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
         // SAFETY: bounds verified above; dst is the start of the slice.
         unsafe {
             let p = dst.add(offset);
-            match nb {
-                8 => (p as *mut u64).write_unaligned(entry.payload),
-                4 => (p as *mut u32).write_unaligned(entry.payload as u32),
-                2 => (p as *mut u16).write_unaligned(entry.payload as u16),
-                1 => *p = entry.payload as u8,
+            let Some(f) = changed.as_deref_mut() else {
+                match nb {
+                    8 => (p as *mut u64).write_unaligned(entry.payload),
+                    4 => (p as *mut u32).write_unaligned(entry.payload as u32),
+                    2 => (p as *mut u16).write_unaligned(entry.payload as u16),
+                    1 => *p = entry.payload as u8,
+                    _ => {}
+                }
+                continue;
+            };
+            let diff = match nb {
+                8 => {
+                    let old = (p as *const u64).read_unaligned();
+                    (p as *mut u64).write_unaligned(entry.payload);
+                    old != entry.payload
+                }
+                4 => {
+                    let old = (p as *const u32).read_unaligned();
+                    (p as *mut u32).write_unaligned(entry.payload as u32);
+                    old != entry.payload as u32
+                }
+                2 => {
+                    let old = (p as *const u16).read_unaligned();
+                    (p as *mut u16).write_unaligned(entry.payload as u16);
+                    old != entry.payload as u16
+                }
+                1 => {
+                    let old = *p;
+                    *p = entry.payload as u8;
+                    old != entry.payload as u8
+                }
                 _ => continue,
+            };
+            if diff {
+                let w0 = (offset / 8) as u32;
+                let w1 = ((offset + nb - 1) / 8) as u32;
+                f(w0);
+                if w1 != w0 {
+                    f(w1);
+                }
             }
         }
     }
@@ -354,7 +407,17 @@ pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
         if nb == 0 || nb > WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES || offset + nb > len {
             continue;
         }
-        ff_values[offset..offset + nb].copy_from_slice(&entry.payload[..nb]);
+        let dst_slice = &mut ff_values[offset..offset + nb];
+        if let Some(f) = changed.as_deref_mut() {
+            if dst_slice != &entry.payload[..nb] {
+                for w in (offset / 8)..=((offset + nb - 1) / 8) {
+                    f(w as u32);
+                }
+                dst_slice.copy_from_slice(&entry.payload[..nb]);
+            }
+        } else {
+            dst_slice.copy_from_slice(&entry.payload[..nb]);
+        }
     }
 }
 
