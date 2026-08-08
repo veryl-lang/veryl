@@ -1,4 +1,6 @@
-use super::{BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
+//! Analyzer-IR procedure evaluation for combinational dependency extraction.
+
+use super::region::{BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
@@ -14,7 +16,7 @@ pub(super) fn analyze(
     bit_part: &BitPartition,
     statements: &[Statement],
 ) -> Vec<(NodeKey, NodeKey)> {
-    SsaProcedure::analyze(module, bit_part, statements)
+    ProcedureAnalysis::analyze(module, bit_part, statements)
 }
 
 // Minimal statement-ordered SSA used by the loop detector.
@@ -28,7 +30,7 @@ enum SsaVersion {
     Phi(Vec<VersionId>),
 }
 
-struct SsaProcedure<'a> {
+struct ProcedureAnalysis<'a> {
     bit_part: &'a BitPartition,
     ctx: Context,
     versions: Vec<SsaVersion>,
@@ -37,7 +39,7 @@ struct SsaProcedure<'a> {
     written: HashSet<NodeKey>,
 }
 
-impl<'a> SsaProcedure<'a> {
+impl<'a> ProcedureAnalysis<'a> {
     fn analyze(
         module: &'a Module,
         bit_part: &'a BitPartition,
