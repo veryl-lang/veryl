@@ -2,7 +2,6 @@
 
 use super::region::{BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
 use super::ssa::{BranchState, SsaStore, VersionId};
-use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
@@ -11,6 +10,57 @@ use crate::ir::{
     VarSelect,
 };
 use crate::value::Value;
+use crate::{HashMap, HashSet};
+
+#[cfg(test)]
+use std::cell::Cell;
+
+#[derive(Clone)]
+struct CallResult {
+    region_groups: Vec<Vec<(PackedSpan, VersionId)>>,
+    opaque_sources: Vec<VersionId>,
+}
+
+// Region-split writes query one RHS several times, but a function call in that
+// RHS is one procedural evaluation. `None` is an invocation barrier: temporary
+// call nodes in a cloned callee body must never enter the caller's cache.
+type CallCache = Option<HashMap<*const FunctionCall, CallResult>>;
+
+#[cfg(test)]
+thread_local! {
+    static FUNCTION_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
+    static FUNCTION_RESULT_VERSIONS: Cell<usize> = const { Cell::new(0) };
+    static FUNCTION_RESULT_REGION_PROBES: Cell<usize> = const { Cell::new(0) };
+    static FUNCTION_BARRIER_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_function_evaluation_count() {
+    FUNCTION_EVALUATIONS.set(0);
+    FUNCTION_RESULT_VERSIONS.set(0);
+    FUNCTION_RESULT_REGION_PROBES.set(0);
+    FUNCTION_BARRIER_EVALUATIONS.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn function_evaluation_count() -> usize {
+    FUNCTION_EVALUATIONS.get()
+}
+
+#[cfg(test)]
+pub(crate) fn function_result_version_count() -> usize {
+    FUNCTION_RESULT_VERSIONS.get()
+}
+
+#[cfg(test)]
+pub(crate) fn function_result_region_probe_count() -> usize {
+    FUNCTION_RESULT_REGION_PROBES.get()
+}
+
+#[cfg(test)]
+pub(crate) fn function_barrier_evaluation_count() -> usize {
+    FUNCTION_BARRIER_EVALUATIONS.get()
+}
 
 pub(super) fn analyze(
     module: &Module,
@@ -25,6 +75,7 @@ struct ProcedureAnalysis<'a> {
     ctx: Context,
     ssa: SsaStore<NodeKey>,
     written: HashSet<NodeKey>,
+    call_caches: Vec<CallCache>,
 }
 
 impl<'a> ProcedureAnalysis<'a> {
@@ -41,17 +92,37 @@ impl<'a> ProcedureAnalysis<'a> {
             ctx,
             ssa: SsaStore::default(),
             written: HashSet::default(),
+            call_caches: Vec::new(),
         };
         this.eval_block(statements, &[]);
 
         let mut dependencies = Vec::new();
-        let destinations: Vec<_> = this.written.iter().copied().collect();
+        let destinations: Vec<_> = this
+            .written
+            .iter()
+            .copied()
+            .filter(|key| this.is_module_scope_key(*key))
+            .collect();
         for destination in destinations {
             let version = this.ssa.read(destination);
             let sources = this.ssa.root_sources(version);
-            dependencies.extend(sources.into_iter().map(|source| (source, destination)));
+            dependencies.extend(
+                sources
+                    .into_iter()
+                    .filter(|source| this.is_module_scope_key(*source))
+                    .map(|source| (source, destination)),
+            );
         }
         dependencies
+    }
+
+    fn is_module_scope_key(&self, key: NodeKey) -> bool {
+        self.ctx.variables.get(&key.0).is_none_or(|variable| {
+            matches!(
+                variable.affiliation,
+                crate::symbol::Affiliation::Module | crate::symbol::Affiliation::Interface
+            )
+        })
     }
 
     fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
@@ -182,6 +253,7 @@ impl<'a> ProcedureAnalysis<'a> {
     fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> bool {
         match statement {
             Statement::Assign(assign) => {
+                self.call_caches.push(Some(HashMap::default()));
                 let widths: Vec<_> = assign
                     .dst
                     .iter()
@@ -207,6 +279,7 @@ impl<'a> ProcedureAnalysis<'a> {
                         self.write_destination(destination, &sources, controls);
                     }
                 }
+                self.call_caches.pop();
                 false
             }
             Statement::If(statement) => {
@@ -390,7 +463,7 @@ impl<'a> ProcedureAnalysis<'a> {
                     }
                     _ => self.eval_system_call(call, &[], true),
                 },
-                Factor::FunctionCall(call) => self.eval_call(call, &[]),
+                Factor::FunctionCall(call) => self.eval_call_requested(call, &[], Some(requested)),
                 Factor::HierVariable(_)
                 | Factor::Value(_)
                 | Factor::Anonymous(_)
@@ -558,6 +631,75 @@ impl<'a> ProcedureAnalysis<'a> {
     }
 
     fn eval_call(&mut self, call: &FunctionCall, controls: &[VersionId]) -> Vec<VersionId> {
+        self.eval_call_requested(call, controls, None)
+    }
+
+    fn eval_call_requested(
+        &mut self,
+        call: &FunctionCall,
+        controls: &[VersionId],
+        requested: Option<PackedSpan>,
+    ) -> Vec<VersionId> {
+        #[cfg(test)]
+        if matches!(self.call_caches.last(), Some(None)) {
+            FUNCTION_BARRIER_EVALUATIONS.set(FUNCTION_BARRIER_EVALUATIONS.get() + 1);
+        }
+        let cache_key = std::ptr::from_ref(call);
+        if let Some(cached) = self
+            .call_caches
+            .last()
+            .and_then(Option::as_ref)
+            .and_then(|cache| cache.get(&cache_key))
+        {
+            let result = self.select_call_result(cached, requested);
+            #[cfg(test)]
+            FUNCTION_RESULT_VERSIONS.set(FUNCTION_RESULT_VERSIONS.get() + result.len());
+            return result;
+        }
+
+        let evaluated = self.eval_call_uncached(call, controls);
+        let result = self.select_call_result(&evaluated, requested);
+        if let Some(Some(cache)) = self.call_caches.last_mut() {
+            cache.insert(cache_key, evaluated);
+        }
+        #[cfg(test)]
+        FUNCTION_RESULT_VERSIONS.set(FUNCTION_RESULT_VERSIONS.get() + result.len());
+        result
+    }
+
+    fn select_call_result(
+        &self,
+        evaluated: &CallResult,
+        requested: Option<PackedSpan>,
+    ) -> Vec<VersionId> {
+        let mut result = Vec::new();
+        for regions in &evaluated.region_groups {
+            let first = requested.map_or(0, |requested| {
+                regions.partition_point(|(span, _)| {
+                    #[cfg(test)]
+                    FUNCTION_RESULT_REGION_PROBES.set(FUNCTION_RESULT_REGION_PROBES.get() + 1);
+                    span.end() <= requested.start
+                })
+            });
+            for (span, version) in &regions[first..] {
+                #[cfg(test)]
+                FUNCTION_RESULT_REGION_PROBES.set(FUNCTION_RESULT_REGION_PROBES.get() + 1);
+                if requested.is_some_and(|requested| span.start >= requested.end()) {
+                    break;
+                }
+                result.push(*version);
+            }
+        }
+        result.extend_from_slice(&evaluated.opaque_sources);
+        result.sort_unstable();
+        result.dedup();
+        result
+    }
+
+    fn eval_call_uncached(&mut self, call: &FunctionCall, controls: &[VersionId]) -> CallResult {
+        #[cfg(test)]
+        FUNCTION_EVALUATIONS.set(FUNCTION_EVALUATIONS.get() + 1);
+
         let body = self.ctx.functions.get(&call.id).and_then(|function| {
             if let Some(index) = &call.index {
                 function.get_function(index)
@@ -575,7 +717,10 @@ impl<'a> ProcedureAnalysis<'a> {
                     self.write_destination(destination, &sources, controls);
                 }
             }
-            return sources;
+            return CallResult {
+                region_groups: Vec::new(),
+                opaque_sources: sources,
+            };
         };
         let mut actual_sources = Vec::new();
 
@@ -591,7 +736,9 @@ impl<'a> ProcedureAnalysis<'a> {
             }
         }
 
+        self.call_caches.push(None);
         self.eval_block(&body.statements, controls);
+        self.call_caches.pop();
 
         for (path, destinations) in &call.outputs {
             let Some(&formal) = body.arg_map.get(path) else {
@@ -617,16 +764,19 @@ impl<'a> ProcedureAnalysis<'a> {
             }
         }
 
-        let mut result = body
+        let region_groups = body
             .ret
-            .map(|ret| self.current_versions_for_id(ret))
+            .map(|ret| self.current_region_groups_for_id(ret))
             .unwrap_or_default();
-        if statements_have_unknown(&body.statements) {
-            result.extend(actual_sources);
+        let opaque_sources = if statements_have_unknown(&body.statements) {
+            actual_sources
+        } else {
+            Vec::new()
+        };
+        CallResult {
+            region_groups,
+            opaque_sources,
         }
-        result.sort_unstable();
-        result.dedup();
-        result
     }
 
     fn keys_for_id(&self, id: VarId) -> Vec<NodeKey> {
@@ -648,6 +798,26 @@ impl<'a> ProcedureAnalysis<'a> {
             .into_iter()
             .map(|key| self.ssa.read(key))
             .collect()
+    }
+
+    fn current_region_groups_for_id(&mut self, id: VarId) -> Vec<Vec<(PackedSpan, VersionId)>> {
+        let mut groups = Vec::<Vec<(PackedSpan, VersionId)>>::new();
+        let mut previous_array_span = None;
+        for key in self.keys_for_id(id) {
+            let Some(span) = self.key_span(key) else {
+                continue;
+            };
+            if previous_array_span != Some(key.1) {
+                groups.push(Vec::new());
+                previous_array_span = Some(key.1);
+            }
+            let group = groups.last_mut().expect("pushed above");
+            debug_assert!(group.last().is_none_or(|(previous, _)| {
+                previous.start <= span.start && previous.end() <= span.start
+            }));
+            group.push((span, self.ssa.read(key)));
+        }
+        groups
     }
 
     fn eval_actual_for_formal_key(

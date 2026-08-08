@@ -12,6 +12,13 @@ mod procedure;
 mod region;
 mod ssa;
 
+#[cfg(test)]
+pub(crate) use procedure::{
+    function_barrier_evaluation_count, function_evaluation_count,
+    function_result_region_probe_count, function_result_version_count,
+    reset_function_evaluation_count,
+};
+
 use region::{ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, var_reads};
 
 use crate::AnalyzerError;
