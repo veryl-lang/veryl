@@ -450,6 +450,8 @@ fn add_inst_feedthrough_edges(
     parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
 ) {
+    add_sparse_whole_port_copy_edges(inst, child, bit_part, graph, node_map, parent_vars);
+
     let mut input_reads: HashMap<VarId, Vec<NodeKey>> = HashMap::default();
     for inp in &inst.inputs {
         if !is_pure_input_or_output(inp.id, &child.variables, Direction::Input) {
@@ -492,6 +494,111 @@ fn add_inst_feedthrough_edges(
                     let s = ensure_node(graph, node_map, *r);
                     let t = ensure_node(graph, node_map, *d);
                     graph.add_edge(s, t, ());
+                }
+            }
+        }
+    }
+}
+
+fn add_sparse_whole_port_copy_edges(
+    inst: &InstDeclaration,
+    child: &Module,
+    bit_part: &BitPartition,
+    graph: &mut Graph<NodeKey, ()>,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+    parent_vars: &HashMap<VarId, Variable>,
+) {
+    for declaration in &child.declarations {
+        let Declaration::Comb(comb) = declaration else {
+            continue;
+        };
+        let [Statement::Assign(assign)] = comb.statements.as_slice() else {
+            continue;
+        };
+        let [destination] = assign.dst.as_slice() else {
+            continue;
+        };
+        if !destination.index.0.is_empty()
+            || !destination.select.is_empty()
+            || !is_pure_input_or_output(destination.id, &child.variables, Direction::Output)
+        {
+            continue;
+        }
+        let Expression::Term(factor) = &assign.expr else {
+            continue;
+        };
+        let Factor::Variable(input_id, input_index, input_select, _) = factor.as_ref() else {
+            continue;
+        };
+        if !input_index.0.is_empty()
+            || !input_select.is_empty()
+            || !is_pure_input_or_output(*input_id, &child.variables, Direction::Input)
+        {
+            continue;
+        }
+
+        let Some(input) = inst.inputs.iter().find(|input| input.id == *input_id) else {
+            continue;
+        };
+        let Expression::Term(input_factor) = &input.expr else {
+            continue;
+        };
+        let Factor::Variable(parent_input, parent_input_index, parent_input_select, _) =
+            input_factor.as_ref()
+        else {
+            continue;
+        };
+        if !parent_input_index.0.is_empty() || !parent_input_select.is_empty() {
+            continue;
+        }
+
+        let Some(output) = inst
+            .outputs
+            .iter()
+            .find(|output| output.id == destination.id)
+        else {
+            continue;
+        };
+        let [parent_destination] = output.dst.as_slice() else {
+            continue;
+        };
+        if !parent_destination.index.0.is_empty() || !parent_destination.select.is_empty() {
+            continue;
+        }
+        let parent_output = parent_destination.id;
+
+        let Some(child_input) = child.variables.get(input_id) else {
+            continue;
+        };
+        let Some(child_output) = child.variables.get(&destination.id) else {
+            continue;
+        };
+        let Some(parent_input_variable) = parent_vars.get(parent_input) else {
+            continue;
+        };
+        let Some(parent_output_variable) = parent_vars.get(&parent_output) else {
+            continue;
+        };
+        if child_input.total_width() != child_output.total_width()
+            || child_input.r#type.total_array() != child_output.r#type.total_array()
+            || parent_input_variable.total_width() != parent_output_variable.total_width()
+            || parent_input_variable.r#type.total_array()
+                != parent_output_variable.r#type.total_array()
+        {
+            continue;
+        }
+
+        for ((object, index), ranges) in &bit_part.ranges {
+            if *object != parent_output {
+                continue;
+            }
+            for (destination_range, mask) in ranges.iter().enumerate() {
+                let destination_key = (parent_output, *index, destination_range);
+                for source_range in bit_part.overlapping((*parent_input, *index), mask) {
+                    let source_key = (*parent_input, *index, source_range);
+                    let source = ensure_node(graph, node_map, source_key);
+                    let destination = ensure_node(graph, node_map, destination_key);
+                    graph.add_edge(source, destination, ());
                 }
             }
         }
@@ -628,6 +735,11 @@ fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
         }
         if let Some(toks) = module.assign_tokens.get(id) {
             tokens.extend(toks.iter().copied());
+        } else if let Some(variable) = module.variables.get(id) {
+            // Assignment coverage intentionally omits oversized arrays. Keep
+            // a usable diagnostic site when the sparse graph still proves a
+            // cycle through one of those variables.
+            tokens.push(variable.token);
         }
     }
     {
