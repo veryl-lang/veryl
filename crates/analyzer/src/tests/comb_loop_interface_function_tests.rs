@@ -139,6 +139,92 @@ const EXTERNAL_INTERFACE_API: &str = r#"
     }
 "#;
 
+fn connected_interface_function_code(top_declarations: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var forward : logic;
+            var backward: logic;
+            function get_forward () -> logic {{
+                return forward;
+            }}
+            function put_backward (value: input logic) {{
+                backward = value;
+            }}
+            modport source {{
+                forward     : output,
+                backward    : input,
+                get_forward : import,
+                put_backward: import,
+            }}
+            modport sink {{
+                get_forward : import,
+                put_backward: import,
+                ..converse(source)
+            }}
+        }}
+        module Top {{
+            inst source: Bus;
+            inst sink  : Bus;
+            connect source.source <> sink.sink;
+            {top_declarations}
+        }}
+        "#
+    )
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; connected sink getter feeds its source"]
+fn comb_loop_connect_detects_interface_function_member_read_feedback() {
+    assert_interface_function_comb_loop(
+        &connected_interface_function_code(
+            r#"assign sink.forward = source.get_forward();
+            assign source.backward = 0;"#,
+        ),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_connect_keeps_interface_function_member_read_one_way() {
+    assert_interface_function_comb_loop(
+        &connected_interface_function_code(
+            r#"var observed: logic;
+            assign sink.forward = source.backward;
+            assign source.backward = 0;
+            assign observed = source.get_forward();"#,
+        ),
+        false,
+    );
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; connected sink setter feeds its source"]
+fn comb_loop_connect_detects_interface_function_member_write_feedback() {
+    assert_interface_function_comb_loop(
+        &connected_interface_function_code(
+            r#"always_comb {
+                source.put_backward(sink.forward);
+            }
+            assign sink.forward = sink.backward;"#,
+        ),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_connect_keeps_interface_function_member_write_one_way() {
+    assert_interface_function_comb_loop(
+        &connected_interface_function_code(
+            r#"always_comb {
+                source.put_backward(sink.forward);
+            }
+            assign sink.forward = 0;"#,
+        ),
+        false,
+    );
+}
+
 #[test]
 #[ignore = "comb-loop migration: false negative; same receiver interface get-to-put feedback"]
 fn comb_loop_external_interface_get_to_put_detects_same_receiver_feedback() {
