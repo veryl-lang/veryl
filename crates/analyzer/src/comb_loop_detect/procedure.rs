@@ -1,7 +1,7 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
 use super::region::{BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
-use super::ssa::{SsaStore, VersionId};
+use super::ssa::{BranchState, SsaStore, VersionId};
 use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
@@ -100,8 +100,9 @@ impl<'a> ProcedureAnalysis<'a> {
         if let Some((_, expression)) = &destination.select.1 {
             dependencies.extend(self.eval_expr(expression));
         }
-        for key in self.write_keys(destination) {
-            let version = self.ssa.definition(dependencies.clone());
+        let keys = self.write_keys(destination);
+        let version = self.ssa.definition(dependencies);
+        for key in keys {
             self.ssa.bind(key, version);
             self.written.insert(key);
         }
@@ -240,22 +241,15 @@ impl<'a> ProcedureAnalysis<'a> {
         let condition = self.eval_expr(&statement.cond);
         let mut nested_controls = controls.to_vec();
         nested_controls.extend_from_slice(&condition);
-        let saved_state = self.ssa.snapshot();
-        let saved_written = self.written.clone();
-
+        let checkpoint = self.ssa.checkpoint();
         self.eval_block(&statement.true_side, &nested_controls);
-        let true_state = self.ssa.snapshot();
-        let true_written = self.written.clone();
+        let true_state = self.ssa.capture_and_rollback(checkpoint);
 
-        self.ssa.restore(&saved_state);
-        self.written = saved_written;
+        let checkpoint = self.ssa.checkpoint();
         self.eval_block(&statement.false_side, &nested_controls);
-        let false_state = self.ssa.snapshot();
-        let false_written = self.written.clone();
+        let false_state = self.ssa.capture_and_rollback(checkpoint);
 
-        self.ssa.merge(&saved_state, &[true_state, false_state]);
-        self.written = true_written;
-        self.written.extend(false_written);
+        self.ssa.merge(&[true_state, false_state]);
     }
 
     fn eval_case(&mut self, statement: &CaseStatement, controls: &[VersionId]) {
@@ -275,24 +269,16 @@ impl<'a> ProcedureAnalysis<'a> {
         }
         let mut nested_controls = controls.to_vec();
         nested_controls.extend(condition);
-        let saved_state = self.ssa.snapshot();
-        let saved_written = self.written.clone();
         let mut states = Vec::with_capacity(statement.arms.len() + 1);
-        let mut written = saved_written.clone();
         for arm in &statement.arms {
-            self.ssa.restore(&saved_state);
-            self.written = saved_written.clone();
+            let checkpoint = self.ssa.checkpoint();
             self.eval_block(&arm.body, &nested_controls);
-            states.push(self.ssa.snapshot());
-            written.extend(self.written.iter().copied());
+            states.push(self.ssa.capture_and_rollback(checkpoint));
         }
-        self.ssa.restore(&saved_state);
-        self.written = saved_written;
+        let checkpoint = self.ssa.checkpoint();
         self.eval_block(&statement.default, &nested_controls);
-        states.push(self.ssa.snapshot());
-        written.extend(self.written.iter().copied());
-        self.ssa.merge(&saved_state, &states);
-        self.written = written;
+        states.push(self.ssa.capture_and_rollback(checkpoint));
+        self.ssa.merge(&states);
     }
 
     fn eval_for(&mut self, statement: &ForStatement, controls: &[VersionId]) {
@@ -329,15 +315,10 @@ impl<'a> ProcedureAnalysis<'a> {
         // Runtime loops have a zero-trip path. One symbolic body traversal is
         // enough to expose all explicit reads; the exit phi keeps LiveOnEntry
         // separate so retained state does not become a loop edge.
-        let saved_state = self.ssa.snapshot();
-        let saved_written = self.written.clone();
+        let checkpoint = self.ssa.checkpoint();
         self.eval_block(&statement.body, &range_controls);
-        let body_state = self.ssa.snapshot();
-        let body_written = self.written.clone();
-        self.ssa
-            .merge(&saved_state, &[saved_state.clone(), body_state]);
-        self.written = saved_written;
-        self.written.extend(body_written);
+        let body_state = self.ssa.capture_and_rollback(checkpoint);
+        self.ssa.merge(&[BranchState::unchanged(), body_state]);
     }
 
     fn eval_expr_requested(
