@@ -46,6 +46,18 @@ pub struct CombPipeline {
     pub dead_offsets: Vec<VarOffset>,
     /// Non-trivial SCC count (debug/test-only diagnostic; 0 in release).
     pub nontrivial_comb_scc: usize,
+    /// Conv-time estimate that the incremental settle plan would be
+    /// declined for this comb list (see `incremental::stmts_infeasible`).
+    /// Downstream this re-enables the default-pipeline features the
+    /// incremental configuration normally gates off (whole-module AOT-C,
+    /// statement batching) and skips building the plan.
+    pub incr_infeasible: bool,
+    /// Comb bytes the version-split pass reserved for its rename temps.
+    /// The pipeline does not run on a hit, so the caller must reserve them
+    /// itself — the cached statements address those offsets, and a key
+    /// match implies the same layout, so the same reservation reproduces it
+    /// exactly (the instance-reuse path does the same with `comb_size`).
+    pub vsplit_temp_bytes: usize,
 }
 
 enum Slot {

@@ -8167,6 +8167,8 @@ mod tests {
             func: stub,
             keepalive: None,
             content_fp: None,
+            deps: None,
+            sub_guarded: false,
         })
     }
 
