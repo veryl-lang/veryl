@@ -1,0 +1,477 @@
+use super::*;
+
+fn assert_interface_function_comb_loop(code: &str, expected: bool) {
+    let errors = analyze(code);
+    let detected = errors
+        .iter()
+        .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }));
+    assert_eq!(detected, expected, "{errors:#?}");
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; interface function member read"]
+fn comb_loop_interface_function_read_detects_member_feedback() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var value: logic;
+            function read () -> logic {
+                return value;
+            }
+        }
+        module Top {
+            inst bus: Bus;
+            assign bus.value = bus.read();
+        }
+        "#,
+        true,
+    );
+}
+
+fn imported_interface_read_code(top_assignments: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var observed : logic;
+            var unrelated: logic;
+            function read_observed () -> logic {{
+                return observed;
+            }}
+            modport monitor {{
+                read_observed: import,
+            }}
+        }}
+        module Observer (
+            bus: modport Bus::monitor,
+            o  : output logic,
+        ) {{
+            assign o = bus.read_observed();
+        }}
+        module Top {{
+            inst bus: Bus;
+            var observed: logic;
+            inst observer: Observer (
+                bus: bus,
+                o  : observed,
+            );
+            {top_assignments}
+        }}
+        "#
+    )
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; imported interface function member read"]
+fn comb_loop_imported_interface_read_detects_member_feedback() {
+    assert_interface_function_comb_loop(
+        &imported_interface_read_code("assign bus.observed = observed; assign bus.unrelated = 0;"),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_imported_interface_read_keeps_unrelated_member_independent() {
+    assert_interface_function_comb_loop(
+        &imported_interface_read_code("assign bus.observed = 0; assign bus.unrelated = observed;"),
+        false,
+    );
+}
+
+fn imported_interface_write_code(writer_input: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var written  : logic;
+            var unrelated: logic;
+            function write_written (value: input logic) {{
+                written = value;
+            }}
+            modport target {{
+                write_written: import,
+            }}
+        }}
+        module Writer (
+            i  : input logic,
+            bus: modport Bus::target,
+        ) {{
+            always_comb {{
+                bus.write_written(i);
+            }}
+        }}
+        module Top {{
+            inst bus: Bus;
+            inst writer: Writer (
+                i  : {writer_input},
+                bus: bus,
+            );
+            assign bus.unrelated = 0;
+        }}
+        "#
+    )
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; imported interface function member write"]
+fn comb_loop_imported_interface_write_detects_member_feedback() {
+    assert_interface_function_comb_loop(&imported_interface_write_code("bus.written"), true);
+}
+
+#[test]
+fn comb_loop_imported_interface_write_keeps_unrelated_member_independent() {
+    assert_interface_function_comb_loop(&imported_interface_write_code("bus.unrelated"), false);
+}
+
+const EXTERNAL_INTERFACE_API: &str = r#"
+    interface Bus {
+        var value: logic;
+        function get () -> logic {
+            return value;
+        }
+        function put (next: input logic) {
+            value = next;
+        }
+        modport reader {
+            get: import,
+        }
+        modport writer {
+            put: import,
+        }
+    }
+"#;
+
+#[test]
+#[ignore = "comb-loop migration: false negative; same receiver interface get-to-put feedback"]
+fn comb_loop_external_interface_get_to_put_detects_same_receiver_feedback() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top {{
+            inst bus: Bus;
+            always_comb {{
+                bus.put(bus.get());
+            }}
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; cross-receiver interface function feedback"]
+fn comb_loop_external_interface_get_to_put_detects_cross_receiver_feedback() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top {{
+            inst first : Bus;
+            inst second: Bus;
+            always_comb {{
+                first.put(second.get());
+                second.put(first.get());
+            }}
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_external_interface_get_to_put_keeps_one_way_receivers_loop_free() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top {{
+            inst source     : Bus;
+            inst destination: Bus;
+            always_comb {{
+                source.put(0);
+                destination.put(source.get());
+            }}
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, false);
+}
+
+#[test]
+fn comb_loop_external_interface_read_preserves_receiver_identity() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top {{
+            inst source     : Bus;
+            inst destination: Bus;
+            assign source.value      = 0;
+            assign destination.value = source.get();
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, false);
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; same interface function array element feedback"]
+fn comb_loop_interface_function_array_detects_same_element_feedback() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top {{
+            inst bus: Bus[2];
+            always_comb {{
+                bus[0].put(bus[0].get());
+                bus[1].put(0);
+            }}
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_interface_function_array_keeps_one_way_elements_loop_free() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top {{
+            inst bus: Bus[2];
+            always_comb {{
+                bus[0].put(0);
+                bus[1].put(bus[0].get());
+            }}
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, false);
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; cross-element interface function array feedback"]
+fn comb_loop_interface_function_array_detects_cross_element_feedback() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top {{
+            inst bus: Bus[2];
+            always_comb {{
+                bus[0].put(bus[1].get());
+                bus[1].put(bus[0].get());
+            }}
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; interface function captured read in control flow"]
+fn comb_loop_external_interface_function_control_detects_member_feedback() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top {{
+            inst bus: Bus;
+            always_comb {{
+                if bus.get() {{
+                    bus.value = 0;
+                }} else {{
+                    bus.value = 1;
+                }}
+            }}
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; interface function captured read in instance actual"]
+fn comb_loop_external_interface_function_instance_actual_detects_feedback() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Pass (
+            i: input  logic,
+            o: output logic,
+        ) {{
+            assign o = i;
+        }}
+        module Top {{
+            inst bus: Bus;
+            inst pass: Pass (
+                i: bus.get(),
+                o: bus.value,
+            );
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; modport formal interface function transfer"]
+fn comb_loop_modport_formal_get_to_put_detects_feedback() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Copy (
+            source     : modport Bus::reader,
+            destination: modport Bus::writer,
+        ) {{
+            always_comb {{
+                destination.put(source.get());
+            }}
+        }}
+        module Top {{
+            inst source     : Bus;
+            inst destination: Bus;
+            inst copy: Copy (
+                source     : source,
+                destination: destination,
+            );
+            assign source.value = destination.value;
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; interface function captured read through output"]
+fn comb_loop_interface_function_output_detects_captured_member_feedback() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var value: logic;
+            function sample (copy: output logic) -> logic {
+                copy = value;
+                return value;
+            }
+        }
+        module Top {
+            inst bus: Bus;
+            var copy      : logic;
+            var discarded : logic;
+            always_comb {
+                discarded = bus.sample(copy);
+                bus.value = copy;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_later_member_write_kills_external_interface_call_feedback() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top {{
+            inst bus: Bus;
+            always_comb {{
+                bus.put(bus.get());
+                bus.value = 0;
+            }}
+        }}
+        "#
+    );
+    assert_interface_function_comb_loop(&code, false);
+}
+
+#[test]
+fn comb_loop_uncalled_interface_function_adds_no_member_dependency() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var source     : logic;
+            var destination: logic;
+            function transfer () {
+                destination = source;
+            }
+        }
+        module Top {
+            inst bus: Bus;
+            assign bus.source = bus.destination;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; inherited interface function member read"]
+fn comb_loop_mixed_interface_function_detects_inherited_member_feedback() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface BaseBus {
+            var value: logic;
+            function get () -> logic {
+                return value;
+            }
+        }
+        interface Bus {
+            mixin BaseBus;
+        }
+        module Top {
+            inst bus: Bus;
+            assign bus.value = bus.get();
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; nested interface function member read"]
+fn comb_loop_nested_interface_function_detects_transitive_member_read() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var value: logic;
+            function raw () -> logic {
+                return value;
+            }
+            function wrapped () -> logic {
+                return raw();
+            }
+        }
+        module Top {
+            inst bus: Bus;
+            assign bus.value = bus.wrapped();
+        }
+        "#,
+        true,
+    );
+}
+
+fn specialized_interface_function_code(enabled: bool) -> String {
+    format!(
+        r#"
+        interface Bus::<ENABLED: bbool> {{
+            var value: logic;
+            function get () -> logic {{
+                if ENABLED {{
+                    return value;
+                }} else {{
+                    return 0;
+                }}
+            }}
+        }}
+        module Top {{
+            inst bus: Bus::<{enabled}>;
+            assign bus.value = bus.get();
+        }}
+        "#
+    )
+}
+
+#[test]
+#[ignore = "comb-loop migration: false negative; enabled interface function specialization read"]
+fn comb_loop_enabled_interface_function_specialization_reads_member() {
+    assert_interface_function_comb_loop(&specialized_interface_function_code(true), true);
+}
+
+#[test]
+fn comb_loop_disabled_interface_function_specialization_ignores_member() {
+    assert_interface_function_comb_loop(&specialized_interface_function_code(false), false);
+}

@@ -13,6 +13,8 @@ mod comb_loop_incomplete_tests;
 
 mod comb_loop_interface_tests;
 
+mod comb_loop_interface_function_tests;
+
 mod comb_loop_procedural_tests;
 
 mod comb_loop_retained_state_tests;
