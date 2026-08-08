@@ -10,6 +10,7 @@
 
 mod procedure;
 mod region;
+mod ssa;
 
 use region::{ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, var_reads};
 

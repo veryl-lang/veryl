@@ -1,6 +1,8 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
 use super::region::{BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
+use super::ssa::{SsaStore, VersionId};
+use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
@@ -9,7 +11,6 @@ use crate::ir::{
     VarSelect,
 };
 use crate::value::Value;
-use crate::{HashMap, HashSet};
 
 pub(super) fn analyze(
     module: &Module,
@@ -19,23 +20,10 @@ pub(super) fn analyze(
     ProcedureAnalysis::analyze(module, bit_part, statements)
 }
 
-// Minimal statement-ordered SSA used by the loop detector.
-
-type VersionId = usize;
-
-#[derive(Clone)]
-enum SsaVersion {
-    Entry(NodeKey),
-    Definition(Vec<VersionId>),
-    Phi(Vec<VersionId>),
-}
-
 struct ProcedureAnalysis<'a> {
     bit_part: &'a BitPartition,
     ctx: Context,
-    versions: Vec<SsaVersion>,
-    entries: HashMap<NodeKey, VersionId>,
-    state: HashMap<NodeKey, VersionId>,
+    ssa: SsaStore<NodeKey>,
     written: HashSet<NodeKey>,
 }
 
@@ -51,9 +39,7 @@ impl<'a> ProcedureAnalysis<'a> {
         let mut this = Self {
             bit_part,
             ctx,
-            versions: Vec::new(),
-            entries: HashMap::default(),
-            state: HashMap::default(),
+            ssa: SsaStore::default(),
             written: HashSet::default(),
         };
         this.eval_block(statements, &[]);
@@ -61,104 +47,11 @@ impl<'a> ProcedureAnalysis<'a> {
         let mut dependencies = Vec::new();
         let destinations: Vec<_> = this.written.iter().copied().collect();
         for destination in destinations {
-            let version = this.current_version(destination);
-            let mut sources = HashSet::default();
-            let mut visited = HashSet::default();
-            this.collect_root_sources(version, &mut sources, &mut visited);
+            let version = this.ssa.read(destination);
+            let sources = this.ssa.root_sources(version);
             dependencies.extend(sources.into_iter().map(|source| (source, destination)));
         }
         dependencies
-    }
-
-    fn entry_version(&mut self, key: NodeKey) -> VersionId {
-        if let Some(version) = self.entries.get(&key) {
-            return *version;
-        }
-        let version = self.versions.len();
-        self.versions.push(SsaVersion::Entry(key));
-        self.entries.insert(key, version);
-        version
-    }
-
-    fn current_version(&mut self, key: NodeKey) -> VersionId {
-        if let Some(version) = self.state.get(&key) {
-            *version
-        } else {
-            let version = self.entry_version(key);
-            self.state.insert(key, version);
-            version
-        }
-    }
-
-    fn definition(&mut self, mut sources: Vec<VersionId>) -> VersionId {
-        sources.sort_unstable();
-        sources.dedup();
-        let version = self.versions.len();
-        self.versions.push(SsaVersion::Definition(sources));
-        version
-    }
-
-    fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
-        inputs.sort_unstable();
-        inputs.dedup();
-        if inputs.len() == 1 {
-            return inputs[0];
-        }
-        let version = self.versions.len();
-        self.versions.push(SsaVersion::Phi(inputs));
-        version
-    }
-
-    fn collect_root_sources(
-        &self,
-        version: VersionId,
-        sources: &mut HashSet<NodeKey>,
-        visited: &mut HashSet<(VersionId, bool)>,
-    ) {
-        match &self.versions[version] {
-            // A final LiveOnEntry value is retained state, not a combinational
-            // read. Entry versions reached through an explicit definition are.
-            SsaVersion::Entry(_) => {}
-            SsaVersion::Definition(inputs) => {
-                for input in inputs {
-                    self.collect_sources(*input, true, sources, visited);
-                }
-            }
-            SsaVersion::Phi(inputs) => {
-                for input in inputs {
-                    self.collect_sources(*input, false, sources, visited);
-                }
-            }
-        }
-    }
-
-    fn collect_sources(
-        &self,
-        version: VersionId,
-        include_entry: bool,
-        sources: &mut HashSet<NodeKey>,
-        visited: &mut HashSet<(VersionId, bool)>,
-    ) {
-        if !visited.insert((version, include_entry)) {
-            return;
-        }
-        match &self.versions[version] {
-            SsaVersion::Entry(key) => {
-                if include_entry {
-                    sources.insert(*key);
-                }
-            }
-            SsaVersion::Definition(inputs) => {
-                for input in inputs {
-                    self.collect_sources(*input, true, sources, visited);
-                }
-            }
-            SsaVersion::Phi(inputs) => {
-                for input in inputs {
-                    self.collect_sources(*input, include_entry, sources, visited);
-                }
-            }
-        }
     }
 
     fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
@@ -184,7 +77,7 @@ impl<'a> ProcedureAnalysis<'a> {
     fn read_variable(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<VersionId> {
         self.read_keys(id, index, select)
             .into_iter()
-            .map(|key| self.current_version(key))
+            .map(|key| self.ssa.read(key))
             .collect()
     }
 
@@ -208,8 +101,8 @@ impl<'a> ProcedureAnalysis<'a> {
             dependencies.extend(self.eval_expr(expression));
         }
         for key in self.write_keys(destination) {
-            let version = self.definition(dependencies.clone());
-            self.state.insert(key, version);
+            let version = self.ssa.definition(dependencies.clone());
+            self.ssa.bind(key, version);
             self.written.insert(key);
         }
     }
@@ -269,8 +162,8 @@ impl<'a> ProcedureAnalysis<'a> {
             } else {
                 dependencies.extend(self.eval_expr(expression));
             }
-            let version = self.definition(dependencies);
-            self.state.insert(key, version);
+            let version = self.ssa.definition(dependencies);
+            self.ssa.bind(key, version);
             self.written.insert(key);
         }
     }
@@ -347,20 +240,20 @@ impl<'a> ProcedureAnalysis<'a> {
         let condition = self.eval_expr(&statement.cond);
         let mut nested_controls = controls.to_vec();
         nested_controls.extend_from_slice(&condition);
-        let saved_state = self.state.clone();
+        let saved_state = self.ssa.snapshot();
         let saved_written = self.written.clone();
 
         self.eval_block(&statement.true_side, &nested_controls);
-        let true_state = self.state.clone();
+        let true_state = self.ssa.snapshot();
         let true_written = self.written.clone();
 
-        self.state = saved_state.clone();
+        self.ssa.restore(&saved_state);
         self.written = saved_written;
         self.eval_block(&statement.false_side, &nested_controls);
-        let false_state = self.state.clone();
+        let false_state = self.ssa.snapshot();
         let false_written = self.written.clone();
 
-        self.merge_states(&saved_state, &[true_state, false_state]);
+        self.ssa.merge(&saved_state, &[true_state, false_state]);
         self.written = true_written;
         self.written.extend(false_written);
     }
@@ -382,48 +275,24 @@ impl<'a> ProcedureAnalysis<'a> {
         }
         let mut nested_controls = controls.to_vec();
         nested_controls.extend(condition);
-        let saved_state = self.state.clone();
+        let saved_state = self.ssa.snapshot();
         let saved_written = self.written.clone();
         let mut states = Vec::with_capacity(statement.arms.len() + 1);
         let mut written = saved_written.clone();
         for arm in &statement.arms {
-            self.state = saved_state.clone();
+            self.ssa.restore(&saved_state);
             self.written = saved_written.clone();
             self.eval_block(&arm.body, &nested_controls);
-            states.push(self.state.clone());
+            states.push(self.ssa.snapshot());
             written.extend(self.written.iter().copied());
         }
-        self.state = saved_state.clone();
+        self.ssa.restore(&saved_state);
         self.written = saved_written;
         self.eval_block(&statement.default, &nested_controls);
-        states.push(self.state.clone());
+        states.push(self.ssa.snapshot());
         written.extend(self.written.iter().copied());
-        self.merge_states(&saved_state, &states);
+        self.ssa.merge(&saved_state, &states);
         self.written = written;
-    }
-
-    fn merge_states(
-        &mut self,
-        base: &HashMap<NodeKey, VersionId>,
-        states: &[HashMap<NodeKey, VersionId>],
-    ) {
-        let mut keys: HashSet<NodeKey> = base.keys().copied().collect();
-        for state in states {
-            keys.extend(state.keys().copied());
-        }
-        let mut merged = HashMap::default();
-        for key in keys {
-            let fallback = base
-                .get(&key)
-                .copied()
-                .unwrap_or_else(|| self.entry_version(key));
-            let inputs = states
-                .iter()
-                .map(|state| state.get(&key).copied().unwrap_or(fallback))
-                .collect();
-            merged.insert(key, self.phi(inputs));
-        }
-        self.state = merged;
     }
 
     fn eval_for(&mut self, statement: &ForStatement, controls: &[VersionId]) {
@@ -460,12 +329,13 @@ impl<'a> ProcedureAnalysis<'a> {
         // Runtime loops have a zero-trip path. One symbolic body traversal is
         // enough to expose all explicit reads; the exit phi keeps LiveOnEntry
         // separate so retained state does not become a loop edge.
-        let saved_state = self.state.clone();
+        let saved_state = self.ssa.snapshot();
         let saved_written = self.written.clone();
         self.eval_block(&statement.body, &range_controls);
-        let body_state = self.state.clone();
+        let body_state = self.ssa.snapshot();
         let body_written = self.written.clone();
-        self.merge_states(&saved_state, &[saved_state.clone(), body_state]);
+        self.ssa
+            .merge(&saved_state, &[saved_state.clone(), body_state]);
         self.written = saved_written;
         self.written.extend(body_written);
     }
@@ -523,7 +393,7 @@ impl<'a> ProcedureAnalysis<'a> {
                                     for key in
                                         self.bit_part.overlapping_access(*id, idx, source_span)
                                     {
-                                        reads.push(self.current_version(key));
+                                        reads.push(self.ssa.read(key));
                                     }
                                 }
                             }
@@ -735,8 +605,8 @@ impl<'a> ProcedureAnalysis<'a> {
             };
             for key in self.keys_for_id(formal) {
                 let sources = self.eval_actual_for_formal_key(actual, key);
-                let version = self.definition(sources);
-                self.state.insert(key, version);
+                let version = self.ssa.definition(sources);
+                self.ssa.bind(key, version);
             }
         }
 
@@ -795,7 +665,7 @@ impl<'a> ProcedureAnalysis<'a> {
     fn current_versions_for_id(&mut self, id: VarId) -> Vec<VersionId> {
         self.keys_for_id(id)
             .into_iter()
-            .map(|key| self.current_version(key))
+            .map(|key| self.ssa.read(key))
             .collect()
     }
 
@@ -816,7 +686,7 @@ impl<'a> ProcedureAnalysis<'a> {
                 .bit_part
                 .overlapping((*id, formal_key.1), span)
                 .into_iter()
-                .map(|range| self.current_version((*id, formal_key.1, range)))
+                .map(|range| self.ssa.read((*id, formal_key.1, range)))
                 .collect();
         }
         self.eval_expr_bits(actual, span)
@@ -855,15 +725,15 @@ impl<'a> ProcedureAnalysis<'a> {
                             continue;
                         };
                         if formal_span.overlaps(requested) {
-                            sources.push(self.current_version(formal_key));
+                            sources.push(self.ssa.read(formal_key));
                         }
                     }
                 }
             } else {
                 sources.extend(self.current_versions_for_id(formal));
             }
-            let version = self.definition(sources);
-            self.state.insert(key, version);
+            let version = self.ssa.definition(sources);
+            self.ssa.bind(key, version);
             self.written.insert(key);
         }
     }
