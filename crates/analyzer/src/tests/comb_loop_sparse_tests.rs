@@ -213,7 +213,6 @@ fn comb_loop_aliases_overlapping_unknown_regions_overlapping_dynamic_prefixes_re
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; sparse and dynamic regions"]
 fn comb_loop_aliases_overlapping_unknown_regions_disjoint_dynamic_prefixes_remain_independent() {
     assert_comb_loop(
         "disjoint dynamic prefixes remain independent",

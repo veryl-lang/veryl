@@ -28,16 +28,34 @@ use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
 use veryl_parser::resource_table::StrId;
 
-/// One array element. Bit precision lives in the sparse partition masks.
-type IdxKey = (VarId, usize);
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct ArraySpan {
+    start: usize,
+    length: usize,
+}
+
+impl ArraySpan {
+    fn end(self) -> Option<usize> {
+        self.start.checked_add(self.length)
+    }
+
+    fn overlaps(self, other: Self) -> bool {
+        let Some(left_end) = self.end() else {
+            return false;
+        };
+        let Some(right_end) = other.end() else {
+            return false;
+        };
+        self.start < right_end && other.start < left_end
+    }
+}
+
+/// One split unpacked-array interval. Bit precision lives in the masks.
+type IdxKey = (VarId, ArraySpan);
 
 /// `(VarId, array_idx, range_idx)`. `range_idx` indexes the variable's
 /// `BitPartition`, so bit-disjoint reads/writes form disjoint nodes.
-type NodeKey = (VarId, usize, usize);
-
-/// Unpacked elements not separated by a constant-index access are represented
-/// by one split piece, regardless of the declared array length.
-const SPLIT_REMAINDER_INDEX: usize = usize::MAX;
+type NodeKey = (VarId, ArraySpan, usize);
 
 /// Per `IdxKey`, atomic bit-range masks. Two bits are in the same range
 /// iff they appear in the same set of per-decl masks.
@@ -62,26 +80,19 @@ impl BitPartition {
             .collect()
     }
 
-    fn overlapping_access(&self, id: VarId, index: usize, mask: &BigUint) -> Vec<NodeKey> {
-        if index != SPLIT_REMAINDER_INDEX {
-            return self
-                .overlapping((id, index), mask)
-                .into_iter()
-                .map(|range| (id, index, range))
-                .collect();
-        }
-
+    fn overlapping_access(&self, id: VarId, access: ArraySpan, mask: &BigUint) -> Vec<NodeKey> {
         let zero = BigUint::default();
         let mut keys = self
             .ranges
             .iter()
             .filter(|((object, _), _)| *object == id)
-            .flat_map(|((_, split_index), ranges)| {
+            .filter(|((_, split), _)| split.overlaps(access))
+            .flat_map(|((_, split), ranges)| {
                 ranges
                     .iter()
                     .enumerate()
                     .filter(|(_, range)| (*range & mask) != zero)
-                    .map(|(range, _)| (id, *split_index, range))
+                    .map(|(range, _)| (id, *split, range))
             })
             .collect::<Vec<_>>();
         keys.sort_unstable();
@@ -221,7 +232,7 @@ fn atomic_ranges(masks: &[BigUint], _width: usize) -> Vec<BigUint> {
 }
 
 fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
-    let mut masks: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
+    let mut masks: HashMap<IdxKey, Vec<BigUint>> = HashMap::default();
 
     for declaration in &module.declarations {
         if let Declaration::Comb(comb) = declaration {
@@ -237,7 +248,16 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
         for out in &inst.outputs {
             for dst in &out.dst {
                 if let Some((idx, mask)) = eval_dst_mask(dst, &module.variables, ctx) {
-                    masks.entry((dst.id, idx)).or_default().push(mask);
+                    masks
+                        .entry((
+                            dst.id,
+                            ArraySpan {
+                                start: idx,
+                                length: 1,
+                            },
+                        ))
+                        .or_default()
+                        .push(mask);
                 }
             }
         }
@@ -252,32 +272,70 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
         }
     }
 
-    let mut ranges: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
-    for (key, mut ms) in masks {
-        let width = module
-            .variables
-            .get(&key.0)
-            .and_then(|v| v.total_width())
-            .unwrap_or(1);
-        // Small values are cheap to scalarize and doing so lets an SSA value
-        // cross a function boundary without collapsing independently used
-        // bits into one version. Wide values remain split only at observed
-        // access boundaries.
-        if width <= 64 {
-            ms.extend((0..width).map(|bit| BigUint::from(1u32) << bit));
-        }
-        let parts = atomic_ranges(&ms, width);
-        if !parts.is_empty() {
-            ranges.insert(key, parts);
-        }
-    }
+    let ranges = split_array_masks(module, masks);
 
     BitPartition { ranges }
 }
 
+fn split_array_masks(
+    module: &Module,
+    masks: HashMap<IdxKey, Vec<BigUint>>,
+) -> HashMap<IdxKey, Vec<BigUint>> {
+    let mut accesses: HashMap<VarId, Vec<(ArraySpan, BigUint)>> = HashMap::default();
+    for ((id, span), masks) in masks {
+        for mask in masks {
+            accesses.entry(id).or_default().push((span, mask));
+        }
+    }
+
+    let mut ranges = HashMap::default();
+    for (id, accesses) in accesses {
+        let mut boundaries = Vec::with_capacity(accesses.len() * 2);
+        for (span, _) in &accesses {
+            if span.length == 0 {
+                continue;
+            }
+            boundaries.push(span.start);
+            if let Some(end) = span.end() {
+                boundaries.push(end);
+            }
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        let width = module
+            .variables
+            .get(&id)
+            .and_then(Variable::total_width)
+            .unwrap_or(1);
+        for boundary in boundaries.windows(2) {
+            let split = ArraySpan {
+                start: boundary[0],
+                length: boundary[1] - boundary[0],
+            };
+            let mut split_masks = accesses
+                .iter()
+                .filter(|(access, _)| access.overlaps(split))
+                .map(|(_, mask)| mask.clone())
+                .collect::<Vec<_>>();
+            if split_masks.is_empty() {
+                continue;
+            }
+            if width <= 64 {
+                split_masks.extend((0..width).map(|bit| BigUint::from(1u32) << bit));
+            }
+            let parts = atomic_ranges(&split_masks, width);
+            if !parts.is_empty() {
+                ranges.insert((id, split), parts);
+            }
+        }
+    }
+    ranges
+}
+
 fn collect_expr_masks(
     expr: &Expression,
-    out: &mut HashMap<(VarId, usize), Vec<BigUint>>,
+    out: &mut HashMap<IdxKey, Vec<BigUint>>,
     ctx: &mut Context,
 ) {
     match expr {
@@ -311,7 +369,7 @@ fn collect_expr_masks(
 
 fn collect_factor_masks(
     factor: &Factor,
-    out: &mut HashMap<(VarId, usize), Vec<BigUint>>,
+    out: &mut HashMap<IdxKey, Vec<BigUint>>,
     ctx: &mut Context,
 ) {
     match factor {
@@ -331,7 +389,7 @@ fn collect_factor_masks(
 
 fn collect_statement_masks(
     statements: &[Statement],
-    out: &mut HashMap<(VarId, usize), Vec<BigUint>>,
+    out: &mut HashMap<IdxKey, Vec<BigUint>>,
     ctx: &mut Context,
 ) {
     for statement in statements {
@@ -706,8 +764,12 @@ fn collect_dst_node_keys(
     let Some((idx, mask)) = eval_dst_mask(dst, parent_vars, ctx) else {
         return;
     };
-    for r in bit_part.overlapping((dst.id, idx), &mask) {
-        out.push((dst.id, idx, r));
+    let span = ArraySpan {
+        start: idx,
+        length: 1,
+    };
+    for r in bit_part.overlapping((dst.id, span), &mask) {
+        out.push((dst.id, span, r));
     }
 }
 
@@ -1633,7 +1695,7 @@ impl<'a> SsaProcedure<'a> {
                 let requested =
                     ((mask >> low) << formal_offset) & ValueBigUint::gen_mask(formal_width);
                 for formal_key in self.keys_for_id(formal) {
-                    if formal_key.1 != 0 {
+                    if formal_key.1.start != 0 {
                         continue;
                     }
                     let Some(formal_mask) = self.key_mask(formal_key) else {
@@ -1732,11 +1794,10 @@ fn expression_has_unknown(expression: &Expression) -> bool {
 }
 
 /// Mirrors the masking logic of `AssignDestination::eval_assign`.
-fn dst_writes(dst: &AssignDestination, ctx: &mut Context) -> Vec<(usize, BigUint)> {
+fn dst_writes(dst: &AssignDestination, ctx: &mut Context) -> Vec<(ArraySpan, BigUint)> {
     let Some(variable) = ctx.get_variable_info(dst.id) else {
         return Vec::new();
     };
-    let is_index_const = dst.index.is_const();
     let is_select_const = dst.select.is_const();
 
     let mask = if !is_select_const {
@@ -1748,27 +1809,9 @@ fn dst_writes(dst: &AssignDestination, ctx: &mut Context) -> Vec<(usize, BigUint
         ValueBigUint::gen_mask_range(beg, end)
     };
 
-    if variable.r#type.total_array().unwrap_or(2) > 1 && (!is_index_const || dst.index.0.is_empty())
-    {
-        return vec![(SPLIT_REMAINDER_INDEX, mask)];
-    }
-
-    let range = if !is_index_const {
-        variable.r#type.array.calc_range(&[])
-    } else {
-        let Some(index) = dst.index.eval_value(ctx) else {
-            return Vec::new();
-        };
-        variable.r#type.array.calc_range(&index)
-    };
-
-    let mut out = Vec::new();
-    if let Some((beg, end)) = range {
-        for i in beg..=end {
-            out.push((i, mask.clone()));
-        }
-    }
-    out
+    array_access_span(&dst.index, &variable.r#type, ctx)
+        .map(|span| vec![(span, mask)])
+        .unwrap_or_default()
 }
 
 fn var_reads(
@@ -1776,7 +1819,7 @@ fn var_reads(
     index: &VarIndex,
     select: &VarSelect,
     ctx: &mut Context,
-) -> Vec<(usize, BigUint)> {
+) -> Vec<(ArraySpan, BigUint)> {
     let Some(variable) = ctx.variables.get(&id).cloned() else {
         return Vec::new();
     };
@@ -1787,16 +1830,28 @@ fn var_reads(
     } else {
         conservative_select_mask(select, &variable.r#type, ctx)
     };
-    if variable.r#type.total_array().unwrap_or(2) > 1 && (!index.is_const() || index.0.is_empty()) {
-        return vec![(SPLIT_REMAINDER_INDEX, mask)];
-    }
-    if index.is_const()
-        && let Some(idx_path) = index.eval_value(ctx)
-        && let Some(flat) = variable.r#type.array.calc_index(&idx_path)
-    {
-        return vec![(flat, mask)];
-    }
-    vec![(SPLIT_REMAINDER_INDEX, mask)]
+    array_access_span(index, &variable.r#type, ctx)
+        .map(|span| vec![(span, mask)])
+        .unwrap_or_default()
+}
+
+fn array_access_span(
+    index: &VarIndex,
+    r#type: &crate::ir::Type,
+    ctx: &mut Context,
+) -> Option<ArraySpan> {
+    let prefix_len = index
+        .0
+        .iter()
+        .take_while(|expression| expression.comptime().is_const)
+        .count();
+    let prefix = VarIndex(index.0[..prefix_len].to_vec());
+    let values = prefix.eval_value(ctx)?;
+    let (start, inclusive_end) = r#type.array.calc_range(&values)?;
+    Some(ArraySpan {
+        start,
+        length: inclusive_end.checked_sub(start)?.checked_add(1)?,
+    })
 }
 
 fn conservative_select_mask(
