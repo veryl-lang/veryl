@@ -67,9 +67,8 @@ fn assert_unaligned_unpacked_instance_input(target: usize, expected: bool) {
     );
 }
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_whole_unpacked_matching_element_retains_feedback,
-    "comb-loop migration: false negative; module feedthrough and instance mapping",
     "a distant matching element retains feedback",
     whole_unpacked_instance_code(123_456),
     true

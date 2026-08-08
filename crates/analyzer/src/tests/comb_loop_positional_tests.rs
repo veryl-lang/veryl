@@ -408,6 +408,31 @@ fn comb_loop_preserves_constant_shift_positions_a_constant_left_shift_retains_di
 }
 
 #[test]
+fn comb_loop_left_shift_beyond_width_has_no_value_dependency() {
+    // Why this case exists: shifting a requested low region right by a shift
+    // larger than its endpoint yields an empty source region, not an unsigned
+    // interval underflow.
+    assert_comb_loop(
+        "a left shift beyond the value width has only zero-filled output bits",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var value  : logic<64>;
+            var shifted: logic<64>;
+            always_comb {
+                shifted = value << 64;
+            }
+            assign o = shifted[0];
+            assign value[0] = o;
+            assign value[63:1] = 0;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
 #[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_repeat_concatenation_positions_repeat_concatenation_keeps_a_disjoint_low_bit_path_loop_free()
  {
