@@ -204,7 +204,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_array_literal_retains_corresponding_element,
-    "comb-loop migration: false positive; positional and periodic transfers",
+    "comb-loop migration: false negative; positional and periodic transfers",
     "an array literal retains corresponding-element feedback",
     array_literal_actual_code("'{feedback, 0}"),
     true
@@ -219,7 +219,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_array_default_retains_same_bit,
-    "comb-loop migration: false positive; positional and periodic transfers",
+    "comb-loop migration: false negative; positional and periodic transfers",
     "an array default retains same-bit feedback",
     array_copy_actual_code("'{default: value}", 0),
     true
@@ -234,7 +234,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_array_repeat_retains_same_bit,
-    "comb-loop migration: false positive; positional and periodic transfers",
+    "comb-loop migration: false negative; positional and periodic transfers",
     "an array repeat retains same-bit feedback",
     array_copy_actual_code("'{value repeat 2}", 0),
     true
@@ -249,7 +249,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_nested_array_literal_retains_inner_element,
-    "comb-loop migration: false positive; positional and periodic transfers",
+    "comb-loop migration: false negative; positional and periodic transfers",
     "a nested array literal retains inner-element feedback",
     nested_array_actual_code("'{'{feedback, 0}, '{0, 0}}"),
     true
@@ -257,7 +257,7 @@ comb_loop_case_ignored!(
 
 comb_loop_case_ignored!(
     comb_loop_structure_constructor_retains_unobserved_member_effects,
-    "comb-loop migration: false positive; positional and periodic transfers",
+    "comb-loop migration: false negative; positional and periodic transfers",
     "a structure constructor retains effects from an unobserved member",
     r#"
     module Top (o: output logic) {

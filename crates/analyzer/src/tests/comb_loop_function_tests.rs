@@ -63,7 +63,7 @@ fn unaligned_instance_function_actual_code(actual: &str) -> String {
 
 comb_loop_case_ignored!(
     comb_loop_instance_actual_function_retains_module_capture,
-    "comb-loop migration: false positive; function effects and summaries",
+    "comb-loop migration: false negative; function effects and summaries",
     "an instance actual function retains a module-scope capture",
     r#"
     module Child (i: input logic, o: output logic) { assign o = i; }
@@ -106,7 +106,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_unaligned_function_return_retains_used_actual,
-    "comb-loop migration: false positive; function effects and summaries",
+    "comb-loop migration: false negative; function effects and summaries",
     "an unaligned function return retains its used actual",
     unaligned_instance_function_actual_code("only_a(feedback, 0)"),
     true

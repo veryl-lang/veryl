@@ -69,7 +69,7 @@ fn assert_unaligned_unpacked_instance_input(target: usize, expected: bool) {
 
 comb_loop_case_ignored!(
     comb_loop_whole_unpacked_matching_element_retains_feedback,
-    "comb-loop migration: false positive; module feedthrough and instance mapping",
+    "comb-loop migration: false negative; module feedthrough and instance mapping",
     "a distant matching element retains feedback",
     whole_unpacked_instance_code(123_456),
     true
@@ -147,7 +147,7 @@ comb_loop_case!(
 
 comb_loop_case_ignored!(
     comb_loop_periodic_phase_survives_two_module_summaries,
-    "comb-loop migration: false positive; module feedthrough and instance mapping",
+    "comb-loop migration: false negative; module feedthrough and instance mapping",
     "a periodic phase survives two module summaries",
     periodic_repeat_two_level_code(0),
     true
