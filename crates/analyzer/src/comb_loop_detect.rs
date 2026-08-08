@@ -1,7 +1,7 @@
 //! Combinational loop detection on the analyzer IR (issue #931).
 //!
-//! Builds a per-module `(VarId, array_index)` dependency graph from
-//! `FfTable` and per-decl `ReferencedEntry` masks, then reports SCCs.
+//! Builds a per-module dependency graph from statement-ordered SSA summaries,
+//! then reports SCCs.
 //! Module instance feedthrough is summarized bottom-up in topo order.
 //!
 //! Under-detect by design: opaque constructs (SystemVerilog black
@@ -15,12 +15,12 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, AssignStatement, CaseStatement, Component, Declaration, Expression, Factor,
-    ForBound, ForRange, ForStatement, FunctionCall, IfStatement, InstDeclaration, Ir, Module,
-    Statement, VarIndex, VarSelect, Variable,
+    ArrayLiteralItem, AssignDestination, CaseStatement, Component, Declaration, Expression, Factor,
+    ForBound, ForRange, ForStatement, FunctionCall, IfStatement, InstDeclaration, Ir, Module, Op,
+    Statement, SystemFunctionKind, VarIndex, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
-use crate::value::ValueBigUint;
+use crate::value::{Value, ValueBigUint};
 use daggy::petgraph::Graph;
 use daggy::petgraph::algo::tarjan_scc;
 use daggy::petgraph::graph::NodeIndex;
@@ -28,7 +28,7 @@ use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
 use veryl_parser::resource_table::StrId;
 
-/// `FfTable` / `per_decl_refs` granularity. Bit-precision lives in masks.
+/// One array element. Bit precision lives in the sparse partition masks.
 type IdxKey = (VarId, usize);
 
 /// `(VarId, array_idx, range_idx)`. `range_idx` indexes the variable's
@@ -74,7 +74,7 @@ pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
 
     for &idx in &order {
         if let Component::Module(module) = &ir.components[idx] {
-            // Unevaluable generic params -> empty per_decl_refs.
+            // Unevaluable generic parameters do not have a stable procedure.
             if module.suppress_unassigned {
                 continue;
             }
@@ -157,91 +157,49 @@ fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
 
 /// Group bits into atomic ranges by signature: bits with the same set
 /// of containing masks form one range. Bits in zero masks are dropped.
-fn atomic_ranges(masks: &[BigUint], width: usize) -> Vec<BigUint> {
-    let mut by_sig: HashMap<BigUint, BigUint> = HashMap::default();
-    let one = BigUint::from(1u32);
-    for b in 0..width {
-        let mut sig = BigUint::default();
-        for (i, m) in masks.iter().enumerate() {
-            if m.bit(b as u64) {
-                sig |= &one << i;
+fn atomic_ranges(masks: &[BigUint], _width: usize) -> Vec<BigUint> {
+    // Refine only regions which occur in an access mask. This is independent
+    // of untouched declared width: each step splits existing disjoint atoms
+    // into their intersection and difference with the new mask.
+    let mut atoms: Vec<BigUint> = Vec::new();
+    for mask in masks {
+        let mut remaining = mask.clone();
+        let mut refined = Vec::with_capacity(atoms.len() + 1);
+        for atom in atoms {
+            let overlap = &atom & mask;
+            if overlap == BigUint::default() {
+                refined.push(atom);
+                continue;
             }
+            let difference = &atom ^ &overlap;
+            if difference != BigUint::default() {
+                refined.push(difference);
+            }
+            refined.push(overlap.clone());
+            remaining ^= overlap;
         }
-        if sig == BigUint::default() {
-            continue;
+        if remaining != BigUint::default() {
+            refined.push(remaining);
         }
-        let entry = by_sig.entry(sig).or_default();
-        *entry |= &one << b;
+        atoms = refined;
     }
-    let mut ret: Vec<BigUint> = by_sig.into_values().collect();
+    let mut ret = atoms;
     // Stable order by lowest set bit so NodeKey range_idx is deterministic.
     ret.sort_by_key(|m| m.trailing_zeros().unwrap_or(0));
     ret
 }
 
-/// Arrays larger than this are under-detected: a dynamic write (`arr[i] = ...`
-/// with no foldable index) fans out to every element, so the per-element graph
-/// / bit-partition expansion below is O(elements). A memory this large is not a
-/// realistic combinational-loop participant, so adding no edges stays sound.
+/// The minimal SSA uses existing per-element coordinates. Whole or dynamic
+/// accesses above this limit are left for the sparse-array follow-up instead
+/// of expanding work with the declared element count.
 const OVERSIZED_ARRAY: usize = 1 << 16;
-
-fn oversized_array(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
-    variables
-        .get(&id)
-        .and_then(|v| v.r#type.total_array())
-        .is_some_and(|n| n > OVERSIZED_ARRAY)
-}
 
 fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
     let mut masks: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
 
-    // Intra-module reads / writes captured during eval_assign.
-    for refs in module.per_decl_refs.values() {
-        for (id, entry) in refs {
-            for (i, m) in entry.mask_ref.iter().enumerate() {
-                if *m != BigUint::default() {
-                    masks.entry((*id, i)).or_default().push(m.clone());
-                }
-            }
-            for (i, m) in entry.mask_assign.iter().enumerate() {
-                if *m != BigUint::default() {
-                    masks.entry((*id, i)).or_default().push(m.clone());
-                }
-            }
-        }
-    }
-
-    // Per-reference masks. Per-decl aggregates alone would collapse
-    // bit-disjoint reads/writes of the same var into one atomic range
-    // (e.g. `b = a[0]; c = a[1];` aggregates a's mask to {0,1}).
-    for ((src_id, src_idx), entry) in &module.ff_table.table {
-        for (_, assign_target, src_read_mask, _) in &entry.refered {
-            if *src_read_mask != BigUint::default() {
-                masks
-                    .entry((*src_id, *src_idx))
-                    .or_default()
-                    .push(src_read_mask.clone());
-            }
-            if let Some((dst_id, dst_idx_opt, lhs_mask)) = assign_target
-                && *lhs_mask != BigUint::default()
-            {
-                if let Some(dst_idx) = dst_idx_opt {
-                    masks
-                        .entry((*dst_id, *dst_idx))
-                        .or_default()
-                        .push(lhs_mask.clone());
-                } else if let Some(var) = module.variables.get(dst_id)
-                    && let Some(total) = var.r#type.total_array()
-                    && total <= OVERSIZED_ARRAY
-                {
-                    for i in 0..total {
-                        masks
-                            .entry((*dst_id, i))
-                            .or_default()
-                            .push(lhs_mask.clone());
-                    }
-                }
-            }
+    for declaration in &module.declarations {
+        if let Declaration::Comb(comb) = declaration {
+            collect_statement_masks(&comb.statements, &mut masks, ctx);
         }
     }
 
@@ -259,13 +217,29 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
         }
     }
 
+    // Function-local regions are not represented by the caller's aggregate
+    // reference table. They still need atoms because calls are lowered into
+    // the same SSA version graph as their caller.
+    for function in module.functions.values() {
+        for body in &function.functions {
+            collect_statement_masks(&body.statements, &mut masks, ctx);
+        }
+    }
+
     let mut ranges: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
-    for (key, ms) in masks {
+    for (key, mut ms) in masks {
         let width = module
             .variables
             .get(&key.0)
             .and_then(|v| v.total_width())
             .unwrap_or(1);
+        // Small values are cheap to scalarize and doing so lets an SSA value
+        // cross a function boundary without collapsing independently used
+        // bits into one version. Wide values remain split only at observed
+        // access boundaries.
+        if width <= 64 {
+            ms.extend((0..width).map(|bit| BigUint::from(1u32) << bit));
+        }
         let parts = atomic_ranges(&ms, width);
         if !parts.is_empty() {
             ranges.insert(key, parts);
@@ -329,6 +303,69 @@ fn collect_factor_masks(
     }
 }
 
+fn collect_statement_masks(
+    statements: &[Statement],
+    out: &mut HashMap<(VarId, usize), Vec<BigUint>>,
+    ctx: &mut Context,
+) {
+    for statement in statements {
+        match statement {
+            Statement::Assign(assign) => {
+                collect_expr_masks(&assign.expr, out, ctx);
+                for destination in &assign.dst {
+                    for (index, mask) in dst_writes(destination, ctx) {
+                        out.entry((destination.id, index)).or_default().push(mask);
+                    }
+                }
+            }
+            Statement::If(statement) => {
+                collect_expr_masks(&statement.cond, out, ctx);
+                collect_statement_masks(&statement.true_side, out, ctx);
+                collect_statement_masks(&statement.false_side, out, ctx);
+            }
+            Statement::Case(statement) => {
+                collect_expr_masks(&statement.case_target, out, ctx);
+                for arm in &statement.arms {
+                    for pattern in &arm.patterns {
+                        match pattern {
+                            crate::ir::CasePattern::Eq(expression) => {
+                                collect_expr_masks(expression, out, ctx);
+                            }
+                            crate::ir::CasePattern::Range { lo, hi, .. } => {
+                                collect_expr_masks(lo, out, ctx);
+                                collect_expr_masks(hi, out, ctx);
+                            }
+                        }
+                    }
+                    collect_statement_masks(&arm.body, out, ctx);
+                }
+                collect_statement_masks(&statement.default, out, ctx);
+            }
+            Statement::For(statement) => {
+                collect_statement_masks(&statement.body, out, ctx);
+            }
+            Statement::FunctionCall(call) => {
+                for input in call.inputs.values() {
+                    collect_expr_masks(input, out, ctx);
+                }
+                for outputs in call.outputs.values() {
+                    for destination in outputs {
+                        for (index, mask) in dst_writes(destination, ctx) {
+                            out.entry((destination.id, index)).or_default().push(mask);
+                        }
+                    }
+                }
+            }
+            Statement::SystemFunctionCall(_)
+            | Statement::IfReset(_)
+            | Statement::TbMethodCall(_)
+            | Statement::Break
+            | Statement::Unsupported(_)
+            | Statement::Null => {}
+        }
+    }
+}
+
 /// None if the index is dynamic.
 fn eval_dst_mask(
     dst: &AssignDestination,
@@ -351,11 +388,6 @@ fn build_module_graph(
     module: &Module,
     summaries: &HashMap<StrId, ModuleCombSummary>,
 ) -> Graph<NodeKey, ()> {
-    let ff_table = &module.ff_table;
-    let union_writes = compute_union_writes(&module.per_decl_refs);
-    let writes_per_decl = compute_writes_per_decl(&module.per_decl_refs);
-    let undom_per_decl = compute_undominated_per_decl(module);
-
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.functions = module.functions.clone();
@@ -364,143 +396,19 @@ fn build_module_graph(
     let mut graph: Graph<NodeKey, ()> = Graph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
 
-    for ((src_id, src_idx), entry) in &ff_table.table {
-        if entry.is_ff {
+    for declaration in &module.declarations {
+        let Declaration::Comb(comb) = declaration else {
             continue;
-        }
-        if !is_module_scope_var(*src_id, &module.variables) {
-            continue;
-        }
-        // Under-detect oversized arrays (see `OVERSIZED_ARRAY`).
-        if oversized_array(*src_id, &module.variables) {
-            continue;
-        }
-        let src_id_idx = (*src_id, *src_idx);
-
-        for (reader_decl, assign_target, src_read_mask, from_ff) in &entry.refered {
-            if *from_ff {
+        };
+        for (source, destination) in SsaProcedure::analyze(module, &bit_part, &comb.statements) {
+            if !is_module_scope_var(source.0, &module.variables)
+                || !is_module_scope_var(destination.0, &module.variables)
+            {
                 continue;
             }
-            // `decl_read_mask == 0` also filters out reads gathered by
-            // `gather_ff` but missing from `eval_assign` (notably inst
-            // input expressions, which `add_inst_feedthrough_edges` handles).
-            let decl_read_mask = lookup_read_mask(&module.per_decl_refs, *reader_decl, src_id_idx);
-            if decl_read_mask == BigUint::default() {
-                continue;
-            }
-            let read_mask = if *src_read_mask != BigUint::default() {
-                &decl_read_mask & src_read_mask
-            } else {
-                decl_read_mask
-            };
-            if read_mask == BigUint::default() {
-                continue;
-            }
-            // Internal sources need a comb writer overlapping the read bits.
-            // Input ports are driven externally so they always carry data.
-            let effective_read = if is_input_port(*src_id, &module.variables) {
-                read_mask.clone()
-            } else {
-                let Some(driven) = union_writes.get(&src_id_idx) else {
-                    continue;
-                };
-                let overlap = &read_mask & driven;
-                if overlap == BigUint::default() {
-                    continue;
-                }
-                overlap
-            };
-
-            // Per-statement LHS mask preferred over per-decl aggregate.
-            // Otherwise `t1[0] = 0; t1[1] = src;` would route src into both
-            // bits.
-            let dst_with_masks: Vec<((VarId, usize), BigUint)> = match assign_target {
-                Some((dst_id, Some(dst_idx), lhs_mask)) => {
-                    let mask = if *lhs_mask != BigUint::default() {
-                        lhs_mask.clone()
-                    } else {
-                        lookup_write_mask(&module.per_decl_refs, *reader_decl, (*dst_id, *dst_idx))
-                    };
-                    if mask != BigUint::default() {
-                        vec![((*dst_id, *dst_idx), mask)]
-                    } else {
-                        vec![]
-                    }
-                }
-                // Under-detect oversized arrays (see `OVERSIZED_ARRAY`).
-                Some((dst_id, None, _)) if oversized_array(*dst_id, &module.variables) => vec![],
-                Some((dst_id, None, lhs_mask)) => writes_per_decl
-                    .get(reader_decl)
-                    .map(|w| {
-                        w.iter()
-                            .filter(|(id, _, _)| id == dst_id)
-                            .map(|(id, idx, decl_mask)| {
-                                let mask = if *lhs_mask != BigUint::default() {
-                                    lhs_mask & decl_mask
-                                } else {
-                                    decl_mask.clone()
-                                };
-                                ((*id, *idx), mask)
-                            })
-                            .filter(|(_, m)| m != &BigUint::default())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                None => writes_per_decl
-                    .get(reader_decl)
-                    .map(|w| {
-                        w.iter()
-                            .filter(|(id, _, _)| *id == *src_id)
-                            .map(|(id, idx, m)| ((*id, *idx), m.clone()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            };
-
-            for (dst_id_idx, write_mask) in dst_with_masks {
-                if write_mask == BigUint::default() {
-                    continue;
-                }
-                if !is_module_scope_var(dst_id_idx.0, &module.variables) {
-                    continue;
-                }
-                // Same `(VarId, idx)`: only undominated reads can close a cycle through
-                // this declaration (`a = 0; a = a + 1` must not). Disjoint bits still form
-                // real multi-bit cycles (`o_y[1] = o_y[2]; o_y[2] = o_y[1]`), so read/write
-                // masks need not overlap — the bit-partition ranges stop `a[1] = a[0]` self-edges.
-                //
-                // A condition read (`assign_target` is None, e.g. `if yw[i]`) is
-                // recorded against EVERY same-variable write, so on a feed-forward
-                // array chain it wires `yw[i]` to every `yw[j]` — a false cross-index
-                // cycle. Extend the same undominated filter to it: a condition read
-                // dominated by an earlier write to the same element cannot close a
-                // loop; a real (undominated) condition loop is still detected.
-                let mut effective_read = effective_read.clone();
-                if src_id_idx == dst_id_idx || assign_target.is_none() {
-                    let undom = undom_per_decl
-                        .get(reader_decl)
-                        .and_then(|m| m.get(&src_id_idx))
-                        .cloned()
-                        .unwrap_or_default();
-                    let undom_read = &undom & &effective_read;
-                    if undom_read == BigUint::default() {
-                        continue;
-                    }
-                    effective_read = undom_read;
-                }
-
-                let src_ranges = bit_part.overlapping(src_id_idx, &effective_read);
-                let dst_ranges = bit_part.overlapping(dst_id_idx, &write_mask);
-                for sr in &src_ranges {
-                    let src_node_key = (src_id_idx.0, src_id_idx.1, *sr);
-                    let src_node = ensure_node(&mut graph, &mut node_map, src_node_key);
-                    for dr in &dst_ranges {
-                        let dst_node_key = (dst_id_idx.0, dst_id_idx.1, *dr);
-                        let dst_node = ensure_node(&mut graph, &mut node_map, dst_node_key);
-                        graph.add_edge(src_node, dst_node, ());
-                    }
-                }
-            }
+            let source = ensure_node(&mut graph, &mut node_map, source);
+            let destination = ensure_node(&mut graph, &mut node_map, destination);
+            graph.add_edge(source, destination, ());
         }
     }
 
@@ -705,66 +613,6 @@ fn has_self_edge(graph: &Graph<NodeKey, ()>, node: NodeIndex) -> bool {
         .any(|e| e.source() == node && e.target() == node)
 }
 
-fn compute_union_writes(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-) -> HashMap<(VarId, usize), BigUint> {
-    let mut out: HashMap<(VarId, usize), BigUint> = HashMap::default();
-    for refs in per_decl_refs.values() {
-        for (id, entry) in refs {
-            for (i, mask) in entry.mask_assign.iter().enumerate() {
-                if *mask == BigUint::default() {
-                    continue;
-                }
-                let cur = out.entry((*id, i)).or_default();
-                *cur |= mask;
-            }
-        }
-    }
-    out
-}
-
-/// `decl -> Vec<(VarId, idx, write_mask)>`. Includes inst-output dsts.
-fn compute_writes_per_decl(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-) -> HashMap<usize, Vec<(VarId, usize, BigUint)>> {
-    let mut out: HashMap<usize, Vec<(VarId, usize, BigUint)>> = HashMap::default();
-    for (decl, refs) in per_decl_refs {
-        for (id, entry) in refs {
-            for (i, mask) in entry.mask_assign.iter().enumerate() {
-                if *mask == BigUint::default() {
-                    continue;
-                }
-                out.entry(*decl).or_default().push((*id, i, mask.clone()));
-            }
-        }
-    }
-    out
-}
-
-fn lookup_read_mask(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-    decl: usize,
-    key: (VarId, usize),
-) -> BigUint {
-    per_decl_refs
-        .get(&decl)
-        .and_then(|m| m.get(&key.0))
-        .and_then(|e| e.mask_ref.get(key.1).cloned())
-        .unwrap_or_default()
-}
-
-fn lookup_write_mask(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-    decl: usize,
-    key: (VarId, usize),
-) -> BigUint {
-    per_decl_refs
-        .get(&decl)
-        .and_then(|m| m.get(&key.0))
-        .and_then(|e| e.mask_assign.get(key.1).cloned())
-        .unwrap_or_default()
-}
-
 fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
     let mut tokens: Vec<veryl_parser::token_range::TokenRange> = Vec::new();
     let mut identifier: Option<String> = None;
@@ -793,11 +641,6 @@ fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
         &primary,
         &participants,
     ))
-}
-
-fn is_input_port(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
-    use crate::ir::VarKind;
-    matches!(variables.get(&id).map(|v| v.kind), Some(VarKind::Input))
 }
 
 fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
@@ -851,260 +694,914 @@ fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> Module
     ModuleCombSummary { feedthrough }
 }
 
-// Statement-level dominance analysis.
+// Minimal statement-ordered SSA used by the loop detector.
 
-/// `defs`: bits guaranteed-written on the current path.
-/// `undom`: bits read without a covering preceding write.
-#[derive(Default, Clone)]
-struct DominanceState {
-    defs: HashMap<IdxKey, BigUint>,
-    undom: HashMap<IdxKey, BigUint>,
+type VersionId = usize;
+
+#[derive(Clone)]
+enum SsaVersion {
+    Entry(NodeKey),
+    Definition(Vec<VersionId>),
+    Phi(Vec<VersionId>),
 }
 
-fn compute_undominated_per_decl(module: &Module) -> HashMap<usize, HashMap<IdxKey, BigUint>> {
-    let mut out: HashMap<usize, HashMap<IdxKey, BigUint>> = HashMap::default();
-    let mut ctx = Context::default();
-    ctx.variables = module.variables.clone();
-    ctx.functions = module.functions.clone();
-
-    for (decl_idx, decl) in module.declarations.iter().enumerate() {
-        if let Declaration::Comb(c) = decl {
-            let mut state = DominanceState::default();
-            walk_block(&c.statements, &mut state, &mut ctx);
-            state.undom.retain(|_, m| *m != BigUint::default());
-            if !state.undom.is_empty() {
-                out.insert(decl_idx, state.undom);
-            }
-        }
-    }
-    out
+struct SsaProcedure<'a> {
+    bit_part: &'a BitPartition,
+    ctx: Context,
+    versions: Vec<SsaVersion>,
+    entries: HashMap<NodeKey, VersionId>,
+    state: HashMap<NodeKey, VersionId>,
+    written: HashSet<NodeKey>,
 }
 
-fn walk_block(stmts: &[Statement], state: &mut DominanceState, ctx: &mut Context) {
-    for stmt in stmts {
-        walk_stmt(stmt, state, ctx);
-    }
-}
-
-fn walk_stmt(stmt: &Statement, state: &mut DominanceState, ctx: &mut Context) {
-    match stmt {
-        Statement::Assign(a) => walk_assign(a, state, ctx),
-        Statement::If(i) => walk_if(i, state, ctx),
-        Statement::Case(c) => walk_case(c, state, ctx),
-        Statement::For(f) => walk_for(f, state, ctx),
-        Statement::FunctionCall(c) => walk_function_call(c.as_ref(), state, ctx),
-        // IfReset is always_ff-only; the rest have no LHS to track.
-        Statement::IfReset(_)
-        | Statement::SystemFunctionCall(_)
-        | Statement::TbMethodCall(_)
-        | Statement::Break
-        | Statement::Unsupported(_)
-        | Statement::Null => {}
-    }
-}
-
-fn walk_assign(stmt: &AssignStatement, state: &mut DominanceState, ctx: &mut Context) {
-    // RHS before LHS: otherwise `a = a + 1` sees itself as dominated.
-    walk_expr(&stmt.expr, state, ctx);
-    for dst in &stmt.dst {
-        for (idx, mask) in dst_writes(dst, ctx) {
-            let key = (dst.id, idx);
-            *state.defs.entry(key).or_default() |= &mask;
-        }
-    }
-}
-
-fn walk_if(stmt: &IfStatement, state: &mut DominanceState, ctx: &mut Context) {
-    walk_expr(&stmt.cond, state, ctx);
-
-    let saved_defs = state.defs.clone();
-    let saved_undom = state.undom.clone();
-
-    let mut true_state = DominanceState {
-        defs: saved_defs.clone(),
-        undom: saved_undom.clone(),
-    };
-    walk_block(&stmt.true_side, &mut true_state, ctx);
-
-    let mut false_state = DominanceState {
-        defs: saved_defs,
-        undom: saved_undom,
-    };
-    walk_block(&stmt.false_side, &mut false_state, ctx);
-
-    // Merge: defs = intersection (only both-paths writes dominate
-    // downstream); undom = union (any path's undom contributes).
-    let mut keys: HashSet<IdxKey> = HashSet::default();
-    for k in true_state.defs.keys().chain(false_state.defs.keys()) {
-        keys.insert(*k);
-    }
-    let mut merged_defs: HashMap<IdxKey, BigUint> = HashMap::default();
-    for key in keys {
-        let zero = BigUint::default();
-        let t = true_state.defs.get(&key).unwrap_or(&zero);
-        let f = false_state.defs.get(&key).unwrap_or(&zero);
-        let merged = t & f;
-        if merged != zero {
-            merged_defs.insert(key, merged);
-        }
-    }
-    state.defs = merged_defs;
-
-    state.undom = true_state.undom;
-    for (key, mask) in false_state.undom {
-        *state.undom.entry(key).or_default() |= &mask;
-    }
-}
-
-fn walk_case(stmt: &CaseStatement, state: &mut DominanceState, ctx: &mut Context) {
-    walk_expr(&stmt.case_target, state, ctx);
-    for arm in &stmt.arms {
-        for p in &arm.patterns {
-            match p {
-                crate::ir::CasePattern::Eq(e) => walk_expr(e, state, ctx),
-                crate::ir::CasePattern::Range { lo, hi, .. } => {
-                    walk_expr(lo, state, ctx);
-                    walk_expr(hi, state, ctx);
-                }
-            }
-        }
-    }
-
-    let saved_defs = state.defs.clone();
-    let saved_undom = state.undom.clone();
-
-    let mut branch_states: Vec<DominanceState> = Vec::with_capacity(stmt.arms.len() + 1);
-    for arm in &stmt.arms {
-        let mut s = DominanceState {
-            defs: saved_defs.clone(),
-            undom: saved_undom.clone(),
+impl<'a> SsaProcedure<'a> {
+    fn analyze(
+        module: &'a Module,
+        bit_part: &'a BitPartition,
+        statements: &[Statement],
+    ) -> Vec<(NodeKey, NodeKey)> {
+        let mut ctx = Context::default();
+        ctx.variables = module.variables.clone();
+        ctx.functions = module.functions.clone();
+        let mut this = Self {
+            bit_part,
+            ctx,
+            versions: Vec::new(),
+            entries: HashMap::default(),
+            state: HashMap::default(),
+            written: HashSet::default(),
         };
-        walk_block(&arm.body, &mut s, ctx);
-        branch_states.push(s);
-    }
-    // Empty default behaves as the saved state, modeling "no arm matched".
-    let mut default_state = DominanceState {
-        defs: saved_defs,
-        undom: saved_undom,
-    };
-    walk_block(&stmt.default, &mut default_state, ctx);
-    branch_states.push(default_state);
+        this.eval_block(statements, &[]);
 
-    // defs = intersection across branches; undom = union.
-    let mut keys: HashSet<IdxKey> = HashSet::default();
-    for b in &branch_states {
-        for k in b.defs.keys() {
-            keys.insert(*k);
+        let mut dependencies = Vec::new();
+        let destinations: Vec<_> = this.written.iter().copied().collect();
+        for destination in destinations {
+            let version = this.current_version(destination);
+            let mut sources = HashSet::default();
+            let mut visited = HashSet::default();
+            this.collect_root_sources(version, &mut sources, &mut visited);
+            dependencies.extend(sources.into_iter().map(|source| (source, destination)));
+        }
+        dependencies
+    }
+
+    fn entry_version(&mut self, key: NodeKey) -> VersionId {
+        if let Some(version) = self.entries.get(&key) {
+            return *version;
+        }
+        let version = self.versions.len();
+        self.versions.push(SsaVersion::Entry(key));
+        self.entries.insert(key, version);
+        version
+    }
+
+    fn current_version(&mut self, key: NodeKey) -> VersionId {
+        if let Some(version) = self.state.get(&key) {
+            *version
+        } else {
+            let version = self.entry_version(key);
+            self.state.insert(key, version);
+            version
         }
     }
-    let mut merged_defs: HashMap<IdxKey, BigUint> = HashMap::default();
-    for key in keys {
-        let zero = BigUint::default();
-        let mut acc: Option<BigUint> = None;
-        for b in &branch_states {
-            let v = b.defs.get(&key).unwrap_or(&zero).clone();
-            acc = Some(match acc {
-                Some(a) => a & v,
-                None => v,
-            });
+
+    fn definition(&mut self, mut sources: Vec<VersionId>) -> VersionId {
+        sources.sort_unstable();
+        sources.dedup();
+        let version = self.versions.len();
+        self.versions.push(SsaVersion::Definition(sources));
+        version
+    }
+
+    fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
+        inputs.sort_unstable();
+        inputs.dedup();
+        if inputs.len() == 1 {
+            return inputs[0];
         }
-        if let Some(merged) = acc
-            && merged != zero
+        let version = self.versions.len();
+        self.versions.push(SsaVersion::Phi(inputs));
+        version
+    }
+
+    fn collect_root_sources(
+        &self,
+        version: VersionId,
+        sources: &mut HashSet<NodeKey>,
+        visited: &mut HashSet<(VersionId, bool)>,
+    ) {
+        match &self.versions[version] {
+            // A final LiveOnEntry value is retained state, not a combinational
+            // read. Entry versions reached through an explicit definition are.
+            SsaVersion::Entry(_) => {}
+            SsaVersion::Definition(inputs) => {
+                for input in inputs {
+                    self.collect_sources(*input, true, sources, visited);
+                }
+            }
+            SsaVersion::Phi(inputs) => {
+                for input in inputs {
+                    self.collect_sources(*input, false, sources, visited);
+                }
+            }
+        }
+    }
+
+    fn collect_sources(
+        &self,
+        version: VersionId,
+        include_entry: bool,
+        sources: &mut HashSet<NodeKey>,
+        visited: &mut HashSet<(VersionId, bool)>,
+    ) {
+        if !visited.insert((version, include_entry)) {
+            return;
+        }
+        match &self.versions[version] {
+            SsaVersion::Entry(key) => {
+                if include_entry {
+                    sources.insert(*key);
+                }
+            }
+            SsaVersion::Definition(inputs) => {
+                for input in inputs {
+                    self.collect_sources(*input, true, sources, visited);
+                }
+            }
+            SsaVersion::Phi(inputs) => {
+                for input in inputs {
+                    self.collect_sources(*input, include_entry, sources, visited);
+                }
+            }
+        }
+    }
+
+    fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
+        let mut keys = Vec::new();
+        for (idx, mask) in var_reads(id, index, select, &mut self.ctx) {
+            keys.extend(
+                self.bit_part
+                    .overlapping((id, idx), &mask)
+                    .into_iter()
+                    .map(|range| (id, idx, range)),
+            );
+        }
+        keys.sort_unstable();
+        keys.dedup();
+        keys
+    }
+
+    fn write_keys(&mut self, destination: &AssignDestination) -> Vec<NodeKey> {
+        let mut keys = Vec::new();
+        for (idx, mask) in dst_writes(destination, &mut self.ctx) {
+            keys.extend(
+                self.bit_part
+                    .overlapping((destination.id, idx), &mask)
+                    .into_iter()
+                    .map(|range| (destination.id, idx, range)),
+            );
+        }
+        keys.sort_unstable();
+        keys.dedup();
+        keys
+    }
+
+    fn read_variable(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<VersionId> {
+        self.read_keys(id, index, select)
+            .into_iter()
+            .map(|key| self.current_version(key))
+            .collect()
+    }
+
+    fn write_destination(
+        &mut self,
+        destination: &AssignDestination,
+        sources: &[VersionId],
+        controls: &[VersionId],
+    ) {
+        let mut dependencies = sources.to_vec();
+        dependencies.extend_from_slice(controls);
+        for expression in destination
+            .index
+            .0
+            .iter()
+            .chain(destination.select.0.iter())
         {
-            merged_defs.insert(key, merged);
+            dependencies.extend(self.eval_expr(expression));
+        }
+        if let Some((_, expression)) = &destination.select.1 {
+            dependencies.extend(self.eval_expr(expression));
+        }
+        for key in self.write_keys(destination) {
+            let version = self.definition(dependencies.clone());
+            self.state.insert(key, version);
+            self.written.insert(key);
         }
     }
-    state.defs = merged_defs;
 
-    let mut merged_undom: HashMap<IdxKey, BigUint> = HashMap::default();
-    for b in branch_states {
-        for (key, mask) in b.undom {
-            *merged_undom.entry(key).or_default() |= &mask;
+    fn destination_width(&mut self, destination: &AssignDestination) -> Option<usize> {
+        let variable = self.ctx.variables.get(&destination.id)?.clone();
+        let (high, low) = destination
+            .select
+            .eval_value(&mut self.ctx, &variable.r#type, false)?;
+        high.checked_sub(low)?.checked_add(1)
+    }
+
+    fn key_mask(&self, key: NodeKey) -> Option<&BigUint> {
+        self.bit_part.ranges_of((key.0, key.1)).get(key.2)
+    }
+
+    fn write_assignment_destination(
+        &mut self,
+        destination: &AssignDestination,
+        expression: &Expression,
+        expression_offset: usize,
+        expression_context_width: usize,
+        controls: &[VersionId],
+    ) {
+        let variable = self.ctx.variables.get(&destination.id).cloned();
+        let selected = if destination.select.is_const_with_range() {
+            variable.as_ref().and_then(|variable| {
+                destination
+                    .select
+                    .eval_value(&mut self.ctx, &variable.r#type, false)
+            })
+        } else {
+            None
+        };
+        let keys = self.write_keys(destination);
+        for key in keys {
+            let mut dependencies = controls.to_vec();
+            for selector in destination
+                .index
+                .0
+                .iter()
+                .chain(destination.select.0.iter())
+            {
+                dependencies.extend(self.eval_expr(selector));
+            }
+            if let Some((_, selector)) = &destination.select.1 {
+                dependencies.extend(self.eval_expr(selector));
+            }
+            if let (Some((_, low)), Some(key_mask)) = (selected, self.key_mask(key).cloned()) {
+                let requested = (key_mask >> low) << expression_offset;
+                dependencies.extend(self.eval_expr_requested(
+                    expression,
+                    &requested,
+                    expression_context_width,
+                ));
+            } else {
+                dependencies.extend(self.eval_expr(expression));
+            }
+            let version = self.definition(dependencies);
+            self.state.insert(key, version);
+            self.written.insert(key);
         }
     }
-    state.undom = merged_undom;
-}
 
-fn walk_for(stmt: &ForStatement, state: &mut DominanceState, ctx: &mut Context) {
-    walk_for_range(&stmt.range, state, ctx);
-    // Body may run zero times: surface undom reads but don't trust
-    // its writes to dominate anything afterwards.
-    let saved_defs = state.defs.clone();
-    walk_block(&stmt.body, state, ctx);
-    state.defs = saved_defs;
-}
-
-fn walk_for_range(range: &ForRange, state: &mut DominanceState, ctx: &mut Context) {
-    let bounds = match range {
-        ForRange::Forward { start, end, .. }
-        | ForRange::Reverse { start, end, .. }
-        | ForRange::Stepped { start, end, .. } => [start, end],
-    };
-    for b in bounds {
-        if let ForBound::Expression(e) = b {
-            walk_expr(e, state, ctx);
-        }
-    }
-}
-
-fn walk_function_call(call: &FunctionCall, state: &mut DominanceState, ctx: &mut Context) {
-    for input in call.inputs.values() {
-        walk_expr(input, state, ctx);
-    }
-    for outputs in call.outputs.values() {
-        for dst in outputs {
-            for (idx, mask) in dst_writes(dst, ctx) {
-                let key = (dst.id, idx);
-                *state.defs.entry(key).or_default() |= &mask;
+    /// Returns true when control leaves the current block through `break`.
+    fn eval_block(&mut self, statements: &[Statement], controls: &[VersionId]) -> bool {
+        for statement in statements {
+            if self.eval_statement(statement, controls) {
+                return true;
             }
         }
+        false
     }
-}
 
-fn walk_expr(expr: &Expression, state: &mut DominanceState, ctx: &mut Context) {
-    match expr {
-        Expression::Term(t) => walk_factor(t, state, ctx),
-        Expression::Unary(_, e, _) => walk_expr(e, state, ctx),
-        Expression::Binary(a, _, b, _) => {
-            walk_expr(a, state, ctx);
-            walk_expr(b, state, ctx);
+    fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> bool {
+        match statement {
+            Statement::Assign(assign) => {
+                let widths: Vec<_> = assign
+                    .dst
+                    .iter()
+                    .map(|destination| self.destination_width(destination))
+                    .collect();
+                if widths.iter().all(Option::is_some) {
+                    let total_width = widths.iter().flatten().sum();
+                    let mut offset = total_width;
+                    for (destination, width) in assign.dst.iter().zip(widths.into_iter()) {
+                        let width = width.expect("checked above");
+                        offset -= width;
+                        self.write_assignment_destination(
+                            destination,
+                            &assign.expr,
+                            offset,
+                            total_width,
+                            controls,
+                        );
+                    }
+                } else {
+                    let sources = self.eval_expr(&assign.expr);
+                    for destination in &assign.dst {
+                        self.write_destination(destination, &sources, controls);
+                    }
+                }
+                false
+            }
+            Statement::If(statement) => {
+                self.eval_if(statement, controls);
+                false
+            }
+            Statement::Case(statement) => {
+                self.eval_case(statement, controls);
+                false
+            }
+            Statement::For(statement) => {
+                self.eval_for(statement, controls);
+                false
+            }
+            Statement::FunctionCall(call) => {
+                self.eval_call(call, controls);
+                false
+            }
+            Statement::SystemFunctionCall(call) => {
+                self.eval_system_call(call, controls, false);
+                false
+            }
+            Statement::Break => true,
+            Statement::IfReset(_)
+            | Statement::TbMethodCall(_)
+            | Statement::Unsupported(_)
+            | Statement::Null => false,
         }
-        Expression::Ternary(a, b, c, _) => {
-            walk_expr(a, state, ctx);
-            walk_expr(b, state, ctx);
-            walk_expr(c, state, ctx);
-        }
-        Expression::Concatenation(parts, _) => {
-            for (a, b) in parts {
-                walk_expr(a, state, ctx);
-                if let Some(b) = b {
-                    walk_expr(b, state, ctx);
+    }
+
+    fn eval_if(&mut self, statement: &IfStatement, controls: &[VersionId]) {
+        let condition = self.eval_expr(&statement.cond);
+        let mut nested_controls = controls.to_vec();
+        nested_controls.extend_from_slice(&condition);
+        let saved_state = self.state.clone();
+        let saved_written = self.written.clone();
+
+        self.eval_block(&statement.true_side, &nested_controls);
+        let true_state = self.state.clone();
+        let true_written = self.written.clone();
+
+        self.state = saved_state.clone();
+        self.written = saved_written;
+        self.eval_block(&statement.false_side, &nested_controls);
+        let false_state = self.state.clone();
+        let false_written = self.written.clone();
+
+        self.merge_states(&saved_state, &[true_state, false_state]);
+        self.written = true_written;
+        self.written.extend(false_written);
+    }
+
+    fn eval_case(&mut self, statement: &CaseStatement, controls: &[VersionId]) {
+        let mut condition = self.eval_expr(&statement.case_target);
+        for arm in &statement.arms {
+            for pattern in &arm.patterns {
+                match pattern {
+                    crate::ir::CasePattern::Eq(expression) => {
+                        condition.extend(self.eval_expr(expression));
+                    }
+                    crate::ir::CasePattern::Range { lo, hi, .. } => {
+                        condition.extend(self.eval_expr(lo));
+                        condition.extend(self.eval_expr(hi));
+                    }
                 }
             }
         }
-        Expression::StructConstructor(_, fields, _) => {
-            for (_, e) in fields {
-                walk_expr(e, state, ctx);
+        let mut nested_controls = controls.to_vec();
+        nested_controls.extend(condition);
+        let saved_state = self.state.clone();
+        let saved_written = self.written.clone();
+        let mut states = Vec::with_capacity(statement.arms.len() + 1);
+        let mut written = saved_written.clone();
+        for arm in &statement.arms {
+            self.state = saved_state.clone();
+            self.written = saved_written.clone();
+            self.eval_block(&arm.body, &nested_controls);
+            states.push(self.state.clone());
+            written.extend(self.written.iter().copied());
+        }
+        self.state = saved_state.clone();
+        self.written = saved_written;
+        self.eval_block(&statement.default, &nested_controls);
+        states.push(self.state.clone());
+        written.extend(self.written.iter().copied());
+        self.merge_states(&saved_state, &states);
+        self.written = written;
+    }
+
+    fn merge_states(
+        &mut self,
+        base: &HashMap<NodeKey, VersionId>,
+        states: &[HashMap<NodeKey, VersionId>],
+    ) {
+        let mut keys: HashSet<NodeKey> = base.keys().copied().collect();
+        for state in states {
+            keys.extend(state.keys().copied());
+        }
+        let mut merged = HashMap::default();
+        for key in keys {
+            let fallback = base
+                .get(&key)
+                .copied()
+                .unwrap_or_else(|| self.entry_version(key));
+            let inputs = states
+                .iter()
+                .map(|state| state.get(&key).copied().unwrap_or(fallback))
+                .collect();
+            merged.insert(key, self.phi(inputs));
+        }
+        self.state = merged;
+    }
+
+    fn eval_for(&mut self, statement: &ForStatement, controls: &[VersionId]) {
+        let mut range_controls = controls.to_vec();
+        let bounds = match &statement.range {
+            ForRange::Forward { start, end, .. }
+            | ForRange::Reverse { start, end, .. }
+            | ForRange::Stepped { start, end, .. } => [start, end],
+        };
+        for bound in bounds {
+            if let ForBound::Expression(expression) = bound {
+                range_controls.extend(self.eval_expr(expression));
             }
         }
-        Expression::ArrayLiteral(_, _) => {}
-    }
-}
 
-fn walk_factor(factor: &Factor, state: &mut DominanceState, ctx: &mut Context) {
-    match factor {
-        Factor::Variable(id, index, select, _) => {
-            for (idx, mask) in var_reads(*id, index, select, ctx) {
-                let key = (*id, idx);
-                let dominated = state.defs.get(&key).cloned().unwrap_or_default();
-                let undom_bits = &mask ^ (&mask & &dominated);
-                if undom_bits != BigUint::default() {
-                    *state.undom.entry(key).or_default() |= undom_bits;
+        if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
+            for value in iterations {
+                if let Some(variable) = self.ctx.variables.get_mut(&statement.var_id)
+                    && let Some(width) = statement.var_type.total_width()
+                {
+                    variable.set_value(
+                        &[],
+                        Value::new(value as u64, width, statement.var_type.signed),
+                        None,
+                    );
+                }
+                if self.eval_block(&statement.body, &range_controls) {
+                    break;
+                }
+            }
+            return;
+        }
+
+        // Runtime loops have a zero-trip path. One symbolic body traversal is
+        // enough to expose all explicit reads; the exit phi keeps LiveOnEntry
+        // separate so retained state does not become a loop edge.
+        let saved_state = self.state.clone();
+        let saved_written = self.written.clone();
+        self.eval_block(&statement.body, &range_controls);
+        let body_state = self.state.clone();
+        let body_written = self.written.clone();
+        self.merge_states(&saved_state, &[saved_state.clone(), body_state]);
+        self.written = saved_written;
+        self.written.extend(body_written);
+    }
+
+    fn eval_expr_requested(
+        &mut self,
+        expression: &Expression,
+        requested: &BigUint,
+        context_width: usize,
+    ) -> Vec<VersionId> {
+        let expression_width = expression
+            .comptime()
+            .r#type
+            .total_width()
+            .unwrap_or(context_width);
+        let low_mask = requested & ValueBigUint::gen_mask(expression_width);
+        let mut reads = self.eval_expr_bits(expression, &low_mask);
+        if context_width > expression_width
+            && expression.comptime().r#type.signed
+            && (requested >> expression_width) != BigUint::default()
+            && expression_width != 0
+        {
+            reads.extend(
+                self.eval_expr_bits(expression, &(BigUint::from(1u32) << (expression_width - 1))),
+            );
+        }
+        reads.sort_unstable();
+        reads.dedup();
+        reads
+    }
+
+    fn eval_expr_bits(&mut self, expression: &Expression, requested: &BigUint) -> Vec<VersionId> {
+        if *requested == BigUint::default() {
+            return Vec::new();
+        }
+        match expression {
+            Expression::Term(factor) => match factor.as_ref() {
+                Factor::Variable(id, index, select, _) => {
+                    let variable = self.ctx.variables.get(id).cloned();
+                    let selected = if select.is_const_with_range() {
+                        variable.as_ref().and_then(|variable| {
+                            select.eval_value(&mut self.ctx, &variable.r#type, false)
+                        })
+                    } else {
+                        None
+                    };
+                    if let Some((_, low)) = selected {
+                        let source_mask = requested << low;
+                        let mut reads = Vec::new();
+                        for (idx, mask) in var_reads(*id, index, select, &mut self.ctx) {
+                            let source_mask = &source_mask & mask;
+                            for range in self.bit_part.overlapping((*id, idx), &source_mask) {
+                                reads.push(self.current_version((*id, idx, range)));
+                            }
+                        }
+                        reads
+                    } else {
+                        self.read_variable(*id, index, select)
+                    }
+                }
+                Factor::SystemFunctionCall(call) => match &call.kind {
+                    SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
+                        self.eval_expr_bits(&input.0, requested)
+                    }
+                    _ => self.eval_system_call(call, &[], true),
+                },
+                Factor::FunctionCall(call) => self.eval_call(call, &[]),
+                Factor::HierVariable(_)
+                | Factor::Value(_)
+                | Factor::Anonymous(_)
+                | Factor::Unknown(_) => Vec::new(),
+            },
+            Expression::Unary(op, operand, _) => match op {
+                Op::BitNot | Op::Add | Op::Sub => self.eval_expr_bits(operand, requested),
+                _ => self.eval_expr(operand),
+            },
+            Expression::Binary(left, op, right, _) => match op {
+                Op::LogicShiftL | Op::ArithShiftL => {
+                    let shift = right
+                        .eval_value(&mut self.ctx)
+                        .and_then(|value| value.to_usize());
+                    let mut reads = self.eval_expr(right);
+                    if let Some(shift) = shift {
+                        reads.extend(self.eval_expr_bits(left, &(requested >> shift)));
+                    } else {
+                        reads.extend(self.eval_expr(left));
+                    }
+                    reads
+                }
+                Op::LogicShiftR | Op::ArithShiftR => {
+                    let shift = right
+                        .eval_value(&mut self.ctx)
+                        .and_then(|value| value.to_usize());
+                    let mut reads = self.eval_expr(right);
+                    if let Some(shift) = shift {
+                        let width = left.comptime().r#type.total_width().unwrap_or(0);
+                        let shifted = requested << shift;
+                        reads.extend(
+                            self.eval_expr_bits(left, &(&shifted & ValueBigUint::gen_mask(width))),
+                        );
+                        if *op == Op::ArithShiftR
+                            && left.comptime().r#type.signed
+                            && width != 0
+                            && (&shifted >> width) != BigUint::default()
+                        {
+                            reads.extend(
+                                self.eval_expr_bits(left, &(BigUint::from(1u32) << (width - 1))),
+                            );
+                        }
+                    } else {
+                        reads.extend(self.eval_expr(left));
+                    }
+                    reads
+                }
+                Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
+                    let mut reads = self.eval_expr_bits(left, requested);
+                    reads.extend(self.eval_expr_bits(right, requested));
+                    reads
+                }
+                _ => self.eval_expr(expression),
+            },
+            Expression::Ternary(condition, left, right, _) => {
+                let mut reads = self.eval_expr(condition);
+                reads.extend(self.eval_expr_bits(left, requested));
+                reads.extend(self.eval_expr_bits(right, requested));
+                reads
+            }
+            Expression::Concatenation(parts, _) => {
+                if parts.iter().any(|(_, repeat)| repeat.is_some()) {
+                    return self.eval_expr(expression);
+                }
+                let mut low = 0usize;
+                let mut reads = Vec::new();
+                for (part, _) in parts.iter().rev() {
+                    let Some(width) = part.comptime().r#type.total_width() else {
+                        return self.eval_expr(expression);
+                    };
+                    let local = (requested >> low) & ValueBigUint::gen_mask(width);
+                    reads.extend(self.eval_expr_bits(part, &local));
+                    low = low.saturating_add(width);
+                }
+                reads
+            }
+            Expression::ArrayLiteral(_, _) | Expression::StructConstructor(_, _, _) => {
+                self.eval_expr(expression)
+            }
+        }
+    }
+
+    fn eval_expr(&mut self, expression: &Expression) -> Vec<VersionId> {
+        let mut reads = Vec::new();
+        match expression {
+            Expression::Term(factor) => self.eval_factor(factor, &mut reads),
+            Expression::Unary(_, expression, _) => reads.extend(self.eval_expr(expression)),
+            Expression::Binary(left, _, right, _) => {
+                reads.extend(self.eval_expr(left));
+                reads.extend(self.eval_expr(right));
+            }
+            Expression::Ternary(condition, left, right, _) => {
+                reads.extend(self.eval_expr(condition));
+                reads.extend(self.eval_expr(left));
+                reads.extend(self.eval_expr(right));
+            }
+            Expression::Concatenation(parts, _) => {
+                for (part, repeat) in parts {
+                    reads.extend(self.eval_expr(part));
+                    if let Some(repeat) = repeat {
+                        reads.extend(self.eval_expr(repeat));
+                    }
+                }
+            }
+            Expression::ArrayLiteral(items, _) => {
+                for item in items {
+                    match item {
+                        ArrayLiteralItem::Value(value, repeat) => {
+                            reads.extend(self.eval_expr(value));
+                            if let Some(repeat) = repeat {
+                                reads.extend(self.eval_expr(repeat));
+                            }
+                        }
+                        ArrayLiteralItem::Defaul(value) => reads.extend(self.eval_expr(value)),
+                    }
+                }
+            }
+            Expression::StructConstructor(_, fields, _) => {
+                for (_, value) in fields {
+                    reads.extend(self.eval_expr(value));
                 }
             }
         }
-        Factor::FunctionCall(call) => walk_function_call(call, state, ctx),
-        _ => {}
+        reads.sort_unstable();
+        reads.dedup();
+        reads
+    }
+
+    fn eval_factor(&mut self, factor: &Factor, reads: &mut Vec<VersionId>) {
+        match factor {
+            Factor::Variable(id, index, select, _) => {
+                for expression in index.0.iter().chain(select.0.iter()) {
+                    reads.extend(self.eval_expr(expression));
+                }
+                if let Some((_, expression)) = &select.1 {
+                    reads.extend(self.eval_expr(expression));
+                }
+                reads.extend(self.read_variable(*id, index, select));
+            }
+            Factor::FunctionCall(call) => reads.extend(self.eval_call(call, &[])),
+            Factor::SystemFunctionCall(call) => {
+                reads.extend(self.eval_system_call(call, &[], true));
+            }
+            Factor::HierVariable(_)
+            | Factor::Value(_)
+            | Factor::Anonymous(_)
+            | Factor::Unknown(_) => {}
+        }
+    }
+
+    fn eval_call(&mut self, call: &FunctionCall, controls: &[VersionId]) -> Vec<VersionId> {
+        let body = self.ctx.functions.get(&call.id).and_then(|function| {
+            if let Some(index) = &call.index {
+                function.get_function(index)
+            } else {
+                function.get_function(&[])
+            }
+        });
+        let Some(body) = body else {
+            let mut sources = Vec::new();
+            for input in call.inputs.values() {
+                sources.extend(self.eval_expr(input));
+            }
+            for outputs in call.outputs.values() {
+                for destination in outputs {
+                    self.write_destination(destination, &sources, controls);
+                }
+            }
+            return sources;
+        };
+        let mut actual_sources = Vec::new();
+
+        for (path, actual) in &call.inputs {
+            actual_sources.extend(self.eval_expr(actual));
+            let Some(&formal) = body.arg_map.get(path) else {
+                continue;
+            };
+            for key in self.keys_for_id(formal) {
+                let sources = self.eval_actual_for_formal_key(actual, key);
+                let version = self.definition(sources);
+                self.state.insert(key, version);
+            }
+        }
+
+        self.eval_block(&body.statements, controls);
+
+        for (path, destinations) in &call.outputs {
+            let Some(&formal) = body.arg_map.get(path) else {
+                continue;
+            };
+            let widths: Vec<_> = destinations
+                .iter()
+                .map(|destination| self.destination_width(destination))
+                .collect();
+            if widths.iter().all(Option::is_some) {
+                let total_width = widths.iter().flatten().sum();
+                let mut offset = total_width;
+                for (destination, width) in destinations.iter().zip(widths.into_iter()) {
+                    let width = width.expect("checked above");
+                    offset -= width;
+                    self.write_formal_output(destination, formal, offset, total_width, controls);
+                }
+            } else {
+                let sources = self.current_versions_for_id(formal);
+                for destination in destinations {
+                    self.write_destination(destination, &sources, controls);
+                }
+            }
+        }
+
+        let mut result = body
+            .ret
+            .map(|ret| self.current_versions_for_id(ret))
+            .unwrap_or_default();
+        if statements_have_unknown(&body.statements) {
+            result.extend(actual_sources);
+        }
+        result.sort_unstable();
+        result.dedup();
+        result
+    }
+
+    fn keys_for_id(&self, id: VarId) -> Vec<NodeKey> {
+        let mut keys = self
+            .bit_part
+            .ranges
+            .iter()
+            .filter(|((object, _), _)| *object == id)
+            .flat_map(|((_, index), ranges)| {
+                (0..ranges.len()).map(move |range| (id, *index, range))
+            })
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys
+    }
+
+    fn current_versions_for_id(&mut self, id: VarId) -> Vec<VersionId> {
+        self.keys_for_id(id)
+            .into_iter()
+            .map(|key| self.current_version(key))
+            .collect()
+    }
+
+    fn eval_actual_for_formal_key(
+        &mut self,
+        actual: &Expression,
+        formal_key: NodeKey,
+    ) -> Vec<VersionId> {
+        let Some(mask) = self.key_mask(formal_key).cloned() else {
+            return self.eval_expr(actual);
+        };
+        if let Expression::Term(factor) = actual
+            && let Factor::Variable(id, index, select, _) = factor.as_ref()
+            && index.0.is_empty()
+            && select.is_empty()
+        {
+            return self
+                .bit_part
+                .overlapping((*id, formal_key.1), &mask)
+                .into_iter()
+                .map(|range| self.current_version((*id, formal_key.1, range)))
+                .collect();
+        }
+        self.eval_expr_bits(actual, &mask)
+    }
+
+    fn write_formal_output(
+        &mut self,
+        destination: &AssignDestination,
+        formal: VarId,
+        formal_offset: usize,
+        formal_width: usize,
+        controls: &[VersionId],
+    ) {
+        let variable = self.ctx.variables.get(&destination.id).cloned();
+        let selected = if destination.select.is_const_with_range() {
+            variable.as_ref().and_then(|variable| {
+                destination
+                    .select
+                    .eval_value(&mut self.ctx, &variable.r#type, false)
+            })
+        } else {
+            None
+        };
+        for key in self.write_keys(destination) {
+            let mut sources = controls.to_vec();
+            if let (Some((_, low)), Some(mask)) = (selected, self.key_mask(key).cloned()) {
+                let requested =
+                    ((mask >> low) << formal_offset) & ValueBigUint::gen_mask(formal_width);
+                for formal_key in self.keys_for_id(formal) {
+                    if formal_key.1 != 0 {
+                        continue;
+                    }
+                    let Some(formal_mask) = self.key_mask(formal_key) else {
+                        continue;
+                    };
+                    if (formal_mask & &requested) != BigUint::default() {
+                        sources.push(self.current_version(formal_key));
+                    }
+                }
+            } else {
+                sources.extend(self.current_versions_for_id(formal));
+            }
+            let version = self.definition(sources);
+            self.state.insert(key, version);
+            self.written.insert(key);
+        }
+    }
+
+    fn eval_system_call(
+        &mut self,
+        call: &crate::ir::SystemFunctionCall,
+        controls: &[VersionId],
+        _value_position: bool,
+    ) -> Vec<VersionId> {
+        match &call.kind {
+            SystemFunctionKind::Bits(_)
+            | SystemFunctionKind::Size(_)
+            | SystemFunctionKind::Clog2(_)
+            | SystemFunctionKind::Finish => Vec::new(),
+            SystemFunctionKind::Onehot(input)
+            | SystemFunctionKind::Signed(input)
+            | SystemFunctionKind::Unsigned(input) => self.eval_expr(&input.0),
+            SystemFunctionKind::Readmemh(input, output) => {
+                let sources = self.eval_expr(&input.0);
+                for destination in &output.0 {
+                    self.write_destination(destination, &sources, controls);
+                }
+                Vec::new()
+            }
+            SystemFunctionKind::Display(_) | SystemFunctionKind::Write(_) => Vec::new(),
+            SystemFunctionKind::Assert { .. } => Vec::new(),
+        }
+    }
+}
+
+fn statements_have_unknown(statements: &[Statement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        Statement::Assign(assign) => expression_has_unknown(&assign.expr),
+        Statement::If(statement) => {
+            expression_has_unknown(&statement.cond)
+                || statements_have_unknown(&statement.true_side)
+                || statements_have_unknown(&statement.false_side)
+        }
+        Statement::Case(statement) => {
+            expression_has_unknown(&statement.case_target)
+                || statement
+                    .arms
+                    .iter()
+                    .any(|arm| statements_have_unknown(&arm.body))
+                || statements_have_unknown(&statement.default)
+        }
+        Statement::For(statement) => statements_have_unknown(&statement.body),
+        _ => false,
+    })
+}
+
+fn expression_has_unknown(expression: &Expression) -> bool {
+    match expression {
+        Expression::Term(factor) => matches!(factor.as_ref(), Factor::Unknown(_)),
+        Expression::Unary(_, expression, _) => expression_has_unknown(expression),
+        Expression::Binary(left, _, right, _) => {
+            expression_has_unknown(left) || expression_has_unknown(right)
+        }
+        Expression::Ternary(condition, left, right, _) => {
+            expression_has_unknown(condition)
+                || expression_has_unknown(left)
+                || expression_has_unknown(right)
+        }
+        Expression::Concatenation(parts, _) => parts.iter().any(|(expression, repeat)| {
+            expression_has_unknown(expression)
+                || repeat.as_ref().is_some_and(expression_has_unknown)
+        }),
+        Expression::ArrayLiteral(items, _) => items.iter().any(|item| match item {
+            ArrayLiteralItem::Value(expression, repeat) => {
+                expression_has_unknown(expression)
+                    || repeat
+                        .as_ref()
+                        .is_some_and(|expression| expression_has_unknown(expression.as_ref()))
+            }
+            ArrayLiteralItem::Defaul(expression) => expression_has_unknown(expression),
+        }),
+        Expression::StructConstructor(_, fields, _) => fields
+            .iter()
+            .any(|(_, expression)| expression_has_unknown(expression)),
     }
 }
 
@@ -1116,6 +1613,15 @@ fn dst_writes(dst: &AssignDestination, ctx: &mut Context) -> Vec<(usize, BigUint
     let is_index_const = dst.index.is_const();
     let is_select_const = dst.select.is_const();
 
+    if (!is_index_const || dst.index.0.is_empty())
+        && variable
+            .r#type
+            .total_array()
+            .is_some_and(|total| total > OVERSIZED_ARRAY)
+    {
+        return Vec::new();
+    }
+
     let range = if !is_index_const {
         variable.r#type.array.calc_range(&[])
     } else {
@@ -1126,10 +1632,7 @@ fn dst_writes(dst: &AssignDestination, ctx: &mut Context) -> Vec<(usize, BigUint
     };
 
     let mask = if !is_select_const {
-        let Some(width) = variable.total_width() else {
-            return Vec::new();
-        };
-        ValueBigUint::gen_mask(width)
+        conservative_select_mask(&dst.select, &variable.r#type, ctx)
     } else {
         let Some((beg, end)) = dst.select.eval_value(ctx, &variable.r#type, false) else {
             return Vec::new();
@@ -1155,15 +1658,23 @@ fn var_reads(
     let Some(variable) = ctx.variables.get(&id).cloned() else {
         return Vec::new();
     };
-    let mask = if let Some((beg, end)) = select.eval_value(ctx, &variable.r#type, false) {
+    if (!index.is_const() || index.0.is_empty())
+        && variable
+            .r#type
+            .total_array()
+            .is_some_and(|total| total > OVERSIZED_ARRAY)
+    {
+        return Vec::new();
+    }
+    let mask = if select.is_const_with_range()
+        && let Some((beg, end)) = select.eval_value(ctx, &variable.r#type, false)
+    {
         ValueBigUint::gen_mask_range(beg, end)
     } else {
-        let Some(width) = variable.total_width() else {
-            return Vec::new();
-        };
-        ValueBigUint::gen_mask(width)
+        conservative_select_mask(select, &variable.r#type, ctx)
     };
-    if let Some(idx_path) = index.eval_value(ctx)
+    if index.is_const()
+        && let Some(idx_path) = index.eval_value(ctx)
         && let Some(flat) = variable.r#type.array.calc_index(&idx_path)
     {
         return vec![(flat, mask)];
@@ -1171,4 +1682,28 @@ fn var_reads(
     // Dynamic index: conservatively treat every element as read.
     let total = variable.r#type.total_array().unwrap_or(1);
     (0..total).map(|i| (i, mask.clone())).collect()
+}
+
+fn conservative_select_mask(
+    select: &VarSelect,
+    r#type: &crate::ir::Type,
+    ctx: &mut Context,
+) -> BigUint {
+    let prefix = VarSelect(
+        select
+            .0
+            .iter()
+            .take_while(|expression| expression.comptime().is_const)
+            .cloned()
+            .collect(),
+        None,
+    );
+    if let Some((beg, end)) = prefix.eval_value(ctx, r#type, false) {
+        ValueBigUint::gen_mask_range(beg, end)
+    } else {
+        r#type
+            .total_width()
+            .map(ValueBigUint::gen_mask)
+            .unwrap_or_default()
+    }
 }
