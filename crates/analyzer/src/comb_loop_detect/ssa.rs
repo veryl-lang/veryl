@@ -1,4 +1,4 @@
-use super::{BitPartition, NodeKey, dst_writes, var_reads};
+use super::{BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
@@ -6,8 +6,8 @@ use crate::ir::{
     ForStatement, FunctionCall, IfStatement, Module, Op, Statement, SystemFunctionKind, VarIndex,
     VarSelect,
 };
-use crate::value::{Value, ValueBigUint};
-use crate::{BigUint, HashMap, HashSet};
+use crate::value::Value;
+use crate::{HashMap, HashSet};
 
 pub(super) fn analyze(
     module: &Module,
@@ -161,8 +161,8 @@ impl<'a> SsaProcedure<'a> {
 
     fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
         let mut keys = Vec::new();
-        for (idx, mask) in var_reads(id, index, select, &mut self.ctx) {
-            keys.extend(self.bit_part.overlapping_access(id, idx, &mask));
+        for (idx, span) in var_reads(id, index, select, &mut self.ctx) {
+            keys.extend(self.bit_part.overlapping_access(id, idx, span));
         }
         keys.sort_unstable();
         keys.dedup();
@@ -171,8 +171,8 @@ impl<'a> SsaProcedure<'a> {
 
     fn write_keys(&mut self, destination: &AssignDestination) -> Vec<NodeKey> {
         let mut keys = Vec::new();
-        for (idx, mask) in dst_writes(destination, &mut self.ctx) {
-            keys.extend(self.bit_part.overlapping_access(destination.id, idx, &mask));
+        for (idx, span) in dst_writes(destination, &mut self.ctx) {
+            keys.extend(self.bit_part.overlapping_access(destination.id, idx, span));
         }
         keys.sort_unstable();
         keys.dedup();
@@ -220,8 +220,8 @@ impl<'a> SsaProcedure<'a> {
         high.checked_sub(low)?.checked_add(1)
     }
 
-    fn key_mask(&self, key: NodeKey) -> Option<&BigUint> {
-        self.bit_part.ranges_of((key.0, key.1)).get(key.2)
+    fn key_span(&self, key: NodeKey) -> Option<PackedSpan> {
+        self.bit_part.ranges_of((key.0, key.1)).get(key.2).copied()
     }
 
     fn write_assignment_destination(
@@ -256,13 +256,14 @@ impl<'a> SsaProcedure<'a> {
             if let Some((_, selector)) = &destination.select.1 {
                 dependencies.extend(self.eval_expr(selector));
             }
-            if let (Some((_, low)), Some(key_mask)) = (selected, self.key_mask(key).cloned()) {
-                let requested = (key_mask >> low) << expression_offset;
-                dependencies.extend(self.eval_expr_requested(
-                    expression,
-                    &requested,
-                    expression_context_width,
-                ));
+            if let (Some((_, low)), Some(key_span)) = (selected, self.key_span(key)) {
+                if let Some(requested) = key_span.translated(low, expression_offset) {
+                    dependencies.extend(self.eval_expr_requested(
+                        expression,
+                        requested,
+                        expression_context_width,
+                    ));
+                }
             } else {
                 dependencies.extend(self.eval_expr(expression));
             }
@@ -470,7 +471,7 @@ impl<'a> SsaProcedure<'a> {
     fn eval_expr_requested(
         &mut self,
         expression: &Expression,
-        requested: &BigUint,
+        requested: PackedSpan,
         context_width: usize,
     ) -> Vec<VersionId> {
         let expression_width = expression
@@ -478,26 +479,29 @@ impl<'a> SsaProcedure<'a> {
             .r#type
             .total_width()
             .unwrap_or(context_width);
-        let low_mask = requested & ValueBigUint::gen_mask(expression_width);
-        let mut reads = self.eval_expr_bits(expression, &low_mask);
+        let mut reads = PackedSpan::whole(expression_width)
+            .and_then(|width| requested.intersection(width))
+            .map(|span| self.eval_expr_bits(expression, span))
+            .unwrap_or_default();
         if context_width > expression_width
             && expression.comptime().r#type.signed
-            && (requested >> expression_width) != BigUint::default()
+            && requested.end() > expression_width
             && expression_width != 0
         {
-            reads.extend(
-                self.eval_expr_bits(expression, &(BigUint::from(1u32) << (expression_width - 1))),
-            );
+            reads.extend(self.eval_expr_bits(
+                expression,
+                PackedSpan {
+                    start: expression_width - 1,
+                    length: 1,
+                },
+            ));
         }
         reads.sort_unstable();
         reads.dedup();
         reads
     }
 
-    fn eval_expr_bits(&mut self, expression: &Expression, requested: &BigUint) -> Vec<VersionId> {
-        if *requested == BigUint::default() {
-            return Vec::new();
-        }
+    fn eval_expr_bits(&mut self, expression: &Expression, requested: PackedSpan) -> Vec<VersionId> {
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::Variable(id, index, select, _) => {
@@ -510,12 +514,16 @@ impl<'a> SsaProcedure<'a> {
                         None
                     };
                     if let Some((_, low)) = selected {
-                        let source_mask = requested << low;
                         let mut reads = Vec::new();
-                        for (idx, mask) in var_reads(*id, index, select, &mut self.ctx) {
-                            let source_mask = &source_mask & mask;
-                            for key in self.bit_part.overlapping_access(*id, idx, &source_mask) {
-                                reads.push(self.current_version(key));
+                        if let Some(source_span) = requested.translated(0, low) {
+                            for (idx, access) in var_reads(*id, index, select, &mut self.ctx) {
+                                if let Some(source_span) = source_span.intersection(access) {
+                                    for key in
+                                        self.bit_part.overlapping_access(*id, idx, source_span)
+                                    {
+                                        reads.push(self.current_version(key));
+                                    }
+                                }
                             }
                         }
                         reads
@@ -546,7 +554,12 @@ impl<'a> SsaProcedure<'a> {
                         .and_then(|value| value.to_usize());
                     let mut reads = self.eval_expr(right);
                     if let Some(shift) = shift {
-                        reads.extend(self.eval_expr_bits(left, &(requested >> shift)));
+                        let start = requested.start.max(shift);
+                        if let Some(length) = requested.end().checked_sub(start)
+                            && let Some(input) = PackedSpan::new(start - shift, length)
+                        {
+                            reads.extend(self.eval_expr_bits(left, input));
+                        }
                     } else {
                         reads.extend(self.eval_expr(left));
                     }
@@ -559,18 +572,24 @@ impl<'a> SsaProcedure<'a> {
                     let mut reads = self.eval_expr(right);
                     if let Some(shift) = shift {
                         let width = left.comptime().r#type.total_width().unwrap_or(0);
-                        let shifted = requested << shift;
-                        reads.extend(
-                            self.eval_expr_bits(left, &(&shifted & ValueBigUint::gen_mask(width))),
-                        );
+                        let shifted = requested.translated(0, shift);
+                        if let Some(input) = shifted
+                            .and_then(|shifted| PackedSpan::whole(width)?.intersection(shifted))
+                        {
+                            reads.extend(self.eval_expr_bits(left, input));
+                        }
                         if *op == Op::ArithShiftR
                             && left.comptime().r#type.signed
                             && width != 0
-                            && (&shifted >> width) != BigUint::default()
+                            && shifted.is_some_and(|shifted| shifted.end() > width)
                         {
-                            reads.extend(
-                                self.eval_expr_bits(left, &(BigUint::from(1u32) << (width - 1))),
-                            );
+                            reads.extend(self.eval_expr_bits(
+                                left,
+                                PackedSpan {
+                                    start: width - 1,
+                                    length: 1,
+                                },
+                            ));
                         }
                     } else {
                         reads.extend(self.eval_expr(left));
@@ -600,8 +619,13 @@ impl<'a> SsaProcedure<'a> {
                     let Some(width) = part.comptime().r#type.total_width() else {
                         return self.eval_expr(expression);
                     };
-                    let local = (requested >> low) & ValueBigUint::gen_mask(width);
-                    reads.extend(self.eval_expr_bits(part, &local));
+                    if let Some(window) = PackedSpan::new(low, width)
+                        && let Some(local) = requested
+                            .intersection(window)
+                            .and_then(|span| span.translated(low, 0))
+                    {
+                        reads.extend(self.eval_expr_bits(part, local));
+                    }
                     low = low.saturating_add(width);
                 }
                 reads
@@ -778,7 +802,7 @@ impl<'a> SsaProcedure<'a> {
         actual: &Expression,
         formal_key: NodeKey,
     ) -> Vec<VersionId> {
-        let Some(mask) = self.key_mask(formal_key).cloned() else {
+        let Some(span) = self.key_span(formal_key) else {
             return self.eval_expr(actual);
         };
         if let Expression::Term(factor) = actual
@@ -788,12 +812,12 @@ impl<'a> SsaProcedure<'a> {
         {
             return self
                 .bit_part
-                .overlapping((*id, formal_key.1), &mask)
+                .overlapping((*id, formal_key.1), span)
                 .into_iter()
                 .map(|range| self.current_version((*id, formal_key.1, range)))
                 .collect();
         }
-        self.eval_expr_bits(actual, &mask)
+        self.eval_expr_bits(actual, span)
     }
 
     fn write_formal_output(
@@ -816,18 +840,21 @@ impl<'a> SsaProcedure<'a> {
         };
         for key in self.write_keys(destination) {
             let mut sources = controls.to_vec();
-            if let (Some((_, low)), Some(mask)) = (selected, self.key_mask(key).cloned()) {
-                let requested =
-                    ((mask >> low) << formal_offset) & ValueBigUint::gen_mask(formal_width);
-                for formal_key in self.keys_for_id(formal) {
-                    if formal_key.1.start != 0 {
-                        continue;
-                    }
-                    let Some(formal_mask) = self.key_mask(formal_key) else {
-                        continue;
-                    };
-                    if (formal_mask & &requested) != BigUint::default() {
-                        sources.push(self.current_version(formal_key));
+            if let (Some((_, low)), Some(span)) = (selected, self.key_span(key)) {
+                if let Some(requested) = span
+                    .translated(low, formal_offset)
+                    .and_then(|span| PackedSpan::whole(formal_width)?.intersection(span))
+                {
+                    for formal_key in self.keys_for_id(formal) {
+                        if formal_key.1.start != 0 {
+                            continue;
+                        }
+                        let Some(formal_span) = self.key_span(formal_key) else {
+                            continue;
+                        };
+                        if formal_span.overlaps(requested) {
+                            sources.push(self.current_version(formal_key));
+                        }
                     }
                 }
             } else {

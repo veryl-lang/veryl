@@ -441,6 +441,60 @@ fn comb_loop_preserves_vector_function_output_bits() {
 }
 
 #[test]
+fn comb_loop_preserves_wide_function_output_bits_without_scalarization() {
+    // Why this case exists: function boundary precision must come from
+    // observed endpoint propagation, not a width-limited per-bit expansion.
+    assert_comb_loop(
+        "a wide function output keeps disjoint endpoint bits independent",
+        r#"
+        module Top (
+            o: output logic<128>,
+        ) {
+            function copy (
+                x: input  logic<128>,
+                y: output logic<128>,
+            ) {
+                y = x;
+            }
+            var value: logic<128>;
+            always_comb {
+                copy(value, o);
+            }
+            assign value[126:0] = 0;
+            assign value[127] = o[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_wide_function_output_retains_matching_endpoint_feedback() {
+    assert_comb_loop(
+        "a wide function output retains feedback at the matching endpoint",
+        r#"
+        module Top (
+            o: output logic<128>,
+        ) {
+            function copy (
+                x: input  logic<128>,
+                y: output logic<128>,
+            ) {
+                y = x;
+            }
+            var value: logic<128>;
+            always_comb {
+                copy(value, o);
+            }
+            assign value[126:0] = 0;
+            assign value[127] = o[127];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 #[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_preserves_split_function_return_bits() {
     // Why this case exists: {high, low}[0] is low. Returning o[0] to high is
