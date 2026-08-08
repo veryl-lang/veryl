@@ -1,0 +1,11 @@
+module for_loop_overflow (
+    end_bound: input  signed logic<64>,
+    hits     : output logic       <32>,
+) {
+    always_comb {
+        hits = 0;
+        for _i in 1500000000..end_bound step *= 2 {
+            hits += 1;
+        }
+    }
+}
