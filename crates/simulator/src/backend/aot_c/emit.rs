@@ -1084,39 +1084,96 @@ fn emit_wide_rhs_field(
 }
 
 /// Full wide RMW of a dst bit-select (2-state):
-///   new = (old & ~rangemask) | ((src << lo) & rangemask)
-/// where rangemask = fill_ones(nbits) << lo.  `old` is read from the
-/// destination BEFORE the final copy overwrites it.  `src` must span `nb`
-/// bytes.  Mirrors Cranelift emit_wide_select_rmw.
+///   new = ((old & ~rangemask) | ((src << lo) & rangemask)) & widthmask
+/// where rangemask = fill_ones(nbits) << lo and widthmask = the
+/// `vw_apply_mask(dst_width)` clamp.  `lo`, `nbits` and `dst_width` are
+/// static, so both masks fold to per-word immediates and only the words the
+/// field (or the width clamp) actually touches get a statement.  Words are
+/// written HIGH to LOW: a self-aliasing store (`x[hi:lo] = f(x)` routed here
+/// with `src` pointing at the destination) reads source words at index
+/// `k - lo/64 <= k`, so descending order only ever reads not-yet-written
+/// words, preserving the read-everything-then-copy behaviour of the
+/// temporary form.  `src` must span `nb` bytes.
 #[allow(clippy::too_many_arguments)]
 fn emit_wide_select_rmw_store(
     src: &str,
-    mut pre: String,
+    pre: String,
     dst: &str,
-    nb: usize,
     nw: usize,
     lo: usize,
     nbits: usize,
-    dmask: u32,
+    dst_width: usize,
 ) -> String {
-    let rmask = next_wide_tmp();
-    let srcsh = next_wide_tmp();
-    let newv = next_wide_tmp();
-    pre.push_str(&format!(
-        "uint64_t _w{rmask}[{nw}]; \
-         vw_fill_ones((uint8_t*)_w{rmask}, (const uint8_t*)0, {pkn}u); \
-         vw_shl((uint8_t*)_w{rmask}, (const uint8_t*)_w{rmask}, {lo}ull, {nb}u); \
-         uint64_t _w{srcsh}[{nw}]; \
-         vw_shl((uint8_t*)_w{srcsh}, {src}, {lo}ull, {nb}u); \
-         vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{rmask}, {nb}u); \
-         uint64_t _w{newv}[{nw}]; \
-         vw_band_not((uint8_t*)_w{newv}, {dst}, (const uint8_t*)_w{rmask}, {nb}u); \
-         vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); ",
-        pkn = wpack(nb, nbits),
-    ));
+    let ws = lo / 64;
+    let bs = lo % 64;
+    // rangemask word k: bits of [lo, lo+nbits-1] falling in [64k, 64k+63].
+    let range_mask = |k: usize| -> u64 {
+        let word_lo = 64 * k;
+        let f_lo = lo.max(word_lo);
+        let f_hi = (lo + nbits - 1).min(word_lo + 63);
+        if f_lo > f_hi {
+            return 0;
+        }
+        let n = f_hi - f_lo + 1;
+        let base = if n == 64 { u64::MAX } else { (1u64 << n) - 1 };
+        base << (f_lo - word_lo)
+    };
+    // vw_apply_mask(dst_width) word k — width 0 means "no clamp" there.
+    let clamp_mask = |k: usize| -> u64 {
+        if dst_width == 0 {
+            return u64::MAX;
+        }
+        let word_lo = 64 * k;
+        if dst_width >= word_lo + 64 {
+            u64::MAX
+        } else if dst_width <= word_lo {
+            0
+        } else {
+            (1u64 << (dst_width - word_lo)) - 1
+        }
+    };
+    let t = next_wide_tmp();
+    let mut body = String::new();
+    for k in (0..nw).rev() {
+        let rm = range_mask(k);
+        let wm = clamp_mask(k);
+        let keep = !rm & wm;
+        let em = rm & wm;
+        if em == 0 {
+            // Untouched by the field; the width clamp may still bite.
+            if keep != u64::MAX {
+                if keep == 0 {
+                    body.push_str(&format!("_d{t}[{k}] = 0; "));
+                } else {
+                    body.push_str(&format!("_d{t}[{k}] &= {keep:#x}ULL; "));
+                }
+            }
+            continue;
+        }
+        // (src << lo) word k.  rm != 0 implies k >= ws, so sk is in range.
+        let sk = k - ws;
+        let sexpr = if bs == 0 {
+            format!("_s{t}[{sk}]")
+        } else if sk > 0 {
+            format!(
+                "((_s{t}[{sk}] << {bs}) | (_s{t}[{prev}] >> {rsh}))",
+                prev = sk - 1,
+                rsh = 64 - bs,
+            )
+        } else {
+            format!("(_s{t}[{sk}] << {bs})")
+        };
+        if keep == 0 {
+            body.push_str(&format!("_d{t}[{k}] = {sexpr} & {em:#x}ULL; "));
+        } else {
+            body.push_str(&format!(
+                "_d{t}[{k}] = (_d{t}[{k}] & {keep:#x}ULL) | ({sexpr} & {em:#x}ULL); "
+            ));
+        }
+    }
     format!(
-        "{{ {pre}vw_copy({dst}, (const uint8_t*)_w{newv}, {nb}u); \
-            vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}"
+        "{{ {pre}const veryl_u64_ua* _s{t} = (const veryl_u64_ua*)({src}); \
+            veryl_u64_ua* _d{t} = (veryl_u64_ua*)({dst}); {body}}}"
     )
 }
 
@@ -1445,7 +1502,52 @@ fn emit_wide_concat(
     let nb = native_bytes(width);
     let nw = wide_words(nb);
     let acc = next_wide_tmp();
-    pre.push_str(&format!("uint64_t _w{acc}[{nw}] = {{0}}; "));
+    let name = format!("_w{acc}");
+    pre.push_str(&format!("uint64_t {name}[{nw}] = {{0}}; "));
+    emit_wide_concat_body(
+        elements,
+        width,
+        nb,
+        &format!("(uint8_t*){name}"),
+        &name,
+        pre,
+    )?;
+    Some(WideRef {
+        addr: format!("((uint8_t*)_w{acc})"),
+        nb,
+        width,
+    })
+}
+
+/// Assemble a wide concat DIRECTLY into `dst` (a `uint8_t*` C expression
+/// over zeroed or to-be-overwritten storage): one `|=` per element word
+/// instead of marshaling through a `_w` temporary and copying it over.
+/// The caller must guarantee no element reads the destination (self-reads
+/// need the temporary form's read-before-write ordering).
+fn emit_wide_concat_into(
+    elements: &[(Box<ProtoExpression>, usize, usize)],
+    width: usize,
+    nb: usize,
+    dst: &str,
+    pre: &mut String,
+) -> Option<()> {
+    pre.push_str(&format!("__builtin_memset({dst}, 0, {nb}); "));
+    let words = format!("((veryl_u64_ua*)({dst}))");
+    emit_wide_concat_body(elements, width, nb, dst, &words, pre)
+}
+
+/// Shared assembly for `emit_wide_concat{,_into}`: `bytes` addresses the
+/// buffer as `uint8_t*` (for the vw_* helpers), `words` as an lvalue u64
+/// array (for the narrow `|=` inserts).
+fn emit_wide_concat_body(
+    elements: &[(Box<ProtoExpression>, usize, usize)],
+    width: usize,
+    nb: usize,
+    bytes: &str,
+    words: &str,
+    pre: &mut String,
+) -> Option<()> {
+    let nw = nb / 8;
 
     // High-to-low: the first element takes the highest bits, so offsets descend.
     let total: usize = elements.iter().map(|(_, r, ew)| r * ew).sum();
@@ -1468,6 +1570,36 @@ fn emit_wide_concat(
             continue;
         }
 
+        if ew == 1 && repeat > 1 {
+            // Replicated single bit (`{N{x}}` sign/mask extension): broadcast
+            // the bit to a full word (`0 - bit`) and OR it under a per-word
+            // immediate span mask instead of one `|=` per copy.
+            let v = emit_expr(elem)?;
+            let e = next_wide_tmp();
+            pre.push_str(&format!(
+                "uint64_t _e{e} = (uint64_t)0 - (((uint64_t)({v})) & 0x1ULL); ",
+            ));
+            let span_hi = hi; // exclusive
+            hi -= repeat;
+            let span_lo = hi; // inclusive
+            for w in span_lo / 64..=(span_hi - 1) / 64 {
+                if w >= nw {
+                    break; // past the result width
+                }
+                let word_lo = w * 64;
+                let f_lo = span_lo.max(word_lo);
+                let f_hi = (span_hi - 1).min(word_lo + 63);
+                let n = f_hi - f_lo + 1;
+                let base = if n == 64 { u64::MAX } else { (1u64 << n) - 1 };
+                let m = base << (f_lo - word_lo);
+                if m == u64::MAX {
+                    pre.push_str(&format!("{words}[{w}] |= _e{e}; "));
+                } else {
+                    pre.push_str(&format!("{words}[{w}] |= _e{e} & {m:#x}ULL; "));
+                }
+            }
+            continue;
+        }
         if ew <= 64 {
             // Mask to `ew`: the reference zero-extends the element from elem_width.
             let v = emit_expr(elem)?;
@@ -1484,11 +1616,11 @@ fn emit_wide_concat(
                     continue; // past the result width
                 }
                 let b = off % 64;
-                pre.push_str(&format!("_w{acc}[{w}] |= _e{e} << {b}; "));
+                pre.push_str(&format!("{words}[{w}] |= _e{e} << {b}; "));
                 // `b+ew>64` ⇒ `b>0`, so `64-b ∈ 1..=63` (no shift UB).
                 if b + ew > 64 && w + 1 < nw {
                     pre.push_str(&format!(
-                        "_w{acc}[{w1}] |= _e{e} >> {sh}; ",
+                        "{words}[{w1}] |= _e{e} >> {sh}; ",
                         w1 = w + 1,
                         sh = 64 - b,
                     ));
@@ -1503,22 +1635,19 @@ fn emit_wide_concat(
                 let sh = next_wide_tmp();
                 pre.push_str(&format!(
                     "uint64_t _w{sh}[{nw}]; vw_shl((uint8_t*)_w{sh}, {e}, {off}ull, {nb}u); \
-                     vw_bor((uint8_t*)_w{acc}, (const uint8_t*)_w{acc}, (const uint8_t*)_w{sh}, {nb}u); ",
+                     vw_bor({bytes}, (const uint8_t*){bytes2}, (const uint8_t*)_w{sh}, {nb}u); ",
                     e = e_ref.addr,
+                    bytes2 = bytes,
                 ));
             }
         }
     }
 
     pre.push_str(&format!(
-        "vw_apply_mask((uint8_t*)_w{acc}, (const uint8_t*)0, {p}u); ",
+        "vw_apply_mask({bytes}, (const uint8_t*)0, {p}u); ",
         p = wpack(nb, width),
     ));
-    Some(WideRef {
-        addr: format!("((uint8_t*)_w{acc})"),
-        nb,
-        width,
-    })
+    Some(())
 }
 
 /// Wide comparison / logic over wide operands → a narrow `uint64_t` 0/1
@@ -4431,11 +4560,10 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                             &format!("((uint8_t*)_w{t})"),
                             pre,
                             &dst,
-                            nb,
                             nw,
                             lo,
                             nbits2,
-                            dmask,
+                            a.dst_width,
                         ));
                     }
                     let store = if nb <= f.nb {
@@ -4469,7 +4597,13 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                     let mut pre = String::new();
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
                     return Some(emit_wide_select_rmw_store(
-                        &r.addr, pre, &dst, nb, nw, lo, nbits, dmask,
+                        &r.addr,
+                        pre,
+                        &dst,
+                        nw,
+                        lo,
+                        nbits,
+                        a.dst_width,
                     ));
                 }
                 // Bare signed RHS narrower than the wide destination:
@@ -4482,6 +4616,70 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                             vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}",
                         src = r.addr,
                     ));
+                }
+                // Wide ternary RHS: select word-by-word straight into the
+                // destination.  Per-word forward select is alias-safe: an
+                // arm equal to the destination reads each word before that
+                // word is written.  The both-signed-narrower shape keeps the
+                // generic path (its arms re-extend through a fresh
+                // temporary).
+                if let ProtoExpression::Ternary {
+                    cond,
+                    true_expr,
+                    false_expr,
+                    width: tw,
+                    ..
+                } = eff_expr
+                    && *tw == a.dst_width
+                {
+                    let needs_sext = true_expr.expr_context().signed
+                        && false_expr.expr_context().signed
+                        && true_expr.width() > 0
+                        && false_expr.width() > 0
+                        && (true_expr.width() < *tw || false_expr.width() < *tw);
+                    if !needs_sext && let Some(c) = emit_expr(cond) {
+                        let mut pre = String::new();
+                        if let Some(t_ref) = emit_wide_operand(true_expr, nb, &mut pre)
+                            && let Some(f_ref) = emit_wide_operand(false_expr, nb, &mut pre)
+                        {
+                            let t = next_wide_tmp();
+                            return Some(format!(
+                                "{{ {pre}int _c{t} = (({c}) != 0); \
+                                 for (int _i{t} = 0; _i{t} < {nw}; _i{t}++) \
+                                 VW_WR({dst}, _i{t}, _c{t} ? \
+                                 ((const veryl_u64_ua*)({tp}))[_i{t}] : \
+                                 ((const veryl_u64_ua*)({fp}))[_i{t}]); \
+                                 vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}",
+                                nw = nb / 8,
+                                tp = t_ref.addr,
+                                fp = f_ref.addr,
+                            ));
+                        }
+                    }
+                }
+                // Wide concat RHS: assemble the elements straight into the
+                // destination (one |= per element word), no `_w` temporary.
+                // Self-reading concats (the partial-coverage fusion's
+                // `x = {x[7:7], b, a}`) keep the temporary form: its
+                // read-before-write ordering is what makes them correct.
+                if let ProtoExpression::Concatenation {
+                    elements,
+                    width: cw,
+                    ..
+                } = eff_expr
+                    && *cw == a.dst_width
+                {
+                    // Expanded: the compact gather hides dynamic reads of
+                    // an array's middle elements, and the into-form zeroes
+                    // the destination before the elements evaluate.
+                    let mut ins: Vec<VarOffset> = vec![];
+                    eff_expr.gather_variable_offsets_expanded(&mut ins);
+                    if !ins.contains(&a.dst) {
+                        let mut pre = String::new();
+                        if emit_wide_concat_into(elements, *cw, nb, &dst, &mut pre).is_some() {
+                            return Some(format!("{{ {pre}}}"));
+                        }
+                    }
                 }
                 // No select: plain wide store.  Copy into the destination, then
                 // mask THERE (never the source, which may alias a flat-buffer
@@ -7977,6 +8175,93 @@ mod tests {
         let expected_sel = ((or0 as u128) >> 32) | ((or1 as u128) << 32) | ((or2 as u128) << 96);
         assert_eq!(read_u128(&comb, 48), expected_sel);
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn wide_concat_store_to_a_dynamically_read_middle_element() {
+        // arr[1] = {arr[idx][63:0], src}: the dynamic read can alias the
+        // destination (idx == 1), so the direct into-form (which zeroes the
+        // destination first) must not be used — the expanded gather sees the
+        // middle element where the compact one does not.
+        if !cc_available() {
+            eprintln!("wide_concat_store_to_a_dynamically_read_middle_element: skipping");
+            return;
+        }
+        let base = 0x40isize; // 4 elements x 192 bit (24 B)
+        let dyn_low = ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(base),
+            stride: 24,
+            element_native_bytes: 24,
+            index_expr: Box::new(ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(0x200),
+                select: None,
+                dynamic_select: None,
+                width: 32,
+                var_full_width: 32,
+                expr_context: ctx(32, false),
+            }),
+            num_elements: 4,
+            select: Some((63, 0)),
+            dynamic_select: None,
+            width: 64,
+            expr_context: ctx(64, false),
+        };
+        let src = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x210),
+            select: None,
+            dynamic_select: None,
+            width: 128,
+            var_full_width: 128,
+            expr_context: ctx(128, false),
+        };
+        let stmt = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(base + 24), // element 1: the middle
+            dst_width: 192,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Concatenation {
+                elements: vec![(Box::new(dyn_low), 1, 64), (Box::new(src), 1, 128)],
+                width: 192,
+                expr_context: ctx(192, false),
+            },
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src_txt = emit_function(&[stmt]).expect("must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_dynmid_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src_txt, "wide_concat_dyn_middle") else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 0x300];
+        for (i, b) in comb[0x58..0x70].iter_mut().enumerate() {
+            *b = 0xa0 + i as u8; // old arr[1]
+        }
+        comb[0x200..0x204].copy_from_slice(&1u32.to_le_bytes()); // idx = 1 (the dst)
+        for (i, b) in comb[0x210..0x220].iter_mut().enumerate() {
+            *b = 0x10 + i as u8; // src
+        }
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        // Low 128 bits = src; bits [191:128] = OLD arr[1][63:0].
+        assert_eq!(
+            &comb[0x58..0x68],
+            &(0x10..0x20).collect::<Vec<u8>>()[..],
+            "src half"
+        );
+        assert_eq!(
+            &comb[0x68..0x70],
+            &(0xa0..0xa8).collect::<Vec<u8>>()[..],
+            "old low word must survive into the high bits"
+        );
     }
 
     #[test]
