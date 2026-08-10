@@ -58,6 +58,9 @@ pprof = {workspace = true}
 
 [features]
 profile = []
+# Env-gated bisect probes (FF digest / state dumps / offset lookups) compiled
+# into `Simulator::step`; off by default so release binaries carry none of it.
+sim-probes = []
 
 [[bench]]
 name = "benchmark"

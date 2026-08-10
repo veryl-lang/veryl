@@ -807,6 +807,124 @@ impl Simulator {
         self.ir.ports.get(&port).map(|id| Event::Reset(*id))
     }
 
+    /// Env-gated bisect probes (see the arming list in `step`); cold so the
+    /// bodies never inline into the step loop.
+    #[cfg(feature = "sim-probes")]
+    #[cold]
+    #[inline(never)]
+    fn debug_state_probes(&self) {
+        // VERYL_FF_DIGEST=<path>: one FF-buffer digest per step — diffing
+        // two runs' files names the first diverging step.  All probes here
+        // share process-global state: use with a single test, or parallel
+        // instances interleave.
+        {
+            use std::io::Write;
+            use std::sync::OnceLock;
+            static DIGEST: OnceLock<Option<std::sync::Mutex<std::fs::File>>> = OnceLock::new();
+            let f = DIGEST.get_or_init(|| {
+                std::env::var("VERYL_FF_DIGEST").ok().map(|p| {
+                    std::sync::Mutex::new(std::fs::File::create(p).expect("VERYL_FF_DIGEST path"))
+                })
+            });
+            if let Some(f) = f {
+                let mut h = 0xcbf29ce484222325u64;
+                for &b in self.ir.ff_values.iter() {
+                    h = (h ^ b as u64).wrapping_mul(0x100000001b3);
+                }
+                let _ = writeln!(f.lock().unwrap(), "{h:016x}");
+            }
+            // VERYL_FF_DUMP_RANGE=lo:hi + VERYL_FF_DUMP_DIR=<dir>: ff+comb
+            // hexdump of the PRE-step state per step in [lo, hi] — the
+            // first differing line between two runs names the byte.
+            // VERYL_FF_LOOKUP=<hex-off>[,<hex-off>...]: print the variable
+            // covering each FF byte offset, once at step 0.
+            static LOOKUP: OnceLock<Vec<usize>> = OnceLock::new();
+            let lk = LOOKUP.get_or_init(|| {
+                std::env::var("VERYL_FF_LOOKUP")
+                    .map(|s| {
+                        s.split(',')
+                            .filter_map(|t| {
+                                usize::from_str_radix(t.trim_start_matches("0x"), 16).ok()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            });
+            static CLOOKUP: OnceLock<Vec<usize>> = OnceLock::new();
+            let clk = CLOOKUP.get_or_init(|| {
+                std::env::var("VERYL_COMB_LOOKUP")
+                    .map(|s| {
+                        s.split(',')
+                            .filter_map(|t| {
+                                usize::from_str_radix(t.trim_start_matches("0x"), 16).ok()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            });
+            static DUMP: OnceLock<Option<(u64, u64, String)>> = OnceLock::new();
+            let dump = DUMP.get_or_init(|| {
+                let r = std::env::var("VERYL_FF_DUMP_RANGE").ok()?;
+                let d = std::env::var("VERYL_FF_DUMP_DIR").ok()?;
+                let (a, b) = r.split_once(':')?;
+                Some((a.parse().ok()?, b.parse().ok()?, d))
+            });
+            static STEP_NO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            // Counted only while a step-indexed probe is armed, so the
+            // unarmed hot path stays free of the atomic.
+            let n = if lk.is_empty() && clk.is_empty() && dump.is_none() {
+                0
+            } else {
+                STEP_NO.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            };
+            if !lk.is_empty() && n == 0 {
+                for &off in lk {
+                    eprintln!(
+                        "[ff_lookup] {off:#x}: {}",
+                        crate::backend::validate::lookup_comb_offset(
+                            &self.ir.module_variables,
+                            self.ir.ff_values.as_ptr(),
+                            off,
+                        )
+                    );
+                }
+            }
+            if !clk.is_empty() && n == 0 {
+                for &off in clk {
+                    eprintln!(
+                        "[comb_lookup] {off:#x}: {}",
+                        crate::backend::validate::lookup_comb_offset(
+                            &self.ir.module_variables,
+                            self.ir.comb_values.as_ptr(),
+                            off,
+                        )
+                    );
+                }
+            }
+            if let Some((lo, hi, dir)) = dump
+                && n >= *lo
+                && n <= *hi
+            {
+                let mut out = String::new();
+                for (tag, buf) in [
+                    ("ff", &self.ir.ff_values[..]),
+                    ("comb", &self.ir.comb_values[..]),
+                ] {
+                    for (i, chunk) in buf.chunks(16).enumerate() {
+                        out.push_str(&format!("{tag} {:06x}:", i * 16));
+                        for b in chunk {
+                            out.push_str(&format!(" {b:02x}"));
+                        }
+                        out.push('\n');
+                    }
+                }
+                if let Err(e) = std::fs::write(format!("{dir}/step{n}.hex"), out) {
+                    eprintln!("[ff_dump] step{n}: {e}");
+                }
+            }
+        }
+    }
+
     pub fn step(&mut self, event: &Event) {
         // A missing init_components call would let the run pass vacuously
         // (no hook ever fires); catch that bug in debug builds without
@@ -819,6 +937,26 @@ impl Simulator {
         #[cfg(feature = "profile")]
         {
             self.profile.step_count += 1;
+        }
+
+        // Bisect probes exist only under `--features sim-probes`: a default
+        // build carries no probe code in the step loop at all.
+        #[cfg(feature = "sim-probes")]
+        {
+            use std::sync::OnceLock;
+            static PROBES_ARMED: OnceLock<bool> = OnceLock::new();
+            if *PROBES_ARMED.get_or_init(|| {
+                [
+                    "VERYL_FF_DIGEST",
+                    "VERYL_FF_LOOKUP",
+                    "VERYL_COMB_LOOKUP",
+                    "VERYL_FF_DUMP_RANGE",
+                ]
+                .iter()
+                .any(|k| std::env::var_os(k).is_some())
+            }) {
+                self.debug_state_probes();
+            }
         }
 
         // Common case (no derived clocks) skips the edge-detect loop.
