@@ -624,6 +624,13 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
                 w: a.dst_width,
                 bad: false,
             });
+            // A WIDE (>64-bit) destination is deliberately NOT fused:
+            // the observed >64-bit field-store groups are single-bit packs
+            // (80 one-bit fields into an 80/960-bit vector), where each
+            // original store is a cheap sub-word RMW and the fused statement
+            // becomes an 80-element wide concat chain — measured sim_s +32%.
+            // No real register-file (many multi-bit fields per word) shape
+            // has been observed to win yet.
             if a.select.is_some()
                 && a.dynamic_select.is_none()
                 && a.rhs_select.is_none()
@@ -825,6 +832,13 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
             }
         }
         fused += 1;
+        if diag() {
+            eprintln!(
+                "[comb_fusion] coalesced group: off={o:#x} w={} fields={} span=[{first},{last}]",
+                g.w,
+                g.idxs.len(),
+            );
+        }
     }
 
     if fused == 0 {
@@ -945,6 +959,11 @@ pub fn inline_single_readers(
     let mut fused_offsets: Vec<isize> = Vec::new();
     let mut inlined = 0usize;
     let (mut veto_shape, mut veto_reader, mut veto_redef, mut veto_ext) = (0usize, 0, 0, 0);
+    // veto_shape sub-classification (diag only): why a comb Assign fell out
+    // of the single-reader candidate shape.
+    let (mut vs_sel_def, mut vs_wide, mut vs_multi, mut vs_no_fwd_reader, mut vs_partial_read) =
+        (0usize, 0, 0, 0, 0);
+    let (mut vs_rhs_sel, mut vs_sext, mut vs_dyn_mismatch) = (0usize, 0, 0);
     let mut e_ins: Vec<VarOffset> = vec![];
     let mut e_outs: Vec<VarOffset> = vec![];
 
@@ -1020,6 +1039,7 @@ pub fn inline_single_readers(
             }
             if to != 0 || tf == 0 || tf != reads[&o].count {
                 veto_shape += 1;
+                vs_dyn_mismatch += 1;
                 continue;
             }
             if diag() && duplicated + 1 == limit_dup() {
@@ -1120,8 +1140,40 @@ pub fn inline_single_readers(
             }
             _ => None,
         }) else {
-            if matches!(&stmts[i], ProtoStatement::Assign(a) if !a.dst.is_ff()) {
-                veto_shape += 1;
+            if let ProtoStatement::Assign(a) = &stmts[i]
+                && !a.dst.is_ff()
+            {
+                // Already counted as ext/reader inside the candidate match —
+                // do not double-count them into the shape buckets.
+                let counted_elsewhere = matches!(a.dst, VarOffset::Comb(o)
+                    if a.select.is_none()
+                        && a.dynamic_select.is_none()
+                        && a.rhs_select.is_none()
+                        && a.dst_width > 0
+                        && a.dst_width <= 64
+                        && a.expr.width() > 0
+                        && a.expr.width() <= 64
+                        && a.expr.store_sign_extend_from(a.dst_width).is_none()
+                        && (externals.contains(&o) || opaque_read.contains(&o)));
+                if !counted_elsewhere {
+                    veto_shape += 1;
+                    if a.select.is_some() || a.dynamic_select.is_some() {
+                        vs_sel_def += 1;
+                    } else if a.rhs_select.is_some() {
+                        vs_rhs_sel += 1;
+                    } else if a.dst_width > 64 || a.expr.width() > 64 {
+                        vs_wide += 1;
+                    } else if a.expr.store_sign_extend_from(a.dst_width).is_some() {
+                        vs_sext += 1;
+                    } else if let VarOffset::Comb(o) = a.dst {
+                        match reads.get(&o) {
+                            Some(ri) if ri.count > 1 => vs_multi += 1,
+                            _ => vs_no_fwd_reader += 1,
+                        }
+                    } else {
+                        vs_no_fwd_reader += 1;
+                    }
+                }
             }
             continue;
         };
@@ -1134,6 +1186,7 @@ pub fn inline_single_readers(
         count_reads_stmt(&stmts[r_idx], o, &mut full, &mut other);
         if full != 1 || other != 0 {
             veto_shape += 1;
+            vs_partial_read += 1;
             continue;
         }
         // Position independence: nothing between def and reader — nor the
@@ -1229,6 +1282,50 @@ pub fn inline_single_readers(
             veto_redef,
             veto_ext,
         );
+        eprintln!(
+            "[comb_fusion] shape breakdown: store_sel={vs_sel_def} rhs_sel={vs_rhs_sel} wide={vs_wide} sext={vs_sext} multi_reader={vs_multi} no_fwd_reader={vs_no_fwd_reader} partial_read={vs_partial_read} dyn_mismatch={vs_dyn_mismatch}",
+        );
+        // Field-store census: group size per destination (how many static
+        // select stores hit the same comb offset) and that offset's reader
+        // count — decides bare-RMW normalization vs group fusion.
+        {
+            use std::collections::HashMap as Map;
+            let mut groups: Map<isize, usize> = Map::new();
+            let mut narrow = 0usize;
+            let mut wide_sel = 0usize;
+            for s in stmts.iter() {
+                if let ProtoStatement::Assign(a) = s
+                    && a.select.is_some()
+                    && a.dynamic_select.is_none()
+                    && let VarOffset::Comb(o) = a.dst
+                {
+                    *groups.entry(o).or_default() += 1;
+                    if a.dst_width <= 64 {
+                        narrow += 1;
+                    } else {
+                        wide_sel += 1;
+                    }
+                }
+            }
+            let mut size_hist: Map<usize, usize> = Map::new();
+            let mut single_dst_single_reader = 0usize;
+            let mut single_dst_multi_reader = 0usize;
+            for (&o, &cnt) in &groups {
+                *size_hist.entry(cnt).or_default() += 1;
+                if cnt == 1 {
+                    match reads.get(&o).map(|ri| ri.count).unwrap_or(0) {
+                        0 | 1 => single_dst_single_reader += 1,
+                        _ => single_dst_multi_reader += 1,
+                    }
+                }
+            }
+            let mut hist: Vec<_> = size_hist.into_iter().collect();
+            hist.sort();
+            eprintln!(
+                "[comb_fusion] field-store census: dsts={} narrow={narrow} wide={wide_sel} group-size-hist={hist:?} singles: reader<=1 {single_dst_single_reader} multi {single_dst_multi_reader}",
+                groups.len(),
+            );
+        }
     }
     if !deleted.iter().any(|&d| d) {
         return (stmts, fused_offsets);
@@ -1729,6 +1826,20 @@ mod tests {
         };
         assert_eq!(*var_offset, VarOffset::Comb(0x0));
         assert_eq!(*select, Some((7, 7)));
+    }
+
+    #[test]
+    fn coalesce_rejects_a_wide_destination() {
+        // A >64-bit destination never fuses, even fully covered (see the
+        // eligibility comment in coalesce_field_stores).
+        let stmts = vec![
+            assign_sel(0x0, 192, 63, 0, var(0x100, 64)),
+            assign_sel(0x0, 192, 127, 64, var(0x108, 64)),
+            assign_sel(0x0, 192, 191, 128, var(0x110, 64)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 0);
+        assert_eq!(out.len(), 3);
     }
 
     #[test]
