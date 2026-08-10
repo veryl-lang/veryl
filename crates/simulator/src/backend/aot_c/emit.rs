@@ -2943,6 +2943,228 @@ fn sink_census(stmts: &[ProtoStatement], chunks: &[&[ProtoStatement]]) {
         chunks_n = chunks.len(),
         sinkable = free - same_chunk,
     );
+    // Materialization census: classify every written byte by what stands
+    // between it and a C local.  `multi_local` is the multi-reader
+    // localization candidate class (single writer, >1 readers, all in the
+    // writer's chunk, not blocklisted) — the analogue of Verilator's
+    // __VdfgRegularize scope locals; `sites` weights each class by reader
+    // count, approximating the load traffic a local would remove.
+    let mut bytes = [0usize; 6];
+    let mut sites = [0usize; 6];
+    for (&off, w) in &writers {
+        let rs = readers.get(&off).map(|v| v.as_slice()).unwrap_or(&[]);
+        let class = if w.len() > 1 {
+            4 // multi-writer (field-store groups): a local needs RMW handling
+        } else if rs.is_empty() {
+            0 // no comb reader: event/TB-visible or dead
+        } else if rs.len() == 1 {
+            1 // single reader: existing sink/localize territory
+        } else if blocklist.contains(&off) {
+            5 // multi-reader but externally visible
+        } else {
+            let wc = chunk_of.get(w[0]);
+            if rs.iter().all(|&r| chunk_of.get(r) == wc) {
+                2 // multi-reader, closed within the writer's chunk
+            } else {
+                3 // multi-reader across chunks: stays materialized (or re-chunk)
+            }
+        };
+        bytes[class] += 1;
+        sites[class] += rs.len();
+    }
+    eprintln!(
+        "[mat_census] bytes: no_reader={} single={} multi_local={} multi_cross={} \
+         multi_write={} blocked_multi={} | reader-sites: single={} multi_local={} \
+         multi_cross={} multi_write={} blocked_multi={}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        sites[1],
+        sites[2],
+        sites[3],
+        sites[4],
+        sites[5],
+    );
+}
+
+/// Table census (V3Table shape): for every top-level statement (an If/Case
+/// block counts whole, like Verilator tables a whole process), collect the
+/// distinct scalar inputs with their effective bit widths and the operator
+/// count.  A statement whose inputs sum to a small index and whose cone is
+/// expensive is a candidate for a lookup-table rewrite — the shape behind
+/// Verilator's ConstPool TABLEs (72 tables / 45 lookup sites on e902).
+/// Groups statements by their exact input set to surface decoder families
+/// that would share one table.  Diagnostic only.
+fn table_census(stmts: &[ProtoStatement]) {
+    use std::collections::BTreeSet;
+    // Distinct inputs as (is_ff, offset, hi, lo); None = disqualified.
+    fn expr_inputs(
+        e: &ProtoExpression,
+        inputs: &mut BTreeSet<(bool, isize, usize, usize)>,
+        ops: &mut usize,
+    ) -> bool {
+        match e {
+            ProtoExpression::HierVariable(_) => false,
+            ProtoExpression::Value { .. } => true,
+            ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select,
+                width,
+                ..
+            } => {
+                if dynamic_select.is_some() {
+                    return false;
+                }
+                let (hi, lo) = match select {
+                    Some((h, l)) => (*h, *l),
+                    None => (width.saturating_sub(1), 0),
+                };
+                if hi - lo + 1 > 64 {
+                    return false;
+                }
+                let (ff, off) = match var_offset {
+                    VarOffset::Ff(o) => (true, *o),
+                    VarOffset::Comb(o) => (false, *o),
+                };
+                inputs.insert((ff, off, hi, lo));
+                true
+            }
+            ProtoExpression::Unary { x, .. } => {
+                *ops += 1;
+                expr_inputs(x, inputs, ops)
+            }
+            ProtoExpression::Binary { x, y, .. } => {
+                *ops += 1;
+                expr_inputs(x, inputs, ops) && expr_inputs(y, inputs, ops)
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                *ops += elements.len();
+                elements.iter().all(|(e, _, _)| expr_inputs(e, inputs, ops))
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                *ops += 1;
+                expr_inputs(cond, inputs, ops)
+                    && expr_inputs(true_expr, inputs, ops)
+                    && expr_inputs(false_expr, inputs, ops)
+            }
+            ProtoExpression::DynamicVariable { .. } => false,
+        }
+    }
+    fn stmt_inputs(
+        s: &ProtoStatement,
+        inputs: &mut BTreeSet<(bool, isize, usize, usize)>,
+        ops: &mut usize,
+        outs: &mut usize,
+    ) -> bool {
+        match s {
+            ProtoStatement::Assign(a) => {
+                if a.dynamic_select.is_some() {
+                    return false;
+                }
+                *outs += 1;
+                expr_inputs(&a.expr, inputs, ops)
+            }
+            ProtoStatement::If(x) => {
+                if let Some(c) = &x.cond {
+                    if !expr_inputs(c, inputs, ops) {
+                        return false;
+                    }
+                    *ops += 1;
+                }
+                x.true_side
+                    .iter()
+                    .chain(x.false_side.iter())
+                    .all(|s| stmt_inputs(s, inputs, ops, outs))
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    if !expr_inputs(&arm.cond, inputs, ops) {
+                        return false;
+                    }
+                    *ops += 1;
+                    if !arm.body.iter().all(|s| stmt_inputs(s, inputs, ops, outs)) {
+                        return false;
+                    }
+                }
+                x.default.iter().all(|s| stmt_inputs(s, inputs, ops, outs))
+            }
+            ProtoStatement::SequentialBlock(inner) => {
+                inner.iter().all(|s| stmt_inputs(s, inputs, ops, outs))
+            }
+            _ => false,
+        }
+    }
+    // Buckets by total input bits: <=8, <=12, <=16, <=20, >20 / disqualified.
+    let mut b_stmts = [0usize; 6];
+    let mut b_ops = [0usize; 6];
+    // Input set -> (statement count, op count).
+    type InputSet = Vec<(bool, isize, usize, usize)>;
+    let mut groups: HashMap<InputSet, (usize, usize)> = HashMap::default();
+    for s in stmts {
+        let mut inputs = BTreeSet::new();
+        let (mut ops, mut outs) = (0usize, 0usize);
+        let ok = stmt_inputs(s, &mut inputs, &mut ops, &mut outs);
+        let bits: usize = if ok {
+            inputs.iter().map(|&(_, _, hi, lo)| hi - lo + 1).sum()
+        } else {
+            0
+        };
+        let bucket = if !ok {
+            5
+        } else if bits <= 8 {
+            0
+        } else if bits <= 12 {
+            1
+        } else if bits <= 16 {
+            2
+        } else if bits <= 20 {
+            3
+        } else {
+            4
+        };
+        b_stmts[bucket] += 1;
+        b_ops[bucket] += ops;
+        if ok && bits <= 16 {
+            let key: Vec<_> = inputs.into_iter().collect();
+            let g = groups.entry(key).or_default();
+            g.0 += 1;
+            g.1 += ops;
+        }
+    }
+    let mut fams: Vec<_> = groups.values().filter(|g| g.0 >= 4).collect();
+    fams.sort_by_key(|g| std::cmp::Reverse(g.1));
+    let fam_stmts: usize = fams.iter().map(|g| g.0).sum();
+    let fam_ops: usize = fams.iter().map(|g| g.1).sum();
+    eprintln!(
+        "[table_census] stmts by input-bits: <=8 {}/{}ops <=12 {}/{}ops <=16 {}/{}ops \
+         <=20 {}/{}ops >20 {}/{}ops disq {}/{}ops | families(>=4 stmts, <=16b): {} \
+         covering {} stmts / {} ops, top5 ops: {:?}",
+        b_stmts[0],
+        b_ops[0],
+        b_stmts[1],
+        b_ops[1],
+        b_stmts[2],
+        b_ops[2],
+        b_stmts[3],
+        b_ops[3],
+        b_stmts[4],
+        b_ops[4],
+        b_stmts[5],
+        b_ops[5],
+        fams.len(),
+        fam_stmts,
+        fam_ops,
+        fams.iter().take(5).map(|g| (g.0, g.1)).collect::<Vec<_>>(),
+    );
 }
 
 /// The aligned `(start_byte, width_bytes)` sub-word of a 16-byte container
@@ -4345,6 +4567,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     };
     if std::env::var("VERYL_AOT_C_SINK_DIAG").as_deref() == Ok("1") {
         sink_census(stmts, &chunks);
+        table_census(stmts);
     }
     // Chunk-local intermediate localization (VERYL_AOT_C_LOCALIZE): per chunk,
     // the comb offsets that are written by one clean top-level scalar Assign in
