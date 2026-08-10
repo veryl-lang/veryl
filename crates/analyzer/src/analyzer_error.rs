@@ -758,6 +758,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(for_loop_overflow),
+        help("keep the loop variable within the 32-bit signed range, or narrow the range or step"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("for-loop step overflows the 32-bit signed loop variable")]
+    ForLoopOverflow {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_test),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2016,6 +2031,7 @@ impl AnalyzerError {
             AnalyzerError::DuplicateEnumVariant { input, .. } => input,
             AnalyzerError::ExceedLimit { input, .. } => input,
             AnalyzerError::FixedTypeWithSignedModifier { input, .. } => input,
+            AnalyzerError::ForLoopOverflow { input, .. } => input,
             AnalyzerError::GenericInferenceFailed { input, .. } => input,
             AnalyzerError::ImplicitClockConversion { input, .. } => input,
             AnalyzerError::IncludeFailure { input, .. } => input,
@@ -2131,6 +2147,7 @@ impl AnalyzerError {
             AnalyzerError::DuplicatedIdentifier { token_source, .. } => *token_source,
             AnalyzerError::ExceedLimit { token_source, .. } => *token_source,
             AnalyzerError::FixedTypeWithSignedModifier { token_source, .. } => *token_source,
+            AnalyzerError::ForLoopOverflow { token_source, .. } => *token_source,
             AnalyzerError::IncludeFailure { token_source, .. } => *token_source,
             AnalyzerError::IncompatProto { token_source, .. } => *token_source,
             AnalyzerError::InfiniteRecursion { token_source, .. } => *token_source,
@@ -2641,6 +2658,13 @@ impl AnalyzerError {
     pub fn invalid_for_step(cause: InvalidForStepKind, token: &TokenRange) -> Self {
         AnalyzerError::InvalidForStep {
             cause,
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn for_loop_overflow(token: &TokenRange) -> Self {
+        AnalyzerError::ForLoopOverflow {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
