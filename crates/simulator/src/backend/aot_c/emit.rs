@@ -3891,6 +3891,12 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     if event_noslp && src.starts_with("// AOT-C event") {
         flags.push("-fno-tree-slp-vectorize".to_string());
     }
+    // Comb sources carry the (noslp) header marker when their wide-op
+    // density is below the static threshold (see the SLP policy in
+    // emit_function).
+    if src.starts_with("// AOT-C generated (noslp)") {
+        flags.push("-fno-tree-slp-vectorize".to_string());
+    }
 
     // Cache key = version + compiler + flags + target arch/OS + source.
     let flags_joined = flags.join(" ");
@@ -4387,6 +4393,38 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     }
     clear_current_local();
 
+    // Static SLP policy: scalar-dominated sources lose to gcc's SLP
+    // vectorizer — it bundles same-shape statements on SCATTERED words, so
+    // the vector is assembled with movd/pinsrd gathers that cost more than
+    // the scalar ops they replace (fewer cycles but MORE instructions: the
+    // gather's port pressure is the loss, so instruction counts mis-rank
+    // this axis).  Wide-data designs vectorize real adjacent words and
+    // keep winning.  The density of vw_* calls over emitted statements
+    // separates the two cleanly — calibrated on reference designs:
+    // scalar CPU cores measure 0.00–0.05 (SLP loses), wide-datapath
+    // designs 0.18–0.28 (SLP wins), so 0.1 sits between with ~2x margin
+    // each side.  VERYL_AOT_C_COMB_SLP=1 pins SLP on everywhere, =0
+    // forces it off.
+    // One emitted statement per line (see the chunk loop above), so line
+    // count is the statement count; counting ';' would inflate the
+    // denominator on multi-';' statement expressions (the overflow guard
+    // alone carries five) and shift the ratio scale the threshold was
+    // calibrated on.
+    let (vw_calls, stmt_count) = chunk_bodies.iter().fold((0usize, 0usize), |(v, s), cb| {
+        (v + cb.matches("vw_").count(), s + cb.lines().count())
+    });
+    let comb_noslp = match std::env::var("VERYL_AOT_C_COMB_SLP").as_deref() {
+        Ok("1") => false,
+        Ok("0") => true,
+        _ => (vw_calls as f64) < 0.1 * (stmt_count as f64),
+    };
+    if std::env::var("VERYL_AOT_C_SLP_DIAG").as_deref() == Ok("1") {
+        eprintln!(
+            "[aot-c slp] vw_calls={vw_calls} stmts={stmt_count} ratio={:.4} noslp={comb_noslp}",
+            (vw_calls as f64) / (stmt_count.max(1) as f64)
+        );
+    }
+
     if chunks.len() == 1 {
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
@@ -4418,6 +4456,16 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             ));
         }
         body.push_str("}\n");
+    }
+    if comb_noslp {
+        // The marker line is the cheapest way to carry the verdict to
+        // compile_source (which only sees the source text); it also lands
+        // in the cache key, so flipping the policy re-keys the .so.
+        body = body.replacen(
+            "// AOT-C generated; do not edit.",
+            "// AOT-C generated (noslp); do not edit.",
+            1,
+        );
     }
     Some(body)
 }
