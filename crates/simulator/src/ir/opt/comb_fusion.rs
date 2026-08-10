@@ -65,6 +65,19 @@ fn limit() -> usize {
     })
 }
 
+/// `VERYL_COMB_FUSION_CHEAP_KEEP`: bisect aid — duplicate into the readers
+/// but keep the def (no retire), separating "a hidden reader sees the
+/// retired storage" from "the duplicated read itself changes the value".
+/// `1` keeps every def, `last` keeps only the LIMIT_DUP-th (isolate one
+/// retire).
+fn cheap_keep(v: Option<&str>, is_last: bool) -> bool {
+    match v {
+        Some("1") => true,
+        Some("last") => is_last,
+        _ => false,
+    }
+}
+
 /// `VERYL_COMB_FUSION_LIMIT_DUP=N`: cap the duplication pass alone
 /// (bisection debug aid; defaults to the shared limit).
 fn limit_dup() -> usize {
@@ -343,17 +356,20 @@ fn coalesce_enabled() -> bool {
     *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION_COALESCE").as_deref() != Ok("0"))
 }
 
-/// Cheap multi-reader duplication: OFF by default (`VERYL_COMB_FUSION_CHEAP=1`
-/// to opt in) — an unexplained long-run miscompile on a full workload keeps
-/// the stage parked.  Unit tests exercise the machinery directly
-/// (`cfg!(test)` keeps it on there, so the production OFF path is validated
-/// only by the end-to-end suites).
+/// Cheap multi-reader duplication: ON by default (`VERYL_COMB_FUSION_CHEAP=0`
+/// opts out).  The long-run miscompile that had parked this stage was rooted
+/// in the compact (base+last) dependency gather hiding dynamic reads of an
+/// array's MIDDLE elements from the read census — fixed by switching the
+/// census and the position-independence gathers to the expanded form.
+/// Measured after the fix (alternating x3, full workloads): sim_s -4.7% and
+/// -3.7% on the two reference CPU cores.
 fn cheap_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if cfg!(test) {
+        // Re-read per call so unit tests can toggle the knob.
         return std::env::var("VERYL_COMB_FUSION_CHEAP").as_deref() != Ok("0");
     }
-    *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION_CHEAP").as_deref() == Ok("1"))
+    *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION_CHEAP").as_deref() != Ok("0"))
 }
 
 /// `VERYL_COMB_FUSION_CSE=0` opts the common-subexpression collapse out
@@ -891,7 +907,11 @@ pub fn inline_single_readers(
             for s in stmts {
                 ins.clear();
                 outs.clear();
-                s.gather_variable_offsets(&mut ins, &mut outs);
+                // EXPANDED: the compact form names base + last element only,
+                // so an event reading `arr[idx]` would leave a MIDDLE
+                // element's def retirable — the event then reads frozen
+                // storage.  (Same hole class as the comb-side census.)
+                s.gather_variable_offsets_expanded(&mut ins, &mut outs);
                 for off in ins.drain(..) {
                     if let VarOffset::Comb(o) = off {
                         externals.insert(o);
@@ -1051,6 +1071,26 @@ pub fn inline_single_readers(
                 for &r in &readers {
                     eprintln!("[comb_fusion] dup reader stmt[{r}] = {:?}", stmts[r]);
                 }
+                // The position-independence window in full: every writer of
+                // every template input, so a (i, r] intruder is visible.
+                for off in &e_ins {
+                    if let VarOffset::Comb(io) = off {
+                        eprintln!(
+                            "[comb_fusion] dup input off={io:#x} comb writers={:?} \
+                             readers={:?}",
+                            writes.get(io),
+                            reads.get(io).map(|ri| &ri.readers),
+                        );
+                    } else {
+                        eprintln!("[comb_fusion] dup input {off:?} (ff)");
+                    }
+                }
+                eprintln!(
+                    "[comb_fusion] dup dst off={o:#x} all writers={:?} externals={} opaque={}",
+                    writes.get(&o),
+                    externals.contains(&o),
+                    opaque_read.contains(&o),
+                );
             }
             let ProtoStatement::Assign(a) = &stmts[i] else {
                 unreachable!()
@@ -1068,7 +1108,13 @@ pub fn inline_single_readers(
                 total, tf,
                 "cheap duplication replaced a different read count"
             );
-            if !externals.contains(&o) && !opaque_read.contains(&o) {
+            let keep = cheap_keep(
+                std::env::var("VERYL_COMB_FUSION_CHEAP_KEEP")
+                    .ok()
+                    .as_deref(),
+                duplicated + 1 == limit_dup(),
+            );
+            if !keep && !externals.contains(&o) && !opaque_read.contains(&o) {
                 deleted[i] = true;
                 fused_offsets.push(o);
             }
@@ -1584,8 +1630,8 @@ mod tests {
     #[test]
     fn vetoes_a_reader_that_also_writes_the_offset() {
         // `x = A; if (c) { x = x | B }` reads x exactly once, but deleting
-        // the init would leave x stale on the not-taken path.  Found on a
-        // real design: VeeR EH2's case-default init pattern.
+        // the init would leave x stale on the not-taken path (the
+        // case-default init pattern of a reference CPU core).
         use crate::ir::statement::ProtoIfStatement;
         let rmw = ProtoStatement::If(ProtoIfStatement {
             cond: Some(var(0x200, 1)),
@@ -2110,7 +2156,6 @@ mod tests {
         // through a dynamic index.  The gather-based count sees the dynamic
         // element read; count_reads cannot.  The mismatch must veto, or the
         // retired def would leave the dynamic read on stale storage.
-        // Found on VeeR EH2 by bisection (dup #4309).
         let dyn_read = ProtoExpression::DynamicVariable {
             base_offset: VarOffset::Comb(0x0),
             stride: 8,
@@ -2174,5 +2219,128 @@ mod tests {
         };
         let Value::U64(v) = value else { panic!() };
         assert_eq!(v.payload, 0xf);
+    }
+
+    fn dyn_read(base: isize, num: usize) -> ProtoExpression {
+        ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(base),
+            stride: 8,
+            element_native_bytes: 4,
+            index_expr: Box::new(var(0x300, 1)),
+            num_elements: num,
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            expr_context: ctx(8),
+        }
+    }
+
+    #[test]
+    fn keep_knob_truth_table() {
+        assert!(cheap_keep(Some("1"), false));
+        assert!(cheap_keep(Some("last"), true));
+        assert!(!cheap_keep(Some("last"), false));
+        assert!(!cheap_keep(None, false));
+        assert!(!cheap_keep(Some("0"), true));
+    }
+
+    #[test]
+    fn cheap_duplication_keeps_a_def_an_event_reads_dynamically() {
+        // An event reads `arr[idx]` over a 3-element array: the MIDDLE
+        // element's def must count as external (the compact base+last
+        // event gather hid it, and the event read frozen storage forever).
+        let stmts = vec![
+            assign(0x8, 8, var(0x100, 8)),
+            assign(0x20, 8, var(0x8, 8)),
+            assign(0x28, 8, var(0x8, 8)),
+        ];
+        let mut events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
+        events.insert(Event::Initial, vec![assign(0x200, 8, dyn_read(0x0, 3))]);
+        let out = inline_single_readers(stmts, &events, &HashSet::default()).0;
+        assert_eq!(out.len(), 3, "the event-read def must not retire");
+        assert!(
+            out.iter()
+                .any(|s| matches!(s, ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x8))),
+        );
+    }
+
+    #[test]
+    fn single_reader_inline_keeps_a_def_an_event_reads_dynamically() {
+        // Same hole through the single-reader path.
+        let stmts = vec![assign(0x8, 8, var(0x100, 8)), assign(0x20, 8, var(0x8, 8))];
+        let mut events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
+        events.insert(Event::Initial, vec![assign(0x200, 8, dyn_read(0x0, 3))]);
+        let out = inline_single_readers(stmts, &events, &HashSet::default()).0;
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn cheap_duplication_keeps_a_def_an_event_writes_dynamically() {
+        // An event dynamically writes the whole array: re-running the comb
+        // def every settle is what clobbers the event's value, so the
+        // middle element's def must stay.
+        let ev_write = ProtoStatement::AssignDynamic(crate::ir::ProtoAssignDynamicStatement {
+            dst_base: VarOffset::Comb(0x0),
+            dst_stride: 8,
+            dst_num_elements: 3,
+            dst_index_expr: var(0x300, 1),
+            dst_width: 8,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: var(0x308, 8),
+            dst_ff_current_base_offset: 0,
+        });
+        let stmts = vec![
+            assign(0x8, 8, var(0x100, 8)),
+            assign(0x20, 8, var(0x8, 8)),
+            assign(0x28, 8, var(0x8, 8)),
+        ];
+        let mut events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
+        events.insert(Event::Initial, vec![ev_write]);
+        let out = inline_single_readers(stmts, &events, &HashSet::default()).0;
+        assert_eq!(out.len(), 3, "the event-written def must not retire");
+    }
+
+    #[test]
+    fn cheap_duplication_vetoes_an_intervening_def_rewrite() {
+        // `x = y; a = x; x = z; b = x`: duplicating y into b would skip the
+        // rewrite b actually observes.
+        let stmts = vec![
+            assign(0x0, 8, var(0x100, 8)),
+            assign(0x8, 8, var(0x0, 8)),
+            assign(0x0, 8, var(0x108, 8)),
+            assign(0x10, 8, var(0x0, 8)),
+        ];
+        let out = run(stmts);
+        assert_eq!(out.len(), 4);
+        for r in [1usize, 3] {
+            assert!(
+                matches!(&out[r], ProtoStatement::Assign(a)
+                    if matches!(&a.expr, ProtoExpression::Variable { var_offset, .. }
+                        if *var_offset == VarOffset::Comb(0x0))),
+                "reader {r} must still read the storage"
+            );
+        }
+    }
+
+    #[test]
+    fn cheap_duplication_declines_a_signed_constant() {
+        let signed_const = ProtoExpression::Value {
+            value: Value::U64(veryl_analyzer::value::ValueU64 {
+                payload: 0x7f,
+                mask_xz: 0,
+                width: 8,
+                signed: true,
+            }),
+            width: 8,
+            expr_context: ctx(8),
+        };
+        let stmts = vec![
+            assign(0x0, 8, signed_const),
+            assign(0x8, 8, var(0x0, 8)),
+            assign(0x10, 8, var(0x0, 8)),
+        ];
+        assert_eq!(run(stmts).len(), 3);
     }
 }
