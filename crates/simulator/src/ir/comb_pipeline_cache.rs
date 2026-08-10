@@ -51,6 +51,10 @@ pub struct CombPipeline {
     /// tree, external connects, derived-clock candidates).  The layout inputs
     /// are folded into the cache key, so a hit implies the same schedule.
     pub layout: Option<Arc<crate::ir::comb_layout::CombLayoutSchedule>>,
+    /// Comb offsets whose defs the fusion pass consumed
+    /// (`VERYL_COMB_FUSION`): their storage is never written, so raw-buffer
+    /// comparisons (the dual-run checker) must skip them.  Diagnostic only.
+    pub fused_offsets: Vec<isize>,
     /// Non-trivial SCC count (debug/test-only diagnostic; 0 in release).
     pub nontrivial_comb_scc: usize,
     /// Conv-time estimate that the incremental settle plan would be

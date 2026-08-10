@@ -11,6 +11,7 @@ use crate::ir::derived_clock::{
 use crate::ir::external::{ExternalComponentInst, ProtoExternalComponent};
 use crate::ir::incremental;
 use crate::ir::inst_layout::InstLayout;
+use crate::ir::opt::comb_fusion;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
@@ -87,6 +88,10 @@ pub struct Module {
     /// Deferred whole-module AOT-C inputs (`Some` only under the
     /// incremental configuration); see `backend::late`.
     pub late_aotc: Option<Arc<late::LateAotc>>,
+    /// Comb offsets whose defs the fusion pass consumed
+    /// (`VERYL_COMB_FUSION`): their storage is never written, so raw-buffer
+    /// comparisons (the dual-run checker) must skip them.  Diagnostic only.
+    pub fused_comb_offsets: Vec<isize>,
 }
 
 pub struct ProtoModule {
@@ -131,6 +136,8 @@ pub struct ProtoModule {
     /// configuration, shared (`Arc::clone`) with every instance — so a
     /// compile triggered by one instance serves later ones directly.
     pub late_aotc: Option<Arc<late::LateAotc>>,
+    /// See `Module::fused_comb_offsets`.
+    pub fused_comb_offsets: Vec<isize>,
 }
 
 fn create_buffers(
@@ -436,6 +443,7 @@ impl ProtoModule {
                 })
                 .collect(),
             rtl_driven: self.rtl_driven.clone(),
+            fused_comb_offsets: self.fused_comb_offsets.clone(),
         }
     }
 
@@ -742,12 +750,14 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
 
 /// `all_event_statements` in place with the dead-var drop (mirroring the miss
 /// path); the returned `dead_offsets` let a cache hit reproduce that drop.
+#[allow(clippy::too_many_arguments)]
 fn run_comb_pipeline(
     context: &mut Context,
     unified: Vec<ProtoStatement>,
     all_event_statements: &mut HashMap<Event, Vec<ProtoStatement>>,
     protect: &HashSet<VarOffset>,
     layout_inputs: Option<&comb_layout::LayoutInputs>,
+    fusion_extra: Option<&[VarOffset]>,
     module_name: StrId,
     force_infeasible: bool,
 ) -> Result<comb_pipeline_cache::CombPipeline, SimulatorError> {
@@ -927,6 +937,22 @@ fn run_comb_pipeline(
         unified_sorted
     };
 
+    // Comb fusion (`VERYL_COMB_FUSION`, P1): fold single-reader comb defs
+    // into their reader's expression — the statement-level analogue of
+    // Verilator's DfgRegularize single-sink inlining.  Runs before the
+    // relayout so the freed storage is already unreferenced when the
+    // schedule is built (it parks as a cold unit; DCE cannot see it earlier
+    // because the def only loses its reader here).
+    let (unified_sorted, fused_offsets) = if comb_fusion::enabled() {
+        let mut externals: HashSet<VarOffset> = protect.clone();
+        if let Some(extra) = fusion_extra {
+            externals.extend(extra.iter().copied());
+        }
+        comb_fusion::inline_single_readers(unified_sorted, all_event_statements, &externals)
+    } else {
+        (unified_sorted, Vec::new())
+    };
+
     // Settle-order relayout (`VERYL_COMB_LAYOUT`): derive the storage
     // permutation from the final execution order and rewrite the comb
     // statements through it before the JIT bakes their offsets in.  The
@@ -960,6 +986,13 @@ fn run_comb_pipeline(
         required_comb_passes,
         comb_statements,
         dead_offsets: dead_union.into_iter().collect(),
+        // Fused (retired) offsets in the FINAL storage space: the checker
+        // compares element addresses derived from the replayed meta, so a
+        // pre-layout offset would name the wrong storage.
+        fused_offsets: match layout.as_deref() {
+            Some(sched) => fused_offsets.iter().map(|&o| sched.translate(o)).collect(),
+            None => fused_offsets,
+        },
         layout,
         nontrivial_comb_scc,
         incr_infeasible,
@@ -3054,11 +3087,28 @@ impl Conv<&air::Module> for ProtoModule {
             HashSet::default()
         };
 
-        // Comb relayout inputs (`VERYL_COMB_LAYOUT`): the per-variable spans
-        // and the offsets referenced outside any statement list, gathered
-        // while the meta structures still hold the plain bump layout.  Folded
-        // into the pipeline key below so a cache hit implies the same
-        // schedule.
+        // Comb relayout / fusion inputs: the offsets referenced outside any
+        // statement list (external-component connects, nested derived-clock
+        // candidates) — the relayout must not treat them as dead space, and
+        // the fusion must not inline the defs they read.  Gathered while the
+        // meta structures still hold the plain bump layout.  Folded into the
+        // pipeline key below so a cache hit implies the same transforms.
+        let aux_extra_offsets: Option<Vec<VarOffset>> =
+            if comb_layout::enabled() || comb_fusion::enabled() {
+                let mut extra_offsets: Vec<VarOffset> =
+                    Vec::with_capacity(nested_derived_clock_candidates.len());
+                for (_, off, _) in &nested_derived_clock_candidates {
+                    extra_offsets.push(*off);
+                }
+                for external in &all_external_components {
+                    for connect in &external.connects {
+                        connect.expr.gather_variable_offsets(&mut extra_offsets);
+                    }
+                }
+                Some(extra_offsets)
+            } else {
+                None
+            };
         let layout_inputs: Option<comb_layout::LayoutInputs> = if comb_layout::enabled() {
             let mut meta_units: Vec<(isize, isize)> = Vec::new();
             comb_layout::collect_meta_units_map(
@@ -3073,19 +3123,9 @@ impl Conv<&air::Module> for ProtoModule {
                     &mut meta_units,
                 );
             }
-            let mut extra_offsets: Vec<VarOffset> =
-                Vec::with_capacity(nested_derived_clock_candidates.len());
-            for (_, off, _) in &nested_derived_clock_candidates {
-                extra_offsets.push(*off);
-            }
-            for external in &all_external_components {
-                for connect in &external.connects {
-                    connect.expr.gather_variable_offsets(&mut extra_offsets);
-                }
-            }
             Some(comb_layout::LayoutInputs {
                 meta_units,
-                extra_offsets,
+                extra_offsets: aux_extra_offsets.clone().unwrap_or_default(),
                 comb_total: context.comb_total_bytes,
             })
         } else {
@@ -3105,13 +3145,18 @@ impl Conv<&air::Module> for ProtoModule {
                 &all_event_statements,
                 &dce_protect,
             );
-            if let Some(li) = &layout_inputs {
+            if layout_inputs.is_some() || comb_fusion::enabled() {
                 use std::collections::hash_map::DefaultHasher;
                 use std::hash::{Hash, Hasher};
                 let mut h = DefaultHasher::new();
-                li.meta_units.hash(&mut h);
-                li.extra_offsets.hash(&mut h);
-                li.comb_total.hash(&mut h);
+                comb_fusion::enabled().hash(&mut h);
+                if let Some(extra) = &aux_extra_offsets {
+                    extra.hash(&mut h);
+                }
+                if let Some(li) = &layout_inputs {
+                    li.meta_units.hash(&mut h);
+                    li.comb_total.hash(&mut h);
+                }
                 base ^ (h.finish() as u128)
             } else {
                 base
@@ -3164,6 +3209,7 @@ impl Conv<&air::Module> for ProtoModule {
                         &mut all_event_statements,
                         &dce_protect,
                         layout_inputs.as_ref(),
+                        aux_extra_offsets.as_deref(),
                         src.name,
                         runtime_infeasible,
                     )?;
@@ -3211,6 +3257,83 @@ impl Conv<&air::Module> for ProtoModule {
         let comb_statements = cached.comb_statements.clone();
         let nontrivial_comb_scc = cached.nontrivial_comb_scc;
         let incr_infeasible = cached.incr_infeasible;
+
+        // Fusion-design census (`VERYL_FUSION_CENSUS=1`, diagnostic only):
+        // per-comb-def reader-count distribution over the post-DCE statements,
+        // to size what a Verilator-style DFG contraction (inline single
+        // readers, delete unobserved defs, keep multi-reader results) could
+        // remove.  `readers0` are defs alive only because of the DCE protect
+        // set — the analogue of what Verilator's RemoveUnobservable deletes.
+        if std::env::var("VERYL_FUSION_CENSUS").as_deref() == Ok("1") {
+            let mut readers: HashMap<VarOffset, usize> = HashMap::default();
+            let mut defs: Vec<VarOffset> = Vec::new();
+            let mut ins: Vec<VarOffset> = vec![];
+            let mut outs: Vec<VarOffset> = vec![];
+            for stmt in pre_jit_stmts.iter() {
+                ins.clear();
+                outs.clear();
+                stmt.gather_variable_offsets(&mut ins, &mut outs);
+                for off in ins.drain(..) {
+                    if !off.is_ff() {
+                        *readers.entry(off).or_insert(0) += 1;
+                    }
+                }
+                if let ProtoStatement::Assign(a) = stmt
+                    && !a.dst.is_ff()
+                {
+                    defs.push(a.dst);
+                }
+            }
+            for stmts in all_event_statements.values() {
+                for stmt in stmts {
+                    ins.clear();
+                    outs.clear();
+                    stmt.gather_variable_offsets(&mut ins, &mut outs);
+                    for off in ins.drain(..) {
+                        if !off.is_ff() {
+                            *readers.entry(off).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+            let (mut r0, mut r1, mut r2_4, mut r5p) = (0usize, 0, 0, 0);
+            let (mut r0_prot, mut r1_prot) = (0usize, 0usize);
+            for d in &defs {
+                let n = readers.get(d).copied().unwrap_or(0);
+                let prot = dce_protect.contains(d);
+                match n {
+                    0 => {
+                        r0 += 1;
+                        if prot {
+                            r0_prot += 1;
+                        }
+                    }
+                    1 => {
+                        r1 += 1;
+                        if prot {
+                            r1_prot += 1;
+                        }
+                    }
+                    2..=4 => r2_4 += 1,
+                    _ => r5p += 1,
+                }
+            }
+            eprintln!(
+                "[fusion_census] module={:?} comb_stmts={} comb_defs={} \
+                 readers0={} (protected {}) readers1={} (protected {}) \
+                 readers2_4={} readers5plus={} protect_set={}",
+                src.name,
+                pre_jit_stmts.len(),
+                defs.len(),
+                r0,
+                r0_prot,
+                r1,
+                r1_prot,
+                r2_4,
+                r5p,
+                dce_protect.len(),
+            );
+        }
 
         // Top-level variables written by RTL (post-DCE), for the sole-driver
         // check on component outputs at load time.
@@ -3725,6 +3848,7 @@ impl Conv<&air::Module> for ProtoModule {
             rtl_driven,
             incr_infeasible,
             late_aotc,
+            fused_comb_offsets: cached.fused_offsets.clone(),
         })
     }
 }

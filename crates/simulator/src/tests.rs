@@ -271,11 +271,12 @@ impl DualSimulator {
             self.jit.ir.ff_values.len(),
             "ff_values",
         );
-        // Compare comb values.  Under the comb relayout the two arms permute
-        // their storage independently (the JIT arm's compiled-block structure
-        // keys a different schedule), so byte-identical buffers are no longer
-        // expected — compare per-variable through each arm's own meta instead.
-        if crate::ir::comb_layout::enabled() {
+        // Compare comb values.  Under the comb relayout (or fusion) the two
+        // arms transform their storage independently (the JIT arm's
+        // compiled-block structure keys a different schedule / different
+        // defs disappear), so byte-identical buffers are no longer expected
+        // — compare per-variable through each arm's own meta instead.
+        if crate::ir::comb_layout::enabled() || crate::ir::opt::comb_fusion::enabled() {
             self.compare_vars_recursive(
                 &self.jit.ir.module_variables,
                 &self.interp.ir.module_variables,
@@ -305,6 +306,22 @@ impl DualSimulator {
             interp.children.len(),
             "child module counts differ between the arms",
         );
+        // Storage the fusion pass retired is never written again, and the two
+        // arms retire different defs (only the interp arm is CompiledBlock
+        // free), so skip any element whose pointer lands in either arm's
+        // fused set.
+        let fused = |ir: &crate::ir::Ir, ptr: *mut u8| -> bool {
+            if ir.fused_comb_offsets.is_empty() {
+                return false;
+            }
+            let base = ir.comb_values.as_ptr() as usize;
+            let addr = ptr as usize;
+            if addr < base || addr >= base + ir.comb_values.len() {
+                return false;
+            }
+            let off = (addr - base) as isize;
+            ir.fused_comb_offsets.contains(&off)
+        };
         let mut ids: Vec<_> = jit.variables.keys().collect();
         ids.sort();
         for vid in ids {
@@ -326,6 +343,9 @@ impl DualSimulator {
                 .zip(iv.current_values.iter())
                 .enumerate()
             {
+                if fused(&self.jit.ir, jp) || fused(&self.interp.ir, ip) {
+                    continue;
+                }
                 let jb = unsafe { std::slice::from_raw_parts(jp, vs) };
                 let ib = unsafe { std::slice::from_raw_parts(ip, vs) };
                 if jb != ib {
