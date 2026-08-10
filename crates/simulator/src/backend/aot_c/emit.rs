@@ -3753,6 +3753,15 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 let mut pre = String::new();
                 let r = emit_wide_operand(eff_expr, native_bytes(src_w), &mut pre)?;
                 let dwmask = width_mask(a.dst_width);
+                // A localized dst is read back through its C local, not
+                // comb_values — the value must land in the local.
+                if is_localized(store_off) {
+                    return Some(format!(
+                        "{{ {pre}{nm} = (uint64_t)(VW_RD({src}, 0) & 0x{dwmask:x}ULL); }}",
+                        nm = local_name(store_off),
+                        src = r.addr,
+                    ));
+                }
                 return Some(format!(
                     "{{ {pre}*(({cty}*)(comb_values + {store_off:#x})) = \
                        ({cty})(VW_RD({src}, 0) & 0x{dwmask:x}ULL); }}",
