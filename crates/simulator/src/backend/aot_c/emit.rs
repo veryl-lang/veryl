@@ -5842,6 +5842,216 @@ fn emit_block(stmts: &[ProtoStatement]) -> Option<String> {
 /// `ProtoExpression` → parenthesized C expression (typed `uint64_t`;
 /// width truncation happens at store time via the dst cast).  `None`
 /// if the variant or operator isn't supported.
+fn bitmerge_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_AOT_C_BITMERGE").as_deref() != Ok("0"))
+}
+
+/// Bit-test merging: a 1-bit And/Or tree whose leaves
+/// test single bits of ONE variable folds to a masked compare on a single
+/// full-width load — `!a[11] & a[10] & … & a[0]` becomes
+/// `(a & 0xfff) == 0x7ff` (3 ops for what was 2 ops per bit plus the
+/// joins).  gcc/clang never rebuild this shape from the per-bit form
+/// (the shifts point different ways), so the emitter folds it while the
+/// Cranelift arm keeps the expression form — VALIDATE checks the fold
+/// byte-for-byte.  Census on a reference dual-thread CPU core: 3,021
+/// same-variable groups, ≈26% of static operators (the small scalar core
+/// has almost none).
+///
+/// Returns `None` when no group of ≥2 same-variable bit tests exists —
+/// the normal expression path then applies.  Mixed leaves keep their
+/// usual emission and join the folded groups with the tree's operator
+/// (And/Or are commutative and associative, so regrouping is sound).
+/// A negated leaf under Or, and any bit claimed both positive and
+/// negated, stay unfolded (the masked-compare form cannot express them).
+fn emit_bit_test_merge(expr: &ProtoExpression) -> Option<String> {
+    let ProtoExpression::Binary { op, .. } = expr else {
+        return None;
+    };
+    let op = *op;
+    // Flatten the same-op 1-bit tree.
+    fn flatten<'a>(e: &'a ProtoExpression, op: Op, out: &mut Vec<&'a ProtoExpression>) {
+        match e {
+            ProtoExpression::Binary {
+                x,
+                op: o,
+                y,
+                expr_context,
+                ..
+            } if *o == op && expr_context.width == 1 && !expr_context.signed => {
+                flatten(x, op, out);
+                flatten(y, op, out);
+            }
+            _ => out.push(e),
+        }
+    }
+    // A single-bit test of a ≤64-bit variable: (is_ff, base, bit, full_width).
+    fn as_bit_test(e: &ProtoExpression) -> Option<(bool, isize, usize, usize)> {
+        let ProtoExpression::Variable {
+            var_offset,
+            select,
+            dynamic_select,
+            width,
+            var_full_width,
+            ..
+        } = e
+        else {
+            return None;
+        };
+        if dynamic_select.is_some() {
+            return None;
+        }
+        let full = (*var_full_width).max(*width);
+        if full > 64 {
+            return None;
+        }
+        let bit = match select {
+            Some((hi, lo)) if hi == lo => *lo,
+            None if full == 1 => 0,
+            _ => return None,
+        };
+        if bit >= full || bit >= 64 {
+            return None;
+        }
+        let (ff, off) = match var_offset {
+            VarOffset::Ff(o) => (true, *o),
+            VarOffset::Comb(o) => (false, *o),
+        };
+        Some((ff, off, bit, full))
+    }
+    let mut leaves: Vec<&ProtoExpression> = Vec::new();
+    flatten(expr, op, &mut leaves);
+    if leaves.len() < 2 {
+        return None;
+    }
+    // Classify: per-variable (mask, positives-mask, full_width) plus the rest.
+    struct Group {
+        mask: u64,
+        pos: u64,
+        /// Parity of the number of negated leaves (Xor folds each `!b`
+        /// into one constant flip: `!a ^ b = (a ^ b) ^ 1`).
+        neg_parity: u64,
+        full: usize,
+        count: usize,
+        conflict: bool,
+    }
+    // BTreeMap: deterministic iteration — the emitted text feeds the
+    // artifact cache key, so an unstable group order would re-key every run.
+    let mut groups: std::collections::BTreeMap<(bool, isize), Group> =
+        std::collections::BTreeMap::new();
+    let mut others: Vec<&ProtoExpression> = Vec::new();
+    for &leaf in &leaves {
+        let (test, neg) = match leaf {
+            ProtoExpression::Unary {
+                op: Op::LogicNot,
+                x,
+                ..
+            } => (as_bit_test(x), true),
+            _ => (as_bit_test(leaf), false),
+        };
+        // A negated leaf under Or has no masked-compare form; keep it
+        // plain.  And absorbs it into the expected-pattern; Xor absorbs it
+        // as a constant parity flip.
+        let usable = match test {
+            Some(_) if neg && op == Op::BitOr => None,
+            t => t,
+        };
+        match usable {
+            Some((ff, off, bit, full)) => {
+                let g = groups.entry((ff, off)).or_insert(Group {
+                    mask: 0,
+                    pos: 0,
+                    neg_parity: 0,
+                    full,
+                    count: 0,
+                    conflict: false,
+                });
+                g.full = g.full.max(full);
+                let b = 1u64 << bit;
+                if g.mask & b != 0 {
+                    // Same bit seen before: under And/Or identical polarity
+                    // is idempotent and opposite polarity cannot be
+                    // expressed; under Xor a repeat TOGGLES (`a^a = 0`), so
+                    // any duplicate bails the group.
+                    let was_pos = g.pos & b != 0;
+                    if op == Op::BitXor || was_pos == neg {
+                        g.conflict = true;
+                    }
+                } else {
+                    g.mask |= b;
+                    if !neg {
+                        g.pos |= b;
+                    } else if op == Op::BitXor {
+                        g.neg_parity ^= 1;
+                    }
+                }
+                g.count += 1;
+            }
+            None => others.push(leaf),
+        }
+    }
+    if !groups.values().any(|g| !g.conflict && g.count >= 2) {
+        return None;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    for ((ff, off), g) in &groups {
+        let vo = if *ff {
+            VarOffset::Ff(*off)
+        } else {
+            VarOffset::Comb(*off)
+        };
+        if g.conflict || g.count < 2 {
+            // Re-emit the single test in its original shape.
+            let load = emit_var_load(&vo, g.full)?;
+            if g.count >= 2 || g.mask.count_ones() != 1 {
+                return None; // conflicted multi-bit group: fall back entirely
+            }
+            let bit = g.mask.trailing_zeros();
+            let inner = format!("((({load}) >> {bit}) & 0x1ULL)");
+            parts.push(if g.pos == 0 {
+                format!("(0x1ULL ^ {inner})")
+            } else {
+                inner
+            });
+            continue;
+        }
+        let load = emit_var_load(&vo, g.full)?;
+        parts.push(match op {
+            Op::BitAnd => format!(
+                "((uint64_t)((({load}) & {:#x}ULL) == {:#x}ULL))",
+                g.mask, g.pos
+            ),
+            // A same-variable Xor bundle is a parity: popcount folds the
+            // whole reduction (ECC generators are exactly this shape).
+            Op::BitXor => {
+                if g.neg_parity != 0 {
+                    format!(
+                        "(0x1ULL ^ ((uint64_t)__builtin_parityll(({load}) & {:#x}ULL)))",
+                        g.mask
+                    )
+                } else {
+                    format!(
+                        "((uint64_t)__builtin_parityll(({load}) & {:#x}ULL))",
+                        g.mask
+                    )
+                }
+            }
+            // Or groups contain only positive tests (negated ones were
+            // diverted to `others` above).
+            _ => format!("((uint64_t)((({load}) & {:#x}ULL) != 0))", g.mask),
+        });
+    }
+    for o in others {
+        parts.push(emit_expr_inner(o, true)?);
+    }
+    let joiner = match op {
+        Op::BitAnd => " & ",
+        Op::BitXor => " ^ ",
+        _ => " | ",
+    };
+    Some(format!("({})", parts.join(joiner)))
+}
+
 pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
     emit_expr_inner(expr, true)
 }
@@ -6237,6 +6447,15 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             expr_context,
             ..
         } => {
+            // Bit-test merging: see emit_bit_test_merge.
+            if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor)
+                && expr_context.width == 1
+                && !expr_context.signed
+                && bitmerge_enabled()
+                && let Some(s) = emit_bit_test_merge(expr)
+            {
+                return Some(s);
+            }
             // Wide (>128-bit) operand: the only scalar-producing wide binary
             // is a comparison/logic op (→ 1-bit).  A wide-result op (add/sub/
             // mul/bitwise/shift) yields a wide value that can't be a C scalar
@@ -10856,6 +11075,124 @@ mod tests {
             "__builtin_expect((x & 1) != 0, 1)"
         );
         assert_eq!(wrap_expect_hint("x & 1", ExpectHint::Off), "x & 1");
+    }
+
+    // ── bit-test merging ────────────────────────────────────────────────
+
+    fn bit(off: isize, b: usize, full: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: Some((b, b)),
+            dynamic_select: None,
+            width: 1,
+            var_full_width: full,
+            expr_context: ctx(1, false),
+        }
+    }
+
+    fn bnot(e: ProtoExpression) -> ProtoExpression {
+        ProtoExpression::Unary {
+            op: Op::LogicNot,
+            x: Box::new(e),
+            width: 1,
+            expr_context: ctx(1, false),
+        }
+    }
+
+    fn bjoin(op: Op, es: Vec<ProtoExpression>) -> ProtoExpression {
+        es.into_iter()
+            .reduce(|a, b| ProtoExpression::Binary {
+                x: Box::new(a),
+                op,
+                y: Box::new(b),
+                width: 1,
+                expr_context: ctx(1, false),
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn bitmerge_folds_an_and_bundle() {
+        // a[0] & a[1] & !a[2] -> (a & 0x7) == 0x3.
+        let e = bjoin(
+            Op::BitAnd,
+            vec![bit(0x0, 0, 16), bit(0x0, 1, 16), bnot(bit(0x0, 2, 16))],
+        );
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("& 0x7ULL) == 0x3ULL"), "{src}");
+    }
+
+    #[test]
+    fn bitmerge_folds_an_or_bundle_and_keeps_a_negated_leaf_plain() {
+        // !a[0] | a[1] | a[2]: the negated leaf has no masked-compare form
+        // under Or; the positive pair still folds.
+        let e = bjoin(
+            Op::BitOr,
+            vec![bnot(bit(0x0, 0, 16)), bit(0x0, 1, 16), bit(0x0, 2, 16)],
+        );
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("& 0x6ULL) != 0"), "{src}");
+    }
+
+    #[test]
+    fn bitmerge_folds_an_xor_bundle_to_a_parity() {
+        let e = bjoin(
+            Op::BitXor,
+            vec![bit(0x0, 0, 16), bit(0x0, 1, 16), bit(0x0, 2, 16)],
+        );
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("__builtin_parityll"), "{src}");
+        assert!(src.contains("0x7ULL"), "{src}");
+        // A negated leaf becomes one constant parity flip.
+        let e = bjoin(Op::BitXor, vec![bnot(bit(0x0, 0, 16)), bit(0x0, 1, 16)]);
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("0x1ULL ^"), "{src}");
+    }
+
+    #[test]
+    fn bitmerge_bails_on_opposite_polarities_of_one_bit() {
+        // a[3] & !a[3] cannot be a masked compare.
+        let e = bjoin(Op::BitAnd, vec![bit(0x0, 3, 16), bnot(bit(0x0, 3, 16))]);
+        assert!(emit_bit_test_merge(&e).is_none());
+    }
+
+    #[test]
+    fn bitmerge_bails_on_a_duplicated_xor_leaf() {
+        // a[3] ^ a[3] == 0; a single mask bit would emit a[3].
+        let e = bjoin(Op::BitXor, vec![bit(0x0, 3, 16), bit(0x0, 3, 16)]);
+        assert!(emit_bit_test_merge(&e).is_none());
+        // Chained: a[1] ^ a[3] ^ a[3] == a[1].
+        let e = bjoin(
+            Op::BitXor,
+            vec![bit(0x0, 1, 16), bit(0x0, 3, 16), bit(0x0, 3, 16)],
+        );
+        assert!(emit_bit_test_merge(&e).is_none());
+        // Negated duplicates: !a[3] ^ !a[3] == 0.
+        let e = bjoin(
+            Op::BitXor,
+            vec![bnot(bit(0x0, 3, 16)), bnot(bit(0x0, 3, 16))],
+        );
+        assert!(emit_bit_test_merge(&e).is_none());
+        // Under And the same duplicate IS idempotent and still folds with
+        // a second bit.
+        let e = bjoin(
+            Op::BitAnd,
+            vec![bit(0x0, 3, 16), bit(0x0, 3, 16), bit(0x0, 4, 16)],
+        );
+        assert!(emit_bit_test_merge(&e).is_some());
+    }
+
+    #[test]
+    fn bitmerge_needs_two_tests_of_one_variable() {
+        // Different variables (offsets) never group.
+        let e = bjoin(Op::BitAnd, vec![bit(0x0, 0, 16), bit(0x40, 1, 16)]);
+        assert!(emit_bit_test_merge(&e).is_none());
+    }
+
+    #[test]
+    fn bitmerge_excludes_a_wide_variable() {
+        let e = bjoin(Op::BitAnd, vec![bit(0x0, 0, 65), bit(0x0, 1, 65)]);
+        assert!(emit_bit_test_merge(&e).is_none());
     }
 
     // ── const-cone partition ────────────────────────────────────────────

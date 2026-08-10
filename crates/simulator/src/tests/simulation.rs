@@ -5000,8 +5000,8 @@ fn array_range_assign() {
 #[test]
 fn array_range_assign_descending() {
     // A descending `-:` slice reaching index 0 covers all four elements; the
-    // literal maps by ascending element index (matches Verilator). Regression
-    // guard for the `-:` low-bound off-by-one.
+    // literal maps by ascending element index (IEEE 1800 unpacked-array
+    // assignment order). Regression guard for the `-:` low-bound off-by-one.
     let code = r#"
             module Top (
                 sel: input  logic<2>,
@@ -5200,8 +5200,8 @@ fn case_as_enum_cast() {
 // underflowed (128 - 129), corrupting the result. This 2-stage cascade mirrors
 // alu_rsft_comb's l32->l64 stages: each stage feeds a `signed logic<64>` into
 // the next concat, keeping the operand 129 bits wide at the final shift node (a
-// single 129-bit concat is reduced to 128 and does not reproduce). Expected
-// value confirmed against Verilator.
+// single 129-bit concat is reduced to 128 and does not reproduce). The
+// expected value follows IEEE 1800 signed arithmetic-shift semantics.
 #[test]
 fn arith_shift_operand_wider_than_native_container() {
     let code = r#"
@@ -19096,8 +19096,8 @@ fn case_with_inlined_function_scrutinee_falls_back_to_nested() {
 // ── Read-during-write NBA semantics for arrays (memories) ──
 // A registered read of an array element and a same-edge write to that element in
 // another always_ff must both sample the pre-edge (current) state (read-OLD), per
-// IEEE NBA. Verilator is read-OLD; a sim that applies a dynamic-index array write
-// in place during evaluation (read-NEW) silently masks every such hazard.
+// IEEE 1800 NBA semantics. A sim that applies a dynamic-index array write in
+// place during evaluation (read-NEW) silently masks every such hazard.
 
 /// UNPACKED (multi-RMW) dynamic-index FF: an element receiving >=2 partial writes
 /// per event stays dual-slot so the second partial write forwards the first's
@@ -20356,8 +20356,8 @@ fn package_const_select_multi_dim_width() {
 #[test]
 fn assign_rhs_sized_by_lhs_bit_select_width() {
     // Regression: sized against the 32-bit variable rather than the 8-bit
-    // select, the shift pair was lossless and stored 0xcd.  0x0d is what the
-    // emitted SV produces under both iverilog and Verilator.
+    // select, the shift pair was lossless and stored 0xcd.  0x0d is what
+    // IEEE 1800 sizing gives (the RHS context is the 8-bit select).
     let code = r#"
     module Top (
         y: input  logic<8>,

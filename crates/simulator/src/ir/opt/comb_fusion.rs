@@ -3,8 +3,7 @@
 //!
 //! A comb def read exactly once by later comb logic is folded into its
 //! reader's expression, and the def statement disappears; the freed storage
-//! becomes ghost bytes the relayout pass drops.  This is what Verilator's
-//! DfgRegularize does for single-sink vertices — the statement-level
+//! becomes ghost bytes the relayout pass drops.  The statement-level
 //! equivalent of the sink→localize→gcc chain, minus the chunk boundary:
 //! statement-level inlining is backend-uniform (interp / Cranelift / AOT-C
 //! all see the contracted statements), so VALIDATE keeps working.
@@ -380,8 +379,7 @@ fn cse_enabled() -> bool {
 }
 
 /// A multi-reader RHS worth recomputing at every use instead of storing and
-/// loading — Verilator's `isCheaperThanLoad` shapes that exist at this
-/// level: constants, canonical full variable loads, and static selects
+/// loading: constants, canonical full variable loads, and static selects
 /// (one load+shift+mask, at most what the retired load cost).  Everything
 /// here is canonical, so no wrap is needed when it fits the def width.
 fn cheap_rhs(e: &ProtoExpression) -> bool {
@@ -614,8 +612,7 @@ fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
 }
 
 /// Coalesce disjoint static field stores that fully define a destination
-/// word into one whole-width concat assignment — the statement-level
-/// analogue of Verilator's `coalesceDrivers` (V3DfgSynthesize).
+/// word into one whole-width concat assignment.
 ///
 ///   `x[3:0] = a; x[7:4] = b;`  →  `x = {b, a};`
 ///

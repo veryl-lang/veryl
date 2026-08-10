@@ -1032,8 +1032,7 @@ fn run_comb_pipeline(
     };
 
     // Comb fusion (`VERYL_COMB_FUSION`, P1): fold single-reader comb defs
-    // into their reader's expression — the statement-level analogue of
-    // Verilator's DfgRegularize single-sink inlining.  Runs before the
+    // into their reader's expression.  Runs before the
     // relayout so the freed storage is already unreferenced when the
     // schedule is built (it parks as a cold unit; DCE cannot see it earlier
     // because the def only loses its reader here).
@@ -3354,10 +3353,9 @@ impl Conv<&air::Module> for ProtoModule {
 
         // Fusion-design census (`VERYL_FUSION_CENSUS=1`, diagnostic only):
         // per-comb-def reader-count distribution over the post-DCE statements,
-        // to size what a Verilator-style DFG contraction (inline single
-        // readers, delete unobserved defs, keep multi-reader results) could
-        // remove.  `readers0` are defs alive only because of the DCE protect
-        // set — the analogue of what Verilator's RemoveUnobservable deletes.
+        // to size what a full DFG contraction (inline single readers, delete
+        // unobserved defs, keep multi-reader results) could remove.
+        // `readers0` are defs alive only because of the DCE protect set.
         if std::env::var("VERYL_FUSION_CENSUS").as_deref() == Ok("1") {
             let mut readers: HashMap<VarOffset, usize> = HashMap::default();
             let mut defs: Vec<VarOffset> = Vec::new();
