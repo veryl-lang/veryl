@@ -700,10 +700,9 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
             continue;
         }
         ranges.sort_unstable();
-        let contiguous = ranges[0].0 == 0
-            && ranges.windows(2).all(|p| p[0].1 + 1 == p[1].0)
-            && ranges.last().unwrap().1 + 1 == g.w;
-        if !contiguous {
+        // Overlapping stores never fuse (last-writer-wins semantics would
+        // need ordering the concat by statement position, not bit position).
+        if ranges.windows(2).any(|p| p[1].0 <= p[0].1) {
             continue;
         }
         let first = *g.idxs.iter().min().unwrap();
@@ -743,9 +742,39 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
         // inserts a concat element as-is — an unmasked dirty RHS would leak
         // into neighbouring fields.  gcc folds the mask away on the AOT-C
         // side.
+        //
+        // Partial coverage fuses too: every uncovered bit range becomes a
+        // static select read of the destination itself — the fused statement
+        // is then a whole-word RMW (`x = {x[15:10], b, a}`), one load and one
+        // store instead of one read-modify-write per field.  The window
+        // checks above guarantee nothing else touches the destination across
+        // the group, so the self-read observes the pre-group value exactly
+        // like each original store's RMW did.
+        let old_bits = |hi: usize, lo: usize| -> (Box<ProtoExpression>, usize, usize) {
+            let ew = hi - lo + 1;
+            (
+                Box::new(ProtoExpression::Variable {
+                    var_offset: VarOffset::Comb(o),
+                    select: Some((hi, lo)),
+                    dynamic_select: None,
+                    width: ew,
+                    var_full_width: g.w,
+                    expr_context: ExpressionContext {
+                        width: ew,
+                        signed: false,
+                    },
+                }),
+                1,
+                ew,
+            )
+        };
         let mut elements: Vec<(Box<ProtoExpression>, usize, usize)> =
-            Vec::with_capacity(ranges.len());
+            Vec::with_capacity(2 * ranges.len() + 1);
+        let mut cursor = g.w; // exclusive upper edge of the uncovered scan
         for &(lo, hi, i) in ranges.iter().rev() {
+            if hi + 1 < cursor {
+                elements.push(old_bits(cursor - 1, hi + 1));
+            }
             let ProtoStatement::Assign(a) = &mut stmts[i] else {
                 unreachable!()
             };
@@ -762,6 +791,10 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
             );
             let ew = hi - lo + 1;
             elements.push((Box::new(canonical_wrap(expr, ew)), 1, ew));
+            cursor = lo;
+        }
+        if cursor > 0 {
+            elements.push(old_bits(cursor - 1, 0));
         }
         let w = g.w;
         let concat = ProtoExpression::Concatenation {
@@ -1665,15 +1698,46 @@ mod tests {
     }
 
     #[test]
-    fn coalesce_rejects_partial_coverage() {
-        // Only [3:0] and [6:4]: bit 7 keeps the old value — no fuse.
+    fn coalesce_fuses_partial_coverage_with_self_select() {
+        // Only [3:0] and [6:4]: bit 7 keeps the old value, read back as a
+        // select of the destination itself — x = {x[7:7], b, a}.
         let stmts = vec![
             assign_sel(0x0, 8, 3, 0, var(0x100, 4)),
             assign_sel(0x0, 8, 6, 4, var(0x108, 3)),
         ];
         let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 1);
+        assert_eq!(out.len(), 1);
+        let ProtoStatement::Assign(a) = &out[0] else {
+            panic!()
+        };
+        assert!(a.select.is_none());
+        let ProtoExpression::Concatenation {
+            elements, width, ..
+        } = &a.expr
+        else {
+            panic!("expected concat, got {:?}", a.expr)
+        };
+        assert_eq!(*width, 8);
+        assert_eq!(elements.len(), 3);
+        // The top element is the old bit 7 of the destination itself.
+        let ProtoExpression::Variable {
+            var_offset, select, ..
+        } = &*elements[0].0
+        else {
+            panic!("top element must be the old-bits self select")
+        };
+        assert_eq!(*var_offset, VarOffset::Comb(0x0));
+        assert_eq!(*select, Some((7, 7)));
+    }
+
+    #[test]
+    fn coalesce_rejects_a_single_partial_store() {
+        // One lone field store never fuses (nothing to combine with).
+        let stmts = vec![assign_sel(0x0, 8, 3, 0, var(0x100, 4))];
+        let (out, fused) = coalesce_field_stores(stmts);
         assert_eq!(fused, 0);
-        assert_eq!(out.len(), 2);
+        assert_eq!(out.len(), 1);
     }
 
     #[test]
