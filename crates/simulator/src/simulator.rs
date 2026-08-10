@@ -431,6 +431,11 @@ impl Simulator {
         let post_ff = self.ir.ff_values.to_vec();
         self.ir.comb_values.copy_from_slice(&pre_comb);
         self.ir.ff_values.copy_from_slice(&pre_ff);
+        // The restore rewinds comb bytes the run-once const cone may have
+        // just written; clear the flag so the baseline recomputes them.
+        self.ir
+            .const_cone_done
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
         let settles = self
             .incr_state

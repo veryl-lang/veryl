@@ -149,6 +149,10 @@ pub struct Ir {
     /// plan is declined at build time or auto-abandoned at runtime.  See
     /// `backend::late`.
     pub late_aotc: Option<Arc<crate::backend::late::LateAotc>>,
+    /// Whether the whole-comb backend's run-once constant-cone entry has
+    /// executed for THIS instance.  Per-instance (not per-artifact): a
+    /// shared `.so` serves many simulators, each with fresh comb buffers.
+    pub(crate) const_cone_done: AtomicBool,
 }
 
 /// A built component library on disk and the type name to look up in it.
@@ -197,6 +201,7 @@ impl Ir {
             whole_event_fallback_recorded: Default::default(),
             incr_plan: module.incr_plan,
             late_aotc: module.late_aotc,
+            const_cone_done: Default::default(),
         };
         // Bake the WriteLogBuffer's heap-stable address into every
         // JIT-dispatched Compiled/CompiledBatch so emitted code can perform
@@ -464,6 +469,15 @@ impl Ir {
             // contract (3rd arg is `*mut u8`).
             let log_ptr = (&*self.write_log_buffer as *const _ as *const u8) as *mut u8;
             let passes = env_passes.unwrap_or(self.required_comb_passes).max(1);
+
+            // Run-once constant cone (see `try_dispatch_const`).  NotReady
+            // leaves the flag unset — the main dispatch below falls back to
+            // Cranelift, which still evaluates the const statements.
+            if !self.const_cone_done.load(Ordering::Relaxed)
+                && whole.try_dispatch_const(ff_ptr, comb_ptr, log_ptr) == DispatchOutcome::Done
+            {
+                self.const_cone_done.store(true, Ordering::Relaxed);
+            }
 
             if !validate {
                 // Common case: passes == 1 (no SCC backward edges).
