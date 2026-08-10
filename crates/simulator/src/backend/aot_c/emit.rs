@@ -2136,6 +2136,562 @@ fn width_mask(width: usize) -> u64 {
     }
 }
 
+/// How a bit-field store may treat the sub-word it writes into, when the
+/// whole sub-word is redefined by a group of disjoint stores (see
+/// `plan_field_groups`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FieldRole {
+    /// First store of the group: define the window outright.
+    Init,
+    /// Later store: the bit is known clear, so OR it in.
+    OrIn,
+}
+
+thread_local! {
+    /// `(window address, bit mask)` -> role, for the comb list being emitted.
+    /// Keyed by the field rather than by position because `emit_stmt` sees one
+    /// statement at a time and the group's members are disjoint by
+    /// construction.  Empty unless `plan_field_groups` armed it.
+    static FIELD_ROLES: RefCell<HashMap<(isize, u64), FieldRole>> =
+        RefCell::new(HashMap::default());
+}
+
+fn field_role(addr: isize, pmask: u64) -> Option<FieldRole> {
+    FIELD_ROLES.with(|r| r.borrow().get(&(addr, pmask)).copied())
+}
+
+/// How far apart a window's stores may sit and still be gathered
+/// (`VERYL_AOT_C_GATHER_SPAN`, 0 disables gathering entirely).
+fn gather_span_limit() -> usize {
+    static LIMIT: OnceLock<usize> = OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        std::env::var("VERYL_AOT_C_GATHER_SPAN")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(512)
+    })
+}
+
+/// Clears `FIELD_ROLES` on the way out, including the `?` returns in
+/// `emit_function` — a plan left behind would mis-role another module's
+/// stores.
+struct FieldRolesGuard;
+
+impl Drop for FieldRolesGuard {
+    fn drop(&mut self) {
+        FIELD_ROLES.with(|r| r.borrow_mut().clear());
+    }
+}
+
+/// Comb byte ranges a statement reads and writes, at field granularity — a
+/// bit-select touches only the bytes its bits live in, because the wider load
+/// the emit uses around it masks away everything else.  `false` means the
+/// statement is opaque (a pre-compiled child, a testbench call) and the caller
+/// must treat it as touching every byte.
+///
+/// FF offsets are ignored on purpose: comb-list FF writes land in the next
+/// slot (NBA) and are invisible to same-eval readers, so they cannot order
+/// against these windows.
+fn comb_touches(
+    s: &ProtoStatement,
+    reads: &mut Vec<(isize, usize)>,
+    writes: &mut Vec<(isize, usize)>,
+) -> bool {
+    /// Bytes spanned by `[lo .. lo+nbits)` of a variable based at `off`.
+    fn field(off: isize, select: Option<(usize, usize)>, width: usize) -> (isize, usize) {
+        match select {
+            Some((hi, lo)) if hi >= lo => (off + (lo / 8) as isize, (hi / 8) - (lo / 8) + 1),
+            _ => (off, native_bytes(width).max(1)),
+        }
+    }
+    fn expr(e: &ProtoExpression, out: &mut Vec<(isize, usize)>) -> bool {
+        match e {
+            ProtoExpression::HierVariable(_) => false,
+            ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select,
+                width,
+                var_full_width,
+                ..
+            } => {
+                if let VarOffset::Comb(o) = var_offset {
+                    let full = (*var_full_width).max(*width);
+                    // A runtime bit-select lands anywhere in the variable.
+                    let sel = if dynamic_select.is_some() {
+                        None
+                    } else {
+                        *select
+                    };
+                    out.push(field(*o, sel, full));
+                }
+                dynamic_select
+                    .as_ref()
+                    .is_none_or(|ds| expr(&ds.index_expr, out))
+            }
+            ProtoExpression::Value { .. } => true,
+            ProtoExpression::Unary { x, .. } => expr(x, out),
+            ProtoExpression::Binary { x, y, .. } => expr(x, out) && expr(y, out),
+            ProtoExpression::Concatenation { elements, .. } => {
+                elements.iter().all(|(e, _, _)| expr(e, out))
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => expr(cond, out) && expr(true_expr, out) && expr(false_expr, out),
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                stride,
+                element_native_bytes,
+                index_expr,
+                num_elements,
+                ..
+            } => {
+                if let VarOffset::Comb(o) = base_offset {
+                    // The index is a runtime value, so the whole array is live.
+                    let span = stride.unsigned_abs() * num_elements.saturating_sub(1)
+                        + element_native_bytes;
+                    let base = if *stride < 0 {
+                        o + stride * (num_elements.saturating_sub(1) as isize)
+                    } else {
+                        *o
+                    };
+                    out.push((base, span));
+                }
+                expr(index_expr, out)
+            }
+        }
+    }
+    match s {
+        ProtoStatement::Assign(a) => {
+            if let VarOffset::Comb(o) = a.dst {
+                // A runtime bit-select writes anywhere in the variable.
+                let sel = if a.dynamic_select.is_some() {
+                    None
+                } else {
+                    a.select
+                };
+                writes.push(field(o, sel, a.dst_width));
+            }
+            a.dynamic_select
+                .as_ref()
+                .is_none_or(|ds| expr(&ds.index_expr, reads))
+                && expr(&a.expr, reads)
+        }
+        ProtoStatement::AssignDynamic(a) => {
+            if let VarOffset::Comb(o) = a.dst_base {
+                let span = a.dst_stride.unsigned_abs() * a.dst_num_elements.saturating_sub(1)
+                    + native_bytes(a.dst_width).max(1);
+                writes.push((
+                    o.min(o + a.dst_stride * (a.dst_num_elements as isize - 1)),
+                    span,
+                ));
+            }
+            expr(&a.dst_index_expr, reads)
+                && expr(&a.expr, reads)
+                && a.dynamic_select
+                    .as_ref()
+                    .is_none_or(|ds| expr(&ds.index_expr, reads))
+        }
+        ProtoStatement::If(x) => {
+            x.cond.as_ref().is_none_or(|c| expr(c, reads))
+                && x.true_side.iter().all(|s| comb_touches(s, reads, writes))
+                && x.false_side.iter().all(|s| comb_touches(s, reads, writes))
+        }
+        ProtoStatement::Case(x) => {
+            x.arms.iter().all(|arm| {
+                expr(&arm.cond, reads) && arm.body.iter().all(|s| comb_touches(s, reads, writes))
+            }) && x.default.iter().all(|s| comb_touches(s, reads, writes))
+        }
+        ProtoStatement::For(x) => {
+            if let VarOffset::Comb(o) = x.var_offset {
+                writes.push((o, 8));
+            }
+            let (start, end) = match &x.range {
+                ProtoForRange::Forward { start, end, .. }
+                | ProtoForRange::Reverse { start, end, .. }
+                | ProtoForRange::Stepped { start, end, .. } => (start, end),
+            };
+            [start, end].into_iter().all(|b| match b {
+                ProtoForBound::Dynamic(e) => expr(e, reads),
+                _ => true,
+            }) && x.body.iter().all(|s| comb_touches(s, reads, writes))
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            body.iter().all(|s| comb_touches(s, reads, writes))
+        }
+        ProtoStatement::SystemFunctionCall(x) => match x {
+            ProtoSystemFunctionCall::Display { args, .. }
+            | ProtoSystemFunctionCall::Write { args, .. } => args.iter().all(|a| expr(a, reads)),
+            ProtoSystemFunctionCall::Assert {
+                condition, args, ..
+            } => expr(condition, reads) && args.iter().all(|a| expr(a, reads)),
+            ProtoSystemFunctionCall::Readmemh { .. } | ProtoSystemFunctionCall::Finish => true,
+        },
+        // A pre-compiled child reads and writes comb_values directly, and a
+        // testbench call can reach anything.
+        ProtoStatement::CompiledBlock(_) | ProtoStatement::TbMethodCall { .. } => false,
+        ProtoStatement::Break => true,
+    }
+}
+
+/// Find the sub-words that a run of bit-field stores redefines completely, and
+/// assign each store its role.
+///
+/// A window qualifies when disjoint top-level stores cover every one of its
+/// bits and nothing between the first and the last of them touches the window:
+/// then the first store may define the window instead of merging into it, and
+/// the rest may OR their bit in.  Statements outside that span are unaffected —
+/// before it they see the previous settle's value, after it the window is
+/// fully defined either way.
+fn plan_field_groups(stmts: &[ProtoStatement]) -> FieldPlan {
+    /// `(window address, bytes, bit mask)` of the narrowed store a statement
+    /// emits, if it emits one.
+    fn narrowed_store(s: &ProtoStatement) -> Option<(isize, usize, u64)> {
+        let ProtoStatement::Assign(a) = s else {
+            return None;
+        };
+        let (VarOffset::Comb(off), Some((hi, lo))) = (a.dst, a.select) else {
+            return None;
+        };
+        if a.dynamic_select.is_some() || a.dst_width <= 64 || a.dst_width > 128 || hi < lo {
+            return None;
+        }
+        let (start, bytes) = narrow_field_window(lo, hi - lo + 1)?;
+        Some((
+            off + start as isize,
+            bytes,
+            width_mask(hi - lo + 1) << (lo - start * 8),
+        ))
+    }
+    /// Every narrowed store in the tree, nested ones included.  Roles are keyed
+    /// by field, so a nested store sharing a member's key would pick up that
+    /// member's role; counting them lets the group be dropped instead.
+    fn all_narrowed(s: &ProtoStatement, out: &mut HashMap<(isize, u64), usize>) {
+        if let Some((addr, _, pmask)) = narrowed_store(s) {
+            *out.entry((addr, pmask)).or_default() += 1;
+        }
+        let mut nested = |body: &[ProtoStatement]| {
+            for s in body {
+                all_narrowed(s, out);
+            }
+        };
+        match s {
+            ProtoStatement::If(x) => {
+                nested(&x.true_side);
+                nested(&x.false_side);
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    nested(&arm.body);
+                }
+                nested(&x.default);
+            }
+            ProtoStatement::For(x) => nested(&x.body),
+            ProtoStatement::SequentialBlock(b) => nested(b),
+            ProtoStatement::CompiledBlock(x) => nested(&x.original_stmts),
+            _ => {}
+        }
+    }
+
+    struct Member {
+        idx: usize,
+        pmask: u64,
+    }
+    let mut occurrences: HashMap<(isize, u64), usize> = HashMap::default();
+    for s in stmts {
+        all_narrowed(s, &mut occurrences);
+    }
+    let mut groups: HashMap<(isize, usize), Vec<Member>> = HashMap::default();
+    for (idx, s) in stmts.iter().enumerate() {
+        let Some((addr, bytes, pmask)) = narrowed_store(s) else {
+            continue;
+        };
+        if occurrences.get(&(addr, pmask)) != Some(&1) {
+            continue;
+        }
+        groups
+            .entry((addr, bytes))
+            .or_default()
+            .push(Member { idx, pmask });
+    }
+
+    // Windows whose bits are covered exactly once each.
+    groups.retain(|&(_, bytes), members| {
+        let full = width_mask(bytes * 8);
+        let mut seen = 0u64;
+        members.len() > 1
+            && members.iter().all(|m| {
+                let fresh = seen & m.pmask == 0;
+                seen |= m.pmask;
+                fresh
+            })
+            && seen == full
+    });
+    if groups.is_empty() {
+        return FieldPlan::identity(stmts.len());
+    }
+
+    // Byte -> statements touching it, for the ranges narrow enough to index
+    // that way.  A memory array's range spans its whole storage, so those go
+    // in a list that is scanned instead of expanded — otherwise one dynamic
+    // write to a 128 KB array would cost 128 K map insertions, and this pass
+    // runs on every emit.
+    const EXPAND_LIMIT: usize = 16;
+    #[derive(Default)]
+    struct Index {
+        /// byte -> statement indices, for ranges narrow enough to expand
+        by_byte: HashMap<isize, Vec<usize>>,
+        /// (start, end, statement) for the rest
+        wide: Vec<(isize, isize, usize)>,
+    }
+    impl Index {
+        fn add(&mut self, idx: usize, ranges: &[(isize, usize)]) {
+            for &(base, len) in ranges {
+                let end = base.saturating_add(len as isize);
+                if len > EXPAND_LIMIT {
+                    self.wide.push((base, end, idx));
+                    continue;
+                }
+                for b in base..end {
+                    let e = self.by_byte.entry(b).or_default();
+                    if e.last() != Some(&idx) {
+                        e.push(idx);
+                    }
+                }
+            }
+        }
+        /// Any indexed statement overlapping `[start, end)` that `f` accepts.
+        fn any(&self, start: isize, end: isize, f: impl Fn(usize) -> bool) -> bool {
+            self.wide
+                .iter()
+                .any(|&(s, e, i)| s < end && e > start && f(i))
+                || (start..end).any(|b| {
+                    self.by_byte
+                        .get(&b)
+                        .is_some_and(|list| list.iter().any(|&i| f(i)))
+                })
+        }
+    }
+
+    let mut touched = Index::default();
+    let mut written = Index::default();
+    let mut read_ranges: Vec<Vec<(isize, usize)>> = vec![Vec::new(); stmts.len()];
+    let mut barriers: Vec<usize> = Vec::new();
+    for (idx, s) in stmts.iter().enumerate() {
+        let (mut reads, mut writes) = (Vec::new(), Vec::new());
+        if !comb_touches(s, &mut reads, &mut writes) {
+            barriers.push(idx);
+            continue;
+        }
+        touched.add(idx, &reads);
+        touched.add(idx, &writes);
+        written.add(idx, &writes);
+        read_ranges[idx] = reads;
+    }
+
+    // Bytes owned by some candidate window.  A member that reads or writes a
+    // window other than its own could be carried into that window's span by
+    // its own group's move, so those windows are dropped rather than
+    // re-checked against every possible destination.
+    let mut window_bytes: HashMap<isize, (isize, usize)> = HashMap::default();
+    for &(addr, bytes) in groups.keys() {
+        for b in addr..addr + bytes as isize {
+            window_bytes.insert(b, (addr, bytes));
+        }
+    }
+    let mut foreign: HashSet<(isize, usize)> = HashSet::default();
+    for (&(addr, bytes), members) in groups.iter() {
+        for m in members {
+            for &(base, len) in &read_ranges[m.idx] {
+                for b in base..base.saturating_add(len as isize) {
+                    if let Some(&w) = window_bytes.get(&b)
+                        && w != (addr, bytes)
+                    {
+                        foreign.insert(w);
+                    }
+                }
+            }
+        }
+    }
+    // Overlapping windows would move into each other's spans for the same
+    // reason.
+    let mut overlapping: HashSet<(isize, usize)> = HashSet::default();
+    for &(addr, bytes) in groups.keys() {
+        for b in addr..addr + bytes as isize {
+            if window_bytes.get(&b) != Some(&(addr, bytes)) {
+                overlapping.insert((addr, bytes));
+            }
+        }
+    }
+
+    let mut roles = HashMap::default();
+    let mut moves: Vec<(usize, usize)> = Vec::new(); // (statement, destination)
+    for ((addr, bytes), mut members) in groups {
+        members.sort_by_key(|m| m.idx);
+        let (first, last) = (members[0].idx, members[members.len() - 1].idx);
+        let window = addr..addr + bytes as isize;
+        let member_at = |i: usize| members.iter().any(|m| m.idx == i);
+        if barriers.iter().any(|&b| b > first && b < last) {
+            continue;
+        }
+        // Nothing outside the group may touch the window while it is being
+        // built.
+        if touched.any(window.start, window.end, |i| {
+            i > first && i < last && !member_at(i)
+        }) {
+            continue;
+        }
+        // A member reading its own window would see Init's zeroed bits where
+        // the interpreter reads the previous settle's value.
+        if members.iter().any(|m| {
+            read_ranges[m.idx].iter().any(|&(base, len)| {
+                base < window.end && base.saturating_add(len as isize) > window.start
+            })
+        }) {
+            continue;
+        }
+        // Everything below decides only whether to GATHER; dropping the merge
+        // is sound for any group that got this far.  The span cap keeps a
+        // group from being dragged far out of its neighbourhood.
+        let mut gather = last - first <= gather_span_limit()
+            && !foreign.contains(&(addr, bytes))
+            && !overlapping.contains(&(addr, bytes));
+        // Sinking a member past a write to anything it reads would let it
+        // capture the new value.
+        gather = gather
+            && members[..members.len() - 1].iter().all(|m| {
+                read_ranges[m.idx].iter().all(|&(base, len)| {
+                    !written.any(base, base.saturating_add(len as isize), |i| {
+                        i > m.idx && i <= last && !member_at(i)
+                    })
+                })
+            });
+        for (n, m) in members.iter().enumerate() {
+            roles.insert(
+                (addr, m.pmask),
+                if n == 0 {
+                    FieldRole::Init
+                } else {
+                    FieldRole::OrIn
+                },
+            );
+            if gather && m.idx != last {
+                moves.push((m.idx, last));
+            }
+        }
+    }
+
+    // Members sit together so gcc keeps the window in a register across the
+    // group and stores it once.
+    let dest: HashMap<usize, usize> = moves.into_iter().collect();
+    let mut pending: HashMap<usize, Vec<usize>> = HashMap::default();
+    for (&src, &dst) in &dest {
+        pending.entry(dst).or_default().push(src);
+    }
+    let mut order = Vec::with_capacity(stmts.len());
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    for i in 0..stmts.len() {
+        if dest.contains_key(&i) {
+            continue; // moved down to its group's last member
+        }
+        if let Some(mut group) = pending.remove(&i) {
+            group.sort_unstable();
+            spans.push((order.len(), group.len() + 1));
+            order.extend(group);
+        }
+        order.push(i);
+    }
+    debug_assert_eq!(order.len(), stmts.len());
+    FieldPlan {
+        roles,
+        order,
+        atoms: spans,
+    }
+}
+
+/// What `plan_field_groups` decided: the per-field roles, the statement order
+/// that puts each group's members together, and where those groups sit in it.
+struct FieldPlan {
+    roles: HashMap<(isize, u64), FieldRole>,
+    order: Vec<usize>,
+    /// `(start, len)` runs in `order` a chunk boundary must not split.
+    atoms: Vec<(usize, usize)>,
+}
+
+impl FieldPlan {
+    /// No group qualified: the original order, nothing to pin, no roles.
+    fn identity(n: usize) -> Self {
+        FieldPlan {
+            roles: HashMap::default(),
+            order: (0..n).collect(),
+            atoms: Vec::new(),
+        }
+    }
+}
+
+/// The aligned `(start_byte, width_bytes)` sub-word of a 16-byte container
+/// that holds the field `[lo .. lo+nbits)`, narrowest first.  `None` when the
+/// field is wider than 64 bits or straddles every candidate window's
+/// boundary, leaving the caller on the 128-bit path.
+///
+/// Windows are aligned to their own width and 16 is a multiple of each, so
+/// `start + width <= 16` holds for every result — the access cannot reach
+/// past the container.
+fn narrow_field_window(lo: usize, nbits: usize) -> Option<(usize, usize)> {
+    if nbits == 0 || nbits > 64 || lo + nbits > 128 {
+        return None;
+    }
+    let byte_lo = lo / 8;
+    let byte_hi = (lo + nbits - 1) / 8;
+    [1usize, 2, 4, 8]
+        .into_iter()
+        .map(|w| ((byte_lo / w) * w, w))
+        .find(|&(start, w)| byte_hi < start + w)
+}
+
+/// Read-modify-write the field `[lo .. lo+nbits)` of a 65..128-bit comb slot
+/// through `narrow_field_window`'s sub-word instead of the whole 16-byte
+/// container.  `None` leaves the caller on the 128-bit form.
+///
+/// Bytes outside the field keep their old values, which is what the wide form
+/// does too, so `comb_values` ends up byte-identical.  Slot offsets are only
+/// 4-byte aligned in general, hence the unaligned typedefs.
+fn narrow_field_store(
+    rhs: &str,
+    buf: &str,
+    store_off: isize,
+    lo: usize,
+    nbits: usize,
+) -> Option<String> {
+    let (start, bytes) = narrow_field_window(lo, nbits)?;
+    let cty = match bytes {
+        1 => "uint8_t",
+        2 => "veryl_u16_ua",
+        4 => "veryl_u32_ua",
+        _ => "veryl_u64_ua",
+    };
+    let shift = lo - start * 8;
+    // `nbits == 64` implies bytes == 8 and shift == 0, so the masks below are
+    // the full word and `1u64 << 64` is never evaluated.
+    let vmask: u64 = width_mask(nbits);
+    let pmask: u64 = vmask << shift;
+    let addr = store_off + start as isize;
+    let value = format!("({cty})((((uint64_t)({rhs})) & 0x{vmask:x}ULL) << {shift})");
+    match field_role(addr, pmask) {
+        Some(FieldRole::Init) => Some(format!("*(({cty}*)({buf} + {addr:#x})) = {value};")),
+        Some(FieldRole::OrIn) => Some(format!("*(({cty}*)({buf} + {addr:#x})) |= {value};")),
+        None => Some(format!(
+            "{{ uint64_t _v = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; \
+                {cty} _o = *(({cty}*)({buf} + {addr:#x})); \
+                *(({cty}*)({buf} + {addr:#x})) = \
+                  ({cty})((_o & ({cty})(~(uint64_t)0x{pmask:x}ULL)) | ({cty})(_v << {shift})); }}",
+        )),
+    }
+}
+
 /// Clean-bits mask elision knob (`VERYL_AOT_C_CLEAN`, default on, `=0` to
 /// opt out — the A/B lever for the redundant-mask removal).
 fn clean_elide() -> bool {
@@ -2829,6 +3385,8 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
          #include <stdint.h>\n\
          typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
          typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
+         typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
+         typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
          typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
          __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
          __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
@@ -3386,17 +3944,49 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         "// AOT-C generated; do not edit.\n\
          #include <stdint.h>\n\
          typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
-         typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n",
+         typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
+         typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
+         typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n",
     );
     body.push_str(WIDEOPS_C_DECLS);
     body.push_str(WIDEOPS_C_INLINE);
     body.push('\n');
 
+    // Field-group roles and gathering: see plan_field_groups.
+    let _field_roles = FieldRolesGuard;
+    let plan = plan_field_groups(stmts);
+    FIELD_ROLES.with(|r| *r.borrow_mut() = plan.roles.clone());
+    let gathered: Option<Vec<ProtoStatement>> =
+        (!plan.atoms.is_empty()).then(|| plan.order.iter().map(|&i| stmts[i].clone()).collect());
+    let stmts: &[ProtoStatement] = gathered.as_deref().unwrap_or(stmts);
+
     // Emit each chunk's stmts now so we can fail fast on unsupported.
     let chunks: Vec<&[ProtoStatement]> = if chunk_size == 0 || stmts.len() <= chunk_size {
         vec![stmts]
-    } else {
+    } else if plan.atoms.is_empty() {
         stmts.chunks(chunk_size).collect()
+    } else {
+        // Cut at multiples of chunk_size, but never inside a gathered group —
+        // splitting one puts the accumulating stores in different functions
+        // and gcc can no longer keep the window in a register.
+        let mut chunks = Vec::new();
+        let (mut start, mut ai) = (0usize, 0usize);
+        while start < stmts.len() {
+            let mut end = (start + chunk_size).min(stmts.len());
+            while ai < plan.atoms.len() && plan.atoms[ai].0 + plan.atoms[ai].1 <= end {
+                ai += 1;
+            }
+            if ai < plan.atoms.len() && plan.atoms[ai].0 < end {
+                end = if plan.atoms[ai].0 > start {
+                    plan.atoms[ai].0
+                } else {
+                    plan.atoms[ai].0 + plan.atoms[ai].1
+                };
+            }
+            chunks.push(&stmts[start..end]);
+            start = end;
+        }
+        chunks
     };
     // Chunk-local intermediate localization (VERYL_AOT_C_LOCALIZE): per chunk,
     // the comb offsets that are written by one clean top-level scalar Assign in
@@ -3910,6 +4500,9 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 if a.dst_width > 64 && a.dst_width <= 128 {
                     if nbits == 0 || lo + nbits > 128 {
                         return None;
+                    }
+                    if let Some(narrow) = narrow_field_store(&rhs_str, buf, store_off, lo, nbits) {
+                        return Some(narrow);
                     }
                     let fmask: u128 = if nbits >= 128 {
                         !0u128
@@ -7859,24 +8452,284 @@ mod tests {
         assert!(s.contains("comb_values + 0x0"));
     }
 
-    #[test]
-    fn emit_stmt_wide_bit_select_store_65_to_128() {
-        // lo ≥ 64 is unreachable by the single-u64 RMW path → __uint128_t branch.
+    fn wide_bit_select_store(off: isize, hi: usize, lo: usize) -> String {
         let a = ProtoAssignStatement {
-            dst: VarOffset::Comb(0x40),
+            dst: VarOffset::Comb(off),
             dst_width: 128,
-            select: Some((71, 64)),
+            select: Some((hi, lo)),
             dynamic_select: None,
             rhs_select: None,
             expr: const_expr(0xab, 8),
             dst_ff_current_offset: 0,
             token: dummy_token(),
         };
-        let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
-        assert!(s.contains("veryl_u128_ua"));
-        assert!(s.contains("__uint128_t _o"));
-        assert!(s.contains("_v << 64"));
-        assert!(s.contains("comb_values + 0x40"));
+        emit_stmt(&ProtoStatement::Assign(a)).unwrap()
+    }
+
+    #[test]
+    fn emit_stmt_wide_bit_select_store_65_to_128() {
+        // Byte 8 of the container holds [71:64] on its own, so the store is a
+        // byte read-modify-write there rather than one over all 16 bytes.
+        let s = wide_bit_select_store(0x40, 71, 64);
+        assert!(!s.contains("__uint128_t"), "{s}");
+        assert!(s.contains("uint8_t _o"), "{s}");
+        assert!(s.contains("comb_values + 0x48"), "{s}");
+        assert!(s.contains("_v << 0"), "{s}");
+    }
+
+    #[test]
+    fn emit_stmt_wide_bit_select_store_straddling_field_keeps_the_128_bit_form() {
+        // [71:56] spans bytes 7 and 8, so every aligned window up to 8 bytes
+        // cuts it and the wide form has to stay reachable.
+        let s = wide_bit_select_store(0x40, 71, 56);
+        assert!(s.contains("veryl_u128_ua"), "{s}");
+        assert!(s.contains("__uint128_t _o"), "{s}");
+        assert!(s.contains("_v << 56"), "{s}");
+    }
+
+    /// A top-level single-bit store of `comb[off][bit]`.
+    fn bit_store(off: isize, bit: usize) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(off),
+            dst_width: 128,
+            select: Some((bit, bit)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(1, 1),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        })
+    }
+
+    /// A statement that reads `[hi:lo]` of the variable at `off`.
+    fn read_of(off: isize, hi: usize, lo: usize) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(0x900),
+            dst_width: 32,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(off),
+                select: Some((hi, lo)),
+                dynamic_select: None,
+                width: hi - lo + 1,
+                var_full_width: 128,
+                expr_context: ctx(hi - lo + 1, false),
+            },
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        })
+    }
+
+    #[test]
+    fn field_group_plans_a_fully_covered_byte() {
+        // Eight disjoint single-bit stores define byte 1 of the slot outright.
+        let stmts: Vec<_> = (8..16).map(|b| bit_store(0x40, b)).collect();
+        let roles = plan_field_groups(&stmts).roles;
+        assert_eq!(roles.len(), 8, "{roles:?}");
+        assert_eq!(roles.get(&(0x41, 1 << 0)), Some(&FieldRole::Init));
+        for b in 1..8u64 {
+            assert_eq!(
+                roles.get(&(0x41, 1 << b)),
+                Some(&FieldRole::OrIn),
+                "bit {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn field_group_gathers_its_members_before_the_last_one() {
+        // Two unrelated statements sit between the bit stores; the plan sinks
+        // the stores past them so the window is built in one run, and keeps
+        // everything else in its original order.
+        let mut stmts: Vec<ProtoStatement> = Vec::new();
+        for b in 8..12 {
+            stmts.push(bit_store(0x40, b));
+        }
+        stmts.push(read_of(0x200, 7, 0)); // index 4
+        stmts.push(read_of(0x300, 7, 0)); // index 5
+        for b in 12..16 {
+            stmts.push(bit_store(0x40, b));
+        }
+        let plan = plan_field_groups(&stmts);
+        assert_eq!(plan.roles.len(), 8);
+        assert_eq!(plan.order, vec![4, 5, 0, 1, 2, 3, 6, 7, 8, 9]);
+        assert_eq!(plan.atoms, vec![(2, 8)], "the run must be pinned");
+    }
+
+    #[test]
+    fn field_group_past_the_span_limit_keeps_its_roles_but_is_not_gathered() {
+        // Dropping the merge is sound however far apart the stores sit; only
+        // moving them is capped, so a group over the limit still gets roles
+        // and stays where it is.
+        let filler = 4000; // beyond any plausible VERYL_AOT_C_GATHER_SPAN
+        let mut stmts: Vec<ProtoStatement> = vec![bit_store(0x40, 8)];
+        stmts.extend((0..filler).map(|i| read_of(0x200 + i as isize * 8, 7, 0)));
+        stmts.extend((9..16).map(|b| bit_store(0x40, b)));
+        let plan = plan_field_groups(&stmts);
+        assert_eq!(plan.roles.len(), 8, "roles survive the cap");
+        assert!(plan.atoms.is_empty(), "nothing pinned");
+        assert!(
+            plan.order.iter().copied().eq(0..stmts.len()),
+            "order unchanged"
+        );
+    }
+
+    #[test]
+    fn field_group_drops_a_window_a_member_reads() {
+        // v[10] = v[9]: the read of bit 9 lands in the group's own window,
+        // and its producer stores later — Init would zero what the
+        // interpreter reads as the previous settle's value.
+        let self_read = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(0x40),
+            dst_width: 128,
+            select: Some((10, 10)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(0x40),
+                select: Some((9, 9)),
+                dynamic_select: None,
+                width: 1,
+                var_full_width: 128,
+                expr_context: ctx(1, false),
+            },
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let mut stmts = vec![bit_store(0x40, 8), self_read];
+        stmts.extend([9usize, 11, 12, 13, 14, 15].map(|b| bit_store(0x40, b)));
+        assert!(plan_field_groups(&stmts).roles.is_empty());
+    }
+
+    #[test]
+    fn field_group_init_orin_stores_execute_correctly() {
+        // A full byte built by eight grouped single-bit stores: the emitted
+        // Init/OrIn run must overwrite the previous settle's byte with the
+        // assembled bits and leave the neighbours alone.
+        if !cc_available() {
+            eprintln!("field_group_init_orin_stores_execute_correctly: cc unavailable, skipping");
+            return;
+        }
+        let stmts: Vec<ProtoStatement> = (8..16usize)
+            .map(|b| {
+                ProtoStatement::Assign(ProtoAssignStatement {
+                    dst: VarOffset::Comb(0x40),
+                    dst_width: 128,
+                    select: Some((b, b)),
+                    dynamic_select: None,
+                    rhs_select: None,
+                    expr: const_expr(((b % 2) == 0) as u64, 1),
+                    dst_ff_current_offset: 0,
+                    token: dummy_token(),
+                })
+            })
+            .collect();
+        let src = emit_function(&stmts).expect("grouped bit stores must stay AOT-covered");
+        assert!(src.contains("|="), "roles were not armed:\n{src}");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_initorin_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "field_group_init_orin_stores_execute")
+        else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 96];
+        comb[0x40] = 0x5A; // neighbour bytes must survive
+        comb[0x41] = 0xAA; // previous settle's value, fully redefined
+        comb[0x42] = 0xC3;
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        // bit b of the byte gets (b % 2 == 0): bits 8,10,12,14 → 0b0101_0101.
+        assert_eq!(comb[0x41], 0x55, "assembled byte");
+        assert_eq!(comb[0x40], 0x5A, "byte below the window");
+        assert_eq!(comb[0x42], 0xC3, "byte above the window");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn field_group_needs_every_bit_of_the_window() {
+        // Seven of the byte's eight bits: the eighth keeps its old value, so
+        // the merge cannot be dropped.
+        let stmts: Vec<_> = (8..15).map(|b| bit_store(0x40, b)).collect();
+        assert!(plan_field_groups(&stmts).roles.is_empty());
+    }
+
+    #[test]
+    fn field_group_stops_at_a_read_of_the_window() {
+        // A reader between the first and last store would see the window
+        // half-built where today it sees the previous settle's value.
+        let mut stmts: Vec<_> = (8..12).map(|b| bit_store(0x40, b)).collect();
+        stmts.push(read_of(0x40, 15, 8));
+        stmts.extend((12..16).map(|b| bit_store(0x40, b)));
+        assert!(plan_field_groups(&stmts).roles.is_empty());
+
+        // The same read after the last store is fine — the window is fully
+        // defined by then either way.
+        let mut after: Vec<_> = (8..16).map(|b| bit_store(0x40, b)).collect();
+        after.push(read_of(0x40, 15, 8));
+        assert_eq!(plan_field_groups(&after).roles.len(), 8);
+    }
+
+    #[test]
+    fn field_group_ignores_a_read_of_a_neighbouring_byte() {
+        // [7:0] lives in byte 0; the group owns byte 1.
+        let mut stmts: Vec<_> = (8..12).map(|b| bit_store(0x40, b)).collect();
+        stmts.push(read_of(0x40, 7, 0));
+        stmts.extend((12..16).map(|b| bit_store(0x40, b)));
+        assert_eq!(plan_field_groups(&stmts).roles.len(), 8);
+    }
+
+    #[test]
+    fn field_group_drops_a_window_whose_field_is_stored_twice() {
+        // Roles are keyed by field, so a second store of the same bit — here
+        // inside a conditional — would pick up the first one's role.
+        let mut stmts: Vec<_> = (8..16).map(|b| bit_store(0x40, b)).collect();
+        stmts.push(ProtoStatement::If(ProtoIfStatement {
+            cond: Some(const_expr(1, 1)),
+            true_side: vec![bit_store(0x40, 9)],
+            false_side: vec![],
+        }));
+        let roles = plan_field_groups(&stmts).roles;
+        assert!(!roles.contains_key(&(0x41, 1 << 1)), "{roles:?}");
+    }
+
+    #[test]
+    fn narrow_field_windows_contain_the_field_and_stay_in_the_container() {
+        for lo in 0..128usize {
+            for nbits in 1..=64usize {
+                if lo + nbits > 128 {
+                    continue;
+                }
+                let Some((start, w)) = narrow_field_window(lo, nbits) else {
+                    continue;
+                };
+                assert!(matches!(w, 1 | 2 | 4 | 8), "lo={lo} nbits={nbits} w={w}");
+                assert_eq!(start % w, 0, "lo={lo} nbits={nbits}: window unaligned");
+                assert!(start + w <= 16, "lo={lo} nbits={nbits}: past the container");
+                assert!(
+                    start * 8 <= lo,
+                    "lo={lo} nbits={nbits}: field starts before"
+                );
+                assert!(
+                    lo + nbits <= (start + w) * 8,
+                    "lo={lo} nbits={nbits}: field ends after"
+                );
+                // The shift has to keep the field inside the window's own width.
+                assert!(lo - start * 8 + nbits <= w * 8, "lo={lo} nbits={nbits}");
+            }
+        }
+        // A single bit always fits a byte — the case that dominates the count.
+        for lo in 0..128usize {
+            assert_eq!(narrow_field_window(lo, 1), Some((lo / 8, 1)), "lo={lo}");
+        }
     }
 
     #[test]
