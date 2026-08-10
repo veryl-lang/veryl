@@ -3763,7 +3763,27 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             let cty = native_c_type(nb)?;
             // Compute the rhs after rhs_select extraction (mirrors
             // AssignStatement::eval_step's `value.select(beg, end)`).
-            let rhs_raw = emit_expr_root(eff_expr)?;
+            // A wide-pointer RHS value is not a C scalar, but a ≤64-bit
+            // rhs_select field of it is.  Scalar emit is tried first:
+            // building a wide pointer does not mean scalar emit fails (a
+            // narrow dynamic select on a >128-bit var is a C scalar too).
+            let (rhs_raw, eff_rhs_select) = if let Some(s) = emit_expr_root(eff_expr) {
+                (s, eff_rhs_select)
+            } else if eff_expr.builds_wide_pointer() {
+                let (rhs_hi, rhs_lo) = eff_rhs_select?;
+                let nbits = rhs_hi.checked_sub(rhs_lo)?.checked_add(1)?;
+                if nbits > 64 {
+                    return None;
+                }
+                let mut pre = String::new();
+                let f = emit_wide_rhs_field(eff_expr, rhs_hi, rhs_lo, &mut pre)?;
+                (
+                    format!("({{ {pre}(uint64_t)VW_RD({addr}, 0); }})", addr = f.addr),
+                    None,
+                )
+            } else {
+                return None;
+            };
             // Sign-extend a bare signed RHS to dst_width before the store
             // (`se_from` = the RHS width). dst_width <= 128 is guaranteed here
             // (wider bailed above). The extension fills bits [w..dst_width) with
@@ -7177,6 +7197,90 @@ mod tests {
         // value >> 32 over the 192-bit [or2:or1:or0].
         let expected_sel = ((or0 as u128) >> 32) | ((or1 as u128) << 32) | ((or2 as u128) << 96);
         assert_eq!(read_u128(&comb, 48), expected_sel);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_narrow_dst_rhs_select_on_wide_pointer_rhs() {
+        // `assign narrow = (a192 | b192)[150:125];` — the scalar sibling
+        // of `emit_rhs_select_on_wide_pointer_store`.
+        if !cc_available() {
+            eprintln!("emit_narrow_dst_rhs_select_on_wide_pointer_rhs: cc unavailable, skipping");
+            return;
+        }
+        let or192 = || ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0), 192)),
+            op: Op::BitOr,
+            y: Box::new(var_expr(VarOffset::Comb(24), 192)),
+            width: 192,
+            expr_context: ctx(192, false),
+        };
+        let mk = |dst: isize, dw: usize, sel: Option<(usize, usize)>| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(dst),
+                dst_width: dw,
+                select: sel,
+                dynamic_select: None,
+                rhs_select: Some((150, 125)),
+                expr: or192(),
+                dst_ff_current_offset: 0,
+                token: dummy_token(),
+            })
+        };
+        let src = emit_function(&[
+            mk(48, 26, None),          // plain narrow store
+            mk(56, 64, Some((30, 5))), // field into a dst bit-select RMW
+        ])
+        .expect("narrow-dst rhs_select on a wide-pointer RHS must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_nwsel_{}", std::process::id()));
+        let Some(module) =
+            compile_for_test(&tmp, &src, "emit_narrow_dst_rhs_select_on_wide_pointer_rhs")
+        else {
+            return;
+        };
+        let a: [u64; 3] = [
+            0x1111_2222_3333_4444,
+            0x5555_6666_7777_8888,
+            0x9999_AAAA_BBBB_CCCC,
+        ];
+        let b: [u64; 3] = [
+            0x0F0F_0F0F_0F0F_0F0F,
+            0xF0F0_F0F0_F0F0_F0F0,
+            0x00FF_00FF_00FF_00FF,
+        ];
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 80];
+        for (i, w) in a.iter().enumerate() {
+            comb[i * 8..i * 8 + 8].copy_from_slice(&w.to_le_bytes());
+        }
+        for (i, w) in b.iter().enumerate() {
+            comb[24 + i * 8..24 + i * 8 + 8].copy_from_slice(&w.to_le_bytes());
+        }
+        // Pre-set dst2 bits outside the [30:5] window to check the RMW.
+        comb[56..64].copy_from_slice(&0xDEAD_0000_0000_0003u64.to_le_bytes());
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let or: Vec<u64> = a.iter().zip(&b).map(|(x, y)| x | y).collect();
+        // Bits [150:125] span or1/or2 (125 = 64 + 61).
+        let shifted = (or[1] >> 61) | (or[2] << 3);
+        let field = shifted & ((1u64 << 26) - 1);
+        let plain = u64::from_le_bytes(comb[48..56].try_into().unwrap());
+        assert_eq!(plain & ((1 << 26) - 1), field, "plain narrow store");
+        let rmw = u64::from_le_bytes(comb[56..64].try_into().unwrap());
+        assert_eq!((rmw >> 5) & ((1 << 26) - 1), field, "field into [30:5]");
+        assert_eq!(rmw & 0x3, 0x3, "RMW keeps bits below the window");
+        assert_eq!(
+            rmw & 0xFFFF_0000_0000_0000,
+            0xDEAD_0000_0000_0000,
+            "RMW keeps bits above the window"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 
