@@ -536,6 +536,26 @@ fn comb_loop_statement_order_and_observer_semantics_a_dominating_procedural_writ
 }
 
 #[test]
+fn comb_loop_ordered_module_scope_reassignments_are_feed_forward() {
+    assert_comb_loop(
+        "module-scope definitions propagate in statement order",
+        r#"
+        module Top (
+            a: output logic,
+        ) {
+            var b: logic;
+            always_comb {
+                a = 0;
+                b = a;
+                a = b;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
 #[ignore = "comb-loop migration: false negative; entry-value dependency closes a real loop"]
 fn comb_loop_statement_order_and_observer_semantics_the_converse_is_real_after_x_0_consumes_the_entry_value_of_x_1_the()
  {
