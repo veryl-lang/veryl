@@ -1,3 +1,4 @@
+use crate::doc::utils::escape_html;
 use crate::doc::{Mermaid, Wavedrom};
 use handlebars::Handlebars;
 use mdbook_driver::MDBook;
@@ -17,35 +18,35 @@ use veryl_parser::veryl_token::Token;
 const SUMMARY_TMPL: &str = r###"
 # Summary
 
-[{{name}}](index.md)
-- [{{version}}]()
+[{{{name}}}](index.md)
+- [{{{version}}}]()
 
 ---
 
 - [Modules](modules.md)
   {{#each modules}}
-  - [{{this.0}}]({{this.1}}.md)
+  - [{{{this.0}}}]({{{this.1}}}.md)
   {{/each}}
 
 - [Module Prototypes](proto_modules.md)
   {{#each proto_modules}}
-  - [{{this.0}}]({{this.1}}.md)
+  - [{{{this.0}}}]({{{this.1}}}.md)
   {{/each}}
 
 - [Interfaces](interfaces.md)
   {{#each interfaces}}
-  - [{{this.0}}]({{this.1}}.md)
+  - [{{{this.0}}}]({{{this.1}}}.md)
   {{/each}}
 
 - [Packages](packages.md)
   {{#each packages}}
-  - [{{this.0}}]({{this.1}}.md)
+  - [{{{this.0}}}]({{{this.1}}}.md)
   {{/each}}
 
 {{#if components}}
 - [Components](components.md)
   {{#each components}}
-  - [{{this.0}}]({{this.1}}.md)
+  - [{{{this.0}}}]({{{this.1}}}.md)
   {{/each}}
 {{/if}}
 "###;
@@ -62,9 +63,9 @@ struct SummaryData {
 }
 
 const INDEX_TMPL: &str = r###"
-# {{name}}
+# {{{name}}}
 
-{{description}}
+{{{description}}}
 
 <table align="center" class="table_list">
 <tbody>
@@ -94,8 +95,8 @@ const INDEX_TMPL: &str = r###"
 <tbody>
 {{#each this.items}}
 <tr>
-    <th class="table_list_item"><a href="{{this.file_name}}.html">{{this.html_name}}</a></th>
-    <td class="table_list_item">{{this.description}}</td>
+    <th class="table_list_item"><a href="{{this.file_name}}.html">{{{this.html_name}}}</a></th>
+    <td class="table_list_item">{{{this.description}}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -114,15 +115,15 @@ struct IndexData {
 }
 
 const LIST_TMPL: &str = r###"
-# {{name}}
+# {{{name}}}
 ---
 
 <table class="table_list">
 <tbody>
 {{#each items}}
 <tr>
-    <th class="table_list_item"><a href="{{this.file_name}}.html">{{this.html_name}}</a></th>
-    <td class="table_list_item">{{this.description}}</td>
+    <th class="table_list_item"><a href="{{this.file_name}}.html">{{{this.html_name}}}</a></th>
+    <td class="table_list_item">{{{this.description}}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -144,9 +145,9 @@ struct ListItem {
 }
 
 const MODULE_TMPL: &str = r#"
-# {{name}}
+# {{{name}}}
 
-{{description}}
+{{{description}}}
 
 {{#if generic_parameters}}
 ### Generic Parameters
@@ -174,7 +175,7 @@ const MODULE_TMPL: &str = r#"
 <tr>
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{this.description}}</td>
+    <td class="table_list_item">{{{this.description}}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -210,7 +211,7 @@ const MODULE_TMPL: &str = r#"
     <td class="table_list_item"><span class="hljs-attribute">{{this.clock_domain}}</span></td>
     {{/if}}
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{this.description}}</td>
+    <td class="table_list_item">{{{this.description}}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -251,9 +252,9 @@ struct PortData {
 }
 
 const PROTO_MODULE_TMPL: &str = r#"
-# {{name}}
+# {{{name}}}
 
-{{description}}
+{{{description}}}
 
 {{#if parameters}}
 ### Parameters
@@ -265,7 +266,7 @@ const PROTO_MODULE_TMPL: &str = r#"
 <tr>
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{this.description}}</td>
+    <td class="table_list_item">{{{this.description}}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -301,7 +302,7 @@ const PROTO_MODULE_TMPL: &str = r#"
     <td class="table_list_item"><span class="hljs-attribute">{{this.clock_domain}}</span></td>
     {{/if}}
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{this.description}}</td>
+    <td class="table_list_item">{{{this.description}}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -319,9 +320,9 @@ struct ProtoModuleData {
 }
 
 const INTERFACE_TMPL: &str = r#"
-# {{name}}
+# {{{name}}}
 
-{{description}}
+{{{description}}}
 
 {{#if parameters}}
 ### Parameters
@@ -333,7 +334,7 @@ const INTERFACE_TMPL: &str = r#"
 <tr>
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{this.description}}</td>
+    <td class="table_list_item">{{{this.description}}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -349,9 +350,9 @@ struct InterfaceData {
 }
 
 const PACKAGE_TMPL: &str = r###"
-# {{name}}
+# {{{name}}}
 
-{{description}}
+{{{description}}}
 
 "###;
 
@@ -362,13 +363,13 @@ struct PackageData {
 }
 
 const COMPONENT_TMPL: &str = r#"
-# {{name}}
+# {{{name}}}
 
 {{#if kind}}
 <p class="doc_subtitle"><span class="hljs-keyword">{{kind}}</span> component</p>
 {{/if}}
 
-{{description}}
+{{{description}}}
 
 {{#if parameters}}
 ### Parameters
@@ -381,7 +382,7 @@ const COMPONENT_TMPL: &str = r#"
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
     <td class="table_list_item">{{#if this.optional}}optional{{else}}required{{/if}}</td>
-    <td class="table_list_item">{{this.description}}</td>
+    <td class="table_list_item">{{{this.description}}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -399,7 +400,7 @@ const COMPONENT_TMPL: &str = r#"
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span></td>
     <td class="table_list_item"><span class="hljs-type">{{this.width}}</span></td>
-    <td class="table_list_item">{{this.description}}</td>
+    <td class="table_list_item">{{{this.description}}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -411,10 +412,10 @@ const COMPONENT_TMPL: &str = r#"
 ---
 
 {{#each methods}}
-<h4 class="method_sig">{{this.signature}}</h4>
+<h4 class="method_sig">{{{this.signature}}}</h4>
 <div class="method_desc">
 
-{{this.description}}
+{{{this.description}}}
 
 </div>
 {{/each}}
@@ -716,8 +717,7 @@ impl DocBuilder {
             components,
         };
 
-        let mut handlebars = Handlebars::new();
-        handlebars.register_escape_fn(handlebars::no_escape);
+        let handlebars = Handlebars::new();
         Ok(handlebars.render_template(SUMMARY_TMPL, &data).unwrap())
     }
 
@@ -738,8 +738,7 @@ impl DocBuilder {
             catalog: self.catalog(),
         };
 
-        let mut handlebars = Handlebars::new();
-        handlebars.register_escape_fn(handlebars::no_escape);
+        let handlebars = Handlebars::new();
         Ok(handlebars.render_template(INDEX_TMPL, &data).unwrap())
     }
 
@@ -797,8 +796,7 @@ impl DocBuilder {
             name: name.to_string(),
             items,
         };
-        let mut handlebars = Handlebars::new();
-        handlebars.register_escape_fn(handlebars::no_escape);
+        let handlebars = Handlebars::new();
         handlebars.render_template(LIST_TMPL, &data).unwrap()
     }
 
@@ -901,8 +899,7 @@ impl DocBuilder {
                 ports,
             };
 
-            let mut handlebars = Handlebars::new();
-            handlebars.register_escape_fn(handlebars::no_escape);
+            let handlebars = Handlebars::new();
             handlebars.render_template(MODULE_TMPL, &data).unwrap()
         } else {
             String::new()
@@ -965,8 +962,7 @@ impl DocBuilder {
                 ports,
             };
 
-            let mut handlebars = Handlebars::new();
-            handlebars.register_escape_fn(handlebars::no_escape);
+            let handlebars = Handlebars::new();
             handlebars
                 .render_template(PROTO_MODULE_TMPL, &data)
                 .unwrap()
@@ -996,8 +992,7 @@ impl DocBuilder {
                 parameters,
             };
 
-            let mut handlebars = Handlebars::new();
-            handlebars.register_escape_fn(handlebars::no_escape);
+            let handlebars = Handlebars::new();
             handlebars.render_template(INTERFACE_TMPL, &data).unwrap()
         } else {
             String::new()
@@ -1013,8 +1008,7 @@ impl DocBuilder {
                 description: symbol.doc_comment.format(false),
             };
 
-            let mut handlebars = Handlebars::new();
-            handlebars.register_escape_fn(handlebars::no_escape);
+            let handlebars = Handlebars::new();
             handlebars.render_template(PACKAGE_TMPL, &data).unwrap()
         } else {
             String::new()
@@ -1072,15 +1066,27 @@ fn build_component_page(item: &ComponentItem) -> String {
             let args: Vec<_> = x
                 .args
                 .iter()
-                .map(|a| format!("{}: <span class=\"hljs-type\">{}</span>", a.name, a.ty))
+                .map(|a| {
+                    format!(
+                        "{}: <span class=\"hljs-type\">{}</span>",
+                        escape_html(&a.name),
+                        escape_html(&a.ty)
+                    )
+                })
                 .collect();
             let ret = match (&x.ret, &x.ret_width) {
-                (Some(t), Some(w)) => format!(" -> <span class=\"hljs-type\">{t}[{w}]</span>"),
-                (Some(t), None) => format!(" -> <span class=\"hljs-type\">{t}</span>"),
+                (Some(t), Some(w)) => format!(
+                    " -> <span class=\"hljs-type\">{}[{}]</span>",
+                    escape_html(t),
+                    escape_html(&w.to_string())
+                ),
+                (Some(t), None) => {
+                    format!(" -> <span class=\"hljs-type\">{}</span>", escape_html(t))
+                }
                 (None, _) => String::new(),
             };
             ComponentMethodData {
-                signature: format!("{}({}){}", x.name, args.join(", "), ret),
+                signature: format!("{}({}){}", escape_html(&x.name), args.join(", "), ret),
                 description: x.doc.clone(),
             }
         })
@@ -1097,8 +1103,7 @@ fn build_component_page(item: &ComponentItem) -> String {
         usage: component_usage(&item.name, manifest),
     };
 
-    let mut handlebars = Handlebars::new();
-    handlebars.register_escape_fn(handlebars::no_escape);
+    let handlebars = Handlebars::new();
     handlebars.render_template(COMPONENT_TMPL, &data).unwrap()
 }
 
@@ -1152,7 +1157,7 @@ fn component_usage(name: &str, manifest: &ComponentManifest) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use veryl_metadata::component_manifest::{ManifestParam, ManifestPort};
+    use veryl_metadata::component_manifest::{ManifestMethod, ManifestParam, ManifestPort};
 
     fn manifest() -> ComponentManifest {
         ComponentManifest {
@@ -1186,7 +1191,18 @@ mod tests {
                     doc: None,
                 },
             ],
-            methods: vec![],
+            methods: vec![ManifestMethod {
+                name: "read".to_string(),
+                args: vec![ManifestParam {
+                    name: "addr".to_string(),
+                    ty: "logic<ADDR_W>".to_string(),
+                    optional: false,
+                    doc: None,
+                }],
+                ret: Some("logic".to_string()),
+                ret_width: None,
+                doc: Some("Read a word.".to_string()),
+            }],
             requires: vec![],
             groups: vec![],
         }
@@ -1238,6 +1254,30 @@ mod tests {
         // Width 0 means "not declared" and renders as an empty cell.
         assert!(page.contains("<span class=\"hljs-type\"></span>"));
         assert!(page.contains("inst u0: $comp::golden #( XLEN ) (clk, q);"));
+        // A method signature is markup this module builds itself, so the
+        // manifest types spliced into it have to be escaped on the way in.
+        assert!(
+            page.contains("read(addr: <span class=\"hljs-type\">logic&lt;ADDR_W&gt;</span>)"),
+            "{page}"
+        );
+        assert!(!page.contains("logic<ADDR_W>"), "{page}");
+    }
+
+    #[test]
+    fn component_page_escapes_usage_snippet() {
+        let mut method_only = manifest();
+        method_only.kind = Some("method_only".to_string());
+        let item = ComponentItem {
+            name: "golden".to_string(),
+            file_name: "component_golden".to_string(),
+            manifest: method_only,
+        };
+        let page = build_component_page(&item);
+        assert!(
+            page.contains("var u0: $comp::golden::&lt;XLEN&gt;;"),
+            "{page}"
+        );
+        assert!(!page.contains("::<XLEN>"), "{page}");
     }
 
     #[test]
@@ -1281,5 +1321,67 @@ mod tests {
             page.contains("inst u0: $comp::checker #( XLEN ) (clk, q, axi: );"),
             "{page}"
         );
+    }
+
+    #[test]
+    fn module_page_escapes_types_only() {
+        let data = ModuleData {
+            name: "async_fifo::&lt;S&gt;".to_string(),
+            description: "Uses `a --> b` and `i < n`".to_string(),
+            generic_parameters: vec![],
+            parameters: vec![ParameterData {
+                name: "MAX_COUNT".to_string(),
+                typ: "bit<WIDTH>".to_string(),
+                description: Some(" Max value of counter".to_string()),
+            }],
+            clock_domains: vec![],
+            ports: vec![PortData {
+                name: "o_count".to_string(),
+                direction: "output".to_string(),
+                clock_domain: None,
+                typ: "logic<WIDTH>".to_string(),
+                description: Some(" Count value".to_string()),
+            }],
+        };
+        let page = Handlebars::new()
+            .render_template(MODULE_TMPL, &data)
+            .unwrap();
+        assert!(
+            page.contains("<span class=\"hljs-type\">bit&lt;WIDTH&gt;</span>"),
+            "{page}"
+        );
+        assert!(
+            page.contains("<span class=\"hljs-type\">logic&lt;WIDTH&gt;</span>"),
+            "{page}"
+        );
+        assert!(!page.contains("bit<WIDTH>"), "{page}");
+        assert!(!page.contains("logic<WIDTH>"), "{page}");
+        assert!(page.contains("# async_fifo::&lt;S&gt;"), "{page}");
+        assert!(page.contains("`a --> b` and `i < n`"), "{page}");
+        assert!(!page.contains("&amp;"), "{page}");
+        // Every row the template opens is closed, so the tables stay separate.
+        assert_eq!(
+            page.matches("<table").count(),
+            page.matches("</table>").count()
+        );
+        assert_eq!(page.matches("<tr>").count(), page.matches("</tr>").count());
+    }
+
+    #[test]
+    fn list_page_does_not_double_escape() {
+        let data = ListData {
+            name: "Modules".to_string(),
+            items: vec![ListItem {
+                file_name: "async_fifo".to_string(),
+                html_name: "async_fifo::&lt;S&gt;".to_string(),
+                description: "Asynchronous FIFO".to_string(),
+            }],
+        };
+        let page = Handlebars::new().render_template(LIST_TMPL, &data).unwrap();
+        assert!(
+            page.contains("<a href=\"async_fifo.html\">async_fifo::&lt;S&gt;</a>"),
+            "{page}"
+        );
+        assert!(!page.contains("&amp;"), "{page}");
     }
 }
