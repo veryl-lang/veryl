@@ -65,6 +65,18 @@ fn limit() -> usize {
     })
 }
 
+/// `VERYL_COMB_FUSION_LIMIT_DUP=N`: cap the duplication pass alone
+/// (bisection debug aid; defaults to the shared limit).
+fn limit_dup() -> usize {
+    static V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("VERYL_COMB_FUSION_LIMIT_DUP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(limit)
+    })
+}
+
 /// A reader statement whose expressions we may rewrite.  `For` is excluded
 /// (the body re-evaluates per iteration), and everything opaque
 /// (CompiledBlock, system calls, TB methods, sequential blocks) is too.
@@ -331,6 +343,260 @@ fn coalesce_enabled() -> bool {
     *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION_COALESCE").as_deref() != Ok("0"))
 }
 
+/// Cheap multi-reader duplication: OFF by default (`VERYL_COMB_FUSION_CHEAP=1`
+/// to opt in) — an unexplained long-run miscompile on a full workload keeps
+/// the stage parked.  Unit tests exercise the machinery directly
+/// (`cfg!(test)` keeps it on there, so the production OFF path is validated
+/// only by the end-to-end suites).
+fn cheap_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if cfg!(test) {
+        return std::env::var("VERYL_COMB_FUSION_CHEAP").as_deref() != Ok("0");
+    }
+    *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION_CHEAP").as_deref() == Ok("1"))
+}
+
+/// `VERYL_COMB_FUSION_CSE=0` opts the common-subexpression collapse out
+/// (per-stage A/B lever).
+fn cse_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION_CSE").as_deref() != Ok("0"))
+}
+
+/// A multi-reader RHS worth recomputing at every use instead of storing and
+/// loading — Verilator's `isCheaperThanLoad` shapes that exist at this
+/// level: constants, canonical full variable loads, and static selects
+/// (one load+shift+mask, at most what the retired load cost).  Everything
+/// here is canonical, so no wrap is needed when it fits the def width.
+fn cheap_rhs(e: &ProtoExpression) -> bool {
+    match e {
+        // A signed leaf is not portable: the store sign-extends it (or the
+        // reader's wider context would re-sign what was an unsigned read).
+        ProtoExpression::Value { value, .. } => !value.signed(),
+        ProtoExpression::Variable {
+            dynamic_select: None,
+            select,
+            width,
+            var_full_width,
+            expr_context,
+            ..
+        } => !expr_context.signed && (select.is_some() || width == var_full_width),
+        _ => false,
+    }
+}
+
+/// Replace EVERY full-width read of `off` with a clone of `template`.
+/// Returns the number of replacements.
+fn replace_all_reads(e: &mut ProtoExpression, off: isize, template: &ProtoExpression) -> usize {
+    let is_target = matches!(
+        e,
+        ProtoExpression::Variable {
+            var_offset,
+            select: None,
+            dynamic_select: None,
+            width,
+            var_full_width,
+            expr_context,
+        } if *var_offset == VarOffset::Comb(off)
+            && !expr_context.signed
+            && width == var_full_width
+    );
+    if is_target {
+        *e = template.clone();
+        return 1;
+    }
+    let mut nrep = 0;
+    match e {
+        ProtoExpression::Variable { dynamic_select, .. } => {
+            if let Some(d) = dynamic_select {
+                nrep += replace_all_reads(&mut d.index_expr, off, template);
+            }
+        }
+        ProtoExpression::DynamicVariable {
+            index_expr,
+            dynamic_select,
+            ..
+        } => {
+            nrep += replace_all_reads(index_expr, off, template);
+            if let Some(d) = dynamic_select {
+                nrep += replace_all_reads(&mut d.index_expr, off, template);
+            }
+        }
+        ProtoExpression::Unary { x, .. } => nrep += replace_all_reads(x, off, template),
+        ProtoExpression::Binary { x, y, .. } => {
+            nrep += replace_all_reads(x, off, template);
+            nrep += replace_all_reads(y, off, template);
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            nrep += replace_all_reads(cond, off, template);
+            nrep += replace_all_reads(true_expr, off, template);
+            nrep += replace_all_reads(false_expr, off, template);
+        }
+        ProtoExpression::Concatenation { elements, .. } => {
+            for (x, _, _) in elements {
+                nrep += replace_all_reads(x, off, template);
+            }
+        }
+        ProtoExpression::Value { .. } | ProtoExpression::HierVariable(_) => {}
+    }
+    nrep
+}
+
+fn replace_all_reads_stmt(s: &mut ProtoStatement, off: isize, template: &ProtoExpression) -> usize {
+    let mut nrep = 0;
+    match s {
+        ProtoStatement::Assign(a) => {
+            nrep += replace_all_reads(&mut a.expr, off, template);
+            if let Some(d) = &mut a.dynamic_select {
+                nrep += replace_all_reads(&mut d.index_expr, off, template);
+            }
+        }
+        ProtoStatement::AssignDynamic(a) => {
+            nrep += replace_all_reads(&mut a.dst_index_expr, off, template);
+            nrep += replace_all_reads(&mut a.expr, off, template);
+            if let Some(d) = &mut a.dynamic_select {
+                nrep += replace_all_reads(&mut d.index_expr, off, template);
+            }
+        }
+        ProtoStatement::If(x) => {
+            if let Some(c) = &mut x.cond {
+                nrep += replace_all_reads(c, off, template);
+            }
+            for t in x.true_side.iter_mut().chain(x.false_side.iter_mut()) {
+                nrep += replace_all_reads_stmt(t, off, template);
+            }
+        }
+        ProtoStatement::Case(x) => {
+            for arm in &mut x.arms {
+                nrep += replace_all_reads(&mut arm.cond, off, template);
+                for t in &mut arm.body {
+                    nrep += replace_all_reads_stmt(t, off, template);
+                }
+            }
+            for t in &mut x.default {
+                nrep += replace_all_reads_stmt(t, off, template);
+            }
+        }
+        _ => {}
+    }
+    nrep
+}
+
+/// Collapse identical non-trivial RHS shapes into a copy of the first def:
+/// `x = E; ... y = E;` → `y = x;` when every input of `E` and `x` itself are
+/// untouched over `(i, j]`.  The copy then feeds the cheap duplication /
+/// single-reader inlining downstream.  Identity is a double structural hash
+/// (`ProtoExpression` has `Hash` but no `Eq`; two independent seeds make a
+/// collision astronomically unlikely, and a false positive would only fuse
+/// two expressions that hash equal twice).
+fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
+    use std::hash::{Hash, Hasher};
+    let mut write_idxs: HashMap<isize, Vec<usize>> = HashMap::default();
+    {
+        let mut ins: Vec<VarOffset> = vec![];
+        let mut outs: Vec<VarOffset> = vec![];
+        for (i, s) in stmts.iter().enumerate() {
+            ins.clear();
+            outs.clear();
+            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            for off in outs.drain(..) {
+                if let VarOffset::Comb(o) = off {
+                    write_idxs.entry(o).or_default().push(i);
+                }
+            }
+        }
+    }
+    let any_write_in = |o: isize, lo: usize, hi_incl: usize| -> bool {
+        write_idxs.get(&o).is_some_and(|v| {
+            let p = v.partition_point(|&x| x <= lo);
+            v.get(p).is_some_and(|&x| x <= hi_incl)
+        })
+    };
+    // (h1, h2) -> (def idx, dst offset, width) of the first occurrence.
+    let mut seen: HashMap<(u64, u64), (usize, isize, usize)> = HashMap::default();
+    let mut collapsed = 0usize;
+    let mut ins: Vec<VarOffset> = vec![];
+    let mut outs: Vec<VarOffset> = vec![];
+    // Index loop: the body re-borrows stmts[j] mutably on a hit.
+    #[allow(clippy::needless_range_loop)]
+    for j in 0..stmts.len() {
+        let ProtoStatement::Assign(a) = &stmts[j] else {
+            continue;
+        };
+        let VarOffset::Comb(dst) = a.dst else {
+            continue;
+        };
+        if a.select.is_some()
+            || a.dynamic_select.is_some()
+            || a.rhs_select.is_some()
+            || a.dst_width == 0
+            || a.dst_width > 64
+            || a.expr.width() > 64
+            || cheap_rhs(&a.expr)
+        {
+            continue;
+        }
+        let key = {
+            let mut h1 = std::collections::hash_map::DefaultHasher::new();
+            a.expr.hash(&mut h1);
+            let mut h2 = std::collections::hash_map::DefaultHasher::new();
+            0xa5a5_5a5a_u64.hash(&mut h2);
+            a.expr.hash(&mut h2);
+            (h1.finish(), h2.finish())
+        };
+        match seen.get(&key) {
+            Some(&(i, x, w)) if w == a.dst_width && x != dst => {
+                // Inputs of E (gathered from the LATER def — identical shape)
+                // and the first dst must be untouched over (i, j].
+                ins.clear();
+                outs.clear();
+                stmts[j].gather_variable_offsets_expanded(&mut ins, &mut outs);
+                // E reading x is a settle back-edge: statement i itself
+                // rewrites x between the two evaluations, and the window
+                // check below starts past i.
+                let stable = !ins.contains(&VarOffset::Comb(x))
+                    && !any_write_in(x, i, j)
+                    && ins.iter().all(|off| match off {
+                        VarOffset::Comb(io) => !any_write_in(*io, i, j),
+                        VarOffset::Ff(_) => true,
+                    });
+                if stable {
+                    let w = a.dst_width;
+                    let ProtoStatement::Assign(a) = &mut stmts[j] else {
+                        unreachable!()
+                    };
+                    a.expr = ProtoExpression::Variable {
+                        var_offset: VarOffset::Comb(x),
+                        select: None,
+                        dynamic_select: None,
+                        width: w,
+                        var_full_width: w,
+                        expr_context: ExpressionContext {
+                            width: w,
+                            signed: false,
+                        },
+                    };
+                    collapsed += 1;
+                } else {
+                    // Window broken: the later occurrence becomes the new
+                    // canonical def for subsequent duplicates.
+                    seen.insert(key, (j, dst, a.dst_width));
+                }
+            }
+            Some(_) => {}
+            None => {
+                seen.insert(key, (j, dst, a.dst_width));
+            }
+        }
+    }
+    collapsed
+}
+
 /// Coalesce disjoint static field stores that fully define a destination
 /// word into one whole-width concat assignment — the statement-level
 /// analogue of Verilator's `coalesceDrivers` (V3DfgSynthesize).
@@ -559,6 +825,11 @@ pub fn inline_single_readers(
     } else {
         0
     };
+    let collapsed = if cse_enabled() {
+        collapse_common_rhs(&mut stmts)
+    } else {
+        0
+    };
     // -- externals: offsets we must never make disappear.
     let mut externals: HashSet<isize> = HashSet::default();
     for off in externals_extra {
@@ -597,6 +868,8 @@ pub fn inline_single_readers(
     struct ReadInfo {
         count: usize,
         last_reader: usize,
+        /// Reader statement indices, deduplicated, ascending.
+        readers: Vec<usize>,
     }
     let mut reads: HashMap<isize, ReadInfo> = HashMap::default();
     let mut writes: HashMap<isize, Vec<usize>> = HashMap::default();
@@ -614,9 +887,13 @@ pub fn inline_single_readers(
                     let e = reads.entry(o).or_insert(ReadInfo {
                         count: 0,
                         last_reader: 0,
+                        readers: Vec::new(),
                     });
                     e.count += 1;
                     e.last_reader = i;
+                    if e.readers.last() != Some(&i) {
+                        e.readers.push(i);
+                    }
                     if opaque {
                         opaque_read.insert(o);
                     }
@@ -630,9 +907,6 @@ pub fn inline_single_readers(
         }
     }
 
-    // -- pass 2: greedy front-to-back inlining.  Chains compose naturally:
-    //    an earlier def folded into its reader travels with it when the
-    //    reader is itself inlined later (its RHS is re-gathered fresh).
     let n = stmts.len();
     let mut deleted = vec![false; n];
     let mut fused_offsets: Vec<isize> = Vec::new();
@@ -640,6 +914,138 @@ pub fn inline_single_readers(
     let (mut veto_shape, mut veto_reader, mut veto_redef, mut veto_ext) = (0usize, 0, 0, 0);
     let mut e_ins: Vec<VarOffset> = vec![];
     let mut e_outs: Vec<VarOffset> = vec![];
+
+    // -- pass 2a: cheap multi-reader duplication — every reader recomputes
+    //    the RHS (see `cheap_rhs`) and the def retires when externally
+    //    invisible.  All readers must qualify (no partial application),
+    //    each windowed like the single-reader path, READER ITSELF INCLUDED.
+    let mut duplicated = 0usize;
+    if cheap_enabled() {
+        let window_has_write =
+            |writes: &HashMap<isize, Vec<usize>>, o: isize, lo: usize, hi: usize| -> bool {
+                writes.get(&o).is_some_and(|v| {
+                    let p = v.partition_point(|&x| x <= lo);
+                    v.get(p).is_some_and(|&x| x < hi)
+                })
+            };
+        for i in 0..n {
+            if duplicated >= limit_dup() {
+                break;
+            }
+            let Some((o, w)) = (match &stmts[i] {
+                ProtoStatement::Assign(a)
+                    if a.select.is_none()
+                        && a.dynamic_select.is_none()
+                        && a.rhs_select.is_none()
+                        && a.dst_width > 0
+                        && a.dst_width <= 64
+                        && a.expr.width() > 0
+                        && a.expr.width() <= 64
+                        && cheap_rhs(&a.expr) =>
+                {
+                    match a.dst {
+                        VarOffset::Comb(o) if reads.get(&o).is_some_and(|ri| ri.count >= 2) => {
+                            Some((o, a.dst_width))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }) else {
+                continue;
+            };
+            let readers = reads[&o].readers.clone();
+            if readers.first().is_none_or(|&f| f <= i) {
+                continue; // backward reader (settle back-edge) or none
+            }
+            e_ins.clear();
+            e_outs.clear();
+            stmts[i].gather_variable_offsets_expanded(&mut e_ins, &mut e_outs);
+            if e_ins.contains(&VarOffset::Comb(o)) {
+                continue; // self-read
+            }
+            let all_ok = readers.iter().all(|&r| {
+                !deleted[r]
+                    && rewritable_reader(&stmts[r])
+                    && !window_has_write(&writes, o, i, r + 1)
+                    && e_ins.iter().all(|off| match off {
+                        VarOffset::Comb(io) => !window_has_write(&writes, *io, i, r + 1),
+                        VarOffset::Ff(_) => true,
+                    })
+            });
+            if !all_ok {
+                veto_redef += 1;
+                continue;
+            }
+            // The full-load count must equal the gather-based read count:
+            // a mismatch means some reader reaches this offset through a
+            // dynamic index `count_reads` cannot see, and would silently
+            // keep reading the retired storage.
+            let (mut tf, mut to) = (0usize, 0usize);
+            for &r in &readers {
+                count_reads_stmt(&stmts[r], o, &mut tf, &mut to);
+            }
+            if to != 0 || tf == 0 || tf != reads[&o].count {
+                veto_shape += 1;
+                continue;
+            }
+            if diag() && duplicated + 1 == limit_dup() {
+                eprintln!(
+                    "[comb_fusion] LAST dup #{n}: off={o:#x} w={w} def stmt[{i}] = {:?}",
+                    stmts[i],
+                    n = duplicated + 1,
+                );
+                for &r in &readers {
+                    eprintln!("[comb_fusion] dup reader stmt[{r}] = {:?}", stmts[r]);
+                }
+            }
+            let ProtoStatement::Assign(a) = &stmts[i] else {
+                unreachable!()
+            };
+            let template = if a.expr.width() <= w {
+                a.expr.clone()
+            } else {
+                canonical_wrap(a.expr.clone(), w)
+            };
+            let mut total = 0usize;
+            for &r in &readers {
+                total += replace_all_reads_stmt(&mut stmts[r], o, &template);
+            }
+            debug_assert_eq!(
+                total, tf,
+                "cheap duplication replaced a different read count"
+            );
+            if !externals.contains(&o) && !opaque_read.contains(&o) {
+                deleted[i] = true;
+                fused_offsets.push(o);
+            }
+            duplicated += 1;
+            // The template's reads now occur at every reader's position.
+            let last = readers.last().copied().unwrap_or(0);
+            for off in &e_ins {
+                if let VarOffset::Comb(io) = off
+                    && let Some(ri) = reads.get_mut(io)
+                {
+                    ri.count += total;
+                    if ri.last_reader < last {
+                        ri.last_reader = last;
+                    }
+                    let tail = ri.readers.last().copied();
+                    ri.readers.extend(
+                        readers
+                            .iter()
+                            .copied()
+                            .filter(|&r| tail.is_none_or(|l| r > l)),
+                    );
+                }
+            }
+        }
+    }
+
+    // -- pass 2b: greedy front-to-back single-reader inlining.  Chains
+    //    compose naturally: an earlier def folded into its reader travels
+    //    with it when the reader is itself inlined later (its RHS is
+    //    re-gathered fresh).
     for i in 0..n {
         if inlined >= limit() {
             break;
@@ -779,14 +1185,22 @@ pub fn inline_single_readers(
 
     if diag() {
         eprintln!(
-            "[comb_fusion] stmts={} coalesced={} inlined={} veto: shape={} reader={} redef={} external={}",
-            n, coalesced, inlined, veto_shape, veto_reader, veto_redef, veto_ext,
+            "[comb_fusion] stmts={} coalesced={} cse={} dup={} inlined={} veto: shape={} reader={} redef={} external={}",
+            n,
+            coalesced,
+            collapsed,
+            duplicated,
+            inlined,
+            veto_shape,
+            veto_reader,
+            veto_redef,
+            veto_ext,
         );
     }
-    if inlined == 0 {
+    if !deleted.iter().any(|&d| d) {
         return (stmts, fused_offsets);
     }
-    let mut out = Vec::with_capacity(n - inlined);
+    let mut out = Vec::with_capacity(n);
     for (i, s) in stmts.into_iter().enumerate() {
         if !deleted[i] {
             out.push(s);
@@ -946,13 +1360,20 @@ mod tests {
     }
 
     #[test]
-    fn keeps_a_two_reader_def() {
+    fn cheap_two_reader_copy_now_duplicates() {
+        // Under the cheap-duplication policy a two-reader COPY retires (both
+        // readers read the source directly); an expensive two-reader def is
+        // covered by `expensive_multi_reader_def_is_kept`.
         let stmts = vec![
             assign(0x0, 8, var(0x100, 8)),
             assign(0x8, 8, var(0x0, 8)),
             assign(0x10, 8, var(0x0, 8)),
         ];
-        assert_eq!(run(stmts).len(), 3);
+        let out = run(stmts);
+        assert_eq!(out.len(), 2);
+        for s in &out {
+            assert_eq!(reads_of(s, 0x0), (0, 0));
+        }
     }
 
     #[test]
@@ -1309,6 +1730,235 @@ mod tests {
         let out = run(stmts);
         assert_eq!(out.len(), 1);
         assert_eq!(reads_of(&out[0], 0x0), (0, 0));
+    }
+
+    #[test]
+    fn cheap_duplication_retires_a_multi_reader_copy() {
+        // x = y (cheap); two readers both fold to y directly, x retires.
+        let stmts = vec![
+            assign(0x0, 8, var(0x100, 8)),
+            assign(0x8, 8, binary(Op::BitAnd, var(0x0, 8), var(0x108, 8), 8)),
+            assign(0x10, 8, binary(Op::BitOr, var(0x0, 8), var(0x110, 8), 8)),
+        ];
+        let out = run(stmts);
+        assert_eq!(out.len(), 2);
+        for s in &out {
+            assert_eq!(reads_of(s, 0x0), (0, 0));
+        }
+    }
+
+    #[test]
+    fn cheap_duplication_keeps_an_external_def_but_rewrites_readers() {
+        let stmts = vec![
+            assign(0x0, 8, var(0x100, 8)),
+            assign(0x8, 8, var(0x0, 8)),
+            assign(0x10, 8, var(0x0, 8)),
+        ];
+        let mut protect: HashSet<VarOffset> = HashSet::default();
+        protect.insert(VarOffset::Comb(0x0));
+        let (out, _) = inline_single_readers(stmts, &HashMap::default(), &protect);
+        // The def survives (external), but both readers now read 0x100.
+        assert_eq!(out.len(), 3);
+        assert_eq!(reads_of(&out[1], 0x0), (0, 0));
+        assert_eq!(reads_of(&out[2], 0x0), (0, 0));
+        assert_eq!(reads_of(&out[1], 0x100), (1, 0));
+    }
+
+    #[test]
+    fn cheap_duplication_vetoes_when_the_source_is_rewritten() {
+        // y (=0x100) changes between the two readers: no duplication.
+        let stmts = vec![
+            assign(0x0, 8, var(0x100, 8)),
+            assign(0x8, 8, var(0x0, 8)),
+            assign(0x100, 8, var(0x110, 8)),
+            assign(0x10, 8, var(0x0, 8)),
+        ];
+        let out = run(stmts);
+        assert_eq!(out.len(), 4);
+        assert_eq!(reads_of(&out[3], 0x0), (1, 0));
+    }
+
+    #[test]
+    fn expensive_multi_reader_def_is_kept() {
+        // An add is not cheap; two readers keep the store+loads.
+        let stmts = vec![
+            assign(0x0, 8, binary(Op::Add, var(0x100, 8), var(0x108, 8), 8)),
+            assign(0x8, 8, var(0x0, 8)),
+            assign(0x10, 8, var(0x0, 8)),
+        ];
+        // The two copy-readers duplicate off the def's DST (cheap copies of
+        // 0x0), but the add def itself must survive with its store.
+        let out = run(stmts);
+        assert!(
+            out.iter()
+                .any(|s| matches!(s, ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x0))),
+            "expensive def must keep its store"
+        );
+    }
+
+    #[test]
+    fn cse_vetoes_a_back_edge_first_def() {
+        // x = x + a (settle back-edge): statement i rewrites its own input,
+        // so the later identical RHS evaluates differently.
+        let stmts = vec![
+            assign(0x0, 8, binary(Op::Add, var(0x0, 8), var(0x100, 8), 8)),
+            assign(0x8, 8, binary(Op::Add, var(0x0, 8), var(0x100, 8), 8)),
+        ];
+        let mut s2 = stmts.clone();
+        assert_eq!(collapse_common_rhs(&mut s2), 0);
+    }
+
+    #[test]
+    fn cse_vetoes_when_the_first_dst_is_rewritten_between() {
+        // A third statement rewrites the first copy's dst inside the span.
+        let stmts = vec![
+            assign(0x0, 8, binary(Op::Add, var(0x100, 8), var(0x108, 8), 8)),
+            assign(0x0, 8, var(0x110, 8)), // rewrites 0x0
+            assign(0x8, 8, binary(Op::Add, var(0x100, 8), var(0x108, 8), 8)),
+        ];
+        let mut s2 = stmts.clone();
+        assert_eq!(collapse_common_rhs(&mut s2), 0);
+    }
+
+    #[test]
+    fn cse_runs_inside_the_pass() {
+        // End-to-end through run(): the collapsed copy then feeds P1/P2 and
+        // the pass output carries no duplicate Add.
+        let stmts = vec![
+            assign(0x0, 8, binary(Op::Add, var(0x100, 8), var(0x108, 8), 8)),
+            assign(0x8, 8, binary(Op::Add, var(0x100, 8), var(0x108, 8), 8)),
+            assign(0x10, 8, var(0x0, 8)),
+            assign(0x18, 8, var(0x8, 8)),
+        ];
+        let out = run(stmts);
+        let adds: usize = out
+            .iter()
+            .map(|s| {
+                let (mut f, mut o2) = (0, 0);
+                count_reads_stmt(s, 0x108, &mut f, &mut o2);
+                f + o2
+            })
+            .sum();
+        assert_eq!(adds, 1, "one evaluation of the shared RHS: {out:?}");
+    }
+
+    #[test]
+    fn cheap_duplication_declines_a_signed_source() {
+        // A bare signed leaf sign-extends at the store (or re-signs in the
+        // reader's wider context); it must not be duplicated.
+        let signed_leaf = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x100),
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            var_full_width: 8,
+            expr_context: ExpressionContext {
+                width: 8,
+                signed: true,
+            },
+        };
+        let stmts = vec![
+            assign(0x0, 8, signed_leaf),
+            assign(0x8, 8, var(0x0, 8)),
+            assign(0x10, 8, var(0x0, 8)),
+        ];
+        assert_eq!(run(stmts).len(), 3);
+    }
+
+    #[test]
+    fn cheap_duplication_takes_a_constant_and_a_static_select() {
+        // The other two cheap shapes: an unsigned constant and a static
+        // select both duplicate into their readers.
+        let konst = ProtoExpression::Value {
+            value: Value::new(0x5a, 8, false),
+            width: 8,
+            expr_context: ctx(8),
+        };
+        let sel = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x100),
+            select: Some((11, 4)),
+            dynamic_select: None,
+            width: 8,
+            var_full_width: 16,
+            expr_context: ctx(8),
+        };
+        let stmts = vec![
+            assign(0x0, 8, konst),
+            assign(0x20, 8, sel),
+            assign(0x8, 8, binary(Op::Add, var(0x0, 8), var(0x20, 8), 8)),
+            assign(0x10, 8, binary(Op::BitOr, var(0x0, 8), var(0x20, 8), 8)),
+        ];
+        let out = run(stmts);
+        assert_eq!(out.len(), 2, "both cheap defs retire: {out:?}");
+    }
+
+    #[test]
+    fn cse_collapses_identical_rhs_into_a_copy() {
+        // Two identical ands: the second becomes `= first_dst`, then the
+        // cheap duplication folds its reader through.
+        let e1 = binary(Op::BitAnd, var(0x100, 8), var(0x108, 8), 8);
+        let e2 = binary(Op::BitAnd, var(0x100, 8), var(0x108, 8), 8);
+        let stmts = vec![
+            assign(0x0, 8, e1),
+            assign(0x8, 8, e2),
+            assign(0x10, 8, binary(Op::BitOr, var(0x0, 8), var(0x8, 8), 8)),
+        ];
+        let mut s2 = stmts;
+        let collapsed = collapse_common_rhs(&mut s2);
+        assert_eq!(collapsed, 1);
+        let ProtoStatement::Assign(a) = &s2[1] else {
+            panic!()
+        };
+        assert!(
+            matches!(&a.expr, ProtoExpression::Variable { var_offset, .. } if *var_offset == VarOffset::Comb(0x0)),
+            "second def collapses to a copy of the first: {:?}",
+            a.expr
+        );
+    }
+
+    #[test]
+    fn cse_vetoes_when_an_input_changes_between() {
+        let e1 = binary(Op::BitAnd, var(0x100, 8), var(0x108, 8), 8);
+        let e2 = binary(Op::BitAnd, var(0x100, 8), var(0x108, 8), 8);
+        let mut stmts = vec![
+            assign(0x0, 8, e1),
+            assign(0x100, 8, var(0x110, 8)),
+            assign(0x8, 8, e2),
+        ];
+        assert_eq!(collapse_common_rhs(&mut stmts), 0);
+    }
+
+    #[test]
+    fn cheap_duplication_vetoes_a_dynamic_element_reader() {
+        // 0x0 (w=8, one element of a 2-entry array based at 0x0 with
+        // stride 8... modeled here as base 0x0) is read BOTH directly and
+        // through a dynamic index.  The gather-based count sees the dynamic
+        // element read; count_reads cannot.  The mismatch must veto, or the
+        // retired def would leave the dynamic read on stale storage.
+        // Found on VeeR EH2 by bisection (dup #4309).
+        let dyn_read = ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(0x0),
+            stride: 8,
+            element_native_bytes: 4,
+            index_expr: Box::new(var(0x200, 1)),
+            num_elements: 2,
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            expr_context: ctx(8),
+        };
+        let stmts = vec![
+            assign(0x0, 8, var(0x100, 8)),
+            assign(0x10, 8, var(0x0, 8)),
+            assign(0x18, 8, dyn_read),
+        ];
+        let out = run(stmts);
+        assert_eq!(out.len(), 3, "dynamic element reader must veto the dup");
+        assert!(
+            out.iter()
+                .any(|s| matches!(s, ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x0))),
+            "def must survive"
+        );
     }
 
     #[test]
