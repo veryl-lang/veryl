@@ -134,6 +134,9 @@ pub struct Ir {
     pub component_file_base: Option<PathBuf>,
     /// See `Module::rtl_driven`.
     pub rtl_driven: HashSet<VarId>,
+    /// See `Module::fused_comb_offsets` (diagnostic; consumed by the
+    /// dual-run checker to skip storage the fusion pass retired).
+    pub fused_comb_offsets: Vec<isize>,
     /// A failed compile leaves the cell empty forever, so the fallback is
     /// taken every cycle; the residency table (a mutex) must be touched once.
     whole_comb_fallback_recorded: AtomicBool,
@@ -189,6 +192,7 @@ impl Ir {
             component_libraries: config.component_libraries.clone(),
             component_file_base: config.component_file_base.clone(),
             rtl_driven: module.rtl_driven,
+            fused_comb_offsets: module.fused_comb_offsets,
             whole_comb_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
             incr_plan: module.incr_plan,
