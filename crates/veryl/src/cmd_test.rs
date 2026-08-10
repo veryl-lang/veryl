@@ -32,7 +32,13 @@ fn random_seed() -> u64 {
 struct TestSuiteReport {
     /// Bump on any breaking change to the report shape.
     format_version: u32,
+    /// The backend that was asked for; see `degraded_modules` for what ran.
     backend: String,
+    /// `kind:module` for every module that fell back, empty when the run used
+    /// `backend` throughout.  A timing comparison is only meaningful when this
+    /// is empty in both arms.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    degraded_modules: Vec<String>,
     passed: i32,
     failed: i32,
     ignored: usize,
@@ -167,6 +173,20 @@ impl CmdTest {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
+        // The incremental settle is the CLI default (`VERYL_INCR` overrides).
+        // Before analysis, like the disables below: the plan shapes chunking.
+        veryl_simulator::ir::incremental::default_on();
+        // A dump wants every comb word.  Both localization and the incremental
+        // settle leave the words no later reader needs holding stale values
+        // (see `aot_c::force_disable_localize` and `ir::incremental`), so
+        // waveforms would disagree with a full settle while the run still
+        // passes.  Dumping turns both off.  Before analysis: the blocklist is
+        // computed during conv and the plan shapes chunking.
+        if self.opt.wave {
+            veryl_simulator::backend::aot_c::force_disable_localize();
+            veryl_simulator::ir::incremental::force_disable();
+        }
+
         // force filelist_type to absolute which can be refered from temporary directory
         metadata.build.filelist_type = FilelistType::Absolute;
 
@@ -302,6 +322,14 @@ impl CmdTest {
                 .or(metadata.test.seed)
                 .unwrap_or_else(random_seed),
             use_4state: self.opt.four_state || metadata.test.four_state,
+            // Persist runtime-infeasible incremental verdicts (see
+            // `backend::late`) so a DUT that abandoned its plan once skips
+            // the incremental conv configuration in later runs too.
+            incr_feedback_path: Some(
+                metadata
+                    .project_dot_build_path()
+                    .join("incr_infeasible_keys"),
+            ),
             ..Config::default()
         };
         config.apply_env();
@@ -684,6 +712,7 @@ impl CmdTest {
             let report = TestSuiteReport {
                 format_version: 1,
                 backend: backend_name.to_string(),
+                degraded_modules: veryl_simulator::residency::degraded_modules(),
                 passed: success,
                 failed: failure,
                 ignored: ignored_count,

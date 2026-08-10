@@ -19,6 +19,7 @@ pub mod aot_c;
 #[cfg(not(target_family = "wasm"))]
 pub mod cranelift;
 pub mod inst;
+pub mod late;
 pub mod registry;
 pub mod validate;
 
@@ -116,6 +117,17 @@ pub struct ChunkArtifact {
     /// still distinguishes chunks with different code. `None` before a stamp
     /// (non-`dut_reuse` path); `Debug` then falls back to the address.
     pub content_fp: Option<u128>,
+    /// Full-coverage read/write dependency sets of the compiled statements,
+    /// captured at compile time for the incremental (change-driven) settle
+    /// plan.  `None` unless `VERYL_INCR=1` (see `ir::incremental`).  Excluded
+    /// from `Debug`/`Hash`: derived deterministically from the statements the
+    /// fingerprint already identifies.
+    pub deps: Option<Arc<crate::ir::incremental::ChunkDeps>>,
+    /// The compiled code carries per-sub-block guards reading the mask slot
+    /// in the write-log header (see `ir::incremental::sub_split_len`); the
+    /// incremental settle then passes a requested-sub mask before the call.
+    /// Excluded from `Debug`/`Hash` like `deps` (derived from env + stmts).
+    pub sub_guarded: bool,
 }
 
 impl std::fmt::Debug for ChunkArtifact {

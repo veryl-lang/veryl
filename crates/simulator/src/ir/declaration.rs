@@ -7,6 +7,7 @@ use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
 use crate::ir::module::{BitRange, gather_bit_aware_outputs, ranges_overlap};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
+use crate::ir::opt::version_split;
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::statement::{ProtoAssignStatement, msb_first_window, size_fill_literal_rhs};
 use crate::ir::variable::{
@@ -672,11 +673,39 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
                     comb_statements.extend(stmts);
                 }
-                let comb_statements = if comb_statements.len() > 1 {
+                #[allow(unused_mut)]
+                let mut comb_statements = if comb_statements.len() > 1 {
                     vec![ProtoStatement::SequentialBlock(comb_statements)]
                 } else {
                     comb_statements
                 };
+                // Version-split runs here, before chunk compilation and the
+                // cross-test caches, so every module's always_comb is seen
+                // while still a flat SequentialBlock (at top level the DUT's
+                // blocks end up nested inside CompiledBlocks).
+                //
+                // Skipped when the block alone already makes the incremental
+                // plan infeasible (a statement reading a whole memory): the
+                // plan the transform serves will be declined, so its cost —
+                // and its select chains over huge reads — buy nothing.
+                #[cfg(not(target_family = "wasm"))]
+                if version_split::pass_enabled(context.config.use_4state)
+                    && !crate::ir::incremental::stmts_infeasible(&comb_statements)
+                {
+                    // Fresh comb offsets for rename temps come from the same
+                    // allocator as function locals; instance-reuse records
+                    // the post-conv size, so cache replay stays consistent.
+                    let use_4state = context.config.use_4state;
+                    let comb_total = &mut context.comb_total_bytes;
+                    let mut alloc = |width: usize| -> isize {
+                        let nb = crate::ir::variable::native_bytes(width);
+                        let off = *comb_total as isize;
+                        *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                        off
+                    };
+                    let stats = version_split::run(&mut comb_statements, &mut alloc);
+                    version_split::accumulate(&stats);
+                }
                 Ok(ProtoDeclaration {
                     event_statements: HashMap::default(),
                     comb_statements,

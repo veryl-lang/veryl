@@ -1,10 +1,10 @@
 use crate::analyzer_error::{ComponentInterfaceMismatchKind, MismatchTypeKind};
 use crate::conv::utils::{
-    TbMethodCallPosition, TypePosition, argument_list, build_for_range, build_for_statement,
-    case_patterns, check_assign_clock_domain, eval_array_range_assign, eval_assign_statement,
-    eval_expr, eval_variable, expand_connect, expand_connect_const, function_call, get_return_str,
-    hoist_component_method_call, single_function_call_factor, switch_condition, tb_method_call,
-    try_infer_decl_type, try_infer_var_assign,
+    TbMethodCallPosition, TypePosition, argument_list, assign_rhs_context_type, build_for_range,
+    build_for_statement, case_patterns, check_assign_clock_domain, eval_array_range_assign,
+    eval_assign_statement, eval_expr, eval_variable, expand_connect, expand_connect_const,
+    function_call, get_return_str, hoist_component_method_call, single_function_call_factor,
+    switch_condition, tb_method_call, try_infer_decl_type, try_infer_var_assign,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -357,12 +357,8 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             let mut expr = if let Some(inferred) = inferred {
                                 inferred
                             } else {
-                                eval_expr(
-                                    context,
-                                    Some(dst.comptime.r#type.clone()),
-                                    &x.assignment.expression,
-                                    false,
-                                )?
+                                let ctx_type = assign_rhs_context_type(context, &dst);
+                                eval_expr(context, Some(ctx_type), &x.assignment.expression, false)?
                             };
 
                             let statements =
@@ -392,9 +388,10 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                         if let Some(dst) = dst.to_assign_destination(context, false)
                             && let Some(src) = src.to_expression(context)
                         {
+                            let ctx_type = assign_rhs_context_type(context, &dst);
                             let (_, expr) = eval_expr(
                                 context,
-                                Some(dst.comptime.r#type.clone()),
+                                Some(ctx_type),
                                 &x.assignment.expression,
                                 false,
                             )?;

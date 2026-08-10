@@ -1187,6 +1187,23 @@ fn aot_native_validate_config() -> Config {
     }
 }
 
+/// Assert that the AOT-C backend covered a construct natively rather than
+/// bailing to Cranelift.
+///
+/// The incremental settle deliberately turns whole-module AOT-C off
+/// (`aot_size_ok = !incr_on` in `ir/module.rs`), so under `VERYL_INCR=1` there
+/// is no whole-comb/whole-event artifact to claim coverage of and the question
+/// is not applicable.  The value assertions each of these tests makes after the
+/// coverage check still run in both configurations — only the claim about which
+/// backend produced the values is skipped.  Coverage therefore stays enforced
+/// in the default configuration, which is the one the library ships.
+fn assert_aot_c_native(covered: bool, what: &str) {
+    if crate::ir::incremental::enabled() {
+        return;
+    }
+    assert!(covered, "{what}");
+}
+
 #[test]
 fn wide_256_aot_native_comb() {
     // G1: a wide (>128-bit) comb module must be covered NATIVELY by the AOT-C
@@ -1211,9 +1228,9 @@ fn wide_256_aot_native_comb() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert!(
+    assert_aot_c_native(
         ir.whole_comb.is_some(),
-        "wide comb module must be AOT-C-native (whole_comb=Some), not bailed to Cranelift"
+        "wide comb module must be AOT-C-native (whole_comb=Some), not bailed to Cranelift",
     );
     let mut sim = Simulator::new(ir, None);
     let a = Value::new(0x00FF, 256, false);
@@ -1301,9 +1318,9 @@ fn wide_256_aot_native_ff() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert!(
+    assert_aot_c_native(
         !ir.whole_events.is_empty(),
-        "wide FF module must be AOT-C-native (whole_events non-empty)"
+        "wide FF module must be AOT-C-native (whole_events non-empty)",
     );
     let mut sim = Simulator::new(ir, None);
     let clk = sim.get_clock("clk").unwrap();
@@ -1336,9 +1353,9 @@ fn wide_128_ff_validate_pool_agnostic() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert!(
+    assert_aot_c_native(
         !ir.whole_events.is_empty(),
-        "128-bit FF must be AOT-C-native"
+        "128-bit FF must be AOT-C-native",
     );
     let mut sim = Simulator::new(ir, None);
     let clk = sim.get_clock("clk").unwrap();
@@ -1377,9 +1394,9 @@ fn probe_r4_wide_dynsel_store() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert!(
+    assert_aot_c_native(
         ir.whole_comb.is_some(),
-        "wide dynsel-store comb must be AOT-C-native"
+        "wide dynsel-store comb must be AOT-C-native",
     );
     let mut sim = Simulator::new(ir, None);
     for idx in 0u64..4 {
@@ -1420,9 +1437,9 @@ fn probe_r4_wide_assign_dynamic() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert!(
+    assert_aot_c_native(
         !ir.whole_events.is_empty(),
-        "wide AssignDynamic event must be AOT-C-native"
+        "wide AssignDynamic event must be AOT-C-native",
     );
     let mut sim = Simulator::new(ir, None);
     let clk = sim.get_clock("clk").unwrap();
@@ -1460,9 +1477,9 @@ fn probe_r4_shift_left_128() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert!(
+    assert_aot_c_native(
         ir.whole_comb.is_some(),
-        "128-bit shift comb must be AOT-C-native"
+        "128-bit shift comb must be AOT-C-native",
     );
     let mut sim = Simulator::new(ir, None);
     for s in [0u64, 1, 31, 63, 64, 96, 100, 127] {
@@ -1497,9 +1514,9 @@ fn probe_r4_wide_src_rhs_select() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert!(
+    assert_aot_c_native(
         ir.whole_comb.is_some(),
-        "wide-src rhs_select comb must be AOT-C-native"
+        "wide-src rhs_select comb must be AOT-C-native",
     );
     let mut sim = Simulator::new(ir, None);
     // Distinctive payload: low word pattern + a set bit near the top window.
@@ -15526,9 +15543,9 @@ fn wide_signed_compare_asymmetric_width_aot_c() {
     let config = aot_native_validate_config();
     for (a, b, egt, elt) in cases {
         let ir = analyze(code, &config);
-        assert!(
+        assert_aot_c_native(
             ir.whole_comb.is_some(),
-            "wide signed compare must be AOT-C-native to exercise vw_scmp_asym"
+            "wide signed compare must be AOT-C-native to exercise vw_scmp_asym",
         );
         let mut sim = Simulator::new(ir, None);
         sim.set("a", a);
@@ -16990,6 +17007,44 @@ fn equality_sign_extends_mixed_width_signed_operands() {
         assert_eq!(sim.get("p").unwrap(), Value::new(1, 1, false), "{config:?}");
         assert_eq!(sim.get("o").unwrap(), Value::new(1, 1, false), "{config:?}");
         assert_eq!(sim.get("n").unwrap(), Value::new(0, 1, false), "{config:?}");
+    }
+}
+
+#[test]
+fn wide_ternary_both_signed_sext_192() {
+    // Regression: the AOT-C wide path's per-word select placed a narrow
+    // both-signed branch zero-extended — 8-bit -1 came back as 0xff instead
+    // of 192'hfff…ff (LRM 11.4.11).
+    let code = r#"
+    module Top (
+        c : input  logic,
+        y : input  i8,
+        zp: input  signed logic<192>,
+        qp: output signed logic<192>,
+    ) {
+        assign qp = if c ? y : zp;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("c", Value::new(1, 1, false));
+        sim.set("y", Value::new(0xff, 8, true));
+        use num_bigint::BigUint;
+        sim.set("zp", Value::new_biguint(BigUint::from(5u32), 192, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("qp").unwrap().payload().into_owned(),
+            (BigUint::from(1u32) << 192) - BigUint::from(1u32),
+            "qp {config:?}"
+        );
+        sim.set("c", Value::new(0, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("qp").unwrap().payload().into_owned(),
+            BigUint::from(5u32),
+            "qp unselected branch {config:?}"
+        );
     }
 }
 
@@ -20295,5 +20350,35 @@ fn package_const_select_multi_dim_width() {
                 "package const i={i} config={config:?}"
             );
         }
+    }
+}
+
+#[test]
+fn assign_rhs_sized_by_lhs_bit_select_width() {
+    // Regression: sized against the 32-bit variable rather than the 8-bit
+    // select, the shift pair was lossless and stored 0xcd.  0x0d is what the
+    // emitted SV produces under both iverilog and Verilator.
+    let code = r#"
+    module Top (
+        y: input  logic<8>,
+        o: output logic<32>,
+    ) {
+        always_comb {
+            o = 0;
+            o[7:0] = (y << 4) >> 4;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("y", Value::new(0xcd, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x0d, 32, false),
+            "config={config:?}"
+        );
     }
 }

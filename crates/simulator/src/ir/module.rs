@@ -1,5 +1,7 @@
 use crate::backend::inst::next_test_top_id;
+use crate::backend::late;
 use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole};
+use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::{stable_topo_sort, stable_topo_sort_with_blocks};
@@ -7,11 +9,14 @@ use crate::ir::derived_clock::{
     DerivedClockSchedule, build_schedule as build_derived_clock_schedule, extract_eval_proto_stmts,
 };
 use crate::ir::external::{ExternalComponentInst, ProtoExternalComponent};
+use crate::ir::incremental;
 use crate::ir::inst_layout::InstLayout;
+use crate::ir::opt::comb_fusion;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
+use crate::ir::opt::version_split;
 use crate::ir::site_table::{SiteInfo, SiteKind, SiteTable};
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, align_up_64, create_variable_meta,
@@ -77,6 +82,16 @@ pub struct Module {
     /// Top-level variables written by RTL statements; component outputs
     /// must not overlap them (sole-driver check at load time).
     pub rtl_driven: crate::HashSet<air::VarId>,
+    /// Change-driven settle plan (`None` unless `VERYL_INCR=1` and the
+    /// module is supported); see `ir::incremental`.
+    pub incr_plan: Option<Arc<incremental::IncrPlan>>,
+    /// Deferred whole-module AOT-C inputs (`Some` only under the
+    /// incremental configuration); see `backend::late`.
+    pub late_aotc: Option<Arc<late::LateAotc>>,
+    /// Comb offsets whose defs the fusion pass consumed
+    /// (`VERYL_COMB_FUSION`): their storage is never written, so raw-buffer
+    /// comparisons (the dual-run checker) must skip them.  Diagnostic only.
+    pub fused_comb_offsets: Vec<isize>,
 }
 
 pub struct ProtoModule {
@@ -113,6 +128,16 @@ pub struct ProtoModule {
     pub external_components: Vec<ProtoExternalComponent>,
     /// See `Module::rtl_driven`.
     pub rtl_driven: crate::HashSet<air::VarId>,
+    /// Conv-time estimate that the incremental plan would be declined
+    /// (see `incremental::stmts_infeasible`); `instantiate` then keeps
+    /// the default batching and skips the plan build.
+    pub incr_infeasible: bool,
+    /// See `Module::late_aotc`.  Built in `conv()` under the incremental
+    /// configuration, shared (`Arc::clone`) with every instance — so a
+    /// compile triggered by one instance serves later ones directly.
+    pub late_aotc: Option<Arc<late::LateAotc>>,
+    /// See `Module::fused_comb_offsets`.
+    pub fused_comb_offsets: Vec<isize>,
 }
 
 fn create_buffers(
@@ -276,22 +301,105 @@ impl ProtoModule {
         let ff_len = self.ff_bytes;
         let comb_len = self.comb_bytes;
 
+        // Event batching merges consecutive same-artifact statements, which
+        // would break the 1:1 alignment the event skip plans need; keep the
+        // flat list under the incremental configuration (same trade as the
+        // comb list below).  A conv-time infeasible estimate means no plan
+        // will be built, so batching stays on.
+        let incr_on = incremental::enabled() && !self.incr_infeasible;
         let event_statements = self
             .event_statements
             .iter()
             .map(|(event, stmts)| {
                 let s = stmts.to_statements(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state);
-                (event.clone(), batch_compiled_statements(s))
+                let s = if incr_on {
+                    s
+                } else {
+                    batch_compiled_statements(s)
+                };
+                (event.clone(), s)
             })
             .collect();
 
-        let comb_statements = batch_compiled_statements(self.comb_statements.to_statements(
-            ff_ptr,
-            ff_len,
-            comb_ptr,
-            comb_len,
-            self.use_4state,
-        ));
+        // Incremental-settle plan (`VERYL_INCR=1`): built from the proto
+        // blocks so it stays 1:1 with the runtime statement list — which
+        // requires comb batching to be skipped (batching merges consecutive
+        // same-artifact statements and would break the alignment).
+        let incr_plan = if incr_on {
+            incremental::build_plan(
+                &self.comb_statements,
+                &self.event_statements,
+                &self.derived_clock_eval,
+                &self.module_variable_meta,
+                self.comb_bytes,
+                self.ff_bytes,
+                self.required_comb_passes,
+                self.use_4state,
+            )
+            .map(Arc::new)
+        } else {
+            None
+        };
+
+        // Temporary diagnostic: histogram the statements that stay
+        // interpreted in the settle loop (VERYL_INTERP_DIAG=1).
+        #[cfg(not(target_family = "wasm"))]
+        if std::env::var("VERYL_INTERP_DIAG").ok().as_deref() == Some("1") {
+            let mut hist: HashMap<String, usize> = HashMap::default();
+            let interp = self
+                .comb_statements
+                .0
+                .iter()
+                .filter_map(|b| match b {
+                    crate::ir::statement::ProtoStatementBlock::Interpreted(v) => Some(v),
+                    _ => None,
+                })
+                .flatten();
+            for s in interp {
+                let kind = match s {
+                    ProtoStatement::Assign(x) => {
+                        let loc = x
+                            .token
+                            .beg
+                            .source
+                            .to_string()
+                            .rsplit('/')
+                            .next()
+                            .map(|f| format!("{f}:{}", x.token.beg.line))
+                            .unwrap_or_default();
+                        format!(
+                            "Assign jit={} w={} {loc}",
+                            x.expr.can_build_binary(),
+                            x.dst_width
+                        )
+                    }
+                    ProtoStatement::AssignDynamic(_) => "AssignDynamic".to_string(),
+                    ProtoStatement::If(_) => "If".to_string(),
+                    ProtoStatement::Case(_) => "Case".to_string(),
+                    ProtoStatement::For(_) => "For".to_string(),
+                    ProtoStatement::SequentialBlock(_) => "SeqBlock".to_string(),
+                    ProtoStatement::SystemFunctionCall(_) => "SysFn".to_string(),
+                    ProtoStatement::TbMethodCall { .. } => "TbMethod".to_string(),
+                    ProtoStatement::Break => "Break".to_string(),
+                    ProtoStatement::CompiledBlock(_) => "NestedCB".to_string(),
+                };
+                *hist.entry(kind).or_insert(0) += 1;
+            }
+            let mut v: Vec<_> = hist.into_iter().collect();
+            v.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
+            for (k, c) in v.iter().take(30) {
+                eprintln!("[InterpDiag] {c:5}  {k}");
+            }
+        }
+
+        let comb_flat =
+            self.comb_statements
+                .to_statements(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state);
+        let comb_statements = if incr_plan.is_some() {
+            comb_flat
+        } else {
+            batch_compiled_statements(comb_flat)
+        };
 
         let derived_clock_eval_stmts = if self.derived_clock_eval.0.is_empty() {
             Vec::new()
@@ -315,6 +423,7 @@ impl ProtoModule {
             comb_values,
             module_variables,
             derived_clock_eval_stmts,
+            incr_plan,
 
             event_statements,
             comb_statements,
@@ -325,6 +434,7 @@ impl ProtoModule {
             nontrivial_comb_scc: self.nontrivial_comb_scc,
             whole_comb: self.whole_comb.clone(),
             whole_events: self.whole_events.clone(),
+            late_aotc: self.late_aotc.clone(),
             external_components: self
                 .external_components
                 .iter()
@@ -333,6 +443,7 @@ impl ProtoModule {
                 })
                 .collect(),
             rtl_driven: self.rtl_driven.clone(),
+            fused_comb_offsets: self.fused_comb_offsets.clone(),
         }
     }
 
@@ -445,23 +556,57 @@ fn validate_meta_offsets(
 /// Overridable via `VERYL_JIT_CHUNK_SIZE` env var for sweeps.
 const JIT_CHUNK_SIZE_DEFAULT: usize = 1024;
 
-fn jit_chunk_size() -> usize {
+/// Chunk size under the incremental configuration: the chunk is the
+/// change-driven plan's entry granularity, and every K sweep on pe_core
+/// found small chunks best (large chunks re-run ~1000 statements for one
+/// changed input; K=8 measures ~4% entry activity vs ~64% at 1024).  The
+/// auto-abandon activity threshold is calibrated at this granularity too.
+const JIT_CHUNK_SIZE_INCR_DEFAULT: usize = 8;
+
+/// `incr_chunks`: whether this statement list feeds a change-driven plan
+/// (incremental enabled AND the module is not infeasible-flavored) — an
+/// infeasible module keeps the default chunk size like the rest of its
+/// default-pipeline configuration (K=8 on a plan-less module is pure conv
+/// cost: ~128x the chunk compiles for the same execution).
+fn jit_chunk_size(incr_chunks: bool) -> usize {
     std::env::var("VERYL_JIT_CHUNK_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(JIT_CHUNK_SIZE_DEFAULT)
+        .unwrap_or(if incr_chunks {
+            JIT_CHUNK_SIZE_INCR_DEFAULT
+        } else {
+            JIT_CHUNK_SIZE_DEFAULT
+        })
 }
 
 /// Per-event JIT path: load_cache CSE enabled, no nested CompiledBlocks
 /// expected.
-fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    build_chunked_via_registry(context, proto, /* contains_compiled_block= */ false)
+fn try_jit(
+    context: &mut Context,
+    proto: Vec<ProtoStatement>,
+    incr_chunks: bool,
+) -> ProtoStatements {
+    build_chunked_via_registry(
+        context,
+        proto,
+        /* contains_compiled_block= */ false,
+        incr_chunks,
+    )
 }
 
 /// Unified-comb JIT path: nested CompiledBlocks may mutate comb storage
 /// between loads, so load_cache CSE is disabled in the emitted chunks.
-fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    build_chunked_via_registry(context, proto, /* contains_compiled_block= */ true)
+fn try_jit_no_cache(
+    context: &mut Context,
+    proto: Vec<ProtoStatement>,
+    incr_chunks: bool,
+) -> ProtoStatements {
+    build_chunked_via_registry(
+        context,
+        proto,
+        /* contains_compiled_block= */ true,
+        incr_chunks,
+    )
 }
 
 /// Shared chunk-building helper.  Asks `context.backends` to group
@@ -472,6 +617,7 @@ fn build_chunked_via_registry(
     context: &mut Context,
     proto: Vec<ProtoStatement>,
     contains_compiled_block: bool,
+    incr_chunks: bool,
 ) -> ProtoStatements {
     if context.backends.is_empty() {
         return ProtoStatements(vec![ProtoStatementBlock::Interpreted(proto)]);
@@ -480,7 +626,7 @@ fn build_chunked_via_registry(
     // CompileCtx borrows from `context.config` (shared), while
     // `build_chunked` also needs `&mut context.backends` — distinct fields,
     // so Rust's split borrow permits both.
-    let max_chunk_size = jit_chunk_size();
+    let max_chunk_size = jit_chunk_size(incr_chunks);
     let outputs = {
         let ctx = CompileCtx {
             config: &context.config,
@@ -604,15 +750,79 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
 
 /// `all_event_statements` in place with the dead-var drop (mirroring the miss
 /// path); the returned `dead_offsets` let a cache hit reproduce that drop.
+#[allow(clippy::too_many_arguments)]
 fn run_comb_pipeline(
     context: &mut Context,
     unified: Vec<ProtoStatement>,
     all_event_statements: &mut HashMap<Event, Vec<ProtoStatement>>,
     protect: &HashSet<VarOffset>,
+    layout_inputs: Option<&comb_layout::LayoutInputs>,
+    fusion_extra: Option<&[VarOffset]>,
     module_name: StrId,
+    force_infeasible: bool,
 ) -> Result<comb_pipeline_cache::CombPipeline, SimulatorError> {
     dump_stmt_order("conv", module_name, &unified);
-    let (unified_sorted, passes_hint) = analyze_dependency(unified)?;
+    // Conv-time incremental-plan feasibility: when a single statement's
+    // read expansion already exceeds the plan guard, the plan will be
+    // declined at instantiate time, so keep the default pipeline features
+    // (whole-module AOT-C, batching) instead of paying the incremental
+    // configuration for nothing.  4-state is infeasible outright:
+    // `build_plan` rejects it at instantiate and AOT-C declines its
+    // whole-module compile, so the incremental flavor would pay unbatched
+    // fine-grained chunks with no fallback backend ever landing.
+    let incr_infeasible = force_infeasible
+        || (incremental::enabled()
+            && (context.config.use_4state
+                || incremental::stmts_infeasible(&unified)
+                || incremental::plan_too_small(&unified)));
+    if incremental::diag_enabled() {
+        eprintln!(
+            "[incr] gate: unified stmts={} min={} infeasible={}",
+            unified.len(),
+            incremental::min_stmts_for_plan(),
+            incr_infeasible,
+        );
+    }
+
+    // Version-split: fuse multi-write (versioned) comb chains into single
+    // writers for the incremental settle plan.  Module-level always_combs
+    // were already handled during conv (see `ProtoDeclaration::conv`); this
+    // covers testbench-level blocks that appear directly in the merged list.
+    //
+    // Incremental configuration: expand nested CompiledBlocks (child
+    // instances' whole-comb functions) inside `analyze_dependency` so the
+    // plan sees per-statement entries instead of one huge entry per child
+    // — the entire point of a change-driven plan on a hierarchical DUT.
+    let incr_expand = incremental::enabled() && !incr_infeasible;
+
+    // Comb bytes this pass reserves for rename temps; recorded on the
+    // pipeline so a cache hit — which skips this whole function — can
+    // reserve the same span (see `CombPipeline::vsplit_temp_bytes`).
+    let mut vsplit_temp_bytes = 0usize;
+    let unified = {
+        let mut unified = unified;
+        if !incr_infeasible && version_split::pass_enabled(context.config.use_4state) {
+            let use_4state = context.config.use_4state;
+            let before = context.comb_total_bytes;
+            let comb_total = &mut context.comb_total_bytes;
+            let mut alloc = |width: usize| -> isize {
+                let nb = crate::ir::variable::native_bytes(width);
+                let off = *comb_total as isize;
+                *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                off
+            };
+            let stats = version_split::run(&mut unified, &mut alloc);
+            vsplit_temp_bytes = context.comb_total_bytes - before;
+            version_split::accumulate(&stats);
+            log::info!(
+                "version_split totals ({module_name}): {}",
+                version_split::totals_line()
+            );
+        }
+        unified
+    };
+    dump_stmt_order("post-vsplit", module_name, &unified);
+    let (unified_sorted, passes_hint) = analyze_dependency(unified, incr_expand)?;
     dump_stmt_order("post-topo", module_name, &unified_sorted);
     // No DCE/inlining: unified list includes internal child comb that would be incorrectly removed.
     // reorder_by_level preserves the sort's dependency relations (readers
@@ -727,24 +937,81 @@ fn run_comb_pipeline(
         unified_sorted
     };
 
+    // Comb fusion (`VERYL_COMB_FUSION`, P1): fold single-reader comb defs
+    // into their reader's expression — the statement-level analogue of
+    // Verilator's DfgRegularize single-sink inlining.  Runs before the
+    // relayout so the freed storage is already unreferenced when the
+    // schedule is built (it parks as a cold unit; DCE cannot see it earlier
+    // because the def only loses its reader here).
+    let (unified_sorted, fused_offsets) = if comb_fusion::enabled() {
+        let mut externals: HashSet<VarOffset> = protect.clone();
+        if let Some(extra) = fusion_extra {
+            externals.extend(extra.iter().copied());
+        }
+        comb_fusion::inline_single_readers(unified_sorted, all_event_statements, &externals)
+    } else {
+        (unified_sorted, Vec::new())
+    };
+
+    // Settle-order relayout (`VERYL_COMB_LAYOUT`): derive the storage
+    // permutation from the final execution order and rewrite the comb
+    // statements through it before the JIT bakes their offsets in.  The
+    // event statements are only READ here (rank + orphan detection, in the
+    // old offset space); the caller replays the schedule on them and on
+    // every other offset-bearing structure the pipeline does not own.
+    let layout = layout_inputs.and_then(|li| {
+        comb_layout::build_schedule(
+            &li.meta_units,
+            &unified_sorted,
+            all_event_statements,
+            &li.extra_offsets,
+            // NOT li.comb_total: version_split just bump-allocated its rename
+            // temps above that Conv-time figure, and they need units too.
+            context.comb_total_bytes,
+        )
+        .map(Arc::new)
+    });
+    let mut unified_sorted = unified_sorted;
+    if let Some(sched) = layout.as_deref() {
+        comb_layout::apply_to_stmts(&mut unified_sorted, sched);
+    }
+
     // Snapshot before JIT consumes it: the whole-comb backend needs the
     // pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
     let pre_jit_stmts = Arc::new(unified_sorted.clone());
-    let comb_statements = try_jit_no_cache(context, unified_sorted);
+    let incr_chunks = incremental::enabled() && !incr_infeasible;
+    let comb_statements = try_jit_no_cache(context, unified_sorted, incr_chunks);
     Ok(comb_pipeline_cache::CombPipeline {
         pre_jit_stmts,
         required_comb_passes,
         comb_statements,
         dead_offsets: dead_union.into_iter().collect(),
+        // Fused (retired) offsets in the FINAL storage space: the checker
+        // compares element addresses derived from the replayed meta, so a
+        // pre-layout offset would name the wrong storage.
+        fused_offsets: match layout.as_deref() {
+            Some(sched) => fused_offsets.iter().map(|&o| sched.translate(o)).collect(),
+            None => fused_offsets,
+        },
+        layout,
         nontrivial_comb_scc,
+        incr_infeasible,
+        vsplit_temp_bytes,
     })
 }
 
 /// Returns the scheduled statements plus an exact required-pass hint when the
 /// block-aware sort could derive one (see `stable_topo_sort_with_blocks`);
 /// `None` means the caller must fall back to `compute_required_passes`.
+///
+/// `expand_nested_cbs` (the incremental configuration): even when the
+/// coarse Phase-1 schedule succeeds, a nested CompiledBlock would become a
+/// single huge incremental-plan entry, so take the Phase-2 full flatten
+/// instead to restore per-statement granularity.  The Phase-1 result is
+/// kept as a fallback should the flat sort give up.
 pub(crate) fn analyze_dependency(
     statements: Vec<ProtoStatement>,
+    expand_nested_cbs: bool,
 ) -> Result<(Vec<ProtoStatement>, Option<usize>), SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
@@ -869,10 +1136,25 @@ pub(crate) fn analyze_dependency(
     // Phase 1: Try with CompiledBlocks as atomic nodes. The bipartite model
     // orders every reader after ALL writers of its inputs, so the schedule
     // settles in exactly one pass.
-    if let Ok(sorted) = try_topo_sort(&table) {
-        pass_diag_phase("phase1: bipartite, CBs atomic");
-        return Ok((sorted, Some(1)));
-    }
+    //
+    // Under `expand_nested_cbs`, a successful coarse schedule containing
+    // nested CompiledBlocks is NOT returned: it is kept as a correctness
+    // fallback while the Phase-2 full flatten below restores per-statement
+    // granularity for the incremental plan.  (The Phase-2 fast path is
+    // skipped in that case too — it keeps hazard blocks atomic, which on a
+    // hierarchical DUT can leave the whole child comb as one entry.)
+    let force_flatten = expand_nested_cbs
+        && table.values().any(
+            |x| matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty()),
+        );
+    let phase1: Option<Vec<ProtoStatement>> = match try_topo_sort(&table) {
+        Ok(sorted) if !force_flatten => {
+            pass_diag_phase("phase1: bipartite, CBs atomic");
+            return Ok((sorted, Some(1)));
+        }
+        Ok(sorted) => Some(sorted),
+        Err(_) => None,
+    };
 
     // Phase 2: Expand CompiledBlocks and SequentialBlocks and retry.
     // Rebuild the table with fresh sequential IDs so expanded sub-statements
@@ -901,7 +1183,10 @@ pub(crate) fn analyze_dependency(
         // On failure fall through to that full-flatten path: an atomic hazard
         // block's conflated I/O can form a phantom cross-block cycle that the
         // bipartite sort rejects but the per-statement flatten resolves.
-        {
+        //
+        // Skipped when a Phase-1 schedule is being held back only for
+        // incremental granularity (see `force_flatten` above).
+        if phase1.is_none() {
             fn block_has_reorder_hazard(stmts: &[ProtoStatement]) -> bool {
                 let mut seen: HashSet<VarOffset> = HashSet::default();
                 for s in stmts {
@@ -1016,8 +1301,15 @@ pub(crate) fn analyze_dependency(
             pass_diag_phase("phase2-full: flatten + stable_topo_sort");
             return Ok((sorted, passes_hint));
         }
-        // The sort gave up (a cycle survives the semantic model) — fall
-        // through to Phase 3's combinational-loop diagnostic.
+        // The sort gave up (a cycle survives the semantic model).  When a
+        // valid coarse Phase-1 schedule was withheld only for incremental
+        // granularity, return it: correctness first, the plan just gets
+        // coarse entries.  Otherwise fall through to Phase 3's
+        // combinational-loop diagnostic.
+        if let Some(sorted) = phase1 {
+            pass_diag_phase("phase1-fallback: flat sort fell back");
+            return Ok((sorted, Some(1)));
+        }
     }
 
     // Phase 3: Check for genuine combinational loop vs false positive
@@ -2637,7 +2929,7 @@ impl Conv<&air::Module> for ProtoModule {
 
         let dyn_indexed = collect_dyn_indexed_vars(declarations);
 
-        let (variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
+        let (mut variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
             &src.variables,
             &ff_table,
             &multi_rmw_set,
@@ -2737,10 +3029,21 @@ impl Conv<&air::Module> for ProtoModule {
         // expanded on demand by `analyze_dependency` Phase 2 when fine-grained
         // ordering is needed.  This eliminates the false SCC artifact from
         // keeping both CB and its originals in the parent's `unified` list.
-        let unified: Vec<ProtoStatement> = all_comb_statements
+        let mut unified: Vec<ProtoStatement> = all_comb_statements
             .into_iter()
             .chain(all_post_comb_fns)
             .collect();
+
+        // Baked inst-chunk artifacts would freeze their spans into rigid
+        // units (see `expand_compiled_blocks`) — expand them BEFORE the key
+        // so the memoised pipeline and every hit see the same statements.
+        if comb_layout::enabled() {
+            comb_layout::expand_compiled_blocks(&mut unified);
+            for stmts in all_event_statements.values_mut() {
+                comb_layout::expand_compiled_blocks(stmts);
+            }
+        }
+        let unified = unified;
 
         // Dead-var DCE protect set (also folded into the cache key): offsets
         // that must survive DCE.  `comb_to_ff_hoist` only rewrites `VarKind::Let`,
@@ -2784,18 +3087,99 @@ impl Conv<&air::Module> for ProtoModule {
             HashSet::default()
         };
 
+        // Comb relayout / fusion inputs: the offsets referenced outside any
+        // statement list (external-component connects, nested derived-clock
+        // candidates) — the relayout must not treat them as dead space, and
+        // the fusion must not inline the defs they read.  Gathered while the
+        // meta structures still hold the plain bump layout.  Folded into the
+        // pipeline key below so a cache hit implies the same transforms.
+        let aux_extra_offsets: Option<Vec<VarOffset>> =
+            if comb_layout::enabled() || comb_fusion::enabled() {
+                let mut extra_offsets: Vec<VarOffset> =
+                    Vec::with_capacity(nested_derived_clock_candidates.len());
+                for (_, off, _) in &nested_derived_clock_candidates {
+                    extra_offsets.push(*off);
+                }
+                for external in &all_external_components {
+                    for connect in &external.connects {
+                        connect.expr.gather_variable_offsets(&mut extra_offsets);
+                    }
+                }
+                Some(extra_offsets)
+            } else {
+                None
+            };
+        let layout_inputs: Option<comb_layout::LayoutInputs> = if comb_layout::enabled() {
+            let mut meta_units: Vec<(isize, isize)> = Vec::new();
+            comb_layout::collect_meta_units_map(
+                &variable_meta,
+                context.config.use_4state,
+                &mut meta_units,
+            );
+            for child in &all_child_modules {
+                comb_layout::collect_meta_units_tree(
+                    child,
+                    context.config.use_4state,
+                    &mut meta_units,
+                );
+            }
+            Some(comb_layout::LayoutInputs {
+                meta_units,
+                extra_offsets: aux_extra_offsets.clone().unwrap_or_default(),
+                comb_total: context.comb_total_bytes,
+            })
+        } else {
+            None
+        };
+
         // Whole comb pipeline (analyze_dependency + reorder + DCE + JIT),
         // memoised across tests that share a DUT.  A hit returns the pre-JIT
         // stmts, pass count, compiled comb, and the dead-var offset set — the
         // last re-applied to this test's events so they match the miss path
         // exactly (dead offsets are read nowhere, so the drop is value-neutral).
         // Single-flight (see `comb_pipeline_cache`); gated to `dut_reuse`.
-        let key = comb_pipeline_key(
-            context.config.use_4state,
-            &unified,
-            &all_event_statements,
-            &dce_protect,
-        );
+        let key = {
+            let base = comb_pipeline_key(
+                context.config.use_4state,
+                &unified,
+                &all_event_statements,
+                &dce_protect,
+            );
+            if layout_inputs.is_some() || comb_fusion::enabled() {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut h = DefaultHasher::new();
+                comb_fusion::enabled().hash(&mut h);
+                if let Some(extra) = &aux_extra_offsets {
+                    extra.hash(&mut h);
+                }
+                if let Some(li) = &layout_inputs {
+                    li.meta_units.hash(&mut h);
+                    li.comb_total.hash(&mut h);
+                }
+                base ^ (h.finish() as u128)
+            } else {
+                base
+            }
+        };
+        // Conv feedback (see `backend::late`): a prior instance of this comb
+        // list abandoned its incremental plan at runtime (or had it declined
+        // at build) — a deterministic verdict, so take the infeasible flavor
+        // from the start: default batching + conv-time whole-module AOT-C,
+        // no plan build.  The flavored key keeps this flavor's pipeline and
+        // whole-comb cache entries separate from the incremental-flavor ones
+        // cached under the base key (the statement lists differ).
+        let runtime_infeasible = incremental::enabled()
+            && late::runtime_infeasible(key, context.config.incr_feedback_path.as_deref());
+        let key = if runtime_infeasible {
+            log::debug!(
+                "conv feedback: {} takes the runtime-infeasible flavor",
+                src.name
+            );
+            key ^ late::FLAVOR_RUNTIME_INFEASIBLE
+        } else {
+            key
+        };
         let cached: Arc<comb_pipeline_cache::CombPipeline> =
             match comb_pipeline_cache::try_get_or_claim(key, context.config.dut_reuse) {
                 comb_pipeline_cache::Outcome::Hit(cached) => {
@@ -2808,6 +3192,11 @@ impl Conv<&air::Module> for ProtoModule {
                             *stmts = dead_var_dce::apply_counting(taken, &dead).0;
                         }
                     }
+                    // ...nor did the version-split pass, whose rename temps the
+                    // cached statements address.  A key match implies the same
+                    // layout, so reserving the same span puts them back where
+                    // the compiled code expects them.
+                    context.comb_total_bytes += cached.vsplit_temp_bytes;
                     cached
                 }
                 // Compute (single-flight claim) or Disabled (reuse off): run the
@@ -2819,7 +3208,10 @@ impl Conv<&air::Module> for ProtoModule {
                         unified,
                         &mut all_event_statements,
                         &dce_protect,
+                        layout_inputs.as_ref(),
+                        aux_extra_offsets.as_deref(),
                         src.name,
+                        runtime_infeasible,
                     )?;
                     match other {
                         comb_pipeline_cache::Outcome::Compute(guard) => guard.store(result),
@@ -2827,6 +3219,36 @@ impl Conv<&air::Module> for ProtoModule {
                     }
                 }
             };
+
+        // Comb relayout replay: the pipeline rewrote (or the cache carries)
+        // the memoised comb statements through the schedule; every
+        // offset-bearing structure the pipeline does not own must follow —
+        // this test's event statements, the variable meta tree (testbench
+        // handles, derived clocks, localize blocklist and buffer fill all
+        // read it), the nested derived-clock candidates, and the
+        // external-component connect exprs.  `comb_total_bytes` advances to
+        // the layout's end so later comb allocations (`cond_hoist_transform`)
+        // stay clear of the packed region.
+        if let Some(sched) = cached.layout.clone() {
+            for stmts in all_event_statements.values_mut() {
+                comb_layout::apply_to_stmts(stmts, &sched);
+            }
+            comb_layout::translate_meta_map(&mut variable_meta, &sched);
+            for child in &mut all_child_modules {
+                comb_layout::translate_meta_tree(child, &sched);
+            }
+            for (_, off, _) in &mut nested_derived_clock_candidates {
+                *off = sched.translate_off(*off);
+            }
+            for external in &mut all_external_components {
+                for connect in &mut external.connects {
+                    connect.expr.remap_offsets_with(&|o| sched.translate_off(o));
+                }
+            }
+            if sched.buffer_end > context.comb_total_bytes {
+                context.comb_total_bytes = sched.buffer_end;
+            }
+        }
         // `pre_jit_stmts` is shared read-only downstream (Arc, no deep clone);
         // `comb_statements` is cloned into the ProtoModule (mostly `Arc::clone`s
         // of compiled chunks).
@@ -2834,6 +3256,84 @@ impl Conv<&air::Module> for ProtoModule {
         let required_comb_passes = cached.required_comb_passes;
         let comb_statements = cached.comb_statements.clone();
         let nontrivial_comb_scc = cached.nontrivial_comb_scc;
+        let incr_infeasible = cached.incr_infeasible;
+
+        // Fusion-design census (`VERYL_FUSION_CENSUS=1`, diagnostic only):
+        // per-comb-def reader-count distribution over the post-DCE statements,
+        // to size what a Verilator-style DFG contraction (inline single
+        // readers, delete unobserved defs, keep multi-reader results) could
+        // remove.  `readers0` are defs alive only because of the DCE protect
+        // set — the analogue of what Verilator's RemoveUnobservable deletes.
+        if std::env::var("VERYL_FUSION_CENSUS").as_deref() == Ok("1") {
+            let mut readers: HashMap<VarOffset, usize> = HashMap::default();
+            let mut defs: Vec<VarOffset> = Vec::new();
+            let mut ins: Vec<VarOffset> = vec![];
+            let mut outs: Vec<VarOffset> = vec![];
+            for stmt in pre_jit_stmts.iter() {
+                ins.clear();
+                outs.clear();
+                stmt.gather_variable_offsets(&mut ins, &mut outs);
+                for off in ins.drain(..) {
+                    if !off.is_ff() {
+                        *readers.entry(off).or_insert(0) += 1;
+                    }
+                }
+                if let ProtoStatement::Assign(a) = stmt
+                    && !a.dst.is_ff()
+                {
+                    defs.push(a.dst);
+                }
+            }
+            for stmts in all_event_statements.values() {
+                for stmt in stmts {
+                    ins.clear();
+                    outs.clear();
+                    stmt.gather_variable_offsets(&mut ins, &mut outs);
+                    for off in ins.drain(..) {
+                        if !off.is_ff() {
+                            *readers.entry(off).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+            let (mut r0, mut r1, mut r2_4, mut r5p) = (0usize, 0, 0, 0);
+            let (mut r0_prot, mut r1_prot) = (0usize, 0usize);
+            for d in &defs {
+                let n = readers.get(d).copied().unwrap_or(0);
+                let prot = dce_protect.contains(d);
+                match n {
+                    0 => {
+                        r0 += 1;
+                        if prot {
+                            r0_prot += 1;
+                        }
+                    }
+                    1 => {
+                        r1 += 1;
+                        if prot {
+                            r1_prot += 1;
+                        }
+                    }
+                    2..=4 => r2_4 += 1,
+                    _ => r5p += 1,
+                }
+            }
+            eprintln!(
+                "[fusion_census] module={:?} comb_stmts={} comb_defs={} \
+                 readers0={} (protected {}) readers1={} (protected {}) \
+                 readers2_4={} readers5plus={} protect_set={}",
+                src.name,
+                pre_jit_stmts.len(),
+                defs.len(),
+                r0,
+                r0_prot,
+                r1,
+                r1_prot,
+                r2_4,
+                r5p,
+                dce_protect.len(),
+            );
+        }
 
         // Top-level variables written by RTL (post-DCE), for the sole-driver
         // check on component outputs at load time.
@@ -2910,16 +3410,19 @@ impl Conv<&air::Module> for ProtoModule {
             );
         }
 
-        // Chunk-local localization (VERYL_AOT_C_LOCALIZE): while events +
-        // derived-clock candidates are in scope, precompute the comb offsets the
-        // emitter must NOT localize — event-touched, in a runtime-indexed array
-        // range, or externally-visible (port / user-var / clock).
+        // Chunk-local localization (gated by `emit::localize_enabled`): while
+        // events + derived-clock candidates are in scope, precompute the comb
+        // offsets the emitter must NOT localize — event-touched, in a
+        // runtime-indexed array range, or externally-visible (port / user-var
+        // / clock).
         // LocalizeInfo = (blocklist offsets, array ranges).
-        type LocalizeInfo = (std::collections::HashSet<isize>, Vec<(isize, usize, isize)>);
+        type LocalizeInfo = (HashSet<isize>, Vec<(isize, usize, isize)>);
+        // Wasm registers no AOT-C backend, so there is nothing to localize;
+        // the binding still exists so the whole-comb call site is uniform.
+        #[cfg(target_family = "wasm")]
+        let localize_info: Option<LocalizeInfo> = None;
         #[cfg(not(target_family = "wasm"))]
-        let localize_info: Option<LocalizeInfo> = if std::env::var("VERYL_AOT_C_LOCALIZE")
-            .as_deref()
-            != Ok("0")
+        let localize_info: Option<LocalizeInfo> = if crate::backend::aot_c::emit::localize_enabled()
         {
             let event_slices: Vec<&[ProtoStatement]> = all_event_statements
                 .values()
@@ -2946,7 +3449,7 @@ impl Conv<&air::Module> for ProtoModule {
             for (_, off, _) in &nested_derived_clock_candidates {
                 block_vo.insert(*off);
             }
-            let mut block: std::collections::HashSet<isize> = std::collections::HashSet::new();
+            let mut block: HashSet<isize> = HashSet::default();
             for vo in &block_vo {
                 if !vo.is_ff() {
                     block.insert(vo.raw());
@@ -3044,7 +3547,29 @@ impl Conv<&air::Module> for ProtoModule {
         // Only engage whole-module backends on big-enough modules — see
         // Config::aot_c_min_stmts.  Below threshold, per-chunk Cranelift
         // wins on compile latency.
-        let aot_size_ok = {
+        //
+        // Never engage them under the change-driven settle (`VERYL_INCR=1`).
+        // Whole-comb: the incremental engine replaces `Ir::settle_comb`
+        // outright, so a landed .so is never dispatched, while its emit +
+        // background `cc` are pure overhead (a large DUT's comb C source
+        // reaches tens of MB, so `cc1` competes with the simulation for the
+        // whole process lifetime without ever landing — measured -13% settle
+        // on pe_core).  Whole-event: dispatch prefers the .so over the
+        // event-plan mark-driven skip, and the .so is an *untracked* FF
+        // writer for the settle seed's dirty lists, forcing the per-settle
+        // full-scan seed fallback — its ~20ms event-eval win costs ~250ms of
+        // settle on pe_core.  The cost of the gate: if the incremental plan
+        // later declines to build, the full-settle fallback stays on
+        // per-chunk Cranelift — the same code it runs while an async whole
+        // compile is pending.
+        //
+        // Exception: when the conv-time estimate already knows the plan
+        // will be declined (`incr_infeasible`, e.g. an SoC whose entries
+        // read whole memories), the full-settle fallback is a certainty,
+        // so whole-module AOT-C re-engages — it is exactly the default
+        // pipeline again (measured 16.5s of heliodor's linux-boot gap).
+        let incr_on = incremental::enabled() && !incr_infeasible;
+        let size_ok = {
             let n = pre_jit_stmts.len()
                 + all_event_statements
                     .values()
@@ -3052,6 +3577,7 @@ impl Conv<&air::Module> for ProtoModule {
                     .sum::<usize>();
             n >= context.config.aot_c_min_stmts
         };
+        let aot_size_ok = !incr_on && size_ok;
         let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !aot_size_ok {
             HashMap::default()
         } else {
@@ -3081,13 +3607,56 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
 
+        // Deferred whole-module AOT-C (incremental configuration only): the
+        // conv-time compile is gated off above, but if the plan is declined
+        // at instantiate time or auto-abandoned at runtime, the full-settle
+        // fallback is the default pipeline again — minus its whole-module
+        // backends.  Snapshot the compile inputs now (pre-JIT comb via the
+        // pipeline cache Arc, per-event pre-JIT stmts post-cond-hoist,
+        // localization info) so `backend::late` can start the compile the
+        // moment one of those outcomes materialises.  Opt out with
+        // VERYL_LATE_AOTC=0.
+        // Skipped under VERYL_INCR_VALIDATE: the dual-run diffs the
+        // incremental settle against `settle_comb`, and a late `.so`
+        // landing between the two runs of one settle would leave its
+        // localized comb bytes stale on one side only — a false divergence.
+        #[cfg(not(target_family = "wasm"))]
+        let late_aotc = if incr_on
+            && size_ok
+            && context.config.aot_c
+            && !context.config.use_4state
+            && late::enabled()
+            && !incremental::validate_enabled()
+        {
+            let event_stmts: HashMap<Event, Vec<ProtoStatement>> = if context.config.aot_c_event {
+                all_event_statements
+                    .iter()
+                    .map(|(e, s)| (e.clone(), s.clone()))
+                    .collect()
+            } else {
+                HashMap::default()
+            };
+            Some(Arc::new(late::LateAotc::new(
+                key,
+                context.config.dut_reuse,
+                context.config.clone(),
+                Arc::clone(&pre_jit_stmts),
+                localize_info.clone(),
+                event_stmts,
+            )))
+        } else {
+            None
+        };
+        #[cfg(target_family = "wasm")]
+        let late_aotc = None;
+
         // Event statements preserve source order (no topological sorting).
         // NBA semantics: reads come from current, writes go to next, then
         // ff_commit copies next → current. Source order must be preserved
         // for sequential writes to the same variable.
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
-            .map(|(event, stmts)| (event, try_jit(context, stmts)))
+            .map(|(event, stmts)| (event, try_jit(context, stmts, incr_on)))
             .collect();
 
         // Collect derived clocks + input-clock offsets BEFORE
@@ -3195,7 +3764,7 @@ impl Conv<&air::Module> for ProtoModule {
                 &input_clock_offsets,
             );
             let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
-            let eval = try_jit(context, eval_protos);
+            let eval = try_jit(context, eval_protos, incr_on);
             (sched, eval)
         };
 
@@ -3211,29 +3780,14 @@ impl Conv<&air::Module> for ProtoModule {
             // comb pipeline: a shared DUT's C is emitted + fingerprinted once,
             // not per test (the emit is the dominant per-test build cost at
             // suite scale, and pure waste when the backend declines).
-            comb_pipeline_cache::whole_comb_get_or_compute(key, dut_reuse, || {
-                let ctx = CompileCtx {
-                    config: &context.config,
-                    use_4state: context.config.use_4state,
-                    contains_compiled_block: false,
-                };
-                // Hand the precomputed localization blocklist + array ranges to
-                // the AOT-C emitter (no-op when VERYL_AOT_C_LOCALIZE is off),
-                // then clear it so it can't leak into a later module's emit.
-                #[cfg(not(target_family = "wasm"))]
-                if let Some((block, ranges)) = &localize_info {
-                    crate::backend::aot_c::emit::set_localize_blocklist(
-                        block.clone(),
-                        ranges.clone(),
-                    );
-                }
-                let r = context
-                    .backends
-                    .try_compile_whole_comb(&ctx, &pre_jit_stmts);
-                #[cfg(not(target_family = "wasm"))]
-                crate::backend::aot_c::emit::clear_localize_blocklist();
-                r
-            })
+            late::compile_whole_comb(
+                &mut context.backends,
+                &context.config,
+                key,
+                dut_reuse,
+                &pre_jit_stmts,
+                localize_info.as_ref(),
+            )
         };
 
         // A whole-comb bail silently drops the whole module to per-chunk
@@ -3256,7 +3810,7 @@ impl Conv<&air::Module> for ProtoModule {
             #[cfg(not(target_family = "wasm"))]
             if std::env::var("VERYL_AOT_C_DIAG").as_deref() == Ok("1") {
                 let census = crate::backend::aot_c::emit::comb_uncovered_census(&pre_jit_stmts);
-                let mut counts: std::collections::HashMap<String, usize> = Default::default();
+                let mut counts: HashMap<String, usize> = Default::default();
                 for c in census {
                     *counts.entry(c).or_default() += 1;
                 }
@@ -3292,6 +3846,9 @@ impl Conv<&air::Module> for ProtoModule {
             whole_events,
             external_components: all_external_components,
             rtl_driven,
+            incr_infeasible,
+            late_aotc,
+            fused_comb_offsets: cached.fused_offsets.clone(),
         })
     }
 }

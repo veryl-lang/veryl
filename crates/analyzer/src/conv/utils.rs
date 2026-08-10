@@ -650,6 +650,29 @@ pub fn eval_assign_statement(
     Ok(ret)
 }
 
+/// IEEE 1800 sizes an assignment RHS against the LHS *select*, not the whole
+/// variable.  Only observable when the RHS is no wider than the select, since
+/// the context is the max of the two: with an 8-bit `y`, `x[7:0] = (y << 4)
+/// >> 4` is 0x0d at 8 bits and 0xcd at a 32-bit `x`'s width.
+pub fn assign_rhs_context_type(context: &mut Context, dst: &ir::AssignDestination) -> ir::Type {
+    let full = dst.comptime.r#type.clone();
+    if dst.select.is_empty() || dst.comptime.part_select.is_some() {
+        return full;
+    }
+    if !matches!(full.kind, ir::TypeKind::Logic | ir::TypeKind::Bit) {
+        return full;
+    }
+    let Some(w) = dst.total_width(context) else {
+        return full;
+    };
+    if w == 0 || full.total_width().is_none_or(|fw| w >= fw) {
+        return full;
+    }
+    let mut t = full;
+    t.set_concrete_width(Shape::new(vec![Some(w)]));
+    t
+}
+
 /// Expand an array-range assignment LHS (`o[0+:N] = '{...}`) into one assignment
 /// per covered element (recursing inner dims for multi-dim arrays). Returns `None`
 /// to defer to the scalar path when the LHS isn't a range or the RHS isn't an array

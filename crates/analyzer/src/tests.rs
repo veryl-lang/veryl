@@ -7,6 +7,26 @@ use veryl_metadata::{Lint, Metadata, ProjectProperty};
 use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
 
+mod comb_loop_diagnostic_tests;
+
+mod comb_loop_incomplete_tests;
+
+mod comb_loop_interface_tests;
+
+mod comb_loop_interface_function_tests;
+
+mod comb_loop_procedural_tests;
+
+mod comb_loop_retained_state_tests;
+
+mod comb_loop_function_tests;
+
+mod comb_loop_module_tests;
+
+mod comb_loop_positional_tests;
+
+mod comb_loop_sparse_tests;
+
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();
