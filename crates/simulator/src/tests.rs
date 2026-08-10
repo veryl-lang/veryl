@@ -271,14 +271,77 @@ impl DualSimulator {
             self.jit.ir.ff_values.len(),
             "ff_values",
         );
-        // Compare comb values
-        self.compare_buffer_region(
-            &self.jit.ir.comb_values,
-            &self.interp.ir.comb_values,
-            self.jit.ir.comb_values.as_ptr(),
-            self.jit.ir.comb_values.len(),
-            "comb_values",
+        // Compare comb values.  Under the comb relayout the two arms permute
+        // their storage independently (the JIT arm's compiled-block structure
+        // keys a different schedule), so byte-identical buffers are no longer
+        // expected — compare per-variable through each arm's own meta instead.
+        if crate::ir::comb_layout::enabled() {
+            self.compare_vars_recursive(
+                &self.jit.ir.module_variables,
+                &self.interp.ir.module_variables,
+            );
+        } else {
+            self.compare_buffer_region(
+                &self.jit.ir.comb_values,
+                &self.interp.ir.comb_values,
+                self.jit.ir.comb_values.as_ptr(),
+                self.jit.ir.comb_values.len(),
+                "comb_values",
+            );
+        }
+    }
+
+    #[track_caller]
+    fn compare_vars_recursive(&self, jit: &ModuleVariables, interp: &ModuleVariables) {
+        // The two arms must expose the SAME variable tree — a silent skip
+        // here would exempt whatever storage one arm forgot from comparison.
+        assert_eq!(
+            jit.variables.len(),
+            interp.variables.len(),
+            "variable sets differ between the arms",
         );
+        assert_eq!(
+            jit.children.len(),
+            interp.children.len(),
+            "child module counts differ between the arms",
+        );
+        let mut ids: Vec<_> = jit.variables.keys().collect();
+        ids.sort();
+        for vid in ids {
+            let jv = &jit.variables[vid];
+            let iv = interp
+                .variables
+                .get(vid)
+                .unwrap_or_else(|| panic!("variable {} missing from the interp arm", jv.path));
+            let vs = crate::ir::variable::value_size(jv.native_bytes, self.use_4state);
+            assert_eq!(
+                jv.current_values.len(),
+                iv.current_values.len(),
+                "value counts differ for {}",
+                jv.path,
+            );
+            for (i, (&jp, &ip)) in jv
+                .current_values
+                .iter()
+                .zip(iv.current_values.iter())
+                .enumerate()
+            {
+                let jb = unsafe { std::slice::from_raw_parts(jp, vs) };
+                let ib = unsafe { std::slice::from_raw_parts(ip, vs) };
+                if jb != ib {
+                    panic!(
+                        "JIT/interpreter mismatch at cycle {}, variable {}[{}]\n\
+                         JIT bytes:    {:02x?}\n\
+                         Interp bytes: {:02x?}\n\
+                         use_4state: {}",
+                        self.cycle, jv.path, i, jb, ib, self.use_4state,
+                    );
+                }
+            }
+        }
+        for (jc, ic) in jit.children.iter().zip(interp.children.iter()) {
+            self.compare_vars_recursive(jc, ic);
+        }
     }
 
     #[track_caller]
