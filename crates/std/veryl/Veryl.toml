@@ -4,7 +4,7 @@ version     = "0.0.1"
 authors     = ["dalance@gmail.com"]
 description = "Veryl Standard Library"
 license     = "MIT OR Apache-2.0"
-repository  = "https://github.com/veryl-lang/std"
+repository  = "https://github.com/veryl-lang/veryl/tree/master/crates/std/veryl"
 
 [build]
 target      = {type = "directory", path = "target/src"}
