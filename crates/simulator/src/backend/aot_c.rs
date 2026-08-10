@@ -127,6 +127,21 @@ impl CompiledWhole for AotCWhole {
         }
     }
 
+    fn try_dispatch_const(&self, ff: *const u8, comb: *mut u8, log: *mut u8) -> DispatchOutcome {
+        match self.cell.get() {
+            Some(m) => {
+                if let Some(f) = m.const_func {
+                    // SAFETY: same ABI and pointer contract as `func`.
+                    unsafe {
+                        f(ff, comb as *const u8, log, 0);
+                    }
+                }
+                DispatchOutcome::Done
+            }
+            None => DispatchOutcome::NotReady,
+        }
+    }
+
     fn localized_comb_bytes(&self) -> &[(isize, usize)] {
         &self.localized
     }

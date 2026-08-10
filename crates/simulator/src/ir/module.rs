@@ -748,6 +748,100 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
     }
 }
 
+/// Comb offsets written anywhere in the event statement lists
+/// (misclassified-FF: ICG enables and other event-written comb).  The
+/// AOT-C const-cone split must treat any read of these as non-constant —
+/// no comb statement writes them, but their value changes across settles.
+/// Dynamic writes taint their whole element range.
+/// `None` when an event contains writes this walker cannot bound (a
+/// CompiledBlock without original statements, a tb-method call whose
+/// return destination is an unresolved `VarId`) — the caller must not
+/// arm the split then.
+fn collect_event_written_comb(
+    events: &HashMap<Event, Vec<ProtoStatement>>,
+) -> Option<HashSet<isize>> {
+    use crate::ir::statement::ProtoTbMethodKind;
+    fn walk(s: &ProtoStatement, out: &mut HashSet<isize>) -> bool {
+        match s {
+            ProtoStatement::Assign(a) => {
+                if !a.dst.is_ff() {
+                    out.insert(a.dst.raw());
+                }
+                true
+            }
+            ProtoStatement::AssignDynamic(a) => {
+                if !a.dst_base.is_ff() && a.dst_stride != 0 {
+                    for k in 0..a.dst_num_elements {
+                        out.insert(a.dst_base.raw() + a.dst_stride * k as isize);
+                    }
+                }
+                true
+            }
+            ProtoStatement::If(x) => x
+                .true_side
+                .iter()
+                .chain(x.false_side.iter())
+                .all(|s| walk(s, out)),
+            ProtoStatement::Case(x) => x
+                .arms
+                .iter()
+                .flat_map(|a| a.body.iter())
+                .chain(x.default.iter())
+                .all(|s| walk(s, out)),
+            ProtoStatement::SequentialBlock(inner) => inner.iter().all(|s| walk(s, out)),
+            ProtoStatement::CompiledBlock(cb) => {
+                // `output_offsets` compresses a dynamic array write to
+                // base + last element, hiding interior elements — walk the
+                // original statements.  No originals = unboundable.
+                if cb.original_stmts.is_empty() {
+                    return false;
+                }
+                cb.original_stmts.iter().all(|s| walk(s, out))
+            }
+            // The loop counter itself is an event-written comb variable;
+            // every body write is either a fixed offset or an AssignDynamic
+            // whose whole element range is tainted — both bounded.
+            ProtoStatement::For(f) => {
+                if !f.var_offset.is_ff() {
+                    out.insert(f.var_offset.raw());
+                }
+                f.body.iter().all(|s| walk(s, out))
+            }
+            ProtoStatement::SystemFunctionCall(c) => {
+                // Readmemh writes are boundable: one offset per element.
+                if let crate::ir::ProtoSystemFunctionCall::Readmemh { elements, .. } = c {
+                    for e in elements {
+                        if !e.current.is_ff() {
+                            out.insert(e.current.raw());
+                        }
+                    }
+                }
+                true
+            }
+            // A tb-method return value lands in a variable this walker
+            // cannot resolve (`VarId`, not an offset) — unboundable.
+            ProtoStatement::TbMethodCall { method, .. } => !matches!(
+                method,
+                ProtoTbMethodKind::Component { ret: Some(_), .. }
+                    | ProtoTbMethodKind::RandomGet { ret: Some(_), .. }
+                    | ProtoTbMethodKind::RandomGetRange { ret: Some(_), .. }
+                    | ProtoTbMethodKind::RandomGetSeed { ret: Some(_) }
+            ),
+            // No comb writes.
+            ProtoStatement::Break => true,
+        }
+    }
+    let mut out = HashSet::default();
+    for stmts in events.values() {
+        for s in stmts {
+            if !walk(s, &mut out) {
+                return None;
+            }
+        }
+    }
+    Some(out)
+}
+
 /// `all_event_statements` in place with the dead-var drop (mirroring the miss
 /// path); the returned `dead_offsets` let a cache hit reproduce that drop.
 #[allow(clippy::too_many_arguments)]
@@ -3460,6 +3554,11 @@ impl Conv<&air::Module> for ProtoModule {
             None
         };
 
+        // Const-cone split input (see `collect_event_written_comb`);
+        // `None` leaves the split unarmed.
+        let const_unsafe_comb: Option<HashSet<isize>> =
+            collect_event_written_comb(&all_event_statements);
+
         // Diag: count FF offsets with multiple write sites — the
         // "multi-RMW candidates" that require scratch/cache forwarding
         // to preserve NBA semantics under packed [current]-only layout.
@@ -3642,6 +3741,7 @@ impl Conv<&air::Module> for ProtoModule {
                 context.config.clone(),
                 Arc::clone(&pre_jit_stmts),
                 localize_info.clone(),
+                const_unsafe_comb.clone(),
                 event_stmts,
             )))
         } else {
@@ -3787,6 +3887,7 @@ impl Conv<&air::Module> for ProtoModule {
                 dut_reuse,
                 &pre_jit_stmts,
                 localize_info.as_ref(),
+                const_unsafe_comb.as_ref(),
             )
         };
 
@@ -3920,4 +4021,150 @@ fn collect_max_writes_one(stmt: &ProtoStatement) -> HashMap<u32, u32> {
         _ => {}
     }
     result
+}
+
+#[cfg(test)]
+mod event_written_comb_tests {
+    use super::*;
+    use crate::backend::ChunkArtifact;
+    use crate::ir::statement::{ProtoTbMethodKind, ReadmemhElement};
+    use crate::ir::{
+        CompiledBlockStatement, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
+        ProtoSystemFunctionCall, VarOffset,
+    };
+    use veryl_analyzer::value::{Value, ValueU64};
+    use veryl_parser::token_range::TokenRange;
+
+    fn lit(payload: u64, width: usize) -> ProtoExpression {
+        ProtoExpression::Value {
+            value: Value::U64(ValueU64 {
+                payload,
+                mask_xz: 0,
+                width: width as u32,
+                signed: false,
+            }),
+            width,
+            expr_context: crate::ir::ExpressionContext {
+                width,
+                signed: false,
+            },
+        }
+    }
+
+    fn cassign(dst: VarOffset, w: usize) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst,
+            dst_width: w,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: lit(0, w),
+            dst_ff_current_offset: 0,
+            token: TokenRange::default(),
+        })
+    }
+
+    fn cdyn_write(base: isize, stride: isize, num: usize) -> ProtoStatement {
+        ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+            dst_base: VarOffset::Comb(base),
+            dst_stride: stride,
+            dst_num_elements: num,
+            dst_index_expr: lit(0, 8),
+            dst_width: 32,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: lit(0, 32),
+            dst_ff_current_base_offset: 0,
+        })
+    }
+
+    fn events(stmts: Vec<ProtoStatement>) -> HashMap<Event, Vec<ProtoStatement>> {
+        HashMap::from_iter([(Event::Initial, stmts)])
+    }
+
+    #[test]
+    fn collects_static_and_expands_dynamic_writes() {
+        // FF writes are ignored; a dynamic write taints every element,
+        // including the middle ones a base+last compression would hide.
+        let out = collect_event_written_comb(&events(vec![
+            cassign(VarOffset::Comb(0x0), 32),
+            cassign(VarOffset::Ff(0x8), 32),
+            cdyn_write(0x10, 0x8, 3),
+        ]))
+        .unwrap();
+        assert_eq!(out, HashSet::from_iter([0x0isize, 0x10, 0x18, 0x20]));
+    }
+
+    #[test]
+    fn registers_readmemh_element_offsets() {
+        let stmts = vec![ProtoStatement::SystemFunctionCall(
+            ProtoSystemFunctionCall::Readmemh {
+                filename: "x.hex".into(),
+                elements: vec![
+                    ReadmemhElement {
+                        current: VarOffset::Comb(0x30),
+                        next_offset: None,
+                    },
+                    ReadmemhElement {
+                        current: VarOffset::Ff(0x8),
+                        next_offset: None,
+                    },
+                ],
+                width: 32,
+            },
+        )];
+        let out = collect_event_written_comb(&events(stmts)).unwrap();
+        assert_eq!(out, HashSet::from_iter([0x30isize]));
+    }
+
+    #[test]
+    fn walks_compiled_block_originals_and_disarms_without_them() {
+        fn cb(originals: Vec<ProtoStatement>) -> ProtoStatement {
+            unsafe extern "system" fn stub(_: *const u8, _: *const u8, _: *mut u8, _: isize) {}
+            ProtoStatement::CompiledBlock(CompiledBlockStatement {
+                artifact: std::sync::Arc::new(ChunkArtifact {
+                    func: stub,
+                    keepalive: None,
+                    content_fp: None,
+                    deps: None,
+                    sub_guarded: false,
+                }),
+                ff_delta_bytes: 0,
+                comb_delta_bytes: 0,
+                input_offsets: vec![],
+                output_offsets: vec![VarOffset::Comb(0x0), VarOffset::Comb(0x10)],
+                ff_canonical_offsets: vec![],
+                stmt_deps: vec![],
+                original_stmts: originals,
+            })
+        }
+        // The originals\u2019 dynamic write taints the middle element the
+        // compressed output list omits.
+        let out =
+            collect_event_written_comb(&events(vec![cb(vec![cdyn_write(0x0, 0x8, 3)])])).unwrap();
+        assert!(out.contains(&0x8isize));
+        // No originals: the writes are unboundable, the split must disarm.
+        assert!(collect_event_written_comb(&events(vec![cb(vec![])])).is_none());
+    }
+
+    #[test]
+    fn disarms_on_a_tb_method_with_an_unresolvable_return() {
+        let call = |ret| ProtoStatement::TbMethodCall {
+            inst: StrId::default(),
+            method: ProtoTbMethodKind::RandomGet {
+                width: 32,
+                signed: false,
+                ret,
+            },
+        };
+        assert!(collect_event_written_comb(&events(vec![call(None)])).is_some());
+        assert!(
+            collect_event_written_comb(&events(vec![call(Some((
+                crate::ir::VarId::SYNTHETIC,
+                crate::ir::statement::RetWidthCheck::Dst,
+            )))]))
+            .is_none()
+        );
+    }
 }

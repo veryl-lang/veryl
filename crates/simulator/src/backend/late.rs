@@ -140,6 +140,9 @@ pub fn compile_whole_comb(
     dut_reuse: bool,
     stmts: &[ProtoStatement],
     #[cfg_attr(target_family = "wasm", allow(unused_variables))] localize: Option<&LocalizeInfo>,
+    #[cfg_attr(target_family = "wasm", allow(unused_variables))] const_unsafe: Option<
+        &crate::HashSet<isize>,
+    >,
 ) -> Option<Arc<dyn CompiledWhole>> {
     crate::ir::comb_pipeline_cache::whole_comb_get_or_compute(key, dut_reuse, || {
         let ctx = super::CompileCtx {
@@ -155,9 +158,17 @@ pub fn compile_whole_comb(
         if let Some((block, ranges)) = localize {
             super::aot_c::emit::set_localize_blocklist(block.clone(), ranges.clone());
         }
+        // Same contract for the const-cone split's event-written-comb set:
+        // `None` (unboundable event writes) leaves the split unarmed.
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(unsafe_comb) = const_unsafe {
+            super::aot_c::emit::set_const_unsafe(unsafe_comb.clone());
+        }
         let r = backends.try_compile_whole_comb(&ctx, stmts);
         #[cfg(not(target_family = "wasm"))]
         super::aot_c::emit::clear_localize_blocklist();
+        #[cfg(not(target_family = "wasm"))]
+        super::aot_c::emit::clear_const_unsafe();
         r
     })
 }
@@ -172,6 +183,9 @@ pub struct LateAotc {
     /// Post-sort post-DCE comb statements (shared with the pipeline cache).
     comb_stmts: Arc<Vec<ProtoStatement>>,
     localize: Option<LocalizeInfo>,
+    /// Event-written comb offsets for the const-cone split; `None` disarms
+    /// it (see `aot_c::emit::set_const_unsafe`).
+    const_unsafe: Option<crate::HashSet<isize>>,
     /// Per-event pre-JIT statements + landing slot.  Empty when
     /// `Config::aot_c_event` is off.
     events: HashMap<Event, EventSlot>,
@@ -189,6 +203,7 @@ impl LateAotc {
         config: Config,
         comb_stmts: Arc<Vec<ProtoStatement>>,
         localize: Option<LocalizeInfo>,
+        const_unsafe: Option<crate::HashSet<isize>>,
         event_stmts: HashMap<Event, Vec<ProtoStatement>>,
     ) -> Self {
         let events = event_stmts
@@ -201,6 +216,7 @@ impl LateAotc {
             config,
             comb_stmts,
             localize,
+            const_unsafe,
             events,
             started: AtomicBool::new(false),
             comb_slot: OnceLock::new(),
@@ -244,6 +260,7 @@ impl LateAotc {
             self.dut_reuse,
             &self.comb_stmts,
             self.localize.as_ref(),
+            self.const_unsafe.as_ref(),
         );
         let ctx = CompileCtx {
             config: &self.config,
