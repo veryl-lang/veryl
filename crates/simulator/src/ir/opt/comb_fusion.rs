@@ -324,6 +324,222 @@ fn canonical_wrap(expr: ProtoExpression, w: usize) -> ProtoExpression {
     }
 }
 
+/// `VERYL_COMB_FUSION_COALESCE=0` opts the field-store coalescing out while
+/// keeping the single-reader inlining (per-stage A/B lever).
+fn coalesce_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION_COALESCE").as_deref() != Ok("0"))
+}
+
+/// Coalesce disjoint static field stores that fully define a destination
+/// word into one whole-width concat assignment — the statement-level
+/// analogue of Verilator's `coalesceDrivers` (V3DfgSynthesize).
+///
+///   `x[3:0] = a; x[7:4] = b;`  →  `x = {b, a};`
+///
+/// Unlike the single-reader inlining, the destination's storage keeps its
+/// exact value (full coverage means the old word contributes nothing), so
+/// external visibility poses no constraint.
+fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, usize) {
+    let n = stmts.len();
+    // Group top-level static-select stores by destination offset.
+    struct Group {
+        idxs: Vec<usize>,
+        w: usize,
+        bad: bool,
+    }
+    let mut groups: HashMap<isize, Group> = HashMap::default();
+    for (i, s) in stmts.iter().enumerate() {
+        if let ProtoStatement::Assign(a) = s
+            && let VarOffset::Comb(o) = a.dst
+        {
+            let g = groups.entry(o).or_insert(Group {
+                idxs: Vec::new(),
+                w: a.dst_width,
+                bad: false,
+            });
+            if a.select.is_some()
+                && a.dynamic_select.is_none()
+                && a.rhs_select.is_none()
+                && a.dst_width > 0
+                && a.dst_width <= 64
+                && a.dst_width == g.w
+            {
+                g.idxs.push(i);
+            } else {
+                // A full store / dynamic store / width mismatch on the same
+                // offset disqualifies the whole group (mixed-driver word).
+                g.bad = true;
+            }
+        }
+    }
+
+    // Reads and writes index lists for the legality window.
+    let mut read_idxs: HashMap<isize, Vec<usize>> = HashMap::default();
+    let mut write_idxs: HashMap<isize, Vec<usize>> = HashMap::default();
+    {
+        let mut ins: Vec<VarOffset> = vec![];
+        let mut outs: Vec<VarOffset> = vec![];
+        for (i, s) in stmts.iter().enumerate() {
+            ins.clear();
+            outs.clear();
+            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            for off in ins.drain(..) {
+                if let VarOffset::Comb(o) = off {
+                    read_idxs.entry(o).or_default().push(i);
+                }
+            }
+            for off in outs.drain(..) {
+                if let VarOffset::Comb(o) = off {
+                    write_idxs.entry(o).or_default().push(i);
+                }
+            }
+        }
+    }
+    let any_in_window = |v: Option<&Vec<usize>>, lo: usize, hi: usize| -> bool {
+        v.is_some_and(|v| {
+            let p = v.partition_point(|&x| x < lo);
+            v.get(p).is_some_and(|&x| x <= hi)
+        })
+    };
+
+    let mut fused = 0usize;
+    let mut deleted = vec![false; n];
+    let mut e_ins: Vec<VarOffset> = vec![];
+    let mut e_outs: Vec<VarOffset> = vec![];
+    let mut group_offs: Vec<isize> = groups.keys().copied().collect();
+    group_offs.sort_unstable();
+    for o in group_offs {
+        let g = &groups[&o];
+        if g.bad || g.idxs.len() < 2 {
+            continue;
+        }
+        // Disjoint ranges covering [0, w) exactly.
+        let mut ranges: Vec<(usize, usize, usize)> = Vec::with_capacity(g.idxs.len());
+        for &i in &g.idxs {
+            let ProtoStatement::Assign(a) = &stmts[i] else {
+                unreachable!()
+            };
+            let (hi, lo) = a.select.unwrap();
+            // The select store sign-extends this RHS shape to dst_width
+            // before inserting the field; a concat element is used
+            // unextended.
+            if hi < lo || a.expr.store_sign_extend_from(a.dst_width).is_some() {
+                ranges.clear();
+                break;
+            }
+            ranges.push((lo, hi, i));
+        }
+        if ranges.is_empty() {
+            continue;
+        }
+        ranges.sort_unstable();
+        let contiguous = ranges[0].0 == 0
+            && ranges.windows(2).all(|p| p[0].1 + 1 == p[1].0)
+            && ranges.last().unwrap().1 + 1 == g.w;
+        if !contiguous {
+            continue;
+        }
+        let first = *g.idxs.iter().min().unwrap();
+        let last = *g.idxs.iter().max().unwrap();
+        // Every RHS is evaluated at `last`, so nothing in [first, last] may
+        // read the destination (the stores' own RHS included) or rewrite an
+        // input.
+        if any_in_window(read_idxs.get(&o), first, last) {
+            continue;
+        }
+        let writers = write_idxs.get(&o).map(|v| {
+            let p = v.partition_point(|&x| x < first);
+            v[p..].iter().take_while(|&&x| x <= last).count()
+        });
+        if writers != Some(g.idxs.len()) {
+            continue;
+        }
+        let mut input_rewritten = false;
+        'legality: for &i in &g.idxs {
+            e_ins.clear();
+            e_outs.clear();
+            stmts[i].gather_variable_offsets_expanded(&mut e_ins, &mut e_outs);
+            for off in &e_ins {
+                if let VarOffset::Comb(io) = off
+                    && any_in_window(write_idxs.get(io), first, last)
+                {
+                    input_rewritten = true;
+                    break 'legality;
+                }
+            }
+        }
+        if input_rewritten {
+            continue;
+        }
+
+        // A bit-select store CLIPS its RHS to the field, but the interpreter
+        // inserts a concat element as-is — an unmasked dirty RHS would leak
+        // into neighbouring fields.  gcc folds the mask away on the AOT-C
+        // side.
+        let mut elements: Vec<(Box<ProtoExpression>, usize, usize)> =
+            Vec::with_capacity(ranges.len());
+        for &(lo, hi, i) in ranges.iter().rev() {
+            let ProtoStatement::Assign(a) = &mut stmts[i] else {
+                unreachable!()
+            };
+            let expr = std::mem::replace(
+                &mut a.expr,
+                ProtoExpression::Value {
+                    value: Value::new(0, 1, false),
+                    width: 1,
+                    expr_context: ExpressionContext {
+                        width: 1,
+                        signed: false,
+                    },
+                },
+            );
+            let ew = hi - lo + 1;
+            elements.push((Box::new(canonical_wrap(expr, ew)), 1, ew));
+        }
+        let w = g.w;
+        let concat = ProtoExpression::Concatenation {
+            elements,
+            width: w,
+            expr_context: ExpressionContext {
+                width: w,
+                signed: false,
+            },
+        };
+        let ProtoStatement::Assign(last_a) = &stmts[last] else {
+            unreachable!()
+        };
+        let fused_stmt = ProtoStatement::Assign(crate::ir::statement::ProtoAssignStatement {
+            dst: last_a.dst,
+            dst_width: w,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: concat,
+            dst_ff_current_offset: last_a.dst_ff_current_offset,
+            token: last_a.token,
+        });
+        stmts[last] = fused_stmt;
+        for &i in &g.idxs {
+            if i != last {
+                deleted[i] = true;
+            }
+        }
+        fused += 1;
+    }
+
+    if fused == 0 {
+        return (stmts, 0);
+    }
+    let mut out = Vec::with_capacity(n);
+    for (i, s) in stmts.into_iter().enumerate() {
+        if !deleted[i] {
+            out.push(s);
+        }
+    }
+    (out, fused)
+}
+
 /// Inline single-reader comb defs into their readers.  `externals` must hold
 /// every comb offset visible outside the comb statement list (event reads,
 /// DCE protect, external connects, derived-clock candidates).
@@ -336,6 +552,13 @@ pub fn inline_single_readers(
     events: &HashMap<Event, Vec<ProtoStatement>>,
     externals_extra: &HashSet<VarOffset>,
 ) -> (Vec<ProtoStatement>, Vec<isize>) {
+    let coalesced = if coalesce_enabled() {
+        let (out, fused) = coalesce_field_stores(stmts);
+        stmts = out;
+        fused
+    } else {
+        0
+    };
     // -- externals: offsets we must never make disappear.
     let mut externals: HashSet<isize> = HashSet::default();
     for off in externals_extra {
@@ -430,7 +653,11 @@ pub fn inline_single_readers(
                     && a.dst_width > 0
                     && a.dst_width <= 64
                     && a.expr.width() > 0
-                    && a.expr.width() <= 64 =>
+                    && a.expr.width() <= 64
+                    // The store sign-extends this shape (a bare signed leaf
+                    // narrower than the destination); the substituted
+                    // expression would be used unextended.
+                    && a.expr.store_sign_extend_from(a.dst_width).is_none() =>
             {
                 match a.dst {
                     VarOffset::Comb(o) => {
@@ -552,8 +779,8 @@ pub fn inline_single_readers(
 
     if diag() {
         eprintln!(
-            "[comb_fusion] stmts={} inlined={} veto: shape={} reader={} redef={} external={}",
-            n, inlined, veto_shape, veto_reader, veto_redef, veto_ext,
+            "[comb_fusion] stmts={} coalesced={} inlined={} veto: shape={} reader={} redef={} external={}",
+            n, coalesced, inlined, veto_shape, veto_reader, veto_redef, veto_ext,
         );
     }
     if inlined == 0 {
@@ -834,6 +1061,254 @@ mod tests {
         });
         let stmts = vec![assign(0x0, 8, var(0x100, 8)), reader];
         assert_eq!(run(stmts).len(), 2);
+    }
+
+    fn assign_sel(
+        dst: isize,
+        w: usize,
+        hi: usize,
+        lo: usize,
+        expr: ProtoExpression,
+    ) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(dst),
+            dst_width: w,
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: 0,
+            token: Default::default(),
+        })
+    }
+
+    #[test]
+    fn coalesces_full_coverage_field_stores() {
+        // x[3:0] = a; x[7:4] = b  =>  x = {b, a} (one full store, read intact).
+        let stmts = vec![
+            assign_sel(0x0, 8, 3, 0, var(0x100, 4)),
+            assign_sel(0x0, 8, 7, 4, var(0x108, 4)),
+            assign(0x8, 8, var(0x0, 8)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 1);
+        assert_eq!(out.len(), 2);
+        let ProtoStatement::Assign(a) = &out[0] else {
+            panic!()
+        };
+        assert!(a.select.is_none());
+        let ProtoExpression::Concatenation {
+            elements, width, ..
+        } = &a.expr
+        else {
+            panic!("expected concat, got {:?}", a.expr)
+        };
+        assert_eq!(*width, 8);
+        assert_eq!(elements.len(), 2);
+        // High-to-low: first element is the [7:4] store's RHS (reads 0x108).
+        let (mut f, mut o2) = (0, 0);
+        count_reads(&elements[0].0, 0x108, &mut f, &mut o2);
+        assert_eq!(f, 1);
+    }
+
+    #[test]
+    fn coalesce_masks_a_dirty_element() {
+        // x[3:0] = a + b (computed wider than the slot): the concat element
+        // must carry the canonical mask, and both slots must hold their own
+        // RHS at the declared width.
+        let stmts = vec![
+            assign_sel(
+                0x0,
+                8,
+                3,
+                0,
+                binary(Op::Add, var(0x100, 4), var(0x108, 4), 4),
+            ),
+            assign_sel(0x0, 8, 7, 4, var(0x110, 4)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 1);
+        let ProtoStatement::Assign(a) = &out[0] else {
+            panic!()
+        };
+        let ProtoExpression::Concatenation { elements, .. } = &a.expr else {
+            panic!()
+        };
+        assert_eq!(elements.len(), 2);
+        assert_eq!((elements[0].1, elements[0].2), (1, 4));
+        assert_eq!((elements[1].1, elements[1].2), (1, 4));
+        // High slot = [7:4]'s RHS; low slot = the masked Add.
+        let (mut f, mut o2) = (0, 0);
+        count_reads(&elements[0].0, 0x110, &mut f, &mut o2);
+        assert_eq!((f, o2), (1, 0));
+        let ProtoExpression::Binary {
+            op: Op::BitAnd, y, ..
+        } = &*elements[1].0
+        else {
+            panic!("low element must be masked: {:?}", elements[1].0)
+        };
+        let ProtoExpression::Value { value, .. } = &**y else {
+            panic!()
+        };
+        assert_eq!(value.payload_u64(), 0xf);
+    }
+
+    #[test]
+    fn coalesce_rejects_a_sign_extending_element() {
+        // s (signed, 2 bits) into [7:4]: the select store sign-extends it to
+        // the destination width; a concat element would not.
+        let signed_leaf = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x100),
+            select: None,
+            dynamic_select: None,
+            width: 2,
+            var_full_width: 2,
+            expr_context: ExpressionContext {
+                width: 2,
+                signed: true,
+            },
+        };
+        let stmts = vec![
+            assign_sel(0x0, 8, 3, 0, var(0x108, 4)),
+            assign_sel(0x0, 8, 7, 4, signed_leaf),
+        ];
+        assert_eq!(coalesce_field_stores(stmts).1, 0);
+    }
+
+    #[test]
+    fn inline_declines_a_sign_extending_def() {
+        // The full store sign-extends the bare narrow signed RHS to the def
+        // width; the substituted expression would be used unextended.
+        let signed_leaf = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x100),
+            select: None,
+            dynamic_select: None,
+            width: 2,
+            var_full_width: 2,
+            expr_context: ExpressionContext {
+                width: 2,
+                signed: true,
+            },
+        };
+        let stmts = vec![assign(0x0, 8, signed_leaf), assign(0x8, 8, var(0x0, 8))];
+        assert_eq!(run(stmts).len(), 2);
+    }
+
+    #[test]
+    fn coalesce_rejects_a_dynamic_reader_of_the_word_in_the_window() {
+        // 0x108 is the middle element of a 3-element array; arr[idx] between
+        // the two field stores reads it — invisible to the compact gather,
+        // so the window index must be built from the expanded form.
+        let dyn_read = ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(0x100),
+            stride: 8,
+            element_native_bytes: 8,
+            index_expr: Box::new(var(0x200, 8)),
+            num_elements: 3,
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            expr_context: ctx(8),
+        };
+        let stmts = vec![
+            assign_sel(0x108, 8, 3, 0, var(0x210, 4)),
+            assign(0x218, 8, dyn_read),
+            assign_sel(0x108, 8, 7, 4, var(0x220, 4)),
+        ];
+        assert_eq!(coalesce_field_stores(stmts).1, 0);
+    }
+
+    #[test]
+    fn coalesce_rejects_a_conditional_writer_in_the_window() {
+        // An If writing the word between the stores is a foreign writer the
+        // writers count must catch.
+        let stmts = vec![
+            assign_sel(0x0, 8, 3, 0, var(0x100, 4)),
+            ProtoStatement::If(crate::ir::statement::ProtoIfStatement {
+                cond: Some(var(0x200, 1)),
+                true_side: vec![assign(0x0, 8, var(0x208, 8))],
+                false_side: vec![],
+            }),
+            assign_sel(0x0, 8, 7, 4, var(0x108, 4)),
+        ];
+        assert_eq!(coalesce_field_stores(stmts).1, 0);
+    }
+
+    #[test]
+    fn coalesce_rejects_a_width_mismatched_group() {
+        let stmts = vec![
+            assign_sel(0x0, 8, 3, 0, var(0x100, 4)),
+            assign_sel(0x0, 16, 7, 4, var(0x108, 4)),
+        ];
+        assert_eq!(coalesce_field_stores(stmts).1, 0);
+    }
+
+    #[test]
+    fn coalesce_rejects_partial_coverage() {
+        // Only [3:0] and [6:4]: bit 7 keeps the old value — no fuse.
+        let stmts = vec![
+            assign_sel(0x0, 8, 3, 0, var(0x100, 4)),
+            assign_sel(0x0, 8, 6, 4, var(0x108, 3)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 0);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn coalesce_rejects_a_read_between_stores() {
+        // The intermediate read observes the half-written word.
+        let stmts = vec![
+            assign_sel(0x0, 8, 3, 0, var(0x100, 4)),
+            assign(0x8, 8, var(0x0, 8)),
+            assign_sel(0x0, 8, 7, 4, var(0x108, 4)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 0);
+        assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn coalesce_rejects_input_rewritten_between() {
+        // 0x100 (input of the first store) is rewritten before the last
+        // store, where the fused RHS would be evaluated.
+        let stmts = vec![
+            assign_sel(0x0, 8, 3, 0, var(0x100, 4)),
+            assign(0x100, 8, var(0x110, 8)),
+            assign_sel(0x0, 8, 7, 4, var(0x108, 4)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 0);
+        assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn coalesce_rejects_overlapping_or_mixed_drivers() {
+        // Overlap [3:0]+[4:2] never fuses; a full store on the same word
+        // disqualifies its group too.
+        let stmts = vec![
+            assign_sel(0x0, 8, 3, 0, var(0x100, 4)),
+            assign_sel(0x0, 8, 4, 2, var(0x108, 3)),
+            assign_sel(0x10, 8, 3, 0, var(0x100, 4)),
+            assign(0x10, 8, var(0x110, 8)),
+            assign_sel(0x10, 8, 7, 4, var(0x108, 4)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 0);
+        assert_eq!(out.len(), 5);
+    }
+
+    #[test]
+    fn coalesced_store_feeds_single_reader_inlining() {
+        // After coalescing, the full-width def has one reader and inlines.
+        let stmts = vec![
+            assign_sel(0x0, 8, 3, 0, var(0x100, 4)),
+            assign_sel(0x0, 8, 7, 4, var(0x108, 4)),
+            assign(0x8, 8, var(0x0, 8)),
+        ];
+        let out = run(stmts);
+        assert_eq!(out.len(), 1);
+        assert_eq!(reads_of(&out[0], 0x0), (0, 0));
     }
 
     #[test]
