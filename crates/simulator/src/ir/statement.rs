@@ -1162,80 +1162,80 @@ impl ProtoStatement {
     /// Replace embedded byte offsets present in `map`. Mirrors `adjust_offsets`'s
     /// walk; `map` holds only comb offsets, so FF offsets are never affected.
     pub fn remap_offsets(&mut self, map: &HashMap<VarOffset, VarOffset>) {
+        self.remap_offsets_with(&|off| map.get(&off).copied().unwrap_or(off));
+    }
+
+    /// `remap_offsets` generalised over an arbitrary offset translation.
+    /// `CompiledBlock` stays a no-op here — its artifact bakes absolute
+    /// offsets, so only a uniform delta is expressible (see
+    /// `comb_layout::apply_to_stmts` for the rigid-shift handling).
+    pub fn remap_offsets_with(&mut self, f: &dyn Fn(VarOffset) -> VarOffset) {
         match self {
             ProtoStatement::Assign(x) => {
-                if let Some(&n) = map.get(&x.dst) {
-                    x.dst = n;
-                }
-                x.expr.remap_offsets(map);
+                x.dst = f(x.dst);
+                x.expr.remap_offsets_with(f);
                 if let Some(dyn_sel) = &mut x.dynamic_select {
-                    dyn_sel.index_expr.remap_offsets(map);
+                    dyn_sel.index_expr.remap_offsets_with(f);
                 }
             }
             ProtoStatement::AssignDynamic(x) => {
-                if let Some(&n) = map.get(&x.dst_base) {
-                    x.dst_base = n;
-                }
-                x.dst_index_expr.remap_offsets(map);
-                x.expr.remap_offsets(map);
+                x.dst_base = f(x.dst_base);
+                x.dst_index_expr.remap_offsets_with(f);
+                x.expr.remap_offsets_with(f);
                 if let Some(dyn_sel) = &mut x.dynamic_select {
-                    dyn_sel.index_expr.remap_offsets(map);
+                    dyn_sel.index_expr.remap_offsets_with(f);
                 }
             }
             ProtoStatement::If(x) => {
                 if let Some(cond) = &mut x.cond {
-                    cond.remap_offsets(map);
+                    cond.remap_offsets_with(f);
                 }
                 for s in &mut x.true_side {
-                    s.remap_offsets(map);
+                    s.remap_offsets_with(f);
                 }
                 for s in &mut x.false_side {
-                    s.remap_offsets(map);
+                    s.remap_offsets_with(f);
                 }
             }
             ProtoStatement::Case(x) => {
                 for arm in &mut x.arms {
-                    arm.cond.remap_offsets(map);
+                    arm.cond.remap_offsets_with(f);
                     for s in &mut arm.body {
-                        s.remap_offsets(map);
+                        s.remap_offsets_with(f);
                     }
                 }
                 for s in &mut x.default {
-                    s.remap_offsets(map);
+                    s.remap_offsets_with(f);
                 }
             }
             ProtoStatement::SystemFunctionCall(x) => match x {
                 ProtoSystemFunctionCall::Display { args, .. }
                 | ProtoSystemFunctionCall::Write { args, .. } => {
                     for arg in args {
-                        arg.remap_offsets(map);
+                        arg.remap_offsets_with(f);
                     }
                 }
                 ProtoSystemFunctionCall::Readmemh { elements, .. } => {
                     for elem in elements {
-                        if let Some(&n) = map.get(&elem.current) {
-                            elem.current = n;
-                        }
+                        elem.current = f(elem.current);
                     }
                 }
                 ProtoSystemFunctionCall::Assert {
                     condition, args, ..
                 } => {
-                    condition.remap_offsets(map);
+                    condition.remap_offsets_with(f);
                     for arg in args {
-                        arg.remap_offsets(map);
+                        arg.remap_offsets_with(f);
                     }
                 }
                 ProtoSystemFunctionCall::Finish => {}
             },
             ProtoStatement::CompiledBlock(_) => {}
             ProtoStatement::For(x) => {
-                if let Some(&n) = map.get(&x.var_offset) {
-                    x.var_offset = n;
-                }
+                x.var_offset = f(x.var_offset);
                 let remap_bound = |b: &mut ProtoForBound| {
                     if let ProtoForBound::Dynamic(expr) = b {
-                        expr.remap_offsets(map);
+                        expr.remap_offsets_with(f);
                     }
                 };
                 match &mut x.range {
@@ -1247,46 +1247,46 @@ impl ProtoStatement {
                     }
                 }
                 for s in &mut x.body {
-                    s.remap_offsets(map);
+                    s.remap_offsets_with(f);
                 }
             }
             ProtoStatement::SequentialBlock(body) => {
                 for s in body {
-                    s.remap_offsets(map);
+                    s.remap_offsets_with(f);
                 }
             }
             ProtoStatement::TbMethodCall { method, .. } => match method {
                 ProtoTbMethodKind::ClockNext { count, period } => {
                     if let Some(c) = count {
-                        c.remap_offsets(map);
+                        c.remap_offsets_with(f);
                     }
                     if let Some(p) = period {
-                        p.remap_offsets(map);
+                        p.remap_offsets_with(f);
                     }
                 }
                 ProtoTbMethodKind::ResetAssert { duration, .. } => {
                     if let Some(d) = duration {
-                        d.remap_offsets(map);
+                        d.remap_offsets_with(f);
                     }
                 }
                 ProtoTbMethodKind::FileWrite { args, .. } => {
                     for a in args {
-                        a.remap_offsets(map);
+                        a.remap_offsets_with(f);
                     }
                 }
                 ProtoTbMethodKind::Component { args, .. } => {
                     for a in args {
                         if let ProtoComponentArg::Expr(e) = a {
-                            e.remap_offsets(map);
+                            e.remap_offsets_with(f);
                         }
                     }
                 }
                 ProtoTbMethodKind::RandomSeed { value } => {
-                    value.remap_offsets(map);
+                    value.remap_offsets_with(f);
                 }
                 ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
-                    min.remap_offsets(map);
-                    max.remap_offsets(map);
+                    min.remap_offsets_with(f);
+                    max.remap_offsets_with(f);
                 }
                 ProtoTbMethodKind::FileOpen { .. }
                 | ProtoTbMethodKind::FileClose

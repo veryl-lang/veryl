@@ -1,6 +1,7 @@
 use crate::backend::inst::next_test_top_id;
 use crate::backend::late;
 use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole};
+use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::{stable_topo_sort, stable_topo_sort_with_blocks};
@@ -746,6 +747,7 @@ fn run_comb_pipeline(
     unified: Vec<ProtoStatement>,
     all_event_statements: &mut HashMap<Event, Vec<ProtoStatement>>,
     protect: &HashSet<VarOffset>,
+    layout_inputs: Option<&comb_layout::LayoutInputs>,
     module_name: StrId,
     force_infeasible: bool,
 ) -> Result<comb_pipeline_cache::CombPipeline, SimulatorError> {
@@ -925,6 +927,29 @@ fn run_comb_pipeline(
         unified_sorted
     };
 
+    // Settle-order relayout (`VERYL_COMB_LAYOUT`): derive the storage
+    // permutation from the final execution order and rewrite the comb
+    // statements through it before the JIT bakes their offsets in.  The
+    // event statements are only READ here (rank + orphan detection, in the
+    // old offset space); the caller replays the schedule on them and on
+    // every other offset-bearing structure the pipeline does not own.
+    let layout = layout_inputs.and_then(|li| {
+        comb_layout::build_schedule(
+            &li.meta_units,
+            &unified_sorted,
+            all_event_statements,
+            &li.extra_offsets,
+            // NOT li.comb_total: version_split just bump-allocated its rename
+            // temps above that Conv-time figure, and they need units too.
+            context.comb_total_bytes,
+        )
+        .map(Arc::new)
+    });
+    let mut unified_sorted = unified_sorted;
+    if let Some(sched) = layout.as_deref() {
+        comb_layout::apply_to_stmts(&mut unified_sorted, sched);
+    }
+
     // Snapshot before JIT consumes it: the whole-comb backend needs the
     // pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
     let pre_jit_stmts = Arc::new(unified_sorted.clone());
@@ -935,6 +960,7 @@ fn run_comb_pipeline(
         required_comb_passes,
         comb_statements,
         dead_offsets: dead_union.into_iter().collect(),
+        layout,
         nontrivial_comb_scc,
         incr_infeasible,
         vsplit_temp_bytes,
@@ -2870,7 +2896,7 @@ impl Conv<&air::Module> for ProtoModule {
 
         let dyn_indexed = collect_dyn_indexed_vars(declarations);
 
-        let (variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
+        let (mut variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
             &src.variables,
             &ff_table,
             &multi_rmw_set,
@@ -2970,10 +2996,21 @@ impl Conv<&air::Module> for ProtoModule {
         // expanded on demand by `analyze_dependency` Phase 2 when fine-grained
         // ordering is needed.  This eliminates the false SCC artifact from
         // keeping both CB and its originals in the parent's `unified` list.
-        let unified: Vec<ProtoStatement> = all_comb_statements
+        let mut unified: Vec<ProtoStatement> = all_comb_statements
             .into_iter()
             .chain(all_post_comb_fns)
             .collect();
+
+        // Baked inst-chunk artifacts would freeze their spans into rigid
+        // units (see `expand_compiled_blocks`) — expand them BEFORE the key
+        // so the memoised pipeline and every hit see the same statements.
+        if comb_layout::enabled() {
+            comb_layout::expand_compiled_blocks(&mut unified);
+            for stmts in all_event_statements.values_mut() {
+                comb_layout::expand_compiled_blocks(stmts);
+            }
+        }
+        let unified = unified;
 
         // Dead-var DCE protect set (also folded into the cache key): offsets
         // that must survive DCE.  `comb_to_ff_hoist` only rewrites `VarKind::Let`,
@@ -3017,18 +3054,69 @@ impl Conv<&air::Module> for ProtoModule {
             HashSet::default()
         };
 
+        // Comb relayout inputs (`VERYL_COMB_LAYOUT`): the per-variable spans
+        // and the offsets referenced outside any statement list, gathered
+        // while the meta structures still hold the plain bump layout.  Folded
+        // into the pipeline key below so a cache hit implies the same
+        // schedule.
+        let layout_inputs: Option<comb_layout::LayoutInputs> = if comb_layout::enabled() {
+            let mut meta_units: Vec<(isize, isize)> = Vec::new();
+            comb_layout::collect_meta_units_map(
+                &variable_meta,
+                context.config.use_4state,
+                &mut meta_units,
+            );
+            for child in &all_child_modules {
+                comb_layout::collect_meta_units_tree(
+                    child,
+                    context.config.use_4state,
+                    &mut meta_units,
+                );
+            }
+            let mut extra_offsets: Vec<VarOffset> =
+                Vec::with_capacity(nested_derived_clock_candidates.len());
+            for (_, off, _) in &nested_derived_clock_candidates {
+                extra_offsets.push(*off);
+            }
+            for external in &all_external_components {
+                for connect in &external.connects {
+                    connect.expr.gather_variable_offsets(&mut extra_offsets);
+                }
+            }
+            Some(comb_layout::LayoutInputs {
+                meta_units,
+                extra_offsets,
+                comb_total: context.comb_total_bytes,
+            })
+        } else {
+            None
+        };
+
         // Whole comb pipeline (analyze_dependency + reorder + DCE + JIT),
         // memoised across tests that share a DUT.  A hit returns the pre-JIT
         // stmts, pass count, compiled comb, and the dead-var offset set — the
         // last re-applied to this test's events so they match the miss path
         // exactly (dead offsets are read nowhere, so the drop is value-neutral).
         // Single-flight (see `comb_pipeline_cache`); gated to `dut_reuse`.
-        let key = comb_pipeline_key(
-            context.config.use_4state,
-            &unified,
-            &all_event_statements,
-            &dce_protect,
-        );
+        let key = {
+            let base = comb_pipeline_key(
+                context.config.use_4state,
+                &unified,
+                &all_event_statements,
+                &dce_protect,
+            );
+            if let Some(li) = &layout_inputs {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut h = DefaultHasher::new();
+                li.meta_units.hash(&mut h);
+                li.extra_offsets.hash(&mut h);
+                li.comb_total.hash(&mut h);
+                base ^ (h.finish() as u128)
+            } else {
+                base
+            }
+        };
         // Conv feedback (see `backend::late`): a prior instance of this comb
         // list abandoned its incremental plan at runtime (or had it declined
         // at build) — a deterministic verdict, so take the infeasible flavor
@@ -3075,6 +3163,7 @@ impl Conv<&air::Module> for ProtoModule {
                         unified,
                         &mut all_event_statements,
                         &dce_protect,
+                        layout_inputs.as_ref(),
                         src.name,
                         runtime_infeasible,
                     )?;
@@ -3084,6 +3173,36 @@ impl Conv<&air::Module> for ProtoModule {
                     }
                 }
             };
+
+        // Comb relayout replay: the pipeline rewrote (or the cache carries)
+        // the memoised comb statements through the schedule; every
+        // offset-bearing structure the pipeline does not own must follow —
+        // this test's event statements, the variable meta tree (testbench
+        // handles, derived clocks, localize blocklist and buffer fill all
+        // read it), the nested derived-clock candidates, and the
+        // external-component connect exprs.  `comb_total_bytes` advances to
+        // the layout's end so later comb allocations (`cond_hoist_transform`)
+        // stay clear of the packed region.
+        if let Some(sched) = cached.layout.clone() {
+            for stmts in all_event_statements.values_mut() {
+                comb_layout::apply_to_stmts(stmts, &sched);
+            }
+            comb_layout::translate_meta_map(&mut variable_meta, &sched);
+            for child in &mut all_child_modules {
+                comb_layout::translate_meta_tree(child, &sched);
+            }
+            for (_, off, _) in &mut nested_derived_clock_candidates {
+                *off = sched.translate_off(*off);
+            }
+            for external in &mut all_external_components {
+                for connect in &mut external.connects {
+                    connect.expr.remap_offsets_with(&|o| sched.translate_off(o));
+                }
+            }
+            if sched.buffer_end > context.comb_total_bytes {
+                context.comb_total_bytes = sched.buffer_end;
+            }
+        }
         // `pre_jit_stmts` is shared read-only downstream (Arc, no deep clone);
         // `comb_statements` is cloned into the ProtoModule (mostly `Arc::clone`s
         // of compiled chunks).
