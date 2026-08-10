@@ -1602,7 +1602,17 @@ fn emit_wide_concat_body(
         }
         if ew <= 64 {
             // Mask to `ew`: the reference zero-extends the element from elem_width.
-            let v = emit_expr(elem)?;
+            let Some(v) = emit_expr(elem) else {
+                if diag_enabled() {
+                    // `{:.400}` truncates by chars — a byte slice could cut a
+                    // UTF-8 sequence and panic.
+                    eprintln!(
+                        "[aot-c] wide-concat elem emit failed (ew={ew}): {:.400}",
+                        format!("{elem:?}")
+                    );
+                }
+                return None;
+            };
             let e = next_wide_tmp();
             pre.push_str(&format!(
                 "uint64_t _e{e} = ((uint64_t)({v})) & 0x{m:x}ULL; ",
@@ -4264,18 +4274,54 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     let stmts: &[ProtoStatement] = gathered.as_deref().unwrap_or(stmts);
 
     // Emit each chunk's stmts now so we can fail fast on unsupported.
+    //
+    // The chunk budget counts approximate CODE WEIGHT, not statements:
+    // statement-level fusion concentrates many former statements' work into
+    // one Assign, and a count-based split packs several of those into one
+    // function whose register pressure defeats gcc.  A plain statement
+    // costs 1, so the knob's meaning is unchanged for unfused code.
+    fn expr_nodes(e: &ProtoExpression) -> usize {
+        match e {
+            ProtoExpression::Variable { .. } | ProtoExpression::Value { .. } => 1,
+            ProtoExpression::Unary { x, .. } => 1 + expr_nodes(x),
+            ProtoExpression::Binary { x, y, .. } => 1 + expr_nodes(x) + expr_nodes(y),
+            ProtoExpression::Concatenation { elements, .. } => {
+                1 + elements
+                    .iter()
+                    .map(|(e, ..)| 1 + expr_nodes(e))
+                    .sum::<usize>()
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => 1 + expr_nodes(cond) + expr_nodes(true_expr) + expr_nodes(false_expr),
+            ProtoExpression::DynamicVariable { index_expr, .. } => 2 + expr_nodes(index_expr),
+            _ => 4,
+        }
+    }
+    fn stmt_cost(s: &ProtoStatement) -> usize {
+        match s {
+            ProtoStatement::Assign(a) => 1 + expr_nodes(&a.expr) / 8,
+            _ => 1,
+        }
+    }
     let chunks: Vec<&[ProtoStatement]> = if chunk_size == 0 || stmts.len() <= chunk_size {
         vec![stmts]
-    } else if plan.atoms.is_empty() {
-        stmts.chunks(chunk_size).collect()
     } else {
-        // Cut at multiples of chunk_size, but never inside a gathered group —
-        // splitting one puts the accumulating stores in different functions
-        // and gcc can no longer keep the window in a register.
+        // Never cut inside a gathered group — splitting one puts the
+        // accumulating stores in different functions and gcc can no longer
+        // keep the window in a register.
         let mut chunks = Vec::new();
         let (mut start, mut ai) = (0usize, 0usize);
         while start < stmts.len() {
-            let mut end = (start + chunk_size).min(stmts.len());
+            let mut end = start;
+            let mut cost = 0usize;
+            while end < stmts.len() && cost < chunk_size {
+                cost += stmt_cost(&stmts[end]);
+                end += 1;
+            }
             while ai < plan.atoms.len() && plan.atoms[ai].0 + plan.atoms[ai].1 <= end {
                 ai += 1;
             }
