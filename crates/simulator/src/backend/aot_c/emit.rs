@@ -2163,13 +2163,20 @@ fn field_role(addr: isize, pmask: u64) -> Option<FieldRole> {
 /// How far apart a window's stores may sit and still be gathered
 /// (`VERYL_AOT_C_GATHER_SPAN`, 0 disables gathering entirely).
 fn gather_span_limit() -> usize {
-    static LIMIT: OnceLock<usize> = OnceLock::new();
-    *LIMIT.get_or_init(|| {
-        std::env::var("VERYL_AOT_C_GATHER_SPAN")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(512)
-    })
+    env_span("VERYL_AOT_C_GATHER_SPAN", 512)
+}
+
+/// How far a single-reader def may be sunk to reach its reader
+/// (`VERYL_AOT_C_SINK_SPAN`, 0 disables sinking entirely).
+fn sink_span_limit() -> usize {
+    env_span("VERYL_AOT_C_SINK_SPAN", usize::MAX)
+}
+
+fn env_span(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
 }
 
 /// Clears `FIELD_ROLES` on the way out, including the `?` returns in
@@ -2430,9 +2437,6 @@ fn plan_field_groups(stmts: &[ProtoStatement]) -> FieldPlan {
             })
             && seen == full
     });
-    if groups.is_empty() {
-        return FieldPlan::identity(stmts.len());
-    }
 
     // Byte -> statements touching it, for the ranges narrow enough to index
     // that way.  A memory array's range spans its whole storage, so those go
@@ -2474,10 +2478,25 @@ fn plan_field_groups(stmts: &[ProtoStatement]) -> FieldPlan {
                         .is_some_and(|list| list.iter().any(|&i| f(i)))
                 })
         }
+        /// Every indexed statement overlapping `[start, end)`, ascending per
+        /// byte; a statement spanning several of them is visited once each.
+        fn for_each(&self, start: isize, end: isize, mut f: impl FnMut(usize)) {
+            for &(s, e, i) in &self.wide {
+                if s < end && e > start {
+                    f(i);
+                }
+            }
+            for b in start..end {
+                if let Some(list) = self.by_byte.get(&b) {
+                    list.iter().for_each(|&i| f(i));
+                }
+            }
+        }
     }
 
     let mut touched = Index::default();
     let mut written = Index::default();
+    let mut readers = Index::default();
     let mut read_ranges: Vec<Vec<(isize, usize)>> = vec![Vec::new(); stmts.len()];
     let mut barriers: Vec<usize> = Vec::new();
     for (idx, s) in stmts.iter().enumerate() {
@@ -2489,6 +2508,7 @@ fn plan_field_groups(stmts: &[ProtoStatement]) -> FieldPlan {
         touched.add(idx, &reads);
         touched.add(idx, &writes);
         written.add(idx, &writes);
+        readers.add(idx, &reads);
         read_ranges[idx] = reads;
     }
 
@@ -2584,25 +2604,132 @@ fn plan_field_groups(stmts: &[ProtoStatement]) -> FieldPlan {
         }
     }
 
-    // Members sit together so gcc keeps the window in a register across the
-    // group and stores it once.
-    let dest: HashMap<usize, usize> = moves.into_iter().collect();
+    // A def next to its only reader shares its chunk, so chunk-local
+    // localization can turn it into a C local.
+    let blocklist = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
+    let ranges = LOCALIZE_RANGES.with(|r| r.borrow().clone());
+    let in_range = |off: isize| -> bool {
+        ranges.iter().any(|&(base, num, stride)| {
+            stride != 0
+                && num != 0
+                && (off - base) >= 0
+                && (off - base) % stride == 0
+                && (off - base) / stride < num as isize
+        })
+    };
+    let moved: HashSet<usize> = moves.iter().map(|&(s, _)| s).collect();
+    let mut sinks: Vec<(usize, usize)> = Vec::new();
+    if localize_armed() {
+        for (d, s) in stmts.iter().enumerate() {
+            if moved.contains(&d) {
+                continue; // already a field-group member
+            }
+            let ProtoStatement::Assign(a) = s else {
+                continue;
+            };
+            let VarOffset::Comb(off) = a.dst else {
+                continue;
+            };
+            // Localization's own candidate shape: a clean full-width scalar
+            // store nothing outside the comb schedule can observe.
+            if a.select.is_some()
+                || a.dynamic_select.is_some()
+                || a.rhs_select.is_some()
+                || a.dst_width == 0
+                || a.dst_width > 64
+                || blocklist.contains(&off)
+                || in_range(off)
+            {
+                continue;
+            }
+            let (start, end) = (off, off + native_bytes(a.dst_width).max(1) as isize);
+            // Exactly one writer (this one) and exactly one reader, both found
+            // through the byte index so a wider access that overlaps counts.
+            if written.any(start, end, |i| i != d) {
+                continue;
+            }
+            // The same statement is indexed once per byte it covers, so the
+            // fanout has to be counted over distinct statements.
+            let mut seen: Vec<usize> = Vec::new();
+            readers.for_each(start, end, |i| {
+                if !seen.contains(&i) {
+                    seen.push(i);
+                }
+            });
+            let [r] = seen[..] else { continue };
+            if r <= d || barriers.iter().any(|&b| b > d && b < r) {
+                continue;
+            }
+            sinks.push((d, r));
+        }
+    }
+
+    // Where a statement ends up once every move is applied: a def whose reader
+    // is itself moved travels with it, so legality has to be checked against
+    // that final position, not the reader's current one.
+    let mut dest: HashMap<usize, usize> = moves.iter().copied().collect();
+    for &(d, r) in &sinks {
+        dest.insert(d, r);
+    }
+    fn terminal(mut i: usize, dest: &HashMap<usize, usize>, cap: usize) -> usize {
+        for _ in 0..cap {
+            match dest.get(&i) {
+                Some(&n) => i = n,
+                None => break,
+            }
+        }
+        i
+    }
+    let limit = sink_span_limit();
+    let mut drop: Vec<usize> = Vec::new();
+    for &(d, r) in &sinks {
+        let t = terminal(r, &dest, stmts.len());
+        let ok = t - d <= limit
+            && read_ranges[d].iter().all(|&(base, len)| {
+                !written.any(base, base.saturating_add(len as isize), |i| i > d && i <= t)
+            });
+        if !ok {
+            drop.push(d);
+        }
+    }
+    for d in drop {
+        dest.remove(&d);
+    }
+
+    // Arrivals emit just ahead of their destination, recursively — a chain
+    // of single-reader defs lands as one run.
     let mut pending: HashMap<usize, Vec<usize>> = HashMap::default();
     for (&src, &dst) in &dest {
         pending.entry(dst).or_default().push(src);
     }
+    for v in pending.values_mut() {
+        v.sort_unstable();
+    }
     let mut order = Vec::with_capacity(stmts.len());
     let mut spans: Vec<(usize, usize)> = Vec::new();
+    // Explicit stack: sink chains nest arbitrarily deep.
+    let mut stack: Vec<(usize, bool)> = Vec::new();
     for i in 0..stmts.len() {
         if dest.contains_key(&i) {
-            continue; // moved down to its group's last member
+            continue; // travels to its destination instead
         }
-        if let Some(mut group) = pending.remove(&i) {
-            group.sort_unstable();
-            spans.push((order.len(), group.len() + 1));
-            order.extend(group);
+        let before = order.len();
+        stack.push((i, false));
+        while let Some((n, expanded)) = stack.pop() {
+            if expanded {
+                order.push(n);
+                continue;
+            }
+            stack.push((n, true));
+            if let Some(arrivals) = pending.get(&n) {
+                for &a in arrivals.iter().rev() {
+                    stack.push((a, false));
+                }
+            }
         }
-        order.push(i);
+        if order.len() - before > 1 {
+            spans.push((before, order.len() - before));
+        }
     }
     debug_assert_eq!(order.len(), stmts.len());
     FieldPlan {
@@ -2621,15 +2748,62 @@ struct FieldPlan {
     atoms: Vec<(usize, usize)>,
 }
 
-impl FieldPlan {
-    /// No group qualified: the original order, nothing to pin, no roles.
-    fn identity(n: usize) -> Self {
-        FieldPlan {
-            roles: HashMap::default(),
-            order: (0..n).collect(),
-            atoms: Vec::new(),
+/// `VERYL_AOT_C_SINK_DIAG=1`: counts single-writer / single-reader comb
+/// bytes, how many the blocklist frees for localization, and how many
+/// already share a chunk with their reader.
+fn sink_census(stmts: &[ProtoStatement], chunks: &[&[ProtoStatement]]) {
+    let mut chunk_of = Vec::with_capacity(stmts.len());
+    for (c, chunk) in chunks.iter().enumerate() {
+        chunk_of.extend(std::iter::repeat_n(c, chunk.len()));
+    }
+    let blocklist = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
+    let mut readers: HashMap<isize, Vec<usize>> = HashMap::default();
+    let mut writers: HashMap<isize, Vec<usize>> = HashMap::default();
+    let mut opaque = 0usize;
+    for (i, s) in stmts.iter().enumerate() {
+        let (mut r, mut w) = (Vec::new(), Vec::new());
+        if !comb_touches(s, &mut r, &mut w) {
+            opaque += 1;
+            continue;
+        }
+        for &(base, len) in &r {
+            for b in base..base.saturating_add(len as isize) {
+                readers.entry(b).or_default().push(i);
+            }
+        }
+        for &(base, len) in &w {
+            for b in base..base.saturating_add(len as isize) {
+                writers.entry(b).or_default().push(i);
+            }
         }
     }
+    let (mut defs, mut single, mut free, mut same_chunk) = (0, 0, 0, 0);
+    for (&off, w) in &writers {
+        if w.len() != 1 {
+            continue;
+        }
+        defs += 1;
+        let Some(r) = readers.get(&off) else { continue };
+        if r.len() != 1 {
+            continue;
+        }
+        single += 1;
+        if blocklist.contains(&off) {
+            continue;
+        }
+        free += 1;
+        if chunk_of.get(w[0]) == chunk_of.get(r[0]) {
+            same_chunk += 1;
+        }
+    }
+    eprintln!(
+        "[sink_census] stmts={} chunks={chunks_n} opaque={opaque} | single-writer bytes={defs} \
+         single-reader={single} not-blocklisted={free} already-same-chunk={same_chunk} \
+         => sinkable={sinkable}",
+        stmts.len(),
+        chunks_n = chunks.len(),
+        sinkable = free - same_chunk,
+    );
 }
 
 /// The aligned `(start_byte, width_bytes)` sub-word of a 16-byte container
@@ -3988,6 +4162,9 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         }
         chunks
     };
+    if std::env::var("VERYL_AOT_C_SINK_DIAG").as_deref() == Ok("1") {
+        sink_census(stmts, &chunks);
+    }
     // Chunk-local intermediate localization (VERYL_AOT_C_LOCALIZE): per chunk,
     // the comb offsets that are written by one clean top-level scalar Assign in
     // that chunk and read only there (and not blocklisted) become C locals
@@ -8556,6 +8733,191 @@ mod tests {
         assert_eq!(plan.roles.len(), 8);
         assert_eq!(plan.order, vec![4, 5, 0, 1, 2, 3, 6, 7, 8, 9]);
         assert_eq!(plan.atoms, vec![(2, 8)], "the run must be pinned");
+    }
+
+    /// A full-width scalar comb store — localization's candidate shape, and
+    /// so the sink's.
+    fn scalar_def(off: isize, reads: isize) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(off),
+            dst_width: 32,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(reads),
+                select: None,
+                dynamic_select: None,
+                width: 32,
+                var_full_width: 32,
+                expr_context: ctx(32, false),
+            },
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        })
+    }
+
+    /// Arms the blocklist gate the sink shares with localization.
+    fn armed<T>(f: impl FnOnce() -> T) -> T {
+        set_localize_blocklist(HashSet::default(), Vec::new());
+        let out = f();
+        clear_localize_blocklist();
+        out
+    }
+
+    #[test]
+    fn sink_moves_a_single_reader_def_next_to_its_reader() {
+        // 0x100 is written once and read once; the def joins its reader so
+        // chunk-local localization can turn it into a C local.
+        let stmts = vec![
+            scalar_def(0x100, 0x900), // 0: the def
+            scalar_def(0x200, 0x910), // 1
+            scalar_def(0x300, 0x920), // 2
+            scalar_def(0x400, 0x100), // 3: the only reader
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert_eq!(plan.order, vec![1, 2, 0, 3]);
+        assert_eq!(plan.atoms, vec![(2, 2)], "def and reader pinned together");
+    }
+
+    #[test]
+    fn sink_declines_a_def_with_two_readers() {
+        // Substituting a two-reader def would duplicate its work, and
+        // localization would not take it either.
+        let stmts = vec![
+            scalar_def(0x100, 0x900),
+            scalar_def(0x400, 0x100),
+            scalar_def(0x500, 0x100),
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert!(plan.atoms.is_empty(), "{:?}", plan.order);
+    }
+
+    #[test]
+    fn sink_declines_when_an_input_is_rewritten_on_the_way() {
+        // Moving the def past the statement that overwrites 0x900 would make
+        // it read the new value.
+        let stmts = vec![
+            scalar_def(0x100, 0x900), // 0: reads 0x900
+            scalar_def(0x900, 0x910), // 1: rewrites 0x900
+            scalar_def(0x400, 0x100), // 2: the reader
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert!(plan.atoms.is_empty(), "{:?}", plan.order);
+    }
+
+    #[test]
+    fn sink_checks_the_input_against_the_final_position_of_a_moving_reader() {
+        // 0x100's reader is itself sunk to 0x400's, so 0x100 travels past the
+        // rewrite of 0x900 that sits between them.
+        let stmts = vec![
+            scalar_def(0x100, 0x900), // 0: reads 0x900
+            scalar_def(0x200, 0x100), // 1: reads 0x100, sinks to 3
+            scalar_def(0x900, 0x910), // 2: rewrites 0x900
+            scalar_def(0x400, 0x200), // 3: reads 0x200
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert_eq!(plan.order, vec![0, 2, 1, 3], "0's sink dropped, 1's kept");
+        assert_eq!(plan.atoms, vec![(2, 2)]);
+    }
+
+    #[test]
+    fn sink_chain_deeper_than_any_recursion_cap_keeps_every_statement() {
+        // 70 links: every def's only reader is the next def, so the whole
+        // chain arrives as one run — and none of it may go missing.
+        let n = 70usize;
+        let stmts: Vec<ProtoStatement> = (0..n)
+            .map(|j| scalar_def(0x100 + j as isize * 4, 0x900 + j as isize * 4))
+            .collect();
+        let stmts: Vec<ProtoStatement> = (0..n)
+            .map(|j| {
+                if j == 0 {
+                    stmts[0].clone()
+                } else {
+                    scalar_def(0x100 + j as isize * 4, 0x100 + (j - 1) as isize * 4)
+                }
+            })
+            .collect();
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert_eq!(plan.order, (0..n).collect::<Vec<_>>());
+        assert_eq!(plan.atoms, vec![(0, n)]);
+    }
+
+    #[test]
+    fn sink_declines_a_reader_above_the_def() {
+        // The reader sees the previous settle's value; hoisting the def over
+        // it would change that.
+        let stmts = vec![
+            scalar_def(0x400, 0x100), // 0: reads 0x100 (previous settle)
+            scalar_def(0x100, 0x900), // 1: the def
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert_eq!(plan.order, vec![0, 1]);
+        assert!(plan.atoms.is_empty());
+    }
+
+    #[test]
+    fn sink_localizes_and_executes_correctly() {
+        // The def sinks to its reader, localization takes it, and the reader
+        // still computes from the def's value.
+        if !cc_available() {
+            eprintln!("sink_localizes_and_executes_correctly: cc unavailable, skipping");
+            return;
+        }
+        let stmts = vec![
+            scalar_def(0x100, 0x900), // the def
+            scalar_def(0x200, 0x910), // unrelated
+            scalar_def(0x400, 0x100), // the only reader
+        ];
+        // 0x200/0x400 are blocklisted so they stay materialized and the
+        // effect is observable in comb memory; 0x100 localizes away.
+        set_localize_blocklist(HashSet::from_iter([0x200isize, 0x400isize]), Vec::new());
+        let src = emit_function(&stmts);
+        clear_localize_blocklist();
+        let src = src.expect("sinkable comb must stay AOT-covered");
+        assert!(
+            src.contains(&local_name(0x100)),
+            "the sunk def must localize:\n{src}"
+        );
+        assert!(
+            !src.contains(&local_name(0x400)),
+            "0x400 must stay in memory"
+        );
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_sink_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "sink_localizes_and_executes") else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 0x1000];
+        comb[0x900..0x904].copy_from_slice(&0xDEAD_BEEFu32.to_le_bytes());
+        comb[0x910..0x914].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let rd = |o: usize| u32::from_le_bytes(comb[o..o + 4].try_into().unwrap());
+        assert_eq!(rd(0x400), 0xDEAD_BEEF, "reader sees the def's value");
+        assert_eq!(rd(0x200), 0x1234_5678, "unrelated def unaffected");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sink_chains_land_as_one_run() {
+        // a -> b -> c: all three end up adjacent so every link localizes.
+        let stmts = vec![
+            scalar_def(0x100, 0x900), // 0
+            scalar_def(0x200, 0x100), // 1: reads 0
+            scalar_def(0x800, 0x910), // 2: unrelated
+            scalar_def(0x300, 0x200), // 3: reads 1
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert_eq!(plan.order, vec![2, 0, 1, 3]);
+        assert_eq!(plan.atoms, vec![(1, 3)]);
     }
 
     #[test]
