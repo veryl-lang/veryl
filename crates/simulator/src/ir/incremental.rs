@@ -126,6 +126,43 @@ pub fn rebind_interval() -> u64 {
     })
 }
 
+/// Runtime trial instrumentation (`VERYL_INCR_TRIAL=dry`): at fixed settle
+/// counts, time the incremental settle against a SHADOW whole-comb dispatch
+/// (run against a scratch copy of the comb buffer, so the simulation is
+/// untouched) and log which would win.  Purely diagnostic — nothing acts on
+/// the verdict.  The point is to measure whether a time-based retirement
+/// verdict is stable across windows and runs BEFORE letting one decide
+/// anything; the previous time-based judgment was built and withdrawn over
+/// exactly that (representativeness), not over its plumbing.
+pub fn trial_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| env::var("VERYL_INCR_TRIAL").as_deref() == Ok("dry"))
+}
+
+/// Trial window starts (generation-local settle index) and length.  Four
+/// windows spread over three decades so window position — the
+/// representativeness objection — is measured, not assumed.
+pub const TRIAL_STARTS: [u64; 4] = [512, 2048, 8192, 32768];
+pub const TRIAL_LEN: u64 = 256;
+
+/// Which trial window `gen_settles` falls in, if any.
+pub fn trial_window(s: u64) -> Option<usize> {
+    TRIAL_STARTS
+        .iter()
+        .position(|&start| s >= start && s < start + TRIAL_LEN)
+}
+
+/// One window's accumulators (see [`trial_enabled`]).
+#[derive(Default, Clone)]
+pub struct TrialWindow {
+    pub incr_ns: u64,
+    pub whole_ns: u64,
+    /// Settles measured on both paths.
+    pub n: u32,
+    /// Settles where no whole-comb handle had landed yet.
+    pub unavailable: u32,
+}
+
 pub fn validate_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| env::var("VERYL_INCR_VALIDATE").as_deref() == Ok("1"))
@@ -2147,6 +2184,13 @@ pub struct IncrState {
     /// coarse (word-granular / chunk-granular) triggering.
     pub stats_runs_nochange: u64,
     pub stats_seed_words: u64,
+    /// `VERYL_INCR_TRIAL=dry` accumulators, one per [`TRIAL_STARTS`] window.
+    pub trial: Vec<TrialWindow>,
+    /// Scratch comb image the shadow whole-comb dispatch writes into, so the
+    /// trial cannot perturb the simulation (the incremental settle carries
+    /// backward marks into the NEXT settle by design, so an extra in-place
+    /// full settle would advance state the baseline leaves for later).
+    pub trial_scratch: Vec<u8>,
 }
 
 impl IncrState {
