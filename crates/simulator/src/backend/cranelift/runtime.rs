@@ -527,42 +527,6 @@ fn build_binary_inner(
     let zero_hi = builder.ins().iconst(I64, 0);
     let zero_128 = builder.ins().iconcat(zero_lo, zero_hi);
 
-    // Sub-block guard (incremental settle): split the chunk into the same
-    // groups as the plan's per-sub dependency sets and gate each group on a
-    // bit of the caller-provided mask.  The mask travels through a slot in
-    // the write-log header: loaded once in the prologue and immediately
-    // cleared, so a nested CompiledBlock (compiled with its own guards)
-    // sees 0 — "run whole" — instead of consuming the outer chunk's mask,
-    // and so every non-incremental caller runs the chunk whole too.
-    let sub_len = if crate::ir::incremental::enabled() {
-        crate::ir::incremental::sub_split_len(proto.len())
-    } else {
-        None
-    };
-    // Store elimination forwards a skipped store through the load cache;
-    // a guarded (skippable) region boundary breaks that forwarding, so
-    // keep every store when guards are present.
-    let store_elim = if sub_len.is_some() {
-        HashSet::default()
-    } else {
-        store_elim
-    };
-    let sub_mask_eff = sub_len.map(|_| {
-        use crate::ir::write_log::WRITE_LOG_OFFSET_INCR_SUB_MASK;
-        let flags = MemFlagsData::trusted();
-        let raw = builder
-            .ins()
-            .load(I32, flags, log_buf, WRITE_LOG_OFFSET_INCR_SUB_MASK);
-        let zero_i32 = builder.ins().iconst(I32, 0);
-        builder
-            .ins()
-            .store(flags, zero_i32, log_buf, WRITE_LOG_OFFSET_INCR_SUB_MASK);
-        // 0 = no request recorded: run every sub-block.
-        let is_zero = builder.ins().icmp_imm_s(IntCC::Equal, raw, 0);
-        let all = builder.ins().iconst(I32, 0xff);
-        builder.ins().select(is_zero, all, raw)
-    });
-
     let mut cranelift_context = Context {
         use_4state: config.use_4state,
         ff_values,
@@ -595,32 +559,9 @@ fn build_binary_inner(
     }
 
     let len = proto.len();
-    // Merge target of the currently open guarded region (jump destination
-    // for both the skip branch and the region's fall-through).
-    let mut pending_merge: Option<cranelift::prelude::Block> = None;
     for (i, x) in proto.iter().enumerate() {
-        if let (Some(s), Some(m_eff)) = (sub_len, sub_mask_eff)
-            && i % s == 0
-        {
-            if let Some(mb) = pending_merge.take() {
-                builder.ins().jump(mb, &[]);
-                builder.switch_to_block(mb);
-            }
-            let si = (i / s) as i64;
-            let body = builder.create_block();
-            let merge = builder.create_block();
-            let shifted = builder.ins().ushr_imm_s(m_eff, si);
-            let bit = builder.ins().band_imm_s(shifted, 1);
-            builder.ins().brif(bit, body, &[], merge, &[]);
-            builder.switch_to_block(body);
-            pending_merge = Some(merge);
-            // Values cached in earlier (possibly skipped) regions must not
-            // be forwarded across the guard.
-            cranelift_context.load_cache.clear();
-        }
-        // `is_last` lets the final statement return directly, bypassing any
-        // merge block — incompatible with the guard's region merge.
-        let is_last = (i + 1) == len && sub_len.is_none();
+        // `is_last` lets the final statement return directly.
+        let is_last = (i + 1) == len;
         x.build_binary(&mut cranelift_context, &mut builder, is_last)?;
 
         // Belady: while over capacity, evict the entry whose next read
@@ -649,10 +590,6 @@ fn build_binary_inner(
         }
     }
 
-    if let Some(mb) = pending_merge.take() {
-        builder.ins().jump(mb, &[]);
-        builder.switch_to_block(mb);
-    }
     builder.ins().return_(&[]);
     builder.seal_all_blocks();
     builder.finalize(isa.frontend_config());

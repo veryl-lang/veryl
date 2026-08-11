@@ -10452,7 +10452,6 @@ mod tests {
             keepalive: None,
             content_fp: None,
             deps: None,
-            sub_guarded: false,
         })
     }
 
