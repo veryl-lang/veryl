@@ -43,7 +43,7 @@ use veryl_parser::token_range::TokenRange;
 /// On under the incremental configuration (the plan needs fused
 /// single-writer chains), off otherwise.
 pub fn pass_enabled(use_4state: bool) -> bool {
-    !use_4state && incremental::enabled()
+    !use_4state && incremental::machinery_enabled()
 }
 
 #[derive(Default, Debug)]

@@ -144,6 +144,12 @@ pub struct Ir {
     /// Change-driven settle plan (`None` unless the incremental settle is on
     /// and the module is supported); see `ir::incremental`.
     pub incr_plan: Option<Arc<incremental::IncrPlan>>,
+    /// See `ProtoModule::incr_run`.
+    pub incr_run: bool,
+    /// See `ProtoModule::incr_key`.
+    pub incr_key: u128,
+    /// Where verdicts are persisted (`Config::incr_feedback_path`).
+    pub incr_feedback_path: Option<PathBuf>,
     /// Deferred whole-module AOT-C (`Some` only under the incremental
     /// configuration): compile inputs + landing slots, spawned when the
     /// plan is declined at build time or auto-abandoned at runtime.  See
@@ -200,6 +206,9 @@ impl Ir {
             whole_comb_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
             incr_plan: module.incr_plan,
+            incr_run: module.incr_run,
+            incr_key: module.incr_key,
+            incr_feedback_path: config.incr_feedback_path.clone(),
             late_aotc: module.late_aotc,
             const_cone_done: Default::default(),
         };
@@ -531,8 +540,7 @@ impl Ir {
             self.settle_comb(mask_cache, profile);
             return;
         }
-        // Diagnostic trial clock (`VERYL_INCR_TRIAL=dry`); `None` = off, so
-        // the hot path pays one already-hot bool load.
+        // Diagnostic trial clock (`VERYL_INCR_TRIAL=dry`).
         let trial_t0 = incremental::trial_enabled()
             .then(std::time::Instant::now)
             .filter(|_| incremental::trial_window(state.gen_settles).is_some());
@@ -762,7 +770,7 @@ impl Ir {
         // the run fraction it measures is a property of the plan.
         {
             use incremental::{ABANDON_WARMUP, ABANDON_WINDOW, abandon_threshold_pct};
-            let pct = abandon_threshold_pct();
+            let pct = abandon_threshold_pct(plan.n_entries);
             if pct > 0 && !state.abandoned {
                 if state.gen_settles == ABANDON_WARMUP {
                     state.abandon_runs0 = state.stats_runs;
@@ -840,7 +848,6 @@ impl Ir {
         if !measured {
             state.trial[w].unavailable += 1;
         }
-        // Last settle of the window: report it.
         if state.gen_settles + 1 == incremental::TRIAL_STARTS[w] + incremental::TRIAL_LEN {
             let t = &state.trial[w];
             let n = t.n.max(1) as f64;
@@ -1102,6 +1109,18 @@ impl Ir {
             }
             any
         }
+    }
+
+    /// One [`incremental::probe_enabled`] sample: count the entries the plan
+    /// would have run this settle.  Runs AFTER the ordinary full settle, off
+    /// the settled state, so it observes exactly the input changes the plan's
+    /// seed diff and out-diff would have propagated between settles.
+    pub(crate) fn incr_probe_tick(
+        &self,
+        probe: &mut incremental::ProbeState,
+        plan: &incremental::IncrPlan,
+    ) {
+        probe.tick(plan, &self.comb_values, &self.ff_values);
     }
 
     /// Cranelift-only settle path, factored out so the validate mode can

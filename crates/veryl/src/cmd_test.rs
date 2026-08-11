@@ -173,9 +173,6 @@ impl CmdTest {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        // The incremental settle is the CLI default (`VERYL_INCR` overrides).
-        // Before analysis, like the disables below: the plan shapes chunking.
-        veryl_simulator::ir::incremental::default_on();
         // A dump wants every comb word.  Both localization and the incremental
         // settle leave the words no later reader needs holding stale values
         // (see `aot_c::force_disable_localize` and `ir::incremental`), so

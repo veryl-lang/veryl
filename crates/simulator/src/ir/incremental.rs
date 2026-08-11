@@ -33,7 +33,6 @@ use crate::ir::statement::{
 };
 use crate::ir::variable::{ModuleVariableMeta, VarOffset};
 use std::env;
-use std::fs;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -41,32 +40,52 @@ use std::sync::{Arc, OnceLock};
 /// [`enabled`] gives cannot change once any caller has acted on it.
 static FORCED_OFF: AtomicBool = AtomicBool::new(false);
 
-/// Set by [`default_on`]; consulted only when `VERYL_INCR` is unset.
-static DEFAULT_ON: AtomicBool = AtomicBool::new(false);
+/// Force the change-driven settle on for every module, skipping the recorded
+/// verdict that otherwise decides (see [`probe_enabled`]).  A design still
+/// retires its plan mid-run if the activity says so.
+/// Force the activity probe: build the plan, run the ordinary full settle,
+/// and measure how many entries the plan WOULD have run.  An entry runs iff
+/// one of its input words changed, so comparing consecutive settled states
+/// against the plan's consumer index answers that without executing
+/// anything.  Slightly pessimistic — a word that changes and changes back
+/// within one settle wakes the real plan but not this — which is the safe
+/// direction: it can only argue against the plan.
+///
+/// The engine probes on its own whenever a comb list has no recorded verdict,
+/// which is how it decides without first paying a run of the wrong engine.
+/// The plan is a large win where entries rarely run (a systolic array's cells
+/// sit idle between wavefronts) and a loss where they run often (a processor
+/// pipeline toggles most of itself every cycle); every static proxy tried for
+/// that — statement count against an LLC model, entries per state word —
+/// classified by accident rather than by mechanism, and a timing-based
+/// verdict makes behaviour depend on the machine and the load.
+pub fn probe_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| env::var("VERYL_INCR_PROBE").as_deref() == Ok("1"))
+}
 
-/// `VERYL_INCR` decides when set (`1` on, `0` off); otherwise the caller's
-/// default applies — on for the CLI, off for the library (see [`default_on`]).
+/// Whether this process may build plans at all — explicitly on, explicitly
+/// probing, or in the automatic mode where a comb list with no recorded
+/// verdict is probed.  `VERYL_INCR=0` opts out of everything, including the
+/// probe, and so does a `force_disable` caller (waveform dumping).
+///
+/// Per-module the decision is finer (run / probe / off); that is carried by
+/// `ProtoModule::incr_infeasible` + `ProtoModule::incr_run`, both derived
+/// from the recorded verdict at conv.
+pub fn machinery_enabled() -> bool {
+    if FORCED_OFF.load(Ordering::Relaxed) {
+        return false;
+    }
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| env::var("VERYL_INCR").as_deref() != Ok("0"))
+}
+
 pub fn enabled() -> bool {
     if FORCED_OFF.load(Ordering::Relaxed) {
         return false;
     }
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| match env::var("VERYL_INCR").as_deref() {
-        Ok("1") => true,
-        Ok("0") => false,
-        _ => DEFAULT_ON.load(Ordering::Relaxed),
-    })
-}
-
-/// Make the incremental settle the default for this process.
-///
-/// The CLI calls this; the library default stays off so `cargo test` keeps
-/// exercising the whole-module AOT-C path (`aot_size_ok = !incr_on` removes
-/// the artifact under the incremental settle, so the coverage assertions in
-/// `assert_aot_c_native` would otherwise never run).  Subject to the same
-/// call-before-first-`enabled()` rule as [`force_disable`], which wins.
-pub fn default_on() {
-    DEFAULT_ON.store(true, Ordering::Relaxed);
+    *ON.get_or_init(|| env::var("VERYL_INCR").as_deref() == Ok("1"))
 }
 
 /// Turn the incremental settle off for this process regardless of
@@ -85,22 +104,43 @@ pub fn force_disable() {
 
 /// Runtime auto-abandon of the incremental plan (`VERYL_INCR_ABANDON`):
 /// after the warmup window, if the observed entry-run fraction exceeds the
-/// threshold (percent; default 33, `0` disables the check), the plan is
-/// permanently abandoned — the settle falls back to the baseline full
-/// sweep and the event skip is disabled.  A high-activity DUT (heliodor's
-/// OoO SoC runs 44-90% of its entries every settle) pays the full
-/// bookkeeping while skipping almost nothing, which measured 6-14x SLOWER
-/// than the plain settle; abandoning caps that at the plan-less INCR
-/// configuration (~2x).  Low-activity DUTs (pe_core ~4%, caches ~15-20%
-/// at the K=8 incremental chunk size) stay well under the threshold.
-pub fn abandon_threshold_pct() -> u64 {
-    static V: OnceLock<u64> = OnceLock::new();
-    *V.get_or_init(|| {
+/// threshold (percent; `0` disables the check), the plan is permanently
+/// abandoned — the settle falls back to the baseline full sweep (which,
+/// since whole-comb AOT-C is no longer forfeited by a live plan, is the
+/// already-compiled `.so`) and the event skip is disabled.
+///
+/// Activity is what decides the trade: the plan wins iff
+///
+/// ```text
+/// activity x (per-entry cost / per-entry cost of the -O3 full sweep)
+///     + (per-settle fixed cost / full-sweep cost)  <  1
+/// ```
+///
+/// The threshold is therefore NOT a constant.  The fixed term grows as the
+/// design shrinks — the full sweep it is measured against gets cheaper, and
+/// a small design's code stays in cache — so the activity a design breaks
+/// even at rises with its size, and a flat threshold would err in the
+/// expensive direction: retiring a big design that still had room to win.
+/// The constants below are fitted to break-even points measured across
+/// pe_core and the rtlmeter designs; re-derive them with
+/// `VERYL_INCR_PROBE=1` (activity) and `VERYL_INCR=1 VERYL_INCR_TRIAL=dry`
+/// (the ratio it breaks even at), both of which force a fresh measurement
+/// even where a verdict is on file.
+///
+/// `VERYL_INCR_ABANDON=<pct>` pins a flat threshold (0 disables the check).
+pub fn abandon_threshold_pct(n_entries: usize) -> u64 {
+    static OVERRIDE: OnceLock<Option<u64>> = OnceLock::new();
+    let over = *OVERRIDE.get_or_init(|| {
         env::var("VERYL_INCR_ABANDON")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(33)
-    })
+    });
+    if let Some(pct) = over {
+        return pct;
+    }
+    // Fitted curve; clamped to the span the fit is supported over.
+    let pct = 7.0 * (n_entries.max(1) as f64 / 1700.0).powf(0.22);
+    pct.clamp(6.0, 14.0).round() as u64
 }
 
 /// Auto-abandon warmup: fraction measured over settles
@@ -145,7 +185,6 @@ pub fn trial_enabled() -> bool {
 pub const TRIAL_STARTS: [u64; 4] = [512, 2048, 8192, 32768];
 pub const TRIAL_LEN: u64 = 256;
 
-/// Which trial window `gen_settles` falls in, if any.
 pub fn trial_window(s: u64) -> Option<usize> {
     TRIAL_STARTS
         .iter()
@@ -1351,116 +1390,6 @@ const MAX_PLAN_IN_WORDS: usize = 1 << 24;
 /// stays on, since the plan would only be declined at instantiate time
 /// anyway and the full-settle fallback then runs the same code the
 /// default pipeline produces.
-/// Emitted C per `ProtoStatement`, letting a statement count stand in for a
-/// code size before anything is emitted.
-///
-/// Taken from the low end of what measured designs produce.  A smaller figure
-/// raises the threshold, erring toward *not* building a plan — the safer
-/// direction, since a wrongly built plan forfeits whole-module AOT-C outright
-/// while a wrongly skipped one only misses the plan's win.
-const CODE_BYTES_PER_STMT: usize = 763;
-
-/// Last-level cache size, if the platform will say.
-///
-/// A baked constant would be wrong: cache sizes span orders of magnitude
-/// across the machines Veryl runs on, and the same design is fetch-bound on
-/// one and resident on another.  `None` leaves the caller guessing, which is
-/// tolerable — a target without a C compiler has no whole-module AOT-C to
-/// forfeit, so the gate has nothing to decide.
-#[cfg(target_os = "linux")]
-fn llc_bytes() -> Option<usize> {
-    // sysfs lists every level; the largest is the last one.
-    let mut best = 0usize;
-    for entry in fs::read_dir("/sys/devices/system/cpu/cpu0/cache").ok()? {
-        // One unreadable entry must not discard the levels already found.
-        let Ok(entry) = entry else { continue };
-        let path = entry.path().join("size");
-        let Ok(text) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let text = text.trim();
-        // Values look like "23040K" or "48K"; a bare number means bytes.
-        let (digits, mult) = match text.strip_suffix('K') {
-            Some(d) => (d, 1024),
-            None => match text.strip_suffix('M') {
-                Some(d) => (d, 1024 * 1024),
-                None => (text, 1),
-            },
-        };
-        if let Ok(n) = digits.parse::<usize>() {
-            best = best.max(n * mult);
-        }
-    }
-    (best > 0).then_some(best)
-}
-
-#[cfg(target_os = "macos")]
-fn llc_bytes() -> Option<usize> {
-    // Apple Silicon reports no L3, so its per-cluster L2 is the last level;
-    // try the keys in descending order and take the first that answers.
-    use std::process::Command;
-    for key in [
-        "hw.l3cachesize",
-        "hw.perflevel0.l2cachesize",
-        "hw.l2cachesize",
-    ] {
-        let Ok(out) = Command::new("sysctl").args(["-n", key]).output() else {
-            continue;
-        };
-        if let Ok(n) = String::from_utf8_lossy(&out.stdout).trim().parse::<usize>()
-            && n > 0
-        {
-            return Some(n);
-        }
-    }
-    None
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn llc_bytes() -> Option<usize> {
-    None
-}
-
-/// Statement count above which a plan is worth its AOT-C forfeit
-/// (`VERYL_INCR_MIN_STMTS` overrides; 0 disables the gate).
-///
-/// Derived from the running machine rather than fixed, since the question is
-/// whether a design's code fits *this* cache.  The measured designs sat far
-/// enough either side that the exact value did not matter; designs landing
-/// near the boundary are a guess, and a counter-example is worth reporting.
-pub fn min_stmts_for_plan() -> usize {
-    static V: OnceLock<usize> = OnceLock::new();
-    *V.get_or_init(|| {
-        if let Some(n) = env::var("VERYL_INCR_MIN_STMTS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-        {
-            return n;
-        }
-        llc_bytes().map_or(65536, |b| b / CODE_BYTES_PER_STMT)
-    })
-}
-
-/// Whether the comb list is small enough that a plan is the wrong trade.
-///
-/// A plan forfeits whole-module AOT-C (`aot_size_ok = !incr_on`) to buy
-/// skipping, and skipping only pays when the code is too large to issue at
-/// speed.  Below the last-level cache the settle is not fetch-bound, so the
-/// forfeited AOT-C costs more than skipping saves; above it instruction fetch
-/// dominates and skipping is the strongest lever there is.  Both directions
-/// are measured.
-///
-/// Activity cannot substitute for size, which is why the run-fraction check
-/// alone could not decide this: a design may skip a larger share of its
-/// entries than another and still lose, because its whole program already fits.
-///
-/// Compared against the whole cache, not a per-worker share of it — that is
-/// what the measurements support, even under the parallelism `veryl test` uses.
-pub fn plan_too_small(stmts: &[ProtoStatement]) -> bool {
-    let min = min_stmts_for_plan();
-    min != 0 && stmts.len() < min
-}
-
 pub fn stmts_infeasible(stmts: &[ProtoStatement]) -> bool {
     fn dep_words_approx(d: &Dep) -> usize {
         let o = match d.off {
@@ -2094,6 +2023,108 @@ pub fn build_plan(
         event_onrun_words,
         event_co_ids,
     })
+}
+
+/// [`probe_enabled`] accumulators: the plan's input words with their previous
+/// values, the would-run entry bitmap, and the running totals.
+pub struct ProbeState {
+    /// Words some entry reads (the consumer index's support), sorted.
+    words: Vec<u32>,
+    /// Their values as of the previous settle.
+    prev: Vec<u64>,
+    /// Entries that would have run this settle.
+    dirty: Vec<u64>,
+    /// Settles seen, sampled or not — the window clock.
+    seen: u64,
+    pub settles: u64,
+    pub would_run: u64,
+    /// Skips the first tick, whose diff is against a zero baseline.
+    inited: bool,
+}
+
+/// Probe window: the same warmup as the auto-abandon (past the all-dirty
+/// transient), then long enough for the mean to settle.  Activity is stable
+/// once the DUT is running, so a bounded window buys the verdict without
+/// scanning the input words on every settle of the run — which costs far
+/// more than the verdict is worth.
+pub const PROBE_WINDOW: u64 = 512;
+
+/// Fewest samples a verdict may be recorded from.  A run that ends just past
+/// the warmup would otherwise persist a verdict drawn from a handful of
+/// settles — and persisted verdicts stick.
+pub const VERDICT_MIN_SETTLES: u64 = 64;
+
+impl ProbeState {
+    pub fn new(plan: &IncrPlan) -> Self {
+        let words: Vec<u32> = (0..plan.total_words)
+            .filter(|&w| !plan.consumers[w].is_empty())
+            .map(|w| w as u32)
+            .collect();
+        let prev = vec![0u64; words.len()];
+        ProbeState {
+            words,
+            prev,
+            dirty: vec![0u64; plan.n_entries.div_ceil(64)],
+            seen: 0,
+            settles: 0,
+            would_run: 0,
+            inited: false,
+        }
+    }
+
+    /// Count the entries whose input words changed since the previous settle,
+    /// plus the always-run set (which executes regardless).
+    pub fn tick(&mut self, plan: &IncrPlan, comb: &[u8], ff: &[u8]) {
+        self.seen += 1;
+        if self.seen <= ABANDON_WARMUP || self.seen > ABANDON_WARMUP + PROBE_WINDOW {
+            return;
+        }
+        let read = |w: usize| -> u64 {
+            if w < plan.comb_words {
+                read_word(comb, w)
+            } else {
+                read_word(ff, w - plan.comb_words)
+            }
+        };
+        if !self.inited {
+            for (i, &w) in self.words.iter().enumerate() {
+                self.prev[i] = read(w as usize);
+            }
+            self.inited = true;
+            return;
+        }
+        for d in self.dirty.iter_mut() {
+            *d = 0;
+        }
+        for &e in &plan.always_run {
+            let e = e as usize;
+            self.dirty[e / 64] |= 1u64 << (e % 64);
+        }
+        for (i, &w) in self.words.iter().enumerate() {
+            let v = read(w as usize);
+            if v != self.prev[i] {
+                self.prev[i] = v;
+                for &e in &plan.consumers[w as usize] {
+                    let e = e as usize;
+                    self.dirty[e / 64] |= 1u64 << (e % 64);
+                }
+            }
+        }
+        self.would_run += self
+            .dirty
+            .iter()
+            .map(|w| w.count_ones() as u64)
+            .sum::<u64>();
+        self.settles += 1;
+    }
+
+    /// Entries the plan would have run, as a fraction of all entries.
+    pub fn activity_pct(&self, n_entries: usize) -> f64 {
+        if self.settles == 0 {
+            return 0.0;
+        }
+        self.would_run as f64 * 100.0 / (self.settles * n_entries as u64).max(1) as f64
+    }
 }
 
 /// Per-simulator mutable state for the incremental settle.

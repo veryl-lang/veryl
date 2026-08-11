@@ -150,10 +150,18 @@ impl BackendRegistry {
         stmts: &[ProtoStatement],
     ) -> Option<Arc<ChunkArtifact>> {
         // Dependency sets for the incremental settle plan, captured while
-        // the source statements are still at hand.  Env-stable within a
-        // process, so cross-test cache hits stay consistent.
-        let incr_deps = crate::ir::incremental::enabled()
-            .then(|| Arc::new(crate::ir::incremental::chunk_deps(stmts)));
+        // the source statements are still at hand.
+        //
+        // Unconditional on purpose.  Whether a module wants a plan is decided
+        // per comb list (from its recorded verdict), but compiled chunks are
+        // shared through `CHUNK_ARTIFACT_CACHE`, whose key is the statement
+        // fingerprint and does NOT record whether deps were captured.  A
+        // conditional capture would therefore let a deps-less artifact,
+        // cached by a module that wanted no plan, silently decline the plan
+        // of a module that did.  Capturing always costs one dependency walk
+        // per compiled chunk at build time and nothing at run time, and
+        // removes the invariant.
+        let incr_deps = Some(Arc::new(crate::ir::incremental::chunk_deps(stmts)));
 
         if !ctx.config.dut_reuse {
             let mut artifact = self
