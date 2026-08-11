@@ -239,6 +239,8 @@ impl LateAotc {
             let this = Arc::clone(this);
             let _ = std::thread::Builder::new()
                 .name("late-aotc".into())
+                // The deferred compile re-runs the emitter (see IR_WALK_STACK_BYTES).
+                .stack_size(crate::IR_WALK_STACK_BYTES)
                 .spawn(move || this.compile());
         }
     }

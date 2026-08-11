@@ -17,6 +17,13 @@ pub use ir::Config;
 pub use simulator::Simulator;
 pub use simulator_error::SimulatorError;
 
+/// Stack size for threads that walk user-design IR (conv over nested
+/// statements, the AOT-C expression emitter): the recursion depth is bounded
+/// by design nesting, but a deep decoder chain exceeds the 2 MiB
+/// spawned-thread default under debug frame sizes.  Reserved virtual memory
+/// only — untouched pages are never committed.
+pub const IR_WALK_STACK_BYTES: usize = 64 * 1024 * 1024;
+
 // 4th arg `ff_delta`: byte delta from the base the chunk was compiled at to this
 // instance's ff base, added to baked FF write-log offsets so a relocated
 // (cache-reused) chunk records absolute `ff_values` offsets. 0 when not reused.
