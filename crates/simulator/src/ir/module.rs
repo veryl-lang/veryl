@@ -85,6 +85,10 @@ pub struct Module {
     /// Change-driven settle plan (`None` unless `VERYL_INCR=1` and the
     /// module is supported); see `ir::incremental`.
     pub incr_plan: Option<Arc<incremental::IncrPlan>>,
+    /// See `ProtoModule::incr_run`.
+    pub incr_run: bool,
+    /// See `ProtoModule::incr_key`.
+    pub incr_key: u128,
     /// Deferred whole-module AOT-C inputs (`Some` only under the
     /// incremental configuration); see `backend::late`.
     pub late_aotc: Option<Arc<late::LateAotc>>,
@@ -132,6 +136,15 @@ pub struct ProtoModule {
     /// (see `incremental::stmts_infeasible`); `instantiate` then keeps
     /// the default batching and skips the plan build.
     pub incr_infeasible: bool,
+    /// Whether this comb list's recorded verdict says to RUN the plan.  In
+    /// the automatic mode a module with no verdict yet still builds a plan,
+    /// but only to probe it (see `incremental::ProbeState`); `false` there
+    /// means "probe, do not execute".  Always true under an explicit
+    /// `VERYL_INCR=1`.
+    pub incr_run: bool,
+    /// Structural comb-pipeline key, so the end-of-run probe can record its
+    /// verdict for this comb list (see `backend::late`).
+    pub incr_key: u128,
     /// See `Module::late_aotc`.  Built in `conv()` under the incremental
     /// configuration, shared (`Arc::clone`) with every instance — so a
     /// compile triggered by one instance serves later ones directly.
@@ -306,7 +319,7 @@ impl ProtoModule {
         // flat list under the incremental configuration (same trade as the
         // comb list below).  A conv-time infeasible estimate means no plan
         // will be built, so batching stays on.
-        let incr_on = incremental::enabled() && !self.incr_infeasible;
+        let incr_on = incremental::machinery_enabled() && !self.incr_infeasible;
         let event_statements = self
             .event_statements
             .iter()
@@ -424,6 +437,8 @@ impl ProtoModule {
             module_variables,
             derived_clock_eval_stmts,
             incr_plan,
+            incr_run: self.incr_run,
+            incr_key: self.incr_key,
 
             event_statements,
             comb_statements,
@@ -865,15 +880,12 @@ fn run_comb_pipeline(
     // whole-module compile, so the incremental flavor would pay unbatched
     // fine-grained chunks with no fallback backend ever landing.
     let incr_infeasible = force_infeasible
-        || (incremental::enabled()
-            && (context.config.use_4state
-                || incremental::stmts_infeasible(&unified)
-                || incremental::plan_too_small(&unified)));
+        || (incremental::machinery_enabled()
+            && (context.config.use_4state || incremental::stmts_infeasible(&unified)));
     if incremental::diag_enabled() {
         eprintln!(
-            "[incr] gate: unified stmts={} min={} infeasible={}",
+            "[incr] gate: unified stmts={} infeasible={}",
             unified.len(),
-            incremental::min_stmts_for_plan(),
             incr_infeasible,
         );
     }
@@ -887,7 +899,7 @@ fn run_comb_pipeline(
     // instances' whole-comb functions) inside `analyze_dependency` so the
     // plan sees per-statement entries instead of one huge entry per child
     // — the entire point of a change-driven plan on a hierarchical DUT.
-    let incr_expand = incremental::enabled() && !incr_infeasible;
+    let incr_expand = incremental::machinery_enabled() && !incr_infeasible;
 
     // Comb bytes this pass reserves for rename temps; recorded on the
     // pipeline so a cache hit — which skips this whole function — can
@@ -1072,7 +1084,7 @@ fn run_comb_pipeline(
     // Snapshot before JIT consumes it: the whole-comb backend needs the
     // pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
     let pre_jit_stmts = Arc::new(unified_sorted.clone());
-    let incr_chunks = incremental::enabled() && !incr_infeasible;
+    let incr_chunks = incremental::machinery_enabled() && !incr_infeasible;
     let comb_statements = try_jit_no_cache(context, unified_sorted, incr_chunks);
     Ok(comb_pipeline_cache::CombPipeline {
         pre_jit_stmts,
@@ -3262,8 +3274,29 @@ impl Conv<&air::Module> for ProtoModule {
         // no plan build.  The flavored key keeps this flavor's pipeline and
         // whole-comb cache entries separate from the incremental-flavor ones
         // cached under the base key (the statement lists differ).
-        let runtime_infeasible = incremental::enabled()
-            && late::runtime_infeasible(key, context.config.incr_feedback_path.as_deref());
+        // A comb list with no verdict yet still builds a plan, but only to
+        // PROBE it (see `incremental::ProbeState`) and record the verdict for
+        // later runs.
+        let fb = context.config.incr_feedback_path.as_deref();
+        // Either diagnostic forces a fresh measurement even where a verdict is
+        // already on file — re-calibrating the threshold on a new machine (or
+        // after the full settle itself gets faster) needs `VERYL_INCR_PROBE=1`
+        // for the activity and `VERYL_INCR=1 VERYL_INCR_TRIAL=dry` for the
+        // time ratio, and a recorded verdict would otherwise silence both.
+        let recorded_infeasible = !incremental::probe_enabled()
+            && !incremental::trial_enabled()
+            && late::runtime_infeasible(key, fb);
+        let incr_run = if incremental::enabled() {
+            !recorded_infeasible
+        } else {
+            !recorded_infeasible && late::runtime_feasible(key, fb)
+        };
+        // Without somewhere to record a verdict there is nothing to probe FOR
+        // — the measurement would be thrown away and repeated every run — so
+        // an embedder that configures no feedback path (the library default,
+        // including the unit tests) stays on the plain pipeline.
+        let runtime_infeasible =
+            recorded_infeasible || (!incremental::enabled() && fb.is_none() && !incr_run);
         let key = if runtime_infeasible {
             log::debug!(
                 "conv feedback: {} takes the runtime-infeasible flavor",
@@ -3674,8 +3707,20 @@ impl Conv<&air::Module> for ProtoModule {
                     .sum::<usize>();
             n >= context.config.aot_c_min_stmts
         };
-        let aot_size_ok = !incr_on && size_ok;
-        let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !aot_size_ok {
+        // Whole-EVENT stays exclusive with a live plan: the `.so` runs the
+        // event whole, which defeats the mark-driven event skip, and it is an
+        // untracked FF writer for the settle's dirty-seed lists.
+        let aot_event_ok = !incr_on && size_ok;
+        // Whole-COMB is NOT exclusive.  The incremental sweep wins the
+        // dispatch while the plan is live (`settle_comb` is only reached
+        // once the plan is declined or auto-abandoned), so preparing the
+        // `.so` costs one emit + a niced background `cc` and buys an
+        // already-compiled fallback for exactly those outcomes.  Skipped under
+        // VERYL_INCR_VALIDATE for the same reason `late` is: a `.so`
+        // landing between the two runs of one settle would leave its
+        // localized comb bytes stale on one side only.
+        let aot_comb_ok = size_ok && !incremental::validate_enabled();
+        let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !aot_event_ok {
             HashMap::default()
         } else {
             let ctx = CompileCtx {
@@ -3871,7 +3916,7 @@ impl Conv<&air::Module> for ProtoModule {
         // unsupported construct) return None and Ir::settle_comb stays
         // on the per-chunk Cranelift loop.
         let dut_reuse = context.config.dut_reuse;
-        let whole_comb: Option<Arc<dyn CompiledWhole>> = if !aot_size_ok {
+        let whole_comb: Option<Arc<dyn CompiledWhole>> = if !aot_comb_ok {
             None
         } else {
             // Memoise the whole-comb compile by the same structural `key` as the
@@ -3893,7 +3938,7 @@ impl Conv<&air::Module> for ProtoModule {
         // dispatch — a perf regression with no other signal.  Each backend
         // exposes its own diagnostic gate (today: VERYL_AOT_C_DIAG); the
         // registry returns the first non-None diagnostic.
-        if aot_size_ok
+        if aot_comb_ok
             && whole_comb.is_none()
             && let Some(reason) = context
                 .backends
@@ -3946,6 +3991,8 @@ impl Conv<&air::Module> for ProtoModule {
             external_components: all_external_components,
             rtl_driven,
             incr_infeasible,
+            incr_run,
+            incr_key: key,
             late_aotc,
             fused_comb_offsets: cached.fused_offsets.clone(),
         })

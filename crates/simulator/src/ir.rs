@@ -144,6 +144,12 @@ pub struct Ir {
     /// Change-driven settle plan (`None` unless the incremental settle is on
     /// and the module is supported); see `ir::incremental`.
     pub incr_plan: Option<Arc<incremental::IncrPlan>>,
+    /// See `ProtoModule::incr_run`.
+    pub incr_run: bool,
+    /// See `ProtoModule::incr_key`.
+    pub incr_key: u128,
+    /// Where verdicts are persisted (`Config::incr_feedback_path`).
+    pub incr_feedback_path: Option<PathBuf>,
     /// Deferred whole-module AOT-C (`Some` only under the incremental
     /// configuration): compile inputs + landing slots, spawned when the
     /// plan is declined at build time or auto-abandoned at runtime.  See
@@ -200,6 +206,9 @@ impl Ir {
             whole_comb_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
             incr_plan: module.incr_plan,
+            incr_run: module.incr_run,
+            incr_key: module.incr_key,
+            incr_feedback_path: config.incr_feedback_path.clone(),
             late_aotc: module.late_aotc,
             const_cone_done: Default::default(),
         };
@@ -531,6 +540,10 @@ impl Ir {
             self.settle_comb(mask_cache, profile);
             return;
         }
+        // Diagnostic trial clock (`VERYL_INCR_TRIAL=dry`).
+        let trial_t0 = incremental::trial_enabled()
+            .then(std::time::Instant::now)
+            .filter(|_| incremental::trial_window(state.gen_settles).is_some());
         let plan = self
             .incr_plan
             .as_ref()
@@ -757,7 +770,7 @@ impl Ir {
         // the run fraction it measures is a property of the plan.
         {
             use incremental::{ABANDON_WARMUP, ABANDON_WINDOW, abandon_threshold_pct};
-            let pct = abandon_threshold_pct();
+            let pct = abandon_threshold_pct(plan.n_entries);
             if pct > 0 && !state.abandoned {
                 if state.gen_settles == ABANDON_WARMUP {
                     state.abandon_runs0 = state.stats_runs;
@@ -788,6 +801,77 @@ impl Ir {
                     }
                 }
             }
+        }
+        if let Some(t0) = trial_t0 {
+            self.incr_trial_tick(state, t0.elapsed());
+        }
+    }
+
+    /// One `VERYL_INCR_TRIAL=dry` sample: charge this settle's time to the
+    /// current window, then time a SHADOW whole-comb dispatch against a
+    /// scratch copy of the comb buffer.  The scratch is what makes this
+    /// value-neutral: the incremental settle deliberately carries backward
+    /// marks into the next settle, so an extra in-place full settle would
+    /// advance state the baseline leaves for later.
+    fn incr_trial_tick(&self, state: &mut incremental::IncrState, incr: std::time::Duration) {
+        let Some(w) = incremental::trial_window(state.gen_settles) else {
+            return;
+        };
+        state
+            .trial
+            .resize(incremental::TRIAL_STARTS.len(), Default::default());
+        state.trial[w].incr_ns += incr.as_nanos() as u64;
+        let whole = self
+            .whole_comb
+            .as_ref()
+            .or_else(|| self.late_aotc.as_ref().and_then(|l| l.whole_comb()));
+        let mut measured = false;
+        if let Some(whole) = whole {
+            state.trial_scratch.clear();
+            state.trial_scratch.extend_from_slice(&self.comb_values);
+            let ff_ptr = self.ff_values.as_ptr();
+            let comb_ptr = state.trial_scratch.as_mut_ptr();
+            let log_ptr = (&*self.write_log_buffer as *const _ as *const u8) as *mut u8;
+            let passes = self.required_comb_passes.max(1);
+            let t = std::time::Instant::now();
+            measured = (0..passes).all(|_| {
+                matches!(
+                    whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
+                    DispatchOutcome::Done
+                )
+            });
+            if measured {
+                state.trial[w].whole_ns += t.elapsed().as_nanos() as u64;
+                state.trial[w].n += 1;
+            }
+        }
+        if !measured {
+            state.trial[w].unavailable += 1;
+        }
+        if state.gen_settles + 1 == incremental::TRIAL_STARTS[w] + incremental::TRIAL_LEN {
+            let t = &state.trial[w];
+            let n = t.n.max(1) as f64;
+            let (i, o) = (t.incr_ns as f64 / n, t.whole_ns as f64 / n);
+            eprintln!(
+                "[incr trial] module={} window={} (settles {}..{}) n={} unavailable={} \
+                 incr={:.1}us whole={:.1}us ratio={:.2} verdict={}",
+                self.name,
+                w,
+                incremental::TRIAL_STARTS[w],
+                incremental::TRIAL_STARTS[w] + incremental::TRIAL_LEN,
+                t.n,
+                t.unavailable,
+                i / 1000.0,
+                o / 1000.0,
+                if o > 0.0 { i / o } else { 0.0 },
+                if t.n == 0 {
+                    "none"
+                } else if i > o {
+                    "retire"
+                } else {
+                    "keep"
+                },
+            );
         }
     }
 
@@ -1025,6 +1109,18 @@ impl Ir {
             }
             any
         }
+    }
+
+    /// One [`incremental::probe_enabled`] sample: count the entries the plan
+    /// would have run this settle.  Runs AFTER the ordinary full settle, off
+    /// the settled state, so it observes exactly the input changes the plan's
+    /// seed diff and out-diff would have propagated between settles.
+    pub(crate) fn incr_probe_tick(
+        &self,
+        probe: &mut incremental::ProbeState,
+        plan: &incremental::IncrPlan,
+    ) {
+        probe.tick(plan, &self.comb_values, &self.ff_values);
     }
 
     /// Cranelift-only settle path, factored out so the validate mode can
