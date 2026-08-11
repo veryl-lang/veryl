@@ -3769,6 +3769,35 @@ fn compile_jobs() -> usize {
         })
 }
 
+/// Background-compile niceness (`VERYL_AOT_C_NICE`, default 10; 0 keeps the
+/// parent's priority).  The compile is off the critical path — the
+/// simulation runs on Cranelift / the incremental sweep while it proceeds —
+/// so `cc` must yield to the sim threads instead of competing with them.
+/// Matters most exactly when the pool is oversubscribed relative to the
+/// cores left over from the sim; where it is not, renicing is a no-op.
+fn compile_nice() -> i32 {
+    std::env::var("VERYL_AOT_C_NICE")
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(10)
+}
+
+/// Drop this thread's scheduling priority by [`compile_nice`]; `cc` children
+/// inherit it.  Linux applies `PRIO_PROCESS` with `who == 0` to the calling
+/// THREAD, which is what keeps the renice off the simulation threads.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn renice_compile_thread() {
+    let n = compile_nice();
+    if n != 0 {
+        // SAFETY: plain syscall wrapper; a failure (permission) is ignored
+        // because the priority is an optimization, not a correctness input.
+        unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, n) };
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn renice_compile_thread() {}
+
 /// Lazily-started global pool of `compile_jobs()` workers draining a shared
 /// queue; returns the job sender.
 ///
@@ -3790,6 +3819,7 @@ fn compile_pool() -> &'static Sender<CompileJob> {
             let _ = thread::Builder::new()
                 .name("veryl-aot-cc".into())
                 .spawn(move || {
+                    renice_compile_thread();
                     loop {
                         let job = {
                             let guard = match rx.lock() {

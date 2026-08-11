@@ -3674,8 +3674,23 @@ impl Conv<&air::Module> for ProtoModule {
                     .sum::<usize>();
             n >= context.config.aot_c_min_stmts
         };
-        let aot_size_ok = !incr_on && size_ok;
-        let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !aot_size_ok {
+        // Whole-EVENT stays exclusive with a live plan: the `.so` runs the
+        // event whole, which defeats the mark-driven event skip (93% of
+        // chunk fires on pe_core), and it is an untracked FF writer for the
+        // settle's dirty-seed lists.
+        let aot_event_ok = !incr_on && size_ok;
+        // Whole-COMB is NOT exclusive.  The incremental sweep wins the
+        // dispatch while the plan is live (`settle_comb` is only reached
+        // once the plan is declined or auto-abandoned), so preparing the
+        // `.so` costs one emit + a niced background `cc` and buys an
+        // INSTANT, already-compiled fallback for exactly those outcomes —
+        // instead of the plan's verdict being a bet that costs the whole
+        // whole-module backend when it goes wrong.  Skipped under
+        // VERYL_INCR_VALIDATE for the same reason `late` is: a `.so`
+        // landing between the two runs of one settle would leave its
+        // localized comb bytes stale on one side only.
+        let aot_comb_ok = size_ok && !incremental::validate_enabled();
+        let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !aot_event_ok {
             HashMap::default()
         } else {
             let ctx = CompileCtx {
@@ -3871,7 +3886,7 @@ impl Conv<&air::Module> for ProtoModule {
         // unsupported construct) return None and Ir::settle_comb stays
         // on the per-chunk Cranelift loop.
         let dut_reuse = context.config.dut_reuse;
-        let whole_comb: Option<Arc<dyn CompiledWhole>> = if !aot_size_ok {
+        let whole_comb: Option<Arc<dyn CompiledWhole>> = if !aot_comb_ok {
             None
         } else {
             // Memoise the whole-comb compile by the same structural `key` as the
@@ -3893,7 +3908,7 @@ impl Conv<&air::Module> for ProtoModule {
         // dispatch — a perf regression with no other signal.  Each backend
         // exposes its own diagnostic gate (today: VERYL_AOT_C_DIAG); the
         // registry returns the first non-None diagnostic.
-        if aot_size_ok
+        if aot_comb_ok
             && whole_comb.is_none()
             && let Some(reason) = context
                 .backends
