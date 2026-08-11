@@ -82,12 +82,6 @@ pub struct WriteLogBuffer {
     /// additional narrow/wide entries.  Called once from the AOT-C event
     /// prologue so the per-push code stays unchecked.
     pub reserve: unsafe extern "C" fn(*mut WriteLogBuffer, u32, u32),
-    /// Requested-sub mask slot for sub-guarded chunks (incremental settle):
-    /// the caller stores the mask just before the call; the chunk prologue
-    /// loads it and immediately clears it back to 0 (so a nested
-    /// CompiledBlock, or any caller that did not set it, runs whole —
-    /// 0 means "execute all sub-blocks").
-    pub incr_sub_mask: u32,
     /// Owning storage — keeps `narrow_entries_ptr` valid.
     _narrow_owner: Box<[WriteLogEntry]>,
     /// Owning storage — keeps `wide_entries_ptr` valid.
@@ -131,9 +125,6 @@ pub const WRITE_LOG_OFFSET_GROW_PUSH_WIDE: i32 =
     std::mem::offset_of!(WriteLogBuffer, grow_push_wide) as i32;
 #[allow(dead_code)]
 pub const WRITE_LOG_OFFSET_RESERVE: i32 = std::mem::offset_of!(WriteLogBuffer, reserve) as i32;
-#[allow(dead_code)]
-pub const WRITE_LOG_OFFSET_INCR_SUB_MASK: i32 =
-    std::mem::offset_of!(WriteLogBuffer, incr_sub_mask) as i32;
 
 #[allow(dead_code)]
 pub const WRITE_LOG_ENTRY_SIZE: i32 = std::mem::size_of::<WriteLogEntry>() as i32;
@@ -185,7 +176,6 @@ impl WriteLogBuffer {
             grow_push_narrow: write_log_grow_push_narrow,
             grow_push_wide: write_log_grow_push_wide,
             reserve: write_log_reserve,
-            incr_sub_mask: 0,
             _narrow_owner: narrow,
             _wide_owner: wide,
         }

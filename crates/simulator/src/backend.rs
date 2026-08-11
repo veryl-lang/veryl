@@ -130,11 +130,6 @@ pub struct ChunkArtifact {
     /// from `Debug`/`Hash`: derived deterministically from the statements the
     /// fingerprint already identifies.
     pub deps: Option<Arc<crate::ir::incremental::ChunkDeps>>,
-    /// The compiled code carries per-sub-block guards reading the mask slot
-    /// in the write-log header (see `ir::incremental::sub_split_len`); the
-    /// incremental settle then passes a requested-sub mask before the call.
-    /// Excluded from `Debug`/`Hash` like `deps` (derived from env + stmts).
-    pub sub_guarded: bool,
 }
 
 impl std::fmt::Debug for ChunkArtifact {

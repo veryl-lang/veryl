@@ -565,7 +565,6 @@ impl Ir {
             state.dirty = vec![0u64; plan.n_entries.div_ceil(64)];
             // All-dirty so every event chunk runs its first fire.
             state.event_dirty = vec![!0u64; plan.event_chunk_count.div_ceil(64)];
-            state.sub_mask = vec![0u8; plan.n_entries];
             state.build_flat(plan, &self.comb_statements);
             state.inited = true;
         }
@@ -707,7 +706,7 @@ impl Ir {
                     state.dirty[e as usize / 64] |= 1u64 << (e % 64);
                 }
             }
-            let ran = self.incr_sweep_pass(state, plan, mask_cache, first_settle);
+            let ran = self.incr_sweep_pass(state, plan, mask_cache);
             if !ran {
                 break;
             }
@@ -800,14 +799,12 @@ impl Ir {
         state: &mut incremental::IncrState,
         plan: &incremental::IncrPlan,
         mask_cache: &mut MaskCache,
-        force_full_subs: bool,
     ) -> bool {
         use incremental::read_word;
         let comb: &[u8] = &self.comb_values;
         let ff: &[u8] = &self.ff_values;
         let incremental::IncrState {
             dirty,
-            sub_mask,
             blob,
             blob_off,
             arg_sets,
@@ -821,12 +818,6 @@ impl Ir {
             stats_runs,
             stats_runs_nochange,
             stats_settles,
-            stats_sub_exec,
-            stats_sub_possible,
-            stats_sub_full_runs,
-            stats_sub_masked_exec,
-            stats_sub_masked_possible,
-            stats_sub_raw_exec,
             stats_event_marks,
             ..
         } = state;
@@ -867,38 +858,6 @@ impl Ir {
                         last_run[e] = *stats_settles + 1;
                     }
 
-                    // Resolve the requested-sub mask: expand each requested
-                    // sub through the intra-chunk solidarity closure; 0
-                    // (always-run marks, first settle) means the whole
-                    // entry.  `sub_m` is stored into the JIT-side mask slot
-                    // below (WRITE_LOG_OFFSET_INCR_SUB_MASK) and drives the
-                    // post-run `ran_m` diff coverage.
-                    let full = plan.full_mask[e];
-                    let raw = std::mem::take(&mut sub_mask[e]);
-                    let sub_m = if force_full_subs || raw == 0 {
-                        // The first settle populates every entry's output
-                        // snapshot in schedule order — a mark accumulated
-                        // mid-sweep must not narrow it to a partial run.
-                        *stats_sub_full_runs += 1;
-                        full
-                    } else {
-                        let ex = &plan.sub_expand[e];
-                        let mut m = raw & full;
-                        *stats_sub_raw_exec += m.count_ones() as u64;
-                        let mut bits = m;
-                        while bits != 0 {
-                            let t = bits.trailing_zeros() as usize;
-                            bits &= bits - 1;
-                            m |= ex[t];
-                        }
-                        m &= full;
-                        *stats_sub_masked_exec += m.count_ones() as u64;
-                        *stats_sub_masked_possible += full.count_ones() as u64;
-                        m
-                    };
-                    *stats_sub_exec += sub_m.count_ones() as u64;
-                    *stats_sub_possible += full.count_ones() as u64;
-
                     // Software-pipelined prefetch: the next dirty entry in
                     // this word is known now, so pull its record line in
                     // while the current entry runs, and its code line in
@@ -938,16 +897,7 @@ impl Ir {
                         // `self.comb_statements` for `self`'s lifetime.
                         unsafe {
                             let a = arg_sets[(counts >> 56) as usize];
-                            if func_bits & 1 != 0 {
-                                // Sub-guarded chunk (flag in bit 0): hand the
-                                // requested-sub mask to the chunk prologue
-                                // through the write-log header slot.
-                                let slot = (a.2 as usize
-                                    + write_log::WRITE_LOG_OFFSET_INCR_SUB_MASK as usize)
-                                    as *mut u32;
-                                *slot = sub_m as u32;
-                            }
-                            let f: crate::FuncPtr = std::mem::transmute((func_bits & !1) as usize);
+                            let f: crate::FuncPtr = std::mem::transmute(func_bits as usize);
                             f(
                                 a.0 as usize as *const u8,
                                 a.1 as usize as *const u8,
@@ -962,28 +912,20 @@ impl Ir {
                     // call; now warm the next entry's code so its call
                     // doesn't stall on icache misses (chunks span several
                     // lines and the settle is icache-fetch bound).  Warm a
-                    // fixed leading window of the chunk body.
+                    // fixed leading window of the chunk body: 512 B covers a
+                    // typical 8-statement chunk.  Dropping it costs 5% and
+                    // halving it 3%; 1 KiB buys nothing back.
                     if let Some(r) = next_rec {
-                        let nf = blob[r] & !1;
+                        let nf = blob[r];
                         if nf != 0 {
                             let c = nf as usize as *const u8;
                             let mut o = 0usize;
-                            while o < 256 {
+                            while o < 512 {
                                 prefetch_read(c.wrapping_add(o));
                                 o += 64;
                             }
                         }
                     }
-                    // Which subs actually executed: the requested mask for a
-                    // guarded call, everything otherwise (interpreted entry,
-                    // arg-set fallback, or an unguarded artifact) — the diff
-                    // below must cover exactly the words that may have been
-                    // written, or the own-output snapshots go stale.
-                    let ran_m = if func_bits & 1 != 0 {
-                        sub_m
-                    } else {
-                        plan.full_mask[e]
-                    };
                     let n_repair = counts as u32 as usize;
                     let n_out = (counts >> 32) as usize & 0xff_ffff;
                     let p = off0 + 2;
@@ -991,29 +933,23 @@ impl Ir {
                     // a later writer's value; re-establish those regardless
                     // of any value change.
                     for m in 0..n_repair {
-                        let enc = (blob[p + (m >> 1)] >> ((m & 1) * 32)) as u32;
-                        let id = (enc & incremental::ENTRY_ID_MASK) as usize;
+                        let id = (blob[p + (m >> 1)] >> ((m & 1) * 32)) as u32 as usize;
                         dirty[id / 64] |= 1u64 << (id % 64);
-                        sub_mask[id] |= (enc >> incremental::SUB_MASK_SHIFT) as u8;
                     }
                     // Diff against this entry's own previous outputs, off
                     // the three fixed-stride arrays (`build_flat` layout) —
                     // iterations are address-independent so loads pipeline;
                     // the mark pool is only touched when a word changed.
+                    // Split once so the loop itself indexes nothing.
                     let hdr = p + n_repair.div_ceil(2);
-                    let idx = hdr + n_out;
-                    let prev = hdr + 2 * n_out;
+                    let pool0 = hdr + 3 * n_out;
+                    let (dense, pool) = blob[hdr..].split_at_mut(3 * n_out);
+                    let (hdrs, rest) = dense.split_at_mut(n_out);
+                    let (idxs, prevs) = rest.split_at_mut(n_out);
                     let mut any_out_changed = false;
-                    for i in 0..n_out {
-                        let h = blob[hdr + i];
-                        // A word none of the executed subs write is skipped:
-                        // it may hold another entry's version, and diffing it
-                        // would corrupt this entry's own-output snapshot.
-                        if (h >> 56) as u8 & ran_m == 0 {
-                            continue;
-                        }
+                    for ((&h, &h1), pv) in hdrs.iter().zip(idxs.iter()).zip(prevs.iter_mut()) {
                         let src = h as u32;
-                        let nm = (h >> 32) as usize & 0xff_ffff;
+                        let nm = (h >> 32) as usize;
                         let tail = src & incremental::OUT_SRC_TAIL != 0;
                         let v = if !tail {
                             let base = if src & incremental::OUT_SRC_FF == 0 {
@@ -1025,22 +961,21 @@ impl Ir {
                             // SAFETY: plan build verified off + 8 <= buf len.
                             u64::from_le(unsafe { (base.add(off) as *const u64).read_unaligned() })
                         } else {
-                            let w = (blob[idx + i] >> 32) as usize;
+                            let w = (h1 >> 32) as usize;
                             if w < plan.comb_words {
                                 read_word(comb, w)
                             } else {
                                 read_word(ff, w - plan.comb_words)
                             }
                         };
-                        if v != blob[prev + i] {
+                        if v != *pv {
                             any_out_changed = true;
                             // Wake only consumers whose read bytes overlap
                             // the changed bytes: packed struct fields share
                             // words, and a neighbour-field change is not a
                             // trigger for this reader.
-                            let dgm = incremental::byte_nonzero_mask(v ^ blob[prev + i]);
-                            blob[prev + i] = v;
-                            let h1 = blob[idx + i];
+                            let dgm = incremental::byte_nonzero_mask(v ^ *pv);
+                            *pv = v;
                             let w = (h1 >> 32) as usize;
                             if w >= plan.comb_words {
                                 // Keep the FF snapshot current so the next
@@ -1054,22 +989,23 @@ impl Ir {
                                     prev_ext[ep - 1] = v;
                                 }
                             }
-                            let marks = h1 as u32 as usize;
+                            // `build_flat` appends the mark pools after the
+                            // dense arrays, so an absolute mark index never
+                            // falls below `pool0`.
+                            debug_assert!(h1 as u32 as usize >= pool0);
+                            let marks = h1 as u32 as usize - pool0;
                             let gm_base = marks + nm.div_ceil(2);
                             for m in 0..nm {
-                                let gm = (blob[gm_base + (m >> 3)] >> ((m & 7) * 8)) as u8;
+                                let gm = (pool[gm_base + (m >> 3)] >> ((m & 7) * 8)) as u8;
                                 if gm & dgm == 0 {
                                     continue;
                                 }
-                                let enc = (blob[marks + (m >> 1)] >> ((m & 1) * 32)) as u32;
-                                let id = (enc & incremental::ENTRY_ID_MASK) as usize;
+                                let id = (pool[marks + (m >> 1)] >> ((m & 1) * 32)) as u32 as usize;
                                 dirty[id / 64] |= 1u64 << (id % 64);
-                                sub_mask[id] |= (enc >> incremental::SUB_MASK_SHIFT) as u8;
                             }
                             plan.mark_word(
                                 &mut incremental::MarkSink {
                                     dirty: &mut *dirty,
-                                    sub_mask: &mut *sub_mask,
                                     event_dirty: &mut *event_dirty,
                                     pending_ff: &mut *pending_ff,
                                     pending_ext: &mut *pending_ext,

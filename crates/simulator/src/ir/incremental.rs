@@ -189,44 +189,6 @@ pub struct ChunkDeps {
     /// A statement whose write set cannot be modelled (e.g. `$readmemh`);
     /// the whole plan is abandoned when set.
     pub unmodelable: bool,
-    /// Sub-block dependency sets: the chunk's statement list split into up
-    /// to [`MAX_SUBS`] consecutive groups, each with its own full-coverage
-    /// sets.  Feeds the sub-block guard granularity of the incremental
-    /// plan; empty when splitting is disabled or the chunk is one group.
-    pub subs: Vec<ChunkDeps>,
-}
-
-/// Upper bound on sub-blocks per chunk: the guard mask is a byte.
-pub const MAX_SUBS: usize = 8;
-
-/// Sub-block split size (statements per sub-block), `None` = disabled.
-/// `VERYL_INCR_SUB` overrides (0 disables); the chunk is never split into
-/// more than [`MAX_SUBS`] groups regardless.  Default 8: guard branches
-/// mispredict heavily (per-chunk masks overwhelm the BTB) and each guard
-/// boundary cuts the load-CSE cache, so fewer, coarser subs beat the finer
-/// occupancy of 4-statement subs (measured on pe_core: 8 → −4.8% settle,
-/// 4 → −2.5%).
-pub fn sub_size() -> Option<usize> {
-    static V: OnceLock<Option<usize>> = OnceLock::new();
-    *V.get_or_init(|| match env::var("VERYL_INCR_SUB") {
-        Ok(s) => match s.parse::<usize>() {
-            Ok(0) => None,
-            Ok(n) => Some(n),
-            Err(_) => Some(8),
-        },
-        Err(_) => Some(8),
-    })
-}
-
-/// Effective sub-block length for a chunk of `n_stmts` statements, `None`
-/// when the chunk is not split (splitting disabled, or it fits one group).
-/// The SINGLE source of truth shared by the deps capture and the Cranelift
-/// guard emission — the plan's mask bit `i` must mean the same statements
-/// as the compiled guard's bit `i`.
-pub fn sub_split_len(n_stmts: usize) -> Option<usize> {
-    let s = sub_size()?;
-    let s = s.max(n_stmts.div_ceil(MAX_SUBS));
-    (n_stmts > s).then_some(s)
 }
 
 /// Walk one statement, appending full-coverage reads/writes.
@@ -412,21 +374,11 @@ pub fn collect_stmt_deps(stmt: &ProtoStatement, deps: &mut ChunkDeps) {
     }
 }
 
-/// Capture the dependency sets for one compiled chunk, including the
-/// per-sub-block split when enabled.
+/// Capture the dependency sets for one compiled chunk.
 pub fn chunk_deps(stmts: &[ProtoStatement]) -> ChunkDeps {
     let mut deps = ChunkDeps::default();
     for s in stmts {
         collect_stmt_deps(s, &mut deps);
-    }
-    if let Some(sub) = sub_split_len(stmts.len()) {
-        for group in stmts.chunks(sub) {
-            let mut d = ChunkDeps::default();
-            for s in group {
-                collect_stmt_deps(s, &mut d);
-            }
-            deps.subs.push(d);
-        }
     }
     deps
 }
@@ -436,13 +388,6 @@ pub fn chunk_deps(stmts: &[ProtoStatement]) -> ChunkDeps {
 /// buffer ends mid-word; take the bounds-checked `read_word` path).
 pub const OUT_SRC_FF: u32 = 1 << 31;
 pub const OUT_SRC_TAIL: u32 = 1 << 30;
-
-/// Entry references in `consumers` / `word_writers` / `repair` (and the
-/// flat-record mark pools built from them) carry a sub-block request mask
-/// in the top byte: `id | mask << 24`.  Mask 0 means "whole entry" —
-/// the safe fallback every consumer of the mask must honour.
-pub const ENTRY_ID_MASK: u32 = 0x00ff_ffff;
-pub const SUB_MASK_SHIFT: u32 = 24;
 
 /// Byte-granular trigger filtering (`VERYL_INCR_BYTEMASK=0` opts out):
 /// every consumer/writer reference carries the mask of the word's bytes it
@@ -482,40 +427,23 @@ pub struct IncrPlan {
     /// so the diff loop is a raw unaligned load instead of a word-id
     /// decode + bounds check per word.
     pub out_src: Vec<u32>,
-    /// Parallel to `out_words`: mask of the entry's subs writing the word.
-    /// The per-run diff only compares words of subs that actually ran —
-    /// a skipped sub's word may hold ANOTHER entry's version, and diffing
-    /// it against this entry's snapshot would corrupt the snapshot (its
-    /// invariant is "the value this entry last wrote").
-    pub out_word_masks: Vec<u8>,
     /// entry → range of `out_words`/`out_src` (`n_entries + 1` fenceposts).
     pub entry_out_off: Vec<u32>,
     /// entry → later same-bit writers of the variables it writes; re-marked
     /// on every run of the entry ("clobber repair" for versioned variables).
-    /// Entries are `id | sub_mask << 24` (see [`ENTRY_ID_MASK`]).
     pub repair: Vec<Vec<u32>>,
-    /// word id → entries reading it (`id | sub_mask << 24`).
+    /// word id → entries reading it.
     pub consumers: Vec<Vec<u32>>,
     /// Parallel to `consumers`: byte mask of the word the entry reads; a
     /// change wakes the entry only when the changed bytes intersect.
     pub consumer_gmasks: Vec<Vec<u8>>,
-    /// word id → entries writing it (`id | sub_mask << 24`).  Marked on
-    /// external seed changes only: the settled version must be
-    /// re-established over an external write, while ordinary diff
-    /// propagation leaves writers to `repair`.
+    /// word id → entries writing it.  Marked on external seed changes only:
+    /// the settled version must be re-established over an external write,
+    /// while ordinary diff propagation leaves writers to `repair`.
     pub word_writers: Vec<Vec<u32>>,
     /// Parallel to `word_writers`: byte mask of the word the entry writes
     /// (an external write only clobbers a version it overlaps).
     pub word_writer_gmasks: Vec<Vec<u8>>,
-    /// entry → per-sub solidarity closure: when sub `i` of the entry is
-    /// requested, all subs in `sub_expand[e][i]` must run with it
-    /// (intra-chunk forward dataflow, same-bit conflicting writers both
-    /// ways, and intermediate readers pulling their writers).  Always-run
-    /// entries expand to the full mask.
-    pub sub_expand: Vec<[u8; MAX_SUBS]>,
-    /// entry → mask covering all its subs (`(1 << n_subs) - 1`; 1 when the
-    /// entry is not split).
-    pub full_mask: Vec<u8>,
     /// Comb words writable from outside the settle (event statements,
     /// top-level testbench variables incl. ports); diffed as seeds.
     pub ext_comb_words: Vec<u32>,
@@ -605,7 +533,6 @@ impl MarkSource {
 /// bitmap, leaving the call sites unchanged.
 pub struct MarkSink<'a> {
     pub dirty: &'a mut [u64],
-    pub sub_mask: &'a mut [u8],
     pub event_dirty: &'a mut [u64],
     pub pending_ff: &'a mut Vec<u32>,
     pub pending_ext: &'a mut Vec<u32>,
@@ -642,9 +569,8 @@ impl IncrPlan {
                     if g & dgm == 0 {
                         continue;
                     }
-                    let e = (c & ENTRY_ID_MASK) as usize;
+                    let e = c as usize;
                     sink.dirty[e / 64] |= 1u64 << (e % 64);
-                    sink.sub_mask[e] |= (c >> SUB_MASK_SHIFT) as u8;
                 }
             }
             MarkSource::Partial | MarkSource::OnRun { .. } => {
@@ -1311,88 +1237,6 @@ fn sort_dedup_or(v: &mut Vec<(u32, u8)>) {
     v.truncate(out);
 }
 
-/// Intra-chunk sub-block solidarity closure.  Baseline semantics assume a
-/// dirty chunk re-runs ALL of its statements; guarding subs individually
-/// is only value-neutral when a requested sub drags along:
-///  - its intra-chunk forward dataflow (a sub reading what it wrote);
-///  - same-bit conflicting co-writers, both directions (an earlier writer
-///    must re-establish its version under a guarded/versioned later one,
-///    and a later writer must re-clobber an earlier intermediate);
-///  - intermediate readers pull both conflicting writers (the version
-///    they read must be present in the buffer).
-///
-/// Returns the reachability closure per sub (self included).
-fn compute_expand(
-    n: usize,
-    sub_ins: &[Vec<u32>],
-    sub_outs: &[Vec<u32>],
-    sub_out_vars: &[Vec<OutVar>],
-) -> [u8; MAX_SUBS] {
-    fn intersects(a: &[u32], b: &[u32]) -> bool {
-        let (mut i, mut j) = (0, 0);
-        while i < a.len() && j < b.len() {
-            match a[i].cmp(&b[j]) {
-                std::cmp::Ordering::Less => i += 1,
-                std::cmp::Ordering::Greater => j += 1,
-                std::cmp::Ordering::Equal => return true,
-            }
-        }
-        false
-    }
-    let mut adj = [0u8; MAX_SUBS];
-    for (i, a) in adj.iter_mut().enumerate().take(n) {
-        *a = 1 << i;
-    }
-    for i in 0..n {
-        for (j, ins) in sub_ins.iter().enumerate().take(n).skip(i + 1) {
-            if intersects(&sub_outs[i], ins) {
-                adj[i] |= 1 << j;
-            }
-        }
-    }
-    let mut conflicts: Vec<(usize, usize, u32, u32)> = Vec::new();
-    for i in 0..n {
-        for j in (i + 1)..n {
-            for a in &sub_out_vars[i] {
-                for b in &sub_out_vars[j] {
-                    if a.key == b.key && a.lo <= b.hi && b.lo <= a.hi {
-                        adj[i] |= 1 << j;
-                        adj[j] |= 1 << i;
-                        conflicts.push((i, j, a.w0.min(b.w0), a.w1.max(b.w1)));
-                    }
-                }
-            }
-        }
-    }
-    for &(i, j, w0, w1) in &conflicts {
-        for (k, ins) in sub_ins.iter().enumerate().take(j).skip(i + 1) {
-            if ins.iter().any(|&w| w >= w0 && w < w1) {
-                adj[k] |= (1 << i) | (1 << j);
-            }
-        }
-    }
-    loop {
-        let mut changed = false;
-        for i in 0..n {
-            let mut m = adj[i];
-            let mut bits = m;
-            while bits != 0 {
-                let t = bits.trailing_zeros() as usize;
-                bits &= bits - 1;
-                m |= adj[t];
-            }
-            if m != adj[i] {
-                adj[i] = m;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    adj
-}
-
 /// Per-entry accumulators of the plan build.
 #[derive(Default)]
 struct PlanAcc {
@@ -1400,15 +1244,9 @@ struct PlanAcc {
     total_in_words: usize,
     always_run: Vec<u32>,
     entry_out_words: Vec<Vec<u32>>,
-    /// Aligned with `entry_out_words`: mask of subs writing each word.
-    entry_out_word_masks: Vec<Vec<u8>>,
     /// Aligned with `entry_out_words`: byte mask written within each word.
     entry_out_word_gmasks: Vec<Vec<u8>>,
     entry_out_vars: Vec<Vec<OutVar>>,
-    /// Per-sub written vars (repair-mask lookup); empty for unsplit entries.
-    entry_sub_out_vars: Vec<Vec<(u8, OutVar)>>,
-    sub_expand: Vec<[u8; MAX_SUBS]>,
-    full_mask: Vec<u8>,
     consumers: Vec<Vec<u32>>,
     /// Aligned with `consumers`: byte mask read within the word.
     consumer_gmasks: Vec<Vec<u8>>,
@@ -1417,7 +1255,6 @@ struct PlanAcc {
 /// Plan-build volume counters (dumped under `VERYL_INCR_DIAG=1`).
 static PLAN_STAT_IN: AtomicU64 = AtomicU64::new(0);
 static PLAN_STAT_OUT: AtomicU64 = AtomicU64::new(0);
-static PLAN_STAT_SUB: AtomicU64 = AtomicU64::new(0);
 static PLAN_STAT_MAX: AtomicU64 = AtomicU64::new(0);
 
 /// Upper bound on one entry's read-word expansion.  An entry whose inputs
@@ -1638,16 +1475,8 @@ fn push_entry(resolver: &WordResolver, deps: &ChunkDeps, acc: &mut PlanAcc) -> b
     if deps.unmodelable {
         return false;
     }
-    let e = acc.entry_out_words.len() as u32;
-    if e >= ENTRY_ID_MASK {
-        // Entry id must fit next to the sub mask.
+    let Ok(e) = u32::try_from(acc.entry_out_words.len()) else {
         return false;
-    }
-    let n_subs = deps.subs.len().min(MAX_SUBS);
-    let full: u8 = if n_subs >= 2 {
-        ((1u16 << n_subs) - 1) as u8
-    } else {
-        1
     };
 
     // Estimate both expansions BEFORE materializing them — the expansion
@@ -1693,112 +1522,12 @@ fn push_entry(resolver: &WordResolver, deps: &ChunkDeps, acc: &mut PlanAcc) -> b
     out_vars.sort_unstable();
     out_vars.dedup();
 
-    if n_subs >= 2 && !huge_reader {
-        let mut sub_ins = Vec::with_capacity(n_subs);
-        let mut sub_out_words = Vec::with_capacity(n_subs);
-        let mut sub_out_vars = Vec::with_capacity(n_subs);
-        for sd in &deps.subs {
-            let mut ws = Vec::new();
-            for d in &sd.ins {
-                resolver.words(d, &mut ws);
-            }
-            PLAN_STAT_SUB.fetch_add(ws.len() as u64, Ordering::Relaxed);
-            ws.sort_unstable();
-            ws.dedup();
-            sub_ins.push(ws);
-            let (ow, mut ov) = collect_outs(resolver, &sd.outs);
-            let mut ow: Vec<u32> = ow.into_iter().map(|(w, _)| w).collect();
-            ow.sort_unstable();
-            ow.dedup();
-            ov.sort_unstable();
-            ov.dedup();
-            sub_out_words.push(ow);
-            sub_out_vars.push(ov);
-        }
-        // Consumers carry the mask of subs reading the word, plus the byte
-        // mask read within it (whole-entry union: a sub-precise byte mask
-        // would need a per-sub pool; the sub mask already narrows the run).
-        // Both lists are sorted and walked in ascending word order, so the
-        // gmask lookup advances a cursor instead of re-scanning `in_words`
-        // per word — a linear rescan is O(W^2) and dominated the whole plan
-        // build on SoC-sized DUTs whose memory arrays expand to 100k+ words.
-        let mut wm: Vec<(u32, u8)> = Vec::new();
-        for (si, ws) in sub_ins.iter().enumerate() {
-            for &w in ws {
-                wm.push((w, 1 << si));
-            }
-        }
-        wm.sort_unstable();
-        let mut gcur = 0usize;
-        let mut i = 0;
-        while i < wm.len() {
-            let (w, mut m) = wm[i];
-            let mut j = i + 1;
-            while j < wm.len() && wm[j].0 == w {
-                m |= wm[j].1;
-                j += 1;
-            }
-            while gcur < in_words.len() && in_words[gcur].0 < w {
-                gcur += 1;
-            }
-            let g = match in_words.get(gcur) {
-                Some(&(iw, g)) if iw == w => g,
-                _ => 0xff,
-            };
-            acc.consumers[w as usize].push(e | (m as u32) << SUB_MASK_SHIFT);
-            acc.consumer_gmasks[w as usize].push(g);
-            i = j;
-        }
-        // Out-word masks aligned with the deduped whole-entry list.  A word
-        // the sub split somehow misses falls back to the full mask.
-        let mut om: Vec<(u32, u8)> = Vec::new();
-        for (si, ws) in sub_out_words.iter().enumerate() {
-            for &w in ws {
-                om.push((w, 1 << si));
-            }
-        }
-        om.sort_unstable();
-        let mut aligned = Vec::with_capacity(out_words.len());
-        let mut i = 0;
-        for &(w, _) in &out_words {
-            while i < om.len() && om[i].0 < w {
-                i += 1;
-            }
-            let mut m = 0u8;
-            while i < om.len() && om[i].0 == w {
-                m |= om[i].1;
-                i += 1;
-            }
-            aligned.push(if m == 0 { full } else { m });
-        }
-        acc.entry_out_word_masks.push(aligned);
-        acc.sub_expand.push(compute_expand(
-            n_subs,
-            &sub_ins,
-            &sub_out_words,
-            &sub_out_vars,
-        ));
-        acc.entry_sub_out_vars.push(
-            sub_out_vars
-                .iter()
-                .enumerate()
-                .flat_map(|(si, v)| v.iter().map(move |ov| (si as u8, *ov)))
-                .collect(),
-        );
-    } else {
-        // Unsplit entries, and huge readers regardless of their sub split:
-        // a huge reader always runs whole (`sub_expand` is forced to the
-        // full mask below via `always_run`), so per-sub consumer indexes
-        // and out-word masks reduce to the full-mask form.
-        for &(w, g) in &in_words {
-            acc.consumers[w as usize].push(e | 1 << SUB_MASK_SHIFT);
-            acc.consumer_gmasks[w as usize].push(g);
-        }
-        acc.entry_out_word_masks.push(vec![full; out_words.len()]);
-        acc.sub_expand.push([full; MAX_SUBS]);
-        acc.entry_sub_out_vars.push(Vec::new());
+    // `in_words` stays empty for a huge reader, so it registers no consumers:
+    // it runs every settle anyway, and its index would dominate the plan.
+    for &(w, g) in &in_words {
+        acc.consumers[w as usize].push(e);
+        acc.consumer_gmasks[w as usize].push(g);
     }
-    acc.full_mask.push(full);
     acc.entry_out_words
         .push(out_words.iter().map(|&(w, _)| w).collect());
     acc.entry_out_word_gmasks
@@ -1948,12 +1677,11 @@ pub fn build_plan(
     if env::var("VERYL_INCR_DIAG").as_deref() == Ok("1") {
         use Ordering::Relaxed;
         eprintln!(
-            "[incr] plan volume: entries={} total_words={} in_pushes={} out_pushes={} sub_pushes={} max_entry_in={}",
+            "[incr] plan volume: entries={} total_words={} in_pushes={} out_pushes={} max_entry_in={}",
             acc.entry_out_words.len(),
             resolver.total_words,
             PLAN_STAT_IN.swap(0, Relaxed),
             PLAN_STAT_OUT.swap(0, Relaxed),
-            PLAN_STAT_SUB.swap(0, Relaxed),
             PLAN_STAT_MAX.swap(0, Relaxed),
         );
     }
@@ -1961,12 +1689,8 @@ pub fn build_plan(
         total_in_words: _,
         mut always_run,
         entry_out_words,
-        entry_out_word_masks,
         entry_out_word_gmasks,
         entry_out_vars,
-        entry_sub_out_vars,
-        mut sub_expand,
-        full_mask,
         consumers,
         consumer_gmasks,
     } = acc;
@@ -2079,32 +1803,16 @@ pub fn build_plan(
     let n_entries = entry_out_words.len();
     let mut word_writers: Vec<Vec<u32>> = vec![Vec::new(); resolver.total_words];
     let mut word_writer_gmasks: Vec<Vec<u8>> = vec![Vec::new(); resolver.total_words];
-    for (e, ((outs, masks), gmasks)) in entry_out_words
+    for (e, (outs, gmasks)) in entry_out_words
         .iter()
-        .zip(&entry_out_word_masks)
         .zip(&entry_out_word_gmasks)
         .enumerate()
     {
-        for ((&w, &m), &g) in outs.iter().zip(masks).zip(gmasks) {
-            word_writers[w as usize].push(e as u32 | (m as u32) << SUB_MASK_SHIFT);
+        for (&w, &g) in outs.iter().zip(gmasks) {
+            word_writers[w as usize].push(e as u32);
             word_writer_gmasks[w as usize].push(g);
         }
     }
-    // Sub mask of the subs of `e` writing variable `key`; falls back to the
-    // full mask (whole entry) for unsplit entries or an unmatched key.
-    let sub_write_mask = |e: u32, key: u64| -> u32 {
-        let subs = &entry_sub_out_vars[e as usize];
-        let mut m = 0u8;
-        for (si, ov) in subs {
-            if ov.key == key {
-                m |= 1 << si;
-            }
-        }
-        if m == 0 {
-            m = full_mask[e as usize];
-        }
-        (m as u32) << SUB_MASK_SHIFT
-    };
     let mut repair: Vec<Vec<u32>> = vec![Vec::new(); n_entries];
     {
         // Group written (entry, bit interval, word range) per variable and
@@ -2121,7 +1829,7 @@ pub fn build_plan(
         let mut conflict_pairs = 0usize;
         let mut hole_vars = 0usize;
         let mut extra: Vec<u32> = Vec::new();
-        for (&var_key, writes) in per_var.iter() {
+        for writes in per_var.values() {
             // Repair links along a SAME-SPAN writer chain are transitively
             // reduced to adjacent pairs: when `a` runs, marking only its
             // immediate same-span successor `b` suffices — `b`'s run marks
@@ -2138,7 +1846,7 @@ pub fn build_plan(
                 chain.sort_unstable();
                 chain.dedup();
                 for pair in chain.windows(2) {
-                    repair[pair[0] as usize].push(pair[1] | sub_write_mask(pair[1], var_key));
+                    repair[pair[0] as usize].push(pair[1]);
                 }
             }
             for (i, (e1, v1)) in writes.iter().enumerate() {
@@ -2150,7 +1858,7 @@ pub fn build_plan(
                     conflict_pairs += 1;
                     let (lo_e, hi_e) = (*e1.min(e2), *e1.max(e2));
                     if (v1.lo, v1.hi) != (v2.lo, v2.hi) {
-                        repair[lo_e as usize].push(hi_e | sub_write_mask(hi_e, var_key));
+                        repair[lo_e as usize].push(hi_e);
                     }
                     // The earlier writer must run every settle: when a later
                     // guarded writer's condition turns false the base value
@@ -2166,8 +1874,7 @@ pub fn build_plan(
                     let w1 = v1.w1.max(v2.w1);
                     let mut has_hole = false;
                     for w in w0..w1 {
-                        for &r in &consumers[w as usize] {
-                            let rid = r & ENTRY_ID_MASK;
+                        for &rid in &consumers[w as usize] {
                             if rid > lo_e && rid < hi_e {
                                 extra.push(rid);
                                 has_hole = true;
@@ -2183,28 +1890,12 @@ pub fn build_plan(
             }
         }
         for r in &mut repair {
-            // Merge same-target links, OR-ing their sub masks.
-            r.sort_unstable_by_key(|&x| x & ENTRY_ID_MASK);
-            let mut merged: Vec<u32> = Vec::with_capacity(r.len());
-            for &x in r.iter() {
-                match merged.last_mut() {
-                    Some(last) if (*last & ENTRY_ID_MASK) == (x & ENTRY_ID_MASK) => {
-                        *last |= x & !ENTRY_ID_MASK;
-                    }
-                    _ => merged.push(x),
-                }
-            }
-            *r = merged;
+            r.sort_unstable();
+            r.dedup();
         }
         always_run.extend(extra);
         always_run.sort_unstable();
         always_run.dedup();
-        // An always-run entry must execute whole every settle regardless of
-        // which sub a mark requested (side effects, FF writes, version-hole
-        // protection are entry-scoped): expand any requested sub to all.
-        for &e in &always_run {
-            sub_expand[e as usize] = [full_mask[e as usize]; MAX_SUBS];
-        }
         let repair_links: usize = repair.iter().map(|r| r.len()).sum();
         diag(&format!(
             "plan: {n_entries} entries, {conflict_pairs} same-bit writer pairs, \
@@ -2220,11 +1911,10 @@ pub fn build_plan(
     // source, so the post-run diff loop needs no word-id decode.
     let mut out_words_flat = Vec::new();
     let mut out_src = Vec::new();
-    let mut out_word_masks = Vec::new();
     let mut entry_out_off = Vec::with_capacity(n_entries + 1);
     entry_out_off.push(0u32);
-    for (outs, masks) in entry_out_words.iter().zip(&entry_out_word_masks) {
-        for (&w, &m) in outs.iter().zip(masks) {
+    for outs in entry_out_words.iter() {
+        for &w in outs.iter() {
             let w = w as usize;
             let (buf_len, off, flag) = if w < resolver.comb_words {
                 (comb_bytes, w * 8, 0)
@@ -2242,7 +1932,6 @@ pub fn build_plan(
             };
             out_words_flat.push(w as u32);
             out_src.push(src);
-            out_word_masks.push(m);
         }
         entry_out_off.push(out_words_flat.len() as u32);
     }
@@ -2268,15 +1957,9 @@ pub fn build_plan(
         let targets: Vec<u32> = dbg.split(',').filter_map(|s| s.parse().ok()).collect();
         for (e, outs) in entry_out_words.iter().enumerate() {
             for &t in &targets {
-                if let Some(pos) = outs.iter().position(|&w| w == t) {
+                if outs.contains(&t) {
                     eprintln!(
-                        "[word-dbg] word={t} writer=settle entry {e} sub_mask={:#x} full_mask={:#x} always_run={}",
-                        entry_out_word_masks
-                            .get(e)
-                            .and_then(|v| v.get(pos))
-                            .copied()
-                            .unwrap_or(0xEE),
-                        full_mask.get(e).copied().unwrap_or(0),
+                        "[word-dbg] word={t} writer=settle entry {e} always_run={}",
                         always_run.contains(&(e as u32)),
                     );
                 }
@@ -2356,15 +2039,12 @@ pub fn build_plan(
         always_run,
         out_words: out_words_flat,
         out_src,
-        out_word_masks,
         entry_out_off,
         repair,
         consumers,
         consumer_gmasks,
         word_writers,
         word_writer_gmasks,
-        sub_expand,
-        full_mask,
         ext_comb_words: ext,
         ext_pos,
         required_passes: required_passes.max(1),
@@ -2434,10 +2114,6 @@ pub struct IncrState {
     pub prev_ext: Vec<u64>,
     /// Dirty-entry bitmap.
     pub dirty: Vec<u64>,
-    /// Per-entry requested-sub mask, OR-accumulated by marks alongside the
-    /// dirty bit and consumed (cleared) when the entry runs.  0 = whole
-    /// entry (safe fallback used by always-run marks and the first settle).
-    pub sub_mask: Vec<u8>,
     /// Flat per-entry run records (see `build_flat`): call target + args,
     /// repair marks, and per-output-word `{src, prev value, dirty marks}`
     /// interleaved into one sequential stream, so a run touches the blob,
@@ -2471,17 +2147,6 @@ pub struct IncrState {
     /// coarse (word-granular / chunk-granular) triggering.
     pub stats_runs_nochange: u64,
     pub stats_seed_words: u64,
-    /// Sub-guard occupancy: subs that would execute vs subs present, over
-    /// all runs (upper-bound estimate for the sub-block guard win).
-    pub stats_sub_exec: u64,
-    pub stats_sub_possible: u64,
-    /// Same split for whole-entry (mask 0) runs vs masked runs.
-    pub stats_sub_full_runs: u64,
-    pub stats_sub_masked_exec: u64,
-    pub stats_sub_masked_possible: u64,
-    /// Requested subs BEFORE the solidarity closure (masked runs only) —
-    /// isolates how much the closure inflates the mask.
-    pub stats_sub_raw_exec: u64,
 }
 
 impl IncrState {
@@ -2491,8 +2156,7 @@ impl IncrState {
     /// [0]  call target (`FuncPtr` bits; 0 = interpret via dispatch)
     /// [1]  n_repair (low 32) | n_out (bits 32..56) | arg-set idx (top 8)
     /// ⌈n_repair/2⌉ × [entry id pair]            (unconditional re-marks)
-    /// n_out × [src (low 32, OUT_SRC_* encoding) | n_marks (bits 32..56)
-    ///          | writer-sub mask (top 8)]
+    /// n_out × [src (low 32, OUT_SRC_* encoding) | n_marks (high 32)]
     /// n_out × [mark index (low 32, absolute) | word id (high 32)]
     /// n_out × [prev value]
     /// mark pool: packed entry-id pairs          (marked when value changed)
@@ -2540,27 +2204,7 @@ impl IncrState {
                         // (slower but arg-exact) dispatch fallback.
                         (0u64, 0usize)
                     } else {
-                        // Chunk code is at least 16-byte aligned, so bit 0
-                        // carries the "sub-guarded" flag: the sweep then
-                        // writes the requested-sub mask to the write-log
-                        // header slot before the call.
-                        //
-                        // Only when the plan models this entry's sub split
-                        // (full_mask > 1, which can only come from this
-                        // artifact's captured deps).  A sub-guarded artifact
-                        // reached through a plan-opaque path — e.g. a
-                        // CompiledBlock statement inside an interpreted span,
-                        // whose deps are re-collected without subs — must run
-                        // whole: with bit 0 clear the slot stays 0 and the
-                        // guard prologue expands it to "all subs".  Passing
-                        // the plan's single-sub mask (0x1) to such a chunk
-                        // would permanently skip every sub but the first.
-                        let mut f = c.artifact.func as usize as u64;
-                        debug_assert_eq!(f & 1, 0);
-                        if c.artifact.sub_guarded && plan.full_mask[e] > 1 {
-                            f |= 1;
-                        }
-                        (f, asi)
+                        (c.artifact.func as usize as u64, asi)
                     }
                 }
                 _ => (0, 0),
@@ -2578,20 +2222,19 @@ impl IncrState {
             // dataflow dominates at larger chunk sizes, so this removes
             // most of the diff work per run.
             let single_pass = plan.required_passes <= 1;
-            // (src, word id, writer-sub mask, mark ids, mark read gmasks)
-            type KeptWord = (u32, u32, u8, Vec<u32>, Vec<u8>);
+            // (src, word id, mark ids, mark read gmasks)
+            type KeptWord = (u32, u32, Vec<u32>, Vec<u8>);
             let mut kept: Vec<KeptWord> = Vec::new();
             for fi in s..t {
                 let src = plan.out_src[fi];
                 let wid = plan.out_words[fi];
-                let wmask = plan.out_word_masks[fi];
                 let cons = &plan.consumers[wid as usize];
                 let cgm = &plan.consumer_gmasks[wid as usize];
                 let (filtered, fgm): (Vec<u32>, Vec<u8>) = if single_pass {
                     cons.iter()
                         .copied()
                         .zip(cgm.iter().copied())
-                        .filter(|&(c, _)| (c & ENTRY_ID_MASK) != e as u32)
+                        .filter(|&(c, _)| c != e as u32)
                         .unzip()
                 } else {
                     (cons.clone(), cgm.clone())
@@ -2612,7 +2255,7 @@ impl IncrState {
                 if filtered.is_empty() && !is_ff_word {
                     event_only_kept += 1;
                 }
-                kept.push((src, wid, wmask, filtered, fgm));
+                kept.push((src, wid, filtered, fgm));
             }
             let n_out = kept.len();
             debug_assert!(n_out < 1 << 24);
@@ -2625,7 +2268,7 @@ impl IncrState {
             // packed byte-granularity read masks (mark `m`'s mask lives at
             // byte `m` of that trailer).
             blob.resize(hdr + 3 * n_out, 0);
-            for (i, (src, wid, wmask, cons, gms)) in kept.iter().enumerate() {
+            for (i, (src, wid, cons, gms)) in kept.iter().enumerate() {
                 let mark = blob.len();
                 push_ids(&mut blob, cons);
                 for chunk in gms.chunks(8) {
@@ -2635,9 +2278,7 @@ impl IncrState {
                     }
                     blob.push(w);
                 }
-                // Header: src | n_marks (24 bits) | writer-sub mask (top 8).
-                debug_assert!(cons.len() < 1 << 24);
-                blob[hdr + i] = *src as u64 | (cons.len() as u64) << 32 | (*wmask as u64) << 56;
+                blob[hdr + i] = *src as u64 | (cons.len() as u64) << 32;
                 blob[hdr + n_out + i] =
                     u32::try_from(mark).expect("incr blob exceeds u32 index space") as u64
                         | (*wid as u64) << 32;
@@ -2676,7 +2317,6 @@ impl IncrState {
         self.bound_plan = plan.map_or(0, |p| std::ptr::from_ref(p) as usize);
         // Indexed by entry id.
         self.dirty.clear();
-        self.sub_mask.clear();
         self.blob.clear();
         self.blob_off.clear();
         self.arg_sets.clear();
@@ -2706,7 +2346,6 @@ impl IncrState {
     pub fn sink(&mut self) -> MarkSink<'_> {
         MarkSink {
             dirty: &mut self.dirty,
-            sub_mask: &mut self.sub_mask,
             event_dirty: &mut self.event_dirty,
             pending_ff: &mut self.pending_ff,
             pending_ext: &mut self.pending_ext,
@@ -2771,16 +2410,12 @@ impl IncrState {
         let pad = "  ".repeat(depth);
         let settle = self.stats_settles; // just-finished settle stamped this
         let ran = |e: usize| self.last_run.get(e).copied().unwrap_or(0) == settle;
-        let writers = |w: usize| -> Vec<usize> {
-            plan.word_writers[w]
-                .iter()
-                .map(|&e| (e & ENTRY_ID_MASK) as usize)
-                .collect()
-        };
+        let writers =
+            |w: usize| -> Vec<usize> { plan.word_writers[w].iter().map(|&e| e as usize).collect() };
         let entry_ins = |e: usize| -> Vec<u32> {
             let mut ins = Vec::new();
             for (w, cs) in plan.consumers.iter().enumerate() {
-                if cs.iter().any(|&c| (c & ENTRY_ID_MASK) == e as u32) {
+                if cs.contains(&(e as u32)) {
                     ins.push(w as u32);
                 }
             }
@@ -2858,7 +2493,7 @@ impl IncrState {
                     let gm: Vec<u8> = plan.consumers[w]
                         .iter()
                         .zip(&plan.consumer_gmasks[w])
-                        .filter(|&(&c, _)| (c & ENTRY_ID_MASK) == e as u32)
+                        .filter(|&(&c, _)| c == e as u32)
                         .map(|(_, &g)| g)
                         .collect();
                     let dgm = byte_nonzero_mask(p ^ f);
@@ -2883,31 +2518,18 @@ impl IncrState {
         }
         let n = self.stats_settles as f64;
         eprintln!(
-            "=== incr settle stats: settles={} avg runs/settle={:.1}/{} ({:.2}%) avg seed words={:.1} \
-             sub occupancy={:.1}% ({}/{}) ===",
+            "=== incr settle stats: settles={} avg runs/settle={:.1}/{} ({:.2}%) avg seed words={:.1} ===",
             self.stats_settles,
             self.stats_runs as f64 / n,
             n_entries,
             self.stats_runs as f64 / n * 100.0 / n_entries.max(1) as f64,
             self.stats_seed_words as f64 / n,
-            self.stats_sub_exec as f64 * 100.0 / self.stats_sub_possible.max(1) as f64,
-            self.stats_sub_exec,
-            self.stats_sub_possible,
         );
         eprintln!(
             "=== incr no-output-change runs: {:.1}% ({}/{}) ===",
             self.stats_runs_nochange as f64 * 100.0 / self.stats_runs.max(1) as f64,
             self.stats_runs_nochange,
             self.stats_runs,
-        );
-        eprintln!(
-            "=== incr sub detail: full runs={:.1}% masked occupancy={:.1}% ({}/{}) raw={:.1}% ===",
-            self.stats_sub_full_runs as f64 * 100.0 / self.stats_runs.max(1) as f64,
-            self.stats_sub_masked_exec as f64 * 100.0
-                / self.stats_sub_masked_possible.max(1) as f64,
-            self.stats_sub_masked_exec,
-            self.stats_sub_masked_possible,
-            self.stats_sub_raw_exec as f64 * 100.0 / self.stats_sub_masked_possible.max(1) as f64,
         );
     }
 }

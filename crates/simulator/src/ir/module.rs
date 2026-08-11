@@ -4126,7 +4126,6 @@ mod event_written_comb_tests {
                     keepalive: None,
                     content_fp: None,
                     deps: None,
-                    sub_guarded: false,
                 }),
                 ff_delta_bytes: 0,
                 comb_delta_bytes: 0,
