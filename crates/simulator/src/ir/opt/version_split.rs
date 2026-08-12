@@ -58,6 +58,8 @@ pub struct RunStats {
     pub skip_unstable: usize,
     pub skip_width: usize,
     pub skip_fold: usize,
+    /// Chain skipped: the folded expression exceeds [`MAX_FUSED_NODES`].
+    pub skip_budget: usize,
     /// Whole block skipped: it contains a block-scoped `Break` (from an
     /// unrolled static for-loop), whose abort-the-rest control flow the
     /// write-position fold cannot model.
@@ -66,7 +68,7 @@ pub struct RunStats {
 
 /// Process-wide totals: the pass runs per always_comb during conv (including
 /// inside cross-test cached subtrees), so per-call logging would be noise.
-static TOTALS: [AtomicUsize; 11] = [const { AtomicUsize::new(0) }; 11];
+static TOTALS: [AtomicUsize; 12] = [const { AtomicUsize::new(0) }; 12];
 
 pub fn accumulate(s: &RunStats) {
     let vals = [
@@ -80,6 +82,7 @@ pub fn accumulate(s: &RunStats) {
         s.skip_unstable,
         s.skip_width,
         s.skip_fold,
+        s.skip_budget,
         s.skip_break,
     ];
     for (t, v) in TOTALS.iter().zip(vals) {
@@ -94,8 +97,8 @@ pub fn totals_line() -> String {
     let v: Vec<usize> = TOTALS.iter().map(|t| t.load(Relaxed)).collect();
     format!(
         "blocks={} fused_vars={} fused_writes={} removed_stmts={} \
-         skip: opaque={} read={} disjoint={} unstable={} width={} fold={} break={}",
-        v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10]
+         skip: opaque={} read={} disjoint={} unstable={} width={} fold={} budget={} break={}",
+        v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11]
     )
 }
 
@@ -115,6 +118,97 @@ pub fn run(stmts: &mut [ProtoStatement], alloc: &mut dyn FnMut(usize) -> isize) 
 /// Maximum If nesting depth folded recursively (else-if chains from `case`
 /// lowering can be hundreds deep; the recursion is one frame per level).
 const MAX_TREE_DEPTH: usize = 512;
+
+/// Ceiling on one folded RHS's emit-weighted size (`VERYL_VSPLIT_MAX_NODES`
+/// overrides; 0 disables).  Deep predication chains compose versions into
+/// one tree whose subtrees duplicate per field split — a wide GPU design
+/// measured a 56 MB single statement (hundreds of GB in the C compiler)
+/// where healthy chains stay under ~1k units.  A unit emits tens of bytes,
+/// so the ceiling keeps a statement far under the AOT-C per-statement
+/// guard.
+const MAX_FUSED_NODES: usize = 65_536;
+
+#[cfg(test)]
+thread_local! {
+    /// Per-test cap override — thread-local so parallel tests cannot race.
+    static TEST_MAX_NODES: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+fn max_fused_nodes() -> usize {
+    #[cfg(test)]
+    if let Some(n) = TEST_MAX_NODES.with(|c| c.get()) {
+        return n;
+    }
+    static V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("VERYL_VSPLIT_MAX_NODES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(MAX_FUSED_NODES)
+    })
+}
+
+/// Emit-weighted node count with an early exit above `cap`.  A wide
+/// constant emits one literal per 64-bit word, so `Value` nodes charge
+/// their word count — the budget then tracks emitted bytes, not tree
+/// shape.  Iterative: the trees this exists to reject are deep enough to
+/// overflow a recursive walk.
+fn expr_nodes_capped(root: &ProtoExpression, cap: usize) -> usize {
+    let mut n = 0usize;
+    let mut stack: Vec<&ProtoExpression> = vec![root];
+    while let Some(e) = stack.pop() {
+        n = n.saturating_add(match e {
+            ProtoExpression::Value { width, .. } => width.div_ceil(64).max(1),
+            _ => 1,
+        });
+        if n > cap {
+            return n;
+        }
+        match e {
+            ProtoExpression::Value { .. }
+            | ProtoExpression::Variable {
+                dynamic_select: None,
+                ..
+            }
+            | ProtoExpression::HierVariable(_) => {}
+            ProtoExpression::Variable {
+                dynamic_select: Some(d),
+                ..
+            } => stack.push(&d.index_expr),
+            ProtoExpression::Unary { x, .. } => stack.push(x),
+            ProtoExpression::Binary { x, y, .. } => {
+                stack.push(x);
+                stack.push(y);
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                stack.push(cond);
+                stack.push(true_expr);
+                stack.push(false_expr);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (e, _, _) in elements {
+                    stack.push(e);
+                }
+            }
+            ProtoExpression::DynamicVariable {
+                index_expr,
+                dynamic_select,
+                ..
+            } => {
+                stack.push(index_expr);
+                if let Some(d) = dynamic_select {
+                    stack.push(&d.index_expr);
+                }
+            }
+        }
+    }
+    n
+}
 
 /// One captured write site of an eventable statement tree (metadata only;
 /// the expressions are consumed later by the tree fold).
@@ -396,6 +490,20 @@ fn split_block(
         let folded = fold_var(body, &writer_stmts, dst, width, alloc);
         match folded {
             Some((temps, expr)) => {
+                let cap = max_fused_nodes();
+                if cap != 0 {
+                    let mut nodes = expr_nodes_capped(&expr, cap);
+                    for t in &temps {
+                        if nodes > cap {
+                            break;
+                        }
+                        nodes = nodes.saturating_add(expr_nodes_capped(&t.expr, cap));
+                    }
+                    if nodes > cap {
+                        stats.skip_budget += 1;
+                        continue;
+                    }
+                }
                 let last_stmt_idx = *writer_stmts.last().unwrap();
                 fused.push(Fused {
                     last_stmt_idx,
@@ -1062,4 +1170,177 @@ fn merge_if(
     out.next_ver = next;
     out.coalesce_vals();
     Some(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{ExpressionContext, Op, ProtoAssignStatement, ProtoIfStatement, VarOffset};
+    use veryl_analyzer::value::{Value, ValueU64};
+    use veryl_parser::token_range::TokenRange;
+
+    fn ctx(width: usize) -> ExpressionContext {
+        ExpressionContext {
+            width,
+            signed: false,
+        }
+    }
+
+    fn lit(v: u64, w: usize) -> ProtoExpression {
+        ProtoExpression::Value {
+            value: Value::U64(ValueU64 {
+                payload: v,
+                mask_xz: 0,
+                width: w as u32,
+                signed: false,
+            }),
+            width: w,
+            expr_context: ctx(w),
+        }
+    }
+
+    fn cvar(off: isize, w: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: None,
+            dynamic_select: None,
+            width: w,
+            var_full_width: w,
+            expr_context: ctx(w),
+        }
+    }
+
+    fn assign(dst: isize, w: usize, expr: ProtoExpression) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(dst),
+            dst_width: w,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: 0,
+            token: TokenRange::default(),
+        })
+    }
+
+    fn cond_write(cond_off: isize, dst: isize, w: usize, val: u64) -> ProtoStatement {
+        ProtoStatement::If(ProtoIfStatement {
+            cond: Some(cvar(cond_off, 1)),
+            true_side: vec![assign(dst, w, lit(val, w))],
+            false_side: vec![],
+        })
+    }
+
+    #[test]
+    fn node_count_walks_a_dynamic_bit_select_index() {
+        // The subtree under a dynamic bit-select on an array-element read
+        // must be counted, or a bomb hiding there passes the budget.
+        let deep = {
+            let mut e = lit(0, 8);
+            for _ in 0..40 {
+                e = ProtoExpression::Unary {
+                    op: Op::LogicNot,
+                    x: Box::new(e),
+                    width: 8,
+                    expr_context: ctx(8),
+                };
+            }
+            e
+        };
+        let e = ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(0x0),
+            stride: 8,
+            element_native_bytes: 4,
+            index_expr: Box::new(lit(0, 8)),
+            num_elements: 4,
+            select: None,
+            dynamic_select: Some(crate::ir::ProtoDynamicBitSelect {
+                index_expr: Box::new(deep),
+                elem_width: 8,
+                window: 1,
+                num_elements: 4,
+            }),
+            width: 8,
+            expr_context: ctx(8),
+        };
+        assert!(expr_nodes_capped(&e, usize::MAX) > 40);
+    }
+
+    #[test]
+    fn node_count_charges_a_wide_constant_per_word() {
+        // A 512-bit literal emits one word literal per 64 bits; the budget
+        // tracks emitted bytes, so it must cost 8 units, not 1.
+        assert_eq!(expr_nodes_capped(&lit(0, 512), usize::MAX), 8);
+        assert_eq!(expr_nodes_capped(&lit(0, 64), usize::MAX), 1);
+    }
+
+    #[test]
+    fn node_count_is_exact_and_caps_early() {
+        // (a & b) | 1  = 5 nodes.
+        let e = ProtoExpression::Binary {
+            x: Box::new(ProtoExpression::Binary {
+                x: Box::new(cvar(0x0, 8)),
+                op: Op::BitAnd,
+                y: Box::new(cvar(0x8, 8)),
+                width: 8,
+                expr_context: ctx(8),
+            }),
+            op: Op::BitOr,
+            y: Box::new(lit(1, 8)),
+            width: 8,
+            expr_context: ctx(8),
+        };
+        assert_eq!(expr_nodes_capped(&e, 100), 5);
+        assert!(expr_nodes_capped(&e, 2) > 2);
+    }
+
+    #[test]
+    fn node_count_survives_a_deep_chain() {
+        // The counter must be iterative: the trees it exists to reject are
+        // deep enough that a recursive walk would itself overflow.
+        let mut e = lit(0, 8);
+        for _ in 0..30_000 {
+            e = ProtoExpression::Unary {
+                op: Op::LogicNot,
+                x: Box::new(e),
+                width: 8,
+                expr_context: ctx(8),
+            };
+        }
+        assert!(expr_nodes_capped(&e, usize::MAX) > 30_000);
+        // Iterative drop too: hand the chain back leaf-first.
+        while let ProtoExpression::Unary { x, .. } = e {
+            e = *x;
+        }
+    }
+
+    #[test]
+    fn budget_rejects_an_oversized_fold_and_keeps_the_writes() {
+        // Two overlapping conditional writes fuse into a ternary chain of
+        // ~10 nodes; a 4-node cap must reject the fold and leave the block
+        // untouched, a large cap must fuse it.
+        let block = || vec![cond_write(0x100, 0x0, 8, 1), cond_write(0x108, 0x0, 8, 2)];
+        let mut alloc_at = 0x1000isize;
+        let mut alloc = |w: usize| -> isize {
+            let off = alloc_at;
+            alloc_at += crate::ir::variable::native_bytes(w) as isize;
+            off
+        };
+
+        TEST_MAX_NODES.with(|c| c.set(Some(4)));
+        let mut body = block();
+        let mut stats = RunStats::default();
+        split_block(&mut body, &mut stats, &mut alloc);
+        assert_eq!(stats.skip_budget, 1, "the fold must be rejected");
+        assert_eq!(stats.fused_vars, 0);
+        assert_eq!(body.len(), 2, "the original writes must survive");
+
+        TEST_MAX_NODES.with(|c| c.set(Some(1 << 20)));
+        let mut body = block();
+        let mut stats = RunStats::default();
+        split_block(&mut body, &mut stats, &mut alloc);
+        assert_eq!(stats.skip_budget, 0);
+        assert_eq!(stats.fused_vars, 1, "a large cap must still fuse");
+        TEST_MAX_NODES.with(|c| c.set(None));
+    }
 }
