@@ -289,9 +289,15 @@ fn synth_factor(
             if select.is_empty() {
                 return apply_part_select(&element_nets, ct, id);
             }
+            // Not `ct.r#type` — see `VarSlot::type`.
+            let var_type = ctx
+                .variables
+                .get(id)
+                .map(|s| &s.r#type)
+                .unwrap_or(&ct.r#type);
             if select.is_const() && !select.is_range() {
                 let (high, low) = select
-                    .eval_value(&mut ctx.eval_ctx, &ct.r#type, false)
+                    .eval_value(&mut ctx.eval_ctx, var_type, false)
                     .ok_or_else(|| {
                         SynthesizerError::dynamic_select(format!("variable {}", id), &ct.token)
                     })?;
@@ -325,7 +331,7 @@ fn synth_factor(
                     ));
                 }
                 let (high, low) = select
-                    .eval_value(&mut ctx.eval_ctx, &ct.r#type, false)
+                    .eval_value(&mut ctx.eval_ctx, var_type, false)
                     .ok_or_else(|| {
                         SynthesizerError::dynamic_select(format!("variable {}", id), &ct.token)
                     })?;

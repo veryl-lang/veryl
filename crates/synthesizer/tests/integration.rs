@@ -4420,3 +4420,88 @@ fn package_const_dynamic_select() {
         "MASK[sel] must reduce to sel[0]"
     );
 }
+
+#[test]
+fn packed_multidim_element_read_keeps_full_width() {
+    // Regression: `s[0]` on `logic<4, 8>` returned only bit 0, the rest tied
+    // to constant zero, because the select was resolved against the drained
+    // comptime type. Writes were unaffected, so the datapath silently folded
+    // away instead of failing.
+    use veryl_synthesizer::ir::{NET_CONST0, NET_CONST1};
+    let code = r#"
+        module PackedElem (
+            i_clk: input  clock   ,
+            i_rst: input  reset   ,
+            i_a  : input  logic<8>,
+            o_out: output logic<8>,
+        ) {
+            var s: logic<4, 8>;
+            always_ff {
+                if_reset {
+                    s = 0;
+                } else {
+                    s[0] = i_a;
+                }
+            }
+            assign o_out = s[0] + i_a;
+        }
+        module UnpackedElem (
+            i_clk: input  clock   ,
+            i_rst: input  reset   ,
+            i_a  : input  logic<8>,
+            o_out: output logic<8>,
+        ) {
+            var s: logic<8> [4];
+            always_ff {
+                if_reset {
+                    for i in 0..4 {
+                        s[i] = 0;
+                    }
+                } else {
+                    s[0] = i_a;
+                }
+            }
+            assign o_out = s[0] + i_a;
+        }
+    "#;
+    let (ir, _) = analyze(code, "PackedElem");
+    let packed = build_gate_ir(&ir, resource_table::insert_str("PackedElem"))
+        .expect("synthesize packed element read");
+    let unpacked = build_gate_ir(&ir, resource_table::insert_str("UnpackedElem"))
+        .expect("synthesize unpacked element read");
+
+    // The bug left the adder with a 1-bit operand: 20 cells instead of 40.
+    assert_eq!(
+        packed.module.cells.len(),
+        unpacked.module.cells.len(),
+        "packed element read ({} cells) must match the unpacked one ({} cells)",
+        packed.module.cells.len(),
+        unpacked.module.cells.len()
+    );
+
+    let read_ffs: Vec<_> = packed
+        .module
+        .ffs
+        .iter()
+        .take(8)
+        .map(|ff| ff.q)
+        .filter(|q| packed.module.cells.iter().any(|c| c.inputs.contains(q)))
+        .collect();
+    assert_eq!(
+        read_ffs.len(),
+        8,
+        "all 8 bits of s[0] must feed the output logic, got {}",
+        read_ffs.len()
+    );
+
+    let out = packed
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "o_out")
+        .expect("o_out port");
+    assert!(
+        out.nets.iter().all(|&n| n != NET_CONST0 && n != NET_CONST1),
+        "no output bit may be tied to a constant net"
+    );
+}
