@@ -313,6 +313,7 @@ fn resolve_argument_width(expr: &Expression) -> Option<usize> {
     let symbol = symbol_table::resolve(scoped.scoped_identifier.as_ref()).ok()?;
     let var_type = match &symbol.found.kind {
         SymbolKind::Variable(x) => &x.r#type,
+        SymbolKind::Port(x) => &x.r#type,
         SymbolKind::Parameter(x) if !x.is_proto => &x.r#type,
         _ => return None,
     };

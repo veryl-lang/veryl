@@ -14505,6 +14505,29 @@ fn generic_inference_failed() {
 }
 
 #[test]
+fn generic_inference_from_module_port() {
+    // Generic arguments should be inferred from module ports just like
+    // from local variables.
+    // https://github.com/veryl-lang/veryl/issues/3117
+    let code = r#"
+    module ModuleA (
+        value: input logic<8>,
+    ) {
+        function FuncId::<T: u32> (
+            x: input logic<T>,
+        ) -> logic<T> {
+            return x;
+        }
+
+        let _r: logic<8> = FuncId(value);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn type_inference_var_conflict() {
     // Two assigns to the same untyped `var` with mismatched widths
     // should be rejected as not inferable.
