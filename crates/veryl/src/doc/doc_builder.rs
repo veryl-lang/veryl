@@ -15,38 +15,41 @@ use veryl_analyzer::symbol_table;
 use veryl_metadata::{ComponentManifest, Metadata, MetadataError};
 use veryl_parser::veryl_token::Token;
 
+// `{{{...}}}` is reserved for a doc comment in markdown context, where mdbook
+// still has to see its wavedrom and mermaid fences. Everything else is spliced
+// into markup and goes through `{{...}}`.
 const SUMMARY_TMPL: &str = r###"
 # Summary
 
-[{{{name}}}](index.md)
-- [{{{version}}}]()
+[{{name}}](index.md)
+- [{{version}}]()
 
 ---
 
 - [Modules](modules.md)
   {{#each modules}}
-  - [{{{this.0}}}]({{{this.1}}}.md)
+  - [{{this.0}}]({{this.1}}.md)
   {{/each}}
 
 - [Module Prototypes](proto_modules.md)
   {{#each proto_modules}}
-  - [{{{this.0}}}]({{{this.1}}}.md)
+  - [{{this.0}}]({{this.1}}.md)
   {{/each}}
 
 - [Interfaces](interfaces.md)
   {{#each interfaces}}
-  - [{{{this.0}}}]({{{this.1}}}.md)
+  - [{{this.0}}]({{this.1}}.md)
   {{/each}}
 
 - [Packages](packages.md)
   {{#each packages}}
-  - [{{{this.0}}}]({{{this.1}}}.md)
+  - [{{this.0}}]({{this.1}}.md)
   {{/each}}
 
 {{#if components}}
 - [Components](components.md)
   {{#each components}}
-  - [{{{this.0}}}]({{{this.1}}}.md)
+  - [{{this.0}}]({{this.1}}.md)
   {{/each}}
 {{/if}}
 "###;
@@ -63,7 +66,7 @@ struct SummaryData {
 }
 
 const INDEX_TMPL: &str = r###"
-# {{{name}}}
+# {{name}}
 
 {{{description}}}
 
@@ -95,8 +98,8 @@ const INDEX_TMPL: &str = r###"
 <tbody>
 {{#each this.items}}
 <tr>
-    <th class="table_list_item"><a href="{{this.file_name}}.html">{{{this.html_name}}}</a></th>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <th class="table_list_item"><a href="{{this.file_name}}.html">{{this.display_name}}</a></th>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -115,15 +118,15 @@ struct IndexData {
 }
 
 const LIST_TMPL: &str = r###"
-# {{{name}}}
+# {{name}}
 ---
 
 <table class="table_list">
 <tbody>
 {{#each items}}
 <tr>
-    <th class="table_list_item"><a href="{{this.file_name}}.html">{{{this.html_name}}}</a></th>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <th class="table_list_item"><a href="{{this.file_name}}.html">{{this.display_name}}</a></th>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -140,12 +143,12 @@ struct ListData {
 #[derive(Serialize)]
 struct ListItem {
     file_name: String,
-    html_name: String,
+    display_name: String,
     description: String,
 }
 
 const MODULE_TMPL: &str = r#"
-# {{{name}}}
+# {{name}}
 
 {{{description}}}
 
@@ -175,7 +178,7 @@ const MODULE_TMPL: &str = r#"
 <tr>
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -211,7 +214,7 @@ const MODULE_TMPL: &str = r#"
     <td class="table_list_item"><span class="hljs-attribute">{{this.clock_domain}}</span></td>
     {{/if}}
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -252,7 +255,7 @@ struct PortData {
 }
 
 const PROTO_MODULE_TMPL: &str = r#"
-# {{{name}}}
+# {{name}}
 
 {{{description}}}
 
@@ -266,7 +269,7 @@ const PROTO_MODULE_TMPL: &str = r#"
 <tr>
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -302,7 +305,7 @@ const PROTO_MODULE_TMPL: &str = r#"
     <td class="table_list_item"><span class="hljs-attribute">{{this.clock_domain}}</span></td>
     {{/if}}
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -320,7 +323,7 @@ struct ProtoModuleData {
 }
 
 const INTERFACE_TMPL: &str = r#"
-# {{{name}}}
+# {{name}}
 
 {{{description}}}
 
@@ -334,7 +337,7 @@ const INTERFACE_TMPL: &str = r#"
 <tr>
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -350,7 +353,7 @@ struct InterfaceData {
 }
 
 const PACKAGE_TMPL: &str = r###"
-# {{{name}}}
+# {{name}}
 
 {{{description}}}
 
@@ -363,7 +366,7 @@ struct PackageData {
 }
 
 const COMPONENT_TMPL: &str = r#"
-# {{{name}}}
+# {{name}}
 
 {{#if kind}}
 <p class="doc_subtitle"><span class="hljs-keyword">{{kind}}</span> component</p>
@@ -382,7 +385,7 @@ const COMPONENT_TMPL: &str = r#"
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
     <td class="table_list_item">{{#if this.optional}}optional{{else}}required{{/if}}</td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -400,7 +403,7 @@ const COMPONENT_TMPL: &str = r#"
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span></td>
     <td class="table_list_item"><span class="hljs-type">{{this.width}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -495,7 +498,7 @@ pub struct DocBuilder {
 #[derive(Clone)]
 pub struct TopLevelItem {
     pub file_name: String,
-    pub html_name: String,
+    pub display_name: String,
     pub symbol: Symbol,
 }
 
@@ -551,22 +554,22 @@ impl DocBuilder {
 
         for x in &self.modules {
             let file = format!("{}.md", x.file_name);
-            self.build_component(&file, self.build_module(&x.html_name, &x.symbol))?;
+            self.build_component(&file, self.build_module(&x.display_name, &x.symbol))?;
         }
 
         for x in &self.proto_modules {
             let file = format!("{}.md", x.file_name);
-            self.build_component(&file, self.build_proto_module(&x.html_name, &x.symbol))?;
+            self.build_component(&file, self.build_proto_module(&x.display_name, &x.symbol))?;
         }
 
         for x in &self.interfaces {
             let file = format!("{}.md", x.file_name);
-            self.build_component(&file, self.build_interface(&x.html_name, &x.symbol))?;
+            self.build_component(&file, self.build_interface(&x.display_name, &x.symbol))?;
         }
 
         for x in &self.packages {
             let file = format!("{}.md", x.file_name);
-            self.build_component(&file, self.build_package(&x.html_name, &x.symbol))?;
+            self.build_component(&file, self.build_package(&x.display_name, &x.symbol))?;
         }
 
         for x in &self.components {
@@ -674,25 +677,25 @@ impl DocBuilder {
             .modules
             .iter()
             .cloned()
-            .map(|x| (x.html_name, x.file_name))
+            .map(|x| (x.display_name, x.file_name))
             .collect();
         let proto_modules: Vec<_> = self
             .proto_modules
             .iter()
             .cloned()
-            .map(|x| (x.html_name, x.file_name))
+            .map(|x| (x.display_name, x.file_name))
             .collect();
         let interfaces: Vec<_> = self
             .interfaces
             .iter()
             .cloned()
-            .map(|x| (x.html_name, x.file_name))
+            .map(|x| (x.display_name, x.file_name))
             .collect();
         let packages: Vec<_> = self
             .packages
             .iter()
             .cloned()
-            .map(|x| (x.html_name, x.file_name))
+            .map(|x| (x.display_name, x.file_name))
             .collect();
         let components: Vec<_> = self
             .components
@@ -747,7 +750,7 @@ impl DocBuilder {
             .iter()
             .map(|x| ListItem {
                 file_name: x.file_name.clone(),
-                html_name: x.html_name.clone(),
+                display_name: x.display_name.clone(),
                 description: x.symbol.doc_comment.format(true),
             })
             .collect()
@@ -758,7 +761,7 @@ impl DocBuilder {
             .iter()
             .map(|x| ListItem {
                 file_name: x.file_name.clone(),
-                html_name: x.name.clone(),
+                display_name: x.name.clone(),
                 description: x
                     .manifest
                     .doc
@@ -1174,7 +1177,7 @@ mod tests {
                     name: "q".to_string(),
                     dir: "output".to_string(),
                     role: None,
-                    doc: None,
+                    doc: Some("Result, a logic<XLEN> word.".to_string()),
                 },
             ],
             params: vec![
@@ -1261,6 +1264,8 @@ mod tests {
             "{page}"
         );
         assert!(!page.contains("logic<ADDR_W>"), "{page}");
+        assert!(page.contains("Result, a logic&lt;XLEN&gt; word."), "{page}");
+        assert!(!page.contains("logic<XLEN>"), "{page}");
     }
 
     #[test]
@@ -1324,15 +1329,15 @@ mod tests {
     }
 
     #[test]
-    fn module_page_escapes_types_only() {
+    fn module_page_escapes_table_cells() {
         let data = ModuleData {
-            name: "async_fifo::&lt;S&gt;".to_string(),
+            name: "async_fifo::<S>".to_string(),
             description: "Uses `a --> b` and `i < n`".to_string(),
             generic_parameters: vec![],
             parameters: vec![ParameterData {
                 name: "MAX_COUNT".to_string(),
                 typ: "bit<WIDTH>".to_string(),
-                description: Some(" Max value of counter".to_string()),
+                description: Some(" Max value, a bit<WIDTH> literal".to_string()),
             }],
             clock_domains: vec![],
             ports: vec![PortData {
@@ -1340,7 +1345,7 @@ mod tests {
                 direction: "output".to_string(),
                 clock_domain: None,
                 typ: "logic<WIDTH>".to_string(),
-                description: Some(" Count value".to_string()),
+                description: Some(" Count value of logic<WIDTH>".to_string()),
             }],
         };
         let page = Handlebars::new()
@@ -1354,6 +1359,12 @@ mod tests {
             page.contains("<span class=\"hljs-type\">logic&lt;WIDTH&gt;</span>"),
             "{page}"
         );
+        // A table cell is an HTML block, so markdown never runs inside it.
+        assert!(
+            page.contains("Max value, a bit&lt;WIDTH&gt; literal"),
+            "{page}"
+        );
+        assert!(page.contains("Count value of logic&lt;WIDTH&gt;"), "{page}");
         assert!(!page.contains("bit<WIDTH>"), "{page}");
         assert!(!page.contains("logic<WIDTH>"), "{page}");
         assert!(page.contains("# async_fifo::&lt;S&gt;"), "{page}");
@@ -1368,13 +1379,13 @@ mod tests {
     }
 
     #[test]
-    fn list_page_does_not_double_escape() {
+    fn list_page_escapes_names_and_descriptions() {
         let data = ListData {
             name: "Modules".to_string(),
             items: vec![ListItem {
                 file_name: "async_fifo".to_string(),
-                html_name: "async_fifo::&lt;S&gt;".to_string(),
-                description: "Asynchronous FIFO".to_string(),
+                display_name: "async_fifo::<S>".to_string(),
+                description: "Asynchronous FIFO of logic<W>".to_string(),
             }],
         };
         let page = Handlebars::new().render_template(LIST_TMPL, &data).unwrap();
@@ -1382,6 +1393,11 @@ mod tests {
             page.contains("<a href=\"async_fifo.html\">async_fifo::&lt;S&gt;</a>"),
             "{page}"
         );
+        assert!(
+            page.contains("Asynchronous FIFO of logic&lt;W&gt;"),
+            "{page}"
+        );
+        assert!(!page.contains("logic<W>"), "{page}");
         assert!(!page.contains("&amp;"), "{page}");
     }
 }
