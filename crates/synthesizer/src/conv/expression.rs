@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use veryl_analyzer::ir::{
     self as air, Expression, Factor, Op, SystemFunctionInput, SystemFunctionKind,
 };
+use veryl_parser::resource_table::StrId;
 
 use crate::conv::ConvContext;
 use crate::conv::arith;
@@ -187,11 +188,11 @@ fn synth_raw(
             }
             Ok(out)
         }
-        Expression::ArrayLiteral(_, _) | Expression::StructConstructor(_, _, _) => {
-            // Analyzer folds these into element-wise Assign statements.
-            Err(SynthesizerError::internal(
-                "array or struct literal reached synthesizer",
-            ))
+        Expression::StructConstructor(r#type, fields, comptime) => {
+            synth_struct_constructor(ctx, r#type, fields, comptime, current)
+        }
+        Expression::ArrayLiteral(items, comptime) => {
+            synth_array_literal(ctx, items, comptime, current, ctx_width)
         }
     }
 }
@@ -221,6 +222,97 @@ fn dynamic_select_shape(var_type: &air::Type, total_bits: usize) -> (usize, usiz
         return bit_select;
     }
     (num_elements, stride)
+}
+
+/// The first declared member of a packed struct owns the high bits, so with
+/// LSB-first nets the members glue together back-to-front.
+fn synth_struct_constructor(
+    ctx: &mut ConvContext,
+    r#type: &air::Type,
+    fields: &[(StrId, Expression)],
+    comptime: &air::Comptime,
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+) -> Result<Vec<NetId>, SynthesizerError> {
+    let air::TypeKind::Struct(s) = &r#type.kind else {
+        return Err(SynthesizerError::unsupported(
+            UnsupportedKind::UnionConstructor,
+            &comptime.token,
+        ));
+    };
+    if s.members.len() != fields.len() {
+        return Err(SynthesizerError::internal(format!(
+            "struct constructor has {} values for {} members",
+            fields.len(),
+            s.members.len()
+        )));
+    }
+
+    let mut out = Vec::new();
+    for (member, (_, expr)) in s.members.iter().zip(fields).rev() {
+        let width = member.width().ok_or_else(|| {
+            SynthesizerError::unknown_width(
+                format!("struct member '{}'", member.name),
+                &comptime.token,
+            )
+        })?;
+        out.extend(synthesize_expr(ctx, expr, current, width)?);
+    }
+    Ok(out)
+}
+
+/// Element 0 occupies the *lowest* bits of the flattened nets (see the
+/// `Factor::Variable` arm), so unlike a concatenation the items are laid down
+/// in source order, filling `target_width` — the whole array.
+///
+/// The element width follows from the element *count*: a bare integer keeps
+/// its own 32-bit width here, so measuring an item would size the array off
+/// one unsized constant.
+fn synth_array_literal(
+    ctx: &mut ConvContext,
+    items: &[air::ArrayLiteralItem],
+    comptime: &air::Comptime,
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+    target_width: usize,
+) -> Result<Vec<NetId>, SynthesizerError> {
+    let mut counts = Vec::with_capacity(items.len());
+    for item in items {
+        let air::ArrayLiteralItem::Value(_, repeat) = item else {
+            return Err(SynthesizerError::unsupported(
+                UnsupportedKind::PackedArrayLiteralDefault,
+                &comptime.token,
+            ));
+        };
+        counts.push(match repeat {
+            Some(r) => r
+                .eval_value(&mut ctx.eval_ctx)
+                .and_then(|v| v.to_usize())
+                .ok_or_else(|| {
+                    SynthesizerError::unknown_width("array literal repeat count", &comptime.token)
+                })?,
+            None => 1,
+        });
+    }
+
+    let elem_count: usize = counts.iter().sum();
+    if elem_count == 0 || !target_width.is_multiple_of(elem_count) {
+        return Err(SynthesizerError::unknown_width(
+            "array literal element",
+            &comptime.token,
+        ));
+    }
+    let elem_width = target_width / elem_count;
+
+    let mut out = Vec::with_capacity(target_width);
+    for (item, count) in items.iter().zip(counts) {
+        let air::ArrayLiteralItem::Value(e, _) = item else {
+            unreachable!("defaults are rejected above");
+        };
+        let bits = synthesize_expr(ctx, e, current, elem_width)?;
+        for _ in 0..count {
+            out.extend(bits.iter().copied());
+        }
+    }
+    Ok(out)
 }
 
 fn synth_factor(
