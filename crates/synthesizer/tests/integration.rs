@@ -4672,3 +4672,194 @@ fn whole_array_assign_drives_every_element() {
         elementwise.module.cells.len()
     );
 }
+
+#[test]
+fn struct_member_write_uses_base_coordinates() {
+    // Regression: the analyzer rebases a member select into whole-variable
+    // coordinates, but the write path added the member offset on top, so the
+    // highest member's write landed past the end and the next member's landed
+    // in its neighbour's bits. Only the last member, at offset 0, was correct.
+    let code = r#"
+        module Three (
+            i_a: input  logic<4>,
+            i_b: input  logic<4>,
+            i_c: input  logic<4>,
+            oa : output logic<4>,
+            ob : output logic<4>,
+            oc : output logic<4>,
+        ) {
+            struct T {
+                a: logic<4>,
+                b: logic<4>,
+                c: logic<4>,
+            }
+            var s: T;
+            always_comb {
+                s.a = i_a;
+                s.b = i_b;
+                s.c = i_c;
+            }
+            assign oa = s.a;
+            assign ob = s.b;
+            assign oc = s.c;
+        }
+        module Nested (
+            i_a: input  logic<4>,
+            i_b: input  logic<4>,
+            oa : output logic<4>,
+            ob : output logic<4>,
+        ) {
+            struct Inner {
+                x: logic<4>,
+                y: logic<4>,
+            }
+            struct Outer {
+                p: logic<4>,
+                q: Inner,
+            }
+            var s: Outer;
+            always_comb {
+                s.p   = i_a;
+                s.q.x = i_b;
+                s.q.y = i_a;
+            }
+            assign oa = s.p;
+            assign ob = s.q.x;
+        }
+        module ArrayOfStruct (
+            i_a: input  logic<4>,
+            i_b: input  logic<4>,
+            oa : output logic<4>,
+        ) {
+            struct T {
+                a: logic<4>,
+                b: logic<4>,
+            }
+            var s: T [2];
+            always_comb {
+                s[0].a = i_a;
+                s[0].b = i_b;
+                s[1].a = i_b;
+                s[1].b = i_a;
+            }
+            assign oa = s[1].a;
+        }
+        // Bit selects inside the high member exercise the same offset path.
+        module HighMemberBits (
+            i_a  : input  logic<4>,
+            i_i  : input  logic<2>,
+            o_fix: output logic,
+            o_dyn: output logic<4>,
+        ) {
+            struct T {
+                a: logic<4>,
+                b: logic<4>,
+            }
+            var s: T;
+            var t: T;
+            always_comb {
+                s.a    = 0;
+                s.a[2] = i_a[0];
+                s.b    = 0;
+                t.a    = 0;
+                t.a[i_i] = 1;
+                t.b    = 0;
+            }
+            assign o_fix = s.a[2];
+            assign o_dyn = t.a;
+        }
+    "#;
+    let (ir, _) = analyze(code, "Three");
+    let port_nets = |g: &veryl_synthesizer::ir::GateIr, name: &str| -> Vec<u32> {
+        g.module
+            .ports
+            .iter()
+            .find(|p| format!("{}", p.name) == name)
+            .unwrap_or_else(|| panic!("port {name}"))
+            .nets
+            .clone()
+    };
+
+    for (module, pairs) in [
+        ("Three", vec![("oa", "i_a"), ("ob", "i_b"), ("oc", "i_c")]),
+        ("Nested", vec![("oa", "i_a"), ("ob", "i_b")]),
+        ("ArrayOfStruct", vec![("oa", "i_b")]),
+    ] {
+        let g = build_gate_ir(&ir, resource_table::insert_str(module))
+            .unwrap_or_else(|e| panic!("synthesize {module}: {e:?}"));
+        for (out, inp) in pairs {
+            assert_eq!(
+                port_nets(&g, out),
+                port_nets(&g, inp),
+                "{module}: {out} must alias {inp}"
+            );
+        }
+    }
+
+    use veryl_synthesizer::ir::{NET_CONST0, NET_CONST1};
+    let g = build_gate_ir(&ir, resource_table::insert_str("HighMemberBits"))
+        .expect("synthesize high-member bit selects");
+    assert_eq!(
+        port_nets(&g, "o_fix"),
+        vec![port_nets(&g, "i_a")[0]],
+        "a constant bit select into the high member must reach that bit"
+    );
+    assert!(
+        port_nets(&g, "o_dyn")
+            .iter()
+            .all(|&n| n != NET_CONST0 && n != NET_CONST1),
+        "a runtime bit select into the high member must drive every bit"
+    );
+}
+
+#[test]
+fn struct_member_ram_write_keeps_its_lane() {
+    // The RAM sub-word path double-counted the offset too, pushing a member
+    // write out of the word so the port carried no live mask bit at all.
+    use veryl_synthesizer::ir::NET_CONST0;
+    let code = r#"
+        module RamMember (
+            i_clk: input  clock    ,
+            we   : input  logic    ,
+            waddr: input  logic<10>,
+            raddr: input  logic<10>,
+            wdata: input  logic<8> ,
+            rdata: output logic<32>,
+        ) {
+            struct S {
+                a: logic<16>,
+                b: logic<16>,
+            }
+            var mem: S [1024];
+            always_ff {
+                if we {
+                    mem[waddr].a[7:0] = wdata;
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "RamMember");
+    let gate = build_gate_ir(&ir, top).expect("synthesize struct member RAM write");
+    let ram = gate
+        .module
+        .ram_blocks
+        .first()
+        .expect("array must infer as RAM");
+    let mask = ram.write_ports[0]
+        .mask
+        .as_ref()
+        .expect("a sub-word write needs a mask");
+    let live: Vec<usize> = mask
+        .iter()
+        .enumerate()
+        .filter(|&(_, &n)| n != NET_CONST0)
+        .map(|(i, _)| i)
+        .collect();
+    // `a` occupies bits 31:16, so `a[7:0]` is bits 23:16.
+    assert_eq!(
+        live,
+        (16..24).collect::<Vec<_>>(),
+        "the masked lane must cover exactly the written member bits"
+    );
+}
