@@ -4505,3 +4505,95 @@ fn packed_multidim_element_read_keeps_full_width() {
         "no output bit may be tied to a constant net"
     );
 }
+
+#[test]
+fn packed_multidim_dynamic_element_select_keeps_full_width() {
+    // Regression: `p[i]` on `logic<4, 8>` built a per-bit mux tree, returning
+    // one bit zero-extended to the element width. It must agree with both the
+    // constant-index form and the equivalent unpacked array.
+    use veryl_synthesizer::ir::{NET_CONST0, NET_CONST1};
+    let code = r#"
+        module DynPacked (
+            i_a  : input  logic<8>,
+            i_i  : input  logic<2>,
+            o_out: output logic<8>,
+        ) {
+            var p: logic<4, 8>;
+            always_comb {
+                for k in 0..4 {
+                    p[k] = i_a + k;
+                }
+            }
+            assign o_out = p[i_i];
+        }
+        module DynUnpacked (
+            i_a  : input  logic<8>,
+            i_i  : input  logic<2>,
+            o_out: output logic<8>,
+        ) {
+            var u: logic<8> [4];
+            always_comb {
+                for k in 0..4 {
+                    u[k] = i_a + k;
+                }
+            }
+            assign o_out = u[i_i];
+        }
+        module DynPacked3 (
+            i_a  : input  logic<8>,
+            i_i  : input  logic,
+            o_out: output logic<32>,
+        ) {
+            var q: logic<2, 4, 8>;
+            always_comb {
+                for k in 0..2 {
+                    for m in 0..4 {
+                        q[k][m] = i_a + k + m;
+                    }
+                }
+            }
+            assign o_out = q[i_i];
+        }
+    "#;
+    let (ir, _) = analyze(code, "DynPacked");
+    let packed = build_gate_ir(&ir, resource_table::insert_str("DynPacked"))
+        .expect("synthesize dynamic packed select");
+    let unpacked = build_gate_ir(&ir, resource_table::insert_str("DynUnpacked"))
+        .expect("synthesize dynamic unpacked select");
+
+    // The bug muxed single bits: 3 cells instead of a full 8-bit mux tree.
+    assert_eq!(
+        packed.module.cells.len(),
+        unpacked.module.cells.len(),
+        "dynamic packed select ({} cells) must match the unpacked one ({} cells)",
+        packed.module.cells.len(),
+        unpacked.module.cells.len()
+    );
+
+    let out = packed
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "o_out")
+        .expect("o_out port");
+    assert!(
+        out.nets.iter().all(|&n| n != NET_CONST0 && n != NET_CONST1),
+        "no output bit may be tied to a constant net"
+    );
+
+    // A select one dimension deep on a 3-D width picks a 32-bit slice.
+    let packed3 = build_gate_ir(&ir, resource_table::insert_str("DynPacked3"))
+        .expect("synthesize 3-D dynamic select");
+    let out3 = packed3
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "o_out")
+        .expect("o_out port");
+    assert!(
+        out3.nets
+            .iter()
+            .all(|&n| n != NET_CONST0 && n != NET_CONST1),
+        "no output bit of the 3-D select may be tied to a constant net"
+    );
+}
