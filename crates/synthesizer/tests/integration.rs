@@ -4863,3 +4863,295 @@ fn struct_member_ram_write_keeps_its_lane() {
         "the masked lane must cover exactly the written member bits"
     );
 }
+
+/// `t = T'{...}` stays a `StructConstructor` in the analyzer IR, so the
+/// synthesizer has to pack it itself.
+#[test]
+fn struct_literal_synthesizes_as_direct_connection() {
+    let code = r#"
+        module Top (
+            i: input  logic,
+            o: output logic,
+        ) {
+            struct T {
+                a: logic,
+            }
+            var t: T;
+            always_comb {
+                t = T'{a: i};
+                o = t.a;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    assert_eq!(port("o"), port("i"));
+}
+
+/// The first declared member of a packed struct owns the high bits; reading the
+/// members out separately pins that down — a reversed pack swaps `hi` and `lo`.
+#[test]
+fn struct_literal_packs_first_member_into_high_bits() {
+    let code = r#"
+        module Top (
+            i:  input  logic<3>,
+            hi: output logic<2>,
+            lo: output logic,
+        ) {
+            struct T {
+                a: logic<2>,
+                b: logic,
+            }
+            var t: T;
+            always_comb {
+                t  = T'{a: i[2:1], b: i[0]};
+                hi = t.a;
+                lo = t.b;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    let i = port("i");
+    assert_eq!(port("hi"), vec![i[1], i[2]]);
+    assert_eq!(port("lo"), vec![i[0]]);
+}
+
+/// Nested literals must flatten into the same bit layout as writing each
+/// member individually.
+#[test]
+fn nested_struct_literal_matches_member_wise_writes() {
+    let code = r#"
+        module Top (
+            i: input  logic<8>,
+            o: output logic<8>,
+        ) {
+            struct Inner {
+                x: logic<2>,
+                y: logic,
+            }
+            struct T {
+                a: logic<3>,
+                b: Inner,
+                c: logic<2>,
+            }
+            var t: T;
+            var u: T;
+            always_comb {
+                t = T'{a: i[2:0], b: Inner'{x: i[4:3], y: i[5]}, c: i[7:6]};
+
+                u.a   = i[2:0];
+                u.b.x = i[4:3];
+                u.b.y = i[5];
+                u.c   = i[7:6];
+
+                o = {t.a, t.b.x, t.b.y, t.c} ^ {u.a, u.b.x, u.b.y, u.c};
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let o = gate
+        .ports
+        .iter()
+        .find(|p| p.name.to_string() == "o")
+        .expect("port o");
+    for (k, &n) in o.nets.iter().enumerate() {
+        assert!(
+            matches!(gate.nets[n as usize].driver, NetDriver::Const(false)),
+            "o[{k}] must fold to 0, got {:?}",
+            gate.nets[n as usize].driver
+        );
+    }
+}
+
+/// Kept packed (a ternary arm, say) an array literal must lay out to the same
+/// bits as writing the elements individually.
+#[test]
+fn packed_array_literal_matches_element_wise_writes() {
+    let code = r#"
+        module Top (
+            i: input  logic<4>,
+            s: input  logic   ,
+            o: output logic<4>,
+        ) {
+            var t: logic<2> [2];
+            var u: logic<2> [2];
+            always_comb {
+                t = if s ? '{i[3:2], i[1:0]} : '{i[1:0], i[3:2]};
+
+                if s {
+                    u[0] = i[3:2];
+                    u[1] = i[1:0];
+                } else {
+                    u[0] = i[1:0];
+                    u[1] = i[3:2];
+                }
+
+                o = {t[1], t[0]} ^ {u[1], u[0]};
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let o = gate
+        .ports
+        .iter()
+        .find(|p| p.name.to_string() == "o")
+        .expect("port o");
+    for (k, &n) in o.nets.iter().enumerate() {
+        assert!(
+            matches!(gate.nets[n as usize].driver, NetDriver::Const(false)),
+            "o[{k}] must fold to 0, got {:?}",
+            gate.nets[n as usize].driver
+        );
+    }
+}
+
+/// `repeat`, nesting and unsized constants must all land on the destination's
+/// element boundaries.
+#[test]
+fn packed_array_literal_handles_repeat_nesting_and_unsized_constants() {
+    let code = r#"
+        module Top (
+            i: input  logic<4>,
+            s: input  logic   ,
+            o: output logic<8>,
+            p: output logic<8>,
+            q: output logic<8>,
+        ) {
+            var t: logic<2> [4];
+            var u: logic<2> [4];
+            var m: logic<2> [2, 2];
+            var n: logic<2> [2, 2];
+            var c: logic<2> [4];
+            always_comb {
+                t = if s ? '{i[3:2] repeat 4} : '{i[1:0] repeat 4};
+                for k in 0..4 {
+                    u[k] = if s ? i[3:2] : i[1:0];
+                }
+                o = {t[3], t[2], t[1], t[0]} ^ {u[3], u[2], u[1], u[0]};
+
+                m = if s ? '{'{i[1:0], i[3:2]}, '{i[3:2], i[1:0]}}
+                         : '{'{i[3:2], i[1:0]}, '{i[1:0], i[3:2]}};
+                if s {
+                    n[0][0] = i[1:0];
+                    n[0][1] = i[3:2];
+                    n[1][0] = i[3:2];
+                    n[1][1] = i[1:0];
+                } else {
+                    n[0][0] = i[3:2];
+                    n[0][1] = i[1:0];
+                    n[1][0] = i[1:0];
+                    n[1][1] = i[3:2];
+                }
+                p = {m[1][1], m[1][0], m[0][1], m[0][0]}
+                  ^ {n[1][1], n[1][0], n[0][1], n[0][0]};
+
+                c = if s ? '{1, 2, 3, 0} : '{0, 0, 0, 0};
+                q = {c[3], c[2], c[1], c[0]};
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    for name in ["o", "p"] {
+        for (k, &net) in port(name).iter().enumerate() {
+            assert!(
+                matches!(gate.nets[net as usize].driver, NetDriver::Const(false)),
+                "{name}[{k}] must fold to 0, got {:?}",
+                gate.nets[net as usize].driver
+            );
+        }
+    }
+    // `c` is `'{1, 2, 3, 0}` gated by `s`, read back MSB-first: 8'b00_11_10_01.
+    let s = port("s")[0];
+    let expect: Vec<u32> = (0..8)
+        .map(|k| if (0b0011_1001u32 >> k) & 1 == 1 { s } else { 0 })
+        .collect();
+    assert_eq!(port("q"), expect);
+}
+
+/// A dynamic bit select on a struct member (`t.b[idx] = ...`) resolves to a
+/// variable-absolute bit position, so the candidate bits and the constants the
+/// index is compared against must both be absolute too.
+#[test]
+fn dynamic_bit_select_on_struct_member_writes_the_addressed_bit() {
+    let code = r#"
+        module Top (
+            d:   input  logic   ,
+            idx: input  logic<2>,
+            o:   output logic<8>,
+        ) {
+            struct T {
+                a: logic<3>,
+                b: logic<3>,
+                c: logic<2>,
+            }
+            var t: T;
+            always_comb {
+                t        = '0;
+                t.b[idx] = d;
+                o        = {t.a, t.b, t.c};
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    let d = port("d")[0];
+    let idx = port("idx");
+    let o = port("o");
+
+    // `b` occupies o[4:2], so `t.b[k]` is o[2 + k]. `idx == 3` is out of range
+    // for a 3-bit member and must write nothing.
+    for k in 0..4usize {
+        for d_val in [false, true] {
+            let inputs: std::collections::HashMap<_, _> = idx
+                .iter()
+                .enumerate()
+                .map(|(b, &n)| (n, (k >> b) & 1 == 1))
+                .chain(std::iter::once((d, d_val)))
+                .collect();
+            let mut memo = std::collections::HashMap::new();
+            for (bit, &n) in o.iter().enumerate() {
+                assert_eq!(
+                    eval_net(&gate, n, &inputs, &mut memo),
+                    k < 3 && bit == 2 + k && d_val,
+                    "o[{bit}] mismatch at idx={k} d={d_val}"
+                );
+            }
+        }
+    }
+}
