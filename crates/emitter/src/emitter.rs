@@ -2732,28 +2732,79 @@ impl Emitter {
     fn emit_modport_default_member(&mut self, arg: &ModportDeclaration) {
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let SymbolKind::Modport(x) = &symbol.found.kind {
-                for (i, x) in x.members.iter().enumerate() {
-                    let symbol = symbol_table::get(*x).unwrap();
-                    if !matches!(symbol.token.source, TokenSource::Generated(_)) {
-                        continue;
-                    }
+                let members: Vec<_> = x
+                    .members
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, id)| {
+                        let symbol = symbol_table::get(*id)?;
+                        if !matches!(symbol.token.source, TokenSource::Generated(_)) {
+                            return None;
+                        }
+                        let direction = match symbol.kind {
+                            SymbolKind::ModportVariableMember(ref x) => x.direction,
+                            SymbolKind::ModportFunctionMember(_) => SymDirection::Import,
+                            _ => return None,
+                        };
+                        Some((i, symbol, direction))
+                    })
+                    .collect();
+                // Generated members have no source position, so the guards have to
+                // come from the variable or function they were generated from.
+                let members: Vec<_> = members
+                    .into_iter()
+                    .map(|(i, symbol, direction)| {
+                        let source = match symbol.kind {
+                            SymbolKind::ModportVariableMember(ref x) => Some(x.variable),
+                            SymbolKind::ModportFunctionMember(ref x) => Some(x.function),
+                            _ => None,
+                        };
+                        let defines: Vec<_> = source
+                            .and_then(symbol_table::get)
+                            .map(|x| attribute_table::get(&x.token))
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter_map(|x| match x {
+                                Attr::Ifdef(x) => Some(("ifdef", x)),
+                                Attr::Ifndef(x) => Some(("ifndef", x)),
+                                _ => None,
+                            })
+                            .collect();
+                        (i, symbol, direction, defines)
+                    })
+                    .collect();
+                let last = members.len().saturating_sub(1);
 
-                    let direction = match symbol.kind {
-                        SymbolKind::ModportVariableMember(x) => x.direction,
-                        SymbolKind::ModportFunctionMember(_) => SymDirection::Import,
-                        _ => continue,
-                    };
+                for (n, (i, symbol, direction, defines)) in members.iter().enumerate() {
+                    let guarded = !defines.is_empty();
+                    let has_prev = *i != 0 || arg.modport_declaration_opt.is_some();
+                    // A guarded member keeps its comma inside its own guard, so the
+                    // comma disappears with it. The explicit list emits none.
+                    let leading = has_prev && (guarded || n == 0);
+                    let trailing = n != last && members[n + 1].3.is_empty();
 
-                    if i != 0 || arg.modport_declaration_opt.is_some() {
-                        self.str(",");
+                    if has_prev {
+                        if leading && !guarded {
+                            self.str(",");
+                        }
                         self.newline();
                     }
+
                     let token = arg
                         .modport_declaration_opt0
                         .clone()
                         .unwrap()
                         .dot_dot
                         .dot_dot_token;
+
+                    for (kind, define) in defines {
+                        self.str(&format!("`{kind} {define}"));
+                        self.newline();
+                    }
+                    if leading && guarded {
+                        self.str(",");
+                        self.space(1);
+                    }
                     self.align_start(align_kind::DIRECTION);
                     self.duplicated_token(&token.replace(&direction.to_string()));
                     self.align_finish(align_kind::DIRECTION);
@@ -2761,6 +2812,13 @@ impl Emitter {
                     self.align_start(align_kind::IDENTIFIER);
                     self.duplicated_token(&token.replace(&symbol.token.text.to_string()));
                     self.align_finish(align_kind::IDENTIFIER);
+                    if trailing {
+                        self.str(",");
+                    }
+                    for _ in defines {
+                        self.newline();
+                        self.str("`endif");
+                    }
                 }
             } else {
                 unreachable!();

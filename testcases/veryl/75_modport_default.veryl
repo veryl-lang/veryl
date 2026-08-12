@@ -4,6 +4,9 @@ interface Interface75 {
     var c: logic;
     var d: logic;
 
+    #[ifdef(TRACE)]
+    var f: logic;
+
     function Func75 () -> logic {
         var e: logic;
         e = 0;
@@ -31,8 +34,10 @@ interface Interface75 {
     }
 
     modport master_ac {
-        a    : input ,
-        c    : output,
+        a: input ,
+        c: output,
+        #[ifdef(TRACE)]
+        f    : input ,
         get_a: import,
         set_c: import,
     }

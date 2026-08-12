@@ -4,6 +4,10 @@ interface veryl_testcase_Interface75;
     logic c;
     logic d;
 
+    `ifdef TRACE
+    logic f;
+    `endif
+
     function automatic logic Func75() ;
         logic e;
         e = 0;
@@ -31,8 +35,11 @@ interface veryl_testcase_Interface75;
     endfunction
 
     modport master_ac (
-        input  a    ,
-        output c    ,
+        input  a,
+        output c,
+        `ifdef TRACE
+        input  f    ,
+        `endif
         import get_a,
         import set_c
     );
@@ -48,7 +55,10 @@ interface veryl_testcase_Interface75;
         input  a    ,
         input  b    ,
         output c    ,
-        output d    ,
+        output d    
+        `ifdef TRACE
+        , input  f    ,
+        `endif
         import get_a,
         import get_b,
         import set_c,
@@ -58,6 +68,9 @@ interface veryl_testcase_Interface75;
     modport slave_ac (
         output a,
         input  c
+        `ifdef TRACE
+        , output f
+        `endif
     );
 
     modport slave_db (
@@ -70,6 +83,9 @@ interface veryl_testcase_Interface75;
         output b,
         input  c,
         input  d
+        `ifdef TRACE
+        , output f
+        `endif
     );
 
     modport all_input (
@@ -77,6 +93,9 @@ interface veryl_testcase_Interface75;
         input b,
         input c,
         input d
+        `ifdef TRACE
+        , input f
+        `endif
     );
 
     modport all_output (
@@ -84,6 +103,9 @@ interface veryl_testcase_Interface75;
         input b,
         input c,
         input d
+        `ifdef TRACE
+        , input f
+        `endif
     );
 
     modport partial_converse (
@@ -91,6 +113,9 @@ interface veryl_testcase_Interface75;
         output b,
         input  c,
         input  d
+        `ifdef TRACE
+        , output f
+        `endif
     );
 
     modport partial_input (
@@ -98,13 +123,19 @@ interface veryl_testcase_Interface75;
         input  a,
         input  b,
         input  d
+        `ifdef TRACE
+        , input  f
+        `endif
     );
 
     modport partial_same (
         output a    ,
         input  b    ,
         output c    ,
-        output d    ,
+        output d    
+        `ifdef TRACE
+        , input  f    ,
+        `endif
         import get_a,
         import get_b,
         import set_c,
