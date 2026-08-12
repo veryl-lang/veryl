@@ -370,6 +370,19 @@ fn or_nets(ctx: &mut ConvContext, a: NetId, b: NetId) -> NetId {
     }
 }
 
+/// The index/select machinery addresses a single element, so `arr = expr`
+/// has to be handled as one flat write instead.
+fn is_whole_array_dst(
+    dst: &air::AssignDestination,
+    scalar_width: usize,
+    total_width: usize,
+) -> bool {
+    dst.index.0.is_empty()
+        && dst.select.is_empty()
+        && dst.comptime.part_select.is_none()
+        && total_width > scalar_width
+}
+
 /// Computes how many source bits an `AssignDestination` consumes. Purely
 /// structural — doesn't allocate any cells. `write_to_dst` produces the
 /// dynamic-index/select nets later.
@@ -377,10 +390,10 @@ pub(crate) fn dst_slice_width(
     ctx: &mut ConvContext,
     dst: &air::AssignDestination,
 ) -> Result<usize, SynthesizerError> {
-    let scalar_width = ctx
+    let (scalar_width, total_width) = ctx
         .variables
         .get(&dst.id)
-        .map(|s| s.scalar_width)
+        .map(|s| (s.scalar_width, s.width))
         .ok_or_else(|| SynthesizerError::internal(format!("unknown assign target {}", dst.id)))?;
     let member_width = match &dst.comptime.part_select {
         Some(ps) => ps
@@ -392,6 +405,9 @@ pub(crate) fn dst_slice_width(
     };
 
     if dst.select.is_empty() {
+        if is_whole_array_dst(dst, scalar_width, total_width) {
+            return Ok(total_width);
+        }
         Ok(member_width)
     } else if dst.select.is_const() {
         let (hi, lo) = dst
@@ -457,6 +473,19 @@ pub(crate) fn write_to_dst(
         }
         None => (0, scalar_width),
     };
+
+    if is_whole_array_dst(dst, scalar_width, total_width) {
+        let var_current = current.entry(dst.id).or_insert_with(|| {
+            ctx.variables
+                .get(&dst.id)
+                .map(|s| s.nets.clone())
+                .unwrap_or_default()
+        });
+        for (bit, &net) in src.iter().enumerate().take(var_current.len()) {
+            var_current[bit] = net;
+        }
+        return Ok(());
+    }
 
     enum SelectKind {
         Static { lo: usize, hi: usize },

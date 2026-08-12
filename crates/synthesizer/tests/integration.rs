@@ -4597,3 +4597,78 @@ fn packed_multidim_dynamic_element_select_keeps_full_width() {
         "no output bit of the 3-D select may be tied to a constant net"
     );
 }
+
+#[test]
+fn whole_array_assign_drives_every_element() {
+    // Regression: `arr = expr` was sized and written as a single element, so
+    // every element but the first stayed undriven and was optimized away. Two
+    // widths were wrong: the array-typed function return (`total_width` counts
+    // one element) and the assign destination.
+    let code = r#"
+        package kp {
+            type st = logic<8> [4];
+            function bump (din: input st) -> st {
+                var dout: st;
+                for i in 0..4 {
+                    dout[i] = din[i] + 1;
+                }
+                return dout;
+            }
+        }
+        module ViaCall (
+            i_clk: input  clock   ,
+            i_rst: input  reset   ,
+            o_out: output logic<8>,
+        ) {
+            var s: kp::st;
+            always_ff {
+                if_reset {
+                    for i in 0..4 {
+                        s[i] = 0;
+                    }
+                } else {
+                    s = kp::bump(s);
+                }
+            }
+            assign o_out = s[3];
+        }
+        module ElementWise (
+            i_clk: input  clock   ,
+            i_rst: input  reset   ,
+            o_out: output logic<8>,
+        ) {
+            var s: kp::st;
+            always_ff {
+                if_reset {
+                    for i in 0..4 {
+                        s[i] = 0;
+                    }
+                } else {
+                    for i in 0..4 {
+                        s[i] = s[i] + 1;
+                    }
+                }
+            }
+            assign o_out = s[3];
+        }
+    "#;
+    let (ir, _) = analyze(code, "ViaCall");
+    let via_call = build_gate_ir(&ir, resource_table::insert_str("ViaCall"))
+        .expect("synthesize whole-array assign from call");
+    let elementwise = build_gate_ir(&ir, resource_table::insert_str("ElementWise"))
+        .expect("synthesize element-wise assign");
+
+    // The bug kept only the first element's 8 bits.
+    assert_eq!(
+        via_call.module.ffs.len(),
+        32,
+        "every element of the array must stay driven"
+    );
+    assert_eq!(
+        via_call.module.cells.len(),
+        elementwise.module.cells.len(),
+        "whole-array assign ({} cells) must match the element-wise form ({} cells)",
+        via_call.module.cells.len(),
+        elementwise.module.cells.len()
+    );
+}
