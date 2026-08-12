@@ -11235,14 +11235,13 @@ fn for_loop_blocking_write_same_var() {
         sim.step(&clk);
 
         let v = sim.get("cnt").unwrap();
-        // Default ff_opt path stores c as comb (blocking chain → 4).
-        // --disable-ff-opt forces c to dual-slot FF (NBA → 1).
-        let expected_payload = if config.disable_ff_opt { 1 } else { 4 };
-        let expected = Value::new(expected_payload, 8, false);
+        // The unrolled loop writes `c` four times, so it stays a register and
+        // every iteration reads the pre-edge value — the emitted `c <= ...`
+        // keeps only the last write.
+        let expected = Value::new(1, 8, false);
         assert_eq!(
             v, expected,
-            "config={:?}: expected cnt = {} after 1 clock",
-            config, expected_payload,
+            "config={config:?}: expected cnt = 1 after 1 clock"
         );
     }
 }
@@ -20455,6 +20454,134 @@ fn whole_array_assign_from_array_returning_function() {
 
     for config in Config::all() {
         let ir = analyze_top(code, &config, "array_ret")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+#[test]
+fn ff_partial_write_read_of_another_slice_sees_the_old_value() {
+    // Regression: `ff_opt` demoted a register to comb whenever every reference
+    // inside its own always_ff assigned the same element, however many times
+    // that element was written. A statement then observed a write an earlier
+    // statement had made, diverging from the emitted SystemVerilog.
+    let code = r#"
+    module Flat (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var s: logic<32>;
+        always_ff {
+            if_reset {
+                s = 32'h04030201;
+            } else {
+                s[7:0]   = s[7:0] + 1;
+                s[15:8]  = s[15:8] + s[7:0];
+                // A slice written from a lower one must also read pre-edge.
+                s[31:24] = s[23:16];
+            }
+        }
+    }
+
+    module Packed (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var s: logic<4, 8>;
+        always_ff {
+            if_reset {
+                for i in 0..4 {
+                    s[i] = (i + 1) as 8;
+                }
+            } else {
+                for i in 0..4 {
+                    s[i] = s[i] + s[(i + 1) % 4];
+                }
+            }
+        }
+    }
+
+    // Branch arms are mutually exclusive, so an up/down counter still writes
+    // its element once and keeps the comb form.
+    module Branchy (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        up   : input  logic,
+    ) {
+        var s: logic<8>;
+        always_ff {
+            if_reset {
+                s = 0;
+            } else {
+                if up {
+                    s = s + 1;
+                } else {
+                    s = s - 1;
+                }
+            }
+        }
+    }
+
+    module Unpacked (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var s: logic<8> [4];
+        always_ff {
+            if_reset {
+                for i in 0..4 {
+                    s[i] = (i + 1) as 8;
+                }
+            } else {
+                for i in 0..4 {
+                    s[i] = s[i] + s[(i + 1) % 4];
+                }
+            }
+        }
+    }
+
+    #[test(nba)]
+    module nba {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var up: logic;
+
+        inst f: Flat     (i_clk: clk, i_rst: rst);
+        inst y: Branchy  (i_clk: clk, i_rst: rst, up: up);
+        inst p: Packed   (i_clk: clk, i_rst: rst);
+        inst u: Unpacked (i_clk: clk, i_rst: rst);
+
+        initial {
+            up = 1;
+            rst.assert();
+            clk.next();
+
+            $assert(y.s == 8'h01, "an exclusive branch pair is still one write");
+
+            // Every right-hand side reads the value the register held before
+            // the clock edge: 01 -> 02, 02 + old 01 -> 03, 04 -> old 03.
+            $assert(f.s[7:0] == 8'h02, "own slice");
+            $assert(f.s[15:8] == 8'h03, "lower slice must be the old value");
+            $assert(f.s[31:24] == 8'h03, "shifted slice");
+
+            // A packed array is one register, so its elements behave the same
+            // way; the unpacked array is the reference.
+            for i in 0..4 {
+                $assert(p.s[i] == u.s[i], "packed and unpacked must agree");
+            }
+            $assert(u.s[3] == 8'h05, "wrap-around lane reads the old lane 0");
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "nba")
             .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
         let module_name = ir.name.to_string();
         assert_eq!(
