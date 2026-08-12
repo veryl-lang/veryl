@@ -823,7 +823,14 @@ fn synth_function_call(
         }
     }
 
-    let ret_width = call.comptime.r#type.total_width().unwrap_or(0);
+    // `total_width` counts one element, not the whole array.
+    let ret_width = match (
+        call.comptime.r#type.total_width(),
+        call.comptime.r#type.total_array(),
+    ) {
+        (Some(w), Some(n)) => w * n,
+        _ => 0,
+    };
     if let Some(ret_vid) = body.ret {
         if let Some(ret_nets) = inner.get(&ret_vid).cloned() {
             Ok(resize(ret_nets, ret_width, call.comptime.r#type.signed))
