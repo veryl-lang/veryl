@@ -1787,16 +1787,54 @@ fn invalid_import() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    // Importing a package namespace itself is allowed:
+    // https://github.com/veryl-lang/veryl/issues/3122
     let code = r#"
     package PkgA {
+        struct S {
+            x: logic,
+        }
     }
-    module ModuleA {
-        import PkgA;
+    import prj::PkgA;
+    module ModuleA (
+        audio: output PkgA::S,
+    ) {
+        assign audio = PkgA::S'{x: 1'b0};
     }
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidImport { .. }));
+    assert!(errors.is_empty());
+
+    // A top-level package can also be imported under its own name.
+    let code = r#"
+    package PkgB {
+        struct S {
+            x: logic,
+        }
+    }
+    module ModuleB {
+        import PkgB;
+        let _s: PkgB::S = PkgB::S'{x: 1'b0};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // A generic package is imported as-is and instantiated at the use site.
+    let code = r#"
+    package PkgG::<W: u32> {
+        const C: u32 = W;
+    }
+    module ModuleC {
+        import prj::PkgG;
+        const X: u32 = PkgG::<8>::C;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 
     let code = r#"
     package a_pkg::<a: u32> {

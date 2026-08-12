@@ -38,6 +38,12 @@ pub fn check_import(context: &mut Context, value: &ImportDeclaration) {
                     .found
                     .get_parent_package()
                     .is_some_and(|pkg| pkg.token.text == symbol.found.token.text)
+        } else if symbol.found.is_package(false) {
+            // Importing a package namespace itself, so that its members can
+            // be referenced with the package as a qualifier
+            // (e.g. `import fixedpoint::Q8_24;` then `Q8_24::Raw`).
+            // https://github.com/veryl-lang/veryl/issues/3122
+            true
         } else if symbol.full_path.len() >= 2 {
             let parent_symbol = symbol
                 .full_path

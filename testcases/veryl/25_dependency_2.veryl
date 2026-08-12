@@ -154,3 +154,25 @@ module Module25K {
         baz: baz,
     );
 }
+
+// Importing a package namespace itself makes the package name usable as a
+// qualifier at the use site.
+// https://github.com/veryl-lang/veryl/issues/3122
+import veryl_sample4::qux_pkg;
+import veryl_sample4::bar_pkg;
+
+module Module25L {
+    const QUX_0: u32 = qux_pkg::QUX_0;
+    const QUX_1: u32 = qux_pkg::QUX_1;
+}
+
+module Module25M {
+    // Module-scope import of a package namespace.
+    import veryl_sample4::qux_pkg;
+    const QUX_0: u32 = qux_pkg::QUX_0;
+}
+
+module Module25N {
+    // A generic package is imported as-is and instantiated at the use site.
+    const BAR: u32 = bar_pkg::<32>::BAR;
+}
