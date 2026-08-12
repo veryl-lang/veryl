@@ -305,8 +305,9 @@ fn const_subword_range(
         }
         None => (0, scalar_width),
     };
+    // A non-empty select is already in whole-variable coordinates.
     let (lo, hi) = if dst.select.is_empty() {
-        (0, member_width - 1)
+        (member_offset, member_offset + member_width - 1)
     } else if dst.select.is_const() {
         let (hi, lo) = dst
             .select
@@ -321,7 +322,7 @@ fn const_subword_range(
             &dst.token,
         ));
     };
-    Ok((member_offset + lo, member_offset + hi))
+    Ok((lo, hi))
 }
 
 /// AND of every enclosing branch condition (`Neg` negated). Constants fold, so
@@ -539,7 +540,10 @@ pub(crate) fn write_to_dst(
                 &dst.token,
             ));
         }
-        let idx_bits = arith::index_bits_for(member_width);
+        // The index is rebased into whole-variable coordinates: truncating it
+        // to the member width cancels a power-of-two offset but corrupts any
+        // other.
+        let idx_bits = arith::index_bits_for(member_offset + member_width);
         let idx_nets = synthesize_expr(ctx, &dst.select.0[0], current, idx_bits)?;
         SelectKind::DynamicSingle { idx_nets }
     };
@@ -619,11 +623,21 @@ pub(crate) fn write_to_dst(
         }
     };
     let (bit_positions, bit_match): (Vec<usize>, Option<Vec<NetId>>) = match select_kind {
-        SelectKind::Static { lo, hi } => ((lo..=hi).map(|p| member_offset + p).collect(), None),
+        SelectKind::Static { lo, hi } => {
+            // The analyzer rebased a non-empty select into whole-variable
+            // coordinates (`PartSelectPath::to_base_select`); adding the offset
+            // again pushes the write past the end, where it is silently dropped.
+            let base = if dst.select.is_empty() {
+                member_offset
+            } else {
+                0
+            };
+            ((lo..=hi).map(|p| base + p).collect(), None)
+        }
         SelectKind::DynamicSingle { idx_nets } => {
             let positions: Vec<usize> = (0..member_width).map(|b| member_offset + b).collect();
             let matches: Vec<NetId> = (0..member_width)
-                .map(|b| arith::eq_const(ctx, &idx_nets, b))
+                .map(|b| arith::eq_const(ctx, &idx_nets, member_offset + b))
                 .collect();
             (positions, Some(matches))
         }
