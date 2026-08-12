@@ -196,6 +196,33 @@ fn synth_raw(
     }
 }
 
+/// `(element count, bit stride)` addressed by a one-dimensional runtime
+/// select: a single-dimension width (`logic<32>`) selects a bit, each further
+/// dimension widens the element.
+fn dynamic_select_shape(var_type: &air::Type, total_bits: usize) -> (usize, usize) {
+    let bit_select = (total_bits, 1);
+    let shape = var_type.width();
+    if shape.dims() == 0 {
+        return bit_select;
+    }
+    let mut stride = 1;
+    for d in shape.iter().skip(1) {
+        match d {
+            Some(w) => stride *= w,
+            None => return bit_select,
+        }
+    }
+    let Some(Some(num_elements)) = shape.get(0).copied() else {
+        return bit_select;
+    };
+    // `chunks` panics on a zero stride; a mismatch means these nets are not
+    // the whole declared variable (RAM read data).
+    if stride == 0 || num_elements * stride != total_bits {
+        return bit_select;
+    }
+    (num_elements, stride)
+}
+
 fn synth_factor(
     ctx: &mut ConvContext,
     factor: &Factor,
@@ -289,9 +316,15 @@ fn synth_factor(
             if select.is_empty() {
                 return apply_part_select(&element_nets, ct, id);
             }
+            // Not `ct.r#type` — see `VarSlot::type`.
+            let var_type = ctx
+                .variables
+                .get(id)
+                .map(|s| &s.r#type)
+                .unwrap_or(&ct.r#type);
             if select.is_const() && !select.is_range() {
                 let (high, low) = select
-                    .eval_value(&mut ctx.eval_ctx, &ct.r#type, false)
+                    .eval_value(&mut ctx.eval_ctx, var_type, false)
                     .ok_or_else(|| {
                         SynthesizerError::dynamic_select(format!("variable {}", id), &ct.token)
                     })?;
@@ -325,7 +358,7 @@ fn synth_factor(
                     ));
                 }
                 let (high, low) = select
-                    .eval_value(&mut ctx.eval_ctx, &ct.r#type, false)
+                    .eval_value(&mut ctx.eval_ctx, var_type, false)
                     .ok_or_else(|| {
                         SynthesizerError::dynamic_select(format!("variable {}", id), &ct.token)
                     })?;
@@ -347,9 +380,12 @@ fn synth_factor(
                     &ct.token,
                 ));
             }
-            let idx_bits = arith::index_bits_for(element_nets.len());
+            // Must match the stride `eval_value` derives for a constant index.
+            let (num_elements, stride) = dynamic_select_shape(var_type, element_nets.len());
+            let idx_bits = arith::index_bits_for(num_elements);
             let idx_nets = synthesize_expr(ctx, &select.0[0], current, idx_bits)?;
-            let elements: Vec<Vec<NetId>> = element_nets.iter().map(|&n| vec![n]).collect();
+            let elements: Vec<Vec<NetId>> =
+                element_nets.chunks(stride).map(|c| c.to_vec()).collect();
             Ok(arith::dynamic_mux_tree(ctx, &elements, &idx_nets))
         }
         Factor::FunctionCall(call) => synth_function_call(ctx, call, current),
