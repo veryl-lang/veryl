@@ -88,10 +88,14 @@ pub struct LayoutInputs {
     pub comb_total: usize,
 }
 
-/// `VERYL_COMB_LAYOUT=1` opt-in.
-pub fn enabled() -> bool {
+/// Default-on for 2-state storage; `VERYL_COMB_LAYOUT=0` opts out.  Off on
+/// wasm, which has no whole-comb backend to profit from the reordering.
+pub fn enabled(use_4state: bool) -> bool {
+    if cfg!(target_family = "wasm") {
+        return false;
+    }
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("VERYL_COMB_LAYOUT").as_deref() == Ok("1"))
+    !use_4state && *ON.get_or_init(|| std::env::var("VERYL_COMB_LAYOUT").as_deref() != Ok("0"))
 }
 
 fn diag() -> bool {

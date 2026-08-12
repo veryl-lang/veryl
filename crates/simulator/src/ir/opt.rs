@@ -41,9 +41,10 @@ pub(crate) mod comb_fusion {
     use crate::ir::event::Event;
     use crate::ir::variable::VarOffset;
     use crate::{HashMap, HashSet};
-    pub fn enabled() -> bool {
+    pub fn enabled(_use_4state: bool) -> bool {
         false
     }
+    pub fn force_disable() {}
     pub fn inline_single_readers(
         stmts: Vec<ProtoStatement>,
         _events: &HashMap<Event, Vec<ProtoStatement>>,

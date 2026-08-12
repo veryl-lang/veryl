@@ -276,7 +276,9 @@ impl DualSimulator {
         // compiled-block structure keys a different schedule / different
         // defs disappear), so byte-identical buffers are no longer expected
         // — compare per-variable through each arm's own meta instead.
-        if crate::ir::comb_layout::enabled() || crate::ir::opt::comb_fusion::enabled() {
+        if crate::ir::comb_layout::enabled(self.jit.ir.use_4state)
+            || crate::ir::opt::comb_fusion::enabled(self.jit.ir.use_4state)
+        {
             self.compare_vars_recursive(
                 &self.jit.ir.module_variables,
                 &self.interp.ir.module_variables,
