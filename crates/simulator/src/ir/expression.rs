@@ -54,6 +54,8 @@ pub enum Expression {
     },
     Concatenation {
         elements: Vec<(Box<Expression>, usize, usize)>, // (expr, repeat, elem_width)
+        /// Result signedness, so a `$signed({..})` sign-extends at a wider store.
+        signed: bool,
     },
     Ternary {
         cond: Box<Expression>,
@@ -142,7 +144,7 @@ impl Expression {
                 let y = y.eval(mask_cache);
                 op.eval_value_binary(&x, &y, expr_context.width, expr_context.signed, mask_cache)
             }
-            Expression::Concatenation { elements } => {
+            Expression::Concatenation { elements, signed } => {
                 let mut ret = Value::new(0, 0, false);
                 for (expr, repeat, _elem_width) in elements {
                     let val = expr.eval(mask_cache);
@@ -150,6 +152,7 @@ impl Expression {
                         ret = ret.concat(&val);
                     }
                 }
+                ret.set_signed(*signed);
                 ret
             }
             Expression::Ternary {
@@ -259,7 +262,7 @@ impl Expression {
                 x.gather_variable(inputs, outputs);
                 y.gather_variable(inputs, outputs);
             }
-            Expression::Concatenation { elements } => {
+            Expression::Concatenation { elements, .. } => {
                 for (expr, _, _) in elements {
                     expr.gather_variable(inputs, outputs);
                 }
@@ -1233,6 +1236,13 @@ impl ProtoExpression {
                 ..
             } => (*width, expr_context.signed),
             ProtoExpression::Value { value, width, .. } => (*width, value.signed()),
+            // A concatenation is unsigned per the LRM, but `$signed({..})` marks
+            // it signed and it reaches the store at its natural width too.
+            ProtoExpression::Concatenation {
+                width,
+                expr_context,
+                ..
+            } => (*width, expr_context.signed),
             _ => return None,
         };
         (signed && width > 0 && width < dst_width).then_some(width)
@@ -1383,7 +1393,11 @@ impl ProtoExpression {
                         expr_context: *expr_context,
                     }
                 }
-                ProtoExpression::Concatenation { elements, .. } => {
+                ProtoExpression::Concatenation {
+                    elements,
+                    expr_context,
+                    ..
+                } => {
                     let elements = elements
                         .iter()
                         .map(|(expr, repeat, elem_width)| {
@@ -1397,7 +1411,10 @@ impl ProtoExpression {
                             (Box::new(expr), *repeat, *elem_width)
                         })
                         .collect();
-                    Expression::Concatenation { elements }
+                    Expression::Concatenation {
+                        elements,
+                        signed: expr_context.signed,
+                    }
                 }
                 ProtoExpression::Ternary {
                     cond,

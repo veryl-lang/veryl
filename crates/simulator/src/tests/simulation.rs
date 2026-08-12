@@ -3542,6 +3542,42 @@ fn signed_cast_same_width() {
     }
 }
 
+#[test]
+fn signed_concat_sign_extends_at_store() {
+    // https://github.com/veryl-lang/veryl/issues/3199
+    let code = r#"
+    module Top (
+        a: input  logic<32>       ,
+        b: output signed logic<32>,
+        c: output logic<32>       ,
+    ) {
+        always_comb {
+            b = ($signed({a[msb] repeat 3, a[msb:8]}) as 32);
+            c = {a[msb] repeat 3, a[msb:8]};
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("32'h8000_0000").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:x}", sim.get("b").unwrap()),
+            "32'hff800000",
+            "config={config:?}"
+        );
+        // A bare concatenation stays unsigned per the LRM, so it zero-extends.
+        assert_eq!(
+            format!("{:x}", sim.get("c").unwrap()),
+            "32'h07800000",
+            "config={config:?}"
+        );
+    }
+}
+
 // Regression: `$signed(a) / $signed(b)` and `%` must (a) produce a
 // signed result and (b) survive the cranelift SIGFPE cases (y == 0 and
 // signed i64::MIN / -1) consistently between interpreter and JIT.
