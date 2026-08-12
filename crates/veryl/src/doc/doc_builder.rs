@@ -15,6 +15,9 @@ use veryl_analyzer::symbol_table;
 use veryl_metadata::{ComponentManifest, Metadata, MetadataError};
 use veryl_parser::veryl_token::Token;
 
+// `{{{...}}}` is reserved for a doc comment in markdown context, where mdbook
+// still has to see its wavedrom and mermaid fences. Everything else is spliced
+// into markup and goes through `{{...}}`.
 const SUMMARY_TMPL: &str = r###"
 # Summary
 
@@ -96,7 +99,7 @@ const INDEX_TMPL: &str = r###"
 {{#each this.items}}
 <tr>
     <th class="table_list_item"><a href="{{this.file_name}}.html">{{{this.html_name}}}</a></th>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -123,7 +126,7 @@ const LIST_TMPL: &str = r###"
 {{#each items}}
 <tr>
     <th class="table_list_item"><a href="{{this.file_name}}.html">{{{this.html_name}}}</a></th>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -175,7 +178,7 @@ const MODULE_TMPL: &str = r#"
 <tr>
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -211,7 +214,7 @@ const MODULE_TMPL: &str = r#"
     <td class="table_list_item"><span class="hljs-attribute">{{this.clock_domain}}</span></td>
     {{/if}}
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -266,7 +269,7 @@ const PROTO_MODULE_TMPL: &str = r#"
 <tr>
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -302,7 +305,7 @@ const PROTO_MODULE_TMPL: &str = r#"
     <td class="table_list_item"><span class="hljs-attribute">{{this.clock_domain}}</span></td>
     {{/if}}
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -334,7 +337,7 @@ const INTERFACE_TMPL: &str = r#"
 <tr>
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -382,7 +385,7 @@ const COMPONENT_TMPL: &str = r#"
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-type">{{this.typ}}</span></td>
     <td class="table_list_item">{{#if this.optional}}optional{{else}}required{{/if}}</td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -400,7 +403,7 @@ const COMPONENT_TMPL: &str = r#"
     <th class="table_list_item">{{this.name}}</th>
     <td class="table_list_item"><span class="hljs-keyword">{{this.direction}}</span></td>
     <td class="table_list_item"><span class="hljs-type">{{this.width}}</span></td>
-    <td class="table_list_item">{{{this.description}}}</td>
+    <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
 </tbody>
@@ -1174,7 +1177,7 @@ mod tests {
                     name: "q".to_string(),
                     dir: "output".to_string(),
                     role: None,
-                    doc: None,
+                    doc: Some("Result, a logic<XLEN> word.".to_string()),
                 },
             ],
             params: vec![
@@ -1261,6 +1264,8 @@ mod tests {
             "{page}"
         );
         assert!(!page.contains("logic<ADDR_W>"), "{page}");
+        assert!(page.contains("Result, a logic&lt;XLEN&gt; word."), "{page}");
+        assert!(!page.contains("logic<XLEN>"), "{page}");
     }
 
     #[test]
@@ -1324,7 +1329,7 @@ mod tests {
     }
 
     #[test]
-    fn module_page_escapes_types_only() {
+    fn module_page_escapes_table_cells() {
         let data = ModuleData {
             name: "async_fifo::&lt;S&gt;".to_string(),
             description: "Uses `a --> b` and `i < n`".to_string(),
@@ -1332,7 +1337,7 @@ mod tests {
             parameters: vec![ParameterData {
                 name: "MAX_COUNT".to_string(),
                 typ: "bit<WIDTH>".to_string(),
-                description: Some(" Max value of counter".to_string()),
+                description: Some(" Max value, a bit<WIDTH> literal".to_string()),
             }],
             clock_domains: vec![],
             ports: vec![PortData {
@@ -1340,7 +1345,7 @@ mod tests {
                 direction: "output".to_string(),
                 clock_domain: None,
                 typ: "logic<WIDTH>".to_string(),
-                description: Some(" Count value".to_string()),
+                description: Some(" Count value of logic<WIDTH>".to_string()),
             }],
         };
         let page = Handlebars::new()
@@ -1354,6 +1359,12 @@ mod tests {
             page.contains("<span class=\"hljs-type\">logic&lt;WIDTH&gt;</span>"),
             "{page}"
         );
+        // A table cell is an HTML block, so markdown never runs inside it.
+        assert!(
+            page.contains("Max value, a bit&lt;WIDTH&gt; literal"),
+            "{page}"
+        );
+        assert!(page.contains("Count value of logic&lt;WIDTH&gt;"), "{page}");
         assert!(!page.contains("bit<WIDTH>"), "{page}");
         assert!(!page.contains("logic<WIDTH>"), "{page}");
         assert!(page.contains("# async_fifo::&lt;S&gt;"), "{page}");
@@ -1374,7 +1385,7 @@ mod tests {
             items: vec![ListItem {
                 file_name: "async_fifo".to_string(),
                 html_name: "async_fifo::&lt;S&gt;".to_string(),
-                description: "Asynchronous FIFO".to_string(),
+                description: "Asynchronous FIFO of logic<W>".to_string(),
             }],
         };
         let page = Handlebars::new().render_template(LIST_TMPL, &data).unwrap();
@@ -1382,6 +1393,11 @@ mod tests {
             page.contains("<a href=\"async_fifo.html\">async_fifo::&lt;S&gt;</a>"),
             "{page}"
         );
+        assert!(
+            page.contains("Asynchronous FIFO of logic&lt;W&gt;"),
+            "{page}"
+        );
+        assert!(!page.contains("logic<W>"), "{page}");
         assert!(!page.contains("&amp;"), "{page}");
     }
 }
