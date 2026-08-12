@@ -4140,6 +4140,72 @@ pub fn compile_source(src: &str) -> Result<EmittedModule, String> {
     compile_source_in(&cache_dir, src)
 }
 
+fn gc_age() -> Option<Duration> {
+    let hours = std::env::var("VERYL_AOT_C_GC_HOURS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(24);
+    (hours != 0).then(|| Duration::from_secs(hours * 3600))
+}
+
+/// A compile's own temp files, `veryl_aot_<hash>.<pid>.<n>.<ext>`; published
+/// artifacts carry no such infix.  A failed compile's `.log` is left alone:
+/// it is the only record of why it failed.
+fn is_temp_artifact(name: &str) -> bool {
+    let mut parts = name.split('.');
+    let (Some(stem), Some(pid), Some(ctr), Some(ext), None) = (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    ) else {
+        return false;
+    };
+    stem.starts_with("veryl_aot_")
+        && pid.parse::<u64>().is_ok()
+        && ctr.parse::<u64>().is_ok()
+        && matches!(ext, "c" | "so")
+}
+
+fn sweep_temp_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !is_temp_artifact(name) {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|m| m < cutoff);
+        if stale {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Sweep the temp files of compiles that never published.
+///
+/// The compiler is detached so it can publish after the run exits; nothing
+/// observes it dying either, so its temp files would stay forever.  Their
+/// pid cannot separate a dead compile from a running one — it belongs to
+/// whatever namespace the writer ran in — so age does, with a default
+/// cutoff well past the longest compile still plausibly running.
+fn gc_orphan_temps(cache_dir: &Path) {
+    static SWEPT: OnceLock<()> = OnceLock::new();
+    SWEPT.get_or_init(|| {
+        if let Some(age) = gc_age()
+            && let Some(cutoff) = std::time::SystemTime::now().checked_sub(age)
+        {
+            sweep_temp_artifacts(cache_dir, cutoff);
+        }
+    });
+}
+
 /// `compile_source` with an explicit cache directory instead of resolving
 /// it from `VERYL_AOT_CACHE_DIR`/`XDG_CACHE_HOME`/`HOME`.  Tests pass a
 /// per-test dir here directly: the cache dir is a *process-global* env var,
@@ -4148,6 +4214,7 @@ pub fn compile_source(src: &str) -> Result<EmittedModule, String> {
 /// as an argument keeps each test hermetic without touching shared state.
 fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, String> {
     fs::create_dir_all(cache_dir).map_err(|e| format!("create_dir_all: {e}"))?;
+    gc_orphan_temps(cache_dir);
 
     let cc_name = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
     // Full flag list — built once and used for *both* the cache key and the
@@ -10923,6 +10990,43 @@ mod tests {
             fnv1a_64_hex_parts(&["v1", "gcc", "-O3", "SRC"]),
             fnv1a_64_hex_parts(&["v1", "clang", "-O3", "SRC"]),
         );
+    }
+
+    #[test]
+    fn gc_sweeps_only_stale_temp_artifacts() {
+        let dir = std::env::temp_dir().join(format!("veryl_gc_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let published = dir.join("veryl_aot_dead.c");
+        let published_so = dir.join("veryl_aot_dead.so");
+        let log = dir.join("veryl_aot_dead.123.0.log");
+        let stale = dir.join("veryl_aot_dead.123.0.c");
+        let stale_so = dir.join("veryl_aot_dead.123.0.so");
+        let fresh = dir.join("veryl_aot_beef.456.1.c");
+        for f in [&published, &published_so, &log, &stale, &stale_so, &fresh] {
+            fs::write(f, "x").unwrap();
+        }
+        let now = std::time::SystemTime::now();
+        for f in [&published, &published_so, &log, &stale, &stale_so] {
+            fs::File::options()
+                .write(true)
+                .open(f)
+                .unwrap()
+                .set_modified(now - Duration::from_secs(7200))
+                .unwrap();
+        }
+
+        sweep_temp_artifacts(&dir, now - Duration::from_secs(3600));
+
+        assert!(published.exists(), "a published .c is not a temp");
+        assert!(published_so.exists(), "a published .so is not a temp");
+        assert!(
+            log.exists(),
+            "a failed compile's log is the only record of why"
+        );
+        assert!(fresh.exists(), "a compile that may still be running");
+        assert!(!stale.exists() && !stale_so.exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
