@@ -20382,3 +20382,85 @@ fn assign_rhs_sized_by_lhs_bit_select_width() {
         );
     }
 }
+
+#[test]
+fn whole_array_assign_from_array_returning_function() {
+    // Regression: `arr = f(x)` where `f` returns an unpacked array was rejected
+    // as an unsupported description — the whole-array expansion only accepted a
+    // plain variable on the right-hand side. `veryl build` accepted the code.
+    let code = r#"
+    package kp {
+        type st = logic<32> [4];
+
+        function bump (
+            din: input st,
+        ) -> st {
+            var dout: st;
+            for i in 0..4 {
+                dout[i] = din[i] + 1;
+            }
+            return dout;
+        }
+    }
+
+    module Top (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var s: kp::st;
+        var t: kp::st;
+
+        always_ff {
+            if_reset {
+                for i in 0..4 {
+                    s[i] = (i * 10) as 32;
+                }
+            } else {
+                s = kp::bump(s);
+            }
+        }
+
+        // Two call sites must not share the inlined body's scratch.
+        always_comb {
+            t = kp::bump(s);
+        }
+    }
+
+    #[test(array_ret)]
+    module array_ret {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        inst dut: Top (i_clk: clk, i_rst: rst);
+
+        var u: kp::st;
+
+        initial {
+            // An initial block writes the current slot, not `next`.
+            for i in 0..4 {
+                u[i] = 0;
+            }
+            u = kp::bump(u);
+            rst.assert();
+            clk.next(3);
+            for i in 0..4 {
+                $assert(dut.s[i] == ((i * 10 + 3) as 32), "ff array from call");
+                $assert(dut.t[i] == ((i * 10 + 4) as 32), "comb array from call");
+                $assert(u[i] == 1, "array from call in an initial block");
+            }
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "array_ret")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
