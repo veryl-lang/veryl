@@ -1,14 +1,13 @@
 //! Version-split (select fusion) pass for multi-write comb variables.
 //!
-//! The incremental settle plan pays for versioned variables three ways:
-//! same-bit conflict repair links, hole-protection always-run entries, and
-//! clobber re-marks.  This pass rewrites the dominant shape — an
-//! unconditional full-width base write followed by guarded full/partial
-//! overrides inside one `always_comb` (a priority chain, e.g. an unrolled
-//! `for` + `if` scan) — into a single unconditional write whose RHS is a
-//! ternary select chain.  One writer per variable means the plan sees no
-//! same-bit conflicts, no version holes, and needs no clobber repair for
-//! these variables.
+//! Rewrites the dominant shape — an unconditional full-width base write
+//! followed by guarded full/partial overrides inside one `always_comb`
+//! (a priority chain, e.g. an unrolled `for` + `if` scan) — into a single
+//! unconditional write whose RHS is a ternary select chain.  One writer
+//! per variable serves two consumers: the incremental settle plan sees no
+//! same-bit conflicts, version holes, or clobber repairs, and the
+//! whole-comb backends can localize and fuse storage they otherwise must
+//! keep materialized.
 //!
 //! Runs on the merged comb list before dependency analysis, while
 //! `SequentialBlock`s (one per multi-statement `always_comb`) are intact,
@@ -42,8 +41,12 @@ use veryl_parser::token_range::TokenRange;
 
 /// On under the incremental configuration (the plan needs fused
 /// single-writer chains), off otherwise.
+/// `VERYL_VSPLIT=0` opts out.  Independent of the incremental settle: the
+/// single-writer form also widens what the whole-comb backends can localize
+/// and fuse, so it pays on the full sweep too.
 pub fn pass_enabled(use_4state: bool) -> bool {
-    !use_4state && incremental::machinery_enabled()
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    !use_4state && *ON.get_or_init(|| std::env::var("VERYL_VSPLIT").as_deref() != Ok("0"))
 }
 
 #[derive(Default, Debug)]

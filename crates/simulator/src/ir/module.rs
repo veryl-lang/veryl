@@ -891,9 +891,9 @@ fn run_comb_pipeline(
     }
 
     // Version-split: fuse multi-write (versioned) comb chains into single
-    // writers for the incremental settle plan.  Module-level always_combs
-    // were already handled during conv (see `ProtoDeclaration::conv`); this
-    // covers testbench-level blocks that appear directly in the merged list.
+    // writers.  Module-level always_combs were already handled during conv
+    // (see `ProtoDeclaration::conv`); this covers testbench-level blocks
+    // that appear directly in the merged list.
     //
     // Incremental configuration: expand nested CompiledBlocks (child
     // instances' whole-comb functions) inside `analyze_dependency` so the
@@ -907,7 +907,7 @@ fn run_comb_pipeline(
     let mut vsplit_temp_bytes = 0usize;
     let unified = {
         let mut unified = unified;
-        if !incr_infeasible && version_split::pass_enabled(context.config.use_4state) {
+        if version_split::pass_enabled(context.config.use_4state) {
             let use_4state = context.config.use_4state;
             let before = context.comb_total_bytes;
             let comb_total = &mut context.comb_total_bytes;
