@@ -4363,7 +4363,19 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
 /// that argument list must agree, or a compiler flag silently lands in the
 /// slot after it and never reaches the compile.
 #[cfg(unix)]
-const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; shift 7; exec > "$lg" 2>&1; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; rm -f "$lg"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; shift 8; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; rm -f "$lg"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+
+/// Address-space ceiling for the compiler, in KiB (`VERYL_AOT_C_MAX_MEM_MB`
+/// gives it in MB; 0 disables).  The compile is detached on purpose — it has
+/// to outlive the run to publish its `.so` — so nothing reclaims it if it
+/// misbehaves.  Set well above a healthy whole-module compile.
+fn compile_mem_limit_kb() -> u64 {
+    std::env::var("VERYL_AOT_C_MAX_MEM_MB")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(16 * 1024)
+        * 1024
+}
 
 /// Paths [`COMPILE_SCRIPT`] works on.  Named rather than positional so the
 /// four `.c`/`.so` slots cannot be transposed at the call site.
@@ -4393,6 +4405,7 @@ fn compile_script_args(p: &CompileScriptPaths, flags: &[String]) -> Vec<std::ffi
             .map(|q| q.as_os_str().to_os_string())
             .unwrap_or_default(),
         p.log.as_os_str().to_os_string(),
+        compile_mem_limit_kb().to_string().into(),
     ];
     args.extend(flags.iter().map(std::ffi::OsString::from));
     args
@@ -4534,6 +4547,24 @@ fn fnv1a_64_hex_parts(parts: &[&str]) -> String {
         h = h.wrapping_mul(FNV_PRIME);
     }
     format!("{h:016x}")
+}
+
+/// Ceiling on one statement's emitted C (`VERYL_AOT_C_MAX_STMT_MB`, 0
+/// disables); over it the statement counts as uncovered.
+///
+/// A statement's emitted text is unbounded: a chain of conditionals inlines
+/// into a single expression, and version-splitting a deeply predicated design
+/// can grow one past what the compiler can hold.  Splitting the translation
+/// unit or the chunk functions cannot bound that — it is ONE statement — so
+/// refusing it is the only lever.  The default sits orders of magnitude above
+/// what healthy designs emit per statement.
+fn max_stmt_bytes() -> usize {
+    std::env::var("VERYL_AOT_C_MAX_STMT_MB")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(16)
+        * 1024
+        * 1024
 }
 
 /// Full C source for a comb statement sequence.  Signature matches the
@@ -4855,9 +4886,26 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     Some(body)
 }
 
-/// One terminated C statement from a `ProtoStatement`.  `None` if
-/// the variant or its substructures aren't emittable.
+/// One terminated C statement from a `ProtoStatement`.  `None` if the
+/// variant or its substructures aren't emittable, or if the result exceeds
+/// [`max_stmt_bytes`].
 pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
+    let out = emit_stmt_inner(stmt)?;
+    let cap = max_stmt_bytes();
+    if cap != 0 && out.len() > cap {
+        if diag_enabled() {
+            eprintln!(
+                "[aot_c] one statement emits {} B, over the {} B ceiling; declining AOT-C",
+                out.len(),
+                cap
+            );
+        }
+        return None;
+    }
+    Some(out)
+}
+
+fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
     match stmt {
         ProtoStatement::Assign(a) => {
             // A rhs_select on a plain variable is a bit-select on that variable
