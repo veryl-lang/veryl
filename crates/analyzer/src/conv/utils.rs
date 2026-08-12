@@ -531,6 +531,11 @@ pub fn eval_size(
     allow_inferable_size: bool,
 ) -> IrResult<(Comptime, Option<usize>)> {
     let (comptime, expr) = eval_expr(context, None, expr, allow_inferable_size)?;
+    if comptime.r#type.is_type() {
+        let token = expr.token_range();
+        context.insert_error(AnalyzerError::invalid_size_type(&token));
+        return Err(ir_error!(token));
+    }
     if let Ok(x) = comptime.get_value() {
         let value = x.to_usize().unwrap_or(0);
         let value = context.check_size(value, expr.token_range());

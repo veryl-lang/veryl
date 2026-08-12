@@ -11669,6 +11669,40 @@ fn out_of_range_select_in_dead_branch() {
 }
 
 #[test]
+fn invalid_size_type() {
+    // https://github.com/veryl-lang/veryl/issues/3162
+    for decl in [
+        "var _a: logic<u32>;",
+        "var _a: logic<bit>;",
+        "var _a: logic<8>[u32];",
+    ] {
+        let code = format!("module ModuleA {{ {decl} }}");
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|x| matches!(x, AnalyzerError::InvalidSizeType { .. })),
+            "`{decl}` should be rejected: {errors:?}"
+        );
+    }
+
+    for decl in [
+        "const W: u32 = $bits(u32); var _a: logic<W>;",
+        "type T = logic<4>; var _a: logic<$bits(T)>;",
+        "var _a: logic<8>[2];",
+    ] {
+        let code = format!("module ModuleA {{ {decl} }}");
+        let errors = analyze(&code);
+        assert!(
+            !errors
+                .iter()
+                .any(|x| matches!(x, AnalyzerError::InvalidSizeType { .. })),
+            "`{decl}` should be accepted: {errors:?}"
+        );
+    }
+}
+
+#[test]
 fn invalid_select() {
     let code = r#"
     module ModuleA {
