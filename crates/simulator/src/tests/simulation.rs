@@ -3578,6 +3578,54 @@ fn signed_concat_sign_extends_at_store() {
     }
 }
 
+#[test]
+fn signed_concat_sign_extends_when_wide() {
+    // Same as above across the I128 (65..=128) and pointer (>128) width
+    // regimes, which take separate concat and store paths.
+    let code = r#"
+    module Top (
+        a: input  logic<64>        ,
+        b: output signed logic<128>,
+        c: output signed logic<256>,
+    ) {
+        always_comb {
+            b = ($signed({a[msb] repeat 4, a}) as 128);
+            c = ($signed({a[msb] repeat 8, a, a}) as 256);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("64'h8000_0000_0000_0000").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // 68-bit {1111, a} sign-extended to 128: 65 ones, then 63 zeros.
+        let expect_b = format!("128'h{}8{}", "f".repeat(16), "0".repeat(15));
+        assert_eq!(
+            format!("{:x}", sim.get("b").unwrap()),
+            expect_b,
+            "config={config:?}"
+        );
+
+        // 136-bit {8 ones, a, a} sign-extended to 256: 129 ones, then the
+        // remainder of the two `a` copies.
+        let expect_c = format!(
+            "256'h{}8{}8{}",
+            "f".repeat(32),
+            "0".repeat(15),
+            "0".repeat(15)
+        );
+        assert_eq!(
+            format!("{:x}", sim.get("c").unwrap()),
+            expect_c,
+            "config={config:?}"
+        );
+    }
+}
+
 // Regression: `$signed(a) / $signed(b)` and `%` must (a) produce a
 // signed result and (b) survive the cranelift SIGFPE cases (y == 0 and
 // signed i64::MIN / -1) consistently between interpreter and JIT.
