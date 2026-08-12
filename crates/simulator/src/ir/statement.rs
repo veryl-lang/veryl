@@ -5,7 +5,7 @@ use crate::backend::ChunkArtifact;
 use crate::ir::context::{Context, Conv};
 use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
-    build_linear_index_expr,
+    build_linear_index_expr, inline_function_call,
 };
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::variable::{
@@ -3365,7 +3365,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                         .get(&dst0.id)
                         .map(|m| m.r#type.array.clone())
                 };
-                if let Some(arr_shape) = dst_array
+                if let Some(arr_shape) = dst_array.clone()
                     && !arr_shape.is_empty()
                     && let air::Expression::Term(factor) = &src.expr
                     && let air::Factor::Variable(_, vidx, _, _) = factor.as_ref()
@@ -3391,6 +3391,68 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                         };
                         let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
                         result.push(ProtoStatement::Assign(proto));
+                    }
+                    if in_initial {
+                        append_ff_next_copies(&mut result);
+                    }
+                    return Ok(result);
+                }
+
+                // Same destination shape with an array-returning call on the
+                // RHS (`state = round(state);`). Inlined once: re-converting
+                // the call per element would inline the body N times.
+                if let Some(arr_shape) = dst_array
+                    && !arr_shape.is_empty()
+                    && dst0.select.is_empty()
+                    && let air::Expression::Term(factor) = &src.expr
+                    && let air::Factor::FunctionCall(call) = factor.as_ref()
+                {
+                    let ret_offsets = inline_function_call(context, call)?;
+                    let total: usize = arr_shape.iter().map(|d| d.unwrap_or(1)).product();
+                    let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
+                    let ret_width = call
+                        .comptime
+                        .r#type
+                        .total_width()
+                        .ok_or_else(|| SimulatorError::unsupported_description(&src.token))?;
+                    let (elements, dst_width) = {
+                        let scope = context.scope();
+                        let meta = scope.variable_meta.get(&dst0.id).unwrap();
+                        (meta.elements.clone(), meta.width)
+                    };
+                    if ret_offsets.len() != total || elements.len() != total {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    }
+
+                    let mut result = Vec::with_capacity(total);
+                    for (element, ret_offset) in elements.iter().zip(ret_offsets) {
+                        let current_offset = element.current_offset();
+                        let dst = if element.is_ff() {
+                            if in_initial {
+                                VarOffset::Ff(current_offset)
+                            } else {
+                                VarOffset::Ff(element.next_offset)
+                            }
+                        } else {
+                            VarOffset::Comb(current_offset)
+                        };
+                        result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                            dst,
+                            dst_width,
+                            select: None,
+                            dynamic_select: None,
+                            rhs_select: None,
+                            expr: ProtoExpression::Variable {
+                                var_offset: ret_offset,
+                                select: None,
+                                dynamic_select: None,
+                                width: ret_width,
+                                var_full_width: ret_width,
+                                expr_context,
+                            },
+                            dst_ff_current_offset: current_offset,
+                            token: src.token,
+                        }));
                     }
                     if in_initial {
                         append_ff_next_copies(&mut result);
