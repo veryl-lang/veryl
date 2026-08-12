@@ -640,3 +640,74 @@ fn hier_ref_nested_test_module_resolves_locally() {
         assert_eq!(result, TestResult::Pass, "config: {config:?}");
     }
 }
+
+#[test]
+fn hier_ref_runtime_select_reads_the_indexed_element() {
+    // Regression: a runtime select on a hierarchical read was evaluated
+    // eagerly, folding the unknown index to 0. No error — just wrong data,
+    // which let a `$assert` on the wrong element pass.
+    let code = r#"
+    module Sub (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        #[allow(unused_variable)]
+        var s: logic<4, 8>;
+        #[allow(unused_variable)]
+        var v: logic<8>;
+        #[allow(unused_variable)]
+        var k: logic<2>;
+        always_ff {
+            if_reset {
+                for i in 0..4 {
+                    s[i] = (i * 16 + 1) as 8;
+                }
+                v = 8'b10100100;
+                k = 2;
+            }
+        }
+    }
+
+    module Top (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        inst u_sub: Sub (clk, rst);
+    }
+
+    #[test(hier_dyn_select)]
+    module hier_dyn_select {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        inst dut: Top (clk, rst);
+
+        initial {
+            rst.assert();
+            clk.next();
+            for i in 0..4 {
+                $assert(dut.u_sub.s[i] == ((i * 16 + 1) as 8), "packed element");
+                for b in 0..8 {
+                    $assert(dut.u_sub.s[i][b] == (((i * 16 + 1) >> b) & 1) as 1, "element bit");
+                }
+            }
+            for i in 0..8 {
+                $assert(dut.u_sub.v[i] == ((8'b10100100 >> i) & 1) as 1, "bit select");
+            }
+            // An index that is itself a hierarchical read used to be rejected.
+            $assert(dut.u_sub.s[dut.u_sub.k] == 8'h21, "index from the hierarchy");
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "hier_dyn_select")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
