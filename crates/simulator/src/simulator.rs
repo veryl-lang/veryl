@@ -72,6 +72,9 @@ pub struct Simulator {
     /// Change-driven settle state; `Some` iff `ir.incr_plan` is set
     /// (`VERYL_INCR=1`, see `ir::incremental`).
     pub incr_state: Option<Box<incremental::IncrState>>,
+    /// `VERYL_INCR_PROBE=1`: the plan is built but never executed; this counts
+    /// what it would have run (see `incremental::ProbeState`).
+    pub incr_probe: Option<Box<incremental::ProbeState>>,
     /// Per-event snapshots for the change-driven event skip (`event_plans`):
     /// event → per-statement `Some(values)` of the plan's word list as of
     /// the statement's last run (None until first run).
@@ -169,11 +172,27 @@ impl Simulator {
         let n_derived = ir.derived_clock_schedule.clocks.len();
         let components_pending = !ir.external_components.is_empty();
         // The initial binding is generation 1; see `IncrState::rebind`.
-        let incr_state_init = ir.incr_plan.as_ref().map(|plan| {
-            let mut s = Box::<incremental::IncrState>::default();
-            s.rebind(Some(plan));
-            s
-        });
+        // A plan present but not to be RUN means this comb list has no
+        // recorded verdict yet: probe it (measure what the plan would have
+        // run) while the ordinary full settle does the work.
+        let probing = !ir.incr_run || incremental::probe_enabled();
+        let incr_probe_init = probing
+            .then(|| {
+                ir.incr_plan
+                    .as_ref()
+                    .map(|p| Box::new(incremental::ProbeState::new(p)))
+            })
+            .flatten();
+        let incr_state_init = incr_probe_init
+            .is_none()
+            .then(|| {
+                ir.incr_plan.as_ref().map(|plan| {
+                    let mut s = Box::<incremental::IncrState>::default();
+                    s.rebind(Some(plan));
+                    s
+                })
+            })
+            .flatten();
         let mut ret = Self {
             ir,
             time: 0,
@@ -193,6 +212,7 @@ impl Simulator {
                 ..Default::default()
             },
             incr_state: incr_state_init,
+            incr_probe: incr_probe_init,
             event_incr: HashMap::default(),
             event_skip_stats: (0, 0),
             event_diag: (env::var("VERYL_EVENT_DIAG").as_deref() == Ok("1")).then(HashMap::default),
@@ -395,6 +415,9 @@ impl Simulator {
             return;
         }
         self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
+        if let (Some(probe), Some(plan)) = (self.incr_probe.as_deref_mut(), &self.ir.incr_plan) {
+            self.ir.incr_probe_tick(probe, plan);
+        }
     }
 
     /// The incremental engine's settle, plus the `VERYL_INCR_VALIDATE`
@@ -431,6 +454,11 @@ impl Simulator {
         let post_ff = self.ir.ff_values.to_vec();
         self.ir.comb_values.copy_from_slice(&pre_comb);
         self.ir.ff_values.copy_from_slice(&pre_ff);
+        // The restore rewinds comb bytes the run-once const cone may have
+        // just written; clear the flag so the baseline recomputes them.
+        self.ir
+            .const_cone_done
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
         let settles = self
             .incr_state
@@ -500,6 +528,81 @@ impl Simulator {
     /// (skipped, total) skippable event-chunk fires (change-driven skip).
     pub fn event_skip_stats(&self) -> (u64, u64) {
         self.event_skip_stats
+    }
+
+    /// End-of-run probe verdict: record whether this comb list should run the
+    /// plan, so later runs act on it instead of probing again.  Deterministic
+    /// — activity is a property of the design and its stimulus — so the same
+    /// project always converges to the same answer.
+    pub fn finish_probe_verdict(&self) {
+        let (Some(probe), Some(plan)) = (self.incr_probe.as_deref(), self.ir.incr_plan.as_ref())
+        else {
+            return;
+        };
+        // Too few samples to persist a verdict from; the default (no plan)
+        // stands for the next run too.
+        if probe.settles < incremental::VERDICT_MIN_SETTLES {
+            return;
+        }
+        let pct = probe.activity_pct(plan.n_entries);
+        let thr = incremental::abandon_threshold_pct(plan.n_entries) as f64;
+        let path = self.ir.incr_feedback_path.as_deref();
+        if incremental::diag_enabled() {
+            eprintln!(
+                "[incr probe] entries={} settles={} would-run activity={:.2}% threshold={:.0}% verdict={}",
+                plan.n_entries,
+                probe.settles,
+                pct,
+                thr,
+                if pct < thr { "feasible" } else { "infeasible" },
+            );
+        }
+        if pct < thr {
+            crate::backend::late::note_runtime_feasible(self.ir.incr_key, path);
+        } else {
+            crate::backend::late::note_runtime_infeasible(self.ir.incr_key, path);
+        }
+    }
+
+    /// End-of-run auto-abandon verdict.  The in-run check needs a full
+    /// [`ABANDON_WINDOW`](crate::ir::incremental::ABANDON_WINDOW) to fire, so
+    /// a run that ends before it never reaches a verdict and pays the same
+    /// bad plan on EVERY later run.  Re-run the same activity test here over
+    /// whatever the run did observe past the warmup: the simulation is over,
+    /// so this cannot change its behaviour — it only persists the verdict for
+    /// the next run, exactly like a mid-run abandon does.
+    ///
+    /// Shortening the window instead would fold the reset transient into the
+    /// measurement, and a false abandon is the expensive direction (it forfeits
+    /// the incremental win outright).
+    pub fn finish_incr_verdict(&self) {
+        use crate::ir::incremental::{ABANDON_WARMUP, VERDICT_MIN_SETTLES, abandon_threshold_pct};
+        let (Some(state), Some(plan), Some(late)) = (
+            self.incr_state.as_ref(),
+            self.ir.incr_plan.as_ref(),
+            self.ir.late_aotc.as_ref(),
+        ) else {
+            return;
+        };
+        // Already abandoned mid-run (which recorded the verdict itself), or
+        // too short to have a transient-free sample.
+        if state.abandoned || state.gen_settles < ABANDON_WARMUP + VERDICT_MIN_SETTLES {
+            return;
+        }
+        let pct = abandon_threshold_pct(plan.n_entries);
+        if pct == 0 {
+            return;
+        }
+        let settles = state.gen_settles - ABANDON_WARMUP;
+        let runs = state.stats_runs.saturating_sub(state.abandon_runs0);
+        if runs * 100 > settles * plan.n_entries as u64 * pct {
+            log::info!(
+                "incremental plan recorded infeasible at end of run: run fraction {:.1}% \
+                 over {settles} settles exceeds {pct}%",
+                runs as f64 * 100.0 / (settles * plan.n_entries as u64).max(1) as f64,
+            );
+            late.note_infeasible();
+        }
     }
 
     /// Dump the `VERYL_EVENT_DIAG=1` per-statement event-eval time
@@ -1132,6 +1235,10 @@ impl Simulator {
                 .filter(|_| !abandoned)
                 .and_then(|p| p.event_plans.get(event))
                 .filter(|p| p.stmt_words.len() == statements.len());
+            // The probe builds a plan it never executes, so there is no
+            // `IncrState` for the mark-driven event skip to key off: run
+            // events whole, exactly like a plan-less configuration.
+            let eplan = eplan.filter(|_| self.incr_state.is_some());
             if let Some(eplan) = eplan.filter(|p| p.mark_mode) {
                 // Mark-driven skip (default): a chunk's dirty bit is set by
                 // the settle diff / seed scans whenever a watched word

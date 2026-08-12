@@ -86,6 +86,13 @@ pub trait CompiledWhole: Send + Sync {
     /// async compile pending) — caller must fall back.
     fn try_dispatch(&self, ff: *const u8, comb: *mut u8, log: *mut u8) -> DispatchOutcome;
 
+    /// Constant-cone entry: statements whose inputs never change, split out
+    /// by the backend so the runtime can run them once per simulator
+    /// instance (see `Ir::const_cone_done`) instead of every settle.
+    fn try_dispatch_const(&self, _ff: *const u8, _comb: *mut u8, _log: *mut u8) -> DispatchOutcome {
+        DispatchOutcome::Done
+    }
+
     /// Comb byte ranges `(offset, native_bytes)` this backend intentionally
     /// leaves stale in `comb_values` (chunk-local intermediate localization).
     /// The validate dual-run skips these when diffing against the full-buffer
@@ -123,11 +130,6 @@ pub struct ChunkArtifact {
     /// from `Debug`/`Hash`: derived deterministically from the statements the
     /// fingerprint already identifies.
     pub deps: Option<Arc<crate::ir::incremental::ChunkDeps>>,
-    /// The compiled code carries per-sub-block guards reading the mask slot
-    /// in the write-log header (see `ir::incremental::sub_split_len`); the
-    /// incremental settle then passes a requested-sub mask before the call.
-    /// Excluded from `Debug`/`Hash` like `deps` (derived from env + stmts).
-    pub sub_guarded: bool,
 }
 
 impl std::fmt::Debug for ChunkArtifact {

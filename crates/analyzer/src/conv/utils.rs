@@ -1803,23 +1803,30 @@ fn build_for_range_inner(
                 ));
                 return Err(ir_error!(token));
             }
-            // With const bounds, also catch value-dependent stalls (e.g.
-            // `*= 2` starting at 0, or `|= k` once k's bits are set).
-            if let (Some(start_val), Some(end_val)) =
-                (beg.eval_value(context), end.eval_value(context))
-            {
-                let end_val = if inclusive {
+            const INDUCTION_MAX: usize = i32::MAX as usize;
+            let end_val = end.eval_value(context).map(|end_val| {
+                if inclusive {
                     end_val.saturating_add(1)
                 } else {
                     end_val
-                };
+                }
+            });
+            let scannable = end_val.is_some() || !matches!(op, ir::Op::Add);
+            if let Some(start_val) = beg.eval_value(context)
+                && scannable
+            {
                 let limit = context.config.evaluate_size_limit;
                 let mut i = start_val;
                 let mut n = 0usize;
-                while i < end_val && n <= limit {
+                while end_val.is_none_or(|end_val| i < end_val) && n <= limit {
                     match op.eval(i, step_val) {
+                        Some(next) if next > INDUCTION_MAX => {
+                            let token: TokenRange = expr.into();
+                            context.insert_error(AnalyzerError::for_loop_overflow(&token));
+                            return Err(ir_error!(token));
+                        }
                         Some(next) if next > i => i = next,
-                        _ => {
+                        _ if end_val.is_some() => {
                             let token: TokenRange = expr.into();
                             context.insert_error(AnalyzerError::invalid_for_step(
                                 InvalidForStepKind::StopsAdvancing,
@@ -1827,6 +1834,7 @@ fn build_for_range_inner(
                             ));
                             return Err(ir_error!(token));
                         }
+                        _ => break,
                     }
                     n += 1;
                 }

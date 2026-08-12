@@ -58,9 +58,6 @@ impl Backend for CraneliftBackend {
             keepalive: mmap.map(|m| Box::new(m) as Box<dyn Send + Sync>),
             content_fp: None,
             deps: None,
-            // Mirrors the guard condition in `build_binary_inner`.
-            sub_guarded: crate::ir::incremental::enabled()
-                && crate::ir::incremental::sub_split_len(stmts.len()).is_some(),
         }))
     }
 }

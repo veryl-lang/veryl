@@ -611,6 +611,8 @@ pub fn run_native_testbench_capped(
         eprintln!("  required_comb_passes:{}", sim.ir.required_comb_passes);
         eprintln!("===========================");
     }
+    sim.finish_probe_verdict();
+    sim.finish_incr_verdict();
     sim.dump_event_diag();
     if let Some(state) = &sim.incr_state
         && crate::ir::incremental::diag_enabled()

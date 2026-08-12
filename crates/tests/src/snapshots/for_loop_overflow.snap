@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+for_loop_overflow (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#for_loop_overflow)
+
+  × for-loop step overflows the 32-bit signed loop variable
+   ╭─[../../testcases/error/for_loop_overflow.veryl:7:49]
+ 6 │         hits = 0;
+ 7 │         for _i in 1500000000..end_bound step *= 2 {
+   ·                                                 ┬
+   ·                                                 ╰── Error location
+ 8 │             hits += 1;
+   ╰────
+  help: keep the loop variable within the 32-bit signed range, or narrow the range or step

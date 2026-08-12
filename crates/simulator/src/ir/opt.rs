@@ -5,6 +5,8 @@
 //! API without inline `#[cfg]` branches at every site.
 
 #[cfg(not(target_family = "wasm"))]
+pub(crate) mod comb_fusion;
+#[cfg(not(target_family = "wasm"))]
 pub(crate) mod dead_var_dce;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dup_assign_dce;
@@ -30,6 +32,24 @@ pub(crate) mod multi_write_analysis {
     }
     pub fn collect_dyn_indexed_vars(_decls: &[air::Declaration]) -> HashSet<VarId> {
         HashSet::default()
+    }
+}
+
+#[cfg(target_family = "wasm")]
+pub(crate) mod comb_fusion {
+    use crate::ir::ProtoStatement;
+    use crate::ir::event::Event;
+    use crate::ir::variable::VarOffset;
+    use crate::{HashMap, HashSet};
+    pub fn enabled() -> bool {
+        false
+    }
+    pub fn inline_single_readers(
+        stmts: Vec<ProtoStatement>,
+        _events: &HashMap<Event, Vec<ProtoStatement>>,
+        _externals_extra: &HashSet<VarOffset>,
+    ) -> (Vec<ProtoStatement>, Vec<isize>) {
+        (stmts, Vec::new())
     }
 }
 

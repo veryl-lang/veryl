@@ -830,6 +830,11 @@ impl ProtoExpression {
     /// Replace every referenced byte offset present in `map`.  Companion to
     /// `ProtoStatement::remap_offsets`.
     pub fn remap_offsets(&mut self, map: &HashMap<VarOffset, VarOffset>) {
+        self.remap_offsets_with(&|off| map.get(&off).copied().unwrap_or(off));
+    }
+
+    /// `remap_offsets` generalised over an arbitrary offset translation.
+    pub fn remap_offsets_with(&mut self, f: &dyn Fn(VarOffset) -> VarOffset) {
         match self {
             // No offsets embedded yet; resolution assigns them later.
             ProtoExpression::HierVariable(_) => {}
@@ -838,11 +843,9 @@ impl ProtoExpression {
                 dynamic_select,
                 ..
             } => {
-                if let Some(&n) = map.get(var_offset) {
-                    *var_offset = n;
-                }
+                *var_offset = f(*var_offset);
                 if let Some(dyn_sel) = dynamic_select {
-                    dyn_sel.index_expr.remap_offsets(map);
+                    dyn_sel.index_expr.remap_offsets_with(f);
                 }
             }
             ProtoExpression::DynamicVariable {
@@ -851,18 +854,16 @@ impl ProtoExpression {
                 dynamic_select,
                 ..
             } => {
-                if let Some(&n) = map.get(base_offset) {
-                    *base_offset = n;
-                }
-                index_expr.remap_offsets(map);
+                *base_offset = f(*base_offset);
+                index_expr.remap_offsets_with(f);
                 if let Some(dyn_sel) = dynamic_select {
-                    dyn_sel.index_expr.remap_offsets(map);
+                    dyn_sel.index_expr.remap_offsets_with(f);
                 }
             }
-            ProtoExpression::Unary { x, .. } => x.remap_offsets(map),
+            ProtoExpression::Unary { x, .. } => x.remap_offsets_with(f),
             ProtoExpression::Binary { x, y, .. } => {
-                x.remap_offsets(map);
-                y.remap_offsets(map);
+                x.remap_offsets_with(f);
+                y.remap_offsets_with(f);
             }
             ProtoExpression::Ternary {
                 cond,
@@ -870,13 +871,13 @@ impl ProtoExpression {
                 false_expr,
                 ..
             } => {
-                cond.remap_offsets(map);
-                true_expr.remap_offsets(map);
-                false_expr.remap_offsets(map);
+                cond.remap_offsets_with(f);
+                true_expr.remap_offsets_with(f);
+                false_expr.remap_offsets_with(f);
             }
             ProtoExpression::Concatenation { elements, .. } => {
                 for (expr, _, _) in elements {
-                    expr.remap_offsets(map);
+                    expr.remap_offsets_with(f);
                 }
             }
             ProtoExpression::Value { .. } => {}

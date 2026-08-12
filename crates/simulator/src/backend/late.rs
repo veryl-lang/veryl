@@ -66,6 +66,22 @@ fn runtime_infeasible_set() -> &'static Mutex<crate::HashSet<u128>> {
     RUNTIME_INFEASIBLE.get_or_init(|| Mutex::new(crate::HashSet::default()))
 }
 
+static RUNTIME_FEASIBLE: OnceLock<Mutex<crate::HashSet<u128>>> = OnceLock::new();
+
+fn runtime_feasible_set() -> &'static Mutex<crate::HashSet<u128>> {
+    RUNTIME_FEASIBLE.get_or_init(|| Mutex::new(crate::HashSet::default()))
+}
+
+/// Sibling of the infeasible-verdict file, holding the POSITIVE verdicts.
+/// Same directory and lifetime (`veryl clean` drops both).
+fn feasible_path(base: Option<&Path>) -> Option<std::path::PathBuf> {
+    base.map(|p| {
+        p.parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("incr_feasible_keys")
+    })
+}
+
 /// Conv-feedback opt-out (`VERYL_INCR_CONV_FEEDBACK=0`); default on.
 fn feedback_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -77,9 +93,11 @@ fn feedback_enabled() -> bool {
 /// an empty set.  Keys are structural fingerprints of the comb list, so a
 /// changed DUT or compiler version simply never matches — stale entries
 /// are inert (delete the file, or `veryl clean`, to reset outright).
-fn ensure_loaded(path: &Path, set: &mut crate::HashSet<u128>) {
-    static LOADED: OnceLock<()> = OnceLock::new();
-    LOADED.get_or_init(|| {
+/// `loaded` is the caller's own latch: the feasible and infeasible sets read
+/// different files, so a shared one would let whichever loaded first silence
+/// the other.
+fn ensure_loaded(loaded: &OnceLock<()>, path: &Path, set: &mut crate::HashSet<u128>) {
+    loaded.get_or_init(|| {
         if let Ok(text) = std::fs::read_to_string(path) {
             set.extend(
                 text.lines()
@@ -89,10 +107,46 @@ fn ensure_loaded(path: &Path, set: &mut crate::HashSet<u128>) {
     });
 }
 
-fn note_runtime_infeasible(key: u128, path: Option<&Path>) {
+/// Later runs of this comb list execute the plan instead of probing it.
+pub fn note_runtime_feasible(key: u128, path: Option<&Path>) {
+    let path = feasible_path(path);
+    static LOADED: OnceLock<()> = OnceLock::new();
+    let mut set = runtime_feasible_set().lock().unwrap();
+    if let Some(path) = &path {
+        ensure_loaded(&LOADED, path, &mut set);
+    }
+    if set.insert(key)
+        && let Some(path) = &path
+    {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)
+        {
+            let _ = writeln!(f, "{key:032x}");
+        }
+    }
+}
+
+pub fn runtime_feasible(key: u128, path: Option<&Path>) -> bool {
+    if !feedback_enabled() {
+        return false;
+    }
+    let path = feasible_path(path);
+    static LOADED: OnceLock<()> = OnceLock::new();
+    let mut set = runtime_feasible_set().lock().unwrap();
+    if let Some(path) = &path {
+        ensure_loaded(&LOADED, path, &mut set);
+    }
+    set.contains(&key)
+}
+
+pub fn note_runtime_infeasible(key: u128, path: Option<&Path>) {
+    static LOADED: OnceLock<()> = OnceLock::new();
     let mut set = runtime_infeasible_set().lock().unwrap();
     if let Some(path) = path {
-        ensure_loaded(path, &mut set);
+        ensure_loaded(&LOADED, path, &mut set);
     }
     if set.insert(key)
         && let Some(path) = path
@@ -118,9 +172,10 @@ pub fn runtime_infeasible(key: u128, path: Option<&Path>) -> bool {
     if !feedback_enabled() {
         return false;
     }
+    static LOADED: OnceLock<()> = OnceLock::new();
     let mut set = runtime_infeasible_set().lock().unwrap();
     if let Some(path) = path {
-        ensure_loaded(path, &mut set);
+        ensure_loaded(&LOADED, path, &mut set);
     }
     set.contains(&key)
 }
@@ -140,6 +195,9 @@ pub fn compile_whole_comb(
     dut_reuse: bool,
     stmts: &[ProtoStatement],
     #[cfg_attr(target_family = "wasm", allow(unused_variables))] localize: Option<&LocalizeInfo>,
+    #[cfg_attr(target_family = "wasm", allow(unused_variables))] const_unsafe: Option<
+        &crate::HashSet<isize>,
+    >,
 ) -> Option<Arc<dyn CompiledWhole>> {
     crate::ir::comb_pipeline_cache::whole_comb_get_or_compute(key, dut_reuse, || {
         let ctx = super::CompileCtx {
@@ -155,9 +213,17 @@ pub fn compile_whole_comb(
         if let Some((block, ranges)) = localize {
             super::aot_c::emit::set_localize_blocklist(block.clone(), ranges.clone());
         }
+        // Same contract for the const-cone split's event-written-comb set:
+        // `None` (unboundable event writes) leaves the split unarmed.
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(unsafe_comb) = const_unsafe {
+            super::aot_c::emit::set_const_unsafe(unsafe_comb.clone());
+        }
         let r = backends.try_compile_whole_comb(&ctx, stmts);
         #[cfg(not(target_family = "wasm"))]
         super::aot_c::emit::clear_localize_blocklist();
+        #[cfg(not(target_family = "wasm"))]
+        super::aot_c::emit::clear_const_unsafe();
         r
     })
 }
@@ -172,6 +238,9 @@ pub struct LateAotc {
     /// Post-sort post-DCE comb statements (shared with the pipeline cache).
     comb_stmts: Arc<Vec<ProtoStatement>>,
     localize: Option<LocalizeInfo>,
+    /// Event-written comb offsets for the const-cone split; `None` disarms
+    /// it (see `aot_c::emit::set_const_unsafe`).
+    const_unsafe: Option<crate::HashSet<isize>>,
     /// Per-event pre-JIT statements + landing slot.  Empty when
     /// `Config::aot_c_event` is off.
     events: HashMap<Event, EventSlot>,
@@ -189,6 +258,7 @@ impl LateAotc {
         config: Config,
         comb_stmts: Arc<Vec<ProtoStatement>>,
         localize: Option<LocalizeInfo>,
+        const_unsafe: Option<crate::HashSet<isize>>,
         event_stmts: HashMap<Event, Vec<ProtoStatement>>,
     ) -> Self {
         let events = event_stmts
@@ -201,6 +271,7 @@ impl LateAotc {
             config,
             comb_stmts,
             localize,
+            const_unsafe,
             events,
             started: AtomicBool::new(false),
             comb_slot: OnceLock::new(),
@@ -223,6 +294,8 @@ impl LateAotc {
             let this = Arc::clone(this);
             let _ = std::thread::Builder::new()
                 .name("late-aotc".into())
+                // The deferred compile re-runs the emitter (see IR_WALK_STACK_BYTES).
+                .stack_size(crate::IR_WALK_STACK_BYTES)
                 .spawn(move || this.compile());
         }
     }
@@ -244,6 +317,7 @@ impl LateAotc {
             self.dut_reuse,
             &self.comb_stmts,
             self.localize.as_ref(),
+            self.const_unsafe.as_ref(),
         );
         let ctx = CompileCtx {
             config: &self.config,
@@ -269,6 +343,12 @@ impl LateAotc {
             events_landed,
             self.events.len(),
         );
+    }
+
+    /// Record the verdict without starting a compile: the end-of-run caller
+    /// arrives after the simulation, so there is nothing left to dispatch.
+    pub fn note_infeasible(&self) {
+        note_runtime_infeasible(self.key, self.config.incr_feedback_path.as_deref());
     }
 
     /// Landed whole-comb handle, if any.  One atomic load; `None` while the

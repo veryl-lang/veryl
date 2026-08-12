@@ -44,6 +44,17 @@ pub struct CombPipeline {
     /// Dead offsets dropped by dead-var DCE. Re-applied to the caller's event
     /// statements on a hit so they match the miss path exactly.
     pub dead_offsets: Vec<VarOffset>,
+    /// Comb relayout schedule (`VERYL_COMB_LAYOUT`): the memoised
+    /// `comb_statements`/`pre_jit_stmts` are already rewritten through it, so
+    /// the caller must replay it — like `dead_offsets` — on every structure
+    /// the pipeline does not own (its event statements, the variable meta
+    /// tree, external connects, derived-clock candidates).  The layout inputs
+    /// are folded into the cache key, so a hit implies the same schedule.
+    pub layout: Option<Arc<crate::ir::comb_layout::CombLayoutSchedule>>,
+    /// Comb offsets whose defs the fusion pass consumed
+    /// (`VERYL_COMB_FUSION`): their storage is never written, so raw-buffer
+    /// comparisons (the dual-run checker) must skip them.  Diagnostic only.
+    pub fused_offsets: Vec<isize>,
     /// Non-trivial SCC count (debug/test-only diagnostic; 0 in release).
     pub nontrivial_comb_scc: usize,
     /// Conv-time estimate that the incremental settle plan would be
