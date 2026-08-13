@@ -440,6 +440,129 @@ fn comb_loop_preserves_vector_function_output_bits() {
 }
 
 #[test]
+fn comb_loop_function_output_state_does_not_leak_between_calls() {
+    assert_comb_loop(
+        "a conditionally assigned function output starts with fresh state on each call",
+        r#"
+        module Top (
+            p: output logic,
+            q: output logic,
+        ) {
+            function f (
+                x: input  logic,
+                y: output logic,
+            ) {
+                if x {
+                    y = 1;
+                }
+            }
+            var a: logic;
+            var b: logic;
+            always_comb {
+                f(a, p);
+                f(b, q);
+            }
+            assign a = q;
+            assign b = 0;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_function_output_retains_same_call_control_feedback() {
+    assert_comb_loop(
+        "a function output retains control feedback within the same call",
+        r#"
+        module Top (
+            p: output logic,
+            q: output logic,
+        ) {
+            function f (
+                x: input  logic,
+                y: output logic,
+            ) {
+                if x {
+                    y = 1;
+                }
+            }
+            var a: logic;
+            var b: logic;
+            always_comb {
+                f(a, p);
+                f(b, q);
+            }
+            assign a = 0;
+            assign b = q;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_function_local_state_does_not_leak_between_calls() {
+    assert_comb_loop(
+        "a function local starts with fresh state on each call",
+        r#"
+        module Top (
+            p: output logic,
+            q: output logic,
+        ) {
+            function f (
+                x: input  logic,
+                y: output logic,
+            ) {
+                var temporary: logic;
+                if x {
+                    temporary = 1;
+                }
+                y = temporary;
+            }
+            var a: logic;
+            var b: logic;
+            always_comb {
+                f(a, p);
+                f(b, q);
+            }
+            assign a = q;
+            assign b = 0;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_function_return_state_does_not_leak_between_calls() {
+    assert_comb_loop(
+        "a function return starts with fresh state on each call",
+        r#"
+        module Top (
+            p: output logic,
+            q: output logic,
+        ) {
+            function f (
+                x: input logic,
+            ) -> logic {
+                if x {
+                    return 1;
+                }
+            }
+            var a: logic;
+            var b: logic;
+            assign p = f(a);
+            assign q = f(b);
+            assign a = q;
+            assign b = 0;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
 fn comb_loop_preserves_wide_function_output_bits_without_scalarization() {
     // Why this case exists: function boundary precision must come from
     // observed endpoint propagation, not a width-limited per-bit expansion.

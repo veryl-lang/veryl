@@ -26,6 +26,14 @@ struct CallResult {
 // call nodes in a cloned callee body must never enter the caller's cache.
 type CallCache = Option<HashMap<*const FunctionCall, CallResult>>;
 
+// Module and interface storage is shared by every call. Function-owned
+// storage is automatic, so its SSA identity also includes the invocation.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct SsaKey {
+    node: NodeKey,
+    call_frame: Option<usize>,
+}
+
 #[cfg(test)]
 thread_local! {
     static FUNCTION_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
@@ -73,9 +81,11 @@ pub(super) fn analyze(
 struct ProcedureAnalysis<'a> {
     bit_part: &'a BitPartition,
     ctx: Context,
-    ssa: SsaStore<NodeKey>,
+    ssa: SsaStore<SsaKey>,
     written: HashSet<NodeKey>,
     call_caches: Vec<CallCache>,
+    call_frames: Vec<usize>,
+    next_call_frame: usize,
 }
 
 impl<'a> ProcedureAnalysis<'a> {
@@ -93,6 +103,8 @@ impl<'a> ProcedureAnalysis<'a> {
             ssa: SsaStore::default(),
             written: HashSet::default(),
             call_caches: Vec::new(),
+            call_frames: Vec::new(),
+            next_call_frame: 0,
         };
         this.eval_block(statements, &[]);
 
@@ -104,11 +116,12 @@ impl<'a> ProcedureAnalysis<'a> {
             .filter(|key| this.is_module_scope_key(*key))
             .collect();
         for destination in destinations {
-            let version = this.ssa.read(destination);
+            let version = this.read_key(destination);
             let sources = this.ssa.root_sources(version);
             dependencies.extend(
                 sources
                     .into_iter()
+                    .filter_map(|source| source.call_frame.is_none().then_some(source.node))
                     .filter(|source| this.is_module_scope_key(*source))
                     .map(|source| (source, destination)),
             );
@@ -123,6 +136,25 @@ impl<'a> ProcedureAnalysis<'a> {
                 crate::symbol::Affiliation::Module | crate::symbol::Affiliation::Interface
             )
         })
+    }
+
+    fn ssa_key(&self, node: NodeKey) -> SsaKey {
+        let call_frame = self
+            .ctx
+            .variables
+            .get(&node.0)
+            .is_some_and(|variable| variable.affiliation == crate::symbol::Affiliation::Function)
+            .then(|| self.call_frames.last().copied())
+            .flatten();
+        SsaKey { node, call_frame }
+    }
+
+    fn read_key(&mut self, node: NodeKey) -> VersionId {
+        self.ssa.read(self.ssa_key(node))
+    }
+
+    fn bind_key(&mut self, node: NodeKey, version: VersionId) {
+        self.ssa.bind(self.ssa_key(node), version);
     }
 
     fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
@@ -148,7 +180,7 @@ impl<'a> ProcedureAnalysis<'a> {
     fn read_variable(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<VersionId> {
         self.read_keys(id, index, select)
             .into_iter()
-            .map(|key| self.ssa.read(key))
+            .map(|key| self.read_key(key))
             .collect()
     }
 
@@ -174,7 +206,7 @@ impl<'a> ProcedureAnalysis<'a> {
         let keys = self.write_keys(destination);
         let version = self.ssa.definition(dependencies);
         for key in keys {
-            self.ssa.bind(key, version);
+            self.bind_key(key, version);
             self.written.insert(key);
         }
     }
@@ -235,7 +267,7 @@ impl<'a> ProcedureAnalysis<'a> {
                 dependencies.extend(self.eval_expr(expression));
             }
             let version = self.ssa.definition(dependencies);
-            self.ssa.bind(key, version);
+            self.bind_key(key, version);
             self.written.insert(key);
         }
     }
@@ -447,7 +479,7 @@ impl<'a> ProcedureAnalysis<'a> {
                                     for key in
                                         self.bit_part.overlapping_access(*id, idx, source_span)
                                     {
-                                        reads.push(self.ssa.read(key));
+                                        reads.push(self.read_key(key));
                                     }
                                 }
                             }
@@ -723,6 +755,7 @@ impl<'a> ProcedureAnalysis<'a> {
             };
         };
         let mut actual_sources = Vec::new();
+        let mut input_bindings = Vec::new();
 
         for (path, actual) in &call.inputs {
             actual_sources.extend(self.eval_expr(actual));
@@ -731,19 +764,57 @@ impl<'a> ProcedureAnalysis<'a> {
             };
             for key in self.keys_for_id(formal) {
                 let sources = self.eval_actual_for_formal_key(actual, key);
-                let version = self.ssa.definition(sources);
-                self.ssa.bind(key, version);
+                input_bindings.push((key, sources));
             }
+        }
+
+        let call_frame = self.next_call_frame;
+        self.next_call_frame += 1;
+        self.call_frames.push(call_frame);
+
+        let mut formal_ids = body.arg_map.values().copied().collect::<Vec<_>>();
+        formal_ids.extend(body.ret);
+        formal_ids.sort_unstable();
+        formal_ids.dedup();
+        for formal in formal_ids {
+            for key in self.keys_for_id(formal) {
+                let version = self.ssa.definition(Vec::new());
+                self.bind_key(key, version);
+            }
+        }
+        for (key, sources) in input_bindings {
+            let version = self.ssa.definition(sources);
+            self.bind_key(key, version);
         }
 
         self.call_caches.push(None);
         self.eval_block(&body.statements, controls);
         self.call_caches.pop();
 
+        let mut formal_outputs = HashMap::default();
+        for (path, _) in &call.outputs {
+            let Some(&formal) = body.arg_map.get(path) else {
+                continue;
+            };
+            formal_outputs
+                .entry(formal)
+                .or_insert_with(|| self.current_key_versions_for_id(formal));
+        }
+        let region_groups = body
+            .ret
+            .map(|ret| self.current_region_groups_for_id(ret))
+            .unwrap_or_default();
+
+        assert_eq!(self.call_frames.pop(), Some(call_frame));
+
         for (path, destinations) in &call.outputs {
             let Some(&formal) = body.arg_map.get(path) else {
                 continue;
             };
+            let formal_versions = formal_outputs
+                .get(&formal)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
             let widths: Vec<_> = destinations
                 .iter()
                 .map(|destination| self.destination_width(destination))
@@ -754,20 +825,25 @@ impl<'a> ProcedureAnalysis<'a> {
                 for (destination, width) in destinations.iter().zip(widths) {
                     let width = width.expect("checked above");
                     offset -= width;
-                    self.write_formal_output(destination, formal, offset, total_width, controls);
+                    self.write_formal_output(
+                        destination,
+                        formal_versions,
+                        offset,
+                        total_width,
+                        controls,
+                    );
                 }
             } else {
-                let sources = self.current_versions_for_id(formal);
+                let sources = formal_versions
+                    .iter()
+                    .map(|(_, version)| *version)
+                    .collect::<Vec<_>>();
                 for destination in destinations {
                     self.write_destination(destination, &sources, controls);
                 }
             }
         }
 
-        let region_groups = body
-            .ret
-            .map(|ret| self.current_region_groups_for_id(ret))
-            .unwrap_or_default();
         let opaque_sources = if statements_have_unknown(&body.statements) {
             actual_sources
         } else {
@@ -793,10 +869,10 @@ impl<'a> ProcedureAnalysis<'a> {
         keys
     }
 
-    fn current_versions_for_id(&mut self, id: VarId) -> Vec<VersionId> {
+    fn current_key_versions_for_id(&mut self, id: VarId) -> Vec<(NodeKey, VersionId)> {
         self.keys_for_id(id)
             .into_iter()
-            .map(|key| self.ssa.read(key))
+            .map(|key| (key, self.read_key(key)))
             .collect()
     }
 
@@ -815,7 +891,7 @@ impl<'a> ProcedureAnalysis<'a> {
             debug_assert!(group.last().is_none_or(|(previous, _)| {
                 previous.start <= span.start && previous.end() <= span.start
             }));
-            group.push((span, self.ssa.read(key)));
+            group.push((span, self.read_key(key)));
         }
         groups
     }
@@ -837,7 +913,7 @@ impl<'a> ProcedureAnalysis<'a> {
                 .bit_part
                 .overlapping((*id, formal_key.1), span)
                 .into_iter()
-                .map(|range| self.ssa.read((*id, formal_key.1, range)))
+                .map(|range| self.read_key((*id, formal_key.1, range)))
                 .collect();
         }
         self.eval_expr_bits(actual, span)
@@ -846,7 +922,7 @@ impl<'a> ProcedureAnalysis<'a> {
     fn write_formal_output(
         &mut self,
         destination: &AssignDestination,
-        formal: VarId,
+        formal_versions: &[(NodeKey, VersionId)],
         formal_offset: usize,
         formal_width: usize,
         controls: &[VersionId],
@@ -868,23 +944,23 @@ impl<'a> ProcedureAnalysis<'a> {
                     .translated(low, formal_offset)
                     .and_then(|span| PackedSpan::whole(formal_width)?.intersection(span))
                 {
-                    for formal_key in self.keys_for_id(formal) {
+                    for (formal_key, version) in formal_versions {
                         if formal_key.1.start != 0 {
                             continue;
                         }
-                        let Some(formal_span) = self.key_span(formal_key) else {
+                        let Some(formal_span) = self.key_span(*formal_key) else {
                             continue;
                         };
                         if formal_span.overlaps(requested) {
-                            sources.push(self.ssa.read(formal_key));
+                            sources.push(*version);
                         }
                     }
                 }
             } else {
-                sources.extend(self.current_versions_for_id(formal));
+                sources.extend(formal_versions.iter().map(|(_, version)| *version));
             }
             let version = self.ssa.definition(sources);
-            self.ssa.bind(key, version);
+            self.bind_key(key, version);
             self.written.insert(key);
         }
     }
