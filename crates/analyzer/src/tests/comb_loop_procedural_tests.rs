@@ -314,6 +314,32 @@ fn comb_loop_core_semantics_and_region_regressions_forward_array_chain_c_i_c_i_1
 }
 
 #[test]
+fn comb_loop_const_for_over_many_disjoint_array_elements_is_feed_forward() {
+    assert_comb_loop(
+        "a constant for loop over many disjoint array elements remains feed-forward",
+        r#"
+        module Top #(
+            param N: u32 = 1024,
+        ) (
+            mem : input  logic<32> [N],
+            i_d : input  logic<32>,
+            sum : output logic<32>,
+        ) {
+            var acc: logic<32> [N];
+            always_comb {
+                sum = 0;
+                for k in 0..N {
+                    acc[k] = mem[k] ^ i_d;
+                    sum = sum + acc[k];
+                }
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
 fn comb_loop_core_semantics_and_region_regressions_bit_disjoint_feedback_through_x_x_a_1_a_0_x_bit()
 {
     // Bit-disjoint feedback through `x`: x = a[1], a[0] = x. Bit

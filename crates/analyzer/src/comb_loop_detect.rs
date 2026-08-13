@@ -335,7 +335,7 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
     let endpoints = propagate_packed_endpoints(&accesses, &transfers);
     let ranges = split_array_spans(accesses, &endpoints);
 
-    BitPartition { ranges }
+    BitPartition::new(ranges)
 }
 
 fn split_array_spans(
@@ -351,36 +351,55 @@ fn split_array_spans(
 
     let mut ranges = HashMap::default();
     for (id, accesses) in accesses {
-        let mut boundaries = Vec::with_capacity(accesses.len() * 2);
-        for (span, _) in &accesses {
+        let mut events = Vec::with_capacity(accesses.len() * 2);
+        for (span, packed) in accesses {
             if span.length == 0 {
                 continue;
             }
-            boundaries.push(span.start);
-            if let Some(end) = span.end() {
-                boundaries.push(end);
-            }
-        }
-        boundaries.sort_unstable();
-        boundaries.dedup();
-
-        for boundary in boundaries.windows(2) {
-            let split = ArraySpan {
-                start: boundary[0],
-                length: boundary[1] - boundary[0],
-            };
-            let split_spans = accesses
-                .iter()
-                .filter(|(access, _)| access.overlaps(split))
-                .map(|(_, span)| *span)
-                .collect::<Vec<_>>();
-            if split_spans.is_empty() {
+            let Some(end) = span.end() else {
                 continue;
+            };
+            events.push((span.start, true, packed));
+            events.push((end, false, packed));
+        }
+        events.sort_unstable_by_key(|(position, starts, packed)| {
+            (*position, *starts, packed.start, packed.length)
+        });
+
+        let mut active: HashMap<PackedSpan, usize> = HashMap::default();
+        let mut previous = events.first().map(|event| event.0);
+        let mut cursor = 0;
+        while cursor < events.len() {
+            let position = events[cursor].0;
+            if let Some(previous) = previous
+                && previous < position
+                && !active.is_empty()
+            {
+                let split = ArraySpan {
+                    start: previous,
+                    length: position - previous,
+                };
+                let split_spans = active.keys().copied().collect::<Vec<_>>();
+                let parts = atomic_ranges(&split_spans, endpoints.get(&id));
+                if !parts.is_empty() {
+                    ranges.insert((id, split), parts);
+                }
             }
-            let parts = atomic_ranges(&split_spans, endpoints.get(&id));
-            if !parts.is_empty() {
-                ranges.insert((id, split), parts);
+            while cursor < events.len() && events[cursor].0 == position {
+                let (_, starts, packed) = events[cursor];
+                if starts {
+                    *active.entry(packed).or_default() += 1;
+                } else if let std::collections::hash_map::Entry::Occupied(mut entry) =
+                    active.entry(packed)
+                {
+                    *entry.get_mut() -= 1;
+                    if *entry.get() == 0 {
+                        entry.remove();
+                    }
+                }
+                cursor += 1;
             }
+            previous = Some(position);
         }
     }
     ranges
@@ -1087,10 +1106,8 @@ fn add_sparse_whole_port_copy_edges(
             continue;
         }
 
-        for ((object, index), ranges) in &bit_part.ranges {
-            if *object != parent_output {
-                continue;
-            }
+        for index in bit_part.array_spans(parent_output) {
+            let ranges = bit_part.ranges_of((parent_output, *index));
             for (destination_range, span) in ranges.iter().enumerate() {
                 let destination_key = (parent_output, *index, destination_range);
                 for source_range in bit_part.overlapping((*parent_input, *index), *span) {
@@ -1310,6 +1327,71 @@ fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> Module
 #[cfg(test)]
 mod region_tests {
     use super::*;
+
+    #[test]
+    fn disjoint_array_point_queries_do_not_scan_every_partition() {
+        const COUNT: usize = 16_384;
+
+        let id = VarId::from_raw(0);
+        let packed = PackedSpan {
+            start: 0,
+            length: 32,
+        };
+        let mut accesses = HashMap::default();
+        for start in 0..COUNT {
+            accesses.insert((id, ArraySpan { start, length: 1 }), vec![packed]);
+        }
+
+        let ranges = split_array_spans(accesses, &HashMap::default());
+        let partition = BitPartition::new(ranges);
+        assert_eq!(partition.array_spans(id).len(), COUNT);
+        for start in 0..COUNT {
+            assert_eq!(
+                partition.overlapping_access(id, ArraySpan { start, length: 1 }, packed),
+                vec![(id, ArraySpan { start, length: 1 }, 0)]
+            );
+        }
+    }
+
+    #[test]
+    fn array_partition_sweep_keeps_an_access_active_until_its_own_end() {
+        let id = VarId::from_raw(0);
+        let packed = PackedSpan {
+            start: 0,
+            length: 1,
+        };
+        let mut accesses = HashMap::default();
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 0,
+                    length: 2,
+                },
+            ),
+            vec![packed],
+        );
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 1,
+                    length: 2,
+                },
+            ),
+            vec![packed],
+        );
+
+        let ranges = split_array_spans(accesses, &HashMap::default());
+        for start in 0..3 {
+            assert_eq!(
+                ranges
+                    .get(&(id, ArraySpan { start, length: 1 }))
+                    .map(Vec::as_slice),
+                Some([packed].as_slice())
+            );
+        }
+    }
 
     #[test]
     fn packed_partition_storage_depends_on_endpoints_not_declared_width() {

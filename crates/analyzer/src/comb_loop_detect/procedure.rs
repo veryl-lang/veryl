@@ -858,10 +858,10 @@ impl<'a> ProcedureAnalysis<'a> {
     fn keys_for_id(&self, id: VarId) -> Vec<NodeKey> {
         let mut keys = self
             .bit_part
-            .ranges
+            .array_spans(id)
             .iter()
-            .filter(|((object, _), _)| *object == id)
-            .flat_map(|((_, index), ranges)| {
+            .flat_map(|index| {
+                let ranges = self.bit_part.ranges_of((id, *index));
                 (0..ranges.len()).map(move |range| (id, *index, range))
             })
             .collect::<Vec<_>>();

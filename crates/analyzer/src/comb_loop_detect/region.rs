@@ -75,10 +75,35 @@ pub(super) type NodeKey = (VarId, ArraySpan, usize);
 /// Per `IdxKey`, atomic packed-bit intervals.
 #[derive(Default)]
 pub(super) struct BitPartition {
-    pub(super) ranges: HashMap<IdxKey, Vec<PackedSpan>>,
+    ranges: HashMap<IdxKey, Vec<PackedSpan>>,
+    array_spans: HashMap<VarId, Vec<ArraySpan>>,
 }
 
 impl BitPartition {
+    pub(super) fn new(ranges: HashMap<IdxKey, Vec<PackedSpan>>) -> Self {
+        let mut array_spans: HashMap<VarId, Vec<ArraySpan>> = HashMap::default();
+        for &(id, span) in ranges.keys() {
+            array_spans.entry(id).or_default().push(span);
+        }
+        for spans in array_spans.values_mut() {
+            spans.sort_unstable();
+            spans.dedup();
+            debug_assert!(
+                spans
+                    .windows(2)
+                    .all(|pair| pair[0].end().is_some_and(|end| end <= pair[1].start))
+            );
+        }
+        Self {
+            ranges,
+            array_spans,
+        }
+    }
+
+    pub(super) fn array_spans(&self, id: VarId) -> &[ArraySpan] {
+        self.array_spans.get(&id).map(Vec::as_slice).unwrap_or(&[])
+    }
+
     /// Empty slice means the variable's bits are untouched.
     pub(super) fn ranges_of(&self, key: IdxKey) -> &[PackedSpan] {
         self.ranges.get(&key).map(|v| v.as_slice()).unwrap_or(&[])
@@ -99,12 +124,17 @@ impl BitPartition {
         access: ArraySpan,
         span: PackedSpan,
     ) -> Vec<NodeKey> {
-        let mut keys = self
-            .ranges
+        let Some(access_end) = access.end() else {
+            return Vec::new();
+        };
+        let spans = self.array_spans(id);
+        let first = spans.partition_point(|span| span.end().is_some_and(|end| end <= access.start));
+        let mut keys = spans[first..]
             .iter()
-            .filter(|((object, _), _)| *object == id)
-            .filter(|((_, split), _)| split.overlaps(access))
-            .flat_map(|((_, split), ranges)| {
+            .take_while(|split| split.start < access_end)
+            .filter(|split| split.overlaps(access))
+            .flat_map(|split| {
+                let ranges = self.ranges_of((id, *split));
                 ranges
                     .iter()
                     .enumerate()
