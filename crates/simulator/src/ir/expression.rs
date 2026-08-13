@@ -1795,6 +1795,98 @@ pub fn build_dynamic_bit_select(
     })
 }
 
+/// Inlines a call into `context.pending_statements` and returns the offset of
+/// every element of its return variable (one entry unless the return type is
+/// an array).
+pub(crate) fn inline_function_call(
+    context: &mut Context,
+    call: &air::FunctionCall,
+) -> Result<Vec<VarOffset>, SimulatorError> {
+    let mut stmts: Vec<ProtoStatement> = Conv::conv(context, call)?;
+
+    // Locate the function body and its return variable.
+    let func = context
+        .scope()
+        .analyzer_context
+        .functions
+        .get(&call.id)
+        .unwrap()
+        .clone();
+    let body = if let Some(ref idx) = call.index {
+        func.get_function(idx).unwrap()
+    } else {
+        func.get_function(&[]).unwrap()
+    };
+    let ret_id = body.ret.unwrap();
+
+    let mut ret_offsets: Vec<VarOffset> = {
+        let scope = context.scope();
+        let meta = scope.variable_meta.get(&ret_id).unwrap();
+        meta.elements.iter().map(|e| e.current).collect()
+    };
+
+    // Give this call site its own copy of the function body's comb scratch.
+    // Without it, two inlines in independent comb blocks share the same
+    // offsets and the compiled backends collapse them, returning one call's
+    // result for both.
+    //
+    // Relocate only function-affiliated WRITTEN variables: a read-only var
+    // keeps its value in its initial-value slot (e.g. an unrolled loop's
+    // per-iteration index constants), which fresh zero-init storage would
+    // drop. Whole variables move together so array stride survives dynamic
+    // indexing.
+    let mut written = Vec::new();
+    for s in &stmts {
+        s.collect_written_offsets(&mut written);
+    }
+
+    let mut relocate_vids: Vec<air::VarId> = Vec::new();
+    {
+        let mut seen = crate::HashSet::default();
+        for off in &written {
+            if off.is_ff() {
+                continue;
+            }
+            if let Some(vid) = context.scope().func_offset_varid(off.raw())
+                && seen.insert(vid)
+            {
+                relocate_vids.push(vid);
+            }
+        }
+    }
+
+    if !relocate_vids.is_empty() {
+        let use_4state = context.config.use_4state;
+        let mut map: HashMap<VarOffset, VarOffset> = HashMap::default();
+        for vid in relocate_vids {
+            let elems: Vec<(VarOffset, usize)> = {
+                let scope = context.scope();
+                let meta = scope.variable_meta.get(&vid).unwrap();
+                meta.elements
+                    .iter()
+                    .map(|e| (e.current, value_size(e.native_bytes, use_4state)))
+                    .collect()
+            };
+            for (old, vs) in elems {
+                let new_off = context.comb_total_bytes as isize;
+                context.comb_total_bytes += vs;
+                map.insert(old, VarOffset::Comb(new_off));
+            }
+        }
+        for s in &mut stmts {
+            s.remap_offsets(&map);
+        }
+        for off in &mut ret_offsets {
+            if let Some(&n) = map.get(off) {
+                *off = n;
+            }
+        }
+    }
+
+    context.pending_statements.extend(stmts);
+    Ok(ret_offsets)
+}
+
 impl Conv<&air::Expression> for ProtoExpression {
     fn conv(context: &mut Context, src: &air::Expression) -> Result<Self, SimulatorError> {
         match src {
@@ -1929,92 +2021,13 @@ impl Conv<&air::Expression> for ProtoExpression {
                     })
                 }
                 air::Factor::FunctionCall(call) => {
-                    let mut stmts: Vec<ProtoStatement> = Conv::conv(context, call)?;
-
-                    // Locate the function body and its return variable.
-                    let func = context
-                        .scope()
-                        .analyzer_context
-                        .functions
-                        .get(&call.id)
-                        .unwrap()
-                        .clone();
-                    let body = if let Some(ref idx) = call.index {
-                        func.get_function(idx).unwrap()
-                    } else {
-                        func.get_function(&[]).unwrap()
-                    };
-                    let ret_id = body.ret.unwrap();
-
-                    let mut ret_offset = {
-                        let scope = context.scope();
-                        let meta = scope.variable_meta.get(&ret_id).unwrap();
-                        meta.elements[0].current
-                    };
+                    let ret_offsets = inline_function_call(context, call)?;
                     let width = call.comptime.r#type.total_width().unwrap();
                     let var_full_width = width;
                     let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
 
-                    // Give this call site its own copy of the function body's
-                    // comb scratch. Without it, two inlines in independent comb
-                    // blocks share the same offsets and the compiled backends
-                    // collapse them, returning one call's result for both.
-                    //
-                    // Relocate only function-affiliated WRITTEN variables: a
-                    // read-only var keeps its value in its initial-value slot
-                    // (e.g. an unrolled loop's per-iteration index constants),
-                    // which fresh zero-init storage would drop. Whole variables
-                    // move together so array stride survives dynamic indexing.
-                    let mut written = Vec::new();
-                    for s in &stmts {
-                        s.collect_written_offsets(&mut written);
-                    }
-
-                    let mut relocate_vids: Vec<air::VarId> = Vec::new();
-                    {
-                        let mut seen = crate::HashSet::default();
-                        for off in &written {
-                            if off.is_ff() {
-                                continue;
-                            }
-                            if let Some(vid) = context.scope().func_offset_varid(off.raw())
-                                && seen.insert(vid)
-                            {
-                                relocate_vids.push(vid);
-                            }
-                        }
-                    }
-
-                    if !relocate_vids.is_empty() {
-                        let use_4state = context.config.use_4state;
-                        let mut map: HashMap<VarOffset, VarOffset> = HashMap::default();
-                        for vid in relocate_vids {
-                            let elems: Vec<(VarOffset, usize)> = {
-                                let scope = context.scope();
-                                let meta = scope.variable_meta.get(&vid).unwrap();
-                                meta.elements
-                                    .iter()
-                                    .map(|e| (e.current, value_size(e.native_bytes, use_4state)))
-                                    .collect()
-                            };
-                            for (old, vs) in elems {
-                                let new_off = context.comb_total_bytes as isize;
-                                context.comb_total_bytes += vs;
-                                map.insert(old, VarOffset::Comb(new_off));
-                            }
-                        }
-                        for s in &mut stmts {
-                            s.remap_offsets(&map);
-                        }
-                        if let Some(&n) = map.get(&ret_offset) {
-                            ret_offset = n;
-                        }
-                    }
-
-                    context.pending_statements.extend(stmts);
-
                     Ok(ProtoExpression::Variable {
-                        var_offset: ret_offset,
+                        var_offset: ret_offsets[0],
                         select: None,
                         dynamic_select: None,
                         width,

@@ -202,10 +202,12 @@ pub(crate) fn resolve_expr(
                     .map(|d| d.unwrap_or(1))
                     .product::<usize>();
 
-            // A dynamic bit-select on a hierarchical reference is unsupported.
+            // Evaluating a runtime select eagerly resolves the unknown index
+            // to 0, silently reading the wrong element.
+            let need_dynamic_select = !hier.select.is_empty() && !hier.select.is_const();
             let select_val = {
                 let scope = context.scope();
-                if hier.select.is_empty() {
+                if hier.select.is_empty() || need_dynamic_select {
                     None
                 } else {
                     Some(
@@ -214,6 +216,21 @@ pub(crate) fn resolve_expr(
                             .ok_or_else(|| SimulatorError::unsupported_description(token))?,
                     )
                 }
+            };
+            let dynamic_select = if need_dynamic_select {
+                let width_shape = meta.r#type.width().clone();
+                let kind_width = meta.r#type.kind.width().unwrap_or(1);
+                let mut sel = crate::ir::expression::build_dynamic_bit_select(
+                    context,
+                    &width_shape,
+                    &hier.select,
+                    kind_width,
+                )?;
+                // The index may itself reach into the hierarchy (`dut.a[dut.i]`).
+                resolve_expr(&mut sel.index_expr, context, children)?;
+                Some(sel)
+            } else {
+                None
             };
 
             if hier.index.is_const() {
@@ -235,7 +252,7 @@ pub(crate) fn resolve_expr(
                 *expr = ProtoExpression::Variable {
                     var_offset: element.current,
                     select: select_val,
-                    dynamic_select: None,
+                    dynamic_select,
                     width: hier.width,
                     var_full_width,
                     expr_context: hier.expr_context,
@@ -266,7 +283,7 @@ pub(crate) fn resolve_expr(
                     index_expr: Box::new(index_proto),
                     num_elements,
                     select: select_val,
-                    dynamic_select: None,
+                    dynamic_select,
                     width: hier.width,
                     expr_context: hier.expr_context,
                 };

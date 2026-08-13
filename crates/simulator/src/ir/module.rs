@@ -1048,7 +1048,7 @@ fn run_comb_pipeline(
     // relayout so the freed storage is already unreferenced when the
     // schedule is built (it parks as a cold unit; DCE cannot see it earlier
     // because the def only loses its reader here).
-    let (unified_sorted, fused_offsets) = if comb_fusion::enabled() {
+    let (unified_sorted, fused_offsets) = if comb_fusion::enabled(context.config.use_4state) {
         let mut externals: HashSet<VarOffset> = protect.clone();
         if let Some(extra) = fusion_extra {
             externals.extend(extra.iter().copied());
@@ -3007,7 +3007,7 @@ impl Conv<&air::Module> for ProtoModule {
             for (i, x) in hoisted_declarations.iter().enumerate() {
                 x.gather_ff(&mut analyzer_context, &mut ff_table, i);
             }
-            ff_table.update_is_ff();
+            ff_table.update_is_ff(&hoisted_declarations, &mut analyzer_context);
             if context.config.disable_ff_opt {
                 ff_table.force_all_ff();
             }
@@ -3142,7 +3142,7 @@ impl Conv<&air::Module> for ProtoModule {
         // Baked inst-chunk artifacts would freeze their spans into rigid
         // units (see `expand_compiled_blocks`) — expand them BEFORE the key
         // so the memoised pipeline and every hit see the same statements.
-        if comb_layout::enabled() {
+        if comb_layout::enabled(context.config.use_4state) {
             comb_layout::expand_compiled_blocks(&mut unified);
             for stmts in all_event_statements.values_mut() {
                 comb_layout::expand_compiled_blocks(stmts);
@@ -3199,7 +3199,9 @@ impl Conv<&air::Module> for ProtoModule {
         // meta structures still hold the plain bump layout.  Folded into the
         // pipeline key below so a cache hit implies the same transforms.
         let aux_extra_offsets: Option<Vec<VarOffset>> =
-            if comb_layout::enabled() || comb_fusion::enabled() {
+            if comb_layout::enabled(context.config.use_4state)
+                || comb_fusion::enabled(context.config.use_4state)
+            {
                 let mut extra_offsets: Vec<VarOffset> =
                     Vec::with_capacity(nested_derived_clock_candidates.len());
                 for (_, off, _) in &nested_derived_clock_candidates {
@@ -3214,28 +3216,29 @@ impl Conv<&air::Module> for ProtoModule {
             } else {
                 None
             };
-        let layout_inputs: Option<comb_layout::LayoutInputs> = if comb_layout::enabled() {
-            let mut meta_units: Vec<(isize, isize)> = Vec::new();
-            comb_layout::collect_meta_units_map(
-                &variable_meta,
-                context.config.use_4state,
-                &mut meta_units,
-            );
-            for child in &all_child_modules {
-                comb_layout::collect_meta_units_tree(
-                    child,
+        let layout_inputs: Option<comb_layout::LayoutInputs> =
+            if comb_layout::enabled(context.config.use_4state) {
+                let mut meta_units: Vec<(isize, isize)> = Vec::new();
+                comb_layout::collect_meta_units_map(
+                    &variable_meta,
                     context.config.use_4state,
                     &mut meta_units,
                 );
-            }
-            Some(comb_layout::LayoutInputs {
-                meta_units,
-                extra_offsets: aux_extra_offsets.clone().unwrap_or_default(),
-                comb_total: context.comb_total_bytes,
-            })
-        } else {
-            None
-        };
+                for child in &all_child_modules {
+                    comb_layout::collect_meta_units_tree(
+                        child,
+                        context.config.use_4state,
+                        &mut meta_units,
+                    );
+                }
+                Some(comb_layout::LayoutInputs {
+                    meta_units,
+                    extra_offsets: aux_extra_offsets.clone().unwrap_or_default(),
+                    comb_total: context.comb_total_bytes,
+                })
+            } else {
+                None
+            };
 
         // Whole comb pipeline (analyze_dependency + reorder + DCE + JIT),
         // memoised across tests that share a DUT.  A hit returns the pre-JIT
@@ -3250,11 +3253,11 @@ impl Conv<&air::Module> for ProtoModule {
                 &all_event_statements,
                 &dce_protect,
             );
-            if layout_inputs.is_some() || comb_fusion::enabled() {
+            if layout_inputs.is_some() || comb_fusion::enabled(context.config.use_4state) {
                 use std::collections::hash_map::DefaultHasher;
                 use std::hash::{Hash, Hasher};
                 let mut h = DefaultHasher::new();
-                comb_fusion::enabled().hash(&mut h);
+                comb_fusion::enabled(context.config.use_4state).hash(&mut h);
                 if let Some(extra) = &aux_extra_offsets {
                     extra.hash(&mut h);
                 }

@@ -906,7 +906,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             for (i, x) in hoisted_child_decls.iter().enumerate() {
                 x.gather_ff(&mut child_analyzer_context, &mut child_ff_table, i);
             }
-            child_ff_table.update_is_ff();
+            child_ff_table.update_is_ff(&hoisted_child_decls, &mut child_analyzer_context);
             if context.config.disable_ff_opt {
                 child_ff_table.force_all_ff();
             }

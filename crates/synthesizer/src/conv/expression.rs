@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use veryl_analyzer::ir::{
     self as air, Expression, Factor, Op, SystemFunctionInput, SystemFunctionKind,
 };
+use veryl_parser::resource_table::StrId;
 
 use crate::conv::ConvContext;
 use crate::conv::arith;
@@ -187,13 +188,131 @@ fn synth_raw(
             }
             Ok(out)
         }
-        Expression::ArrayLiteral(_, _) | Expression::StructConstructor(_, _, _) => {
-            // Analyzer folds these into element-wise Assign statements.
-            Err(SynthesizerError::internal(
-                "array or struct literal reached synthesizer",
-            ))
+        Expression::StructConstructor(r#type, fields, comptime) => {
+            synth_struct_constructor(ctx, r#type, fields, comptime, current)
+        }
+        Expression::ArrayLiteral(items, comptime) => {
+            synth_array_literal(ctx, items, comptime, current, ctx_width)
         }
     }
+}
+
+/// `(element count, bit stride)` addressed by a one-dimensional runtime
+/// select: a single-dimension width (`logic<32>`) selects a bit, each further
+/// dimension widens the element.
+fn dynamic_select_shape(var_type: &air::Type, total_bits: usize) -> (usize, usize) {
+    let bit_select = (total_bits, 1);
+    let shape = var_type.width();
+    if shape.dims() == 0 {
+        return bit_select;
+    }
+    let mut stride = 1;
+    for d in shape.iter().skip(1) {
+        match d {
+            Some(w) => stride *= w,
+            None => return bit_select,
+        }
+    }
+    let Some(Some(num_elements)) = shape.get(0).copied() else {
+        return bit_select;
+    };
+    // `chunks` panics on a zero stride; a mismatch means these nets are not
+    // the whole declared variable (RAM read data).
+    if stride == 0 || num_elements * stride != total_bits {
+        return bit_select;
+    }
+    (num_elements, stride)
+}
+
+/// The first declared member of a packed struct owns the high bits, so with
+/// LSB-first nets the members glue together back-to-front.
+fn synth_struct_constructor(
+    ctx: &mut ConvContext,
+    r#type: &air::Type,
+    fields: &[(StrId, Expression)],
+    comptime: &air::Comptime,
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+) -> Result<Vec<NetId>, SynthesizerError> {
+    let air::TypeKind::Struct(s) = &r#type.kind else {
+        return Err(SynthesizerError::unsupported(
+            UnsupportedKind::UnionConstructor,
+            &comptime.token,
+        ));
+    };
+    if s.members.len() != fields.len() {
+        return Err(SynthesizerError::internal(format!(
+            "struct constructor has {} values for {} members",
+            fields.len(),
+            s.members.len()
+        )));
+    }
+
+    let mut out = Vec::new();
+    for (member, (_, expr)) in s.members.iter().zip(fields).rev() {
+        let width = member.width().ok_or_else(|| {
+            SynthesizerError::unknown_width(
+                format!("struct member '{}'", member.name),
+                &comptime.token,
+            )
+        })?;
+        out.extend(synthesize_expr(ctx, expr, current, width)?);
+    }
+    Ok(out)
+}
+
+/// Element 0 occupies the *lowest* bits of the flattened nets (see the
+/// `Factor::Variable` arm), so unlike a concatenation the items are laid down
+/// in source order, filling `target_width` — the whole array.
+///
+/// The element width follows from the element *count*: a bare integer keeps
+/// its own 32-bit width here, so measuring an item would size the array off
+/// one unsized constant.
+fn synth_array_literal(
+    ctx: &mut ConvContext,
+    items: &[air::ArrayLiteralItem],
+    comptime: &air::Comptime,
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+    target_width: usize,
+) -> Result<Vec<NetId>, SynthesizerError> {
+    let mut counts = Vec::with_capacity(items.len());
+    for item in items {
+        let air::ArrayLiteralItem::Value(_, repeat) = item else {
+            return Err(SynthesizerError::unsupported(
+                UnsupportedKind::PackedArrayLiteralDefault,
+                &comptime.token,
+            ));
+        };
+        counts.push(match repeat {
+            Some(r) => r
+                .eval_value(&mut ctx.eval_ctx)
+                .and_then(|v| v.to_usize())
+                .ok_or_else(|| {
+                    SynthesizerError::unknown_width("array literal repeat count", &comptime.token)
+                })?,
+            None => 1,
+        });
+    }
+
+    let elem_count: usize = counts.iter().sum();
+    if elem_count == 0 || !target_width.is_multiple_of(elem_count) {
+        return Err(SynthesizerError::unknown_width(
+            "array literal element",
+            &comptime.token,
+        ));
+    }
+    let elem_width = target_width / elem_count;
+
+    let mut out = Vec::with_capacity(target_width);
+    for (item, count) in items.iter().zip(counts) {
+        let air::ArrayLiteralItem::Value(e, _) = item else {
+            unreachable!("defaults are rejected above");
+        };
+        let bits = synthesize_expr(ctx, e, current, elem_width)?;
+        for _ in 0..count {
+            out.extend(bits.iter().copied());
+        }
+    }
+    Ok(out)
 }
 
 fn synth_factor(
@@ -289,9 +408,15 @@ fn synth_factor(
             if select.is_empty() {
                 return apply_part_select(&element_nets, ct, id);
             }
+            // Not `ct.r#type` — see `VarSlot::type`.
+            let var_type = ctx
+                .variables
+                .get(id)
+                .map(|s| &s.r#type)
+                .unwrap_or(&ct.r#type);
             if select.is_const() && !select.is_range() {
                 let (high, low) = select
-                    .eval_value(&mut ctx.eval_ctx, &ct.r#type, false)
+                    .eval_value(&mut ctx.eval_ctx, var_type, false)
                     .ok_or_else(|| {
                         SynthesizerError::dynamic_select(format!("variable {}", id), &ct.token)
                     })?;
@@ -325,7 +450,7 @@ fn synth_factor(
                     ));
                 }
                 let (high, low) = select
-                    .eval_value(&mut ctx.eval_ctx, &ct.r#type, false)
+                    .eval_value(&mut ctx.eval_ctx, var_type, false)
                     .ok_or_else(|| {
                         SynthesizerError::dynamic_select(format!("variable {}", id), &ct.token)
                     })?;
@@ -347,9 +472,12 @@ fn synth_factor(
                     &ct.token,
                 ));
             }
-            let idx_bits = arith::index_bits_for(element_nets.len());
+            // Must match the stride `eval_value` derives for a constant index.
+            let (num_elements, stride) = dynamic_select_shape(var_type, element_nets.len());
+            let idx_bits = arith::index_bits_for(num_elements);
             let idx_nets = synthesize_expr(ctx, &select.0[0], current, idx_bits)?;
-            let elements: Vec<Vec<NetId>> = element_nets.iter().map(|&n| vec![n]).collect();
+            let elements: Vec<Vec<NetId>> =
+                element_nets.chunks(stride).map(|c| c.to_vec()).collect();
             Ok(arith::dynamic_mux_tree(ctx, &elements, &idx_nets))
         }
         Factor::FunctionCall(call) => synth_function_call(ctx, call, current),
@@ -787,7 +915,14 @@ fn synth_function_call(
         }
     }
 
-    let ret_width = call.comptime.r#type.total_width().unwrap_or(0);
+    // `total_width` counts one element, not the whole array.
+    let ret_width = match (
+        call.comptime.r#type.total_width(),
+        call.comptime.r#type.total_array(),
+    ) {
+        (Some(w), Some(n)) => w * n,
+        _ => 0,
+    };
     if let Some(ret_vid) = body.ret {
         if let Some(ret_nets) = inner.get(&ret_vid).cloned() {
             Ok(resize(ret_nets, ret_width, call.comptime.r#type.signed))

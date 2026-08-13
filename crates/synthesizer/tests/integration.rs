@@ -4420,3 +4420,738 @@ fn package_const_dynamic_select() {
         "MASK[sel] must reduce to sel[0]"
     );
 }
+
+#[test]
+fn packed_multidim_element_read_keeps_full_width() {
+    // Regression: `s[0]` on `logic<4, 8>` returned only bit 0, the rest tied
+    // to constant zero, because the select was resolved against the drained
+    // comptime type. Writes were unaffected, so the datapath silently folded
+    // away instead of failing.
+    use veryl_synthesizer::ir::{NET_CONST0, NET_CONST1};
+    let code = r#"
+        module PackedElem (
+            i_clk: input  clock   ,
+            i_rst: input  reset   ,
+            i_a  : input  logic<8>,
+            o_out: output logic<8>,
+        ) {
+            var s: logic<4, 8>;
+            always_ff {
+                if_reset {
+                    s = 0;
+                } else {
+                    s[0] = i_a;
+                }
+            }
+            assign o_out = s[0] + i_a;
+        }
+        module UnpackedElem (
+            i_clk: input  clock   ,
+            i_rst: input  reset   ,
+            i_a  : input  logic<8>,
+            o_out: output logic<8>,
+        ) {
+            var s: logic<8> [4];
+            always_ff {
+                if_reset {
+                    for i in 0..4 {
+                        s[i] = 0;
+                    }
+                } else {
+                    s[0] = i_a;
+                }
+            }
+            assign o_out = s[0] + i_a;
+        }
+    "#;
+    let (ir, _) = analyze(code, "PackedElem");
+    let packed = build_gate_ir(&ir, resource_table::insert_str("PackedElem"))
+        .expect("synthesize packed element read");
+    let unpacked = build_gate_ir(&ir, resource_table::insert_str("UnpackedElem"))
+        .expect("synthesize unpacked element read");
+
+    // The bug left the adder with a 1-bit operand: 20 cells instead of 40.
+    assert_eq!(
+        packed.module.cells.len(),
+        unpacked.module.cells.len(),
+        "packed element read ({} cells) must match the unpacked one ({} cells)",
+        packed.module.cells.len(),
+        unpacked.module.cells.len()
+    );
+
+    let read_ffs: Vec<_> = packed
+        .module
+        .ffs
+        .iter()
+        .take(8)
+        .map(|ff| ff.q)
+        .filter(|q| packed.module.cells.iter().any(|c| c.inputs.contains(q)))
+        .collect();
+    assert_eq!(
+        read_ffs.len(),
+        8,
+        "all 8 bits of s[0] must feed the output logic, got {}",
+        read_ffs.len()
+    );
+
+    let out = packed
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "o_out")
+        .expect("o_out port");
+    assert!(
+        out.nets.iter().all(|&n| n != NET_CONST0 && n != NET_CONST1),
+        "no output bit may be tied to a constant net"
+    );
+}
+
+#[test]
+fn packed_multidim_dynamic_element_select_keeps_full_width() {
+    // Regression: `p[i]` on `logic<4, 8>` built a per-bit mux tree, returning
+    // one bit zero-extended to the element width. It must agree with both the
+    // constant-index form and the equivalent unpacked array.
+    use veryl_synthesizer::ir::{NET_CONST0, NET_CONST1};
+    let code = r#"
+        module DynPacked (
+            i_a  : input  logic<8>,
+            i_i  : input  logic<2>,
+            o_out: output logic<8>,
+        ) {
+            var p: logic<4, 8>;
+            always_comb {
+                for k in 0..4 {
+                    p[k] = i_a + k;
+                }
+            }
+            assign o_out = p[i_i];
+        }
+        module DynUnpacked (
+            i_a  : input  logic<8>,
+            i_i  : input  logic<2>,
+            o_out: output logic<8>,
+        ) {
+            var u: logic<8> [4];
+            always_comb {
+                for k in 0..4 {
+                    u[k] = i_a + k;
+                }
+            }
+            assign o_out = u[i_i];
+        }
+        module DynPacked3 (
+            i_a  : input  logic<8>,
+            i_i  : input  logic,
+            o_out: output logic<32>,
+        ) {
+            var q: logic<2, 4, 8>;
+            always_comb {
+                for k in 0..2 {
+                    for m in 0..4 {
+                        q[k][m] = i_a + k + m;
+                    }
+                }
+            }
+            assign o_out = q[i_i];
+        }
+    "#;
+    let (ir, _) = analyze(code, "DynPacked");
+    let packed = build_gate_ir(&ir, resource_table::insert_str("DynPacked"))
+        .expect("synthesize dynamic packed select");
+    let unpacked = build_gate_ir(&ir, resource_table::insert_str("DynUnpacked"))
+        .expect("synthesize dynamic unpacked select");
+
+    // The bug muxed single bits: 3 cells instead of a full 8-bit mux tree.
+    assert_eq!(
+        packed.module.cells.len(),
+        unpacked.module.cells.len(),
+        "dynamic packed select ({} cells) must match the unpacked one ({} cells)",
+        packed.module.cells.len(),
+        unpacked.module.cells.len()
+    );
+
+    let out = packed
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "o_out")
+        .expect("o_out port");
+    assert!(
+        out.nets.iter().all(|&n| n != NET_CONST0 && n != NET_CONST1),
+        "no output bit may be tied to a constant net"
+    );
+
+    // A select one dimension deep on a 3-D width picks a 32-bit slice.
+    let packed3 = build_gate_ir(&ir, resource_table::insert_str("DynPacked3"))
+        .expect("synthesize 3-D dynamic select");
+    let out3 = packed3
+        .module
+        .ports
+        .iter()
+        .find(|p| format!("{}", p.name) == "o_out")
+        .expect("o_out port");
+    assert!(
+        out3.nets
+            .iter()
+            .all(|&n| n != NET_CONST0 && n != NET_CONST1),
+        "no output bit of the 3-D select may be tied to a constant net"
+    );
+}
+
+#[test]
+fn whole_array_assign_drives_every_element() {
+    // Regression: `arr = expr` was sized and written as a single element, so
+    // every element but the first stayed undriven and was optimized away. Two
+    // widths were wrong: the array-typed function return (`total_width` counts
+    // one element) and the assign destination.
+    let code = r#"
+        package kp {
+            type st = logic<8> [4];
+            function bump (din: input st) -> st {
+                var dout: st;
+                for i in 0..4 {
+                    dout[i] = din[i] + 1;
+                }
+                return dout;
+            }
+        }
+        module ViaCall (
+            i_clk: input  clock   ,
+            i_rst: input  reset   ,
+            o_out: output logic<8>,
+        ) {
+            var s: kp::st;
+            always_ff {
+                if_reset {
+                    for i in 0..4 {
+                        s[i] = 0;
+                    }
+                } else {
+                    s = kp::bump(s);
+                }
+            }
+            assign o_out = s[3];
+        }
+        module ElementWise (
+            i_clk: input  clock   ,
+            i_rst: input  reset   ,
+            o_out: output logic<8>,
+        ) {
+            var s: kp::st;
+            always_ff {
+                if_reset {
+                    for i in 0..4 {
+                        s[i] = 0;
+                    }
+                } else {
+                    for i in 0..4 {
+                        s[i] = s[i] + 1;
+                    }
+                }
+            }
+            assign o_out = s[3];
+        }
+    "#;
+    let (ir, _) = analyze(code, "ViaCall");
+    let via_call = build_gate_ir(&ir, resource_table::insert_str("ViaCall"))
+        .expect("synthesize whole-array assign from call");
+    let elementwise = build_gate_ir(&ir, resource_table::insert_str("ElementWise"))
+        .expect("synthesize element-wise assign");
+
+    // The bug kept only the first element's 8 bits.
+    assert_eq!(
+        via_call.module.ffs.len(),
+        32,
+        "every element of the array must stay driven"
+    );
+    assert_eq!(
+        via_call.module.cells.len(),
+        elementwise.module.cells.len(),
+        "whole-array assign ({} cells) must match the element-wise form ({} cells)",
+        via_call.module.cells.len(),
+        elementwise.module.cells.len()
+    );
+}
+
+#[test]
+fn struct_member_write_uses_base_coordinates() {
+    // Regression: the analyzer rebases a member select into whole-variable
+    // coordinates, but the write path added the member offset on top, so the
+    // highest member's write landed past the end and the next member's landed
+    // in its neighbour's bits. Only the last member, at offset 0, was correct.
+    let code = r#"
+        module Three (
+            i_a: input  logic<4>,
+            i_b: input  logic<4>,
+            i_c: input  logic<4>,
+            oa : output logic<4>,
+            ob : output logic<4>,
+            oc : output logic<4>,
+        ) {
+            struct T {
+                a: logic<4>,
+                b: logic<4>,
+                c: logic<4>,
+            }
+            var s: T;
+            always_comb {
+                s.a = i_a;
+                s.b = i_b;
+                s.c = i_c;
+            }
+            assign oa = s.a;
+            assign ob = s.b;
+            assign oc = s.c;
+        }
+        module Nested (
+            i_a: input  logic<4>,
+            i_b: input  logic<4>,
+            oa : output logic<4>,
+            ob : output logic<4>,
+        ) {
+            struct Inner {
+                x: logic<4>,
+                y: logic<4>,
+            }
+            struct Outer {
+                p: logic<4>,
+                q: Inner,
+            }
+            var s: Outer;
+            always_comb {
+                s.p   = i_a;
+                s.q.x = i_b;
+                s.q.y = i_a;
+            }
+            assign oa = s.p;
+            assign ob = s.q.x;
+        }
+        module ArrayOfStruct (
+            i_a: input  logic<4>,
+            i_b: input  logic<4>,
+            oa : output logic<4>,
+        ) {
+            struct T {
+                a: logic<4>,
+                b: logic<4>,
+            }
+            var s: T [2];
+            always_comb {
+                s[0].a = i_a;
+                s[0].b = i_b;
+                s[1].a = i_b;
+                s[1].b = i_a;
+            }
+            assign oa = s[1].a;
+        }
+        // Bit selects inside the high member exercise the same offset path.
+        module HighMemberBits (
+            i_a  : input  logic<4>,
+            i_i  : input  logic<2>,
+            o_fix: output logic,
+            o_dyn: output logic<4>,
+        ) {
+            struct T {
+                a: logic<4>,
+                b: logic<4>,
+            }
+            var s: T;
+            var t: T;
+            always_comb {
+                s.a    = 0;
+                s.a[2] = i_a[0];
+                s.b    = 0;
+                t.a    = 0;
+                t.a[i_i] = 1;
+                t.b    = 0;
+            }
+            assign o_fix = s.a[2];
+            assign o_dyn = t.a;
+        }
+    "#;
+    let (ir, _) = analyze(code, "Three");
+    let port_nets = |g: &veryl_synthesizer::ir::GateIr, name: &str| -> Vec<u32> {
+        g.module
+            .ports
+            .iter()
+            .find(|p| format!("{}", p.name) == name)
+            .unwrap_or_else(|| panic!("port {name}"))
+            .nets
+            .clone()
+    };
+
+    for (module, pairs) in [
+        ("Three", vec![("oa", "i_a"), ("ob", "i_b"), ("oc", "i_c")]),
+        ("Nested", vec![("oa", "i_a"), ("ob", "i_b")]),
+        ("ArrayOfStruct", vec![("oa", "i_b")]),
+    ] {
+        let g = build_gate_ir(&ir, resource_table::insert_str(module))
+            .unwrap_or_else(|e| panic!("synthesize {module}: {e:?}"));
+        for (out, inp) in pairs {
+            assert_eq!(
+                port_nets(&g, out),
+                port_nets(&g, inp),
+                "{module}: {out} must alias {inp}"
+            );
+        }
+    }
+
+    use veryl_synthesizer::ir::{NET_CONST0, NET_CONST1};
+    let g = build_gate_ir(&ir, resource_table::insert_str("HighMemberBits"))
+        .expect("synthesize high-member bit selects");
+    assert_eq!(
+        port_nets(&g, "o_fix"),
+        vec![port_nets(&g, "i_a")[0]],
+        "a constant bit select into the high member must reach that bit"
+    );
+    assert!(
+        port_nets(&g, "o_dyn")
+            .iter()
+            .all(|&n| n != NET_CONST0 && n != NET_CONST1),
+        "a runtime bit select into the high member must drive every bit"
+    );
+}
+
+#[test]
+fn struct_member_ram_write_keeps_its_lane() {
+    // The RAM sub-word path double-counted the offset too, pushing a member
+    // write out of the word so the port carried no live mask bit at all.
+    use veryl_synthesizer::ir::NET_CONST0;
+    let code = r#"
+        module RamMember (
+            i_clk: input  clock    ,
+            we   : input  logic    ,
+            waddr: input  logic<10>,
+            raddr: input  logic<10>,
+            wdata: input  logic<8> ,
+            rdata: output logic<32>,
+        ) {
+            struct S {
+                a: logic<16>,
+                b: logic<16>,
+            }
+            var mem: S [1024];
+            always_ff {
+                if we {
+                    mem[waddr].a[7:0] = wdata;
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "RamMember");
+    let gate = build_gate_ir(&ir, top).expect("synthesize struct member RAM write");
+    let ram = gate
+        .module
+        .ram_blocks
+        .first()
+        .expect("array must infer as RAM");
+    let mask = ram.write_ports[0]
+        .mask
+        .as_ref()
+        .expect("a sub-word write needs a mask");
+    let live: Vec<usize> = mask
+        .iter()
+        .enumerate()
+        .filter(|&(_, &n)| n != NET_CONST0)
+        .map(|(i, _)| i)
+        .collect();
+    // `a` occupies bits 31:16, so `a[7:0]` is bits 23:16.
+    assert_eq!(
+        live,
+        (16..24).collect::<Vec<_>>(),
+        "the masked lane must cover exactly the written member bits"
+    );
+}
+
+/// `t = T'{...}` stays a `StructConstructor` in the analyzer IR, so the
+/// synthesizer has to pack it itself.
+#[test]
+fn struct_literal_synthesizes_as_direct_connection() {
+    let code = r#"
+        module Top (
+            i: input  logic,
+            o: output logic,
+        ) {
+            struct T {
+                a: logic,
+            }
+            var t: T;
+            always_comb {
+                t = T'{a: i};
+                o = t.a;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    assert_eq!(port("o"), port("i"));
+}
+
+/// The first declared member of a packed struct owns the high bits; reading the
+/// members out separately pins that down — a reversed pack swaps `hi` and `lo`.
+#[test]
+fn struct_literal_packs_first_member_into_high_bits() {
+    let code = r#"
+        module Top (
+            i:  input  logic<3>,
+            hi: output logic<2>,
+            lo: output logic,
+        ) {
+            struct T {
+                a: logic<2>,
+                b: logic,
+            }
+            var t: T;
+            always_comb {
+                t  = T'{a: i[2:1], b: i[0]};
+                hi = t.a;
+                lo = t.b;
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    let i = port("i");
+    assert_eq!(port("hi"), vec![i[1], i[2]]);
+    assert_eq!(port("lo"), vec![i[0]]);
+}
+
+/// Nested literals must flatten into the same bit layout as writing each
+/// member individually.
+#[test]
+fn nested_struct_literal_matches_member_wise_writes() {
+    let code = r#"
+        module Top (
+            i: input  logic<8>,
+            o: output logic<8>,
+        ) {
+            struct Inner {
+                x: logic<2>,
+                y: logic,
+            }
+            struct T {
+                a: logic<3>,
+                b: Inner,
+                c: logic<2>,
+            }
+            var t: T;
+            var u: T;
+            always_comb {
+                t = T'{a: i[2:0], b: Inner'{x: i[4:3], y: i[5]}, c: i[7:6]};
+
+                u.a   = i[2:0];
+                u.b.x = i[4:3];
+                u.b.y = i[5];
+                u.c   = i[7:6];
+
+                o = {t.a, t.b.x, t.b.y, t.c} ^ {u.a, u.b.x, u.b.y, u.c};
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let o = gate
+        .ports
+        .iter()
+        .find(|p| p.name.to_string() == "o")
+        .expect("port o");
+    for (k, &n) in o.nets.iter().enumerate() {
+        assert!(
+            matches!(gate.nets[n as usize].driver, NetDriver::Const(false)),
+            "o[{k}] must fold to 0, got {:?}",
+            gate.nets[n as usize].driver
+        );
+    }
+}
+
+/// Kept packed (a ternary arm, say) an array literal must lay out to the same
+/// bits as writing the elements individually.
+#[test]
+fn packed_array_literal_matches_element_wise_writes() {
+    let code = r#"
+        module Top (
+            i: input  logic<4>,
+            s: input  logic   ,
+            o: output logic<4>,
+        ) {
+            var t: logic<2> [2];
+            var u: logic<2> [2];
+            always_comb {
+                t = if s ? '{i[3:2], i[1:0]} : '{i[1:0], i[3:2]};
+
+                if s {
+                    u[0] = i[3:2];
+                    u[1] = i[1:0];
+                } else {
+                    u[0] = i[1:0];
+                    u[1] = i[3:2];
+                }
+
+                o = {t[1], t[0]} ^ {u[1], u[0]};
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let o = gate
+        .ports
+        .iter()
+        .find(|p| p.name.to_string() == "o")
+        .expect("port o");
+    for (k, &n) in o.nets.iter().enumerate() {
+        assert!(
+            matches!(gate.nets[n as usize].driver, NetDriver::Const(false)),
+            "o[{k}] must fold to 0, got {:?}",
+            gate.nets[n as usize].driver
+        );
+    }
+}
+
+/// `repeat`, nesting and unsized constants must all land on the destination's
+/// element boundaries.
+#[test]
+fn packed_array_literal_handles_repeat_nesting_and_unsized_constants() {
+    let code = r#"
+        module Top (
+            i: input  logic<4>,
+            s: input  logic   ,
+            o: output logic<8>,
+            p: output logic<8>,
+            q: output logic<8>,
+        ) {
+            var t: logic<2> [4];
+            var u: logic<2> [4];
+            var m: logic<2> [2, 2];
+            var n: logic<2> [2, 2];
+            var c: logic<2> [4];
+            always_comb {
+                t = if s ? '{i[3:2] repeat 4} : '{i[1:0] repeat 4};
+                for k in 0..4 {
+                    u[k] = if s ? i[3:2] : i[1:0];
+                }
+                o = {t[3], t[2], t[1], t[0]} ^ {u[3], u[2], u[1], u[0]};
+
+                m = if s ? '{'{i[1:0], i[3:2]}, '{i[3:2], i[1:0]}}
+                         : '{'{i[3:2], i[1:0]}, '{i[1:0], i[3:2]}};
+                if s {
+                    n[0][0] = i[1:0];
+                    n[0][1] = i[3:2];
+                    n[1][0] = i[3:2];
+                    n[1][1] = i[1:0];
+                } else {
+                    n[0][0] = i[3:2];
+                    n[0][1] = i[1:0];
+                    n[1][0] = i[1:0];
+                    n[1][1] = i[3:2];
+                }
+                p = {m[1][1], m[1][0], m[0][1], m[0][0]}
+                  ^ {n[1][1], n[1][0], n[0][1], n[0][0]};
+
+                c = if s ? '{1, 2, 3, 0} : '{0, 0, 0, 0};
+                q = {c[3], c[2], c[1], c[0]};
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    for name in ["o", "p"] {
+        for (k, &net) in port(name).iter().enumerate() {
+            assert!(
+                matches!(gate.nets[net as usize].driver, NetDriver::Const(false)),
+                "{name}[{k}] must fold to 0, got {:?}",
+                gate.nets[net as usize].driver
+            );
+        }
+    }
+    // `c` is `'{1, 2, 3, 0}` gated by `s`, read back MSB-first: 8'b00_11_10_01.
+    let s = port("s")[0];
+    let expect: Vec<u32> = (0..8)
+        .map(|k| if (0b0011_1001u32 >> k) & 1 == 1 { s } else { 0 })
+        .collect();
+    assert_eq!(port("q"), expect);
+}
+
+/// A dynamic bit select on a struct member (`t.b[idx] = ...`) resolves to a
+/// variable-absolute bit position, so the candidate bits and the constants the
+/// index is compared against must both be absolute too.
+#[test]
+fn dynamic_bit_select_on_struct_member_writes_the_addressed_bit() {
+    let code = r#"
+        module Top (
+            d:   input  logic   ,
+            idx: input  logic<2>,
+            o:   output logic<8>,
+        ) {
+            struct T {
+                a: logic<3>,
+                b: logic<3>,
+                c: logic<2>,
+            }
+            var t: T;
+            always_comb {
+                t        = '0;
+                t.b[idx] = d;
+                o        = {t.a, t.b, t.c};
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        gate.ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap_or_else(|| panic!("port {name} not found"))
+            .nets
+            .clone()
+    };
+    let d = port("d")[0];
+    let idx = port("idx");
+    let o = port("o");
+
+    // `b` occupies o[4:2], so `t.b[k]` is o[2 + k]. `idx == 3` is out of range
+    // for a 3-bit member and must write nothing.
+    for k in 0..4usize {
+        for d_val in [false, true] {
+            let inputs: std::collections::HashMap<_, _> = idx
+                .iter()
+                .enumerate()
+                .map(|(b, &n)| (n, (k >> b) & 1 == 1))
+                .chain(std::iter::once((d, d_val)))
+                .collect();
+            let mut memo = std::collections::HashMap::new();
+            for (bit, &n) in o.iter().enumerate() {
+                assert_eq!(
+                    eval_net(&gate, n, &inputs, &mut memo),
+                    k < 3 && bit == 2 + k && d_val,
+                    "o[{bit}] mismatch at idx={k} d={d_val}"
+                );
+            }
+        }
+    }
+}
