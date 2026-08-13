@@ -7,6 +7,7 @@ use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
 use num_bigint::BigUint;
 use num_traits::One;
+use std::cmp::Ordering;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::{MaskCache, ValueU64};
 use veryl_parser::resource_table::StrId;
@@ -1527,6 +1528,25 @@ impl ProtoExpression {
     }
 }
 
+/// Non-`Value` expressions already carry the width the analyzer resolved.
+fn fit_literal_width(expr: &mut ProtoExpression, width: usize) {
+    let ProtoExpression::Value {
+        value,
+        width: value_width,
+        expr_context,
+    } = expr
+    else {
+        return;
+    };
+    match value.width().cmp(&width) {
+        Ordering::Less => *value = value.expand(width, value.signed()).into_owned(),
+        Ordering::Greater => value.trunc(width),
+        Ordering::Equal => {}
+    }
+    *value_width = width;
+    expr_context.width = width;
+}
+
 /// Build a ProtoExpression computing the linear index from a multi-dimensional VarIndex.
 /// Equivalent to calc_index_expr but produces ProtoExpression directly with correct widths.
 pub fn build_linear_index_expr(
@@ -2410,8 +2430,12 @@ impl Conv<&air::Expression> for ProtoExpression {
 
                 let mut elements = Vec::new();
                 for ((_name, expr), member_type) in members.iter().zip(struct_members.iter()) {
-                    let converted: ProtoExpression = Conv::conv(context, expr)?;
+                    let mut converted: ProtoExpression = Conv::conv(context, expr)?;
                     let elem_width = member_type.width().unwrap();
+                    // An unsized literal is 32 bits, and the concatenation
+                    // joins elements at their value width, not `elem_width`.
+                    fit_literal_width(&mut converted, elem_width);
+                    debug_assert_eq!(converted.width(), elem_width);
                     elements.push((Box::new(converted), 1, elem_width));
                 }
 
