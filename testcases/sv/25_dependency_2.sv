@@ -232,13 +232,13 @@ module veryl_testcase_Module25O
     import veryl_sample4_bar_pkg;
     import veryl_sample4_qux_if;
 (
-    veryl_sample4___qux_if__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR_Foo.mp ifp
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S.mp ifp
 );
     // An interface is imported as-is; modport members stay qualified.
 
-    veryl_sample4___qux_if__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR_Foo u_if         ();
-    always_comb u_if.qux.foo = 0;
-    int unsigned _a          ; always_comb _a           = ifp.qux.foo;
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S u_if       ();
+    always_comb u_if.qux.s = 0;
+    logic _a        ; always_comb _a         = ifp.qux.s;
 endmodule
 
 module veryl_testcase_Module25P;

@@ -181,13 +181,13 @@ module Module25N {
 // https://github.com/veryl-lang/veryl/issues/1588
 
 module Module25O (
-    ifp: modport qux_if::<veryl_sample4::foo_pkg::<barpkg::BAR>::Foo>::mp,
+    ifp: modport qux_if::<Package25::<1>::S>::mp,
 ) {
     // An interface is imported as-is; modport members stay qualified.
     import veryl_sample4::qux_if;
-    inst u_if: qux_if::<veryl_sample4::foo_pkg::<barpkg::BAR>::Foo>;
-    assign u_if.qux.foo = 0;
-    let _a: u32 = ifp.qux.foo;
+    inst u_if: qux_if::<Package25::<1>::S>;
+    assign u_if.qux.s = 0;
+    let _a: logic = ifp.qux.s;
 }
 
 module Module25P {
