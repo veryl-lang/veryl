@@ -1,0 +1,3 @@
+module invalid_size_type {
+    var _a: logic<u32>;
+}

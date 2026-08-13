@@ -3336,3 +3336,96 @@ fn const_fold_switch_arm() {
 
     check_ir(code, exp);
 }
+
+#[track_caller]
+fn ff_flags(code: &str) -> Vec<(String, bool)> {
+    symbol_table::clear();
+    attribute_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+
+    let mut ir = Ir::default();
+    let _ = analyzer.analyze_pass1("prj", &parser.veryl);
+    let _ = Analyzer::analyze_post_pass1();
+    let _ = analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+
+    let module = ir
+        .components
+        .iter()
+        .find_map(|x| match x {
+            crate::ir::Component::Module(m) => Some(m),
+            _ => None,
+        })
+        .expect("module");
+    let mut ret: Vec<(String, bool)> = module
+        .ff_table
+        .table
+        .iter()
+        .filter(|(_, entry)| entry.assigned.is_some())
+        .map(|((id, _), entry)| {
+            let name = module
+                .variables
+                .get(id)
+                .map(|v| v.path.to_string())
+                .unwrap_or_default();
+            (name, entry.is_ff)
+        })
+        .collect();
+    ret.sort();
+    ret
+}
+
+#[test]
+fn ff_opt_counts_branches_by_max() {
+    // Mutually exclusive arms and a reset arm each write the element once, so
+    // the comb form survives; a sequential second write or an unrolled loop
+    // does not.
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+        up   : input logic,
+    ) {
+        var branchy : logic<8>;
+        var enabled : logic<8>;
+        var twice   : logic<8>;
+        var looped  : logic<8>;
+
+        always_ff {
+            if_reset {
+                branchy = 0;
+                enabled = 0;
+                twice   = 0;
+                looped  = 0;
+            } else {
+                if up {
+                    branchy = branchy + 1;
+                } else {
+                    branchy = branchy - 1;
+                }
+                if up {
+                    enabled = enabled + 1;
+                }
+                twice = twice + 1;
+                twice = twice + 1;
+                for i in 0..4 {
+                    looped = looped + 1 + i - i;
+                }
+            }
+        }
+    }
+    "#;
+
+    assert_eq!(
+        ff_flags(code),
+        vec![
+            ("branchy".to_string(), false),
+            ("enabled".to_string(), false),
+            ("looped".to_string(), true),
+            ("twice".to_string(), true),
+        ]
+    );
+}

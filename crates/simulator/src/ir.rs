@@ -26,6 +26,7 @@ pub use external::{
     ExternalComponentInst, ExternalConnectInst, ProtoExternalComponent, ProtoExternalConnect,
 };
 pub use module::{Module, ProtoModule};
+pub use opt::comb_fusion::force_disable as force_disable_comb_fusion;
 pub use statement::{
     CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoComponentArg,

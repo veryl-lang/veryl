@@ -82,6 +82,8 @@ pub enum UnsupportedKind {
         bits: usize,
         limit: usize,
     },
+    UnionConstructor,
+    PackedArrayLiteralDefault,
 }
 
 impl fmt::Display for UnsupportedKind {
@@ -116,6 +118,16 @@ impl fmt::Display for UnsupportedKind {
                  reset-less clocked array so it is inferred as RAM, or raise ram_max_ff_bits \
                  in the [synth] section of Veryl.toml",
                 path, bits, limit
+            ),
+            Self::UnionConstructor => {
+                "union constructor (every member aliases the same bits, so the value is ambiguous)"
+                    .fmt(f)
+            }
+            Self::PackedArrayLiteralDefault => write!(
+                f,
+                "array literal with `default:` used as a packed value (e.g. as a ternary arm), \
+                 where the element count it would fill is unknown; assign the literal directly \
+                 to the array instead"
             ),
         }
     }

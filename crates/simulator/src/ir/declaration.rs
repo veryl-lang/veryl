@@ -9,7 +9,9 @@ use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
 use crate::ir::partial_index::partial_index_base;
-use crate::ir::statement::{ProtoAssignStatement, msb_first_window, size_fill_literal_rhs};
+use crate::ir::statement::{
+    ProtoAssignStatement, const_array_element_exprs, msb_first_window, size_fill_literal_rhs,
+};
 use crate::ir::variable::{
     ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
 };
@@ -906,7 +908,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             for (i, x) in hoisted_child_decls.iter().enumerate() {
                 x.gather_ff(&mut child_analyzer_context, &mut child_ff_table, i);
             }
-            child_ff_table.update_is_ff();
+            child_ff_table.update_is_ff(&hoisted_child_decls, &mut child_analyzer_context);
             if context.config.disable_ff_opt {
                 child_ff_table.force_all_ff();
             }
@@ -1220,6 +1222,23 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 continue;
             }
             let child_meta = child_variable_meta.get(&input.id).unwrap();
+
+            // Array port fed by a const array (`inst u: Sub (i: pk::TBL)`).
+            if let Some(exprs) = const_array_element_exprs(&input.expr, child_meta.elements.len()) {
+                for (child_element, expr) in child_meta.elements.iter().zip(exprs) {
+                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: child_element.current,
+                        dst_width: child_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: 0, // not FF
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
 
             // Array port fed by a bare or constant partial-index variable
             // (e.g. `w_q[i]` from `logic [N, M]`): expand per-element.
