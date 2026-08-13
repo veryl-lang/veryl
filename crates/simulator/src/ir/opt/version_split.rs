@@ -4,31 +4,25 @@
 //! followed by guarded full/partial overrides inside one `always_comb`
 //! (a priority chain, e.g. an unrolled `for` + `if` scan) — into a single
 //! unconditional write whose RHS is a ternary select chain.  One writer
-//! per variable serves two consumers: the incremental settle plan sees no
-//! same-bit conflicts, version holes, or clobber repairs, and the
-//! whole-comb backends can localize and fuse storage they otherwise must
-//! keep materialized.
+//! per variable lets the whole-comb backends localize and fuse storage
+//! they otherwise must keep materialized.
 //!
 //! Runs on the merged comb list before dependency analysis, while
 //! `SequentialBlock`s (one per multi-statement `always_comb`) are intact,
 //! so program order inside a block is the sequential-semantics order.
-//! Enabled only for the incremental settle configuration (`VERYL_INCR=1`,
-//! 2-state); the default pipeline is untouched.
 //!
 //! Turning a guarded write into an always-evaluated select operand is
 //! sound here because every partial expression form is total in this IR:
 //! division guards y==0, dynamic indices clamp to the element range, and
 //! shift counts clamp to the width.
 //!
-//! Validation caveat: this pass runs before compile, so `VERYL_INCR_VALIDATE`
-//! dual-runs the incremental and full settle of the *already-fused*
-//! statements — a semantic error introduced here is applied to both sides
-//! and is therefore invisible to VALIDATE.  Changes to this pass must be
-//! gated on golden SystemVerilog co-simulation, not on VALIDATE div0.
+//! Validation caveat: this pass runs before compile, so a dual-run checker
+//! compares the *already-fused* statements — a semantic error introduced
+//! here is applied to both sides and is therefore invisible to it.  Changes
+//! to this pass must be gated on golden SystemVerilog co-simulation.
 
 use crate::ir::Value;
 use crate::ir::expression::{ExpressionContext, ProtoExpression};
-use crate::ir::incremental;
 use crate::ir::statement::{ProtoAssignStatement, ProtoIfStatement, ProtoStatement};
 use crate::ir::variable::VarOffset;
 use crate::{HashMap, HashSet};
@@ -39,11 +33,8 @@ use veryl_parser::token_range::TokenRange;
 // Transformation pass
 // ---------------------------------------------------------------------------
 
-/// On under the incremental configuration (the plan needs fused
-/// single-writer chains), off otherwise.
-/// `VERYL_VSPLIT=0` opts out.  Independent of the incremental settle: the
-/// single-writer form also widens what the whole-comb backends can localize
-/// and fuse, so it pays on the full sweep too.
+/// The single-writer form widens what the whole-comb backends can localize
+/// and fuse, so it pays on the full sweep.
 pub fn pass_enabled(use_4state: bool) -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     !use_4state && *ON.get_or_init(|| std::env::var("VERYL_VSPLIT").as_deref() != Ok("0"))
@@ -345,8 +336,8 @@ fn record_tree(
 
 /// Record a non-eventable statement's comb reads and writes.
 fn record_opaque(stmt: &ProtoStatement, col: &mut BlockCol) {
-    let mut deps = incremental::ChunkDeps::default();
-    incremental::collect_stmt_deps(stmt, &mut deps);
+    let mut deps = crate::ir::deps::StmtDeps::default();
+    crate::ir::deps::collect_stmt_deps(stmt, &mut deps);
     col.pos += 1;
     let pos = col.pos;
     for d in &deps.ins {
@@ -479,9 +470,8 @@ fn split_block(
             stats.skip_width += 1;
             continue;
         }
-        // Pairwise-disjoint writers (per-field assigns) create no same-bit
-        // conflicts in the settle plan; fusing them would only coarsen the
-        // change-driven granularity, so leave them alone.
+        // Pairwise-disjoint writers (per-field assigns) are already
+        // conflict-free, so a select chain buys no single-writer benefit.
         let overlaps = evs
             .iter()
             .enumerate()
@@ -617,8 +607,7 @@ fn prune_stmt(stmt: ProtoStatement, dsts: &HashSet<i64>) -> Option<ProtoStatemen
 /// interval no write ever covers materializes as a self-read, matching the
 /// keep-previous-value semantics of a guard-only chain (`w = c ? e : w`).
 /// The settle evaluates the self-read against the previous pass's value —
-/// the same fixpoint the original guarded statements converge to — and the
-/// incremental plan drops self-wakes, so the loop is benign.
+/// the same fixpoint the original guarded statements converge to.
 #[derive(Clone)]
 enum Fe {
     Val(Value),

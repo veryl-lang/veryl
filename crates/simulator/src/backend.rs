@@ -19,8 +19,13 @@ pub mod aot_c;
 #[cfg(not(target_family = "wasm"))]
 pub mod cranelift;
 pub mod inst;
-pub mod late;
 pub mod registry;
+pub mod whole;
+
+/// Comb offsets the AOT-C emitter must not localize + runtime-indexed array
+/// ranges, precomputed in `ProtoModule::conv` while events and derived-clock
+/// candidates are in scope (see `aot_c::emit::set_localize_blocklist`).
+pub type LocalizeInfo = (crate::HashSet<isize>, Vec<(isize, usize, isize)>);
 pub mod validate;
 
 #[cfg(not(target_family = "wasm"))]
@@ -124,12 +129,6 @@ pub struct ChunkArtifact {
     /// still distinguishes chunks with different code. `None` before a stamp
     /// (non-`dut_reuse` path); `Debug` then falls back to the address.
     pub content_fp: Option<u128>,
-    /// Full-coverage read/write dependency sets of the compiled statements,
-    /// captured at compile time for the incremental (change-driven) settle
-    /// plan.  `None` unless `VERYL_INCR=1` (see `ir::incremental`).  Excluded
-    /// from `Debug`/`Hash`: derived deterministically from the statements the
-    /// fingerprint already identifies.
-    pub deps: Option<Arc<crate::ir::incremental::ChunkDeps>>,
 }
 
 impl std::fmt::Debug for ChunkArtifact {
