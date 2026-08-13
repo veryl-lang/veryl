@@ -32,7 +32,7 @@ use crate::ir::{
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::Graph;
-use daggy::petgraph::algo::tarjan_scc;
+use daggy::petgraph::algo::kosaraju_scc;
 use daggy::petgraph::graph::NodeIndex;
 use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
@@ -1206,7 +1206,7 @@ fn collect_dst_node_keys(
 }
 
 fn check_graph(module: &Module, graph: &Graph<NodeKey, ()>, errors: &mut Vec<AnalyzerError>) {
-    let sccs = tarjan_scc(graph);
+    let sccs = strongly_connected_components(graph);
     let mut reported: HashSet<Vec<NodeKey>> = HashSet::default();
     for scc in sccs {
         let is_loop = scc.len() > 1 || (scc.len() == 1 && has_self_edge(graph, scc[0]));
@@ -1222,6 +1222,13 @@ fn check_graph(module: &Module, graph: &Graph<NodeKey, ()>, errors: &mut Vec<Ana
             errors.push(error);
         }
     }
+}
+
+fn strongly_connected_components(graph: &Graph<NodeKey, ()>) -> Vec<Vec<NodeIndex>> {
+    // Petgraph's Tarjan implementation uses recursive DFS. A long, otherwise
+    // shallow dependency chain can therefore exhaust the native stack. The
+    // Kosaraju implementation uses explicit worklists for both passes.
+    kosaraju_scc(graph)
 }
 
 fn ensure_node(
@@ -1327,6 +1334,24 @@ fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> Module
 #[cfg(test)]
 mod region_tests {
     use super::*;
+
+    #[test]
+    fn scc_walk_does_not_use_the_native_stack() {
+        const COUNT: usize = 100_000;
+
+        let id = VarId::from_raw(0);
+        let mut graph = Graph::new();
+        let mut previous = None;
+        for start in 0..COUNT {
+            let current = graph.add_node((id, ArraySpan { start, length: 1 }, 0));
+            if let Some(previous) = previous {
+                graph.add_edge(previous, current, ());
+            }
+            previous = Some(current);
+        }
+
+        assert_eq!(strongly_connected_components(&graph).len(), COUNT);
+    }
 
     #[test]
     fn disjoint_array_point_queries_do_not_scan_every_partition() {
