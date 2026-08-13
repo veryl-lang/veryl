@@ -2036,11 +2036,21 @@ pub fn eval_struct_constructor(
 
         let members = match &r#type.kind {
             ir::TypeKind::Struct(x) => &x.members,
-            ir::TypeKind::Union(x) => &x.members,
             ir::TypeKind::SystemVerilog => &vec![],
+            // A union stores one member at a time, so a pattern naming its
+            // members has no value to build. SystemVerilog leaves the case to
+            // the tool -- implementations disagree on which forms are legal
+            // and on what they mean -- so emitting one is not portable.
+            ir::TypeKind::Union(_) => {
+                context.insert_error(AnalyzerError::mismatch_type(
+                    MismatchTypeKind::UnionConstructor,
+                    &token,
+                ));
+                return Err(ir_error!(token));
+            }
             _ => {
                 context.insert_error(AnalyzerError::mismatch_type(
-                    MismatchTypeKind::NonStructUnionType {
+                    MismatchTypeKind::NonStructType {
                         actual: r#type.kind.to_string(),
                     },
                     &token,

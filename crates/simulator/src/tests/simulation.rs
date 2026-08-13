@@ -21054,3 +21054,39 @@ fn ff_partial_write_read_of_another_slice_sees_the_old_value() {
         );
     }
 }
+
+#[test]
+fn union_member_forms() {
+    // The forms the union-constructor rejection must leave working.
+    let code = r#"
+    module Top (
+        a: output logic<16>,
+        b: output logic<16>,
+    ) {
+        struct S { x: logic<8>, y: logic<8> }
+        union U { w: logic<16>, s: S }
+        struct W { uu: U }
+
+        var u: U;
+        var v: W;
+
+        always_comb {
+            u.w = 16'h5a5a;
+            v   = W'{uu: S'{x: 8'h11, y: 8'h22}};
+        }
+        assign a = u;
+        assign b = v;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("a").unwrap(), Value::new(0x5a5a, 16, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0x1122, 16, false));
+    }
+}

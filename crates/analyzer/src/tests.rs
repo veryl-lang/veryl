@@ -3580,6 +3580,22 @@ fn incompat_proto() {
 fn mismatch_type() {
     let code = r#"
     module ModuleA {
+        union UnionA {
+            a: logic<16>,
+            b: logic<16>,
+        }
+        var c: UnionA;
+        always_comb {
+            c = UnionA'{a: 16'h5a5a, b: 16'h1234};
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {
         const a: u32 = 1;
         inst u: a;
     }
