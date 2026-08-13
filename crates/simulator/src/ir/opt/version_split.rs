@@ -123,13 +123,17 @@ pub fn run(stmts: &mut [ProtoStatement], alloc: &mut dyn FnMut(usize) -> isize) 
 const MAX_TREE_DEPTH: usize = 512;
 
 /// Ceiling on one folded RHS's emit-weighted size (`VERYL_VSPLIT_MAX_NODES`
-/// overrides; 0 disables).  Deep predication chains compose versions into
-/// one tree whose subtrees duplicate per field split — a wide GPU design
-/// measured a 56 MB single statement (hundreds of GB in the C compiler)
-/// where healthy chains stay under ~1k units.  A unit emits tens of bytes,
-/// so the ceiling keeps a statement far under the AOT-C per-statement
-/// guard.
-const MAX_FUSED_NODES: usize = 65_536;
+/// overrides; 0 disables).  The snapshot above keeps a fold proportional to
+/// its source, so what is left here is a size/work trade, and both directions
+/// cost: folding removes work but grows the emitted code, and on a design
+/// whose settle streams through more code than the instruction cache holds
+/// the code costs more than the work saved, while folding too little leaves
+/// the multi-writer form the whole-comb passes cannot localize or fuse.
+/// Measured across the suite the response is a shallow bowl — this value wins
+/// several percent on the widest designs and is neutral on the rest, a
+/// quarter of it loses on both counts — and it doubles as a backstop for any
+/// growth the snapshot does not cover.
+const MAX_FUSED_NODES: usize = 2_048;
 
 #[cfg(test)]
 thread_local! {
