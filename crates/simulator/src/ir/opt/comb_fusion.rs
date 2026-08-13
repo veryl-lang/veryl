@@ -36,6 +36,7 @@
 
 use crate::ir::event::Event;
 use crate::ir::expression::{ExpressionContext, ProtoExpression};
+use crate::ir::opt::lane_vector;
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::VarOffset;
 use crate::{HashMap, HashSet};
@@ -890,18 +891,6 @@ pub fn inline_single_readers(
     events: &HashMap<Event, Vec<ProtoStatement>>,
     externals_extra: &HashSet<VarOffset>,
 ) -> (Vec<ProtoStatement>, Vec<isize>) {
-    let coalesced = if coalesce_enabled() {
-        let (out, fused) = coalesce_field_stores(stmts);
-        stmts = out;
-        fused
-    } else {
-        0
-    };
-    let collapsed = if cse_enabled() {
-        collapse_common_rhs(&mut stmts)
-    } else {
-        0
-    };
     // -- externals: offsets we must never make disappear.
     let mut externals: HashSet<isize> = HashSet::default();
     for off in externals_extra {
@@ -939,6 +928,33 @@ pub fn inline_single_readers(
             }
         }
     }
+
+    // -- bit-lane structure recovery, around the field-store coalescing: the
+    // fold turns reduction rows into one-bit stores, the coalescing gathers
+    // those into a concatenation, and the merge collapses it to word width.
+    let mut fused_offsets: Vec<isize> = Vec::new();
+    let folded = if lane_vector::fold_enabled() {
+        lane_vector::transpose_fold(&mut stmts, &externals, &mut fused_offsets)
+    } else {
+        0
+    };
+    let coalesced = if coalesce_enabled() {
+        let (out, fused) = coalesce_field_stores(stmts);
+        stmts = out;
+        fused
+    } else {
+        0
+    };
+    let laned = if lane_vector::merge_enabled() {
+        lane_vector::lane_merge(&mut stmts)
+    } else {
+        0
+    };
+    let collapsed = if cse_enabled() {
+        collapse_common_rhs(&mut stmts)
+    } else {
+        0
+    };
 
     // -- pass 1: reads / writes / opacity over the top-level statements.
     struct ReadInfo {
@@ -985,7 +1001,6 @@ pub fn inline_single_readers(
 
     let n = stmts.len();
     let mut deleted = vec![false; n];
-    let mut fused_offsets: Vec<isize> = Vec::new();
     let mut inlined = 0usize;
     let (mut veto_shape, mut veto_reader, mut veto_redef, mut veto_ext) = (0usize, 0, 0, 0);
     // veto_shape sub-classification (diag only): why a comb Assign fell out
@@ -1326,9 +1341,11 @@ pub fn inline_single_readers(
 
     if diag() {
         eprintln!(
-            "[comb_fusion] stmts={} coalesced={} cse={} dup={} inlined={} veto: shape={} reader={} redef={} external={}",
+            "[comb_fusion] stmts={} folded={} coalesced={} laned={} cse={} dup={} inlined={} veto: shape={} reader={} redef={} external={}",
             n,
+            folded,
             coalesced,
+            laned,
             collapsed,
             duplicated,
             inlined,
