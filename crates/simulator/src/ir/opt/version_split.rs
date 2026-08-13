@@ -29,7 +29,7 @@
 use crate::ir::Value;
 use crate::ir::expression::{ExpressionContext, ProtoExpression};
 use crate::ir::incremental;
-use crate::ir::statement::{ProtoAssignStatement, ProtoStatement};
+use crate::ir::statement::{ProtoAssignStatement, ProtoIfStatement, ProtoStatement};
 use crate::ir::variable::VarOffset;
 use crate::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -123,13 +123,17 @@ pub fn run(stmts: &mut [ProtoStatement], alloc: &mut dyn FnMut(usize) -> isize) 
 const MAX_TREE_DEPTH: usize = 512;
 
 /// Ceiling on one folded RHS's emit-weighted size (`VERYL_VSPLIT_MAX_NODES`
-/// overrides; 0 disables).  Deep predication chains compose versions into
-/// one tree whose subtrees duplicate per field split — a wide GPU design
-/// measured a 56 MB single statement (hundreds of GB in the C compiler)
-/// where healthy chains stay under ~1k units.  A unit emits tens of bytes,
-/// so the ceiling keeps a statement far under the AOT-C per-statement
-/// guard.
-const MAX_FUSED_NODES: usize = 65_536;
+/// overrides; 0 disables).  The snapshot above keeps a fold proportional to
+/// its source, so what is left here is a size/work trade, and both directions
+/// cost: folding removes work but grows the emitted code, and on a design
+/// whose settle streams through more code than the instruction cache holds
+/// the code costs more than the work saved, while folding too little leaves
+/// the multi-writer form the whole-comb passes cannot localize or fuse.
+/// Measured across the suite the response is a shallow bowl — this value wins
+/// several percent on the widest designs and is neutral on the rest, a
+/// quarter of it loses on both counts — and it doubles as a backstop for any
+/// growth the snapshot does not cover.
+const MAX_FUSED_NODES: usize = 2_048;
 
 #[cfg(test)]
 thread_local! {
@@ -490,7 +494,7 @@ fn split_block(
         // Fold the writer statements (program order, deduped) into one RHS.
         let mut writer_stmts: Vec<usize> = evs.iter().map(|e| e.stmt_idx).collect();
         writer_stmts.dedup();
-        let folded = fold_var(body, &writer_stmts, dst, width, alloc);
+        let folded = fold_var(body, &writer_stmts, dst, width, alloc, evs[0].token);
         match folded {
             Some((temps, expr)) => {
                 let cap = max_fused_nodes();
@@ -804,6 +808,25 @@ impl IMap {
         Some(())
     }
 
+    fn total_width(&self) -> usize {
+        self.iv.last().map_or(0, |iv| iv.hi as usize + 1)
+    }
+
+    /// Emit-weighted size of the accumulated value, counting only the
+    /// composed subtrees (a plain read or literal is free to duplicate).
+    fn op_nodes(&self, cap: usize) -> usize {
+        let mut n = 0usize;
+        for iv in &self.iv {
+            if let Fe::Op(e) = &iv.fe {
+                n = n.saturating_add(expr_nodes_capped(e, cap));
+                if n > cap {
+                    break;
+                }
+            }
+        }
+        n
+    }
+
     /// Split intervals so that `lo` and `hi + 1` fall on boundaries.
     fn split_at(&mut self, hi: u32, lo: u32) -> Option<()> {
         for cut in [lo, hi + 1] {
@@ -913,11 +936,12 @@ fn fold_var(
     dst: i64,
     width: usize,
     alloc: &mut dyn FnMut(usize) -> isize,
+    token: TokenRange,
 ) -> Option<(Vec<ProtoAssignStatement>, ProtoExpression)> {
     let mut map = IMap::new(width, dst);
     let mut temps: Vec<ProtoAssignStatement> = Vec::new();
     for &si in writer_stmts {
-        fold_stmt(&body[si], dst, &mut map, &mut temps, alloc)?;
+        fold_stmt(&body[si], dst, &mut map, &mut temps, alloc, token)?;
     }
     let expr = map.to_expr(width)?;
     Some((temps, expr))
@@ -1001,6 +1025,64 @@ fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &Fe) -> Option<()>
     }
 }
 
+/// Bits of `dst` that `stmts` assigns: `all` on every path, `any` on some.
+/// Bits outside `all` keep their incoming value, so the fold carries that
+/// value into the merged result; bits outside `any` are not merged at all.
+fn written_bits(
+    stmts: &[ProtoStatement],
+    dst: i64,
+    width: usize,
+    all: &mut [bool],
+    any: &mut [bool],
+) {
+    for stmt in stmts {
+        match stmt {
+            ProtoStatement::Assign(x) => {
+                if !matches!(x.dst, VarOffset::Comb(o) if o as i64 == dst) {
+                    continue;
+                }
+                let (hi, lo) = match x.select {
+                    Some((a, b)) => (a.max(b), a.min(b)),
+                    None => (x.dst_width.saturating_sub(1), 0),
+                };
+                for i in lo..=hi.min(width - 1) {
+                    all[i] = true;
+                    any[i] = true;
+                }
+            }
+            ProtoStatement::If(x) => {
+                let (mut ta, mut tn) = (vec![false; width], vec![false; width]);
+                let (mut fa, mut fn_) = (vec![false; width], vec![false; width]);
+                written_bits(&x.true_side, dst, width, &mut ta, &mut tn);
+                written_bits(&x.false_side, dst, width, &mut fa, &mut fn_);
+                for i in 0..width {
+                    all[i] |= ta[i] && fa[i];
+                    any[i] |= tn[i] || fn_[i];
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Size above which the accumulated value is worth hiding behind a temp
+/// rather than letting a merge duplicate it.  Below this the temp — an
+/// extra comb slot plus its own statement — costs more than the copy.
+const SNAPSHOT_MIN_NODES: usize = 32;
+
+/// True when folding `x` would emit the accumulated value more than once.
+/// A merged bit carries that value from whichever side leaves it unwritten,
+/// so a bit that both sides may leave — while some path still writes it —
+/// emits it on both arms of the ternary.  Nesting that shape doubles the
+/// value per level.
+fn duplicates_entry(x: &ProtoIfStatement, dst: i64, width: usize) -> bool {
+    let (mut ta, mut tn) = (vec![false; width], vec![false; width]);
+    let (mut fa, mut fn_) = (vec![false; width], vec![false; width]);
+    written_bits(&x.true_side, dst, width, &mut ta, &mut tn);
+    written_bits(&x.false_side, dst, width, &mut fa, &mut fn_);
+    (0..width).any(|i| (tn[i] || fn_[i]) && !ta[i] && !fa[i])
+}
+
 fn expr_reads_dst(e: &ProtoExpression, dst: i64) -> bool {
     let mut ins = Vec::new();
     e.gather_variable_offsets_expanded(&mut ins);
@@ -1014,6 +1096,7 @@ fn fold_stmt(
     map: &mut IMap,
     temps: &mut Vec<ProtoAssignStatement>,
     alloc: &mut dyn FnMut(usize) -> isize,
+    token: TokenRange,
 ) -> Option<()> {
     match stmt {
         ProtoStatement::Assign(x) => {
@@ -1077,6 +1160,16 @@ fn fold_stmt(
         }
         ProtoStatement::If(x) => {
             let cond = x.cond.as_ref()?;
+            // Behind a temp each level adds a read instead of a copy.  Left
+            // in place, a deep nest reached millions of nodes from seventeen
+            // writes on one design.
+            let width = map.total_width();
+            if map.op_nodes(SNAPSHOT_MIN_NODES) > SNAPSHOT_MIN_NODES
+                && width > 0
+                && duplicates_entry(x, dst, width)
+            {
+                map.snapshot_to_temp(width, temps, alloc, token)?;
+            }
             let entry_snapshot: Vec<(u32, u32)> = map.iv.iter().map(|iv| (iv.lo, iv.ver)).collect();
             let mut t = map.clone();
             let mut f = map.clone();
@@ -1085,10 +1178,10 @@ fn fold_stmt(
             t.next_ver = map.next_ver;
             f.next_ver = map.next_ver + 1_000_000;
             for s in &x.true_side {
-                fold_stmt(s, dst, &mut t, temps, alloc)?;
+                fold_stmt(s, dst, &mut t, temps, alloc, token)?;
             }
             for s in &x.false_side {
-                fold_stmt(s, dst, &mut f, temps, alloc)?;
+                fold_stmt(s, dst, &mut f, temps, alloc, token)?;
             }
             merge_if(cond, t, f, &entry_snapshot, map)
         }
@@ -1345,5 +1438,49 @@ mod tests {
         assert_eq!(stats.skip_budget, 0);
         assert_eq!(stats.fused_vars, 1, "a large cap must still fuse");
         TEST_MAX_NODES.with(|c| c.set(None));
+    }
+
+    #[test]
+    fn a_nested_conditional_chain_folds_to_a_linear_size() {
+        // `if a { if b { d = k } }` leaves the incoming value on both arms
+        // of its merge, so folding a run of them copies that value once per
+        // statement — 2^n for n statements.  The fold must stay
+        // proportional to the source instead.
+        const N: usize = 20;
+        let mut body: Vec<ProtoStatement> = (0..N)
+            .map(|i| {
+                ProtoStatement::If(ProtoIfStatement {
+                    cond: Some(cvar(0x100 + i as isize * 8, 1)),
+                    true_side: vec![ProtoStatement::If(ProtoIfStatement {
+                        cond: Some(cvar(0x200 + i as isize * 8, 1)),
+                        true_side: vec![assign(0x0, 8, lit(i as u64, 8))],
+                        false_side: vec![],
+                    })],
+                    false_side: vec![],
+                })
+            })
+            .collect();
+        let mut alloc_at = 0x1000isize;
+        let mut alloc = |w: usize| -> isize {
+            let off = alloc_at;
+            alloc_at += crate::ir::variable::native_bytes(w) as isize;
+            off
+        };
+
+        TEST_MAX_NODES.with(|c| c.set(Some(1 << 20)));
+        let mut stats = RunStats::default();
+        split_block(&mut body, &mut stats, &mut alloc);
+        TEST_MAX_NODES.with(|c| c.set(None));
+
+        assert_eq!(stats.fused_vars, 1, "the chain must fuse");
+        assert_eq!(stats.skip_budget, 0);
+        let nodes: usize = body
+            .iter()
+            .map(|s| match s {
+                ProtoStatement::Assign(a) => expr_nodes_capped(&a.expr, usize::MAX),
+                _ => 0,
+            })
+            .sum();
+        assert!(nodes < 40 * N, "fold grew super-linearly: {nodes} nodes");
     }
 }

@@ -36,6 +36,7 @@
 
 use crate::ir::event::Event;
 use crate::ir::expression::{ExpressionContext, ProtoExpression};
+use crate::ir::opt::lane_vector;
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::VarOffset;
 use crate::{HashMap, HashSet};
@@ -367,6 +368,17 @@ fn coalesce_enabled() -> bool {
     *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION_COALESCE").as_deref() != Ok("0"))
 }
 
+/// Take a destination wider than a word one 64-bit word at a time
+/// (`VERYL_COMB_FUSION_WORD_COALESCE=0` opts out).  Fusing it whole makes one
+/// concat as wide as the variable, which forces the multi-word paths and
+/// measured sim_s +32%; per word the fused store is an ordinary word-sized
+/// value, and a word assembled bit by bit becomes a single store the lane
+/// merge can then collapse.
+fn word_coalesce_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION_WORD_COALESCE").as_deref() != Ok("0"))
+}
+
 /// Cheap multi-reader duplication: ON by default (`VERYL_COMB_FUSION_CHEAP=0`
 /// opts out).  The long-run miscompile that had parked this stage was rooted
 /// in the compact (base+last) dependency gather hiding dynamic reads of an
@@ -649,18 +661,17 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
                 w: a.dst_width,
                 bad: false,
             });
-            // A WIDE (>64-bit) destination is deliberately NOT fused:
-            // the observed >64-bit field-store groups are single-bit packs
-            // (80 one-bit fields into an 80/960-bit vector), where each
-            // original store is a cheap sub-word RMW and the fused statement
-            // becomes an 80-element wide concat chain — measured sim_s +32%.
-            // No real register-file (many multi-bit fields per word) shape
-            // has been observed to win yet.
+            // A field straddling a word boundary has no single word to land
+            // in, so it disqualifies the group (see `word_coalesce_enabled`).
+            let word_ok = a.dst_width <= 64
+                || (word_coalesce_enabled()
+                    && a.select
+                        .is_some_and(|(hi, lo)| hi.max(lo) / 64 == hi.min(lo) / 64));
             if a.select.is_some()
                 && a.dynamic_select.is_none()
                 && a.rhs_select.is_none()
                 && a.dst_width > 0
-                && a.dst_width <= 64
+                && word_ok
                 && a.dst_width == g.w
             {
                 g.idxs.push(i);
@@ -703,6 +714,9 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
 
     let mut fused = 0usize;
     let mut deleted = vec![false; n];
+    // Keyed by the group's last statement index, whose place they take —
+    // a wide destination lands several.
+    let mut extra: HashMap<usize, Vec<ProtoStatement>> = HashMap::default();
     let mut e_ins: Vec<VarOffset> = vec![];
     let mut e_outs: Vec<VarOffset> = vec![];
     let mut group_offs: Vec<isize> = groups.keys().copied().collect();
@@ -800,70 +814,98 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
                 ew,
             )
         };
-        let mut elements: Vec<(Box<ProtoExpression>, usize, usize)> =
-            Vec::with_capacity(2 * ranges.len() + 1);
-        let mut cursor = g.w; // exclusive upper edge of the uncovered scan
-        for &(lo, hi, i) in ranges.iter().rev() {
-            if hi + 1 < cursor {
-                elements.push(old_bits(cursor - 1, hi + 1));
-            }
-            let ProtoStatement::Assign(a) = &mut stmts[i] else {
-                unreachable!()
-            };
-            let expr = std::mem::replace(
-                &mut a.expr,
-                ProtoExpression::Value {
-                    value: Value::new(0, 1, false),
-                    width: 1,
-                    expr_context: ExpressionContext {
-                        width: 1,
-                        signed: false,
-                    },
-                },
-            );
-            let ew = hi - lo + 1;
-            elements.push((Box::new(canonical_wrap(expr, ew)), 1, ew));
-            cursor = lo;
-        }
-        if cursor > 0 {
-            elements.push(old_bits(cursor - 1, 0));
-        }
-        let w = g.w;
-        let concat = ProtoExpression::Concatenation {
-            elements,
-            width: w,
-            expr_context: ExpressionContext {
-                width: w,
-                signed: false,
-            },
+        // Fusing one field would reproduce that same field store, and a word
+        // no field touches keeps its value by not being stored at all.
+        let slices: Vec<(usize, usize)> = if g.w <= 64 {
+            vec![(g.w - 1, 0)]
+        } else {
+            (0..g.w.div_ceil(64))
+                .map(|word| (((word + 1) * 64).min(g.w) - 1, word * 64))
+                .filter(|&(whi, wlo)| {
+                    ranges
+                        .iter()
+                        .filter(|&&(lo, _, _)| lo >= wlo && lo <= whi)
+                        .count()
+                        > 1
+                })
+                .collect()
         };
+        if slices.is_empty() {
+            continue;
+        }
         let ProtoStatement::Assign(last_a) = &stmts[last] else {
             unreachable!()
         };
-        let fused_stmt = ProtoStatement::Assign(crate::ir::statement::ProtoAssignStatement {
-            dst: last_a.dst,
-            dst_width: w,
-            select: None,
-            dynamic_select: None,
-            rhs_select: None,
-            expr: concat,
-            dst_ff_current_offset: last_a.dst_ff_current_offset,
-            token: last_a.token,
-        });
-        stmts[last] = fused_stmt;
-        for &i in &g.idxs {
-            if i != last {
+        let (dst, ff_cur, token) = (last_a.dst, last_a.dst_ff_current_offset, last_a.token);
+        let mut stores: Vec<ProtoStatement> = Vec::with_capacity(slices.len());
+        for &(shi, slo) in &slices {
+            let sw = shi - slo + 1;
+            let mut elements: Vec<(Box<ProtoExpression>, usize, usize)> = Vec::new();
+            let mut cursor = shi + 1; // exclusive upper edge of the uncovered scan
+            for &(lo, hi, i) in ranges
+                .iter()
+                .rev()
+                .filter(|&&(lo, _, _)| lo >= slo && lo <= shi)
+            {
+                if hi + 1 < cursor {
+                    elements.push(old_bits(cursor - 1, hi + 1));
+                }
+                let ProtoStatement::Assign(a) = &mut stmts[i] else {
+                    unreachable!()
+                };
+                let expr = std::mem::replace(
+                    &mut a.expr,
+                    ProtoExpression::Value {
+                        value: Value::new(0, 1, false),
+                        width: 1,
+                        expr_context: ExpressionContext {
+                            width: 1,
+                            signed: false,
+                        },
+                    },
+                );
+                let ew = hi - lo + 1;
+                elements.push((Box::new(canonical_wrap(expr, ew)), 1, ew));
+                cursor = lo;
+            }
+            if cursor > slo {
+                elements.push(old_bits(cursor - 1, slo));
+            }
+            stores.push(ProtoStatement::Assign(
+                crate::ir::statement::ProtoAssignStatement {
+                    dst,
+                    dst_width: g.w,
+                    select: (g.w > 64).then_some((shi, slo)),
+                    dynamic_select: None,
+                    rhs_select: None,
+                    expr: ProtoExpression::Concatenation {
+                        elements,
+                        width: sw,
+                        expr_context: ExpressionContext {
+                            width: sw,
+                            signed: false,
+                        },
+                    },
+                    dst_ff_current_offset: ff_cur,
+                    token,
+                },
+            ));
+        }
+        if diag() {
+            eprintln!(
+                "[comb_fusion] coalesced group: off={o:#x} w={} fields={} stores={} span=[{first},{last}]",
+                g.w,
+                g.idxs.len(),
+                stores.len(),
+            );
+        }
+        extra.insert(last, stores);
+        for &(lo, _, i) in &ranges {
+            if slices.iter().any(|&(shi, slo)| lo >= slo && lo <= shi) {
                 deleted[i] = true;
             }
         }
         fused += 1;
-        if diag() {
-            eprintln!(
-                "[comb_fusion] coalesced group: off={o:#x} w={} fields={} span=[{first},{last}]",
-                g.w,
-                g.idxs.len(),
-            );
-        }
     }
 
     if fused == 0 {
@@ -873,6 +915,9 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
     for (i, s) in stmts.into_iter().enumerate() {
         if !deleted[i] {
             out.push(s);
+        }
+        if let Some(v) = extra.remove(&i) {
+            out.extend(v);
         }
     }
     (out, fused)
@@ -890,18 +935,6 @@ pub fn inline_single_readers(
     events: &HashMap<Event, Vec<ProtoStatement>>,
     externals_extra: &HashSet<VarOffset>,
 ) -> (Vec<ProtoStatement>, Vec<isize>) {
-    let coalesced = if coalesce_enabled() {
-        let (out, fused) = coalesce_field_stores(stmts);
-        stmts = out;
-        fused
-    } else {
-        0
-    };
-    let collapsed = if cse_enabled() {
-        collapse_common_rhs(&mut stmts)
-    } else {
-        0
-    };
     // -- externals: offsets we must never make disappear.
     let mut externals: HashSet<isize> = HashSet::default();
     for off in externals_extra {
@@ -939,6 +972,32 @@ pub fn inline_single_readers(
             }
         }
     }
+
+    // Bit-lane structure recovery runs around the coalescing; see
+    // `lane_vector` for why that order.
+    let mut fused_offsets: Vec<isize> = Vec::new();
+    let folded = if lane_vector::fold_enabled() {
+        lane_vector::transpose_fold(&mut stmts, &externals, &mut fused_offsets)
+    } else {
+        0
+    };
+    let coalesced = if coalesce_enabled() {
+        let (out, fused) = coalesce_field_stores(stmts);
+        stmts = out;
+        fused
+    } else {
+        0
+    };
+    let laned = if lane_vector::merge_enabled() {
+        lane_vector::lane_merge(&mut stmts)
+    } else {
+        0
+    };
+    let collapsed = if cse_enabled() {
+        collapse_common_rhs(&mut stmts)
+    } else {
+        0
+    };
 
     // -- pass 1: reads / writes / opacity over the top-level statements.
     struct ReadInfo {
@@ -985,7 +1044,6 @@ pub fn inline_single_readers(
 
     let n = stmts.len();
     let mut deleted = vec![false; n];
-    let mut fused_offsets: Vec<isize> = Vec::new();
     let mut inlined = 0usize;
     let (mut veto_shape, mut veto_reader, mut veto_redef, mut veto_ext) = (0usize, 0, 0, 0);
     // veto_shape sub-classification (diag only): why a comb Assign fell out
@@ -1326,9 +1384,11 @@ pub fn inline_single_readers(
 
     if diag() {
         eprintln!(
-            "[comb_fusion] stmts={} coalesced={} cse={} dup={} inlined={} veto: shape={} reader={} redef={} external={}",
+            "[comb_fusion] stmts={} folded={} coalesced={} laned={} cse={} dup={} inlined={} veto: shape={} reader={} redef={} external={}",
             n,
+            folded,
             coalesced,
+            laned,
             collapsed,
             duplicated,
             inlined,
@@ -1884,9 +1944,9 @@ mod tests {
     }
 
     #[test]
-    fn coalesce_rejects_a_wide_destination() {
-        // A >64-bit destination never fuses, even fully covered (see the
-        // eligibility comment in coalesce_field_stores).
+    fn coalesce_leaves_word_sized_fields_of_a_wide_destination_alone() {
+        // Each field already is a whole word, so the fused store would be
+        // that same store — nothing to gain.
         let stmts = vec![
             assign_sel(0x0, 192, 63, 0, var(0x100, 64)),
             assign_sel(0x0, 192, 127, 64, var(0x108, 64)),
@@ -1895,6 +1955,41 @@ mod tests {
         let (out, fused) = coalesce_field_stores(stmts);
         assert_eq!(fused, 0);
         assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn coalesce_packs_a_wide_destination_one_word_at_a_time() {
+        // A vector written bit by bit becomes one store per word, not one
+        // concat as wide as the vector.
+        let w = 130;
+        let stmts: Vec<ProtoStatement> = (0..w)
+            .map(|b| assign_sel(0x0, w, b, b, var(0x100 + b as isize * 8, 1)))
+            .collect();
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 1);
+        assert_eq!(out.len(), 3, "one store per written word");
+        let mut seen: Vec<(Option<(usize, usize)>, usize)> = out
+            .iter()
+            .map(|s| {
+                let ProtoStatement::Assign(a) = s else {
+                    panic!("expected an Assign")
+                };
+                let ProtoExpression::Concatenation { elements, .. } = &a.expr else {
+                    panic!("expected a concatenation")
+                };
+                assert_eq!(a.dst_width, w);
+                (a.select, elements.len())
+            })
+            .collect();
+        seen.sort();
+        assert_eq!(
+            seen,
+            vec![
+                (Some((63, 0)), 64),
+                (Some((127, 64)), 64),
+                (Some((129, 128)), 2),
+            ]
+        );
     }
 
     #[test]

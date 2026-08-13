@@ -11,6 +11,8 @@ pub(crate) mod dead_var_dce;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dup_assign_dce;
 #[cfg(not(target_family = "wasm"))]
+pub(crate) mod lane_vector;
+#[cfg(not(target_family = "wasm"))]
 pub(crate) mod load_cache_lookahead;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod multi_write_analysis;
