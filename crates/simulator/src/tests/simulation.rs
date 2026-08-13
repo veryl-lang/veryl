@@ -5000,6 +5000,116 @@ fn const_array_in_initial() {
 }
 
 #[test]
+fn sub_array_assign() {
+    // The index prefix can be on either side of the assignment.
+    let code = r#"
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        a:   output logic<8>,
+        b:   output logic<8>,
+        c:   output logic<8>,
+        d:   output logic<8>,
+    ) {
+        var t: logic<8> [3];
+        var u: logic<8> [2, 3];
+        var p: logic<8> [2, 3];
+        var q: logic<8> [3];
+        var r: logic<8> [2, 3];
+        var f: logic<8> [2, 3];
+
+        assign t = '{8'd1, 8'd2, 8'd3};
+        assign u = '{'{8'd4, 8'd5, 8'd6}, '{8'd7, 8'd8, 8'd9}};
+
+        always_comb {
+            p[0] = t;
+            p[1] = u[1];
+            q    = u[0];
+            r[0] = u[1];
+            r[1] = u[0];
+        }
+        always_ff {
+            if_reset {
+                f[0] = '{8'd0, 8'd0, 8'd0};
+                f[1] = '{8'd0, 8'd0, 8'd0};
+            } else {
+                f[0] = t;
+                f[1] = u[1];
+            }
+        }
+        assign a = p[0][2];
+        assign b = p[1][0];
+        assign c = q[1];
+        assign d = f[1][2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        assert_eq!(sim.get("a").unwrap(), Value::new(3, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(7, 8, false));
+        assert_eq!(sim.get("c").unwrap(), Value::new(5, 8, false));
+        assert_eq!(sim.get("d").unwrap(), Value::new(0, 8, false));
+
+        sim.step(&clk);
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("d").unwrap(), Value::new(9, 8, false));
+    }
+}
+
+#[test]
+fn sub_array_assign_const_and_call() {
+    let code = r#"
+    package pk {
+        type sub = logic<8> [4];
+        const TBL: sub = '{8'd1, 8'd2, 8'd3, 8'd4};
+    }
+    module Top (
+        a: output logic<8>,
+        b: output logic<8>,
+        c: output logic<8>,
+    ) {
+        function f () -> pk::sub {
+            return '{8'd5, 8'd6, 8'd7, 8'd8};
+        }
+        var s: logic<8> [2, 3, 4];
+        var v: logic<8> [2, 4];
+        always_comb {
+            for i in 0..2 {
+                for j in 0..3 {
+                    s[i][j] = pk::TBL;
+                }
+            }
+            v[0] = pk::TBL;
+            v[1] = f();
+        }
+        assign a = s[1][2][3];
+        assign b = v[0][1];
+        assign c = v[1][3];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("a").unwrap(), Value::new(4, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(2, 8, false));
+        assert_eq!(sim.get("c").unwrap(), Value::new(8, 8, false));
+    }
+}
+
+#[test]
 fn struct_constructor() {
     let code = r#"
     module Top (

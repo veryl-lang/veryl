@@ -47,6 +47,22 @@ fn const_array_operand(expr: &air::Expression) -> Option<(&air::Comptime, &[Valu
     }
 }
 
+/// Array shape an operand still has after its index prefix -- `s[0]` against
+/// `logic<8> [2, 3]` leaves `[3]`. `None` when there is no element list to
+/// expand over: a scalar, or a prefix that isn't constant.
+fn remaining_array_shape(
+    context: &mut Context,
+    id: &air::VarId,
+    index: &air::VarIndex,
+) -> Option<air::Shape> {
+    let shape = &context.scope().variable_meta.get(id)?.r#type.array;
+    let dim = index.dimension();
+    if dim >= shape.dims() || !index.is_const() {
+        return None;
+    }
+    Some(air::Shape::new(shape.as_slice()[dim..].to_vec()))
+}
+
 /// `None` on a shape mismatch, leaving the caller's generic path to report it.
 pub(crate) fn const_array_element_exprs(
     expr: &air::Expression,
@@ -3392,36 +3408,29 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
     fn conv(context: &mut Context, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         let in_initial = context.in_initial;
 
-        // Whole-array assignment (`assign out = arr;`): analyzer emits dst
-        // with empty index but non-empty array shape, which the single-stmt
-        // conv path can't address. Expand to N element-wise assigns.
+        // Array-shaped assignment (`assign out = arr;`, `s[0] = arr;`), which
+        // the single-stmt conv path below can't address.
         if src.dst.len() == 1 {
             let dst0 = &src.dst[0];
-            if dst0.index.dimension() == 0 {
-                let dst_array = {
-                    let scope = context.scope();
-                    scope
-                        .variable_meta
-                        .get(&dst0.id)
-                        .map(|m| m.r#type.array.clone())
-                };
-                if let Some(arr_shape) = dst_array.clone()
-                    && !arr_shape.is_empty()
-                    && let air::Expression::Term(factor) = &src.expr
-                    && let air::Factor::Variable(_, vidx, _, _) = factor.as_ref()
-                    && vidx.dimension() == 0
+            if let Some(dst_shape) = remaining_array_shape(context, &dst0.id, &dst0.index) {
+                let total: usize = dst_shape.iter().map(|d| d.unwrap_or(1)).product();
+
+                if let air::Expression::Term(factor) = &src.expr
+                    && let air::Factor::Variable(rhs_id, rhs_index, _, _) = factor.as_ref()
+                    && let Some(rhs_shape) = remaining_array_shape(context, rhs_id, rhs_index)
+                    && rhs_shape.iter().map(|d| d.unwrap_or(1)).product::<usize>() == total
                 {
-                    let total: usize = arr_shape.iter().map(|d| d.unwrap_or(1)).product();
                     let mut result = Vec::with_capacity(total);
                     for i in 0..total {
-                        let elem_idx = air::VarIndex::from_index(i, &arr_shape);
                         let mut new_dst = dst0.clone();
-                        new_dst.index = elem_idx.clone();
+                        new_dst
+                            .index
+                            .append(&air::VarIndex::from_index(i, &dst_shape));
                         let mut new_expr = src.expr.clone();
                         if let air::Expression::Term(ref mut fbox) = new_expr
-                            && let air::Factor::Variable(_, vidx2, _, _) = fbox.as_mut()
+                            && let air::Factor::Variable(_, vidx, _, _) = fbox.as_mut()
                         {
-                            *vidx2 = elem_idx;
+                            vidx.append(&air::VarIndex::from_index(i, &rhs_shape));
                         }
                         let element_assign = air::AssignStatement {
                             dst: vec![new_dst],
@@ -3438,13 +3447,10 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     return Ok(result);
                 }
 
-                // Same destination shape fed by a const array (`s = pk::TBL;`).
-                if let Some(arr_shape) = dst_array.clone()
-                    && !arr_shape.is_empty()
-                    && dst0.select.is_empty()
+                // A const array on the RHS (`s = pk::TBL;`).
+                if dst0.select.is_empty()
                     && let Some((comptime, values)) = const_array_operand(&src.expr)
                 {
-                    let total: usize = arr_shape.iter().map(|d| d.unwrap_or(1)).product();
                     if values.len() != total {
                         return Err(SimulatorError::unsupported_description(&src.token));
                     }
@@ -3454,7 +3460,9 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     let mut result = Vec::with_capacity(total);
                     for (i, value) in values.iter().enumerate() {
                         let mut new_dst = dst0.clone();
-                        new_dst.index = air::VarIndex::from_index(i, &arr_shape);
+                        new_dst
+                            .index
+                            .append(&air::VarIndex::from_index(i, &dst_shape));
                         let mut element_comptime = element_comptime.clone();
                         element_comptime.value = ValueVariant::Numeric(value.clone());
                         let element_assign = air::AssignStatement {
@@ -3474,34 +3482,46 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     return Ok(result);
                 }
 
-                // Same destination shape with an array-returning call on the
-                // RHS (`state = round(state);`). Inlined once: re-converting
-                // the call per element would inline the body N times.
-                if let Some(arr_shape) = dst_array
-                    && !arr_shape.is_empty()
-                    && dst0.select.is_empty()
+                // An array-returning call on the RHS (`state = round(state);`).
+                // Inlined once: re-converting the call per element would
+                // inline the body N times.
+                if dst0.select.is_empty()
                     && let air::Expression::Term(factor) = &src.expr
                     && let air::Factor::FunctionCall(call) = factor.as_ref()
                 {
                     let ret_offsets = inline_function_call(context, call)?;
-                    let total: usize = arr_shape.iter().map(|d| d.unwrap_or(1)).product();
                     let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
                     let ret_width = call
                         .comptime
                         .r#type
                         .total_width()
                         .ok_or_else(|| SimulatorError::unsupported_description(&src.token))?;
-                    let (elements, dst_width) = {
+                    let (elements, dst_width, dims) = {
                         let scope = context.scope();
                         let meta = scope.variable_meta.get(&dst0.id).unwrap();
-                        (meta.elements.clone(), meta.width)
+                        (
+                            meta.elements.clone(),
+                            meta.width,
+                            meta.r#type.array.as_slice().to_vec(),
+                        )
                     };
-                    if ret_offsets.len() != total || elements.len() != total {
+                    // An empty index prefix resolves to 0, so a bare dst needs
+                    // no special case here.
+                    let base = dst0
+                        .index
+                        .eval_value(&mut context.scope().analyzer_context)
+                        .and_then(|v| partial_index_base(&dims, &v, total, elements.len()));
+                    let Some(base) = base else {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    };
+                    if ret_offsets.len() != total {
                         return Err(SimulatorError::unsupported_description(&src.token));
                     }
 
                     let mut result = Vec::with_capacity(total);
-                    for (element, ret_offset) in elements.iter().zip(ret_offsets) {
+                    for (element, ret_offset) in
+                        elements[base..base + total].iter().zip(ret_offsets)
+                    {
                         let current_offset = element.current_offset();
                         let dst = if element.is_ff() {
                             if in_initial {
