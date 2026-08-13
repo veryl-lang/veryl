@@ -223,4 +223,33 @@ module veryl_testcase_Module25N;
     import veryl_sample4_bar_pkg;
     localparam int unsigned BAR = veryl_sample4___bar_pkg__32::BAR;
 endmodule
+
+// Interfaces and modules can also be imported under their own names.
+// https://github.com/veryl-lang/veryl/issues/1588
+
+module veryl_testcase_Module25O
+    import veryl_sample4_qux_pkg;
+    import veryl_sample4_bar_pkg;
+    import veryl_sample4_qux_if;
+(
+    veryl_sample4___qux_if__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR_Foo.mp ifp
+);
+    // An interface is imported as-is; modport members stay qualified.
+
+    veryl_sample4___qux_if__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR_Foo u_if         ();
+    always_comb u_if.qux.foo = 0;
+    int unsigned _a          ; always_comb _a           = ifp.qux.foo;
+endmodule
+
+module veryl_testcase_Module25P;
+    // Modules are imported as-is and instantiated at the use site.
+    import veryl_sample4_qux_pkg;
+    import veryl_sample4_bar_pkg;
+    import veryl_sample4_foo_module;
+    import veryl_sample4_bar_module;
+
+
+    veryl_sample4___foo_module__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR                              u0 ();
+    veryl_sample4___bar_module__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR__veryl_sample4___bar_pkg__32 u1 ();
+endmodule
 //# sourceMappingURL=../map/25_dependency_2.sv.map

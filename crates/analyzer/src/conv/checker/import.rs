@@ -38,11 +38,12 @@ pub fn check_import(context: &mut Context, value: &ImportDeclaration) {
                     .found
                     .get_parent_package()
                     .is_some_and(|pkg| pkg.token.text == symbol.found.token.text)
-        } else if symbol.found.is_package(false) {
-            // Importing a package namespace itself, so that its members can
-            // be referenced with the package as a qualifier
-            // (e.g. `import fixedpoint::Q8_24;` then `Q8_24::Raw`).
+        } else if symbol.found.is_component(false) {
+            // Importing a component itself (package, module or interface),
+            // so that its members can be referenced with the component name
+            // as a qualifier (e.g. `import dep::MyPkg;` then `MyPkg::Raw`).
             // https://github.com/veryl-lang/veryl/issues/3122
+            // https://github.com/veryl-lang/veryl/issues/1588
             true
         } else if symbol.full_path.len() >= 2 {
             let parent_symbol = symbol

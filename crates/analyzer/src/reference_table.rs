@@ -327,7 +327,12 @@ impl ReferenceTable {
                         && (matches!(
                             symbol.found.kind,
                             SymbolKind::Struct(_) | SymbolKind::Union(_)
-                        ) || matches!(symbol.found.kind, SymbolKind::Package(_)) && n_args == 0
+                        ) || matches!(
+                            symbol.found.kind,
+                            SymbolKind::Package(_)
+                                | SymbolKind::Module(_)
+                                | SymbolKind::Interface(_)
+                        ) && n_args == 0
                             || matches!(symbol.found.kind, SymbolKind::Function(ref x) if !x.is_proto))
                     {
                         // Generic function, struct, union and package should be

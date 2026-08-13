@@ -1836,6 +1836,65 @@ fn invalid_import() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    // An interface can also be imported under its own name, keeping
+    // modport members qualified.
+    let code = r#"
+    interface IfA {
+        var _x: logic<8>;
+        modport mp {
+            _x: input,
+        }
+    }
+    module ModuleD (
+        ifp: modport IfA::mp,
+    ) {
+        import prj::IfA;
+        inst u: IfA;
+        assign u._x = 0;
+        let _p: logic = ifp._x;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // A module can also be imported under its own name.
+    let code = r#"
+    module ModA {
+        var _y: logic<8>;
+        assign _y = 0;
+    }
+    module ModuleE {
+        import prj::ModA;
+        inst u: ModA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Generic interfaces and modules are imported as-is and
+    // instantiated at the use site.
+    let code = r#"
+    interface IfG::<W: u32> {
+        var _x: logic<W>;
+    }
+    module ModG::<W: u32> {
+        var _y: logic<W>;
+        assign _y = 0;
+    }
+    module ModuleF {
+        import prj::IfG;
+        import prj::ModG;
+        inst u: IfG::<8>;
+        inst v: ModG::<8>;
+        assign u._x = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
     let code = r#"
     package a_pkg::<a: u32> {
         const A: u32 = a;
