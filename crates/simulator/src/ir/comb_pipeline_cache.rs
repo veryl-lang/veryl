@@ -44,8 +44,31 @@ pub struct CombPipeline {
     /// Dead offsets dropped by dead-var DCE. Re-applied to the caller's event
     /// statements on a hit so they match the miss path exactly.
     pub dead_offsets: Vec<VarOffset>,
+    /// Comb relayout schedule (`VERYL_COMB_LAYOUT`): the memoised
+    /// `comb_statements`/`pre_jit_stmts` are already rewritten through it, so
+    /// the caller must replay it — like `dead_offsets` — on every structure
+    /// the pipeline does not own (its event statements, the variable meta
+    /// tree, external connects, derived-clock candidates).  The layout inputs
+    /// are folded into the cache key, so a hit implies the same schedule.
+    pub layout: Option<Arc<crate::ir::comb_layout::CombLayoutSchedule>>,
+    /// Comb offsets whose defs the fusion pass consumed
+    /// (`VERYL_COMB_FUSION`): their storage is never written, so raw-buffer
+    /// comparisons (the dual-run checker) must skip them.  Diagnostic only.
+    pub fused_offsets: Vec<isize>,
     /// Non-trivial SCC count (debug/test-only diagnostic; 0 in release).
     pub nontrivial_comb_scc: usize,
+    /// Conv-time estimate that the incremental settle plan would be
+    /// declined for this comb list (see `incremental::stmts_infeasible`).
+    /// Downstream this re-enables the default-pipeline features the
+    /// incremental configuration normally gates off (whole-module AOT-C,
+    /// statement batching) and skips building the plan.
+    pub incr_infeasible: bool,
+    /// Comb bytes the version-split pass reserved for its rename temps.
+    /// The pipeline does not run on a hit, so the caller must reserve them
+    /// itself — the cached statements address those offsets, and a key
+    /// match implies the same layout, so the same reservation reproduces it
+    /// exactly (the instance-reuse path does the same with `comb_size`).
+    pub vsplit_temp_bytes: usize,
 }
 
 enum Slot {

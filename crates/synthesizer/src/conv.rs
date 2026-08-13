@@ -175,6 +175,10 @@ pub(crate) struct VarSlot {
     pub scalar_width: usize,
     /// Array dimensions. Empty shape = scalar.
     pub shape: Shape,
+    /// A reference's `Comptime::type` has the selected width dimensions
+    /// drained, so only the declared type can resolve a packed multi-dim
+    /// select.
+    pub r#type: air::Type,
     pub name: StrId,
     pub kind: VarKind,
     pub driver: VarDriverKind,
@@ -424,6 +428,7 @@ impl ConvContext {
                     width,
                     scalar_width,
                     shape,
+                    r#type: v.r#type.clone(),
                     name,
                     kind: v.kind,
                     driver: VarDriverKind::None,

@@ -317,11 +317,20 @@ impl WriteLogBuffer {
     }
 }
 
-/// Apply each log entry's payload to the FF current slot.  Narrow entries
-/// are applied first, then wide entries.  Within each pool, entries are
-/// processed in insertion order so multiple writes to the same offset
-/// apply last-write-wins, matching JIT/interpret semantics.
-pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
+/// Apply each log entry's payload to the FF current slot.  Narrow entries are
+/// applied first, then wide entries.  Within each pool, entries are processed
+/// in insertion order so multiple writes to the same offset apply
+/// last-write-wins, matching JIT/interpret semantics.
+///
+/// `changed` (when given) receives the ff-local WORD index of every store whose
+/// bytes actually differed — the dirty-seed feed for the incremental settle.
+/// Without a collector the old value is not read back at all: nothing would
+/// consume the comparison.
+pub fn ff_commit_from_log(
+    ff_values: &mut [u8],
+    buffer: &WriteLogBuffer,
+    mut changed: Option<&mut dyn FnMut(u32)>,
+) {
     let len = ff_values.len();
     let dst = ff_values.as_mut_ptr();
 
@@ -336,12 +345,46 @@ pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
         // SAFETY: bounds verified above; dst is the start of the slice.
         unsafe {
             let p = dst.add(offset);
-            match nb {
-                8 => (p as *mut u64).write_unaligned(entry.payload),
-                4 => (p as *mut u32).write_unaligned(entry.payload as u32),
-                2 => (p as *mut u16).write_unaligned(entry.payload as u16),
-                1 => *p = entry.payload as u8,
+            let Some(f) = changed.as_deref_mut() else {
+                match nb {
+                    8 => (p as *mut u64).write_unaligned(entry.payload),
+                    4 => (p as *mut u32).write_unaligned(entry.payload as u32),
+                    2 => (p as *mut u16).write_unaligned(entry.payload as u16),
+                    1 => *p = entry.payload as u8,
+                    _ => {}
+                }
+                continue;
+            };
+            let diff = match nb {
+                8 => {
+                    let old = (p as *const u64).read_unaligned();
+                    (p as *mut u64).write_unaligned(entry.payload);
+                    old != entry.payload
+                }
+                4 => {
+                    let old = (p as *const u32).read_unaligned();
+                    (p as *mut u32).write_unaligned(entry.payload as u32);
+                    old != entry.payload as u32
+                }
+                2 => {
+                    let old = (p as *const u16).read_unaligned();
+                    (p as *mut u16).write_unaligned(entry.payload as u16);
+                    old != entry.payload as u16
+                }
+                1 => {
+                    let old = *p;
+                    *p = entry.payload as u8;
+                    old != entry.payload as u8
+                }
                 _ => continue,
+            };
+            if diff {
+                let w0 = (offset / 8) as u32;
+                let w1 = ((offset + nb - 1) / 8) as u32;
+                f(w0);
+                if w1 != w0 {
+                    f(w1);
+                }
             }
         }
     }
@@ -354,7 +397,17 @@ pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
         if nb == 0 || nb > WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES || offset + nb > len {
             continue;
         }
-        ff_values[offset..offset + nb].copy_from_slice(&entry.payload[..nb]);
+        let dst_slice = &mut ff_values[offset..offset + nb];
+        if let Some(f) = changed.as_deref_mut() {
+            if dst_slice != &entry.payload[..nb] {
+                for w in (offset / 8)..=((offset + nb - 1) / 8) {
+                    f(w as u32);
+                }
+                dst_slice.copy_from_slice(&entry.payload[..nb]);
+            }
+        } else {
+            dst_slice.copy_from_slice(&entry.payload[..nb]);
+        }
     }
 }
 

@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_size_type (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_size_type)
+
+  × a type can't be used as a width or an array size
+   ╭─[../../testcases/error/invalid_size_type.veryl:2:19]
+ 1 │ module invalid_size_type {
+ 2 │     var _a: logic<u32>;
+   ·                   ─┬─
+   ·                    ╰── Error location
+ 3 │ }
+   ╰────
+  help: use `$bits` to get the bit width of a type (e.g. `logic<$bits(u32)>`)

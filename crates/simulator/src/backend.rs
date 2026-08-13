@@ -19,6 +19,7 @@ pub mod aot_c;
 #[cfg(not(target_family = "wasm"))]
 pub mod cranelift;
 pub mod inst;
+pub mod late;
 pub mod registry;
 pub mod validate;
 
@@ -85,6 +86,13 @@ pub trait CompiledWhole: Send + Sync {
     /// async compile pending) — caller must fall back.
     fn try_dispatch(&self, ff: *const u8, comb: *mut u8, log: *mut u8) -> DispatchOutcome;
 
+    /// Constant-cone entry: statements whose inputs never change, split out
+    /// by the backend so the runtime can run them once per simulator
+    /// instance (see `Ir::const_cone_done`) instead of every settle.
+    fn try_dispatch_const(&self, _ff: *const u8, _comb: *mut u8, _log: *mut u8) -> DispatchOutcome {
+        DispatchOutcome::Done
+    }
+
     /// Comb byte ranges `(offset, native_bytes)` this backend intentionally
     /// leaves stale in `comb_values` (chunk-local intermediate localization).
     /// The validate dual-run skips these when diffing against the full-buffer
@@ -116,6 +124,12 @@ pub struct ChunkArtifact {
     /// still distinguishes chunks with different code. `None` before a stamp
     /// (non-`dut_reuse` path); `Debug` then falls back to the address.
     pub content_fp: Option<u128>,
+    /// Full-coverage read/write dependency sets of the compiled statements,
+    /// captured at compile time for the incremental (change-driven) settle
+    /// plan.  `None` unless `VERYL_INCR=1` (see `ir::incremental`).  Excluded
+    /// from `Debug`/`Hash`: derived deterministically from the statements the
+    /// fingerprint already identifies.
+    pub deps: Option<Arc<crate::ir::incremental::ChunkDeps>>,
 }
 
 impl std::fmt::Debug for ChunkArtifact {

@@ -173,12 +173,16 @@ impl CmdTest {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        // A dump wants every comb word, and localization leaves the ones no
-        // later reader needs holding stale values (see
-        // `aot_c::force_disable_localize`).  Before analysis: the blocklist is
-        // computed during conv.
+        // A dump wants every comb word.  Localization, the incremental
+        // settle, and the comb fusion leave the words no later reader needs
+        // holding stale values, so waveforms would disagree with a full
+        // settle while the run still passes.  Before analysis: the blocklist
+        // is computed during conv, the plan shapes chunking, and the fusion
+        // decision is baked into the memoised pipeline.
         if self.opt.wave {
             veryl_simulator::backend::aot_c::force_disable_localize();
+            veryl_simulator::ir::incremental::force_disable();
+            veryl_simulator::ir::force_disable_comb_fusion();
         }
 
         // force filelist_type to absolute which can be refered from temporary directory
@@ -316,6 +320,14 @@ impl CmdTest {
                 .or(metadata.test.seed)
                 .unwrap_or_else(random_seed),
             use_4state: self.opt.four_state || metadata.test.four_state,
+            // Persist runtime-infeasible incremental verdicts (see
+            // `backend::late`) so a DUT that abandoned its plan once skips
+            // the incremental conv configuration in later runs too.
+            incr_feedback_path: Some(
+                metadata
+                    .project_dot_build_path()
+                    .join("incr_infeasible_keys"),
+            ),
             ..Config::default()
         };
         config.apply_env();
@@ -422,156 +434,161 @@ impl CmdTest {
                 let reports = &reports;
                 let handles: Vec<_> = (0..num_threads)
                     .map(|_| {
-                        s.spawn(move || {
-                            resource_table::import_tables(resource_snap);
-                            text_table::import_tables(text_snap);
-                            // Per-thread cache avoids locking; cross-test
-                            // reuse is rare since each top name is unique.
-                            let mut thread_cache = ProtoModuleCache::default();
-                            let (mut tally_pass, mut tally_fail) = (0, 0);
-                            let mut tally_waves: Vec<PathBuf> = Vec::new();
-                            let mut tally_timings: Vec<(String, f64)> = Vec::new();
-                            loop {
-                                let pending = queue.lock().unwrap().next();
-                                let Some(pending) = pending else { break };
-                                if buffered {
-                                    output_buffer::enable();
-                                }
-                                // With the `profile` feature, report the build
-                                // (IR build + conv/AOT/dlopen) vs run (Simulator::new
-                                // + hex + cycle sim) split.  The run boundary matches
-                                // what a warm Verilator binary re-runs (model build
-                                // mtime-skipped), so the two are comparable.  Zero
-                                // overhead when the feature is off.
-                                #[cfg(feature = "profile")]
-                                let t_build = std::time::Instant::now();
-                                let t0 = std::time::Instant::now();
-                                let build_result = prepare_native_test(
-                                    ir_ref,
-                                    &pending.test_name,
-                                    &pending.top,
-                                    opt_ref,
-                                    pending.test_path,
-                                    metadata_ref,
-                                    config_ref,
-                                    &mut thread_cache,
-                                );
-                                #[cfg(feature = "profile")]
-                                let build_el = t_build.elapsed();
-                                #[cfg(feature = "profile")]
-                                let t_run = std::time::Instant::now();
-                                let mut run_secs: Option<f64> = None;
-                                let outcome = match build_result {
-                                    Ok(job) => {
-                                        let wave_path =
-                                            job.dump.as_ref().and_then(|d| d.path().cloned());
-                                        if !buffered {
-                                            info!("Executing test ({})", pending.test_name);
-                                        }
-                                        // Time the run (not the build) — the build is
-                                        // amortized by the cross-test chunk cache, so
-                                        // run time is the stable per-test cost that
-                                        // longest-first scheduling sorts on.
-                                        let t_run_sched = std::time::Instant::now();
-                                        let result = run_native_testbench(
-                                            job.sim_ir,
-                                            job.dump,
-                                            job.module_name,
-                                        );
-                                        run_secs = Some(t_run_sched.elapsed().as_secs_f64());
-                                        NativeOutcome::Ran { result, wave_path }
+                        // Workers conv and emit user designs (see
+                        // IR_WALK_STACK_BYTES).
+                        std::thread::Builder::new()
+                            .stack_size(veryl_simulator::IR_WALK_STACK_BYTES)
+                            .spawn_scoped(s, move || {
+                                resource_table::import_tables(resource_snap);
+                                text_table::import_tables(text_snap);
+                                // Per-thread cache avoids locking; cross-test
+                                // reuse is rare since each top name is unique.
+                                let mut thread_cache = ProtoModuleCache::default();
+                                let (mut tally_pass, mut tally_fail) = (0, 0);
+                                let mut tally_waves: Vec<PathBuf> = Vec::new();
+                                let mut tally_timings: Vec<(String, f64)> = Vec::new();
+                                loop {
+                                    let pending = queue.lock().unwrap().next();
+                                    let Some(pending) = pending else { break };
+                                    if buffered {
+                                        output_buffer::enable();
                                     }
-                                    Err(e) => NativeOutcome::ElaborateFailed(e),
-                                };
-                                if let Some(secs) = run_secs {
-                                    tally_timings.push((pending.test_name.clone(), secs));
-                                }
-                                // `run_secs` is exactly the run_native_testbench
-                                // span (Simulator::new + preload + cycle loop),
-                                // which is the sim_s semantics — reuse it.
-                                let sim_s = run_secs;
-                                #[cfg(feature = "profile")]
-                                {
-                                    let run_el = t_run.elapsed();
-                                    eprintln!(
-                                        "PROFILE_SPLIT test={} build_ms={:.1} run_ms={:.1}",
-                                        pending.test_name,
-                                        build_el.as_secs_f64() * 1e3,
-                                        run_el.as_secs_f64() * 1e3
+                                    // With the `profile` feature, report the build
+                                    // (IR build + conv/AOT/dlopen) vs run (Simulator::new
+                                    // + hex + cycle sim) split.  The run boundary matches
+                                    // what a warm Verilator binary re-runs (model build
+                                    // mtime-skipped), so the two are comparable.  Zero
+                                    // overhead when the feature is off.
+                                    #[cfg(feature = "profile")]
+                                    let t_build = std::time::Instant::now();
+                                    let t0 = std::time::Instant::now();
+                                    let build_result = prepare_native_test(
+                                        ir_ref,
+                                        &pending.test_name,
+                                        &pending.top,
+                                        opt_ref,
+                                        pending.test_path,
+                                        metadata_ref,
+                                        config_ref,
+                                        &mut thread_cache,
                                     );
-                                }
-                                let runtime_s = t0.elapsed().as_secs_f64();
-                                let output = output_buffer::take();
-                                let test_name = &pending.test_name;
-                                let _print = print_lock.lock().unwrap();
-                                let mut rep_status: &'static str = "error";
-                                let mut rep_message: Option<String> = None;
-                                match outcome {
-                                    NativeOutcome::ElaborateFailed(e) => {
-                                        // Buffered output is from IR build; emit before the diag.
-                                        if !output.is_empty() && !json {
-                                            print!("{output}");
+                                    #[cfg(feature = "profile")]
+                                    let build_el = t_build.elapsed();
+                                    #[cfg(feature = "profile")]
+                                    let t_run = std::time::Instant::now();
+                                    let mut run_secs: Option<f64> = None;
+                                    let outcome = match build_result {
+                                        Ok(job) => {
+                                            let wave_path =
+                                                job.dump.as_ref().and_then(|d| d.path().cloned());
+                                            if !buffered {
+                                                info!("Executing test ({})", pending.test_name);
+                                            }
+                                            // Time the run (not the build) — the build is
+                                            // amortized by the cross-test chunk cache, so
+                                            // run time is the stable per-test cost that
+                                            // longest-first scheduling sorts on.
+                                            let t_run_sched = std::time::Instant::now();
+                                            let result = run_native_testbench(
+                                                job.sim_ir,
+                                                job.dump,
+                                                job.module_name,
+                                            );
+                                            run_secs = Some(t_run_sched.elapsed().as_secs_f64());
+                                            NativeOutcome::Ran { result, wave_path }
                                         }
-                                        error!("Failed to elaborate test ({test_name})");
-                                        let rendered = format!("{:?}", miette::Report::new(e));
-                                        eprintln!("{rendered}");
-                                        rep_status = "error";
-                                        rep_message = Some(rendered);
-                                        tally_fail += 1;
+                                        Err(e) => NativeOutcome::ElaborateFailed(e),
+                                    };
+                                    if let Some(secs) = run_secs {
+                                        tally_timings.push((pending.test_name.clone(), secs));
                                     }
-                                    NativeOutcome::Ran { result, wave_path } => {
-                                        if buffered {
-                                            info!("Executing test ({test_name})");
+                                    // `run_secs` is exactly the run_native_testbench
+                                    // span (Simulator::new + preload + cycle loop),
+                                    // which is the sim_s semantics — reuse it.
+                                    let sim_s = run_secs;
+                                    #[cfg(feature = "profile")]
+                                    {
+                                        let run_el = t_run.elapsed();
+                                        eprintln!(
+                                            "PROFILE_SPLIT test={} build_ms={:.1} run_ms={:.1}",
+                                            pending.test_name,
+                                            build_el.as_secs_f64() * 1e3,
+                                            run_el.as_secs_f64() * 1e3
+                                        );
+                                    }
+                                    let runtime_s = t0.elapsed().as_secs_f64();
+                                    let output = output_buffer::take();
+                                    let test_name = &pending.test_name;
+                                    let _print = print_lock.lock().unwrap();
+                                    let mut rep_status: &'static str = "error";
+                                    let mut rep_message: Option<String> = None;
+                                    match outcome {
+                                        NativeOutcome::ElaborateFailed(e) => {
+                                            // Buffered output is from IR build; emit before the diag.
+                                            if !output.is_empty() && !json {
+                                                print!("{output}");
+                                            }
+                                            error!("Failed to elaborate test ({test_name})");
+                                            let rendered = format!("{:?}", miette::Report::new(e));
+                                            eprintln!("{rendered}");
+                                            rep_status = "error";
+                                            rep_message = Some(rendered);
+                                            tally_fail += 1;
                                         }
-                                        if !output.is_empty() && !json {
-                                            print!("{output}");
-                                        }
-                                        match result {
-                                            Ok(TestResult::Pass) => {
-                                                info!("Succeeded test ({test_name})");
-                                                rep_status = "pass";
-                                                tally_pass += 1;
-                                                if let Some(path) = wave_path {
-                                                    tally_waves.push(path);
+                                        NativeOutcome::Ran { result, wave_path } => {
+                                            if buffered {
+                                                info!("Executing test ({test_name})");
+                                            }
+                                            if !output.is_empty() && !json {
+                                                print!("{output}");
+                                            }
+                                            match result {
+                                                Ok(TestResult::Pass) => {
+                                                    info!("Succeeded test ({test_name})");
+                                                    rep_status = "pass";
+                                                    tally_pass += 1;
+                                                    if let Some(path) = wave_path {
+                                                        tally_waves.push(path);
+                                                    }
+                                                }
+                                                Ok(TestResult::Fail(msg)) => {
+                                                    error!("Failed test ({test_name}): {msg}");
+                                                    rep_status = "fail";
+                                                    rep_message = Some(msg);
+                                                    tally_fail += 1;
+                                                }
+                                                Err(e) => {
+                                                    error!("Failed test ({test_name})");
+                                                    let rendered =
+                                                        format!("{:?}", miette::Report::new(e));
+                                                    eprintln!("{rendered}");
+                                                    rep_status = "error";
+                                                    rep_message = Some(rendered);
+                                                    tally_fail += 1;
                                                 }
                                             }
-                                            Ok(TestResult::Fail(msg)) => {
-                                                error!("Failed test ({test_name}): {msg}");
-                                                rep_status = "fail";
-                                                rep_message = Some(msg);
-                                                tally_fail += 1;
-                                            }
-                                            Err(e) => {
-                                                error!("Failed test ({test_name})");
-                                                let rendered =
-                                                    format!("{:?}", miette::Report::new(e));
-                                                eprintln!("{rendered}");
-                                                rep_status = "error";
-                                                rep_message = Some(rendered);
-                                                tally_fail += 1;
-                                            }
                                         }
                                     }
+                                    if json {
+                                        reports.lock().unwrap().push(TestReport {
+                                            name: test_name.to_string(),
+                                            status: rep_status,
+                                            message: rep_message,
+                                            runtime_s,
+                                            sim_s,
+                                            output: if output.is_empty() {
+                                                None
+                                            } else {
+                                                Some(output)
+                                            },
+                                        });
+                                    }
+                                    use std::io::Write;
+                                    let _ = std::io::stdout().flush();
                                 }
-                                if json {
-                                    reports.lock().unwrap().push(TestReport {
-                                        name: test_name.to_string(),
-                                        status: rep_status,
-                                        message: rep_message,
-                                        runtime_s,
-                                        sim_s,
-                                        output: if output.is_empty() {
-                                            None
-                                        } else {
-                                            Some(output)
-                                        },
-                                    });
-                                }
-                                use std::io::Write;
-                                let _ = std::io::stdout().flush();
-                            }
-                            (tally_pass, tally_fail, tally_waves, tally_timings)
-                        })
+                                (tally_pass, tally_fail, tally_waves, tally_timings)
+                            })
+                            .expect("spawn test worker")
                     })
                     .collect();
                 handles.into_iter().map(|h| h.join().unwrap()).collect()

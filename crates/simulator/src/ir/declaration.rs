@@ -7,8 +7,11 @@ use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
 use crate::ir::module::{BitRange, gather_bit_aware_outputs, ranges_overlap};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
+use crate::ir::opt::version_split;
 use crate::ir::partial_index::partial_index_base;
-use crate::ir::statement::{ProtoAssignStatement, msb_first_window, size_fill_literal_rhs};
+use crate::ir::statement::{
+    ProtoAssignStatement, const_array_element_exprs, msb_first_window, size_fill_literal_rhs,
+};
 use crate::ir::variable::{
     ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
 };
@@ -672,11 +675,39 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
                     comb_statements.extend(stmts);
                 }
-                let comb_statements = if comb_statements.len() > 1 {
+                #[allow(unused_mut)]
+                let mut comb_statements = if comb_statements.len() > 1 {
                     vec![ProtoStatement::SequentialBlock(comb_statements)]
                 } else {
                     comb_statements
                 };
+                // Version-split runs here, before chunk compilation and the
+                // cross-test caches, so every module's always_comb is seen
+                // while still a flat SequentialBlock (at top level the DUT's
+                // blocks end up nested inside CompiledBlocks).
+                //
+                // Skipped when the block alone already makes the incremental
+                // plan infeasible (a statement reading a whole memory): the
+                // plan the transform serves will be declined, so its cost —
+                // and its select chains over huge reads — buy nothing.
+                #[cfg(not(target_family = "wasm"))]
+                if version_split::pass_enabled(context.config.use_4state)
+                    && !crate::ir::incremental::stmts_infeasible(&comb_statements)
+                {
+                    // Fresh comb offsets for rename temps come from the same
+                    // allocator as function locals; instance-reuse records
+                    // the post-conv size, so cache replay stays consistent.
+                    let use_4state = context.config.use_4state;
+                    let comb_total = &mut context.comb_total_bytes;
+                    let mut alloc = |width: usize| -> isize {
+                        let nb = crate::ir::variable::native_bytes(width);
+                        let off = *comb_total as isize;
+                        *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                        off
+                    };
+                    let stats = version_split::run(&mut comb_statements, &mut alloc);
+                    version_split::accumulate(&stats);
+                }
                 Ok(ProtoDeclaration {
                     event_statements: HashMap::default(),
                     comb_statements,
@@ -877,7 +908,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             for (i, x) in hoisted_child_decls.iter().enumerate() {
                 x.gather_ff(&mut child_analyzer_context, &mut child_ff_table, i);
             }
-            child_ff_table.update_is_ff();
+            child_ff_table.update_is_ff(&hoisted_child_decls, &mut child_analyzer_context);
             if context.config.disable_ff_opt {
                 child_ff_table.force_all_ff();
             }
@@ -1191,6 +1222,23 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 continue;
             }
             let child_meta = child_variable_meta.get(&input.id).unwrap();
+
+            // Array port fed by a const array (`inst u: Sub (i: pk::TBL)`).
+            if let Some(exprs) = const_array_element_exprs(&input.expr, child_meta.elements.len()) {
+                for (child_element, expr) in child_meta.elements.iter().zip(exprs) {
+                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: child_element.current,
+                        dst_width: child_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: 0, // not FF
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
 
             // Array port fed by a bare or constant partial-index variable
             // (e.g. `w_q[i]` from `logic [N, M]`): expand per-element.

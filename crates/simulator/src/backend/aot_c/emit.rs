@@ -362,6 +362,33 @@ pub fn clear_localize_blocklist() {
     LOCALIZE_ARMED.with(|a| a.set(false));
 }
 
+thread_local! {
+    /// Comb offsets written by EVENT statements (misclassified-FF: ICG
+    /// enables and other event-written comb).  Reading or writing one
+    /// disqualifies a statement from the const cone; the split only arms
+    /// once this sound set has been installed.
+    static CONST_UNSAFE_COMB: RefCell<HashSet<isize>> = RefCell::new(HashSet::default());
+    static CONST_SKIP_ARMED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Install the event-written comb offsets and arm the const-cone split for
+/// the next comb emit.  Paired with `clear_const_unsafe`.
+pub fn set_const_unsafe(set: HashSet<isize>) {
+    CONST_UNSAFE_COMB.with(|b| *b.borrow_mut() = set);
+    CONST_SKIP_ARMED.with(|a| a.set(true));
+}
+
+pub fn clear_const_unsafe() {
+    CONST_UNSAFE_COMB.with(|b| b.borrow_mut().clear());
+    CONST_SKIP_ARMED.with(|a| a.set(false));
+}
+
+#[inline]
+fn const_skip_armed() -> bool {
+    CONST_SKIP_ARMED.with(|a| a.get())
+        && std::env::var("VERYL_AOT_C_CONST_SKIP").as_deref() != Ok("0")
+}
+
 fn clear_current_local() {
     CURRENT_LOCAL.with(|c| c.borrow_mut().clear());
 }
@@ -1084,39 +1111,96 @@ fn emit_wide_rhs_field(
 }
 
 /// Full wide RMW of a dst bit-select (2-state):
-///   new = (old & ~rangemask) | ((src << lo) & rangemask)
-/// where rangemask = fill_ones(nbits) << lo.  `old` is read from the
-/// destination BEFORE the final copy overwrites it.  `src` must span `nb`
-/// bytes.  Mirrors Cranelift emit_wide_select_rmw.
+///   new = ((old & ~rangemask) | ((src << lo) & rangemask)) & widthmask
+/// where rangemask = fill_ones(nbits) << lo and widthmask = the
+/// `vw_apply_mask(dst_width)` clamp.  `lo`, `nbits` and `dst_width` are
+/// static, so both masks fold to per-word immediates and only the words the
+/// field (or the width clamp) actually touches get a statement.  Words are
+/// written HIGH to LOW: a self-aliasing store (`x[hi:lo] = f(x)` routed here
+/// with `src` pointing at the destination) reads source words at index
+/// `k - lo/64 <= k`, so descending order only ever reads not-yet-written
+/// words, preserving the read-everything-then-copy behaviour of the
+/// temporary form.  `src` must span `nb` bytes.
 #[allow(clippy::too_many_arguments)]
 fn emit_wide_select_rmw_store(
     src: &str,
-    mut pre: String,
+    pre: String,
     dst: &str,
-    nb: usize,
     nw: usize,
     lo: usize,
     nbits: usize,
-    dmask: u32,
+    dst_width: usize,
 ) -> String {
-    let rmask = next_wide_tmp();
-    let srcsh = next_wide_tmp();
-    let newv = next_wide_tmp();
-    pre.push_str(&format!(
-        "uint64_t _w{rmask}[{nw}]; \
-         vw_fill_ones((uint8_t*)_w{rmask}, (const uint8_t*)0, {pkn}u); \
-         vw_shl((uint8_t*)_w{rmask}, (const uint8_t*)_w{rmask}, {lo}ull, {nb}u); \
-         uint64_t _w{srcsh}[{nw}]; \
-         vw_shl((uint8_t*)_w{srcsh}, {src}, {lo}ull, {nb}u); \
-         vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{rmask}, {nb}u); \
-         uint64_t _w{newv}[{nw}]; \
-         vw_band_not((uint8_t*)_w{newv}, {dst}, (const uint8_t*)_w{rmask}, {nb}u); \
-         vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); ",
-        pkn = wpack(nb, nbits),
-    ));
+    let ws = lo / 64;
+    let bs = lo % 64;
+    // rangemask word k: bits of [lo, lo+nbits-1] falling in [64k, 64k+63].
+    let range_mask = |k: usize| -> u64 {
+        let word_lo = 64 * k;
+        let f_lo = lo.max(word_lo);
+        let f_hi = (lo + nbits - 1).min(word_lo + 63);
+        if f_lo > f_hi {
+            return 0;
+        }
+        let n = f_hi - f_lo + 1;
+        let base = if n == 64 { u64::MAX } else { (1u64 << n) - 1 };
+        base << (f_lo - word_lo)
+    };
+    // vw_apply_mask(dst_width) word k — width 0 means "no clamp" there.
+    let clamp_mask = |k: usize| -> u64 {
+        if dst_width == 0 {
+            return u64::MAX;
+        }
+        let word_lo = 64 * k;
+        if dst_width >= word_lo + 64 {
+            u64::MAX
+        } else if dst_width <= word_lo {
+            0
+        } else {
+            (1u64 << (dst_width - word_lo)) - 1
+        }
+    };
+    let t = next_wide_tmp();
+    let mut body = String::new();
+    for k in (0..nw).rev() {
+        let rm = range_mask(k);
+        let wm = clamp_mask(k);
+        let keep = !rm & wm;
+        let em = rm & wm;
+        if em == 0 {
+            // Untouched by the field; the width clamp may still bite.
+            if keep != u64::MAX {
+                if keep == 0 {
+                    body.push_str(&format!("_d{t}[{k}] = 0; "));
+                } else {
+                    body.push_str(&format!("_d{t}[{k}] &= {keep:#x}ULL; "));
+                }
+            }
+            continue;
+        }
+        // (src << lo) word k.  rm != 0 implies k >= ws, so sk is in range.
+        let sk = k - ws;
+        let sexpr = if bs == 0 {
+            format!("_s{t}[{sk}]")
+        } else if sk > 0 {
+            format!(
+                "((_s{t}[{sk}] << {bs}) | (_s{t}[{prev}] >> {rsh}))",
+                prev = sk - 1,
+                rsh = 64 - bs,
+            )
+        } else {
+            format!("(_s{t}[{sk}] << {bs})")
+        };
+        if keep == 0 {
+            body.push_str(&format!("_d{t}[{k}] = {sexpr} & {em:#x}ULL; "));
+        } else {
+            body.push_str(&format!(
+                "_d{t}[{k}] = (_d{t}[{k}] & {keep:#x}ULL) | ({sexpr} & {em:#x}ULL); "
+            ));
+        }
+    }
     format!(
-        "{{ {pre}vw_copy({dst}, (const uint8_t*)_w{newv}, {nb}u); \
-            vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}"
+        "{{ {pre}const veryl_u64_ua* _s{t} = (const veryl_u64_ua*)({src}); \
+            veryl_u64_ua* _d{t} = (veryl_u64_ua*)({dst}); {body}}}"
     )
 }
 
@@ -1445,7 +1529,52 @@ fn emit_wide_concat(
     let nb = native_bytes(width);
     let nw = wide_words(nb);
     let acc = next_wide_tmp();
-    pre.push_str(&format!("uint64_t _w{acc}[{nw}] = {{0}}; "));
+    let name = format!("_w{acc}");
+    pre.push_str(&format!("uint64_t {name}[{nw}] = {{0}}; "));
+    emit_wide_concat_body(
+        elements,
+        width,
+        nb,
+        &format!("(uint8_t*){name}"),
+        &name,
+        pre,
+    )?;
+    Some(WideRef {
+        addr: format!("((uint8_t*)_w{acc})"),
+        nb,
+        width,
+    })
+}
+
+/// Assemble a wide concat DIRECTLY into `dst` (a `uint8_t*` C expression
+/// over zeroed or to-be-overwritten storage): one `|=` per element word
+/// instead of marshaling through a `_w` temporary and copying it over.
+/// The caller must guarantee no element reads the destination (self-reads
+/// need the temporary form's read-before-write ordering).
+fn emit_wide_concat_into(
+    elements: &[(Box<ProtoExpression>, usize, usize)],
+    width: usize,
+    nb: usize,
+    dst: &str,
+    pre: &mut String,
+) -> Option<()> {
+    pre.push_str(&format!("__builtin_memset({dst}, 0, {nb}); "));
+    let words = format!("((veryl_u64_ua*)({dst}))");
+    emit_wide_concat_body(elements, width, nb, dst, &words, pre)
+}
+
+/// Shared assembly for `emit_wide_concat{,_into}`: `bytes` addresses the
+/// buffer as `uint8_t*` (for the vw_* helpers), `words` as an lvalue u64
+/// array (for the narrow `|=` inserts).
+fn emit_wide_concat_body(
+    elements: &[(Box<ProtoExpression>, usize, usize)],
+    width: usize,
+    nb: usize,
+    bytes: &str,
+    words: &str,
+    pre: &mut String,
+) -> Option<()> {
+    let nw = nb / 8;
 
     // High-to-low: the first element takes the highest bits, so offsets descend.
     let total: usize = elements.iter().map(|(_, r, ew)| r * ew).sum();
@@ -1468,9 +1597,49 @@ fn emit_wide_concat(
             continue;
         }
 
+        if ew == 1 && repeat > 1 {
+            // Replicated single bit (`{N{x}}` sign/mask extension): broadcast
+            // the bit to a full word (`0 - bit`) and OR it under a per-word
+            // immediate span mask instead of one `|=` per copy.
+            let v = emit_expr(elem)?;
+            let e = next_wide_tmp();
+            pre.push_str(&format!(
+                "uint64_t _e{e} = (uint64_t)0 - (((uint64_t)({v})) & 0x1ULL); ",
+            ));
+            let span_hi = hi; // exclusive
+            hi -= repeat;
+            let span_lo = hi; // inclusive
+            for w in span_lo / 64..=(span_hi - 1) / 64 {
+                if w >= nw {
+                    break; // past the result width
+                }
+                let word_lo = w * 64;
+                let f_lo = span_lo.max(word_lo);
+                let f_hi = (span_hi - 1).min(word_lo + 63);
+                let n = f_hi - f_lo + 1;
+                let base = if n == 64 { u64::MAX } else { (1u64 << n) - 1 };
+                let m = base << (f_lo - word_lo);
+                if m == u64::MAX {
+                    pre.push_str(&format!("{words}[{w}] |= _e{e}; "));
+                } else {
+                    pre.push_str(&format!("{words}[{w}] |= _e{e} & {m:#x}ULL; "));
+                }
+            }
+            continue;
+        }
         if ew <= 64 {
             // Mask to `ew`: the reference zero-extends the element from elem_width.
-            let v = emit_expr(elem)?;
+            let Some(v) = emit_expr(elem) else {
+                if diag_enabled() {
+                    // `{:.400}` truncates by chars — a byte slice could cut a
+                    // UTF-8 sequence and panic.
+                    eprintln!(
+                        "[aot-c] wide-concat elem emit failed (ew={ew}): {:.400}",
+                        format!("{elem:?}")
+                    );
+                }
+                return None;
+            };
             let e = next_wide_tmp();
             pre.push_str(&format!(
                 "uint64_t _e{e} = ((uint64_t)({v})) & 0x{m:x}ULL; ",
@@ -1484,11 +1653,11 @@ fn emit_wide_concat(
                     continue; // past the result width
                 }
                 let b = off % 64;
-                pre.push_str(&format!("_w{acc}[{w}] |= _e{e} << {b}; "));
+                pre.push_str(&format!("{words}[{w}] |= _e{e} << {b}; "));
                 // `b+ew>64` ⇒ `b>0`, so `64-b ∈ 1..=63` (no shift UB).
                 if b + ew > 64 && w + 1 < nw {
                     pre.push_str(&format!(
-                        "_w{acc}[{w1}] |= _e{e} >> {sh}; ",
+                        "{words}[{w1}] |= _e{e} >> {sh}; ",
                         w1 = w + 1,
                         sh = 64 - b,
                     ));
@@ -1503,22 +1672,19 @@ fn emit_wide_concat(
                 let sh = next_wide_tmp();
                 pre.push_str(&format!(
                     "uint64_t _w{sh}[{nw}]; vw_shl((uint8_t*)_w{sh}, {e}, {off}ull, {nb}u); \
-                     vw_bor((uint8_t*)_w{acc}, (const uint8_t*)_w{acc}, (const uint8_t*)_w{sh}, {nb}u); ",
+                     vw_bor({bytes}, (const uint8_t*){bytes2}, (const uint8_t*)_w{sh}, {nb}u); ",
                     e = e_ref.addr,
+                    bytes2 = bytes,
                 ));
             }
         }
     }
 
     pre.push_str(&format!(
-        "vw_apply_mask((uint8_t*)_w{acc}, (const uint8_t*)0, {p}u); ",
+        "vw_apply_mask({bytes}, (const uint8_t*)0, {p}u); ",
         p = wpack(nb, width),
     ));
-    Some(WideRef {
-        addr: format!("((uint8_t*)_w{acc})"),
-        nb,
-        width,
-    })
+    Some(())
 }
 
 /// Wide comparison / logic over wide operands → a narrow `uint64_t` 0/1
@@ -2136,6 +2302,969 @@ fn width_mask(width: usize) -> u64 {
     }
 }
 
+/// How a bit-field store may treat the sub-word it writes into, when the
+/// whole sub-word is redefined by a group of disjoint stores (see
+/// `plan_field_groups`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FieldRole {
+    /// First store of the group: define the window outright.
+    Init,
+    /// Later store: the bit is known clear, so OR it in.
+    OrIn,
+}
+
+thread_local! {
+    /// `(window address, bit mask)` -> role, for the comb list being emitted.
+    /// Keyed by the field rather than by position because `emit_stmt` sees one
+    /// statement at a time and the group's members are disjoint by
+    /// construction.  Empty unless `plan_field_groups` armed it.
+    static FIELD_ROLES: RefCell<HashMap<(isize, u64), FieldRole>> =
+        RefCell::new(HashMap::default());
+}
+
+fn field_role(addr: isize, pmask: u64) -> Option<FieldRole> {
+    FIELD_ROLES.with(|r| r.borrow().get(&(addr, pmask)).copied())
+}
+
+/// How far apart a window's stores may sit and still be gathered
+/// (`VERYL_AOT_C_GATHER_SPAN`, 0 disables gathering entirely).
+fn gather_span_limit() -> usize {
+    env_span("VERYL_AOT_C_GATHER_SPAN", 512)
+}
+
+/// How far a single-reader def may be sunk to reach its reader
+/// (`VERYL_AOT_C_SINK_SPAN`, 0 disables sinking entirely).
+fn sink_span_limit() -> usize {
+    env_span("VERYL_AOT_C_SINK_SPAN", usize::MAX)
+}
+
+fn env_span(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+}
+
+/// Clears `FIELD_ROLES` on the way out, including the `?` returns in
+/// `emit_function` — a plan left behind would mis-role another module's
+/// stores.
+struct FieldRolesGuard;
+
+impl Drop for FieldRolesGuard {
+    fn drop(&mut self) {
+        FIELD_ROLES.with(|r| r.borrow_mut().clear());
+    }
+}
+
+/// Comb byte ranges a statement reads and writes, at field granularity — a
+/// bit-select touches only the bytes its bits live in, because the wider load
+/// the emit uses around it masks away everything else.  `false` means the
+/// statement is opaque (a pre-compiled child, a testbench call) and the caller
+/// must treat it as touching every byte.
+///
+/// FF offsets are ignored on purpose: comb-list FF writes land in the next
+/// slot (NBA) and are invisible to same-eval readers, so they cannot order
+/// against these windows.
+fn comb_touches(
+    s: &ProtoStatement,
+    reads: &mut Vec<(isize, usize)>,
+    writes: &mut Vec<(isize, usize)>,
+) -> bool {
+    /// Bytes spanned by `[lo .. lo+nbits)` of a variable based at `off`.
+    fn field(off: isize, select: Option<(usize, usize)>, width: usize) -> (isize, usize) {
+        match select {
+            Some((hi, lo)) if hi >= lo => (off + (lo / 8) as isize, (hi / 8) - (lo / 8) + 1),
+            _ => (off, native_bytes(width).max(1)),
+        }
+    }
+    fn expr(e: &ProtoExpression, out: &mut Vec<(isize, usize)>) -> bool {
+        match e {
+            ProtoExpression::HierVariable(_) => false,
+            ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select,
+                width,
+                var_full_width,
+                ..
+            } => {
+                if let VarOffset::Comb(o) = var_offset {
+                    let full = (*var_full_width).max(*width);
+                    // A runtime bit-select lands anywhere in the variable.
+                    let sel = if dynamic_select.is_some() {
+                        None
+                    } else {
+                        *select
+                    };
+                    out.push(field(*o, sel, full));
+                }
+                dynamic_select
+                    .as_ref()
+                    .is_none_or(|ds| expr(&ds.index_expr, out))
+            }
+            ProtoExpression::Value { .. } => true,
+            ProtoExpression::Unary { x, .. } => expr(x, out),
+            ProtoExpression::Binary { x, y, .. } => expr(x, out) && expr(y, out),
+            ProtoExpression::Concatenation { elements, .. } => {
+                elements.iter().all(|(e, _, _)| expr(e, out))
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => expr(cond, out) && expr(true_expr, out) && expr(false_expr, out),
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                stride,
+                element_native_bytes,
+                index_expr,
+                num_elements,
+                ..
+            } => {
+                if let VarOffset::Comb(o) = base_offset {
+                    // The index is a runtime value, so the whole array is live.
+                    let span = stride.unsigned_abs() * num_elements.saturating_sub(1)
+                        + element_native_bytes;
+                    let base = if *stride < 0 {
+                        o + stride * (num_elements.saturating_sub(1) as isize)
+                    } else {
+                        *o
+                    };
+                    out.push((base, span));
+                }
+                expr(index_expr, out)
+            }
+        }
+    }
+    match s {
+        ProtoStatement::Assign(a) => {
+            if let VarOffset::Comb(o) = a.dst {
+                // A runtime bit-select writes anywhere in the variable.
+                let sel = if a.dynamic_select.is_some() {
+                    None
+                } else {
+                    a.select
+                };
+                writes.push(field(o, sel, a.dst_width));
+            }
+            a.dynamic_select
+                .as_ref()
+                .is_none_or(|ds| expr(&ds.index_expr, reads))
+                && expr(&a.expr, reads)
+        }
+        ProtoStatement::AssignDynamic(a) => {
+            if let VarOffset::Comb(o) = a.dst_base {
+                let span = a.dst_stride.unsigned_abs() * a.dst_num_elements.saturating_sub(1)
+                    + native_bytes(a.dst_width).max(1);
+                writes.push((
+                    o.min(o + a.dst_stride * (a.dst_num_elements as isize - 1)),
+                    span,
+                ));
+            }
+            expr(&a.dst_index_expr, reads)
+                && expr(&a.expr, reads)
+                && a.dynamic_select
+                    .as_ref()
+                    .is_none_or(|ds| expr(&ds.index_expr, reads))
+        }
+        ProtoStatement::If(x) => {
+            x.cond.as_ref().is_none_or(|c| expr(c, reads))
+                && x.true_side.iter().all(|s| comb_touches(s, reads, writes))
+                && x.false_side.iter().all(|s| comb_touches(s, reads, writes))
+        }
+        ProtoStatement::Case(x) => {
+            x.arms.iter().all(|arm| {
+                expr(&arm.cond, reads) && arm.body.iter().all(|s| comb_touches(s, reads, writes))
+            }) && x.default.iter().all(|s| comb_touches(s, reads, writes))
+        }
+        ProtoStatement::For(x) => {
+            if let VarOffset::Comb(o) = x.var_offset {
+                writes.push((o, 8));
+            }
+            let (start, end) = match &x.range {
+                ProtoForRange::Forward { start, end, .. }
+                | ProtoForRange::Reverse { start, end, .. }
+                | ProtoForRange::Stepped { start, end, .. } => (start, end),
+            };
+            [start, end].into_iter().all(|b| match b {
+                ProtoForBound::Dynamic(e) => expr(e, reads),
+                _ => true,
+            }) && x.body.iter().all(|s| comb_touches(s, reads, writes))
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            body.iter().all(|s| comb_touches(s, reads, writes))
+        }
+        ProtoStatement::SystemFunctionCall(x) => match x {
+            ProtoSystemFunctionCall::Display { args, .. }
+            | ProtoSystemFunctionCall::Write { args, .. } => args.iter().all(|a| expr(a, reads)),
+            ProtoSystemFunctionCall::Assert {
+                condition, args, ..
+            } => expr(condition, reads) && args.iter().all(|a| expr(a, reads)),
+            ProtoSystemFunctionCall::Readmemh { .. } | ProtoSystemFunctionCall::Finish => true,
+        },
+        // A pre-compiled child reads and writes comb_values directly, and a
+        // testbench call can reach anything.
+        ProtoStatement::CompiledBlock(_) | ProtoStatement::TbMethodCall { .. } => false,
+        ProtoStatement::Break => true,
+    }
+}
+
+/// Find the sub-words that a run of bit-field stores redefines completely, and
+/// assign each store its role.
+///
+/// A window qualifies when disjoint top-level stores cover every one of its
+/// bits and nothing between the first and the last of them touches the window:
+/// then the first store may define the window instead of merging into it, and
+/// the rest may OR their bit in.  Statements outside that span are unaffected —
+/// before it they see the previous settle's value, after it the window is
+/// fully defined either way.
+fn plan_field_groups(stmts: &[ProtoStatement]) -> FieldPlan {
+    /// `(window address, bytes, bit mask)` of the narrowed store a statement
+    /// emits, if it emits one.
+    fn narrowed_store(s: &ProtoStatement) -> Option<(isize, usize, u64)> {
+        let ProtoStatement::Assign(a) = s else {
+            return None;
+        };
+        let (VarOffset::Comb(off), Some((hi, lo))) = (a.dst, a.select) else {
+            return None;
+        };
+        if a.dynamic_select.is_some() || a.dst_width <= 64 || a.dst_width > 128 || hi < lo {
+            return None;
+        }
+        let (start, bytes) = narrow_field_window(lo, hi - lo + 1)?;
+        Some((
+            off + start as isize,
+            bytes,
+            width_mask(hi - lo + 1) << (lo - start * 8),
+        ))
+    }
+    /// Every narrowed store in the tree, nested ones included.  Roles are keyed
+    /// by field, so a nested store sharing a member's key would pick up that
+    /// member's role; counting them lets the group be dropped instead.
+    fn all_narrowed(s: &ProtoStatement, out: &mut HashMap<(isize, u64), usize>) {
+        if let Some((addr, _, pmask)) = narrowed_store(s) {
+            *out.entry((addr, pmask)).or_default() += 1;
+        }
+        let mut nested = |body: &[ProtoStatement]| {
+            for s in body {
+                all_narrowed(s, out);
+            }
+        };
+        match s {
+            ProtoStatement::If(x) => {
+                nested(&x.true_side);
+                nested(&x.false_side);
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    nested(&arm.body);
+                }
+                nested(&x.default);
+            }
+            ProtoStatement::For(x) => nested(&x.body),
+            ProtoStatement::SequentialBlock(b) => nested(b),
+            ProtoStatement::CompiledBlock(x) => nested(&x.original_stmts),
+            _ => {}
+        }
+    }
+
+    struct Member {
+        idx: usize,
+        pmask: u64,
+    }
+    let mut occurrences: HashMap<(isize, u64), usize> = HashMap::default();
+    for s in stmts {
+        all_narrowed(s, &mut occurrences);
+    }
+    let mut groups: HashMap<(isize, usize), Vec<Member>> = HashMap::default();
+    for (idx, s) in stmts.iter().enumerate() {
+        let Some((addr, bytes, pmask)) = narrowed_store(s) else {
+            continue;
+        };
+        if occurrences.get(&(addr, pmask)) != Some(&1) {
+            continue;
+        }
+        groups
+            .entry((addr, bytes))
+            .or_default()
+            .push(Member { idx, pmask });
+    }
+
+    // Windows whose bits are covered exactly once each.
+    groups.retain(|&(_, bytes), members| {
+        let full = width_mask(bytes * 8);
+        let mut seen = 0u64;
+        members.len() > 1
+            && members.iter().all(|m| {
+                let fresh = seen & m.pmask == 0;
+                seen |= m.pmask;
+                fresh
+            })
+            && seen == full
+    });
+
+    // Byte -> statements touching it, for the ranges narrow enough to index
+    // that way.  A memory array's range spans its whole storage, so those go
+    // in a list that is scanned instead of expanded — otherwise one dynamic
+    // write to a 128 KB array would cost 128 K map insertions, and this pass
+    // runs on every emit.
+    const EXPAND_LIMIT: usize = 16;
+    #[derive(Default)]
+    struct Index {
+        /// byte -> statement indices, for ranges narrow enough to expand
+        by_byte: HashMap<isize, Vec<usize>>,
+        /// (start, end, statement) for the rest
+        wide: Vec<(isize, isize, usize)>,
+    }
+    impl Index {
+        fn add(&mut self, idx: usize, ranges: &[(isize, usize)]) {
+            for &(base, len) in ranges {
+                let end = base.saturating_add(len as isize);
+                if len > EXPAND_LIMIT {
+                    self.wide.push((base, end, idx));
+                    continue;
+                }
+                for b in base..end {
+                    let e = self.by_byte.entry(b).or_default();
+                    if e.last() != Some(&idx) {
+                        e.push(idx);
+                    }
+                }
+            }
+        }
+        /// Any indexed statement overlapping `[start, end)` that `f` accepts.
+        fn any(&self, start: isize, end: isize, f: impl Fn(usize) -> bool) -> bool {
+            self.wide
+                .iter()
+                .any(|&(s, e, i)| s < end && e > start && f(i))
+                || (start..end).any(|b| {
+                    self.by_byte
+                        .get(&b)
+                        .is_some_and(|list| list.iter().any(|&i| f(i)))
+                })
+        }
+        /// Every indexed statement overlapping `[start, end)`, ascending per
+        /// byte; a statement spanning several of them is visited once each.
+        fn for_each(&self, start: isize, end: isize, mut f: impl FnMut(usize)) {
+            for &(s, e, i) in &self.wide {
+                if s < end && e > start {
+                    f(i);
+                }
+            }
+            for b in start..end {
+                if let Some(list) = self.by_byte.get(&b) {
+                    list.iter().for_each(|&i| f(i));
+                }
+            }
+        }
+    }
+
+    let mut touched = Index::default();
+    let mut written = Index::default();
+    let mut readers = Index::default();
+    let mut read_ranges: Vec<Vec<(isize, usize)>> = vec![Vec::new(); stmts.len()];
+    let mut barriers: Vec<usize> = Vec::new();
+    for (idx, s) in stmts.iter().enumerate() {
+        let (mut reads, mut writes) = (Vec::new(), Vec::new());
+        if !comb_touches(s, &mut reads, &mut writes) {
+            barriers.push(idx);
+            continue;
+        }
+        touched.add(idx, &reads);
+        touched.add(idx, &writes);
+        written.add(idx, &writes);
+        readers.add(idx, &reads);
+        read_ranges[idx] = reads;
+    }
+
+    // Bytes owned by some candidate window.  A member that reads or writes a
+    // window other than its own could be carried into that window's span by
+    // its own group's move, so those windows are dropped rather than
+    // re-checked against every possible destination.
+    let mut window_bytes: HashMap<isize, (isize, usize)> = HashMap::default();
+    for &(addr, bytes) in groups.keys() {
+        for b in addr..addr + bytes as isize {
+            window_bytes.insert(b, (addr, bytes));
+        }
+    }
+    let mut foreign: HashSet<(isize, usize)> = HashSet::default();
+    for (&(addr, bytes), members) in groups.iter() {
+        for m in members {
+            for &(base, len) in &read_ranges[m.idx] {
+                for b in base..base.saturating_add(len as isize) {
+                    if let Some(&w) = window_bytes.get(&b)
+                        && w != (addr, bytes)
+                    {
+                        foreign.insert(w);
+                    }
+                }
+            }
+        }
+    }
+    // Overlapping windows would move into each other's spans for the same
+    // reason.
+    let mut overlapping: HashSet<(isize, usize)> = HashSet::default();
+    for &(addr, bytes) in groups.keys() {
+        for b in addr..addr + bytes as isize {
+            if window_bytes.get(&b) != Some(&(addr, bytes)) {
+                overlapping.insert((addr, bytes));
+            }
+        }
+    }
+
+    let mut roles = HashMap::default();
+    let mut moves: Vec<(usize, usize)> = Vec::new(); // (statement, destination)
+    for ((addr, bytes), mut members) in groups {
+        members.sort_by_key(|m| m.idx);
+        let (first, last) = (members[0].idx, members[members.len() - 1].idx);
+        let window = addr..addr + bytes as isize;
+        let member_at = |i: usize| members.iter().any(|m| m.idx == i);
+        if barriers.iter().any(|&b| b > first && b < last) {
+            continue;
+        }
+        // Nothing outside the group may touch the window while it is being
+        // built.
+        if touched.any(window.start, window.end, |i| {
+            i > first && i < last && !member_at(i)
+        }) {
+            continue;
+        }
+        // A member reading its own window would see Init's zeroed bits where
+        // the interpreter reads the previous settle's value.
+        if members.iter().any(|m| {
+            read_ranges[m.idx].iter().any(|&(base, len)| {
+                base < window.end && base.saturating_add(len as isize) > window.start
+            })
+        }) {
+            continue;
+        }
+        // Everything below decides only whether to GATHER; dropping the merge
+        // is sound for any group that got this far.  The span cap keeps a
+        // group from being dragged far out of its neighbourhood.
+        let mut gather = last - first <= gather_span_limit()
+            && !foreign.contains(&(addr, bytes))
+            && !overlapping.contains(&(addr, bytes));
+        // Sinking a member past a write to anything it reads would let it
+        // capture the new value.
+        gather = gather
+            && members[..members.len() - 1].iter().all(|m| {
+                read_ranges[m.idx].iter().all(|&(base, len)| {
+                    !written.any(base, base.saturating_add(len as isize), |i| {
+                        i > m.idx && i <= last && !member_at(i)
+                    })
+                })
+            });
+        for (n, m) in members.iter().enumerate() {
+            roles.insert(
+                (addr, m.pmask),
+                if n == 0 {
+                    FieldRole::Init
+                } else {
+                    FieldRole::OrIn
+                },
+            );
+            if gather && m.idx != last {
+                moves.push((m.idx, last));
+            }
+        }
+    }
+
+    // A def next to its only reader shares its chunk, so chunk-local
+    // localization can turn it into a C local.
+    let blocklist = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
+    let ranges = LOCALIZE_RANGES.with(|r| r.borrow().clone());
+    let in_range = |off: isize| -> bool {
+        ranges.iter().any(|&(base, num, stride)| {
+            stride != 0
+                && num != 0
+                && (off - base) >= 0
+                && (off - base) % stride == 0
+                && (off - base) / stride < num as isize
+        })
+    };
+    let moved: HashSet<usize> = moves.iter().map(|&(s, _)| s).collect();
+    let mut sinks: Vec<(usize, usize)> = Vec::new();
+    if localize_armed() {
+        for (d, s) in stmts.iter().enumerate() {
+            if moved.contains(&d) {
+                continue; // already a field-group member
+            }
+            let ProtoStatement::Assign(a) = s else {
+                continue;
+            };
+            let VarOffset::Comb(off) = a.dst else {
+                continue;
+            };
+            // Localization's own candidate shape: a clean full-width scalar
+            // store nothing outside the comb schedule can observe.
+            if a.select.is_some()
+                || a.dynamic_select.is_some()
+                || a.rhs_select.is_some()
+                || a.dst_width == 0
+                || a.dst_width > 64
+                || blocklist.contains(&off)
+                || in_range(off)
+            {
+                continue;
+            }
+            let (start, end) = (off, off + native_bytes(a.dst_width).max(1) as isize);
+            // Exactly one writer (this one) and exactly one reader, both found
+            // through the byte index so a wider access that overlaps counts.
+            if written.any(start, end, |i| i != d) {
+                continue;
+            }
+            // The same statement is indexed once per byte it covers, so the
+            // fanout has to be counted over distinct statements.
+            let mut seen: Vec<usize> = Vec::new();
+            readers.for_each(start, end, |i| {
+                if !seen.contains(&i) {
+                    seen.push(i);
+                }
+            });
+            let [r] = seen[..] else { continue };
+            if r <= d || barriers.iter().any(|&b| b > d && b < r) {
+                continue;
+            }
+            sinks.push((d, r));
+        }
+    }
+
+    // Where a statement ends up once every move is applied: a def whose reader
+    // is itself moved travels with it, so legality has to be checked against
+    // that final position, not the reader's current one.
+    let mut dest: HashMap<usize, usize> = moves.iter().copied().collect();
+    for &(d, r) in &sinks {
+        dest.insert(d, r);
+    }
+    fn terminal(mut i: usize, dest: &HashMap<usize, usize>, cap: usize) -> usize {
+        for _ in 0..cap {
+            match dest.get(&i) {
+                Some(&n) => i = n,
+                None => break,
+            }
+        }
+        i
+    }
+    let limit = sink_span_limit();
+    let mut drop: Vec<usize> = Vec::new();
+    for &(d, r) in &sinks {
+        let t = terminal(r, &dest, stmts.len());
+        let ok = t - d <= limit
+            && read_ranges[d].iter().all(|&(base, len)| {
+                !written.any(base, base.saturating_add(len as isize), |i| i > d && i <= t)
+            });
+        if !ok {
+            drop.push(d);
+        }
+    }
+    for d in drop {
+        dest.remove(&d);
+    }
+
+    // Arrivals emit just ahead of their destination, recursively — a chain
+    // of single-reader defs lands as one run.
+    let mut pending: HashMap<usize, Vec<usize>> = HashMap::default();
+    for (&src, &dst) in &dest {
+        pending.entry(dst).or_default().push(src);
+    }
+    for v in pending.values_mut() {
+        v.sort_unstable();
+    }
+    let mut order = Vec::with_capacity(stmts.len());
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    // Explicit stack: sink chains nest arbitrarily deep.
+    let mut stack: Vec<(usize, bool)> = Vec::new();
+    for i in 0..stmts.len() {
+        if dest.contains_key(&i) {
+            continue; // travels to its destination instead
+        }
+        let before = order.len();
+        stack.push((i, false));
+        while let Some((n, expanded)) = stack.pop() {
+            if expanded {
+                order.push(n);
+                continue;
+            }
+            stack.push((n, true));
+            if let Some(arrivals) = pending.get(&n) {
+                for &a in arrivals.iter().rev() {
+                    stack.push((a, false));
+                }
+            }
+        }
+        if order.len() - before > 1 {
+            spans.push((before, order.len() - before));
+        }
+    }
+    debug_assert_eq!(order.len(), stmts.len());
+    FieldPlan {
+        roles,
+        order,
+        atoms: spans,
+    }
+}
+
+/// What `plan_field_groups` decided: the per-field roles, the statement order
+/// that puts each group's members together, and where those groups sit in it.
+struct FieldPlan {
+    roles: HashMap<(isize, u64), FieldRole>,
+    order: Vec<usize>,
+    /// `(start, len)` runs in `order` a chunk boundary must not split.
+    atoms: Vec<(usize, usize)>,
+}
+
+/// `VERYL_AOT_C_SINK_DIAG=1`: counts single-writer / single-reader comb
+/// bytes, how many the blocklist frees for localization, and how many
+/// already share a chunk with their reader.
+fn sink_census(stmts: &[ProtoStatement], chunks: &[&[ProtoStatement]]) {
+    let mut chunk_of = Vec::with_capacity(stmts.len());
+    for (c, chunk) in chunks.iter().enumerate() {
+        chunk_of.extend(std::iter::repeat_n(c, chunk.len()));
+    }
+    let blocklist = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
+    let mut readers: HashMap<isize, Vec<usize>> = HashMap::default();
+    let mut writers: HashMap<isize, Vec<usize>> = HashMap::default();
+    let mut opaque = 0usize;
+    for (i, s) in stmts.iter().enumerate() {
+        let (mut r, mut w) = (Vec::new(), Vec::new());
+        if !comb_touches(s, &mut r, &mut w) {
+            opaque += 1;
+            continue;
+        }
+        for &(base, len) in &r {
+            for b in base..base.saturating_add(len as isize) {
+                readers.entry(b).or_default().push(i);
+            }
+        }
+        for &(base, len) in &w {
+            for b in base..base.saturating_add(len as isize) {
+                writers.entry(b).or_default().push(i);
+            }
+        }
+    }
+    let (mut defs, mut single, mut free, mut same_chunk) = (0, 0, 0, 0);
+    for (&off, w) in &writers {
+        if w.len() != 1 {
+            continue;
+        }
+        defs += 1;
+        let Some(r) = readers.get(&off) else { continue };
+        if r.len() != 1 {
+            continue;
+        }
+        single += 1;
+        if blocklist.contains(&off) {
+            continue;
+        }
+        free += 1;
+        if chunk_of.get(w[0]) == chunk_of.get(r[0]) {
+            same_chunk += 1;
+        }
+    }
+    eprintln!(
+        "[sink_census] stmts={} chunks={chunks_n} opaque={opaque} | single-writer bytes={defs} \
+         single-reader={single} not-blocklisted={free} already-same-chunk={same_chunk} \
+         => sinkable={sinkable}",
+        stmts.len(),
+        chunks_n = chunks.len(),
+        sinkable = free - same_chunk,
+    );
+}
+
+/// Const-cone partition: reorder `stmts` so that statements whose inputs are
+/// constants all the way down come first, returning the reordered list and
+/// the prefix length.  Those statements compute the same value on every
+/// settle, so the module exports them as a separate `veryl_aot_eval_const`
+/// entry the runtime runs ONCE per simulator instance instead of every
+/// settle.  Soundness rests on five exclusions (each of the first four
+/// was once missing, and VALIDATE caught the divergence):
+/// - every statement is walked to the END even once disqualified, so its
+///   writes still register for co-writer demotion (no short-circuit);
+/// - a CompiledBlock's ORIGINAL statements are walked (its input/output
+///   offset lists compress dynamic accesses to base + last element and
+///   would hide interior writes);
+/// - a reader whose writer does not PRECEDE it (back-edge / self-RMW)
+///   reads last settle's value and is never const;
+/// - any offset covered by a dynamic-write range (AssignDynamic) demotes
+///   const candidates that touch it;
+/// - a statement reading OR writing an event-written offset
+///   (`unsafe_comb`) is never const — the per-settle rerun is what keeps
+///   clobbering the event's value.
+///
+/// `None` disarms the split entirely (a Readmemh / TB-method statement,
+/// or a CompiledBlock without original statements, writes storage this
+/// walker cannot bound).
+fn const_cone_partition(
+    stmts: &[ProtoStatement],
+    unsafe_comb: &HashSet<isize>,
+) -> Option<(Vec<ProtoStatement>, usize)> {
+    #[derive(Default)]
+    struct Io {
+        /// (is_ff, base offset) of every scalar read.
+        reads: Vec<(bool, isize)>,
+        /// Comb base offsets written (incl. CompiledBlock outputs and For
+        /// loop counters).
+        writes: Vec<isize>,
+        /// The statement itself can never be const (but its I/O above still
+        /// participates in demotion).
+        opaque: bool,
+    }
+    /// Dynamic comb WRITE ranges (base, num, stride).
+    type WRanges = Vec<(isize, usize, isize)>;
+    fn expr_io(e: &ProtoExpression, io: &mut Io) {
+        match e {
+            ProtoExpression::HierVariable(_) => io.opaque = true,
+            ProtoExpression::Value { .. } => {}
+            ProtoExpression::Variable {
+                var_offset,
+                dynamic_select,
+                ..
+            } => {
+                match var_offset {
+                    VarOffset::Ff(o) => io.reads.push((true, *o)),
+                    VarOffset::Comb(o) => io.reads.push((false, *o)),
+                }
+                if let Some(d) = dynamic_select {
+                    io.opaque = true;
+                    expr_io(&d.index_expr, io);
+                }
+            }
+            ProtoExpression::Unary { x, .. } => expr_io(x, io),
+            ProtoExpression::Binary { x, y, .. } => {
+                expr_io(x, io);
+                expr_io(y, io);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (e, _, _) in elements {
+                    expr_io(e, io);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                expr_io(cond, io);
+                expr_io(true_expr, io);
+                expr_io(false_expr, io);
+            }
+            ProtoExpression::DynamicVariable { index_expr, .. } => {
+                // Disqualifies only the reader: the (run-once) writers it
+                // might read hold the same values either way.
+                io.opaque = true;
+                expr_io(index_expr, io);
+            }
+        }
+    }
+    /// Returns false when the module must disarm entirely.
+    fn stmt_io(s: &ProtoStatement, io: &mut Io, wranges: &mut WRanges) -> bool {
+        match s {
+            ProtoStatement::Assign(a) => {
+                if a.dynamic_select.is_some() || a.dst.is_ff() {
+                    io.opaque = true;
+                }
+                if !a.dst.is_ff() {
+                    io.writes.push(a.dst.raw());
+                }
+                if let Some(d) = &a.dynamic_select {
+                    expr_io(&d.index_expr, io);
+                }
+                expr_io(&a.expr, io);
+                true
+            }
+            ProtoStatement::AssignDynamic(a) => {
+                io.opaque = true;
+                if !a.dst_base.is_ff() && a.dst_stride != 0 {
+                    wranges.push((a.dst_base.raw(), a.dst_num_elements, a.dst_stride));
+                }
+                expr_io(&a.dst_index_expr, io);
+                expr_io(&a.expr, io);
+                true
+            }
+            ProtoStatement::If(x) => {
+                if let Some(c) = &x.cond {
+                    expr_io(c, io);
+                }
+                x.true_side
+                    .iter()
+                    .chain(x.false_side.iter())
+                    .all(|s| stmt_io(s, io, wranges))
+            }
+            ProtoStatement::Case(x) => {
+                x.arms.iter().all(|arm| {
+                    expr_io(&arm.cond, io);
+                    arm.body.iter().all(|s| stmt_io(s, io, wranges))
+                }) && x.default.iter().all(|s| stmt_io(s, io, wranges))
+            }
+            ProtoStatement::SequentialBlock(inner) => inner.iter().all(|s| stmt_io(s, io, wranges)),
+            ProtoStatement::CompiledBlock(cb) => {
+                // `input_offsets`/`output_offsets` compress a dynamic array
+                // access to base + last element, hiding interior elements
+                // from the co-writer and wrange rules — walk the original
+                // statements instead.  No originals = unboundable: disarm.
+                io.opaque = true;
+                if cb.original_stmts.is_empty() {
+                    return false;
+                }
+                cb.original_stmts.iter().all(|s| stmt_io(s, io, wranges))
+            }
+            ProtoStatement::For(f) => {
+                io.opaque = true;
+                if !f.var_offset.is_ff() {
+                    io.writes.push(f.var_offset.raw());
+                }
+                f.body.iter().all(|s| stmt_io(s, io, wranges))
+            }
+            ProtoStatement::Break => true,
+            ProtoStatement::SystemFunctionCall(c) => {
+                io.opaque = true;
+                // Readmemh writes storage this walker does not model.
+                !matches!(c, crate::ir::ProtoSystemFunctionCall::Readmemh { .. })
+            }
+            // TB-method writes are not modeled either.
+            ProtoStatement::TbMethodCall { .. } => false,
+        }
+    }
+    let mut wranges: WRanges = Vec::new();
+    let mut ios: Vec<Io> = Vec::with_capacity(stmts.len());
+    for s in stmts {
+        let mut io = Io::default();
+        if !stmt_io(s, &mut io, &mut wranges) {
+            return None;
+        }
+        ios.push(io);
+    }
+    let in_wrange = |off: isize| -> bool {
+        wranges.iter().any(|&(base, num, stride)| {
+            let d = off - base;
+            d >= 0 && d % stride == 0 && (d / stride) < num as isize
+        })
+    };
+    let mut writers: HashMap<isize, Vec<usize>> = HashMap::default();
+    for (i, io) in ios.iter().enumerate() {
+        for &w in &io.writes {
+            writers.entry(w).or_default().push(i);
+        }
+    }
+    let mut is_const: Vec<bool> = ios
+        .iter()
+        .map(|io| {
+            !io.opaque
+                && io.reads.iter().all(|&(ff, o)| {
+                    !ff && !unsafe_comb.contains(&o) && writers.contains_key(&o) && !in_wrange(o)
+                })
+                // An event co-writes `w`: rerunning the (const) comb write
+                // every settle is what keeps clobbering the event's value,
+                // so freezing it after one run changes what readers see.
+                && io
+                    .writes
+                    .iter()
+                    .all(|&w| !in_wrange(w) && !unsafe_comb.contains(&w))
+        })
+        .collect();
+    loop {
+        let mut changed = false;
+        for i in 0..ios.len() {
+            if !is_const[i] {
+                continue;
+            }
+            let ok = ios[i].reads.iter().all(|&(_, o)| {
+                writers
+                    .get(&o)
+                    .is_none_or(|ws| ws.iter().all(|&j| is_const[j] && j < i))
+            }) && ios[i]
+                .writes
+                .iter()
+                .all(|&w| writers[&w].iter().all(|&j| is_const[j]));
+            if !ok {
+                is_const[i] = false;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let n = is_const.iter().filter(|&&c| c).count();
+    if n == 0 {
+        return None;
+    }
+    let mut out: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
+    for (i, s) in stmts.iter().enumerate() {
+        if is_const[i] {
+            out.push(s.clone());
+        }
+    }
+    for (i, s) in stmts.iter().enumerate() {
+        if !is_const[i] {
+            out.push(s.clone());
+        }
+    }
+    Some((out, n))
+}
+
+/// The aligned `(start_byte, width_bytes)` sub-word of a 16-byte container
+/// that holds the field `[lo .. lo+nbits)`, narrowest first.  `None` when the
+/// field is wider than 64 bits or straddles every candidate window's
+/// boundary, leaving the caller on the 128-bit path.
+///
+/// Windows are aligned to their own width and 16 is a multiple of each, so
+/// `start + width <= 16` holds for every result — the access cannot reach
+/// past the container.
+fn narrow_field_window(lo: usize, nbits: usize) -> Option<(usize, usize)> {
+    if nbits == 0 || nbits > 64 || lo + nbits > 128 {
+        return None;
+    }
+    let byte_lo = lo / 8;
+    let byte_hi = (lo + nbits - 1) / 8;
+    [1usize, 2, 4, 8]
+        .into_iter()
+        .map(|w| ((byte_lo / w) * w, w))
+        .find(|&(start, w)| byte_hi < start + w)
+}
+
+/// Read-modify-write the field `[lo .. lo+nbits)` of a 65..128-bit comb slot
+/// through `narrow_field_window`'s sub-word instead of the whole 16-byte
+/// container.  `None` leaves the caller on the 128-bit form.
+///
+/// Bytes outside the field keep their old values, which is what the wide form
+/// does too, so `comb_values` ends up byte-identical.  Slot offsets are only
+/// 4-byte aligned in general, hence the unaligned typedefs.
+fn narrow_field_store(
+    rhs: &str,
+    buf: &str,
+    store_off: isize,
+    lo: usize,
+    nbits: usize,
+) -> Option<String> {
+    let (start, bytes) = narrow_field_window(lo, nbits)?;
+    let cty = match bytes {
+        1 => "uint8_t",
+        2 => "veryl_u16_ua",
+        4 => "veryl_u32_ua",
+        _ => "veryl_u64_ua",
+    };
+    let shift = lo - start * 8;
+    // `nbits == 64` implies bytes == 8 and shift == 0, so the masks below are
+    // the full word and `1u64 << 64` is never evaluated.
+    let vmask: u64 = width_mask(nbits);
+    let pmask: u64 = vmask << shift;
+    let addr = store_off + start as isize;
+    let value = format!("({cty})((((uint64_t)({rhs})) & 0x{vmask:x}ULL) << {shift})");
+    match field_role(addr, pmask) {
+        Some(FieldRole::Init) => Some(format!("*(({cty}*)({buf} + {addr:#x})) = {value};")),
+        Some(FieldRole::OrIn) => Some(format!("*(({cty}*)({buf} + {addr:#x})) |= {value};")),
+        None => Some(format!(
+            "{{ uint64_t _v = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; \
+                {cty} _o = *(({cty}*)({buf} + {addr:#x})); \
+                *(({cty}*)({buf} + {addr:#x})) = \
+                  ({cty})((_o & ({cty})(~(uint64_t)0x{pmask:x}ULL)) | ({cty})(_v << {shift})); }}",
+        )),
+    }
+}
+
 /// Clean-bits mask elision knob (`VERYL_AOT_C_CLEAN`, default on, `=0` to
 /// opt out — the A/B lever for the redundant-mask removal).
 fn clean_elide() -> bool {
@@ -2607,6 +3736,9 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
 /// `_lib` drops, so this struct must outlive every dispatch.
 pub struct EmittedModule {
     pub func: FuncPtr,
+    /// Run-once constant-cone entry (`veryl_aot_eval_const`); absent when the
+    /// module has no const prefix.  Same ABI as `func`.
+    pub const_func: Option<FuncPtr>,
     /// Keep-alive: dropping unloads the library and invalidates `func`.
     _lib: libloading::Library,
 }
@@ -2637,6 +3769,32 @@ fn compile_jobs() -> usize {
         })
 }
 
+/// Background-compile niceness (`VERYL_AOT_C_NICE`, default 10; 0 keeps the
+/// parent's priority).  The compile is off the critical path — the
+/// simulation runs on Cranelift / the incremental sweep while it proceeds —
+/// so `cc` must yield to the sim threads instead of competing with them.
+fn compile_nice() -> i32 {
+    std::env::var("VERYL_AOT_C_NICE")
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(10)
+}
+
+/// Linux applies `PRIO_PROCESS` with `who == 0` to the calling THREAD, and
+/// `cc` children inherit it — so this renices the pool, not the simulation.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn renice_compile_thread() {
+    let n = compile_nice();
+    if n != 0 {
+        // SAFETY: plain syscall wrapper.  Failure is ignored: the priority
+        // is an optimization, not a correctness input.
+        unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, n) };
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn renice_compile_thread() {}
+
 /// Lazily-started global pool of `compile_jobs()` workers draining a shared
 /// queue; returns the job sender.
 ///
@@ -2658,6 +3816,7 @@ fn compile_pool() -> &'static Sender<CompileJob> {
             let _ = thread::Builder::new()
                 .name("veryl-aot-cc".into())
                 .spawn(move || {
+                    renice_compile_thread();
                     loop {
                         let job = {
                             let guard = match rx.lock() {
@@ -2829,6 +3988,8 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
          #include <stdint.h>\n\
          typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
          typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
+         typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
+         typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
          typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
          __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
          __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
@@ -2979,6 +4140,72 @@ pub fn compile_source(src: &str) -> Result<EmittedModule, String> {
     compile_source_in(&cache_dir, src)
 }
 
+fn gc_age() -> Option<Duration> {
+    let hours = std::env::var("VERYL_AOT_C_GC_HOURS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(24);
+    (hours != 0).then(|| Duration::from_secs(hours * 3600))
+}
+
+/// A compile's own temp files, `veryl_aot_<hash>.<pid>.<n>.<ext>`; published
+/// artifacts carry no such infix.  A failed compile's `.log` is left alone:
+/// it is the only record of why it failed.
+fn is_temp_artifact(name: &str) -> bool {
+    let mut parts = name.split('.');
+    let (Some(stem), Some(pid), Some(ctr), Some(ext), None) = (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    ) else {
+        return false;
+    };
+    stem.starts_with("veryl_aot_")
+        && pid.parse::<u64>().is_ok()
+        && ctr.parse::<u64>().is_ok()
+        && matches!(ext, "c" | "so")
+}
+
+fn sweep_temp_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !is_temp_artifact(name) {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|m| m < cutoff);
+        if stale {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Sweep the temp files of compiles that never published.
+///
+/// The compiler is detached so it can publish after the run exits; nothing
+/// observes it dying either, so its temp files would stay forever.  Their
+/// pid cannot separate a dead compile from a running one — it belongs to
+/// whatever namespace the writer ran in — so age does, with a default
+/// cutoff well past the longest compile still plausibly running.
+fn gc_orphan_temps(cache_dir: &Path) {
+    static SWEPT: OnceLock<()> = OnceLock::new();
+    SWEPT.get_or_init(|| {
+        if let Some(age) = gc_age()
+            && let Some(cutoff) = std::time::SystemTime::now().checked_sub(age)
+        {
+            sweep_temp_artifacts(cache_dir, cutoff);
+        }
+    });
+}
+
 /// `compile_source` with an explicit cache directory instead of resolving
 /// it from `VERYL_AOT_CACHE_DIR`/`XDG_CACHE_HOME`/`HOME`.  Tests pass a
 /// per-test dir here directly: the cache dir is a *process-global* env var,
@@ -2987,6 +4214,7 @@ pub fn compile_source(src: &str) -> Result<EmittedModule, String> {
 /// as an argument keeps each test hermetic without touching shared state.
 fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, String> {
     fs::create_dir_all(cache_dir).map_err(|e| format!("create_dir_all: {e}"))?;
+    gc_orphan_temps(cache_dir);
 
     let cc_name = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
     // Full flag list — built once and used for *both* the cache key and the
@@ -3018,6 +4246,12 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     // the match can't drift.  VERYL_AOT_C_EVENT_NOSLP=0 opts back in.
     let event_noslp = std::env::var("VERYL_AOT_C_EVENT_NOSLP").map_or(true, |v| v != "0");
     if event_noslp && src.starts_with("// AOT-C event") {
+        flags.push("-fno-tree-slp-vectorize".to_string());
+    }
+    // Comb sources carry the (noslp) header marker when their wide-op
+    // density is below the static threshold (see the SLP policy in
+    // emit_function).
+    if src.starts_with("// AOT-C generated (noslp)") {
         flags.push("-fno-tree-slp-vectorize".to_string());
     }
 
@@ -3151,6 +4385,9 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         *lib.get::<FuncPtr>(b"veryl_aot_eval\0")
             .map_err(|e| format!("dlsym veryl_aot_eval: {e}"))?
     };
+    let const_func: Option<FuncPtr> = unsafe { lib.get::<FuncPtr>(b"veryl_aot_eval_const\0") }
+        .ok()
+        .map(|s| *s);
     // Publish the wide-op helper table into the .so so emitted wide-op calls
     // dispatch to the same `wide_ops::*` Rust helpers Cranelift uses.  The
     // setter is always present (decls emitted unconditionally) and copies the
@@ -3172,7 +4409,11 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
             veryl_aot_sysfn_print;
         unsafe { setter(cb as *mut c_void) };
     }
-    Ok(EmittedModule { func, _lib: lib })
+    Ok(EmittedModule {
+        func,
+        const_func,
+        _lib: lib,
+    })
 }
 
 /// Compile one source and publish it, releasing the compile lock (`$lk`) at
@@ -3189,7 +4430,19 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
 /// that argument list must agree, or a compiler flag silently lands in the
 /// slot after it and never reaches the compile.
 #[cfg(unix)]
-const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; shift 7; exec > "$lg" 2>&1; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; rm -f "$lg"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; shift 8; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; rm -f "$lg"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+
+/// Address-space ceiling for the compiler, in KiB (`VERYL_AOT_C_MAX_MEM_MB`
+/// gives it in MB; 0 disables).  The compile is detached on purpose — it has
+/// to outlive the run to publish its `.so` — so nothing reclaims it if it
+/// misbehaves.  Set well above a healthy whole-module compile.
+fn compile_mem_limit_kb() -> u64 {
+    std::env::var("VERYL_AOT_C_MAX_MEM_MB")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(16 * 1024)
+        * 1024
+}
 
 /// Paths [`COMPILE_SCRIPT`] works on.  Named rather than positional so the
 /// four `.c`/`.so` slots cannot be transposed at the call site.
@@ -3219,6 +4472,7 @@ fn compile_script_args(p: &CompileScriptPaths, flags: &[String]) -> Vec<std::ffi
             .map(|q| q.as_os_str().to_os_string())
             .unwrap_or_default(),
         p.log.as_os_str().to_os_string(),
+        compile_mem_limit_kb().to_string().into(),
     ];
     args.extend(flags.iter().map(std::ffi::OsString::from));
     args
@@ -3362,6 +4616,24 @@ fn fnv1a_64_hex_parts(parts: &[&str]) -> String {
     format!("{h:016x}")
 }
 
+/// Ceiling on one statement's emitted C (`VERYL_AOT_C_MAX_STMT_MB`, 0
+/// disables); over it the statement counts as uncovered.
+///
+/// A statement's emitted text is unbounded: a chain of conditionals inlines
+/// into a single expression, and version-splitting a deeply predicated design
+/// can grow one past what the compiler can hold.  Splitting the translation
+/// unit or the chunk functions cannot bound that — it is ONE statement — so
+/// refusing it is the only lever.  The default sits orders of magnitude above
+/// what healthy designs emit per statement.
+fn max_stmt_bytes() -> usize {
+    std::env::var("VERYL_AOT_C_MAX_STMT_MB")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(16)
+        * 1024
+        * 1024
+}
+
 /// Full C source for a comb statement sequence.  Signature matches the
 /// Cranelift FuncPtr ABI: `void veryl_aot_eval(uint8_t *ff, uint8_t
 /// *comb, uint64_t *log, intptr_t ff_delta)`.  Comb-target writes store
@@ -3386,18 +4658,162 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         "// AOT-C generated; do not edit.\n\
          #include <stdint.h>\n\
          typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
-         typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n",
+         typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
+         typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
+         typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n",
     );
     body.push_str(WIDEOPS_C_DECLS);
     body.push_str(WIDEOPS_C_INLINE);
     body.push('\n');
 
-    // Emit each chunk's stmts now so we can fail fast on unsupported.
-    let chunks: Vec<&[ProtoStatement]> = if chunk_size == 0 || stmts.len() <= chunk_size {
-        vec![stmts]
+    // Const-cone split (default ON, VERYL_AOT_C_CONST_SKIP=0 opts out):
+    // partition constant-input statements to the front BEFORE field-group
+    // planning so the gather's atom ranges are computed on the final order.
+    // The gather may still move statements across the prefix boundary
+    // (a sink pairs a const def with its non-const reader); its moves are
+    // dependency-checked and never earlier, so the prefix stays executable
+    // in order — the re-count below just shrinks it to the run that is
+    // still contiguously const, and a boundary-split sink pair reverts to
+    // buffer traffic (the localize sets are recomputed per final chunk).
+    let const_part: Option<(Vec<ProtoStatement>, usize)> = if const_skip_armed() {
+        let unsafe_comb = CONST_UNSAFE_COMB.with(|b| b.borrow().clone());
+        const_cone_partition(stmts, &unsafe_comb)
     } else {
-        stmts.chunks(chunk_size).collect()
+        None
     };
+    if std::env::var("VERYL_AOT_C_CONST_DIAG").as_deref() == Ok("1") {
+        eprintln!(
+            "[const_skip] armed={} stmts={} n_const={}",
+            const_skip_armed(),
+            stmts.len(),
+            const_part.as_ref().map_or(0, |(_, n)| *n),
+        );
+    }
+    let mut n_const = const_part.as_ref().map_or(0, |(_, n)| *n);
+    let stmts: &[ProtoStatement] = const_part.as_ref().map_or(stmts, |(s, _)| s.as_slice());
+
+    // Field-group roles and gathering: see plan_field_groups.
+    let _field_roles = FieldRolesGuard;
+    let plan = plan_field_groups(stmts);
+    FIELD_ROLES.with(|r| *r.borrow_mut() = plan.roles.clone());
+    let gathered: Option<Vec<ProtoStatement>> =
+        (!plan.atoms.is_empty()).then(|| plan.order.iter().map(|&i| stmts[i].clone()).collect());
+    if gathered.is_some() && n_const > 0 {
+        // The gather may move statements across the prefix boundary in
+        // either direction (a sink pairs a const def with its later
+        // non-const reader).  Rather than reorder anything further, shrink
+        // the prefix to the statements still contiguously const at the
+        // front of the FINAL order — a pure re-count, so it is always
+        // sound; statements pushed past an intruder just stay in the main
+        // entry (a missed opportunity, not an error).
+        let boundary = n_const;
+        let mut k = 0usize;
+        while k < plan.order.len() && plan.order[k] < boundary {
+            k += 1;
+        }
+        n_const = k;
+    }
+    let stmts: &[ProtoStatement] = gathered.as_deref().unwrap_or(stmts);
+
+    // Emit each chunk's stmts now so we can fail fast on unsupported.
+    //
+    // The chunk budget counts approximate CODE WEIGHT, not statements:
+    // statement-level fusion concentrates many former statements' work into
+    // one Assign, and a count-based split packs several of those into one
+    // function whose register pressure defeats gcc.  A plain statement
+    // costs 1, so the knob's meaning is unchanged for unfused code.
+    fn expr_nodes(e: &ProtoExpression) -> usize {
+        match e {
+            ProtoExpression::Variable { .. } | ProtoExpression::Value { .. } => 1,
+            ProtoExpression::Unary { x, .. } => 1 + expr_nodes(x),
+            ProtoExpression::Binary { x, y, .. } => 1 + expr_nodes(x) + expr_nodes(y),
+            ProtoExpression::Concatenation { elements, .. } => {
+                1 + elements
+                    .iter()
+                    .map(|(e, ..)| 1 + expr_nodes(e))
+                    .sum::<usize>()
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => 1 + expr_nodes(cond) + expr_nodes(true_expr) + expr_nodes(false_expr),
+            ProtoExpression::DynamicVariable { index_expr, .. } => 2 + expr_nodes(index_expr),
+            _ => 4,
+        }
+    }
+    fn stmt_cost(s: &ProtoStatement) -> usize {
+        match s {
+            ProtoStatement::Assign(a) => 1 + expr_nodes(&a.expr) / 8,
+            _ => 1,
+        }
+    }
+    let chunks: Vec<&[ProtoStatement]> = if chunk_size == 0 || stmts.len() <= chunk_size {
+        if n_const > 0 && n_const < stmts.len() {
+            vec![&stmts[..n_const], &stmts[n_const..]]
+        } else {
+            vec![stmts]
+        }
+    } else {
+        // Never cut inside a gathered group — splitting one puts the
+        // accumulating stores in different functions and gcc can no longer
+        // keep the window in a register.
+        let mut chunks = Vec::new();
+        let (mut start, mut ai) = (0usize, 0usize);
+        while start < stmts.len() {
+            let mut end = start;
+            let mut cost = 0usize;
+            while end < stmts.len() && cost < chunk_size {
+                cost += stmt_cost(&stmts[end]);
+                end += 1;
+            }
+            while ai < plan.atoms.len() && plan.atoms[ai].0 + plan.atoms[ai].1 <= end {
+                ai += 1;
+            }
+            if ai < plan.atoms.len() && plan.atoms[ai].0 < end {
+                end = if plan.atoms[ai].0 > start {
+                    plan.atoms[ai].0
+                } else {
+                    plan.atoms[ai].0 + plan.atoms[ai].1
+                };
+            }
+            // Force a boundary at the const prefix so the const chunks can
+            // be routed to the run-once entry.  A field-group atom is never
+            // split here (the co-writer rule makes its members all-const or
+            // all-demoted together); a sink atom straddling the boundary is
+            // split, which only costs the pair its locality (the localize
+            // sets are recomputed per final chunk).
+            if start < n_const && end > n_const {
+                end = n_const;
+            }
+            chunks.push(&stmts[start..end]);
+            start = end;
+        }
+        chunks
+    };
+    let const_chunks = {
+        let mut acc = 0usize;
+        let mut k = 0usize;
+        for c in &chunks {
+            if acc + c.len() <= n_const {
+                acc += c.len();
+                k += 1;
+            } else {
+                break;
+            }
+        }
+        k
+    };
+    if std::env::var("VERYL_AOT_C_CONST_DIAG").as_deref() == Ok("1") {
+        eprintln!(
+            "[const_skip] post-gather n_const={n_const} const_chunks={const_chunks} chunks={}",
+            chunks.len(),
+        );
+    }
+    if std::env::var("VERYL_AOT_C_SINK_DIAG").as_deref() == Ok("1") {
+        sink_census(stmts, &chunks);
+    }
     // Chunk-local intermediate localization (VERYL_AOT_C_LOCALIZE): per chunk,
     // the comb offsets that are written by one clean top-level scalar Assign in
     // that chunk and read only there (and not blocklisted) become C locals
@@ -3445,7 +4861,39 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     }
     clear_current_local();
 
-    if chunks.len() == 1 {
+    // Static SLP policy: scalar-dominated sources lose to gcc's SLP
+    // vectorizer — it bundles same-shape statements on SCATTERED words, so
+    // the vector is assembled with movd/pinsrd gathers that cost more than
+    // the scalar ops they replace (fewer cycles but MORE instructions: the
+    // gather's port pressure is the loss, so instruction counts mis-rank
+    // this axis).  Wide-data designs vectorize real adjacent words and
+    // keep winning.  The density of vw_* calls over emitted statements
+    // separates the two cleanly — calibrated on reference designs:
+    // scalar CPU cores measure 0.00–0.05 (SLP loses), wide-datapath
+    // designs 0.18–0.28 (SLP wins), so 0.1 sits between with ~2x margin
+    // each side.  VERYL_AOT_C_COMB_SLP=1 pins SLP on everywhere, =0
+    // forces it off.
+    // One emitted statement per line (see the chunk loop above), so line
+    // count is the statement count; counting ';' would inflate the
+    // denominator on multi-';' statement expressions (the overflow guard
+    // alone carries five) and shift the ratio scale the threshold was
+    // calibrated on.
+    let (vw_calls, stmt_count) = chunk_bodies.iter().fold((0usize, 0usize), |(v, s), cb| {
+        (v + cb.matches("vw_").count(), s + cb.lines().count())
+    });
+    let comb_noslp = match std::env::var("VERYL_AOT_C_COMB_SLP").as_deref() {
+        Ok("1") => false,
+        Ok("0") => true,
+        _ => (vw_calls as f64) < 0.1 * (stmt_count as f64),
+    };
+    if std::env::var("VERYL_AOT_C_SLP_DIAG").as_deref() == Ok("1") {
+        eprintln!(
+            "[aot-c slp] vw_calls={vw_calls} stmts={stmt_count} ratio={:.4} noslp={comb_noslp}",
+            (vw_calls as f64) / (stmt_count.max(1) as f64)
+        );
+    }
+
+    if chunks.len() == 1 && const_chunks == 0 {
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n\
@@ -3466,23 +4914,65 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             body.push_str(cb);
             body.push_str("}\n\n");
         }
+        // Const-prefix chunks go to a separate run-once entry: their inputs
+        // never change, so the runtime (Ir::const_cone_done) calls this once per
+        // simulator instance and the main entry skips them every settle.
+        if const_chunks > 0 {
+            body.push_str(
+                "__attribute__((visibility(\"default\")))\n\
+                 void veryl_aot_eval_const(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
+            );
+            for i in 0..const_chunks {
+                body.push_str(&format!(
+                    "    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n",
+                ));
+            }
+            body.push_str("}\n");
+        }
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
         );
-        for i in 0..chunks.len() {
+        for i in const_chunks..chunks.len() {
             body.push_str(&format!(
                 "    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n",
             ));
         }
         body.push_str("}\n");
     }
+    if comb_noslp {
+        // The marker line is the cheapest way to carry the verdict to
+        // compile_source (which only sees the source text); it also lands
+        // in the cache key, so flipping the policy re-keys the .so.
+        body = body.replacen(
+            "// AOT-C generated; do not edit.",
+            "// AOT-C generated (noslp); do not edit.",
+            1,
+        );
+    }
     Some(body)
 }
 
-/// One terminated C statement from a `ProtoStatement`.  `None` if
-/// the variant or its substructures aren't emittable.
+/// One terminated C statement from a `ProtoStatement`.  `None` if the
+/// variant or its substructures aren't emittable, or if the result exceeds
+/// [`max_stmt_bytes`].
 pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
+    let out = emit_stmt_inner(stmt)?;
+    let cap = max_stmt_bytes();
+    if cap != 0 && out.len() > cap {
+        if diag_enabled() {
+            eprintln!(
+                "[aot_c] one statement emits {} B, over the {} B ceiling; declining AOT-C",
+                out.len(),
+                cap
+            );
+        }
+        return None;
+    }
+    Some(out)
+}
+
+fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
     match stmt {
         ProtoStatement::Assign(a) => {
             // A rhs_select on a plain variable is a bit-select on that variable
@@ -3664,11 +5154,10 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                             &format!("((uint8_t*)_w{t})"),
                             pre,
                             &dst,
-                            nb,
                             nw,
                             lo,
                             nbits2,
-                            dmask,
+                            a.dst_width,
                         ));
                     }
                     let store = if nb <= f.nb {
@@ -3702,7 +5191,13 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                     let mut pre = String::new();
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
                     return Some(emit_wide_select_rmw_store(
-                        &r.addr, pre, &dst, nb, nw, lo, nbits, dmask,
+                        &r.addr,
+                        pre,
+                        &dst,
+                        nw,
+                        lo,
+                        nbits,
+                        a.dst_width,
                     ));
                 }
                 // Bare signed RHS narrower than the wide destination:
@@ -3715,6 +5210,70 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                             vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}",
                         src = r.addr,
                     ));
+                }
+                // Wide ternary RHS: select word-by-word straight into the
+                // destination.  Per-word forward select is alias-safe: an
+                // arm equal to the destination reads each word before that
+                // word is written.  The both-signed-narrower shape keeps the
+                // generic path (its arms re-extend through a fresh
+                // temporary).
+                if let ProtoExpression::Ternary {
+                    cond,
+                    true_expr,
+                    false_expr,
+                    width: tw,
+                    ..
+                } = eff_expr
+                    && *tw == a.dst_width
+                {
+                    let needs_sext = true_expr.expr_context().signed
+                        && false_expr.expr_context().signed
+                        && true_expr.width() > 0
+                        && false_expr.width() > 0
+                        && (true_expr.width() < *tw || false_expr.width() < *tw);
+                    if !needs_sext && let Some(c) = emit_expr(cond) {
+                        let mut pre = String::new();
+                        if let Some(t_ref) = emit_wide_operand(true_expr, nb, &mut pre)
+                            && let Some(f_ref) = emit_wide_operand(false_expr, nb, &mut pre)
+                        {
+                            let t = next_wide_tmp();
+                            return Some(format!(
+                                "{{ {pre}int _c{t} = (({c}) != 0); \
+                                 for (int _i{t} = 0; _i{t} < {nw}; _i{t}++) \
+                                 VW_WR({dst}, _i{t}, _c{t} ? \
+                                 ((const veryl_u64_ua*)({tp}))[_i{t}] : \
+                                 ((const veryl_u64_ua*)({fp}))[_i{t}]); \
+                                 vw_apply_mask({dst}, (const uint8_t*)0, {dmask}u); }}",
+                                nw = nb / 8,
+                                tp = t_ref.addr,
+                                fp = f_ref.addr,
+                            ));
+                        }
+                    }
+                }
+                // Wide concat RHS: assemble the elements straight into the
+                // destination (one |= per element word), no `_w` temporary.
+                // Self-reading concats (the partial-coverage fusion's
+                // `x = {x[7:7], b, a}`) keep the temporary form: its
+                // read-before-write ordering is what makes them correct.
+                if let ProtoExpression::Concatenation {
+                    elements,
+                    width: cw,
+                    ..
+                } = eff_expr
+                    && *cw == a.dst_width
+                {
+                    // Expanded: the compact gather hides dynamic reads of
+                    // an array's middle elements, and the into-form zeroes
+                    // the destination before the elements evaluate.
+                    let mut ins: Vec<VarOffset> = vec![];
+                    eff_expr.gather_variable_offsets_expanded(&mut ins);
+                    if !ins.contains(&a.dst) {
+                        let mut pre = String::new();
+                        if emit_wide_concat_into(elements, *cw, nb, &dst, &mut pre).is_some() {
+                            return Some(format!("{{ {pre}}}"));
+                        }
+                    }
                 }
                 // No select: plain wide store.  Copy into the destination, then
                 // mask THERE (never the source, which may alias a flat-buffer
@@ -3753,6 +5312,15 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 let mut pre = String::new();
                 let r = emit_wide_operand(eff_expr, native_bytes(src_w), &mut pre)?;
                 let dwmask = width_mask(a.dst_width);
+                // A localized dst is read back through its C local, not
+                // comb_values — the value must land in the local.
+                if is_localized(store_off) {
+                    return Some(format!(
+                        "{{ {pre}{nm} = (uint64_t)(VW_RD({src}, 0) & 0x{dwmask:x}ULL); }}",
+                        nm = local_name(store_off),
+                        src = r.addr,
+                    ));
+                }
                 return Some(format!(
                     "{{ {pre}*(({cty}*)(comb_values + {store_off:#x})) = \
                        ({cty})(VW_RD({src}, 0) & 0x{dwmask:x}ULL); }}",
@@ -3763,7 +5331,27 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             let cty = native_c_type(nb)?;
             // Compute the rhs after rhs_select extraction (mirrors
             // AssignStatement::eval_step's `value.select(beg, end)`).
-            let rhs_raw = emit_expr_root(eff_expr)?;
+            // A wide-pointer RHS value is not a C scalar, but a ≤64-bit
+            // rhs_select field of it is.  Scalar emit is tried first:
+            // building a wide pointer does not mean scalar emit fails (a
+            // narrow dynamic select on a >128-bit var is a C scalar too).
+            let (rhs_raw, eff_rhs_select) = if let Some(s) = emit_expr_root(eff_expr) {
+                (s, eff_rhs_select)
+            } else if eff_expr.builds_wide_pointer() {
+                let (rhs_hi, rhs_lo) = eff_rhs_select?;
+                let nbits = rhs_hi.checked_sub(rhs_lo)?.checked_add(1)?;
+                if nbits > 64 {
+                    return None;
+                }
+                let mut pre = String::new();
+                let f = emit_wide_rhs_field(eff_expr, rhs_hi, rhs_lo, &mut pre)?;
+                (
+                    format!("({{ {pre}(uint64_t)VW_RD({addr}, 0); }})", addr = f.addr),
+                    None,
+                )
+            } else {
+                return None;
+            };
             // Sign-extend a bare signed RHS to dst_width before the store
             // (`se_from` = the RHS width). dst_width <= 128 is guaranteed here
             // (wider bailed above). The extension fills bits [w..dst_width) with
@@ -3881,6 +5469,9 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
                 if a.dst_width > 64 && a.dst_width <= 128 {
                     if nbits == 0 || lo + nbits > 128 {
                         return None;
+                    }
+                    if let Some(narrow) = narrow_field_store(&rhs_str, buf, store_off, lo, nbits) {
+                        return Some(narrow);
                     }
                     let fmask: u128 = if nbits >= 128 {
                         !0u128
@@ -4393,6 +5984,216 @@ fn emit_block(stmts: &[ProtoStatement]) -> Option<String> {
 /// `ProtoExpression` → parenthesized C expression (typed `uint64_t`;
 /// width truncation happens at store time via the dst cast).  `None`
 /// if the variant or operator isn't supported.
+fn bitmerge_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_AOT_C_BITMERGE").as_deref() != Ok("0"))
+}
+
+/// Bit-test merging: a 1-bit And/Or tree whose leaves
+/// test single bits of ONE variable folds to a masked compare on a single
+/// full-width load — `!a[11] & a[10] & … & a[0]` becomes
+/// `(a & 0xfff) == 0x7ff` (3 ops for what was 2 ops per bit plus the
+/// joins).  gcc/clang never rebuild this shape from the per-bit form
+/// (the shifts point different ways), so the emitter folds it while the
+/// Cranelift arm keeps the expression form — VALIDATE checks the fold
+/// byte-for-byte.  Census on a reference dual-thread CPU core: 3,021
+/// same-variable groups, ≈26% of static operators (the small scalar core
+/// has almost none).
+///
+/// Returns `None` when no group of ≥2 same-variable bit tests exists —
+/// the normal expression path then applies.  Mixed leaves keep their
+/// usual emission and join the folded groups with the tree's operator
+/// (And/Or are commutative and associative, so regrouping is sound).
+/// A negated leaf under Or, and any bit claimed both positive and
+/// negated, stay unfolded (the masked-compare form cannot express them).
+fn emit_bit_test_merge(expr: &ProtoExpression) -> Option<String> {
+    let ProtoExpression::Binary { op, .. } = expr else {
+        return None;
+    };
+    let op = *op;
+    // Flatten the same-op 1-bit tree.
+    fn flatten<'a>(e: &'a ProtoExpression, op: Op, out: &mut Vec<&'a ProtoExpression>) {
+        match e {
+            ProtoExpression::Binary {
+                x,
+                op: o,
+                y,
+                expr_context,
+                ..
+            } if *o == op && expr_context.width == 1 && !expr_context.signed => {
+                flatten(x, op, out);
+                flatten(y, op, out);
+            }
+            _ => out.push(e),
+        }
+    }
+    // A single-bit test of a ≤64-bit variable: (is_ff, base, bit, full_width).
+    fn as_bit_test(e: &ProtoExpression) -> Option<(bool, isize, usize, usize)> {
+        let ProtoExpression::Variable {
+            var_offset,
+            select,
+            dynamic_select,
+            width,
+            var_full_width,
+            ..
+        } = e
+        else {
+            return None;
+        };
+        if dynamic_select.is_some() {
+            return None;
+        }
+        let full = (*var_full_width).max(*width);
+        if full > 64 {
+            return None;
+        }
+        let bit = match select {
+            Some((hi, lo)) if hi == lo => *lo,
+            None if full == 1 => 0,
+            _ => return None,
+        };
+        if bit >= full || bit >= 64 {
+            return None;
+        }
+        let (ff, off) = match var_offset {
+            VarOffset::Ff(o) => (true, *o),
+            VarOffset::Comb(o) => (false, *o),
+        };
+        Some((ff, off, bit, full))
+    }
+    let mut leaves: Vec<&ProtoExpression> = Vec::new();
+    flatten(expr, op, &mut leaves);
+    if leaves.len() < 2 {
+        return None;
+    }
+    // Classify: per-variable (mask, positives-mask, full_width) plus the rest.
+    struct Group {
+        mask: u64,
+        pos: u64,
+        /// Parity of the number of negated leaves (Xor folds each `!b`
+        /// into one constant flip: `!a ^ b = (a ^ b) ^ 1`).
+        neg_parity: u64,
+        full: usize,
+        count: usize,
+        conflict: bool,
+    }
+    // BTreeMap: deterministic iteration — the emitted text feeds the
+    // artifact cache key, so an unstable group order would re-key every run.
+    let mut groups: std::collections::BTreeMap<(bool, isize), Group> =
+        std::collections::BTreeMap::new();
+    let mut others: Vec<&ProtoExpression> = Vec::new();
+    for &leaf in &leaves {
+        let (test, neg) = match leaf {
+            ProtoExpression::Unary {
+                op: Op::LogicNot,
+                x,
+                ..
+            } => (as_bit_test(x), true),
+            _ => (as_bit_test(leaf), false),
+        };
+        // A negated leaf under Or has no masked-compare form; keep it
+        // plain.  And absorbs it into the expected-pattern; Xor absorbs it
+        // as a constant parity flip.
+        let usable = match test {
+            Some(_) if neg && op == Op::BitOr => None,
+            t => t,
+        };
+        match usable {
+            Some((ff, off, bit, full)) => {
+                let g = groups.entry((ff, off)).or_insert(Group {
+                    mask: 0,
+                    pos: 0,
+                    neg_parity: 0,
+                    full,
+                    count: 0,
+                    conflict: false,
+                });
+                g.full = g.full.max(full);
+                let b = 1u64 << bit;
+                if g.mask & b != 0 {
+                    // Same bit seen before: under And/Or identical polarity
+                    // is idempotent and opposite polarity cannot be
+                    // expressed; under Xor a repeat TOGGLES (`a^a = 0`), so
+                    // any duplicate bails the group.
+                    let was_pos = g.pos & b != 0;
+                    if op == Op::BitXor || was_pos == neg {
+                        g.conflict = true;
+                    }
+                } else {
+                    g.mask |= b;
+                    if !neg {
+                        g.pos |= b;
+                    } else if op == Op::BitXor {
+                        g.neg_parity ^= 1;
+                    }
+                }
+                g.count += 1;
+            }
+            None => others.push(leaf),
+        }
+    }
+    if !groups.values().any(|g| !g.conflict && g.count >= 2) {
+        return None;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    for ((ff, off), g) in &groups {
+        let vo = if *ff {
+            VarOffset::Ff(*off)
+        } else {
+            VarOffset::Comb(*off)
+        };
+        if g.conflict || g.count < 2 {
+            // Re-emit the single test in its original shape.
+            let load = emit_var_load(&vo, g.full)?;
+            if g.count >= 2 || g.mask.count_ones() != 1 {
+                return None; // conflicted multi-bit group: fall back entirely
+            }
+            let bit = g.mask.trailing_zeros();
+            let inner = format!("((({load}) >> {bit}) & 0x1ULL)");
+            parts.push(if g.pos == 0 {
+                format!("(0x1ULL ^ {inner})")
+            } else {
+                inner
+            });
+            continue;
+        }
+        let load = emit_var_load(&vo, g.full)?;
+        parts.push(match op {
+            Op::BitAnd => format!(
+                "((uint64_t)((({load}) & {:#x}ULL) == {:#x}ULL))",
+                g.mask, g.pos
+            ),
+            // A same-variable Xor bundle is a parity: popcount folds the
+            // whole reduction (ECC generators are exactly this shape).
+            Op::BitXor => {
+                if g.neg_parity != 0 {
+                    format!(
+                        "(0x1ULL ^ ((uint64_t)__builtin_parityll(({load}) & {:#x}ULL)))",
+                        g.mask
+                    )
+                } else {
+                    format!(
+                        "((uint64_t)__builtin_parityll(({load}) & {:#x}ULL))",
+                        g.mask
+                    )
+                }
+            }
+            // Or groups contain only positive tests (negated ones were
+            // diverted to `others` above).
+            _ => format!("((uint64_t)((({load}) & {:#x}ULL) != 0))", g.mask),
+        });
+    }
+    for o in others {
+        parts.push(emit_expr_inner(o, true)?);
+    }
+    let joiner = match op {
+        Op::BitAnd => " & ",
+        Op::BitXor => " ^ ",
+        _ => " | ",
+    };
+    Some(format!("({})", parts.join(joiner)))
+}
+
 pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
     emit_expr_inner(expr, true)
 }
@@ -4788,6 +6589,15 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             expr_context,
             ..
         } => {
+            // Bit-test merging: see emit_bit_test_merge.
+            if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor)
+                && expr_context.width == 1
+                && !expr_context.signed
+                && bitmerge_enabled()
+                && let Some(s) = emit_bit_test_merge(expr)
+            {
+                return Some(s);
+            }
             // Wide (>128-bit) operand: the only scalar-producing wide binary
             // is a comparison/logic op (→ 1-bit).  A wide-result op (add/sub/
             // mul/bitwise/shift) yields a wide value that can't be a C scalar
@@ -7181,6 +8991,177 @@ mod tests {
     }
 
     #[test]
+    fn wide_concat_store_to_a_dynamically_read_middle_element() {
+        // arr[1] = {arr[idx][63:0], src}: the dynamic read can alias the
+        // destination (idx == 1), so the direct into-form (which zeroes the
+        // destination first) must not be used — the expanded gather sees the
+        // middle element where the compact one does not.
+        if !cc_available() {
+            eprintln!("wide_concat_store_to_a_dynamically_read_middle_element: skipping");
+            return;
+        }
+        let base = 0x40isize; // 4 elements x 192 bit (24 B)
+        let dyn_low = ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(base),
+            stride: 24,
+            element_native_bytes: 24,
+            index_expr: Box::new(ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(0x200),
+                select: None,
+                dynamic_select: None,
+                width: 32,
+                var_full_width: 32,
+                expr_context: ctx(32, false),
+            }),
+            num_elements: 4,
+            select: Some((63, 0)),
+            dynamic_select: None,
+            width: 64,
+            expr_context: ctx(64, false),
+        };
+        let src = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x210),
+            select: None,
+            dynamic_select: None,
+            width: 128,
+            var_full_width: 128,
+            expr_context: ctx(128, false),
+        };
+        let stmt = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(base + 24), // element 1: the middle
+            dst_width: 192,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Concatenation {
+                elements: vec![(Box::new(dyn_low), 1, 64), (Box::new(src), 1, 128)],
+                width: 192,
+                expr_context: ctx(192, false),
+            },
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src_txt = emit_function(&[stmt]).expect("must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_dynmid_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src_txt, "wide_concat_dyn_middle") else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 0x300];
+        for (i, b) in comb[0x58..0x70].iter_mut().enumerate() {
+            *b = 0xa0 + i as u8; // old arr[1]
+        }
+        comb[0x200..0x204].copy_from_slice(&1u32.to_le_bytes()); // idx = 1 (the dst)
+        for (i, b) in comb[0x210..0x220].iter_mut().enumerate() {
+            *b = 0x10 + i as u8; // src
+        }
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        // Low 128 bits = src; bits [191:128] = OLD arr[1][63:0].
+        assert_eq!(
+            &comb[0x58..0x68],
+            &(0x10..0x20).collect::<Vec<u8>>()[..],
+            "src half"
+        );
+        assert_eq!(
+            &comb[0x68..0x70],
+            &(0xa0..0xa8).collect::<Vec<u8>>()[..],
+            "old low word must survive into the high bits"
+        );
+    }
+
+    #[test]
+    fn emit_narrow_dst_rhs_select_on_wide_pointer_rhs() {
+        // `assign narrow = (a192 | b192)[150:125];` — the scalar sibling
+        // of `emit_rhs_select_on_wide_pointer_store`.
+        if !cc_available() {
+            eprintln!("emit_narrow_dst_rhs_select_on_wide_pointer_rhs: cc unavailable, skipping");
+            return;
+        }
+        let or192 = || ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0), 192)),
+            op: Op::BitOr,
+            y: Box::new(var_expr(VarOffset::Comb(24), 192)),
+            width: 192,
+            expr_context: ctx(192, false),
+        };
+        let mk = |dst: isize, dw: usize, sel: Option<(usize, usize)>| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(dst),
+                dst_width: dw,
+                select: sel,
+                dynamic_select: None,
+                rhs_select: Some((150, 125)),
+                expr: or192(),
+                dst_ff_current_offset: 0,
+                token: dummy_token(),
+            })
+        };
+        let src = emit_function(&[
+            mk(48, 26, None),          // plain narrow store
+            mk(56, 64, Some((30, 5))), // field into a dst bit-select RMW
+        ])
+        .expect("narrow-dst rhs_select on a wide-pointer RHS must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_nwsel_{}", std::process::id()));
+        let Some(module) =
+            compile_for_test(&tmp, &src, "emit_narrow_dst_rhs_select_on_wide_pointer_rhs")
+        else {
+            return;
+        };
+        let a: [u64; 3] = [
+            0x1111_2222_3333_4444,
+            0x5555_6666_7777_8888,
+            0x9999_AAAA_BBBB_CCCC,
+        ];
+        let b: [u64; 3] = [
+            0x0F0F_0F0F_0F0F_0F0F,
+            0xF0F0_F0F0_F0F0_F0F0,
+            0x00FF_00FF_00FF_00FF,
+        ];
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 80];
+        for (i, w) in a.iter().enumerate() {
+            comb[i * 8..i * 8 + 8].copy_from_slice(&w.to_le_bytes());
+        }
+        for (i, w) in b.iter().enumerate() {
+            comb[24 + i * 8..24 + i * 8 + 8].copy_from_slice(&w.to_le_bytes());
+        }
+        // Pre-set dst2 bits outside the [30:5] window to check the RMW.
+        comb[56..64].copy_from_slice(&0xDEAD_0000_0000_0003u64.to_le_bytes());
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let or: Vec<u64> = a.iter().zip(&b).map(|(x, y)| x | y).collect();
+        // Bits [150:125] span or1/or2 (125 = 64 + 61).
+        let shifted = (or[1] >> 61) | (or[2] << 3);
+        let field = shifted & ((1u64 << 26) - 1);
+        let plain = u64::from_le_bytes(comb[48..56].try_into().unwrap());
+        assert_eq!(plain & ((1 << 26) - 1), field, "plain narrow store");
+        let rmw = u64::from_le_bytes(comb[56..64].try_into().unwrap());
+        assert_eq!((rmw >> 5) & ((1 << 26) - 1), field, "field into [30:5]");
+        assert_eq!(rmw & 0x3, 0x3, "RMW keeps bits below the window");
+        assert_eq!(
+            rmw & 0xFFFF_0000_0000_0000,
+            0xDEAD_0000_0000_0000,
+            "RMW keeps bits above the window"
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn emit_narrow_dst_from_wide_pointer_rhs() {
         // `assign bit1 = a192 & b192;` — SV truncation of a wide-op RHS
         // into a ≤64-bit destination.
@@ -7746,24 +9727,469 @@ mod tests {
         assert!(s.contains("comb_values + 0x0"));
     }
 
-    #[test]
-    fn emit_stmt_wide_bit_select_store_65_to_128() {
-        // lo ≥ 64 is unreachable by the single-u64 RMW path → __uint128_t branch.
+    fn wide_bit_select_store(off: isize, hi: usize, lo: usize) -> String {
         let a = ProtoAssignStatement {
-            dst: VarOffset::Comb(0x40),
+            dst: VarOffset::Comb(off),
             dst_width: 128,
-            select: Some((71, 64)),
+            select: Some((hi, lo)),
             dynamic_select: None,
             rhs_select: None,
             expr: const_expr(0xab, 8),
             dst_ff_current_offset: 0,
             token: dummy_token(),
         };
-        let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
-        assert!(s.contains("veryl_u128_ua"));
-        assert!(s.contains("__uint128_t _o"));
-        assert!(s.contains("_v << 64"));
-        assert!(s.contains("comb_values + 0x40"));
+        emit_stmt(&ProtoStatement::Assign(a)).unwrap()
+    }
+
+    #[test]
+    fn emit_stmt_wide_bit_select_store_65_to_128() {
+        // Byte 8 of the container holds [71:64] on its own, so the store is a
+        // byte read-modify-write there rather than one over all 16 bytes.
+        let s = wide_bit_select_store(0x40, 71, 64);
+        assert!(!s.contains("__uint128_t"), "{s}");
+        assert!(s.contains("uint8_t _o"), "{s}");
+        assert!(s.contains("comb_values + 0x48"), "{s}");
+        assert!(s.contains("_v << 0"), "{s}");
+    }
+
+    #[test]
+    fn emit_stmt_wide_bit_select_store_straddling_field_keeps_the_128_bit_form() {
+        // [71:56] spans bytes 7 and 8, so every aligned window up to 8 bytes
+        // cuts it and the wide form has to stay reachable.
+        let s = wide_bit_select_store(0x40, 71, 56);
+        assert!(s.contains("veryl_u128_ua"), "{s}");
+        assert!(s.contains("__uint128_t _o"), "{s}");
+        assert!(s.contains("_v << 56"), "{s}");
+    }
+
+    /// A top-level single-bit store of `comb[off][bit]`.
+    fn bit_store(off: isize, bit: usize) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(off),
+            dst_width: 128,
+            select: Some((bit, bit)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(1, 1),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        })
+    }
+
+    /// A statement that reads `[hi:lo]` of the variable at `off`.
+    fn read_of(off: isize, hi: usize, lo: usize) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(0x900),
+            dst_width: 32,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(off),
+                select: Some((hi, lo)),
+                dynamic_select: None,
+                width: hi - lo + 1,
+                var_full_width: 128,
+                expr_context: ctx(hi - lo + 1, false),
+            },
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        })
+    }
+
+    #[test]
+    fn field_group_plans_a_fully_covered_byte() {
+        // Eight disjoint single-bit stores define byte 1 of the slot outright.
+        let stmts: Vec<_> = (8..16).map(|b| bit_store(0x40, b)).collect();
+        let roles = plan_field_groups(&stmts).roles;
+        assert_eq!(roles.len(), 8, "{roles:?}");
+        assert_eq!(roles.get(&(0x41, 1 << 0)), Some(&FieldRole::Init));
+        for b in 1..8u64 {
+            assert_eq!(
+                roles.get(&(0x41, 1 << b)),
+                Some(&FieldRole::OrIn),
+                "bit {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn field_group_gathers_its_members_before_the_last_one() {
+        // Two unrelated statements sit between the bit stores; the plan sinks
+        // the stores past them so the window is built in one run, and keeps
+        // everything else in its original order.
+        let mut stmts: Vec<ProtoStatement> = Vec::new();
+        for b in 8..12 {
+            stmts.push(bit_store(0x40, b));
+        }
+        stmts.push(read_of(0x200, 7, 0)); // index 4
+        stmts.push(read_of(0x300, 7, 0)); // index 5
+        for b in 12..16 {
+            stmts.push(bit_store(0x40, b));
+        }
+        let plan = plan_field_groups(&stmts);
+        assert_eq!(plan.roles.len(), 8);
+        assert_eq!(plan.order, vec![4, 5, 0, 1, 2, 3, 6, 7, 8, 9]);
+        assert_eq!(plan.atoms, vec![(2, 8)], "the run must be pinned");
+    }
+
+    /// A full-width scalar comb store — localization's candidate shape, and
+    /// so the sink's.
+    fn scalar_def(off: isize, reads: isize) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(off),
+            dst_width: 32,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(reads),
+                select: None,
+                dynamic_select: None,
+                width: 32,
+                var_full_width: 32,
+                expr_context: ctx(32, false),
+            },
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        })
+    }
+
+    /// Arms the blocklist gate the sink shares with localization.
+    fn armed<T>(f: impl FnOnce() -> T) -> T {
+        set_localize_blocklist(HashSet::default(), Vec::new());
+        let out = f();
+        clear_localize_blocklist();
+        out
+    }
+
+    #[test]
+    fn sink_moves_a_single_reader_def_next_to_its_reader() {
+        // 0x100 is written once and read once; the def joins its reader so
+        // chunk-local localization can turn it into a C local.
+        let stmts = vec![
+            scalar_def(0x100, 0x900), // 0: the def
+            scalar_def(0x200, 0x910), // 1
+            scalar_def(0x300, 0x920), // 2
+            scalar_def(0x400, 0x100), // 3: the only reader
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert_eq!(plan.order, vec![1, 2, 0, 3]);
+        assert_eq!(plan.atoms, vec![(2, 2)], "def and reader pinned together");
+    }
+
+    #[test]
+    fn sink_declines_a_def_with_two_readers() {
+        // Substituting a two-reader def would duplicate its work, and
+        // localization would not take it either.
+        let stmts = vec![
+            scalar_def(0x100, 0x900),
+            scalar_def(0x400, 0x100),
+            scalar_def(0x500, 0x100),
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert!(plan.atoms.is_empty(), "{:?}", plan.order);
+    }
+
+    #[test]
+    fn sink_declines_when_an_input_is_rewritten_on_the_way() {
+        // Moving the def past the statement that overwrites 0x900 would make
+        // it read the new value.
+        let stmts = vec![
+            scalar_def(0x100, 0x900), // 0: reads 0x900
+            scalar_def(0x900, 0x910), // 1: rewrites 0x900
+            scalar_def(0x400, 0x100), // 2: the reader
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert!(plan.atoms.is_empty(), "{:?}", plan.order);
+    }
+
+    #[test]
+    fn sink_checks_the_input_against_the_final_position_of_a_moving_reader() {
+        // 0x100's reader is itself sunk to 0x400's, so 0x100 travels past the
+        // rewrite of 0x900 that sits between them.
+        let stmts = vec![
+            scalar_def(0x100, 0x900), // 0: reads 0x900
+            scalar_def(0x200, 0x100), // 1: reads 0x100, sinks to 3
+            scalar_def(0x900, 0x910), // 2: rewrites 0x900
+            scalar_def(0x400, 0x200), // 3: reads 0x200
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert_eq!(plan.order, vec![0, 2, 1, 3], "0's sink dropped, 1's kept");
+        assert_eq!(plan.atoms, vec![(2, 2)]);
+    }
+
+    #[test]
+    fn sink_chain_deeper_than_any_recursion_cap_keeps_every_statement() {
+        // 70 links: every def's only reader is the next def, so the whole
+        // chain arrives as one run — and none of it may go missing.
+        let n = 70usize;
+        let stmts: Vec<ProtoStatement> = (0..n)
+            .map(|j| scalar_def(0x100 + j as isize * 4, 0x900 + j as isize * 4))
+            .collect();
+        let stmts: Vec<ProtoStatement> = (0..n)
+            .map(|j| {
+                if j == 0 {
+                    stmts[0].clone()
+                } else {
+                    scalar_def(0x100 + j as isize * 4, 0x100 + (j - 1) as isize * 4)
+                }
+            })
+            .collect();
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert_eq!(plan.order, (0..n).collect::<Vec<_>>());
+        assert_eq!(plan.atoms, vec![(0, n)]);
+    }
+
+    #[test]
+    fn sink_declines_a_reader_above_the_def() {
+        // The reader sees the previous settle's value; hoisting the def over
+        // it would change that.
+        let stmts = vec![
+            scalar_def(0x400, 0x100), // 0: reads 0x100 (previous settle)
+            scalar_def(0x100, 0x900), // 1: the def
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert_eq!(plan.order, vec![0, 1]);
+        assert!(plan.atoms.is_empty());
+    }
+
+    #[test]
+    fn sink_localizes_and_executes_correctly() {
+        // The def sinks to its reader, localization takes it, and the reader
+        // still computes from the def's value.
+        if !cc_available() {
+            eprintln!("sink_localizes_and_executes_correctly: cc unavailable, skipping");
+            return;
+        }
+        let stmts = vec![
+            scalar_def(0x100, 0x900), // the def
+            scalar_def(0x200, 0x910), // unrelated
+            scalar_def(0x400, 0x100), // the only reader
+        ];
+        // 0x200/0x400 are blocklisted so they stay materialized and the
+        // effect is observable in comb memory; 0x100 localizes away.
+        set_localize_blocklist(HashSet::from_iter([0x200isize, 0x400isize]), Vec::new());
+        let src = emit_function(&stmts);
+        clear_localize_blocklist();
+        let src = src.expect("sinkable comb must stay AOT-covered");
+        assert!(
+            src.contains(&local_name(0x100)),
+            "the sunk def must localize:\n{src}"
+        );
+        assert!(
+            !src.contains(&local_name(0x400)),
+            "0x400 must stay in memory"
+        );
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_sink_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "sink_localizes_and_executes") else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 0x1000];
+        comb[0x900..0x904].copy_from_slice(&0xDEAD_BEEFu32.to_le_bytes());
+        comb[0x910..0x914].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let rd = |o: usize| u32::from_le_bytes(comb[o..o + 4].try_into().unwrap());
+        assert_eq!(rd(0x400), 0xDEAD_BEEF, "reader sees the def's value");
+        assert_eq!(rd(0x200), 0x1234_5678, "unrelated def unaffected");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sink_chains_land_as_one_run() {
+        // a -> b -> c: all three end up adjacent so every link localizes.
+        let stmts = vec![
+            scalar_def(0x100, 0x900), // 0
+            scalar_def(0x200, 0x100), // 1: reads 0
+            scalar_def(0x800, 0x910), // 2: unrelated
+            scalar_def(0x300, 0x200), // 3: reads 1
+        ];
+        let plan = armed(|| plan_field_groups(&stmts));
+        assert_eq!(plan.order, vec![2, 0, 1, 3]);
+        assert_eq!(plan.atoms, vec![(1, 3)]);
+    }
+
+    #[test]
+    fn field_group_past_the_span_limit_keeps_its_roles_but_is_not_gathered() {
+        // Dropping the merge is sound however far apart the stores sit; only
+        // moving them is capped, so a group over the limit still gets roles
+        // and stays where it is.
+        let filler = 4000; // beyond any plausible VERYL_AOT_C_GATHER_SPAN
+        let mut stmts: Vec<ProtoStatement> = vec![bit_store(0x40, 8)];
+        stmts.extend((0..filler).map(|i| read_of(0x200 + i as isize * 8, 7, 0)));
+        stmts.extend((9..16).map(|b| bit_store(0x40, b)));
+        let plan = plan_field_groups(&stmts);
+        assert_eq!(plan.roles.len(), 8, "roles survive the cap");
+        assert!(plan.atoms.is_empty(), "nothing pinned");
+        assert!(
+            plan.order.iter().copied().eq(0..stmts.len()),
+            "order unchanged"
+        );
+    }
+
+    #[test]
+    fn field_group_drops_a_window_a_member_reads() {
+        // v[10] = v[9]: the read of bit 9 lands in the group's own window,
+        // and its producer stores later — Init would zero what the
+        // interpreter reads as the previous settle's value.
+        let self_read = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(0x40),
+            dst_width: 128,
+            select: Some((10, 10)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(0x40),
+                select: Some((9, 9)),
+                dynamic_select: None,
+                width: 1,
+                var_full_width: 128,
+                expr_context: ctx(1, false),
+            },
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let mut stmts = vec![bit_store(0x40, 8), self_read];
+        stmts.extend([9usize, 11, 12, 13, 14, 15].map(|b| bit_store(0x40, b)));
+        assert!(plan_field_groups(&stmts).roles.is_empty());
+    }
+
+    #[test]
+    fn field_group_init_orin_stores_execute_correctly() {
+        // A full byte built by eight grouped single-bit stores: the emitted
+        // Init/OrIn run must overwrite the previous settle's byte with the
+        // assembled bits and leave the neighbours alone.
+        if !cc_available() {
+            eprintln!("field_group_init_orin_stores_execute_correctly: cc unavailable, skipping");
+            return;
+        }
+        let stmts: Vec<ProtoStatement> = (8..16usize)
+            .map(|b| {
+                ProtoStatement::Assign(ProtoAssignStatement {
+                    dst: VarOffset::Comb(0x40),
+                    dst_width: 128,
+                    select: Some((b, b)),
+                    dynamic_select: None,
+                    rhs_select: None,
+                    expr: const_expr(((b % 2) == 0) as u64, 1),
+                    dst_ff_current_offset: 0,
+                    token: dummy_token(),
+                })
+            })
+            .collect();
+        let src = emit_function(&stmts).expect("grouped bit stores must stay AOT-covered");
+        assert!(src.contains("|="), "roles were not armed:\n{src}");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_initorin_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "field_group_init_orin_stores_execute")
+        else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 96];
+        comb[0x40] = 0x5A; // neighbour bytes must survive
+        comb[0x41] = 0xAA; // previous settle's value, fully redefined
+        comb[0x42] = 0xC3;
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        // bit b of the byte gets (b % 2 == 0): bits 8,10,12,14 → 0b0101_0101.
+        assert_eq!(comb[0x41], 0x55, "assembled byte");
+        assert_eq!(comb[0x40], 0x5A, "byte below the window");
+        assert_eq!(comb[0x42], 0xC3, "byte above the window");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn field_group_needs_every_bit_of_the_window() {
+        // Seven of the byte's eight bits: the eighth keeps its old value, so
+        // the merge cannot be dropped.
+        let stmts: Vec<_> = (8..15).map(|b| bit_store(0x40, b)).collect();
+        assert!(plan_field_groups(&stmts).roles.is_empty());
+    }
+
+    #[test]
+    fn field_group_stops_at_a_read_of_the_window() {
+        // A reader between the first and last store would see the window
+        // half-built where today it sees the previous settle's value.
+        let mut stmts: Vec<_> = (8..12).map(|b| bit_store(0x40, b)).collect();
+        stmts.push(read_of(0x40, 15, 8));
+        stmts.extend((12..16).map(|b| bit_store(0x40, b)));
+        assert!(plan_field_groups(&stmts).roles.is_empty());
+
+        // The same read after the last store is fine — the window is fully
+        // defined by then either way.
+        let mut after: Vec<_> = (8..16).map(|b| bit_store(0x40, b)).collect();
+        after.push(read_of(0x40, 15, 8));
+        assert_eq!(plan_field_groups(&after).roles.len(), 8);
+    }
+
+    #[test]
+    fn field_group_ignores_a_read_of_a_neighbouring_byte() {
+        // [7:0] lives in byte 0; the group owns byte 1.
+        let mut stmts: Vec<_> = (8..12).map(|b| bit_store(0x40, b)).collect();
+        stmts.push(read_of(0x40, 7, 0));
+        stmts.extend((12..16).map(|b| bit_store(0x40, b)));
+        assert_eq!(plan_field_groups(&stmts).roles.len(), 8);
+    }
+
+    #[test]
+    fn field_group_drops_a_window_whose_field_is_stored_twice() {
+        // Roles are keyed by field, so a second store of the same bit — here
+        // inside a conditional — would pick up the first one's role.
+        let mut stmts: Vec<_> = (8..16).map(|b| bit_store(0x40, b)).collect();
+        stmts.push(ProtoStatement::If(ProtoIfStatement {
+            cond: Some(const_expr(1, 1)),
+            true_side: vec![bit_store(0x40, 9)],
+            false_side: vec![],
+        }));
+        let roles = plan_field_groups(&stmts).roles;
+        assert!(!roles.contains_key(&(0x41, 1 << 1)), "{roles:?}");
+    }
+
+    #[test]
+    fn narrow_field_windows_contain_the_field_and_stay_in_the_container() {
+        for lo in 0..128usize {
+            for nbits in 1..=64usize {
+                if lo + nbits > 128 {
+                    continue;
+                }
+                let Some((start, w)) = narrow_field_window(lo, nbits) else {
+                    continue;
+                };
+                assert!(matches!(w, 1 | 2 | 4 | 8), "lo={lo} nbits={nbits} w={w}");
+                assert_eq!(start % w, 0, "lo={lo} nbits={nbits}: window unaligned");
+                assert!(start + w <= 16, "lo={lo} nbits={nbits}: past the container");
+                assert!(
+                    start * 8 <= lo,
+                    "lo={lo} nbits={nbits}: field starts before"
+                );
+                assert!(
+                    lo + nbits <= (start + w) * 8,
+                    "lo={lo} nbits={nbits}: field ends after"
+                );
+                // The shift has to keep the field inside the window's own width.
+                assert!(lo - start * 8 + nbits <= w * 8, "lo={lo} nbits={nbits}");
+            }
+        }
+        // A single bit always fits a byte — the case that dominates the count.
+        for lo in 0..128usize {
+            assert_eq!(narrow_field_window(lo, 1), Some((lo / 8, 1)), "lo={lo}");
+        }
     }
 
     #[test]
@@ -8167,6 +10593,7 @@ mod tests {
             func: stub,
             keepalive: None,
             content_fp: None,
+            deps: None,
         })
     }
 
@@ -8566,6 +10993,43 @@ mod tests {
     }
 
     #[test]
+    fn gc_sweeps_only_stale_temp_artifacts() {
+        let dir = std::env::temp_dir().join(format!("veryl_gc_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let published = dir.join("veryl_aot_dead.c");
+        let published_so = dir.join("veryl_aot_dead.so");
+        let log = dir.join("veryl_aot_dead.123.0.log");
+        let stale = dir.join("veryl_aot_dead.123.0.c");
+        let stale_so = dir.join("veryl_aot_dead.123.0.so");
+        let fresh = dir.join("veryl_aot_beef.456.1.c");
+        for f in [&published, &published_so, &log, &stale, &stale_so, &fresh] {
+            fs::write(f, "x").unwrap();
+        }
+        let now = std::time::SystemTime::now();
+        for f in [&published, &published_so, &log, &stale, &stale_so] {
+            fs::File::options()
+                .write(true)
+                .open(f)
+                .unwrap()
+                .set_modified(now - Duration::from_secs(7200))
+                .unwrap();
+        }
+
+        sweep_temp_artifacts(&dir, now - Duration::from_secs(3600));
+
+        assert!(published.exists(), "a published .c is not a temp");
+        assert!(published_so.exists(), "a published .so is not a temp");
+        assert!(
+            log.exists(),
+            "a failed compile's log is the only record of why"
+        );
+        assert!(fresh.exists(), "a compile that may still be running");
+        assert!(!stale.exists() && !stale_so.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn compile_source_round_trip() {
         // End-to-end: compile a hand-written stub C source, dlopen,
         // call through the FuncPtr ABI, observe a side effect on the
@@ -8789,5 +11253,336 @@ mod tests {
             "__builtin_expect((x & 1) != 0, 1)"
         );
         assert_eq!(wrap_expect_hint("x & 1", ExpectHint::Off), "x & 1");
+    }
+
+    // ── bit-test merging ────────────────────────────────────────────────
+
+    fn bit(off: isize, b: usize, full: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: Some((b, b)),
+            dynamic_select: None,
+            width: 1,
+            var_full_width: full,
+            expr_context: ctx(1, false),
+        }
+    }
+
+    fn bnot(e: ProtoExpression) -> ProtoExpression {
+        ProtoExpression::Unary {
+            op: Op::LogicNot,
+            x: Box::new(e),
+            width: 1,
+            expr_context: ctx(1, false),
+        }
+    }
+
+    fn bjoin(op: Op, es: Vec<ProtoExpression>) -> ProtoExpression {
+        es.into_iter()
+            .reduce(|a, b| ProtoExpression::Binary {
+                x: Box::new(a),
+                op,
+                y: Box::new(b),
+                width: 1,
+                expr_context: ctx(1, false),
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn bitmerge_folds_an_and_bundle() {
+        // a[0] & a[1] & !a[2] -> (a & 0x7) == 0x3.
+        let e = bjoin(
+            Op::BitAnd,
+            vec![bit(0x0, 0, 16), bit(0x0, 1, 16), bnot(bit(0x0, 2, 16))],
+        );
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("& 0x7ULL) == 0x3ULL"), "{src}");
+    }
+
+    #[test]
+    fn bitmerge_folds_an_or_bundle_and_keeps_a_negated_leaf_plain() {
+        // !a[0] | a[1] | a[2]: the negated leaf has no masked-compare form
+        // under Or; the positive pair still folds.
+        let e = bjoin(
+            Op::BitOr,
+            vec![bnot(bit(0x0, 0, 16)), bit(0x0, 1, 16), bit(0x0, 2, 16)],
+        );
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("& 0x6ULL) != 0"), "{src}");
+    }
+
+    #[test]
+    fn bitmerge_folds_an_xor_bundle_to_a_parity() {
+        let e = bjoin(
+            Op::BitXor,
+            vec![bit(0x0, 0, 16), bit(0x0, 1, 16), bit(0x0, 2, 16)],
+        );
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("__builtin_parityll"), "{src}");
+        assert!(src.contains("0x7ULL"), "{src}");
+        // A negated leaf becomes one constant parity flip.
+        let e = bjoin(Op::BitXor, vec![bnot(bit(0x0, 0, 16)), bit(0x0, 1, 16)]);
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("0x1ULL ^"), "{src}");
+    }
+
+    #[test]
+    fn bitmerge_bails_on_opposite_polarities_of_one_bit() {
+        // a[3] & !a[3] cannot be a masked compare.
+        let e = bjoin(Op::BitAnd, vec![bit(0x0, 3, 16), bnot(bit(0x0, 3, 16))]);
+        assert!(emit_bit_test_merge(&e).is_none());
+    }
+
+    #[test]
+    fn bitmerge_bails_on_a_duplicated_xor_leaf() {
+        // a[3] ^ a[3] == 0; a single mask bit would emit a[3].
+        let e = bjoin(Op::BitXor, vec![bit(0x0, 3, 16), bit(0x0, 3, 16)]);
+        assert!(emit_bit_test_merge(&e).is_none());
+        // Chained: a[1] ^ a[3] ^ a[3] == a[1].
+        let e = bjoin(
+            Op::BitXor,
+            vec![bit(0x0, 1, 16), bit(0x0, 3, 16), bit(0x0, 3, 16)],
+        );
+        assert!(emit_bit_test_merge(&e).is_none());
+        // Negated duplicates: !a[3] ^ !a[3] == 0.
+        let e = bjoin(
+            Op::BitXor,
+            vec![bnot(bit(0x0, 3, 16)), bnot(bit(0x0, 3, 16))],
+        );
+        assert!(emit_bit_test_merge(&e).is_none());
+        // Under And the same duplicate IS idempotent and still folds with
+        // a second bit.
+        let e = bjoin(
+            Op::BitAnd,
+            vec![bit(0x0, 3, 16), bit(0x0, 3, 16), bit(0x0, 4, 16)],
+        );
+        assert!(emit_bit_test_merge(&e).is_some());
+    }
+
+    #[test]
+    fn bitmerge_needs_two_tests_of_one_variable() {
+        // Different variables (offsets) never group.
+        let e = bjoin(Op::BitAnd, vec![bit(0x0, 0, 16), bit(0x40, 1, 16)]);
+        assert!(emit_bit_test_merge(&e).is_none());
+    }
+
+    #[test]
+    fn bitmerge_excludes_a_wide_variable() {
+        let e = bjoin(Op::BitAnd, vec![bit(0x0, 0, 65), bit(0x0, 1, 65)]);
+        assert!(emit_bit_test_merge(&e).is_none());
+    }
+
+    // ── const-cone partition ────────────────────────────────────────────
+
+    fn cassign(dst: isize, w: usize, expr: ProtoExpression) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(dst),
+            dst_width: w,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        })
+    }
+
+    fn cdyn_write(base: isize, stride: isize, num: usize) -> ProtoStatement {
+        ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+            dst_base: VarOffset::Comb(base),
+            dst_stride: stride,
+            dst_num_elements: num,
+            dst_index_expr: var_expr(VarOffset::Ff(0x40), 8),
+            dst_width: 32,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0, 32),
+            dst_ff_current_base_offset: 0,
+        })
+    }
+
+    #[test]
+    fn const_partition_moves_literal_cones_to_the_front() {
+        // stmt0 non-const (FF read), stmt1 const literal, stmt2 const
+        // reader of stmt1: the const pair moves to the front, in order.
+        let stmts = vec![
+            cassign(0x10, 32, var_expr(VarOffset::Ff(0), 32)),
+            cassign(0x0, 32, const_expr(7, 32)),
+            cassign(0x8, 32, var_expr(VarOffset::Comb(0x0), 32)),
+        ];
+        let (out, n) = const_cone_partition(&stmts, &HashSet::default()).unwrap();
+        assert_eq!(n, 2);
+        assert!(matches!(&out[0], ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x0)));
+        assert!(matches!(&out[1], ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x8)));
+        assert!(matches!(&out[2], ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x10)));
+    }
+
+    #[test]
+    fn const_partition_respects_event_written_offsets() {
+        // The same cone with the def's offset in `unsafe_comb`: the WRITER
+        // must be demoted (rerunning it every settle is what clobbers the
+        // event's value) and the reader with it.
+        let stmts = vec![
+            cassign(0x0, 32, const_expr(7, 32)),
+            cassign(0x8, 32, var_expr(VarOffset::Comb(0x0), 32)),
+        ];
+        assert_eq!(
+            const_cone_partition(&stmts, &HashSet::default()).map(|(_, n)| n),
+            Some(2)
+        );
+        let unsafe_comb = HashSet::from_iter([0x0isize]);
+        assert!(const_cone_partition(&stmts, &unsafe_comb).is_none());
+    }
+
+    #[test]
+    fn const_partition_demotes_a_reader_ahead_of_its_writer() {
+        // Back-edge: the reader precedes its writer in (topo-sorted) order,
+        // so it reads last settle's value — the READER is never const.  The
+        // literal writer itself stays const: the SCC converges over
+        // `required_comb_passes` to the same fixpoint either way.
+        let stmts = vec![
+            cassign(0x8, 32, var_expr(VarOffset::Comb(0x0), 32)),
+            cassign(0x0, 32, const_expr(7, 32)),
+        ];
+        let (out, n) = const_cone_partition(&stmts, &HashSet::default()).unwrap();
+        assert_eq!(n, 1);
+        assert!(matches!(&out[0], ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x0)));
+    }
+
+    #[test]
+    fn const_partition_demotes_a_self_rmw() {
+        let stmts = vec![cassign(0x0, 32, var_expr(VarOffset::Comb(0x0), 32))];
+        assert!(const_cone_partition(&stmts, &HashSet::default()).is_none());
+    }
+
+    #[test]
+    fn const_partition_taints_a_dynamic_write_range() {
+        // A dynamic write covers [0x0, 0x20): the const write of 0x8 (an
+        // interior element) is demoted; a write of 0x20 (one past the
+        // range) survives.
+        let in_range = vec![cdyn_write(0x0, 0x8, 4), cassign(0x8, 32, const_expr(7, 32))];
+        assert!(const_cone_partition(&in_range, &HashSet::default()).is_none());
+        let past_range = vec![
+            cdyn_write(0x0, 0x8, 4),
+            cassign(0x20, 32, const_expr(7, 32)),
+        ];
+        assert_eq!(
+            const_cone_partition(&past_range, &HashSet::default()).map(|(_, n)| n),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn const_partition_demotes_a_const_co_writer_of_a_nonconst_statement() {
+        // The If reads an FF (never const) and conditionally writes 0x0;
+        // the unconditional const write of 0x0 must be demoted, or it
+        // freezes a value the If keeps overwriting.
+        let cond_write = ProtoStatement::If(ProtoIfStatement {
+            cond: Some(var_expr(VarOffset::Ff(0), 1)),
+            true_side: vec![cassign(0x0, 32, const_expr(1, 32))],
+            false_side: vec![],
+        });
+        let stmts = vec![cond_write, cassign(0x0, 32, const_expr(7, 32))];
+        assert!(const_cone_partition(&stmts, &HashSet::default()).is_none());
+    }
+
+    #[test]
+    fn const_partition_walks_compiled_block_originals() {
+        // The CB's compressed output list names base + last element only;
+        // its ORIGINAL statements dynamically write the whole range, so
+        // the const write of the MIDDLE element (0x8) must be demoted.
+        let cb = crate::ir::CompiledBlockStatement {
+            artifact: bogus_artifact(),
+            ff_delta_bytes: 0,
+            comb_delta_bytes: 0,
+            input_offsets: vec![],
+            output_offsets: vec![VarOffset::Comb(0x0), VarOffset::Comb(0x10)],
+            ff_canonical_offsets: vec![],
+            stmt_deps: vec![],
+            original_stmts: vec![cdyn_write(0x0, 0x8, 3)],
+        };
+        let stmts = vec![
+            ProtoStatement::CompiledBlock(cb),
+            cassign(0x8, 32, const_expr(7, 32)),
+        ];
+        assert!(const_cone_partition(&stmts, &HashSet::default()).is_none());
+    }
+
+    #[test]
+    fn const_partition_disarms_on_an_unboundable_statement() {
+        let stmts = vec![
+            cassign(0x0, 32, const_expr(7, 32)),
+            ProtoStatement::SystemFunctionCall(ProtoSystemFunctionCall::Readmemh {
+                filename: "x.hex".into(),
+                elements: vec![],
+                width: 32,
+            }),
+        ];
+        assert!(const_cone_partition(&stmts, &HashSet::default()).is_none());
+    }
+
+    #[test]
+    fn const_split_emits_a_run_once_entry() {
+        // Armed: the const literal goes to `veryl_aot_eval_const`
+        // (chunk 0) and the main entry runs only the non-const chunk.
+        // Unarmed: the export must be absent — pins that the feature
+        // cannot silently arm without `set_const_unsafe`.
+        let stmts = vec![
+            cassign(0x0, 32, const_expr(7, 32)),
+            cassign(0x10, 32, var_expr(VarOffset::Ff(0), 32)),
+        ];
+        let unarmed = emit_function(&stmts).unwrap();
+        assert!(!unarmed.contains("veryl_aot_eval_const"));
+        set_const_unsafe(HashSet::default());
+        let armed = emit_function(&stmts);
+        clear_const_unsafe();
+        let armed = armed.unwrap();
+        let const_entry = armed
+            .split("void veryl_aot_eval_const(")
+            .nth(1)
+            .expect("armed emit must export the const entry");
+        let (const_body, rest) = const_entry.split_once("void veryl_aot_eval(").unwrap();
+        assert!(const_body.contains("veryl_aot_chunk_0("));
+        assert!(!const_body.contains("veryl_aot_chunk_1("));
+        assert!(rest.contains("veryl_aot_chunk_1("));
+        assert!(!rest.contains("veryl_aot_chunk_0("));
+    }
+
+    #[test]
+    fn const_split_survives_a_field_group_gather() {
+        // A const literal ahead of a two-store field group: the gather
+        // reorders the group into one atom, the re-count keeps the const
+        // prefix, and the run-once entry still emits.
+        let stmts = vec![
+            cassign(0x0, 32, const_expr(7, 32)),
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(0x10),
+                dst_width: 32,
+                select: Some((15, 0)),
+                dynamic_select: None,
+                rhs_select: None,
+                expr: var_expr(VarOffset::Ff(0), 16),
+                dst_ff_current_offset: 0,
+                token: dummy_token(),
+            }),
+            cassign(0x20, 32, var_expr(VarOffset::Ff(8), 32)),
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(0x10),
+                dst_width: 32,
+                select: Some((31, 16)),
+                dynamic_select: None,
+                rhs_select: None,
+                expr: var_expr(VarOffset::Ff(2), 16),
+                dst_ff_current_offset: 0,
+                token: dummy_token(),
+            }),
+        ];
+        set_const_unsafe(HashSet::default());
+        let src = emit_function(&stmts);
+        clear_const_unsafe();
+        let src = src.unwrap();
+        assert!(src.contains("veryl_aot_eval_const"));
     }
 }

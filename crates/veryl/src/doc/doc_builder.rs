@@ -1,3 +1,4 @@
+use crate::doc::utils::escape_html;
 use crate::doc::{Mermaid, Wavedrom};
 use handlebars::Handlebars;
 use mdbook_driver::MDBook;
@@ -14,6 +15,9 @@ use veryl_analyzer::symbol_table;
 use veryl_metadata::{ComponentManifest, Metadata, MetadataError};
 use veryl_parser::veryl_token::Token;
 
+// `{{{...}}}` is reserved for a doc comment in markdown context, where mdbook
+// still has to see its wavedrom and mermaid fences. Everything else is spliced
+// into markup and goes through `{{...}}`.
 const SUMMARY_TMPL: &str = r###"
 # Summary
 
@@ -64,7 +68,7 @@ struct SummaryData {
 const INDEX_TMPL: &str = r###"
 # {{name}}
 
-{{description}}
+{{{description}}}
 
 <table align="center" class="table_list">
 <tbody>
@@ -94,7 +98,7 @@ const INDEX_TMPL: &str = r###"
 <tbody>
 {{#each this.items}}
 <tr>
-    <th class="table_list_item"><a href="{{this.file_name}}.html">{{this.html_name}}</a></th>
+    <th class="table_list_item"><a href="{{this.file_name}}.html">{{this.display_name}}</a></th>
     <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
@@ -121,7 +125,7 @@ const LIST_TMPL: &str = r###"
 <tbody>
 {{#each items}}
 <tr>
-    <th class="table_list_item"><a href="{{this.file_name}}.html">{{this.html_name}}</a></th>
+    <th class="table_list_item"><a href="{{this.file_name}}.html">{{this.display_name}}</a></th>
     <td class="table_list_item">{{this.description}}</td>
 </tr>
 {{/each}}
@@ -139,14 +143,14 @@ struct ListData {
 #[derive(Serialize)]
 struct ListItem {
     file_name: String,
-    html_name: String,
+    display_name: String,
     description: String,
 }
 
 const MODULE_TMPL: &str = r#"
 # {{name}}
 
-{{description}}
+{{{description}}}
 
 {{#if generic_parameters}}
 ### Generic Parameters
@@ -253,7 +257,7 @@ struct PortData {
 const PROTO_MODULE_TMPL: &str = r#"
 # {{name}}
 
-{{description}}
+{{{description}}}
 
 {{#if parameters}}
 ### Parameters
@@ -321,7 +325,7 @@ struct ProtoModuleData {
 const INTERFACE_TMPL: &str = r#"
 # {{name}}
 
-{{description}}
+{{{description}}}
 
 {{#if parameters}}
 ### Parameters
@@ -351,7 +355,7 @@ struct InterfaceData {
 const PACKAGE_TMPL: &str = r###"
 # {{name}}
 
-{{description}}
+{{{description}}}
 
 "###;
 
@@ -368,7 +372,7 @@ const COMPONENT_TMPL: &str = r#"
 <p class="doc_subtitle"><span class="hljs-keyword">{{kind}}</span> component</p>
 {{/if}}
 
-{{description}}
+{{{description}}}
 
 {{#if parameters}}
 ### Parameters
@@ -411,10 +415,10 @@ const COMPONENT_TMPL: &str = r#"
 ---
 
 {{#each methods}}
-<h4 class="method_sig">{{this.signature}}</h4>
+<h4 class="method_sig">{{{this.signature}}}</h4>
 <div class="method_desc">
 
-{{this.description}}
+{{{this.description}}}
 
 </div>
 {{/each}}
@@ -494,7 +498,7 @@ pub struct DocBuilder {
 #[derive(Clone)]
 pub struct TopLevelItem {
     pub file_name: String,
-    pub html_name: String,
+    pub display_name: String,
     pub symbol: Symbol,
 }
 
@@ -550,22 +554,22 @@ impl DocBuilder {
 
         for x in &self.modules {
             let file = format!("{}.md", x.file_name);
-            self.build_component(&file, self.build_module(&x.html_name, &x.symbol))?;
+            self.build_component(&file, self.build_module(&x.display_name, &x.symbol))?;
         }
 
         for x in &self.proto_modules {
             let file = format!("{}.md", x.file_name);
-            self.build_component(&file, self.build_proto_module(&x.html_name, &x.symbol))?;
+            self.build_component(&file, self.build_proto_module(&x.display_name, &x.symbol))?;
         }
 
         for x in &self.interfaces {
             let file = format!("{}.md", x.file_name);
-            self.build_component(&file, self.build_interface(&x.html_name, &x.symbol))?;
+            self.build_component(&file, self.build_interface(&x.display_name, &x.symbol))?;
         }
 
         for x in &self.packages {
             let file = format!("{}.md", x.file_name);
-            self.build_component(&file, self.build_package(&x.html_name, &x.symbol))?;
+            self.build_component(&file, self.build_package(&x.display_name, &x.symbol))?;
         }
 
         for x in &self.components {
@@ -673,25 +677,25 @@ impl DocBuilder {
             .modules
             .iter()
             .cloned()
-            .map(|x| (x.html_name, x.file_name))
+            .map(|x| (x.display_name, x.file_name))
             .collect();
         let proto_modules: Vec<_> = self
             .proto_modules
             .iter()
             .cloned()
-            .map(|x| (x.html_name, x.file_name))
+            .map(|x| (x.display_name, x.file_name))
             .collect();
         let interfaces: Vec<_> = self
             .interfaces
             .iter()
             .cloned()
-            .map(|x| (x.html_name, x.file_name))
+            .map(|x| (x.display_name, x.file_name))
             .collect();
         let packages: Vec<_> = self
             .packages
             .iter()
             .cloned()
-            .map(|x| (x.html_name, x.file_name))
+            .map(|x| (x.display_name, x.file_name))
             .collect();
         let components: Vec<_> = self
             .components
@@ -716,8 +720,7 @@ impl DocBuilder {
             components,
         };
 
-        let mut handlebars = Handlebars::new();
-        handlebars.register_escape_fn(handlebars::no_escape);
+        let handlebars = Handlebars::new();
         Ok(handlebars.render_template(SUMMARY_TMPL, &data).unwrap())
     }
 
@@ -738,8 +741,7 @@ impl DocBuilder {
             catalog: self.catalog(),
         };
 
-        let mut handlebars = Handlebars::new();
-        handlebars.register_escape_fn(handlebars::no_escape);
+        let handlebars = Handlebars::new();
         Ok(handlebars.render_template(INDEX_TMPL, &data).unwrap())
     }
 
@@ -748,7 +750,7 @@ impl DocBuilder {
             .iter()
             .map(|x| ListItem {
                 file_name: x.file_name.clone(),
-                html_name: x.html_name.clone(),
+                display_name: x.display_name.clone(),
                 description: x.symbol.doc_comment.format(true),
             })
             .collect()
@@ -759,7 +761,7 @@ impl DocBuilder {
             .iter()
             .map(|x| ListItem {
                 file_name: x.file_name.clone(),
-                html_name: x.name.clone(),
+                display_name: x.name.clone(),
                 description: x
                     .manifest
                     .doc
@@ -797,8 +799,7 @@ impl DocBuilder {
             name: name.to_string(),
             items,
         };
-        let mut handlebars = Handlebars::new();
-        handlebars.register_escape_fn(handlebars::no_escape);
+        let handlebars = Handlebars::new();
         handlebars.render_template(LIST_TMPL, &data).unwrap()
     }
 
@@ -901,8 +902,7 @@ impl DocBuilder {
                 ports,
             };
 
-            let mut handlebars = Handlebars::new();
-            handlebars.register_escape_fn(handlebars::no_escape);
+            let handlebars = Handlebars::new();
             handlebars.render_template(MODULE_TMPL, &data).unwrap()
         } else {
             String::new()
@@ -965,8 +965,7 @@ impl DocBuilder {
                 ports,
             };
 
-            let mut handlebars = Handlebars::new();
-            handlebars.register_escape_fn(handlebars::no_escape);
+            let handlebars = Handlebars::new();
             handlebars
                 .render_template(PROTO_MODULE_TMPL, &data)
                 .unwrap()
@@ -996,8 +995,7 @@ impl DocBuilder {
                 parameters,
             };
 
-            let mut handlebars = Handlebars::new();
-            handlebars.register_escape_fn(handlebars::no_escape);
+            let handlebars = Handlebars::new();
             handlebars.render_template(INTERFACE_TMPL, &data).unwrap()
         } else {
             String::new()
@@ -1013,8 +1011,7 @@ impl DocBuilder {
                 description: symbol.doc_comment.format(false),
             };
 
-            let mut handlebars = Handlebars::new();
-            handlebars.register_escape_fn(handlebars::no_escape);
+            let handlebars = Handlebars::new();
             handlebars.render_template(PACKAGE_TMPL, &data).unwrap()
         } else {
             String::new()
@@ -1072,15 +1069,27 @@ fn build_component_page(item: &ComponentItem) -> String {
             let args: Vec<_> = x
                 .args
                 .iter()
-                .map(|a| format!("{}: <span class=\"hljs-type\">{}</span>", a.name, a.ty))
+                .map(|a| {
+                    format!(
+                        "{}: <span class=\"hljs-type\">{}</span>",
+                        escape_html(&a.name),
+                        escape_html(&a.ty)
+                    )
+                })
                 .collect();
             let ret = match (&x.ret, &x.ret_width) {
-                (Some(t), Some(w)) => format!(" -> <span class=\"hljs-type\">{t}[{w}]</span>"),
-                (Some(t), None) => format!(" -> <span class=\"hljs-type\">{t}</span>"),
+                (Some(t), Some(w)) => format!(
+                    " -> <span class=\"hljs-type\">{}[{}]</span>",
+                    escape_html(t),
+                    escape_html(&w.to_string())
+                ),
+                (Some(t), None) => {
+                    format!(" -> <span class=\"hljs-type\">{}</span>", escape_html(t))
+                }
                 (None, _) => String::new(),
             };
             ComponentMethodData {
-                signature: format!("{}({}){}", x.name, args.join(", "), ret),
+                signature: format!("{}({}){}", escape_html(&x.name), args.join(", "), ret),
                 description: x.doc.clone(),
             }
         })
@@ -1097,8 +1106,7 @@ fn build_component_page(item: &ComponentItem) -> String {
         usage: component_usage(&item.name, manifest),
     };
 
-    let mut handlebars = Handlebars::new();
-    handlebars.register_escape_fn(handlebars::no_escape);
+    let handlebars = Handlebars::new();
     handlebars.render_template(COMPONENT_TMPL, &data).unwrap()
 }
 
@@ -1152,7 +1160,7 @@ fn component_usage(name: &str, manifest: &ComponentManifest) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use veryl_metadata::component_manifest::{ManifestParam, ManifestPort};
+    use veryl_metadata::component_manifest::{ManifestMethod, ManifestParam, ManifestPort};
 
     fn manifest() -> ComponentManifest {
         ComponentManifest {
@@ -1169,7 +1177,7 @@ mod tests {
                     name: "q".to_string(),
                     dir: "output".to_string(),
                     role: None,
-                    doc: None,
+                    doc: Some("Result, a logic<XLEN> word.".to_string()),
                 },
             ],
             params: vec![
@@ -1186,7 +1194,18 @@ mod tests {
                     doc: None,
                 },
             ],
-            methods: vec![],
+            methods: vec![ManifestMethod {
+                name: "read".to_string(),
+                args: vec![ManifestParam {
+                    name: "addr".to_string(),
+                    ty: "logic<ADDR_W>".to_string(),
+                    optional: false,
+                    doc: None,
+                }],
+                ret: Some("logic".to_string()),
+                ret_width: None,
+                doc: Some("Read a word.".to_string()),
+            }],
             requires: vec![],
             groups: vec![],
         }
@@ -1238,6 +1257,32 @@ mod tests {
         // Width 0 means "not declared" and renders as an empty cell.
         assert!(page.contains("<span class=\"hljs-type\"></span>"));
         assert!(page.contains("inst u0: $comp::golden #( XLEN ) (clk, q);"));
+        // A method signature is markup this module builds itself, so the
+        // manifest types spliced into it have to be escaped on the way in.
+        assert!(
+            page.contains("read(addr: <span class=\"hljs-type\">logic&lt;ADDR_W&gt;</span>)"),
+            "{page}"
+        );
+        assert!(!page.contains("logic<ADDR_W>"), "{page}");
+        assert!(page.contains("Result, a logic&lt;XLEN&gt; word."), "{page}");
+        assert!(!page.contains("logic<XLEN>"), "{page}");
+    }
+
+    #[test]
+    fn component_page_escapes_usage_snippet() {
+        let mut method_only = manifest();
+        method_only.kind = Some("method_only".to_string());
+        let item = ComponentItem {
+            name: "golden".to_string(),
+            file_name: "component_golden".to_string(),
+            manifest: method_only,
+        };
+        let page = build_component_page(&item);
+        assert!(
+            page.contains("var u0: $comp::golden::&lt;XLEN&gt;;"),
+            "{page}"
+        );
+        assert!(!page.contains("::<XLEN>"), "{page}");
     }
 
     #[test]
@@ -1281,5 +1326,78 @@ mod tests {
             page.contains("inst u0: $comp::checker #( XLEN ) (clk, q, axi: );"),
             "{page}"
         );
+    }
+
+    #[test]
+    fn module_page_escapes_table_cells() {
+        let data = ModuleData {
+            name: "async_fifo::<S>".to_string(),
+            description: "Uses `a --> b` and `i < n`".to_string(),
+            generic_parameters: vec![],
+            parameters: vec![ParameterData {
+                name: "MAX_COUNT".to_string(),
+                typ: "bit<WIDTH>".to_string(),
+                description: Some(" Max value, a bit<WIDTH> literal".to_string()),
+            }],
+            clock_domains: vec![],
+            ports: vec![PortData {
+                name: "o_count".to_string(),
+                direction: "output".to_string(),
+                clock_domain: None,
+                typ: "logic<WIDTH>".to_string(),
+                description: Some(" Count value of logic<WIDTH>".to_string()),
+            }],
+        };
+        let page = Handlebars::new()
+            .render_template(MODULE_TMPL, &data)
+            .unwrap();
+        assert!(
+            page.contains("<span class=\"hljs-type\">bit&lt;WIDTH&gt;</span>"),
+            "{page}"
+        );
+        assert!(
+            page.contains("<span class=\"hljs-type\">logic&lt;WIDTH&gt;</span>"),
+            "{page}"
+        );
+        // A table cell is an HTML block, so markdown never runs inside it.
+        assert!(
+            page.contains("Max value, a bit&lt;WIDTH&gt; literal"),
+            "{page}"
+        );
+        assert!(page.contains("Count value of logic&lt;WIDTH&gt;"), "{page}");
+        assert!(!page.contains("bit<WIDTH>"), "{page}");
+        assert!(!page.contains("logic<WIDTH>"), "{page}");
+        assert!(page.contains("# async_fifo::&lt;S&gt;"), "{page}");
+        assert!(page.contains("`a --> b` and `i < n`"), "{page}");
+        assert!(!page.contains("&amp;"), "{page}");
+        // Every row the template opens is closed, so the tables stay separate.
+        assert_eq!(
+            page.matches("<table").count(),
+            page.matches("</table>").count()
+        );
+        assert_eq!(page.matches("<tr>").count(), page.matches("</tr>").count());
+    }
+
+    #[test]
+    fn list_page_escapes_names_and_descriptions() {
+        let data = ListData {
+            name: "Modules".to_string(),
+            items: vec![ListItem {
+                file_name: "async_fifo".to_string(),
+                display_name: "async_fifo::<S>".to_string(),
+                description: "Asynchronous FIFO of logic<W>".to_string(),
+            }],
+        };
+        let page = Handlebars::new().render_template(LIST_TMPL, &data).unwrap();
+        assert!(
+            page.contains("<a href=\"async_fifo.html\">async_fifo::&lt;S&gt;</a>"),
+            "{page}"
+        );
+        assert!(
+            page.contains("Asynchronous FIFO of logic&lt;W&gt;"),
+            "{page}"
+        );
+        assert!(!page.contains("logic<W>"), "{page}");
+        assert!(!page.contains("&amp;"), "{page}");
     }
 }

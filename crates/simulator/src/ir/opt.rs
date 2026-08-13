@@ -5,6 +5,8 @@
 //! API without inline `#[cfg]` branches at every site.
 
 #[cfg(not(target_family = "wasm"))]
+pub(crate) mod comb_fusion;
+#[cfg(not(target_family = "wasm"))]
 pub(crate) mod dead_var_dce;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dup_assign_dce;
@@ -12,6 +14,8 @@ pub(crate) mod dup_assign_dce;
 pub(crate) mod load_cache_lookahead;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod multi_write_analysis;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod version_split;
 
 #[cfg(target_family = "wasm")]
 pub(crate) mod multi_write_analysis {
@@ -28,6 +32,25 @@ pub(crate) mod multi_write_analysis {
     }
     pub fn collect_dyn_indexed_vars(_decls: &[air::Declaration]) -> HashSet<VarId> {
         HashSet::default()
+    }
+}
+
+#[cfg(target_family = "wasm")]
+pub(crate) mod comb_fusion {
+    use crate::ir::ProtoStatement;
+    use crate::ir::event::Event;
+    use crate::ir::variable::VarOffset;
+    use crate::{HashMap, HashSet};
+    pub fn enabled(_use_4state: bool) -> bool {
+        false
+    }
+    pub fn force_disable() {}
+    pub fn inline_single_readers(
+        stmts: Vec<ProtoStatement>,
+        _events: &HashMap<Event, Vec<ProtoStatement>>,
+        _externals_extra: &HashSet<VarOffset>,
+    ) -> (Vec<ProtoStatement>, Vec<isize>) {
+        (stmts, Vec::new())
     }
 }
 
@@ -64,5 +87,24 @@ pub(crate) mod dead_var_dce {
         _event_slices: &[&[ProtoStatement]],
     ) -> (HashSet<VarOffset>, Vec<(isize, usize, isize)>) {
         (HashSet::default(), Vec::new())
+    }
+}
+
+#[cfg(target_family = "wasm")]
+pub(crate) mod version_split {
+    use crate::ir::ProtoStatement;
+
+    #[derive(Default, Debug)]
+    pub struct RunStats;
+
+    pub fn pass_enabled(_use_4state: bool) -> bool {
+        false
+    }
+    pub fn run(_stmts: &mut [ProtoStatement], _alloc: &mut dyn FnMut(usize) -> isize) -> RunStats {
+        RunStats
+    }
+    pub fn accumulate(_s: &RunStats) {}
+    pub fn totals_line() -> String {
+        String::new()
     }
 }

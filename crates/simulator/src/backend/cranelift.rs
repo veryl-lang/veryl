@@ -57,6 +57,7 @@ impl Backend for CraneliftBackend {
             // unmapped); only the fallback private mapping does.
             keepalive: mmap.map(|m| Box::new(m) as Box<dyn Send + Sync>),
             content_fp: None,
+            deps: None,
         }))
     }
 }

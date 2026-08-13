@@ -11669,6 +11669,40 @@ fn out_of_range_select_in_dead_branch() {
 }
 
 #[test]
+fn invalid_size_type() {
+    // https://github.com/veryl-lang/veryl/issues/3162
+    for decl in [
+        "var _a: logic<u32>;",
+        "var _a: logic<bit>;",
+        "var _a: logic<8>[u32];",
+    ] {
+        let code = format!("module ModuleA {{ {decl} }}");
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|x| matches!(x, AnalyzerError::InvalidSizeType { .. })),
+            "`{decl}` should be rejected: {errors:?}"
+        );
+    }
+
+    for decl in [
+        "const W: u32 = $bits(u32); var _a: logic<W>;",
+        "type T = logic<4>; var _a: logic<$bits(T)>;",
+        "var _a: logic<8>[2];",
+    ] {
+        let code = format!("module ModuleA {{ {decl} }}");
+        let errors = analyze(&code);
+        assert!(
+            !errors
+                .iter()
+                .any(|x| matches!(x, AnalyzerError::InvalidSizeType { .. })),
+            "`{decl}` should be accepted: {errors:?}"
+        );
+    }
+}
+
+#[test]
 fn invalid_select() {
     let code = r#"
     module ModuleA {
@@ -14505,6 +14539,29 @@ fn generic_inference_failed() {
 }
 
 #[test]
+fn generic_inference_from_module_port() {
+    // Generic arguments should be inferred from module ports just like
+    // from local variables.
+    // https://github.com/veryl-lang/veryl/issues/3117
+    let code = r#"
+    module ModuleA (
+        value: input logic<8>,
+    ) {
+        function FuncId::<T: u32> (
+            x: input logic<T>,
+        ) -> logic<T> {
+            return x;
+        }
+
+        let _r: logic<8> = FuncId(value);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn type_inference_var_conflict() {
     // Two assigns to the same untyped `var` with mismatched widths
     // should be rejected as not inferable.
@@ -16295,6 +16352,130 @@ fn regression_rev_for_non_additive_step_rejected() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::InvalidForStep { .. })),
         "forward for-loop with a non-additive step should be accepted: {errors:?}"
+    );
+}
+
+#[test]
+fn for_step_overflowing_induction_variable_rejected() {
+    // https://github.com/veryl-lang/veryl/issues/3130
+    let mul_repro = r#"
+    module Top (
+        end_bound: input signed logic<64>,
+        hits     : output       logic<32>,
+    ) {
+        always_comb {
+            hits = 0;
+            for _i in 1500000000..end_bound step *= 2 {
+                hits += 1;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(mul_repro);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ForLoopOverflow { .. })),
+        "`*= 2` overflowing the loop variable should be rejected: {errors:?}"
+    );
+
+    let shl_repro = r#"
+    module Top (
+        end_bound: input signed logic<64>,
+        hits     : output       logic<32>,
+    ) {
+        always_comb {
+            hits = 0;
+            for _i in 1073741824..end_bound step <<= 1 {
+                hits += 1;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(shl_repro);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ForLoopOverflow { .. })),
+        "`<<= 1` overflowing the loop variable should be rejected: {errors:?}"
+    );
+
+    let const_bounds = r#"
+    module Top (
+        o: output logic<32>,
+    ) {
+        var sum: logic<32>;
+        always_comb {
+            sum = 0;
+            for i in 1500000000..2000000000 step *= 2 {
+                sum += i;
+            }
+            o = sum;
+        }
+    }
+    "#;
+    let errors = analyze(const_bounds);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ForLoopOverflow { .. })),
+        "const-bounds overflow should be rejected: {errors:?}"
+    );
+}
+
+#[test]
+fn for_step_within_induction_variable_range_accepted() {
+    for range in [
+        "1..10 step *= 2",
+        "0..10 step += 2",
+        "1..1000000 step <<= 1",
+    ] {
+        let code = format!(
+            r#"
+        module Top (
+            o: output logic<32>,
+        ) {{
+            var sum: logic<32>;
+            always_comb {{
+                sum = 0;
+                for i in {range} {{
+                    sum += i;
+                }}
+                o = sum;
+            }}
+        }}
+        "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::ForLoopOverflow { .. })),
+            "`{range}` stays within range and should be accepted: {errors:?}"
+        );
+    }
+
+    let runtime_additive = r#"
+    module Top (
+        n: input  logic<32>,
+        o: output logic<32>,
+    ) {
+        var sum: logic<32>;
+        always_comb {
+            sum = 0;
+            for i in 0..n step += 1 {
+                sum += i;
+            }
+            o = sum;
+        }
+    }
+    "#;
+    let errors = analyze(runtime_additive);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::ForLoopOverflow { .. })),
+        "runtime additive loop should be accepted: {errors:?}"
     );
 }
 

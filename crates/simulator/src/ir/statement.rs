@@ -5,7 +5,7 @@ use crate::backend::ChunkArtifact;
 use crate::ir::context::{Context, Conv};
 use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
-    build_linear_index_expr,
+    build_linear_index_expr, inline_function_call,
 };
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::variable::{
@@ -30,6 +30,62 @@ use veryl_parser::token_range::TokenRange;
 
 /// Per-statement dependency: (input offsets, output offsets).
 pub type StmtDep = (Vec<VarOffset>, Vec<VarOffset>);
+
+/// The analyzer folds a const array to one value per element, which has no
+/// single-width expression form -- every array destination copies it
+/// element-wise instead.
+fn const_array_operand(expr: &air::Expression) -> Option<(&air::Comptime, &[Value])> {
+    let air::Expression::Term(factor) = expr else {
+        return None;
+    };
+    let air::Factor::Value(comptime) = factor.as_ref() else {
+        return None;
+    };
+    match &comptime.value {
+        ValueVariant::NumericArray(values) => Some((comptime, values)),
+        _ => None,
+    }
+}
+
+/// Array shape an operand still has after its index prefix -- `s[0]` against
+/// `logic<8> [2, 3]` leaves `[3]`. `None` when there is no element list to
+/// expand over: a scalar, or a prefix that isn't constant.
+fn remaining_array_shape(
+    context: &mut Context,
+    id: &air::VarId,
+    index: &air::VarIndex,
+) -> Option<air::Shape> {
+    let shape = &context.scope().variable_meta.get(id)?.r#type.array;
+    let dim = index.dimension();
+    if dim >= shape.dims() || !index.is_const() {
+        return None;
+    }
+    Some(air::Shape::new(shape.as_slice()[dim..].to_vec()))
+}
+
+/// `None` on a shape mismatch, leaving the caller's generic path to report it.
+pub(crate) fn const_array_element_exprs(
+    expr: &air::Expression,
+    elements: usize,
+) -> Option<Vec<ProtoExpression>> {
+    let (comptime, values) = const_array_operand(expr)?;
+    if values.len() != elements {
+        return None;
+    }
+    let width = comptime.r#type.total_width()?;
+    let expr_context: ExpressionContext = (&comptime.expr_context).into();
+
+    Some(
+        values
+            .iter()
+            .map(|value| ProtoExpression::Value {
+                value: value.clone(),
+                width,
+                expr_context,
+            })
+            .collect(),
+    )
+}
 
 #[derive(Clone)]
 pub enum ProtoStatementBlock {
@@ -1162,80 +1218,80 @@ impl ProtoStatement {
     /// Replace embedded byte offsets present in `map`. Mirrors `adjust_offsets`'s
     /// walk; `map` holds only comb offsets, so FF offsets are never affected.
     pub fn remap_offsets(&mut self, map: &HashMap<VarOffset, VarOffset>) {
+        self.remap_offsets_with(&|off| map.get(&off).copied().unwrap_or(off));
+    }
+
+    /// `remap_offsets` generalised over an arbitrary offset translation.
+    /// `CompiledBlock` stays a no-op here — its artifact bakes absolute
+    /// offsets, so only a uniform delta is expressible (see
+    /// `comb_layout::apply_to_stmts` for the rigid-shift handling).
+    pub fn remap_offsets_with(&mut self, f: &dyn Fn(VarOffset) -> VarOffset) {
         match self {
             ProtoStatement::Assign(x) => {
-                if let Some(&n) = map.get(&x.dst) {
-                    x.dst = n;
-                }
-                x.expr.remap_offsets(map);
+                x.dst = f(x.dst);
+                x.expr.remap_offsets_with(f);
                 if let Some(dyn_sel) = &mut x.dynamic_select {
-                    dyn_sel.index_expr.remap_offsets(map);
+                    dyn_sel.index_expr.remap_offsets_with(f);
                 }
             }
             ProtoStatement::AssignDynamic(x) => {
-                if let Some(&n) = map.get(&x.dst_base) {
-                    x.dst_base = n;
-                }
-                x.dst_index_expr.remap_offsets(map);
-                x.expr.remap_offsets(map);
+                x.dst_base = f(x.dst_base);
+                x.dst_index_expr.remap_offsets_with(f);
+                x.expr.remap_offsets_with(f);
                 if let Some(dyn_sel) = &mut x.dynamic_select {
-                    dyn_sel.index_expr.remap_offsets(map);
+                    dyn_sel.index_expr.remap_offsets_with(f);
                 }
             }
             ProtoStatement::If(x) => {
                 if let Some(cond) = &mut x.cond {
-                    cond.remap_offsets(map);
+                    cond.remap_offsets_with(f);
                 }
                 for s in &mut x.true_side {
-                    s.remap_offsets(map);
+                    s.remap_offsets_with(f);
                 }
                 for s in &mut x.false_side {
-                    s.remap_offsets(map);
+                    s.remap_offsets_with(f);
                 }
             }
             ProtoStatement::Case(x) => {
                 for arm in &mut x.arms {
-                    arm.cond.remap_offsets(map);
+                    arm.cond.remap_offsets_with(f);
                     for s in &mut arm.body {
-                        s.remap_offsets(map);
+                        s.remap_offsets_with(f);
                     }
                 }
                 for s in &mut x.default {
-                    s.remap_offsets(map);
+                    s.remap_offsets_with(f);
                 }
             }
             ProtoStatement::SystemFunctionCall(x) => match x {
                 ProtoSystemFunctionCall::Display { args, .. }
                 | ProtoSystemFunctionCall::Write { args, .. } => {
                     for arg in args {
-                        arg.remap_offsets(map);
+                        arg.remap_offsets_with(f);
                     }
                 }
                 ProtoSystemFunctionCall::Readmemh { elements, .. } => {
                     for elem in elements {
-                        if let Some(&n) = map.get(&elem.current) {
-                            elem.current = n;
-                        }
+                        elem.current = f(elem.current);
                     }
                 }
                 ProtoSystemFunctionCall::Assert {
                     condition, args, ..
                 } => {
-                    condition.remap_offsets(map);
+                    condition.remap_offsets_with(f);
                     for arg in args {
-                        arg.remap_offsets(map);
+                        arg.remap_offsets_with(f);
                     }
                 }
                 ProtoSystemFunctionCall::Finish => {}
             },
             ProtoStatement::CompiledBlock(_) => {}
             ProtoStatement::For(x) => {
-                if let Some(&n) = map.get(&x.var_offset) {
-                    x.var_offset = n;
-                }
+                x.var_offset = f(x.var_offset);
                 let remap_bound = |b: &mut ProtoForBound| {
                     if let ProtoForBound::Dynamic(expr) = b {
-                        expr.remap_offsets(map);
+                        expr.remap_offsets_with(f);
                     }
                 };
                 match &mut x.range {
@@ -1247,46 +1303,46 @@ impl ProtoStatement {
                     }
                 }
                 for s in &mut x.body {
-                    s.remap_offsets(map);
+                    s.remap_offsets_with(f);
                 }
             }
             ProtoStatement::SequentialBlock(body) => {
                 for s in body {
-                    s.remap_offsets(map);
+                    s.remap_offsets_with(f);
                 }
             }
             ProtoStatement::TbMethodCall { method, .. } => match method {
                 ProtoTbMethodKind::ClockNext { count, period } => {
                     if let Some(c) = count {
-                        c.remap_offsets(map);
+                        c.remap_offsets_with(f);
                     }
                     if let Some(p) = period {
-                        p.remap_offsets(map);
+                        p.remap_offsets_with(f);
                     }
                 }
                 ProtoTbMethodKind::ResetAssert { duration, .. } => {
                     if let Some(d) = duration {
-                        d.remap_offsets(map);
+                        d.remap_offsets_with(f);
                     }
                 }
                 ProtoTbMethodKind::FileWrite { args, .. } => {
                     for a in args {
-                        a.remap_offsets(map);
+                        a.remap_offsets_with(f);
                     }
                 }
                 ProtoTbMethodKind::Component { args, .. } => {
                     for a in args {
                         if let ProtoComponentArg::Expr(e) = a {
-                            e.remap_offsets(map);
+                            e.remap_offsets_with(f);
                         }
                     }
                 }
                 ProtoTbMethodKind::RandomSeed { value } => {
-                    value.remap_offsets(map);
+                    value.remap_offsets_with(f);
                 }
                 ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
-                    min.remap_offsets(map);
-                    max.remap_offsets(map);
+                    min.remap_offsets_with(f);
+                    max.remap_offsets_with(f);
                 }
                 ProtoTbMethodKind::FileOpen { .. }
                 | ProtoTbMethodKind::FileClose
@@ -3352,36 +3408,29 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
     fn conv(context: &mut Context, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         let in_initial = context.in_initial;
 
-        // Whole-array assignment (`assign out = arr;`): analyzer emits dst
-        // with empty index but non-empty array shape, which the single-stmt
-        // conv path can't address. Expand to N element-wise assigns.
+        // Array-shaped assignment (`assign out = arr;`, `s[0] = arr;`), which
+        // the single-stmt conv path below can't address.
         if src.dst.len() == 1 {
             let dst0 = &src.dst[0];
-            if dst0.index.dimension() == 0 {
-                let dst_array = {
-                    let scope = context.scope();
-                    scope
-                        .variable_meta
-                        .get(&dst0.id)
-                        .map(|m| m.r#type.array.clone())
-                };
-                if let Some(arr_shape) = dst_array
-                    && !arr_shape.is_empty()
-                    && let air::Expression::Term(factor) = &src.expr
-                    && let air::Factor::Variable(_, vidx, _, _) = factor.as_ref()
-                    && vidx.dimension() == 0
+            if let Some(dst_shape) = remaining_array_shape(context, &dst0.id, &dst0.index) {
+                let total: usize = dst_shape.iter().map(|d| d.unwrap_or(1)).product();
+
+                if let air::Expression::Term(factor) = &src.expr
+                    && let air::Factor::Variable(rhs_id, rhs_index, _, _) = factor.as_ref()
+                    && let Some(rhs_shape) = remaining_array_shape(context, rhs_id, rhs_index)
+                    && rhs_shape.iter().map(|d| d.unwrap_or(1)).product::<usize>() == total
                 {
-                    let total: usize = arr_shape.iter().map(|d| d.unwrap_or(1)).product();
                     let mut result = Vec::with_capacity(total);
                     for i in 0..total {
-                        let elem_idx = air::VarIndex::from_index(i, &arr_shape);
                         let mut new_dst = dst0.clone();
-                        new_dst.index = elem_idx.clone();
+                        new_dst
+                            .index
+                            .append(&air::VarIndex::from_index(i, &dst_shape));
                         let mut new_expr = src.expr.clone();
                         if let air::Expression::Term(ref mut fbox) = new_expr
-                            && let air::Factor::Variable(_, vidx2, _, _) = fbox.as_mut()
+                            && let air::Factor::Variable(_, vidx, _, _) = fbox.as_mut()
                         {
-                            *vidx2 = elem_idx;
+                            vidx.append(&air::VarIndex::from_index(i, &rhs_shape));
                         }
                         let element_assign = air::AssignStatement {
                             dst: vec![new_dst],
@@ -3391,6 +3440,115 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                         };
                         let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
                         result.push(ProtoStatement::Assign(proto));
+                    }
+                    if in_initial {
+                        append_ff_next_copies(&mut result);
+                    }
+                    return Ok(result);
+                }
+
+                // A const array on the RHS (`s = pk::TBL;`).
+                if dst0.select.is_empty()
+                    && let Some((comptime, values)) = const_array_operand(&src.expr)
+                {
+                    if values.len() != total {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    }
+                    let mut element_comptime = comptime.clone();
+                    element_comptime.r#type.array.clear();
+
+                    let mut result = Vec::with_capacity(total);
+                    for (i, value) in values.iter().enumerate() {
+                        let mut new_dst = dst0.clone();
+                        new_dst
+                            .index
+                            .append(&air::VarIndex::from_index(i, &dst_shape));
+                        let mut element_comptime = element_comptime.clone();
+                        element_comptime.value = ValueVariant::Numeric(value.clone());
+                        let element_assign = air::AssignStatement {
+                            dst: vec![new_dst],
+                            width: src.width,
+                            expr: air::Expression::Term(Box::new(air::Factor::Value(
+                                element_comptime,
+                            ))),
+                            token: src.token,
+                        };
+                        let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
+                        result.push(ProtoStatement::Assign(proto));
+                    }
+                    if in_initial {
+                        append_ff_next_copies(&mut result);
+                    }
+                    return Ok(result);
+                }
+
+                // An array-returning call on the RHS (`state = round(state);`).
+                // Inlined once: re-converting the call per element would
+                // inline the body N times.
+                if dst0.select.is_empty()
+                    && let air::Expression::Term(factor) = &src.expr
+                    && let air::Factor::FunctionCall(call) = factor.as_ref()
+                {
+                    let ret_offsets = inline_function_call(context, call)?;
+                    let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
+                    let ret_width = call
+                        .comptime
+                        .r#type
+                        .total_width()
+                        .ok_or_else(|| SimulatorError::unsupported_description(&src.token))?;
+                    let (elements, dst_width, dims) = {
+                        let scope = context.scope();
+                        let meta = scope.variable_meta.get(&dst0.id).unwrap();
+                        (
+                            meta.elements.clone(),
+                            meta.width,
+                            meta.r#type.array.as_slice().to_vec(),
+                        )
+                    };
+                    // An empty index prefix resolves to 0, so a bare dst needs
+                    // no special case here.
+                    let base = dst0
+                        .index
+                        .eval_value(&mut context.scope().analyzer_context)
+                        .and_then(|v| partial_index_base(&dims, &v, total, elements.len()));
+                    let Some(base) = base else {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    };
+                    if ret_offsets.len() != total {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    }
+
+                    let mut result = Vec::with_capacity(total);
+                    for (element, ret_offset) in
+                        elements[base..base + total].iter().zip(ret_offsets)
+                    {
+                        let current_offset = element.current_offset();
+                        let dst = if element.is_ff() {
+                            if in_initial {
+                                VarOffset::Ff(current_offset)
+                            } else {
+                                VarOffset::Ff(element.next_offset)
+                            }
+                        } else {
+                            VarOffset::Comb(current_offset)
+                        };
+                        result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                            dst,
+                            dst_width,
+                            select: None,
+                            dynamic_select: None,
+                            rhs_select: None,
+                            expr: ProtoExpression::Variable {
+                                var_offset: ret_offset,
+                                select: None,
+                                dynamic_select: None,
+                                width: ret_width,
+                                var_full_width: ret_width,
+                                expr_context,
+                            },
+                            dst_ff_current_offset: current_offset,
+                            token: src.token,
+                        }));
                     }
                     if in_initial {
                         append_ff_next_copies(&mut result);
@@ -4102,6 +4260,25 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                         rhs_select: None,
                         expr: proto_expr,
                         dst_ff_current_offset: 0,
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
+
+            // Array argument fed by a const array (`f(pk::TBL)`).
+            if let Some(arg_meta) = arg_meta_clone.as_ref()
+                && let Some(exprs) = const_array_element_exprs(expr, arg_meta.elements.len())
+            {
+                for (arg_element, expr) in arg_meta.elements.iter().zip(exprs) {
+                    result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: arg_element.current,
+                        dst_width: arg_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: 0, // not FF
                         token: TokenRange::default(),
                     }));
                 }

@@ -414,6 +414,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_size_type),
+        help("use `$bits` to get the bit width of a type (e.g. `logic<$bits(u32)>`)"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("a type can't be used as a width or an array size")]
+    InvalidSizeType {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_unsized_literal),
         help("give the literal an explicit width (e.g. `1'b0`)"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -749,6 +764,21 @@ pub enum AnalyzerError {
     #[error("{cause}")]
     InvalidForStep {
         cause: InvalidForStepKind,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(for_loop_overflow),
+        help("keep the loop variable within the 32-bit signed range, or narrow the range or step"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("for-loop step overflows the 32-bit signed loop variable")]
+    ForLoopOverflow {
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1134,7 +1164,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(generic_inference_failed),
-        help("provide explicit generic arguments like `{identifier}::<…>(…)`, or pass an argument whose width can be determined from a variable declaration"),
+        help("provide explicit generic arguments like `{identifier}::<…>(…)`, or pass an argument whose width can be determined from a variable, port or parameter declaration"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("failed to infer generic arguments for `{identifier}`")]
@@ -2016,6 +2046,7 @@ impl AnalyzerError {
             AnalyzerError::DuplicateEnumVariant { input, .. } => input,
             AnalyzerError::ExceedLimit { input, .. } => input,
             AnalyzerError::FixedTypeWithSignedModifier { input, .. } => input,
+            AnalyzerError::ForLoopOverflow { input, .. } => input,
             AnalyzerError::GenericInferenceFailed { input, .. } => input,
             AnalyzerError::ImplicitClockConversion { input, .. } => input,
             AnalyzerError::IncludeFailure { input, .. } => input,
@@ -2049,6 +2080,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidRangeAssign { input, .. } => input,
             AnalyzerError::InvalidReset { input, .. } => input,
             AnalyzerError::InvalidSelect { input, .. } => input,
+            AnalyzerError::InvalidSizeType { input, .. } => input,
             AnalyzerError::InvalidStatement { input, .. } => input,
             AnalyzerError::InvalidTbUsage { input, .. } => input,
             AnalyzerError::InvalidTest { input, .. } => input,
@@ -2131,6 +2163,7 @@ impl AnalyzerError {
             AnalyzerError::DuplicatedIdentifier { token_source, .. } => *token_source,
             AnalyzerError::ExceedLimit { token_source, .. } => *token_source,
             AnalyzerError::FixedTypeWithSignedModifier { token_source, .. } => *token_source,
+            AnalyzerError::ForLoopOverflow { token_source, .. } => *token_source,
             AnalyzerError::IncludeFailure { token_source, .. } => *token_source,
             AnalyzerError::IncompatProto { token_source, .. } => *token_source,
             AnalyzerError::InfiniteRecursion { token_source, .. } => *token_source,
@@ -2160,6 +2193,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidRange { token_source, .. } => *token_source,
             AnalyzerError::InvalidReset { token_source, .. } => *token_source,
             AnalyzerError::InvalidSelect { token_source, .. } => *token_source,
+            AnalyzerError::InvalidSizeType { token_source, .. } => *token_source,
             AnalyzerError::InvalidRangeAssign { token_source, .. } => *token_source,
             AnalyzerError::NonConstantSelectWidth { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
@@ -2607,6 +2641,13 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
+    pub fn invalid_size_type(token: &TokenRange) -> Self {
+        AnalyzerError::InvalidSizeType {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
     pub fn invalid_range_assign(token: &TokenRange) -> Self {
         AnalyzerError::InvalidRangeAssign {
             input: source(token),
@@ -2641,6 +2682,13 @@ impl AnalyzerError {
     pub fn invalid_for_step(cause: InvalidForStepKind, token: &TokenRange) -> Self {
         AnalyzerError::InvalidForStep {
             cause,
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn for_loop_overflow(token: &TokenRange) -> Self {
+        AnalyzerError::ForLoopOverflow {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

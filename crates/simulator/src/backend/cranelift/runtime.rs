@@ -366,8 +366,8 @@ pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
     builder.ins().stack_addr(I64, slot, 0)
 }
 
-/// Compile a chunk into a native function.  Returns `(func, mmap)`;
-/// the caller must keep `mmap` alive for as long as `func` is callable
+/// Compile a chunk into a native function.  Returns `(func, mmap)`; the
+/// caller must keep `mmap` alive for as long as `func` is callable
 /// (typically by wrapping both in `ChunkArtifact`).
 pub fn build_binary(
     config: &Config,
@@ -560,6 +560,7 @@ fn build_binary_inner(
 
     let len = proto.len();
     for (i, x) in proto.iter().enumerate() {
+        // `is_last` lets the final statement return directly.
         let is_last = (i + 1) == len;
         x.build_binary(&mut cranelift_context, &mut builder, is_last)?;
 

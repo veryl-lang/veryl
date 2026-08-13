@@ -43,37 +43,37 @@ impl CmdDoc {
             if format!("{}", symbol.namespace) == metadata.project.name && symbol.public {
                 match &symbol.kind {
                     SymbolKind::Module(x) if !x.is_proto => {
-                        let html_name = fmt_generic_parameters(&text, &x.generic_parameters);
+                        let display_name = fmt_generic_parameters(&text, &x.generic_parameters);
                         let item = TopLevelItem {
                             file_name,
-                            html_name,
+                            display_name,
                             symbol,
                         };
                         modules.insert(text, item);
                     }
                     SymbolKind::Module(x) if x.is_proto => {
-                        let html_name = file_name.clone();
+                        let display_name = file_name.clone();
                         let item = TopLevelItem {
                             file_name,
-                            html_name,
+                            display_name,
                             symbol,
                         };
                         proto_modules.insert(text, item);
                     }
                     SymbolKind::Interface(x) if !x.is_proto => {
-                        let html_name = fmt_generic_parameters(&text, &x.generic_parameters);
+                        let display_name = fmt_generic_parameters(&text, &x.generic_parameters);
                         let item = TopLevelItem {
                             file_name,
-                            html_name,
+                            display_name,
                             symbol,
                         };
                         interfaces.insert(text, item);
                     }
                     SymbolKind::Package(x) if !x.is_proto => {
-                        let html_name = fmt_generic_parameters(&text, &x.generic_parameters);
+                        let display_name = fmt_generic_parameters(&text, &x.generic_parameters);
                         let item = TopLevelItem {
                             file_name,
-                            html_name,
+                            display_name,
                             symbol,
                         };
                         packages.insert(text, item);
@@ -140,11 +140,11 @@ fn fmt_generic_parameters(name: &str, params: &[SymbolId]) -> String {
         name.to_string()
     } else {
         let mut name = name.to_string();
-        name.push_str("::&lt;");
+        name.push_str("::<");
         for param in params {
             let symbol = symbol_table::get(*param).unwrap();
             name.push_str(&format!("{}, ", symbol.token.text));
         }
-        format!("{}&gt;", name.strip_suffix(", ").unwrap())
+        format!("{}>", name.strip_suffix(", ").unwrap())
     }
 }
