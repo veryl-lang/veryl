@@ -274,7 +274,6 @@ fn comb_loop_function_global_write_contributes_procedural_effect_a_captured_func
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_preserves_vector_function_return_bits_a_vector_function_return_preserves_bit_identity()
 {
     assert_comb_loop(
@@ -441,7 +440,270 @@ fn comb_loop_preserves_vector_function_output_bits() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
+fn comb_loop_function_output_state_does_not_leak_between_calls() {
+    assert_comb_loop(
+        "a conditionally assigned function output starts with fresh state on each call",
+        r#"
+        module Top (
+            p: output logic,
+            q: output logic,
+        ) {
+            function f (
+                x: input  logic,
+                y: output logic,
+            ) {
+                if x {
+                    y = 1;
+                }
+            }
+            var a: logic;
+            var b: logic;
+            always_comb {
+                f(a, p);
+                f(b, q);
+            }
+            assign a = q;
+            assign b = 0;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_function_output_retains_same_call_control_feedback() {
+    assert_comb_loop(
+        "a function output retains control feedback within the same call",
+        r#"
+        module Top (
+            p: output logic,
+            q: output logic,
+        ) {
+            function f (
+                x: input  logic,
+                y: output logic,
+            ) {
+                if x {
+                    y = 1;
+                }
+            }
+            var a: logic;
+            var b: logic;
+            always_comb {
+                f(a, p);
+                f(b, q);
+            }
+            assign a = 0;
+            assign b = q;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_function_local_state_does_not_leak_between_calls() {
+    assert_comb_loop(
+        "a function local starts with fresh state on each call",
+        r#"
+        module Top (
+            p: output logic,
+            q: output logic,
+        ) {
+            function f (
+                x: input  logic,
+                y: output logic,
+            ) {
+                var temporary: logic;
+                if x {
+                    temporary = 1;
+                }
+                y = temporary;
+            }
+            var a: logic;
+            var b: logic;
+            always_comb {
+                f(a, p);
+                f(b, q);
+            }
+            assign a = q;
+            assign b = 0;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_function_return_state_does_not_leak_between_calls() {
+    assert_comb_loop(
+        "a function return starts with fresh state on each call",
+        r#"
+        module Top (
+            p: output logic,
+            q: output logic,
+        ) {
+            function f (
+                x: input logic,
+            ) -> logic {
+                if x {
+                    return 1;
+                }
+            }
+            var a: logic;
+            var b: logic;
+            assign p = f(a);
+            assign q = f(b);
+            assign a = q;
+            assign b = 0;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_preserves_wide_function_output_bits_without_scalarization() {
+    // Why this case exists: function boundary precision must come from
+    // observed endpoint propagation, not a width-limited per-bit expansion.
+    assert_comb_loop(
+        "a wide function output keeps disjoint endpoint bits independent",
+        r#"
+        module Top (
+            o: output logic<128>,
+        ) {
+            function copy (
+                x: input  logic<128>,
+                y: output logic<128>,
+            ) {
+                y = x;
+            }
+            var value: logic<128>;
+            always_comb {
+                copy(value, o);
+            }
+            assign value[126:0] = 0;
+            assign value[127] = o[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_wide_function_output_retains_matching_endpoint_feedback() {
+    assert_comb_loop(
+        "a wide function output retains feedback at the matching endpoint",
+        r#"
+        module Top (
+            o: output logic<128>,
+        ) {
+            function copy (
+                x: input  logic<128>,
+                y: output logic<128>,
+            ) {
+                y = x;
+            }
+            var value: logic<128>;
+            always_comb {
+                copy(value, o);
+            }
+            assign value[126:0] = 0;
+            assign value[127] = o[127];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_split_destination_reuses_one_function_evaluation() {
+    const WIDTH: usize = 256;
+    let observed_bits = (0..WIDTH)
+        .map(|bit| format!("assign observed[{bit}] = result[{bit}];"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::comb_loop_detect::reset_function_evaluation_count();
+    let errors = analyze(&format!(
+        r#"
+        module Top (
+            i       : input  logic<{WIDTH}>,
+            observed: output logic<{WIDTH}>,
+        ) {{
+            function identity (
+                x: input logic<{WIDTH}>,
+            ) -> logic<{WIDTH}> {{
+                return x;
+            }}
+            var result: logic<{WIDTH}>;
+            assign result = identity(i);
+            {observed_bits}
+        }}
+        "#
+    ));
+    assert!(
+        errors.is_empty(),
+        "split observation of one function result is acyclic: {errors:#?}"
+    );
+    assert_eq!(
+        crate::comb_loop_detect::function_evaluation_count(),
+        1,
+        "splitting the destination must not reevaluate the same function call"
+    );
+    assert_eq!(
+        crate::comb_loop_detect::function_result_version_count(),
+        WIDTH,
+        "each split destination must request only its matching return region"
+    );
+    assert!(
+        crate::comb_loop_detect::function_result_region_probe_count() <= WIDTH * 12,
+        "return-region lookup must be logarithmic rather than scanning all regions per bit"
+    );
+}
+
+#[test]
+fn comb_loop_static_loop_reevaluates_nested_function_actuals() {
+    crate::comb_loop_detect::reset_function_evaluation_count();
+    assert_comb_loop(
+        "a nested call is reevaluated when its static-loop actual changes",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function inner (
+                x: input logic,
+            ) -> logic {
+                return x;
+            }
+            function outer (
+                x: input logic<2>,
+            ) -> logic {
+                var result: logic;
+                result = 0;
+                for i in 0..2 {
+                    if inner(x[i]) {
+                        result = 1;
+                    } else {
+                        result = 0;
+                    }
+                }
+                return result;
+            }
+            var feedback: logic;
+            assign o = outer({feedback, 1'b0});
+            assign feedback = o;
+        }
+        "#,
+        true,
+    );
+    assert_eq!(
+        crate::comb_loop_detect::function_barrier_evaluation_count(),
+        2,
+        "both static-loop invocations must cross the callee cache barrier"
+    );
+}
+
+#[test]
 fn comb_loop_preserves_split_function_return_bits() {
     // Why this case exists: {high, low}[0] is low. Returning o[0] to high is
     // acyclic when low is constant, even though the return uses two regions.

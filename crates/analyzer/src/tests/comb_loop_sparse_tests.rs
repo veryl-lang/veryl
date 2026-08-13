@@ -104,7 +104,6 @@ fn comb_loop_oversized_array_is_sparse_and_complete_why_this_case_exists_a_seque
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; oversized sparse array feedback is missed"]
 fn comb_loop_oversized_array_is_sparse_and_complete_why_this_case_exists_the_former_size_guard_silently_discarded_every()
  {
     // Why this case exists: the former size guard silently discarded every
@@ -214,7 +213,6 @@ fn comb_loop_aliases_overlapping_unknown_regions_overlapping_dynamic_prefixes_re
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; sparse and dynamic regions"]
 fn comb_loop_aliases_overlapping_unknown_regions_disjoint_dynamic_prefixes_remain_independent() {
     assert_comb_loop(
         "disjoint dynamic prefixes remain independent",

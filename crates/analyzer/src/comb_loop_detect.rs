@@ -1,63 +1,42 @@
 //! Combinational loop detection on the analyzer IR (issue #931).
 //!
-//! Builds a per-module `(VarId, array_index)` dependency graph from
-//! `FfTable` and per-decl `ReferencedEntry` masks, then reports SCCs.
+//! Builds a per-module dependency graph from statement-ordered SSA summaries,
+//! then reports SCCs.
 //! Module instance feedthrough is summarized bottom-up in topo order.
 //!
 //! Under-detect by design: opaque constructs (SystemVerilog black
 //! boxes, `inout` ports, recursive functions) add no edges; the
 //! simulator's `analyze_dependency` is the backup safety net.
 
+mod procedure;
+mod region;
+mod ssa;
+
+#[cfg(test)]
+pub(crate) use procedure::{
+    function_barrier_evaluation_count, function_evaluation_count,
+    function_result_region_probe_count, function_result_version_count,
+    reset_function_evaluation_count,
+};
+
+use region::{ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, var_reads};
+
 use crate::AnalyzerError;
-use crate::BigUint;
 use crate::HashMap;
 use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, AssignStatement, CaseStatement, Component, Declaration, Expression, Factor,
-    ForBound, ForRange, ForStatement, FunctionCall, IfStatement, InstDeclaration, Ir, Module,
-    Statement, VarIndex, VarSelect, Variable,
+    AssignDestination, Component, Declaration, Expression, Factor, FunctionCall, InstDeclaration,
+    Ir, Module, Op, Statement, SystemFunctionKind, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
-use crate::value::ValueBigUint;
 use daggy::petgraph::Graph;
-use daggy::petgraph::algo::tarjan_scc;
+use daggy::petgraph::algo::kosaraju_scc;
 use daggy::petgraph::graph::NodeIndex;
 use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
 use veryl_parser::resource_table::StrId;
-
-/// `FfTable` / `per_decl_refs` granularity. Bit-precision lives in masks.
-type IdxKey = (VarId, usize);
-
-/// `(VarId, array_idx, range_idx)`. `range_idx` indexes the variable's
-/// `BitPartition`, so bit-disjoint reads/writes form disjoint nodes.
-type NodeKey = (VarId, usize, usize);
-
-/// Per `IdxKey`, atomic bit-range masks. Two bits are in the same range
-/// iff they appear in the same set of per-decl masks.
-#[derive(Default)]
-struct BitPartition {
-    ranges: HashMap<IdxKey, Vec<BigUint>>,
-}
-
-impl BitPartition {
-    /// Empty slice means the variable's bits are untouched.
-    fn ranges_of(&self, key: IdxKey) -> &[BigUint] {
-        self.ranges.get(&key).map(|v| v.as_slice()).unwrap_or(&[])
-    }
-
-    fn overlapping(&self, key: IdxKey, mask: &BigUint) -> Vec<usize> {
-        let zero = BigUint::default();
-        self.ranges_of(key)
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| (*m & mask) != zero)
-            .map(|(i, _)| i)
-            .collect()
-    }
-}
 
 /// `feedthrough[child_in_id] = { child_out_ids reachable purely combinationally }`.
 /// Port-level only -- the parent keeps bit precision via `BitPartition`.
@@ -74,7 +53,7 @@ pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
 
     for &idx in &order {
         if let Component::Module(module) = &ir.components[idx] {
-            // Unevaluable generic params -> empty per_decl_refs.
+            // Unevaluable generic parameters do not have a stable procedure.
             if module.suppress_unassigned {
                 continue;
             }
@@ -155,207 +134,778 @@ fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
     })
 }
 
-/// Group bits into atomic ranges by signature: bits with the same set
-/// of containing masks form one range. Bits in zero masks are dropped.
-fn atomic_ranges(masks: &[BigUint], width: usize) -> Vec<BigUint> {
-    let mut by_sig: HashMap<BigUint, BigUint> = HashMap::default();
-    let one = BigUint::from(1u32);
-    for b in 0..width {
-        let mut sig = BigUint::default();
-        for (i, m) in masks.iter().enumerate() {
-            if m.bit(b as u64) {
-                sig |= &one << i;
-            }
-        }
-        if sig == BigUint::default() {
-            continue;
-        }
-        let entry = by_sig.entry(sig).or_default();
-        *entry |= &one << b;
+/// Split only at observed access endpoints. Runtime and storage depend on the
+/// number of accesses, never on the highest referenced bit position.
+fn atomic_ranges(spans: &[PackedSpan], endpoints: Option<&HashSet<usize>>) -> Vec<PackedSpan> {
+    let mut events = Vec::with_capacity(spans.len() * 2 + endpoints.map_or(0, HashSet::len));
+    for span in spans {
+        events.push((span.start, 1isize));
+        events.push((span.end(), -1isize));
     }
-    let mut ret: Vec<BigUint> = by_sig.into_values().collect();
-    // Stable order by lowest set bit so NodeKey range_idx is deterministic.
-    ret.sort_by_key(|m| m.trailing_zeros().unwrap_or(0));
-    ret
-}
+    if let Some(endpoints) = endpoints {
+        events.extend(endpoints.iter().map(|endpoint| (*endpoint, 0)));
+    }
+    events.sort_unstable_by_key(|event| event.0);
 
-/// Arrays larger than this are under-detected: a dynamic write (`arr[i] = ...`
-/// with no foldable index) fans out to every element, so the per-element graph
-/// / bit-partition expansion below is O(elements). A memory this large is not a
-/// realistic combinational-loop participant, so adding no edges stays sound.
-const OVERSIZED_ARRAY: usize = 1 << 16;
-
-fn oversized_array(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
-    variables
-        .get(&id)
-        .and_then(|v| v.r#type.total_array())
-        .is_some_and(|n| n > OVERSIZED_ARRAY)
-}
-
-fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
-    let mut masks: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
-
-    // Intra-module reads / writes captured during eval_assign.
-    for refs in module.per_decl_refs.values() {
-        for (id, entry) in refs {
-            for (i, m) in entry.mask_ref.iter().enumerate() {
-                if *m != BigUint::default() {
-                    masks.entry((*id, i)).or_default().push(m.clone());
-                }
-            }
-            for (i, m) in entry.mask_assign.iter().enumerate() {
-                if *m != BigUint::default() {
-                    masks.entry((*id, i)).or_default().push(m.clone());
-                }
-            }
+    let mut atoms = Vec::new();
+    let mut active = 0isize;
+    let mut index = 0;
+    while index < events.len() {
+        let position = events[index].0;
+        while index < events.len() && events[index].0 == position {
+            active += events[index].1;
+            index += 1;
+        }
+        if active > 0
+            && let Some(next) = events.get(index).map(|event| event.0)
+            && let Some(atom) = PackedSpan::new(position, next - position)
+        {
+            atoms.push(atom);
         }
     }
+    atoms
+}
 
-    // Per-reference masks. Per-decl aggregates alone would collapse
-    // bit-disjoint reads/writes of the same var into one atomic range
-    // (e.g. `b = a[0]; c = a[1];` aggregates a's mask to {0,1}).
-    for ((src_id, src_idx), entry) in &module.ff_table.table {
-        for (_, assign_target, src_read_mask, _) in &entry.refered {
-            if *src_read_mask != BigUint::default() {
-                masks
-                    .entry((*src_id, *src_idx))
-                    .or_default()
-                    .push(src_read_mask.clone());
-            }
-            if let Some((dst_id, dst_idx_opt, lhs_mask)) = assign_target
-                && *lhs_mask != BigUint::default()
-            {
-                if let Some(dst_idx) = dst_idx_opt {
-                    masks
-                        .entry((*dst_id, *dst_idx))
-                        .or_default()
-                        .push(lhs_mask.clone());
-                } else if let Some(var) = module.variables.get(dst_id)
-                    && let Some(total) = var.r#type.total_array()
-                    && total <= OVERSIZED_ARRAY
-                {
-                    for i in 0..total {
-                        masks
-                            .entry((*dst_id, i))
-                            .or_default()
-                            .push(lhs_mask.clone());
+#[derive(Clone, Copy, Debug)]
+struct PackedTransfer {
+    left_id: VarId,
+    left: PackedSpan,
+    right_id: VarId,
+    right: PackedSpan,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PackedTransferEdge {
+    index: usize,
+    reverse: bool,
+    source: PackedSpan,
+    destination_id: VarId,
+    destination: PackedSpan,
+}
+
+fn add_transfer(
+    transfers: &mut Vec<PackedTransfer>,
+    left_id: VarId,
+    left: PackedSpan,
+    right_id: VarId,
+    right: PackedSpan,
+) {
+    if left.length == right.length {
+        transfers.push(PackedTransfer {
+            left_id,
+            left,
+            right_id,
+            right,
+        });
+    }
+}
+
+fn propagate_packed_endpoints(
+    accesses: &HashMap<IdxKey, Vec<PackedSpan>>,
+    transfers: &[PackedTransfer],
+) -> HashMap<VarId, HashSet<usize>> {
+    let mut adjacency: HashMap<VarId, Vec<PackedTransferEdge>> = HashMap::default();
+    for (index, transfer) in transfers.iter().enumerate() {
+        adjacency
+            .entry(transfer.left_id)
+            .or_default()
+            .push(PackedTransferEdge {
+                index,
+                reverse: false,
+                source: transfer.left,
+                destination_id: transfer.right_id,
+                destination: transfer.right,
+            });
+        adjacency
+            .entry(transfer.right_id)
+            .or_default()
+            .push(PackedTransferEdge {
+                index,
+                reverse: true,
+                source: transfer.right,
+                destination_id: transfer.left_id,
+                destination: transfer.left,
+            });
+    }
+
+    let mut seeds = HashSet::default();
+    for ((id, _), spans) in accesses {
+        for span in spans {
+            seeds.insert((*id, span.start));
+            seeds.insert((*id, span.end()));
+        }
+    }
+    for transfer in transfers {
+        for (id, point) in [
+            (transfer.left_id, transfer.left.start),
+            (transfer.left_id, transfer.left.end()),
+            (transfer.right_id, transfer.right.start),
+            (transfer.right_id, transfer.right.end()),
+        ] {
+            seeds.insert((id, point));
+        }
+    }
+
+    // Each observed endpoint crosses each directed relation once. Process all
+    // points at the same depth before consuming a direction so converging copy
+    // paths retain every arrival. Reusing a direction around an offset cycle
+    // would materialize periodic repetitions as one boundary per vector bit.
+    let mut endpoints: HashMap<VarId, HashSet<usize>> = HashMap::default();
+    for seed in seeds {
+        let mut frontier = vec![seed];
+        let mut visited = [seed].into_iter().collect::<HashSet<_>>();
+        let mut used_directions = HashSet::default();
+        while !frontier.is_empty() {
+            let mut next = Vec::new();
+            let mut used_this_round = HashSet::default();
+            for (id, point) in frontier {
+                endpoints.entry(id).or_default().insert(point);
+                let Some(edges) = adjacency.get(&id) else {
+                    continue;
+                };
+                for edge in edges {
+                    let direction = (edge.index, edge.reverse);
+                    if point < edge.source.start
+                        || point > edge.source.end()
+                        || used_directions.contains(&direction)
+                    {
+                        continue;
+                    }
+                    let Some(mapped) = point
+                        .checked_sub(edge.source.start)
+                        .and_then(|offset| edge.destination.start.checked_add(offset))
+                    else {
+                        continue;
+                    };
+                    used_this_round.insert(direction);
+                    if visited.insert((edge.destination_id, mapped)) {
+                        next.push((edge.destination_id, mapped));
                     }
                 }
             }
+            used_directions.extend(used_this_round);
+            frontier = next;
+        }
+    }
+    endpoints
+}
+
+fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
+    let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
+
+    for declaration in &module.declarations {
+        if let Declaration::Comb(comb) = declaration {
+            collect_statement_spans(&comb.statements, &mut accesses, ctx);
         }
     }
 
-    // Inst input expressions: gather_ff records them but without masks.
+    // Inst input expressions are not represented by procedure statements.
     for inst in walk_insts(module) {
         for inp in &inst.inputs {
-            collect_expr_masks(&inp.expr, &mut masks, ctx);
+            collect_expr_spans(&inp.expr, &mut accesses, ctx);
         }
         for out in &inst.outputs {
             for dst in &out.dst {
-                if let Some((idx, mask)) = eval_dst_mask(dst, &module.variables, ctx) {
-                    masks.entry((dst.id, idx)).or_default().push(mask);
+                if let Some((idx, packed)) = eval_dst_span(dst, &module.variables, ctx) {
+                    accesses
+                        .entry((
+                            dst.id,
+                            ArraySpan {
+                                start: idx,
+                                length: 1,
+                            },
+                        ))
+                        .or_default()
+                        .push(packed);
                 }
             }
         }
     }
 
-    let mut ranges: HashMap<(VarId, usize), Vec<BigUint>> = HashMap::default();
-    for (key, ms) in masks {
-        let width = module
-            .variables
-            .get(&key.0)
-            .and_then(|v| v.total_width())
-            .unwrap_or(1);
-        let parts = atomic_ranges(&ms, width);
-        if !parts.is_empty() {
-            ranges.insert(key, parts);
+    // Function-local regions are not represented by the caller's aggregate
+    // reference table. They still need atoms because calls are lowered into
+    // the same SSA version graph as their caller.
+    for function in module.functions.values() {
+        for body in &function.functions {
+            collect_statement_spans(&body.statements, &mut accesses, ctx);
         }
     }
 
-    BitPartition { ranges }
+    let transfers = collect_packed_transfers(module, ctx);
+    let endpoints = propagate_packed_endpoints(&accesses, &transfers);
+    let ranges = split_array_spans(accesses, &endpoints);
+
+    BitPartition::new(ranges)
 }
 
-fn collect_expr_masks(
+fn split_array_spans(
+    accesses_by_index: HashMap<IdxKey, Vec<PackedSpan>>,
+    endpoints: &HashMap<VarId, HashSet<usize>>,
+) -> HashMap<IdxKey, Vec<PackedSpan>> {
+    let mut accesses: HashMap<VarId, Vec<(ArraySpan, PackedSpan)>> = HashMap::default();
+    for ((id, span), packed_spans) in accesses_by_index {
+        for packed in packed_spans {
+            accesses.entry(id).or_default().push((span, packed));
+        }
+    }
+
+    let mut ranges = HashMap::default();
+    for (id, accesses) in accesses {
+        let mut events = Vec::with_capacity(accesses.len() * 2);
+        for (span, packed) in accesses {
+            if span.length == 0 {
+                continue;
+            }
+            let Some(end) = span.end() else {
+                continue;
+            };
+            events.push((span.start, true, packed));
+            events.push((end, false, packed));
+        }
+        events.sort_unstable_by_key(|(position, starts, packed)| {
+            (*position, *starts, packed.start, packed.length)
+        });
+
+        let mut active: HashMap<PackedSpan, usize> = HashMap::default();
+        let mut previous = events.first().map(|event| event.0);
+        let mut cursor = 0;
+        while cursor < events.len() {
+            let position = events[cursor].0;
+            if let Some(previous) = previous
+                && previous < position
+                && !active.is_empty()
+            {
+                let split = ArraySpan {
+                    start: previous,
+                    length: position - previous,
+                };
+                let split_spans = active.keys().copied().collect::<Vec<_>>();
+                let parts = atomic_ranges(&split_spans, endpoints.get(&id));
+                if !parts.is_empty() {
+                    ranges.insert((id, split), parts);
+                }
+            }
+            while cursor < events.len() && events[cursor].0 == position {
+                let (_, starts, packed) = events[cursor];
+                if starts {
+                    *active.entry(packed).or_default() += 1;
+                } else if let std::collections::hash_map::Entry::Occupied(mut entry) =
+                    active.entry(packed)
+                {
+                    *entry.get_mut() -= 1;
+                    if *entry.get() == 0 {
+                        entry.remove();
+                    }
+                }
+                cursor += 1;
+            }
+            previous = Some(position);
+        }
+    }
+    ranges
+}
+
+fn collect_expr_spans(
     expr: &Expression,
-    out: &mut HashMap<(VarId, usize), Vec<BigUint>>,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
     ctx: &mut Context,
 ) {
     match expr {
-        Expression::Term(t) => collect_factor_masks(t, out, ctx),
-        Expression::Unary(_, e, _) => collect_expr_masks(e, out, ctx),
+        Expression::Term(t) => collect_factor_spans(t, out, ctx),
+        Expression::Unary(_, e, _) => collect_expr_spans(e, out, ctx),
         Expression::Binary(a, _, b, _) => {
-            collect_expr_masks(a, out, ctx);
-            collect_expr_masks(b, out, ctx);
+            collect_expr_spans(a, out, ctx);
+            collect_expr_spans(b, out, ctx);
         }
         Expression::Ternary(a, b, c, _) => {
-            collect_expr_masks(a, out, ctx);
-            collect_expr_masks(b, out, ctx);
-            collect_expr_masks(c, out, ctx);
+            collect_expr_spans(a, out, ctx);
+            collect_expr_spans(b, out, ctx);
+            collect_expr_spans(c, out, ctx);
         }
         Expression::Concatenation(parts, _) => {
             for (a, b) in parts {
-                collect_expr_masks(a, out, ctx);
+                collect_expr_spans(a, out, ctx);
                 if let Some(b) = b {
-                    collect_expr_masks(b, out, ctx);
+                    collect_expr_spans(b, out, ctx);
                 }
             }
         }
         Expression::StructConstructor(_, fields, _) => {
             for (_, e) in fields {
-                collect_expr_masks(e, out, ctx);
+                collect_expr_spans(e, out, ctx);
             }
         }
         Expression::ArrayLiteral(_, _) => {}
     }
 }
 
-fn collect_factor_masks(
+fn collect_factor_spans(
     factor: &Factor,
-    out: &mut HashMap<(VarId, usize), Vec<BigUint>>,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
     ctx: &mut Context,
 ) {
     match factor {
         Factor::Variable(id, index, select, _) => {
-            for (idx, mask) in var_reads(*id, index, select, ctx) {
-                out.entry((*id, idx)).or_default().push(mask);
+            for (idx, packed) in var_reads(*id, index, select, ctx) {
+                out.entry((*id, idx)).or_default().push(packed);
             }
         }
         Factor::FunctionCall(call) => {
             for input in call.inputs.values() {
-                collect_expr_masks(input, out, ctx);
+                collect_expr_spans(input, out, ctx);
             }
         }
         _ => {}
     }
 }
 
+fn collect_statement_spans(
+    statements: &[Statement],
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    ctx: &mut Context,
+) {
+    for statement in statements {
+        match statement {
+            Statement::Assign(assign) => {
+                collect_expr_spans(&assign.expr, out, ctx);
+                for destination in &assign.dst {
+                    for (index, packed) in dst_writes(destination, ctx) {
+                        out.entry((destination.id, index)).or_default().push(packed);
+                    }
+                }
+            }
+            Statement::If(statement) => {
+                collect_expr_spans(&statement.cond, out, ctx);
+                collect_statement_spans(&statement.true_side, out, ctx);
+                collect_statement_spans(&statement.false_side, out, ctx);
+            }
+            Statement::Case(statement) => {
+                collect_expr_spans(&statement.case_target, out, ctx);
+                for arm in &statement.arms {
+                    for pattern in &arm.patterns {
+                        match pattern {
+                            crate::ir::CasePattern::Eq(expression) => {
+                                collect_expr_spans(expression, out, ctx);
+                            }
+                            crate::ir::CasePattern::Range { lo, hi, .. } => {
+                                collect_expr_spans(lo, out, ctx);
+                                collect_expr_spans(hi, out, ctx);
+                            }
+                        }
+                    }
+                    collect_statement_spans(&arm.body, out, ctx);
+                }
+                collect_statement_spans(&statement.default, out, ctx);
+            }
+            Statement::For(statement) => {
+                collect_statement_spans(&statement.body, out, ctx);
+            }
+            Statement::FunctionCall(call) => {
+                for input in call.inputs.values() {
+                    collect_expr_spans(input, out, ctx);
+                }
+                for outputs in call.outputs.values() {
+                    for destination in outputs {
+                        for (index, packed) in dst_writes(destination, ctx) {
+                            out.entry((destination.id, index)).or_default().push(packed);
+                        }
+                    }
+                }
+            }
+            Statement::SystemFunctionCall(_)
+            | Statement::IfReset(_)
+            | Statement::TbMethodCall(_)
+            | Statement::Break
+            | Statement::Unsupported(_)
+            | Statement::Null => {}
+        }
+    }
+}
+
+fn variable_packed_span(id: VarId, select: &VarSelect, ctx: &mut Context) -> Option<PackedSpan> {
+    if !select.is_const_with_range() {
+        return None;
+    }
+    let variable = ctx.variables.get(&id)?.clone();
+    let (high, low) = select.eval_value(ctx, &variable.r#type, false)?;
+    PackedSpan::from_select(high, low)
+}
+
+fn collect_packed_transfers(module: &Module, ctx: &mut Context) -> Vec<PackedTransfer> {
+    let mut transfers = Vec::new();
+    for declaration in &module.declarations {
+        if let Declaration::Comb(comb) = declaration {
+            collect_statement_transfers(&comb.statements, ctx, &mut transfers);
+        }
+    }
+    for function in module.functions.values() {
+        for body in &function.functions {
+            collect_statement_transfers(&body.statements, ctx, &mut transfers);
+        }
+    }
+    transfers.sort_unstable_by_key(|transfer| {
+        (
+            transfer.left_id,
+            transfer.left,
+            transfer.right_id,
+            transfer.right,
+        )
+    });
+    transfers.dedup_by_key(|transfer| {
+        (
+            transfer.left_id,
+            transfer.left,
+            transfer.right_id,
+            transfer.right,
+        )
+    });
+    transfers
+}
+
+fn collect_statement_transfers(
+    statements: &[Statement],
+    ctx: &mut Context,
+    transfers: &mut Vec<PackedTransfer>,
+) {
+    for statement in statements {
+        match statement {
+            Statement::Assign(assign) => {
+                collect_expression_calls(&assign.expr, ctx, transfers);
+                let destinations = assign
+                    .dst
+                    .iter()
+                    .map(|destination| {
+                        variable_packed_span(destination.id, &destination.select, ctx)
+                            .map(|span| (destination.id, span))
+                    })
+                    .collect::<Option<Vec<_>>>();
+                let Some(destinations) = destinations else {
+                    continue;
+                };
+                let total_width = destinations.iter().map(|(_, span)| span.length).sum();
+                let mut offset = total_width;
+                for (id, destination) in destinations {
+                    offset -= destination.length;
+                    let expression = PackedSpan {
+                        start: offset,
+                        length: destination.length,
+                    };
+                    collect_expression_transfers(
+                        &assign.expr,
+                        expression,
+                        id,
+                        destination,
+                        ctx,
+                        transfers,
+                    );
+                }
+            }
+            Statement::If(statement) => {
+                collect_expression_calls(&statement.cond, ctx, transfers);
+                collect_statement_transfers(&statement.true_side, ctx, transfers);
+                collect_statement_transfers(&statement.false_side, ctx, transfers);
+            }
+            Statement::Case(statement) => {
+                collect_expression_calls(&statement.case_target, ctx, transfers);
+                for arm in &statement.arms {
+                    for pattern in &arm.patterns {
+                        match pattern {
+                            crate::ir::CasePattern::Eq(expression) => {
+                                collect_expression_calls(expression, ctx, transfers);
+                            }
+                            crate::ir::CasePattern::Range { lo, hi, .. } => {
+                                collect_expression_calls(lo, ctx, transfers);
+                                collect_expression_calls(hi, ctx, transfers);
+                            }
+                        }
+                    }
+                    collect_statement_transfers(&arm.body, ctx, transfers);
+                }
+                collect_statement_transfers(&statement.default, ctx, transfers);
+            }
+            Statement::For(statement) => {
+                collect_statement_transfers(&statement.body, ctx, transfers);
+            }
+            Statement::FunctionCall(call) => collect_call_transfers(call, ctx, transfers),
+            Statement::SystemFunctionCall(_)
+            | Statement::IfReset(_)
+            | Statement::TbMethodCall(_)
+            | Statement::Break
+            | Statement::Unsupported(_)
+            | Statement::Null => {}
+        }
+    }
+}
+
+fn collect_expression_calls(
+    expression: &Expression,
+    ctx: &mut Context,
+    transfers: &mut Vec<PackedTransfer>,
+) {
+    match expression {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::FunctionCall(call) => collect_call_transfers(call, ctx, transfers),
+            Factor::SystemFunctionCall(call) => match &call.kind {
+                SystemFunctionKind::Onehot(input)
+                | SystemFunctionKind::Signed(input)
+                | SystemFunctionKind::Unsigned(input) => {
+                    collect_expression_calls(&input.0, ctx, transfers);
+                }
+                SystemFunctionKind::Readmemh(input, _) => {
+                    collect_expression_calls(&input.0, ctx, transfers);
+                }
+                _ => {}
+            },
+            _ => {}
+        },
+        Expression::Unary(_, operand, _) => collect_expression_calls(operand, ctx, transfers),
+        Expression::Binary(left, _, right, _) => {
+            collect_expression_calls(left, ctx, transfers);
+            collect_expression_calls(right, ctx, transfers);
+        }
+        Expression::Ternary(condition, left, right, _) => {
+            collect_expression_calls(condition, ctx, transfers);
+            collect_expression_calls(left, ctx, transfers);
+            collect_expression_calls(right, ctx, transfers);
+        }
+        Expression::Concatenation(parts, _) => {
+            for (part, repeat) in parts {
+                collect_expression_calls(part, ctx, transfers);
+                if let Some(repeat) = repeat {
+                    collect_expression_calls(repeat, ctx, transfers);
+                }
+            }
+        }
+        Expression::ArrayLiteral(items, _) => {
+            for item in items {
+                match item {
+                    crate::ir::ArrayLiteralItem::Value(value, repeat) => {
+                        collect_expression_calls(value, ctx, transfers);
+                        if let Some(repeat) = repeat {
+                            collect_expression_calls(repeat, ctx, transfers);
+                        }
+                    }
+                    crate::ir::ArrayLiteralItem::Defaul(value) => {
+                        collect_expression_calls(value, ctx, transfers);
+                    }
+                }
+            }
+        }
+        Expression::StructConstructor(_, fields, _) => {
+            for (_, value) in fields {
+                collect_expression_calls(value, ctx, transfers);
+            }
+        }
+    }
+}
+
+fn collect_call_transfers(
+    call: &FunctionCall,
+    ctx: &mut Context,
+    transfers: &mut Vec<PackedTransfer>,
+) {
+    let body = ctx.functions.get(&call.id).and_then(|function| {
+        if let Some(index) = &call.index {
+            function.get_function(index)
+        } else {
+            function.get_function(&[])
+        }
+    });
+    let Some(body) = body else {
+        for input in call.inputs.values() {
+            collect_expression_calls(input, ctx, transfers);
+        }
+        return;
+    };
+
+    for (path, actual) in &call.inputs {
+        collect_expression_calls(actual, ctx, transfers);
+        let Some(&formal) = body.arg_map.get(path) else {
+            continue;
+        };
+        let Some(width) = ctx.variables.get(&formal).and_then(Variable::total_width) else {
+            continue;
+        };
+        let Some(span) = PackedSpan::whole(width) else {
+            continue;
+        };
+        collect_expression_transfers(actual, span, formal, span, ctx, transfers);
+    }
+
+    for (path, destinations) in &call.outputs {
+        let Some(&formal) = body.arg_map.get(path) else {
+            continue;
+        };
+        let destination_spans = destinations
+            .iter()
+            .map(|destination| {
+                variable_packed_span(destination.id, &destination.select, ctx)
+                    .map(|span| (destination.id, span))
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(destination_spans) = destination_spans else {
+            continue;
+        };
+        let total_width = destination_spans.iter().map(|(_, span)| span.length).sum();
+        let mut offset = total_width;
+        for (destination_id, destination) in destination_spans {
+            offset -= destination.length;
+            add_transfer(
+                transfers,
+                formal,
+                PackedSpan {
+                    start: offset,
+                    length: destination.length,
+                },
+                destination_id,
+                destination,
+            );
+        }
+    }
+}
+
+fn collect_expression_transfers(
+    expression: &Expression,
+    requested: PackedSpan,
+    target_id: VarId,
+    target: PackedSpan,
+    ctx: &mut Context,
+    transfers: &mut Vec<PackedTransfer>,
+) {
+    if requested.length != target.length {
+        return;
+    }
+    match expression {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::Variable(id, _, select, _) => {
+                let Some(selected) = variable_packed_span(*id, select, ctx) else {
+                    return;
+                };
+                let Some(expression_width) = PackedSpan::whole(selected.length) else {
+                    return;
+                };
+                let Some(valid) = requested.intersection(expression_width) else {
+                    return;
+                };
+                let Some(source) = valid.translated(0, selected.start) else {
+                    return;
+                };
+                let Some(target) = valid.translated(requested.start, target.start) else {
+                    return;
+                };
+                add_transfer(transfers, *id, source, target_id, target);
+            }
+            Factor::FunctionCall(call) => {
+                collect_call_transfers(call, ctx, transfers);
+                let body = ctx.functions.get(&call.id).and_then(|function| {
+                    if let Some(index) = &call.index {
+                        function.get_function(index)
+                    } else {
+                        function.get_function(&[])
+                    }
+                });
+                if let Some(ret) = body.and_then(|body| body.ret)
+                    && let Some(width) = ctx.variables.get(&ret).and_then(Variable::total_width)
+                    && let Some(valid) =
+                        PackedSpan::whole(width).and_then(|width| requested.intersection(width))
+                    && let Some(target) = valid.translated(requested.start, target.start)
+                {
+                    add_transfer(transfers, ret, valid, target_id, target);
+                }
+            }
+            Factor::SystemFunctionCall(call) => match &call.kind {
+                SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
+                    collect_expression_transfers(
+                        &input.0, requested, target_id, target, ctx, transfers,
+                    );
+                }
+                _ => collect_expression_calls(expression, ctx, transfers),
+            },
+            _ => {}
+        },
+        Expression::Unary(Op::BitNot | Op::Add | Op::Sub, operand, _) => {
+            collect_expression_transfers(operand, requested, target_id, target, ctx, transfers);
+        }
+        Expression::Binary(left, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor, right, _) => {
+            collect_expression_transfers(left, requested, target_id, target, ctx, transfers);
+            collect_expression_transfers(right, requested, target_id, target, ctx, transfers);
+        }
+        Expression::Binary(left, op, right, _)
+            if matches!(
+                op,
+                Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR | Op::ArithShiftR
+            ) =>
+        {
+            let shift = right.eval_value(ctx).and_then(|value| value.to_usize());
+            let width = left.comptime().r#type.total_width();
+            if let (Some(shift), Some(width)) = (shift, width) {
+                let mapped = if matches!(op, Op::LogicShiftL | Op::ArithShiftL) {
+                    PackedSpan::new(shift, width)
+                        .and_then(|window| requested.intersection(window))
+                        .and_then(|valid| Some((valid, valid.translated(shift, 0)?)))
+                } else {
+                    width
+                        .checked_sub(shift)
+                        .and_then(PackedSpan::whole)
+                        .and_then(|window| requested.intersection(window))
+                        .and_then(|valid| Some((valid, valid.translated(0, shift)?)))
+                };
+                if let Some((valid, source)) = mapped
+                    && let Some(target) = valid.translated(requested.start, target.start)
+                {
+                    collect_expression_transfers(left, source, target_id, target, ctx, transfers);
+                }
+            }
+            collect_expression_calls(right, ctx, transfers);
+        }
+        Expression::Ternary(_, left, right, _) => {
+            collect_expression_transfers(left, requested, target_id, target, ctx, transfers);
+            collect_expression_transfers(right, requested, target_id, target, ctx, transfers);
+        }
+        Expression::Concatenation(parts, _) if parts.iter().all(|(_, repeat)| repeat.is_none()) => {
+            let mut low = 0usize;
+            for (part, _) in parts.iter().rev() {
+                let Some(width) = part.comptime().r#type.total_width() else {
+                    return;
+                };
+                let Some(window) = PackedSpan::new(low, width) else {
+                    return;
+                };
+                if let Some(overlap) = requested.intersection(window)
+                    && let Some(local) = overlap.translated(low, 0)
+                    && let Some(target) = overlap.translated(requested.start, target.start)
+                {
+                    collect_expression_transfers(part, local, target_id, target, ctx, transfers);
+                }
+                low = low.saturating_add(width);
+            }
+        }
+        _ => collect_expression_calls(expression, ctx, transfers),
+    }
+}
+
 /// None if the index is dynamic.
-fn eval_dst_mask(
+fn eval_dst_span(
     dst: &AssignDestination,
     parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
-) -> Option<(usize, BigUint)> {
+) -> Option<(usize, PackedSpan)> {
     let v = parent_vars.get(&dst.id)?;
     let idx_path = dst.index.eval_value(ctx)?;
     let flat = v.r#type.array.calc_index(&idx_path)?;
-    let mask = if let Some((beg, end)) = dst.select.eval_value(ctx, &v.r#type, false) {
-        ValueBigUint::gen_mask_range(beg, end)
+    let span = if let Some((high, low)) = dst.select.eval_value(ctx, &v.r#type, false) {
+        PackedSpan::from_select(high, low)?
     } else {
         let width = v.total_width()?;
-        ValueBigUint::gen_mask(width)
+        PackedSpan::whole(width)?
     };
-    Some((flat, mask))
+    Some((flat, span))
 }
 
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<StrId, ModuleCombSummary>,
 ) -> Graph<NodeKey, ()> {
-    let ff_table = &module.ff_table;
-    let union_writes = compute_union_writes(&module.per_decl_refs);
-    let writes_per_decl = compute_writes_per_decl(&module.per_decl_refs);
-    let undom_per_decl = compute_undominated_per_decl(module);
-
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.functions = module.functions.clone();
@@ -364,143 +914,19 @@ fn build_module_graph(
     let mut graph: Graph<NodeKey, ()> = Graph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
 
-    for ((src_id, src_idx), entry) in &ff_table.table {
-        if entry.is_ff {
+    for declaration in &module.declarations {
+        let Declaration::Comb(comb) = declaration else {
             continue;
-        }
-        if !is_module_scope_var(*src_id, &module.variables) {
-            continue;
-        }
-        // Under-detect oversized arrays (see `OVERSIZED_ARRAY`).
-        if oversized_array(*src_id, &module.variables) {
-            continue;
-        }
-        let src_id_idx = (*src_id, *src_idx);
-
-        for (reader_decl, assign_target, src_read_mask, from_ff) in &entry.refered {
-            if *from_ff {
+        };
+        for (source, destination) in procedure::analyze(module, &bit_part, &comb.statements) {
+            if !is_module_scope_var(source.0, &module.variables)
+                || !is_module_scope_var(destination.0, &module.variables)
+            {
                 continue;
             }
-            // `decl_read_mask == 0` also filters out reads gathered by
-            // `gather_ff` but missing from `eval_assign` (notably inst
-            // input expressions, which `add_inst_feedthrough_edges` handles).
-            let decl_read_mask = lookup_read_mask(&module.per_decl_refs, *reader_decl, src_id_idx);
-            if decl_read_mask == BigUint::default() {
-                continue;
-            }
-            let read_mask = if *src_read_mask != BigUint::default() {
-                &decl_read_mask & src_read_mask
-            } else {
-                decl_read_mask
-            };
-            if read_mask == BigUint::default() {
-                continue;
-            }
-            // Internal sources need a comb writer overlapping the read bits.
-            // Input ports are driven externally so they always carry data.
-            let effective_read = if is_input_port(*src_id, &module.variables) {
-                read_mask.clone()
-            } else {
-                let Some(driven) = union_writes.get(&src_id_idx) else {
-                    continue;
-                };
-                let overlap = &read_mask & driven;
-                if overlap == BigUint::default() {
-                    continue;
-                }
-                overlap
-            };
-
-            // Per-statement LHS mask preferred over per-decl aggregate.
-            // Otherwise `t1[0] = 0; t1[1] = src;` would route src into both
-            // bits.
-            let dst_with_masks: Vec<((VarId, usize), BigUint)> = match assign_target {
-                Some((dst_id, Some(dst_idx), lhs_mask)) => {
-                    let mask = if *lhs_mask != BigUint::default() {
-                        lhs_mask.clone()
-                    } else {
-                        lookup_write_mask(&module.per_decl_refs, *reader_decl, (*dst_id, *dst_idx))
-                    };
-                    if mask != BigUint::default() {
-                        vec![((*dst_id, *dst_idx), mask)]
-                    } else {
-                        vec![]
-                    }
-                }
-                // Under-detect oversized arrays (see `OVERSIZED_ARRAY`).
-                Some((dst_id, None, _)) if oversized_array(*dst_id, &module.variables) => vec![],
-                Some((dst_id, None, lhs_mask)) => writes_per_decl
-                    .get(reader_decl)
-                    .map(|w| {
-                        w.iter()
-                            .filter(|(id, _, _)| id == dst_id)
-                            .map(|(id, idx, decl_mask)| {
-                                let mask = if *lhs_mask != BigUint::default() {
-                                    lhs_mask & decl_mask
-                                } else {
-                                    decl_mask.clone()
-                                };
-                                ((*id, *idx), mask)
-                            })
-                            .filter(|(_, m)| m != &BigUint::default())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                None => writes_per_decl
-                    .get(reader_decl)
-                    .map(|w| {
-                        w.iter()
-                            .filter(|(id, _, _)| *id == *src_id)
-                            .map(|(id, idx, m)| ((*id, *idx), m.clone()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            };
-
-            for (dst_id_idx, write_mask) in dst_with_masks {
-                if write_mask == BigUint::default() {
-                    continue;
-                }
-                if !is_module_scope_var(dst_id_idx.0, &module.variables) {
-                    continue;
-                }
-                // Same `(VarId, idx)`: only undominated reads can close a cycle through
-                // this declaration (`a = 0; a = a + 1` must not). Disjoint bits still form
-                // real multi-bit cycles (`o_y[1] = o_y[2]; o_y[2] = o_y[1]`), so read/write
-                // masks need not overlap — the bit-partition ranges stop `a[1] = a[0]` self-edges.
-                //
-                // A condition read (`assign_target` is None, e.g. `if yw[i]`) is
-                // recorded against EVERY same-variable write, so on a feed-forward
-                // array chain it wires `yw[i]` to every `yw[j]` — a false cross-index
-                // cycle. Extend the same undominated filter to it: a condition read
-                // dominated by an earlier write to the same element cannot close a
-                // loop; a real (undominated) condition loop is still detected.
-                let mut effective_read = effective_read.clone();
-                if src_id_idx == dst_id_idx || assign_target.is_none() {
-                    let undom = undom_per_decl
-                        .get(reader_decl)
-                        .and_then(|m| m.get(&src_id_idx))
-                        .cloned()
-                        .unwrap_or_default();
-                    let undom_read = &undom & &effective_read;
-                    if undom_read == BigUint::default() {
-                        continue;
-                    }
-                    effective_read = undom_read;
-                }
-
-                let src_ranges = bit_part.overlapping(src_id_idx, &effective_read);
-                let dst_ranges = bit_part.overlapping(dst_id_idx, &write_mask);
-                for sr in &src_ranges {
-                    let src_node_key = (src_id_idx.0, src_id_idx.1, *sr);
-                    let src_node = ensure_node(&mut graph, &mut node_map, src_node_key);
-                    for dr in &dst_ranges {
-                        let dst_node_key = (dst_id_idx.0, dst_id_idx.1, *dr);
-                        let dst_node = ensure_node(&mut graph, &mut node_map, dst_node_key);
-                        graph.add_edge(src_node, dst_node, ());
-                    }
-                }
-            }
+            let source = ensure_node(&mut graph, &mut node_map, source);
+            let destination = ensure_node(&mut graph, &mut node_map, destination);
+            graph.add_edge(source, destination, ());
         }
     }
 
@@ -542,6 +968,8 @@ fn add_inst_feedthrough_edges(
     parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
 ) {
+    add_sparse_whole_port_copy_edges(inst, child, bit_part, graph, node_map, parent_vars);
+
     let mut input_reads: HashMap<VarId, Vec<NodeKey>> = HashMap::default();
     for inp in &inst.inputs {
         if !is_pure_input_or_output(inp.id, &child.variables, Direction::Input) {
@@ -584,6 +1012,109 @@ fn add_inst_feedthrough_edges(
                     let s = ensure_node(graph, node_map, *r);
                     let t = ensure_node(graph, node_map, *d);
                     graph.add_edge(s, t, ());
+                }
+            }
+        }
+    }
+}
+
+fn add_sparse_whole_port_copy_edges(
+    inst: &InstDeclaration,
+    child: &Module,
+    bit_part: &BitPartition,
+    graph: &mut Graph<NodeKey, ()>,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+    parent_vars: &HashMap<VarId, Variable>,
+) {
+    for declaration in &child.declarations {
+        let Declaration::Comb(comb) = declaration else {
+            continue;
+        };
+        let [Statement::Assign(assign)] = comb.statements.as_slice() else {
+            continue;
+        };
+        let [destination] = assign.dst.as_slice() else {
+            continue;
+        };
+        if !destination.index.0.is_empty()
+            || !destination.select.is_empty()
+            || !is_pure_input_or_output(destination.id, &child.variables, Direction::Output)
+        {
+            continue;
+        }
+        let Expression::Term(factor) = &assign.expr else {
+            continue;
+        };
+        let Factor::Variable(input_id, input_index, input_select, _) = factor.as_ref() else {
+            continue;
+        };
+        if !input_index.0.is_empty()
+            || !input_select.is_empty()
+            || !is_pure_input_or_output(*input_id, &child.variables, Direction::Input)
+        {
+            continue;
+        }
+
+        let Some(input) = inst.inputs.iter().find(|input| input.id == *input_id) else {
+            continue;
+        };
+        let Expression::Term(input_factor) = &input.expr else {
+            continue;
+        };
+        let Factor::Variable(parent_input, parent_input_index, parent_input_select, _) =
+            input_factor.as_ref()
+        else {
+            continue;
+        };
+        if !parent_input_index.0.is_empty() || !parent_input_select.is_empty() {
+            continue;
+        }
+
+        let Some(output) = inst
+            .outputs
+            .iter()
+            .find(|output| output.id == destination.id)
+        else {
+            continue;
+        };
+        let [parent_destination] = output.dst.as_slice() else {
+            continue;
+        };
+        if !parent_destination.index.0.is_empty() || !parent_destination.select.is_empty() {
+            continue;
+        }
+        let parent_output = parent_destination.id;
+
+        let Some(child_input) = child.variables.get(input_id) else {
+            continue;
+        };
+        let Some(child_output) = child.variables.get(&destination.id) else {
+            continue;
+        };
+        let Some(parent_input_variable) = parent_vars.get(parent_input) else {
+            continue;
+        };
+        let Some(parent_output_variable) = parent_vars.get(&parent_output) else {
+            continue;
+        };
+        if child_input.total_width() != child_output.total_width()
+            || child_input.r#type.total_array() != child_output.r#type.total_array()
+            || parent_input_variable.total_width() != parent_output_variable.total_width()
+            || parent_input_variable.r#type.total_array()
+                != parent_output_variable.r#type.total_array()
+        {
+            continue;
+        }
+
+        for index in bit_part.array_spans(parent_output) {
+            let ranges = bit_part.ranges_of((parent_output, *index));
+            for (destination_range, span) in ranges.iter().enumerate() {
+                let destination_key = (parent_output, *index, destination_range);
+                for source_range in bit_part.overlapping((*parent_input, *index), *span) {
+                    let source_key = (*parent_input, *index, source_range);
+                    let source = ensure_node(graph, node_map, source_key);
+                    let destination = ensure_node(graph, node_map, destination_key);
+                    graph.add_edge(source, destination, ());
                 }
             }
         }
@@ -644,10 +1175,8 @@ fn collect_factor_node_keys(
 ) {
     match factor {
         Factor::Variable(id, index, select, _) => {
-            for (idx, mask) in var_reads(*id, index, select, ctx) {
-                for r in bit_part.overlapping((*id, idx), &mask) {
-                    out.push((*id, idx, r));
-                }
+            for (idx, span) in var_reads(*id, index, select, ctx) {
+                out.extend(bit_part.overlapping_access(*id, idx, span));
             }
         }
         Factor::FunctionCall(_) | Factor::SystemFunctionCall(_) => {
@@ -664,16 +1193,20 @@ fn collect_dst_node_keys(
     parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
 ) {
-    let Some((idx, mask)) = eval_dst_mask(dst, parent_vars, ctx) else {
+    let Some((idx, packed)) = eval_dst_span(dst, parent_vars, ctx) else {
         return;
     };
-    for r in bit_part.overlapping((dst.id, idx), &mask) {
-        out.push((dst.id, idx, r));
+    let span = ArraySpan {
+        start: idx,
+        length: 1,
+    };
+    for r in bit_part.overlapping((dst.id, span), packed) {
+        out.push((dst.id, span, r));
     }
 }
 
 fn check_graph(module: &Module, graph: &Graph<NodeKey, ()>, errors: &mut Vec<AnalyzerError>) {
-    let sccs = tarjan_scc(graph);
+    let sccs = strongly_connected_components(graph);
     let mut reported: HashSet<Vec<NodeKey>> = HashSet::default();
     for scc in sccs {
         let is_loop = scc.len() > 1 || (scc.len() == 1 && has_self_edge(graph, scc[0]));
@@ -691,6 +1224,13 @@ fn check_graph(module: &Module, graph: &Graph<NodeKey, ()>, errors: &mut Vec<Ana
     }
 }
 
+fn strongly_connected_components(graph: &Graph<NodeKey, ()>) -> Vec<Vec<NodeIndex>> {
+    // Petgraph's Tarjan implementation uses recursive DFS. A long, otherwise
+    // shallow dependency chain can therefore exhaust the native stack. The
+    // Kosaraju implementation uses explicit worklists for both passes.
+    kosaraju_scc(graph)
+}
+
 fn ensure_node(
     graph: &mut Graph<NodeKey, ()>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
@@ -703,66 +1243,6 @@ fn has_self_edge(graph: &Graph<NodeKey, ()>, node: NodeIndex) -> bool {
     graph
         .edges(node)
         .any(|e| e.source() == node && e.target() == node)
-}
-
-fn compute_union_writes(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-) -> HashMap<(VarId, usize), BigUint> {
-    let mut out: HashMap<(VarId, usize), BigUint> = HashMap::default();
-    for refs in per_decl_refs.values() {
-        for (id, entry) in refs {
-            for (i, mask) in entry.mask_assign.iter().enumerate() {
-                if *mask == BigUint::default() {
-                    continue;
-                }
-                let cur = out.entry((*id, i)).or_default();
-                *cur |= mask;
-            }
-        }
-    }
-    out
-}
-
-/// `decl -> Vec<(VarId, idx, write_mask)>`. Includes inst-output dsts.
-fn compute_writes_per_decl(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-) -> HashMap<usize, Vec<(VarId, usize, BigUint)>> {
-    let mut out: HashMap<usize, Vec<(VarId, usize, BigUint)>> = HashMap::default();
-    for (decl, refs) in per_decl_refs {
-        for (id, entry) in refs {
-            for (i, mask) in entry.mask_assign.iter().enumerate() {
-                if *mask == BigUint::default() {
-                    continue;
-                }
-                out.entry(*decl).or_default().push((*id, i, mask.clone()));
-            }
-        }
-    }
-    out
-}
-
-fn lookup_read_mask(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-    decl: usize,
-    key: (VarId, usize),
-) -> BigUint {
-    per_decl_refs
-        .get(&decl)
-        .and_then(|m| m.get(&key.0))
-        .and_then(|e| e.mask_ref.get(key.1).cloned())
-        .unwrap_or_default()
-}
-
-fn lookup_write_mask(
-    per_decl_refs: &HashMap<usize, HashMap<VarId, crate::ir::ReferencedEntry>>,
-    decl: usize,
-    key: (VarId, usize),
-) -> BigUint {
-    per_decl_refs
-        .get(&decl)
-        .and_then(|m| m.get(&key.0))
-        .and_then(|e| e.mask_assign.get(key.1).cloned())
-        .unwrap_or_default()
 }
 
 fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
@@ -780,6 +1260,11 @@ fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
         }
         if let Some(toks) = module.assign_tokens.get(id) {
             tokens.extend(toks.iter().copied());
+        } else if let Some(variable) = module.variables.get(id) {
+            // Assignment coverage intentionally omits oversized arrays. Keep
+            // a usable diagnostic site when the sparse graph still proves a
+            // cycle through one of those variables.
+            tokens.push(variable.token);
         }
     }
     {
@@ -793,11 +1278,6 @@ fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
         &primary,
         &participants,
     ))
-}
-
-fn is_input_port(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
-    use crate::ir::VarKind;
-    matches!(variables.get(&id).map(|v| v.kind), Some(VarKind::Input))
 }
 
 fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
@@ -851,324 +1331,220 @@ fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> Module
     ModuleCombSummary { feedthrough }
 }
 
-// Statement-level dominance analysis.
+#[cfg(test)]
+mod region_tests {
+    use super::*;
 
-/// `defs`: bits guaranteed-written on the current path.
-/// `undom`: bits read without a covering preceding write.
-#[derive(Default, Clone)]
-struct DominanceState {
-    defs: HashMap<IdxKey, BigUint>,
-    undom: HashMap<IdxKey, BigUint>,
-}
+    #[test]
+    fn scc_walk_does_not_use_the_native_stack() {
+        const COUNT: usize = 100_000;
 
-fn compute_undominated_per_decl(module: &Module) -> HashMap<usize, HashMap<IdxKey, BigUint>> {
-    let mut out: HashMap<usize, HashMap<IdxKey, BigUint>> = HashMap::default();
-    let mut ctx = Context::default();
-    ctx.variables = module.variables.clone();
-    ctx.functions = module.functions.clone();
-
-    for (decl_idx, decl) in module.declarations.iter().enumerate() {
-        if let Declaration::Comb(c) = decl {
-            let mut state = DominanceState::default();
-            walk_block(&c.statements, &mut state, &mut ctx);
-            state.undom.retain(|_, m| *m != BigUint::default());
-            if !state.undom.is_empty() {
-                out.insert(decl_idx, state.undom);
+        let id = VarId::from_raw(0);
+        let mut graph = Graph::new();
+        let mut previous = None;
+        for start in 0..COUNT {
+            let current = graph.add_node((id, ArraySpan { start, length: 1 }, 0));
+            if let Some(previous) = previous {
+                graph.add_edge(previous, current, ());
             }
+            previous = Some(current);
         }
-    }
-    out
-}
 
-fn walk_block(stmts: &[Statement], state: &mut DominanceState, ctx: &mut Context) {
-    for stmt in stmts {
-        walk_stmt(stmt, state, ctx);
-    }
-}
-
-fn walk_stmt(stmt: &Statement, state: &mut DominanceState, ctx: &mut Context) {
-    match stmt {
-        Statement::Assign(a) => walk_assign(a, state, ctx),
-        Statement::If(i) => walk_if(i, state, ctx),
-        Statement::Case(c) => walk_case(c, state, ctx),
-        Statement::For(f) => walk_for(f, state, ctx),
-        Statement::FunctionCall(c) => walk_function_call(c.as_ref(), state, ctx),
-        // IfReset is always_ff-only; the rest have no LHS to track.
-        Statement::IfReset(_)
-        | Statement::SystemFunctionCall(_)
-        | Statement::TbMethodCall(_)
-        | Statement::Break
-        | Statement::Unsupported(_)
-        | Statement::Null => {}
-    }
-}
-
-fn walk_assign(stmt: &AssignStatement, state: &mut DominanceState, ctx: &mut Context) {
-    // RHS before LHS: otherwise `a = a + 1` sees itself as dominated.
-    walk_expr(&stmt.expr, state, ctx);
-    for dst in &stmt.dst {
-        for (idx, mask) in dst_writes(dst, ctx) {
-            let key = (dst.id, idx);
-            *state.defs.entry(key).or_default() |= &mask;
-        }
-    }
-}
-
-fn walk_if(stmt: &IfStatement, state: &mut DominanceState, ctx: &mut Context) {
-    walk_expr(&stmt.cond, state, ctx);
-
-    let saved_defs = state.defs.clone();
-    let saved_undom = state.undom.clone();
-
-    let mut true_state = DominanceState {
-        defs: saved_defs.clone(),
-        undom: saved_undom.clone(),
-    };
-    walk_block(&stmt.true_side, &mut true_state, ctx);
-
-    let mut false_state = DominanceState {
-        defs: saved_defs,
-        undom: saved_undom,
-    };
-    walk_block(&stmt.false_side, &mut false_state, ctx);
-
-    // Merge: defs = intersection (only both-paths writes dominate
-    // downstream); undom = union (any path's undom contributes).
-    let mut keys: HashSet<IdxKey> = HashSet::default();
-    for k in true_state.defs.keys().chain(false_state.defs.keys()) {
-        keys.insert(*k);
-    }
-    let mut merged_defs: HashMap<IdxKey, BigUint> = HashMap::default();
-    for key in keys {
-        let zero = BigUint::default();
-        let t = true_state.defs.get(&key).unwrap_or(&zero);
-        let f = false_state.defs.get(&key).unwrap_or(&zero);
-        let merged = t & f;
-        if merged != zero {
-            merged_defs.insert(key, merged);
-        }
-    }
-    state.defs = merged_defs;
-
-    state.undom = true_state.undom;
-    for (key, mask) in false_state.undom {
-        *state.undom.entry(key).or_default() |= &mask;
-    }
-}
-
-fn walk_case(stmt: &CaseStatement, state: &mut DominanceState, ctx: &mut Context) {
-    walk_expr(&stmt.case_target, state, ctx);
-    for arm in &stmt.arms {
-        for p in &arm.patterns {
-            match p {
-                crate::ir::CasePattern::Eq(e) => walk_expr(e, state, ctx),
-                crate::ir::CasePattern::Range { lo, hi, .. } => {
-                    walk_expr(lo, state, ctx);
-                    walk_expr(hi, state, ctx);
-                }
-            }
-        }
+        assert_eq!(strongly_connected_components(&graph).len(), COUNT);
     }
 
-    let saved_defs = state.defs.clone();
-    let saved_undom = state.undom.clone();
+    #[test]
+    fn disjoint_array_point_queries_do_not_scan_every_partition() {
+        const COUNT: usize = 16_384;
 
-    let mut branch_states: Vec<DominanceState> = Vec::with_capacity(stmt.arms.len() + 1);
-    for arm in &stmt.arms {
-        let mut s = DominanceState {
-            defs: saved_defs.clone(),
-            undom: saved_undom.clone(),
+        let id = VarId::from_raw(0);
+        let packed = PackedSpan {
+            start: 0,
+            length: 32,
         };
-        walk_block(&arm.body, &mut s, ctx);
-        branch_states.push(s);
-    }
-    // Empty default behaves as the saved state, modeling "no arm matched".
-    let mut default_state = DominanceState {
-        defs: saved_defs,
-        undom: saved_undom,
-    };
-    walk_block(&stmt.default, &mut default_state, ctx);
-    branch_states.push(default_state);
+        let mut accesses = HashMap::default();
+        for start in 0..COUNT {
+            accesses.insert((id, ArraySpan { start, length: 1 }), vec![packed]);
+        }
 
-    // defs = intersection across branches; undom = union.
-    let mut keys: HashSet<IdxKey> = HashSet::default();
-    for b in &branch_states {
-        for k in b.defs.keys() {
-            keys.insert(*k);
+        let ranges = split_array_spans(accesses, &HashMap::default());
+        let partition = BitPartition::new(ranges);
+        assert_eq!(partition.array_spans(id).len(), COUNT);
+        for start in 0..COUNT {
+            assert_eq!(
+                partition.overlapping_access(id, ArraySpan { start, length: 1 }, packed),
+                vec![(id, ArraySpan { start, length: 1 }, 0)]
+            );
         }
     }
-    let mut merged_defs: HashMap<IdxKey, BigUint> = HashMap::default();
-    for key in keys {
-        let zero = BigUint::default();
-        let mut acc: Option<BigUint> = None;
-        for b in &branch_states {
-            let v = b.defs.get(&key).unwrap_or(&zero).clone();
-            acc = Some(match acc {
-                Some(a) => a & v,
-                None => v,
-            });
-        }
-        if let Some(merged) = acc
-            && merged != zero
-        {
-            merged_defs.insert(key, merged);
-        }
-    }
-    state.defs = merged_defs;
 
-    let mut merged_undom: HashMap<IdxKey, BigUint> = HashMap::default();
-    for b in branch_states {
-        for (key, mask) in b.undom {
-            *merged_undom.entry(key).or_default() |= &mask;
-        }
-    }
-    state.undom = merged_undom;
-}
-
-fn walk_for(stmt: &ForStatement, state: &mut DominanceState, ctx: &mut Context) {
-    walk_for_range(&stmt.range, state, ctx);
-    // Body may run zero times: surface undom reads but don't trust
-    // its writes to dominate anything afterwards.
-    let saved_defs = state.defs.clone();
-    walk_block(&stmt.body, state, ctx);
-    state.defs = saved_defs;
-}
-
-fn walk_for_range(range: &ForRange, state: &mut DominanceState, ctx: &mut Context) {
-    let bounds = match range {
-        ForRange::Forward { start, end, .. }
-        | ForRange::Reverse { start, end, .. }
-        | ForRange::Stepped { start, end, .. } => [start, end],
-    };
-    for b in bounds {
-        if let ForBound::Expression(e) = b {
-            walk_expr(e, state, ctx);
-        }
-    }
-}
-
-fn walk_function_call(call: &FunctionCall, state: &mut DominanceState, ctx: &mut Context) {
-    for input in call.inputs.values() {
-        walk_expr(input, state, ctx);
-    }
-    for outputs in call.outputs.values() {
-        for dst in outputs {
-            for (idx, mask) in dst_writes(dst, ctx) {
-                let key = (dst.id, idx);
-                *state.defs.entry(key).or_default() |= &mask;
-            }
-        }
-    }
-}
-
-fn walk_expr(expr: &Expression, state: &mut DominanceState, ctx: &mut Context) {
-    match expr {
-        Expression::Term(t) => walk_factor(t, state, ctx),
-        Expression::Unary(_, e, _) => walk_expr(e, state, ctx),
-        Expression::Binary(a, _, b, _) => {
-            walk_expr(a, state, ctx);
-            walk_expr(b, state, ctx);
-        }
-        Expression::Ternary(a, b, c, _) => {
-            walk_expr(a, state, ctx);
-            walk_expr(b, state, ctx);
-            walk_expr(c, state, ctx);
-        }
-        Expression::Concatenation(parts, _) => {
-            for (a, b) in parts {
-                walk_expr(a, state, ctx);
-                if let Some(b) = b {
-                    walk_expr(b, state, ctx);
-                }
-            }
-        }
-        Expression::StructConstructor(_, fields, _) => {
-            for (_, e) in fields {
-                walk_expr(e, state, ctx);
-            }
-        }
-        Expression::ArrayLiteral(_, _) => {}
-    }
-}
-
-fn walk_factor(factor: &Factor, state: &mut DominanceState, ctx: &mut Context) {
-    match factor {
-        Factor::Variable(id, index, select, _) => {
-            for (idx, mask) in var_reads(*id, index, select, ctx) {
-                let key = (*id, idx);
-                let dominated = state.defs.get(&key).cloned().unwrap_or_default();
-                let undom_bits = &mask ^ (&mask & &dominated);
-                if undom_bits != BigUint::default() {
-                    *state.undom.entry(key).or_default() |= undom_bits;
-                }
-            }
-        }
-        Factor::FunctionCall(call) => walk_function_call(call, state, ctx),
-        _ => {}
-    }
-}
-
-/// Mirrors the masking logic of `AssignDestination::eval_assign`.
-fn dst_writes(dst: &AssignDestination, ctx: &mut Context) -> Vec<(usize, BigUint)> {
-    let Some(variable) = ctx.get_variable_info(dst.id) else {
-        return Vec::new();
-    };
-    let is_index_const = dst.index.is_const();
-    let is_select_const = dst.select.is_const();
-
-    let range = if !is_index_const {
-        variable.r#type.array.calc_range(&[])
-    } else {
-        let Some(index) = dst.index.eval_value(ctx) else {
-            return Vec::new();
+    #[test]
+    fn array_partition_sweep_keeps_an_access_active_until_its_own_end() {
+        let id = VarId::from_raw(0);
+        let packed = PackedSpan {
+            start: 0,
+            length: 1,
         };
-        variable.r#type.array.calc_range(&index)
-    };
+        let mut accesses = HashMap::default();
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 0,
+                    length: 2,
+                },
+            ),
+            vec![packed],
+        );
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 1,
+                    length: 2,
+                },
+            ),
+            vec![packed],
+        );
 
-    let mask = if !is_select_const {
-        let Some(width) = variable.total_width() else {
-            return Vec::new();
-        };
-        ValueBigUint::gen_mask(width)
-    } else {
-        let Some((beg, end)) = dst.select.eval_value(ctx, &variable.r#type, false) else {
-            return Vec::new();
-        };
-        ValueBigUint::gen_mask_range(beg, end)
-    };
-
-    let mut out = Vec::new();
-    if let Some((beg, end)) = range {
-        for i in beg..=end {
-            out.push((i, mask.clone()));
+        let ranges = split_array_spans(accesses, &HashMap::default());
+        for start in 0..3 {
+            assert_eq!(
+                ranges
+                    .get(&(id, ArraySpan { start, length: 1 }))
+                    .map(Vec::as_slice),
+                Some([packed].as_slice())
+            );
         }
     }
-    out
-}
 
-fn var_reads(
-    id: VarId,
-    index: &VarIndex,
-    select: &VarSelect,
-    ctx: &mut Context,
-) -> Vec<(usize, BigUint)> {
-    let Some(variable) = ctx.variables.get(&id).cloned() else {
-        return Vec::new();
-    };
-    let mask = if let Some((beg, end)) = select.eval_value(ctx, &variable.r#type, false) {
-        ValueBigUint::gen_mask_range(beg, end)
-    } else {
-        let Some(width) = variable.total_width() else {
-            return Vec::new();
-        };
-        ValueBigUint::gen_mask(width)
-    };
-    if let Some(idx_path) = index.eval_value(ctx)
-        && let Some(flat) = variable.r#type.array.calc_index(&idx_path)
-    {
-        return vec![(flat, mask)];
+    #[test]
+    fn packed_partition_storage_depends_on_endpoints_not_declared_width() {
+        let distant = 1_000_000_000;
+        let spans = [
+            PackedSpan {
+                start: 0,
+                length: 1,
+            },
+            PackedSpan {
+                start: distant,
+                length: 1,
+            },
+        ];
+
+        assert_eq!(atomic_ranges(&spans, None), spans);
     }
-    // Dynamic index: conservatively treat every element as read.
-    let total = variable.r#type.total_array().unwrap_or(1);
-    (0..total).map(|i| (i, mask.clone())).collect()
+
+    #[test]
+    fn shifted_transfer_cycle_does_not_enumerate_declared_width() {
+        let width = 1_000_000_000;
+        let id = VarId::from_raw(0);
+        let mut accesses = HashMap::default();
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 0,
+                    length: 1,
+                },
+            ),
+            vec![PackedSpan {
+                start: 0,
+                length: width,
+            }],
+        );
+        let transfers = [PackedTransfer {
+            left_id: id,
+            left: PackedSpan {
+                start: 0,
+                length: width - 1,
+            },
+            right_id: id,
+            right: PackedSpan {
+                start: 1,
+                length: width - 1,
+            },
+        }];
+
+        let endpoints = propagate_packed_endpoints(&accesses, &transfers);
+        assert_eq!(
+            endpoints[&id],
+            [0, 1, 2, width - 2, width - 1, width]
+                .into_iter()
+                .collect::<HashSet<_>>()
+        );
+    }
+
+    #[test]
+    fn endpoint_paths_do_not_hide_distinct_arrivals_at_a_shared_transfer() {
+        let x = VarId::from_raw(0);
+        let y = VarId::from_raw(1);
+        let z = VarId::from_raw(2);
+        let w = VarId::from_raw(3);
+        let q = VarId::from_raw(4);
+        let mut accesses = HashMap::default();
+        accesses.insert(
+            (
+                x,
+                ArraySpan {
+                    start: 0,
+                    length: 1,
+                },
+            ),
+            vec![PackedSpan {
+                start: 5,
+                length: 1,
+            }],
+        );
+        let aligned = PackedSpan {
+            start: 0,
+            length: 10,
+        };
+        let shifted = PackedSpan {
+            start: 1,
+            length: 10,
+        };
+        let transfers = [
+            PackedTransfer {
+                left_id: x,
+                left: aligned,
+                right_id: y,
+                right: aligned,
+            },
+            PackedTransfer {
+                left_id: x,
+                left: aligned,
+                right_id: z,
+                right: shifted,
+            },
+            PackedTransfer {
+                left_id: y,
+                left: aligned,
+                right_id: w,
+                right: aligned,
+            },
+            PackedTransfer {
+                left_id: z,
+                left: shifted,
+                right_id: w,
+                right: shifted,
+            },
+            PackedTransfer {
+                left_id: w,
+                left: PackedSpan {
+                    start: 0,
+                    length: 11,
+                },
+                right_id: q,
+                right: PackedSpan {
+                    start: 0,
+                    length: 11,
+                },
+            },
+        ];
+
+        let endpoints = propagate_packed_endpoints(&accesses, &transfers);
+        let expected = [5, 6, 7].into_iter().collect::<HashSet<_>>();
+        assert!(endpoints[&q].is_superset(&expected));
+    }
 }
