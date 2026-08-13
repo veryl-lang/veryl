@@ -3007,7 +3007,7 @@ impl Conv<&air::Module> for ProtoModule {
             for (i, x) in hoisted_declarations.iter().enumerate() {
                 x.gather_ff(&mut analyzer_context, &mut ff_table, i);
             }
-            ff_table.update_is_ff();
+            ff_table.update_is_ff(&hoisted_declarations, &mut analyzer_context);
             if context.config.disable_ff_opt {
                 ff_table.force_all_ff();
             }
