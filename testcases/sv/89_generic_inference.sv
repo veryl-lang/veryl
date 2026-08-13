@@ -26,4 +26,17 @@ module veryl_testcase_Module89;
     // `T + 1` pattern inference: argument width 8 resolves T = 8.
     logic [9-1:0] _rw; always_comb _rw = __FuncWide__8(_a);
 endmodule
+
+module veryl_testcase_Module89b (
+    input var logic [8-1:0] value
+);
+    function automatic logic [8-1:0] __FuncId__8(
+        input var logic [8-1:0] x
+    ) ;
+        return x;
+    endfunction
+
+    // Generic argument inferred from a module port's declared width.
+    logic [8-1:0] _rp; always_comb _rp = __FuncId__8(value);
+endmodule
 //# sourceMappingURL=../map/89_generic_inference.sv.map
