@@ -3429,3 +3429,41 @@ fn ff_opt_counts_branches_by_max() {
         ]
     );
 }
+
+#[test]
+fn ff_opt_keeps_a_shift_that_reads_before_it_writes() {
+    // A pipeline shifted from the far end reads each bit before the loop
+    // reaches it, so no read observes a write and the comb form survives;
+    // running the same shift from the near end does observe one.
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+        d    : input logic,
+    ) {
+        var down : logic<5>;
+        var up   : logic<5>;
+
+        always_ff {
+            if_reset {
+                down = 0;
+                up   = 0;
+            } else {
+                for i in rev 0..4 {
+                    down[i + 1] = down[i];
+                }
+                for i in 0..4 {
+                    up[i + 1] = up[i];
+                }
+                down[0] = d;
+                up[0]   = d;
+            }
+        }
+    }
+    "#;
+
+    assert_eq!(
+        ff_flags(code),
+        vec![("down".to_string(), false), ("up".to_string(), true)]
+    );
+}
