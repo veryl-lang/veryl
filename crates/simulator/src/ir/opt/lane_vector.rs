@@ -382,7 +382,10 @@ pub fn lane_merge(stmts: &mut [ProtoStatement]) -> usize {
         let ProtoStatement::Assign(a) = s else {
             continue;
         };
-        if a.select.is_some() || a.dynamic_select.is_some() || a.rhs_select.is_some() {
+        // A static select store carries the same shape in a slice of a wider
+        // destination (a word of a bit-assembled vector); the store clips to
+        // the field either way, so the merged word is equally bounded.
+        if a.dynamic_select.is_some() || a.rhs_select.is_some() {
             continue;
         }
         let ProtoExpression::Concatenation {
@@ -392,6 +395,11 @@ pub fn lane_merge(stmts: &mut [ProtoStatement]) -> usize {
             continue;
         };
         let w = *width;
+        if let Some((hi, lo)) = a.select
+            && hi.max(lo) - hi.min(lo) + 1 != w
+        {
+            continue;
+        }
         // Wide results would need the multi-word paths for every node built
         // here; the shapes this recovers are word-sized destinations.
         if !(2..=64).contains(&w) || elements.len() != w {
@@ -434,11 +442,59 @@ pub fn lane_merge(stmts: &mut [ProtoStatement]) -> usize {
     merged
 }
 
+/// The same plain one-bit read in every lane, or `None` if any lane differs
+/// or the read is not plain.
+fn lane_invariant_read<'a>(lanes: &[(&'a ProtoExpression, usize)]) -> Option<&'a ProtoExpression> {
+    let head = lanes[0].0;
+    let ProtoExpression::Variable {
+        var_offset,
+        select,
+        dynamic_select: None,
+        width,
+        var_full_width,
+        ..
+    } = head
+    else {
+        return None;
+    };
+    if *width != 1 {
+        return None;
+    }
+    for (e, _) in &lanes[1..] {
+        let ProtoExpression::Variable {
+            var_offset: vo,
+            select: sel,
+            dynamic_select: None,
+            width: wd,
+            var_full_width: vfw,
+            ..
+        } = e
+        else {
+            return None;
+        };
+        if vo != var_offset || sel != select || wd != width || vfw != var_full_width {
+            return None;
+        }
+    }
+    Some(head)
+}
+
 /// Merge per-lane one-bit expressions into one `w`-bit expression whose bit
 /// `j` is lane `j`, or `None` if the lanes are not one shape over one set of
 /// variables.
 fn merge_lanes(lanes: &[(&ProtoExpression, usize)], w: usize) -> Option<ProtoExpression> {
     let (head, _) = lanes[0];
+    // A leaf that does not follow the lane at all: every lane holds the same
+    // bit, so the merged word is that bit replicated.  Only a plain read is
+    // matched — a compound invariant subtree arrives here through the
+    // operator arms, whose operands are replicated one by one instead.
+    if let Some(v) = lane_invariant_read(lanes) {
+        return Some(ProtoExpression::Concatenation {
+            elements: vec![(Box::new(v.clone()), w, 1)],
+            width: w,
+            expr_context: ctx(w),
+        });
+    }
     match head {
         ProtoExpression::Variable {
             var_offset,
@@ -902,6 +958,50 @@ mod tests {
             panic!("expected the broadcast constant")
         };
         assert_eq!((value.to_u64(), *width), (Some(0xf), 4));
+    }
+
+    #[test]
+    fn merge_broadcasts_a_lane_invariant_read() {
+        // `a[j] & b[2]`: one leaf follows the lane, the other holds the same
+        // bit everywhere and becomes that bit replicated across the word.
+        let lanes: Vec<ProtoExpression> = (0..4)
+            .rev()
+            .map(|j| binop(bit(0x10, j, 4), Op::BitAnd, bit(0x20, 2, 4), 1))
+            .collect();
+        let mut stmts = vec![store(0x80, 4, None, concat(lanes))];
+        assert_eq!(merge_any(&mut stmts), 1);
+        let ProtoExpression::Binary { y, .. } = unmask(expr_of(&stmts[0])) else {
+            panic!("expected the merged word operation")
+        };
+        let ProtoExpression::Concatenation {
+            elements, width, ..
+        } = y.as_ref()
+        else {
+            panic!("expected the replicated read")
+        };
+        assert_eq!((elements.len(), elements[0].1, *width), (1, 4, 4));
+    }
+
+    #[test]
+    fn merge_takes_a_static_select_store() {
+        // One word of a bit-assembled wider vector: the store selects the
+        // word, and the lanes inside it merge like any other.
+        let lanes: Vec<ProtoExpression> = (0..4)
+            .rev()
+            .map(|j| binop(bit(0x10, j, 4), Op::BitAnd, lit(1, 1), 1))
+            .collect();
+        let mut stmts = vec![store(0x80, 12, Some((7, 4)), concat(lanes))];
+        assert_eq!(merge_any(&mut stmts), 1);
+    }
+
+    #[test]
+    fn merge_rejects_a_select_store_whose_width_disagrees() {
+        let lanes: Vec<ProtoExpression> = (0..4)
+            .rev()
+            .map(|j| binop(bit(0x10, j, 4), Op::BitAnd, lit(1, 1), 1))
+            .collect();
+        let mut stmts = vec![store(0x80, 12, Some((8, 4)), concat(lanes))];
+        assert_eq!(merge_any(&mut stmts), 0);
     }
 
     #[test]
