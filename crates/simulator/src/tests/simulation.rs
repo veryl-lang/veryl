@@ -5143,6 +5143,61 @@ fn struct_constructor() {
 }
 
 #[test]
+fn struct_constructor_unsized_member_in_array() {
+    // The interpreter and the AOT-C backend used to read a shifted value here;
+    // the JIT did not -- hence every config.
+    let code = r#"
+    module Top (
+        zero:       output logic<16>,
+        trunc:      output logic<16>,
+        signed_neg: output logic<20>,
+        fill:       output logic<16>,
+        every:      output logic<16>,
+    ) {
+        struct T { a: logic<8>, b: logic<8> }
+        struct S { a: logic<8>, b: signed logic<12> }
+
+        var v: T [2];
+        var t: T [2];
+        var g: S [2];
+        var f: T [2];
+        var n: T [2];
+
+        always_comb {
+            v = '{T'{a: 8'h5a, b: 0},   T'{a: 0, b: 0}};
+            t = '{T'{a: 8'h5a, b: 300}, T'{a: 0, b: 0}};
+            g = '{S'{a: 8'h5a, b: -1},  S'{a: 0, b: 0}};
+            f = '{T'{a: 8'h5a, b: '1},  T'{a: 0, b: 0}};
+            n = '{T'{a: 1, b: 2},       T'{a: 3, b: 4}};
+        }
+
+        assign zero       = v[0];
+        assign trunc      = t[0];
+        assign signed_neg = g[0];
+        assign fill       = f[0];
+        assign every      = n[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("zero").unwrap(), Value::new(0x5a00, 16, false));
+        assert_eq!(sim.get("trunc").unwrap(), Value::new(0x5a2c, 16, false));
+        assert_eq!(
+            sim.get("signed_neg").unwrap(),
+            Value::new(0x5afff, 20, false)
+        );
+        assert_eq!(sim.get("fill").unwrap(), Value::new(0x5aff, 16, false));
+        assert_eq!(sim.get("every").unwrap(), Value::new(0x0304, 16, false));
+    }
+}
+
+#[test]
 fn struct_constructor_ff() {
     let code = r#"
     module Top (
