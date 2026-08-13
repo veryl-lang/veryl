@@ -42,10 +42,22 @@ use crate::{HashMap, HashSet};
 use veryl_analyzer::ir::Op;
 use veryl_analyzer::value::Value;
 
-/// `VERYL_COMB_FUSION=1` opt-in.
-pub fn enabled() -> bool {
+/// Default-on for 2-state storage; `VERYL_COMB_FUSION=0` opts out.
+pub fn enabled(use_4state: bool) -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION").as_deref() == Ok("1"))
+    !use_4state
+        && !FORCE_DISABLED.load(std::sync::atomic::Ordering::Relaxed)
+        && *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION").as_deref() != Ok("0"))
+}
+
+/// Set by [`force_disable`]; latches on and is never cleared, so the answer
+/// [`enabled`] gives cannot change once the pipeline has acted on it.
+static FORCE_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A fused def's storage is never written, so a dump would show it stale
+/// while the run still passes.  Must be called before analysis.
+pub fn force_disable() {
+    FORCE_DISABLED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 fn diag() -> bool {

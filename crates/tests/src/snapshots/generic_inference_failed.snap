@@ -13,4 +13,4 @@ generic_inference_failed (https://doc.veryl-lang.org/book/07_appendix/02_semanti
    ·                           ╰── Error location
  9 │ }
    ╰────
-  help: provide explicit generic arguments like `FuncId::<…>(…)`, or pass an argument whose width can be determined from a variable declaration
+  help: provide explicit generic arguments like `FuncId::<…>(…)`, or pass an argument whose width can be determined from a variable, port or parameter declaration

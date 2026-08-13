@@ -1164,7 +1164,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(generic_inference_failed),
-        help("provide explicit generic arguments like `{identifier}::<…>(…)`, or pass an argument whose width can be determined from a variable declaration"),
+        help("provide explicit generic arguments like `{identifier}::<…>(…)`, or pass an argument whose width can be determined from a variable, port or parameter declaration"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("failed to infer generic arguments for `{identifier}`")]

@@ -171,7 +171,7 @@ impl Module {
 
         let mut table = FfTable::default();
         self.gather_ff(context, &mut table);
-        table.update_is_ff();
+        table.update_is_ff(&self.declarations, context);
         self.ff_table = table;
 
         context.variables = saved_vars;
