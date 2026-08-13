@@ -153,18 +153,34 @@ where
     pub(super) fn root_sources(&self, version: VersionId) -> HashSet<K> {
         let mut sources = HashSet::default();
         let mut visited = HashSet::default();
+        let mut pending = Vec::new();
         match &self.versions[version] {
             // A final LiveOnEntry value is retained state, not a combinational
             // read. Entry versions reached through an explicit definition are.
             Version::Entry(_) => {}
             Version::Definition(inputs) => {
-                for input in inputs {
-                    self.collect_sources(*input, true, &mut sources, &mut visited);
-                }
+                pending.extend(inputs.iter().map(|input| (*input, true)));
             }
             Version::Phi(inputs) => {
-                for input in inputs {
-                    self.collect_sources(*input, false, &mut sources, &mut visited);
+                pending.extend(inputs.iter().map(|input| (*input, false)));
+            }
+        }
+
+        while let Some((version, include_entry)) = pending.pop() {
+            if !visited.insert((version, include_entry)) {
+                continue;
+            }
+            match &self.versions[version] {
+                Version::Entry(key) => {
+                    if include_entry {
+                        sources.insert(*key);
+                    }
+                }
+                Version::Definition(inputs) => {
+                    pending.extend(inputs.iter().map(|input| (*input, true)));
+                }
+                Version::Phi(inputs) => {
+                    pending.extend(inputs.iter().map(|input| (*input, include_entry)));
                 }
             }
         }
@@ -180,35 +196,6 @@ where
         let version = self.versions.len();
         self.versions.push(Version::Phi(inputs));
         version
-    }
-
-    fn collect_sources(
-        &self,
-        version: VersionId,
-        include_entry: bool,
-        sources: &mut HashSet<K>,
-        visited: &mut HashSet<(VersionId, bool)>,
-    ) {
-        if !visited.insert((version, include_entry)) {
-            return;
-        }
-        match &self.versions[version] {
-            Version::Entry(key) => {
-                if include_entry {
-                    sources.insert(*key);
-                }
-            }
-            Version::Definition(inputs) => {
-                for input in inputs {
-                    self.collect_sources(*input, true, sources, visited);
-                }
-            }
-            Version::Phi(inputs) => {
-                for input in inputs {
-                    self.collect_sources(*input, include_entry, sources, visited);
-                }
-            }
-        }
     }
 }
 
@@ -256,6 +243,19 @@ mod tests {
         let expected = ["source"].into_iter().collect::<HashSet<_>>();
         assert_eq!(ssa.root_sources(definition), expected);
         assert!(ssa.root_sources(restored).is_empty());
+    }
+
+    #[test]
+    fn root_source_walk_does_not_use_the_native_stack() {
+        let mut ssa = SsaStore::default();
+        let source = ssa.read("source");
+        let mut version = ssa.definition(vec![source]);
+        for _ in 0..100_000 {
+            version = ssa.definition(vec![version]);
+        }
+
+        let expected = ["source"].into_iter().collect::<HashSet<_>>();
+        assert_eq!(ssa.root_sources(version), expected);
     }
 
     #[test]
