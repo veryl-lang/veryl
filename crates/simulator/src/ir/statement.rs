@@ -31,6 +31,46 @@ use veryl_parser::token_range::TokenRange;
 /// Per-statement dependency: (input offsets, output offsets).
 pub type StmtDep = (Vec<VarOffset>, Vec<VarOffset>);
 
+/// The analyzer folds a const array to one value per element, which has no
+/// single-width expression form -- every array destination copies it
+/// element-wise instead.
+fn const_array_operand(expr: &air::Expression) -> Option<(&air::Comptime, &[Value])> {
+    let air::Expression::Term(factor) = expr else {
+        return None;
+    };
+    let air::Factor::Value(comptime) = factor.as_ref() else {
+        return None;
+    };
+    match &comptime.value {
+        ValueVariant::NumericArray(values) => Some((comptime, values)),
+        _ => None,
+    }
+}
+
+/// `None` on a shape mismatch, leaving the caller's generic path to report it.
+pub(crate) fn const_array_element_exprs(
+    expr: &air::Expression,
+    elements: usize,
+) -> Option<Vec<ProtoExpression>> {
+    let (comptime, values) = const_array_operand(expr)?;
+    if values.len() != elements {
+        return None;
+    }
+    let width = comptime.r#type.total_width()?;
+    let expr_context: ExpressionContext = (&comptime.expr_context).into();
+
+    Some(
+        values
+            .iter()
+            .map(|value| ProtoExpression::Value {
+                value: value.clone(),
+                width,
+                expr_context,
+            })
+            .collect(),
+    )
+}
+
 #[derive(Clone)]
 pub enum ProtoStatementBlock {
     Interpreted(Vec<ProtoStatement>),
@@ -3398,6 +3438,42 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     return Ok(result);
                 }
 
+                // Same destination shape fed by a const array (`s = pk::TBL;`).
+                if let Some(arr_shape) = dst_array.clone()
+                    && !arr_shape.is_empty()
+                    && dst0.select.is_empty()
+                    && let Some((comptime, values)) = const_array_operand(&src.expr)
+                {
+                    let total: usize = arr_shape.iter().map(|d| d.unwrap_or(1)).product();
+                    if values.len() != total {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    }
+                    let mut element_comptime = comptime.clone();
+                    element_comptime.r#type.array.clear();
+
+                    let mut result = Vec::with_capacity(total);
+                    for (i, value) in values.iter().enumerate() {
+                        let mut new_dst = dst0.clone();
+                        new_dst.index = air::VarIndex::from_index(i, &arr_shape);
+                        let mut element_comptime = element_comptime.clone();
+                        element_comptime.value = ValueVariant::Numeric(value.clone());
+                        let element_assign = air::AssignStatement {
+                            dst: vec![new_dst],
+                            width: src.width,
+                            expr: air::Expression::Term(Box::new(air::Factor::Value(
+                                element_comptime,
+                            ))),
+                            token: src.token,
+                        };
+                        let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
+                        result.push(ProtoStatement::Assign(proto));
+                    }
+                    if in_initial {
+                        append_ff_next_copies(&mut result);
+                    }
+                    return Ok(result);
+                }
+
                 // Same destination shape with an array-returning call on the
                 // RHS (`state = round(state);`). Inlined once: re-converting
                 // the call per element would inline the body N times.
@@ -4164,6 +4240,25 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                         rhs_select: None,
                         expr: proto_expr,
                         dst_ff_current_offset: 0,
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
+
+            // Array argument fed by a const array (`f(pk::TBL)`).
+            if let Some(arg_meta) = arg_meta_clone.as_ref()
+                && let Some(exprs) = const_array_element_exprs(expr, arg_meta.elements.len())
+            {
+                for (arg_element, expr) in arg_meta.elements.iter().zip(exprs) {
+                    result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: arg_element.current,
+                        dst_width: arg_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: 0, // not FF
                         token: TokenRange::default(),
                     }));
                 }

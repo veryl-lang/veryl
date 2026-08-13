@@ -4744,6 +4744,178 @@ fn array_literal_ff() {
 }
 
 #[test]
+fn const_array_whole_assign() {
+    let code = r#"
+    package pk {
+        type st = logic<8> [4];
+        const TBL: st = '{8'd1, 8'd2, 8'd3, 8'd4};
+    }
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        c0: output logic<8>,
+        c3: output logic<8>,
+        f0: output logic<8>,
+        f3: output logic<8>,
+    ) {
+        var c: pk::st;
+        var f: pk::st;
+        always_comb {
+            c = pk::TBL;
+        }
+        always_ff {
+            if_reset {
+                f = '{0, 0, 0, 0};
+            } else {
+                f = pk::TBL;
+            }
+        }
+        assign c0 = c[0];
+        assign c3 = c[3];
+        assign f0 = f[0];
+        assign f3 = f[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        assert_eq!(sim.get("c0").unwrap(), Value::new(1, 8, false));
+        assert_eq!(sim.get("c3").unwrap(), Value::new(4, 8, false));
+        assert_eq!(sim.get("f0").unwrap(), Value::new(0, 8, false));
+
+        sim.step(&clk);
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("f0").unwrap(), Value::new(1, 8, false));
+        assert_eq!(sim.get("f3").unwrap(), Value::new(4, 8, false));
+    }
+}
+
+#[test]
+fn const_array_whole_assign_multi_dim() {
+    // Element order must follow the same row-major flattening the analyzer
+    // uses to fold `TBL[i][j]`.
+    let code = r#"
+    package pk {
+        type st = logic<8> [2, 3];
+        const TBL: st = '{'{8'd1, 8'd2, 8'd3}, '{8'd4, 8'd5, 8'd6}};
+    }
+    module Top (
+        o01: output logic<8>,
+        o10: output logic<8>,
+        o12: output logic<8>,
+    ) {
+        var s: pk::st;
+        always_comb {
+            s = pk::TBL;
+        }
+        assign o01 = s[0][1];
+        assign o10 = s[1][0];
+        assign o12 = s[1][2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("o01").unwrap(), Value::new(2, 8, false));
+        assert_eq!(sim.get("o10").unwrap(), Value::new(4, 8, false));
+        assert_eq!(sim.get("o12").unwrap(), Value::new(6, 8, false));
+    }
+}
+
+#[test]
+fn const_array_as_operand() {
+    // A single-element array must take the same paths as a wider one.
+    let code = r#"
+    package pk {
+        type st = logic<8> [4];
+        const TBL: st = '{8'd1, 8'd2, 8'd3, 8'd4};
+        type one = logic<8> [1];
+        const ONE: one = '{8'd7};
+    }
+    module Sub (
+        i: input  logic<8> [4],
+        j: input  logic<8> [1],
+        o: output logic<8>,
+    ) {
+        assign o = i[2] + j[0];
+    }
+    module Top (
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        function f (a: input logic<8> [4], b: input logic<8> [1]) -> logic<8> {
+            return a[1] + a[3] + b[0];
+        }
+        function g () -> pk::st {
+            return pk::TBL;
+        }
+        var s: pk::st;
+        inst u: Sub (i: pk::TBL, j: pk::ONE, o: o0);
+        assign o1 = f(pk::TBL, pk::ONE);
+        always_comb {
+            s = g();
+        }
+        assign o2 = s[2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("o0").unwrap(), Value::new(10, 8, false));
+        assert_eq!(sim.get("o1").unwrap(), Value::new(13, 8, false));
+        assert_eq!(sim.get("o2").unwrap(), Value::new(3, 8, false));
+    }
+}
+
+#[test]
+fn const_array_in_initial() {
+    let code = r#"
+    package pk {
+        type st = logic<8> [4];
+        const TBL: st = '{8'd1, 8'd2, 8'd3, 8'd4};
+    }
+    #[test(t_const_array)]
+    module t_const_array {
+        var s: pk::st;
+        initial {
+            s = pk::TBL;
+            $assert(s[0] == 8'd1, "first element");
+            $assert(s[3] == 8'd4, "last element");
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "t_const_array")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+#[test]
 fn struct_constructor() {
     let code = r#"
     module Top (
