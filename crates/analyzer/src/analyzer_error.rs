@@ -3642,9 +3642,10 @@ pub enum MismatchTypeKind {
         actual: usize,
     },
     ConnectMultipleExpression,
-    NonStructUnionType {
+    NonStructType {
         actual: String,
     },
+    UnionConstructor,
 }
 
 impl fmt::Display for MismatchTypeKind {
@@ -3679,11 +3680,14 @@ impl fmt::Display for MismatchTypeKind {
             MismatchTypeKind::ConnectMultipleExpression => {
                 "connect requires a single expression, but multiple expressions are provided".fmt(f)
             }
-            MismatchTypeKind::NonStructUnionType { actual } => {
+            MismatchTypeKind::NonStructType { actual } => {
                 write!(
                     f,
-                    "struct constructor is expected to \"struct or union\", but it is \"{actual}\""
+                    "struct constructor is expected to \"struct\", but it is \"{actual}\""
                 )
+            }
+            MismatchTypeKind::UnionConstructor => {
+                "a union holds one member at a time, so it has no constructor; assign to a member instead".fmt(f)
             }
         }
     }
