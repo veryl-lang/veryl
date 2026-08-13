@@ -5328,6 +5328,48 @@ fn array_dynamic_index_write_comb() {
     }
 }
 
+#[test]
+fn array_dynamic_index_prefix_write() {
+    // A dynamic prefix completed to full depth, directly or by array-literal
+    // expansion.
+    let code = r#"
+    module Top (
+        idx: input  logic<1>,
+        a:   output logic<8>,
+        b:   output logic<8>,
+    ) {
+        var p: logic<8> [2, 3];
+        var q: logic<8> [2, 3];
+
+        always_comb {
+            p = '{'{8'd0, 8'd0, 8'd0}, '{8'd0, 8'd0, 8'd0}};
+            p[idx][2] = 8'd7;
+            q = '{'{8'd0, 8'd0, 8'd0}, '{8'd0, 8'd0, 8'd0}};
+            q[idx] = '{8'd1, 8'd2, 8'd3};
+        }
+        assign a = p[1][2];
+        assign b = q[1][2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("idx", Value::new(0, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("a").unwrap(), Value::new(0, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0, 8, false));
+
+        sim.set("idx", Value::new(1, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("a").unwrap(), Value::new(7, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(3, 8, false));
+    }
+}
+
 // Regression for #9: an array-range assignment LHS (`arr[0+:3] = '{...}` /
 // `arr[0:2] = '{...}`) must drive each covered element with the matching literal
 // item (first item -> lowest index), matching the emitted SystemVerilog.

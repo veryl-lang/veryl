@@ -129,3 +129,53 @@ fn unsupported_sv_module_instance() {
         Err(SimulatorError::UnsupportedDescription { .. })
     ));
 }
+
+#[test]
+fn dynamic_index_leaving_a_sub_array() {
+    // These used to hit a `build_linear_index_expr` assertion instead of
+    // reporting.
+    let bodies = [
+        "x = 8'd0; s[i] = t;",
+        "x = 8'd0; s[i] = pk::TBL;",
+        "x = 8'd0; s[i] = f();",
+        "x = 8'd0; s[i] = u[j];",
+        "{s[i], x} = 16'h1234;",
+    ];
+
+    for body in bodies {
+        let code = format!(
+            r#"
+    package pk {{
+        type sub = logic<8> [3];
+        const TBL: sub = '{{8'd1, 8'd2, 8'd3}};
+    }}
+    module Top (
+        i: input  logic<1>,
+        j: input  logic<1>,
+        x: output logic<8>,
+        o: output logic<8>,
+    ) {{
+        function f () -> pk::sub {{
+            return '{{8'd1, 8'd2, 8'd3}};
+        }}
+        var t: logic<8> [3];
+        var u: logic<8> [2, 3];
+        var s: logic<8> [2, 3];
+        assign t = '{{8'd1, 8'd2, 8'd3}};
+        assign u = '{{'{{8'd1, 8'd2, 8'd3}}, '{{8'd4, 8'd5, 8'd6}}}};
+        always_comb {{
+            s = '{{'{{8'd0, 8'd0, 8'd0}}, '{{8'd0, 8'd0, 8'd0}}}};
+            {body}
+        }}
+        assign o = s[1][2];
+    }}
+    "#
+        );
+
+        let result = analyze_top(&code, &Config::default(), "Top");
+        assert!(
+            matches!(result, Err(SimulatorError::UnsupportedDescription { .. })),
+            "{body}"
+        );
+    }
+}

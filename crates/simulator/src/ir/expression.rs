@@ -1548,13 +1548,12 @@ pub fn build_linear_index_expr(
         });
     }
 
-    assert_eq!(
-        index.0.len(),
-        array.dims(),
-        "index dimension mismatch: {} != {}",
-        index.0.len(),
-        array.dims()
-    );
+    // A partial index (`s[i]` against `logic<8> [2, 3]`) leaves a sub-array,
+    // which has no single element to offset to.
+    if index.0.len() != array.dims() {
+        let token = index.0.first().map(|x| x.token_range()).unwrap_or_default();
+        return Err(SimulatorError::unsupported_description(&token));
+    }
 
     let mut ret: Option<ProtoExpression> = None;
     let mut base: usize = 1;
