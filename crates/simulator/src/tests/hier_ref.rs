@@ -15,9 +15,30 @@ const HIER_DUT: &str = r#"
         var internal_reg: logic<4>;
         #[allow(unused_variable)]
         let internal_let: logic<4> = din + 2;
+
+        struct Inner { x: logic<4>, y: logic<4> }
+        struct Pair { hi: logic<8>, lo: Inner }
+        #[allow(unused_variable)]
+        var st: Pair;
+        #[allow(unused_variable)]
+        var arr: Pair [2];
+        union U { p: logic<8>, q: logic<8> }
+        #[allow(unused_variable)]
+        var un: U;
+
         always_ff {
-            if_reset { internal_reg = 0; }
-            else { internal_reg = din + 1; }
+            if_reset {
+                internal_reg = 0;
+                st = Pair'{hi: 0, lo: Inner'{x: 0, y: 0}};
+                arr = '{Pair'{hi: 0, lo: Inner'{x: 0, y: 0}}, Pair'{hi: 0, lo: Inner'{x: 0, y: 0}}};
+                un.p = 0;
+            } else {
+                internal_reg = din + 1;
+                st = Pair'{hi: 8'ha5, lo: Inner'{x: 4'h3, y: 4'hc}};
+                arr = '{Pair'{hi: 8'h11, lo: Inner'{x: 4'h1, y: 4'h2}},
+                        Pair'{hi: 8'h33, lo: Inner'{x: 4'h3, y: 4'h4}}};
+                un.p = 8'h7e;
+            }
         }
     }
 
@@ -287,6 +308,42 @@ fn hier_ref_unknown_member_diagnosed() {
             .iter()
             .any(|x| matches!(x, AnalyzerError::UnknownMember { .. })),
         "expected unknown_member, got: {errors:?}"
+    );
+}
+
+#[test]
+fn hier_ref_struct_member() {
+    let code = hier_testbench(
+        r#"
+            $assert(dut.u_sub.st.hi == 8'ha5, "member");
+            $assert(dut.u_sub.st.lo.x == 4'h3, "nested member");
+            $assert(dut.u_sub.st.lo.y == 4'hc, "nested member y");
+            $assert(dut.u_sub.st.hi[3:0] == 4'h5, "bit select on a member");
+            $assert(dut.u_sub.st == 16'ha53c, "whole struct");
+            $assert(dut.u_sub.arr[1].hi == 8'h33, "array element member");
+            $assert(dut.u_sub.arr[0].lo.y == 4'h2, "array element nested member");
+            $assert(dut.u_sub.un.q == 8'h7e, "union member");
+        "#,
+    );
+    let results = run_hier_test(&code);
+    assert!(!results.is_empty());
+    for (config, result, _) in results {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn hier_ref_unknown_struct_member_names_the_struct() {
+    // The owner must be the struct, not the instance that holds it.
+    let code = hier_testbench(r#"$assert(dut.u_sub.st.nope == 8'h0, "typo");"#);
+    let errors = analyze_errors(&code);
+    assert!(
+        errors.iter().any(|x| matches!(
+            x,
+            AnalyzerError::UnknownMember { name, member, .. }
+                if name == "dut.u_sub.st" && member == "nope"
+        )),
+        "expected unknown_member on the struct, got: {errors:?}"
     );
 }
 
@@ -702,6 +759,67 @@ fn hier_ref_runtime_select_reads_the_indexed_element() {
     "#;
     for config in Config::all() {
         let ir = analyze_top(code, &config, "hier_dyn_select")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+#[test]
+fn hier_ref_struct_member_in_interface() {
+    // An interface flattens into multi-segment variable paths, so the member
+    // must resolve against `bus.pkt`, not `bus`.
+    let code = r#"
+    package pk {
+        struct P { f: logic<8>, g: logic<8> }
+    }
+    interface If {
+        var pkt:   pk::P;
+        var valid: logic;
+        modport mp { pkt: output, valid: output }
+    }
+    module Sub (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        inst bus: If;
+        always_ff {
+            if_reset {
+                bus.pkt.f = 8'h7a;
+                bus.pkt.g = 8'ha7;
+                bus.valid = 1;
+            }
+        }
+    }
+    module Top (
+        clk: input clock,
+        rst: input reset,
+    ) {
+        inst u_sub: Sub (clk, rst);
+    }
+    #[test(hier_if_test)]
+    module hier_if_test {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+        inst dut: Top (clk, rst);
+        initial {
+            rst.assert();
+            clk.next();
+            $assert(dut.u_sub.bus.valid == 1, "flattened member");
+            $assert(dut.u_sub.bus.pkt == 16'h7aa7, "whole struct member");
+            $assert(dut.u_sub.bus.pkt.f == 8'h7a, "struct member f");
+            $assert(dut.u_sub.bus.pkt.g == 8'ha7, "struct member g");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "hier_if_test")
             .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
         let module_name = ir.name.to_string();
         assert_eq!(

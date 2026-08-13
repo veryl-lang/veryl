@@ -2087,9 +2087,15 @@ pub fn eval_struct_constructor(
 /// A member path whose first segment is a module instance: a hierarchical
 /// testbench reference (`dut.u_core.pc`) or one of its misuse forms.
 enum HierReference {
-    /// Instance-name path, variable path within the target module, and the
-    /// variable's type.
-    Resolved(Vec<StrId>, VarPath, Box<ir::Type>),
+    Resolved {
+        /// Instance names from the referencing module down to the target.
+        inst_path: Vec<StrId>,
+        var_path: VarPath,
+        r#type: Box<ir::Type>,
+        /// A struct/union member named by trailing segments, read as a bit
+        /// range of the whole variable.
+        part_select: Option<Box<PartSelectPath>>,
+    },
     UnknownMember {
         owner: String,
         member: StrId,
@@ -2121,11 +2127,36 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
             // (multi-segment for interface-flattened members) ...
             let var_path = VarPath::from_slice(&segs[i..]);
             if let Some(variable) = module.variables.values().find(|v| v.path == var_path) {
-                return HierReference::Resolved(
+                return HierReference::Resolved {
                     inst_path,
                     var_path,
-                    Box::new(variable.r#type.clone()),
-                );
+                    r#type: Box::new(variable.r#type.clone()),
+                    part_select: None,
+                };
+            }
+
+            // ... or a struct/union member of one. A struct is a single
+            // variable, so the member resolves against its type, not the
+            // variable list. Longest prefix wins: an interface flattens into
+            // multi-segment variable paths.
+            let holder = module
+                .variables
+                .values()
+                .filter(|v| v.path.0.len() < var_path.0.len() && var_path.0.starts_with(&v.path.0))
+                .max_by_key(|v| v.path.0.len());
+            if let Some(variable) = holder
+                && let Some(part_select) = variable
+                    .r#type
+                    .expand_struct_union(&variable.path, &[], None)
+                    .into_iter()
+                    .find(|x| x.path == var_path)
+            {
+                return HierReference::Resolved {
+                    inst_path,
+                    var_path: variable.path.clone(),
+                    r#type: Box::new(variable.r#type.clone()),
+                    part_select: Some(Box::new(part_select)),
+                };
             }
 
             // ... or descend into the child instance whose qualified path
@@ -2138,15 +2169,19 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
                 Some((&inst.component, consumed))
             });
             let Some((child, consumed)) = child else {
+                // Name the struct, not the instance, when a variable path
+                // matched but its trailing member did not.
+                let (owner_tail, member) = match holder {
+                    Some(v) => (v.path.0.as_slice(), segs[i + v.path.0.len()]),
+                    None => (&[][..], segs[i]),
+                };
                 let owner = inst_path
                     .iter()
+                    .chain(owner_tail)
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()
                     .join(".");
-                return HierReference::UnknownMember {
-                    owner,
-                    member: segs[i],
-                };
+                return HierReference::UnknownMember { owner, member };
             };
             inst_path.extend_from_slice(&segs[i..i + consumed]);
             component = child.as_ref();
@@ -2303,7 +2338,13 @@ fn eval_factor_path_inner(
                 Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
             }
         }
-    } else if let HierReference::Resolved(inst_path, var_path, r#type) = hier {
+    } else if let HierReference::Resolved {
+        inst_path,
+        var_path,
+        r#type,
+        part_select,
+    } = hier
+    {
         if !context.in_tb_block {
             context.insert_error(AnalyzerError::invisible_identifier(
                 &path.0[1].to_string(),
@@ -2316,8 +2357,12 @@ fn eval_factor_path_inner(
 
         let (array_select, width_select) = select.split(comptime.r#type.array.dims());
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
-        let width_select = eval_width_select(context, &var_path, &comptime.r#type, width_select)
-            .ok_or_else(|| ir_error!(token))?;
+        let width_select = if let Some(part_select) = &part_select {
+            part_select.to_base_select(context, &width_select)
+        } else {
+            eval_width_select(context, &var_path, &comptime.r#type, width_select)
+        }
+        .ok_or_else(|| ir_error!(token))?;
 
         if array_select.is_range() {
             Err(ir_error!(token))
@@ -2371,7 +2416,7 @@ fn eval_factor_path_inner(
                     &[],
                 ));
             }
-            HierReference::Resolved(..) | HierReference::NotHier => unreachable!(),
+            HierReference::Resolved { .. } | HierReference::NotHier => unreachable!(),
         }
         Err(ir_error!(token))
     } else if let Some(x) = generic_path.to_literal() {
