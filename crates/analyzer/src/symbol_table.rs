@@ -193,6 +193,10 @@ pub struct SymbolTable {
     connect_list: Vec<Connect>,
     reference_func_table: HashMap<SymbolId, Vec<GenericSymbolPath>>,
     reference_table: HashMap<SymbolId, Vec<Token>>,
+    /// `$sv::` members whose insert lost the dedup to another file. Kept so
+    /// every file's fragment can define the members it uses: the `$sv`
+    /// namespace is shared, not owned by whichever file mentions one first.
+    sv_shadows: Vec<Symbol>,
     suppress_cache_clear: bool,
     skip_generic_args: bool,
 }
@@ -250,6 +254,15 @@ impl SymbolTable {
         // inserted symbol regardless of which path created it.
         scope::add_local(scope, token.text, id);
         Some(id)
+    }
+
+    /// Registers a member synthesized for a `$sv::` reference; see `sv_shadows`.
+    pub fn insert_sv_member(&mut self, token: &Token, symbol: Symbol) -> Option<SymbolId> {
+        let ret = self.insert(token, symbol.clone());
+        if ret.is_none() {
+            self.sv_shadows.push(symbol);
+        }
+        ret
     }
 
     pub fn get(&self, id: SymbolId) -> Option<Symbol> {
@@ -1721,6 +1734,8 @@ impl SymbolTable {
             tokens.retain(|x| !is_drop_token(x, file_path, prj));
         }
 
+        self.sv_shadows.retain(|x| x.token.source != file_path);
+
         scope::drop_symbols(&dropped);
     }
 
@@ -1762,6 +1777,25 @@ impl SymbolTable {
             .filter(|(id, _)| in_window(id))
             .map(|(_, symbol)| (**symbol).clone())
             .collect();
+        // Shadowed `$sv::` members too, deduped: a file usually mentions the
+        // same member many times.
+        let sv_member_key = |x: &Symbol| {
+            (
+                x.namespace.paths.clone(),
+                resource_table::canonical_str_id(x.token.text),
+            )
+        };
+        let mut defined: HashSet<_> = symbols
+            .iter()
+            .filter(|x| matches!(x.kind, SymbolKind::SystemVerilog))
+            .map(sv_member_key)
+            .collect();
+        symbols.extend(
+            self.sv_shadows
+                .iter()
+                .filter(|x| in_window(&x.id) && defined.insert(sv_member_key(x)))
+                .cloned(),
+        );
         symbols.sort_unstable_by_key(|x| x.id);
 
         let mut reference_functions: Vec<_> = self
@@ -1806,6 +1840,11 @@ impl SymbolTable {
             let scope = symbol.scope;
             let owned_scope_kind = scope::scope_kind_of(&symbol.kind);
             if self.insert(&token, symbol.clone()).is_none() {
+                // `$sv::` members are shared: another file having registered
+                // the same one is not a conflict.
+                if matches!(symbol.kind, SymbolKind::SystemVerilog) {
+                    continue;
+                }
                 return Err(Box::new(symbol));
             }
             // Re-establish the owned inner scope's kind/owner, which pass1 sets
@@ -3133,6 +3172,13 @@ pub fn insert(token: &Token, symbol: Symbol) -> Option<SymbolId> {
         clear_resolve_caches();
     }
     ret
+}
+
+pub fn insert_sv_member(token: &Token, symbol: Symbol) {
+    let ret = SYMBOL_TABLE.with(|f| f.borrow_mut().insert_sv_member(token, symbol));
+    if ret.is_some() {
+        clear_resolve_caches();
+    }
 }
 
 pub fn get(id: SymbolId) -> Option<Symbol> {

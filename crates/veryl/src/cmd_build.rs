@@ -790,6 +790,46 @@ exclude_std = true
         assert!(b.contains("WIDTH"));
     }
 
+    const SV_USER_A: &str = r#"
+    module SvUserA {
+        inst u_if: $sv::foo_if;
+    }
+    "#;
+
+    const SV_USER_B: &str = r#"
+    module SvUserB {
+        inst u_if: $sv::foo_if;
+    }
+    "#;
+
+    // A restored fragment must define the `$sv::` members it uses: only one
+    // file registers each, and that file may be gone by the next build.
+    #[test]
+    fn incremental_restore_defines_sv_members_of_removed_files() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+
+        // The source scan order decides which file registers the member, so
+        // drop each in turn: one of the two rounds drops that file.
+        for (round, removed) in ["a.veryl", "b.veryl"].iter().enumerate() {
+            let tempdir = tempfile::tempdir().unwrap();
+            let (mut metadata, project_path) = write_incremental_project(
+                tempdir.path(),
+                &format!("inc_sv{round}"),
+                &[("a.veryl", SV_USER_A), ("b.veryl", SV_USER_B)],
+            );
+
+            run_build(&mut metadata, None);
+            fs::remove_file(project_path.join("src").join(removed)).unwrap();
+
+            run_build(&mut metadata, None);
+            assert_eq!(
+                crate::incremental::last_restored_count(),
+                1,
+                "the surviving file must be restored for this to test anything"
+            );
+        }
+    }
+
     const INC_FILE_T: &str = r#"
     #[test(test_modb)]
     module test_modb {
