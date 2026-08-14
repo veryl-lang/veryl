@@ -200,15 +200,59 @@ fn add_transfer(
     }
 }
 
+/// One variable's outgoing relations, indexed for "which spans contain this
+/// bit position" queries.
+///
+/// A variable copied around a wide datapath collects hundreds of relations
+/// while any one bit position sits inside only a handful of them, so the
+/// traversal below asks instead of scanning.
+#[derive(Default)]
+struct VarEdges {
+    edges: Vec<PackedTransferEdge>,
+    /// `max_end[i]` = the largest span end among `edges[..=i]`.
+    max_end: Vec<usize>,
+}
+
+impl VarEdges {
+    fn finish(&mut self) {
+        self.edges
+            .sort_unstable_by_key(|edge| (edge.source.start, edge.source.end()));
+        self.max_end.clear();
+        self.max_end.reserve(self.edges.len());
+        let mut running = 0usize;
+        for edge in &self.edges {
+            running = running.max(edge.source.end());
+            self.max_end.push(running);
+        }
+    }
+
+    /// Every relation whose source span contains `point`, in no particular
+    /// order.
+    fn containing(&self, point: usize) -> impl Iterator<Item = &PackedTransferEdge> {
+        let upper = self
+            .edges
+            .partition_point(|edge| edge.source.start <= point);
+        self.edges[..upper]
+            .iter()
+            .enumerate()
+            .rev()
+            // No earlier span reaches `point` either, so the walk can stop.
+            .take_while(move |(i, _)| self.max_end[*i] >= point)
+            .map(|(_, edge)| edge)
+            .filter(move |edge| edge.source.end() >= point)
+    }
+}
+
 fn propagate_packed_endpoints(
     accesses: &HashMap<IdxKey, Vec<PackedSpan>>,
     transfers: &[PackedTransfer],
 ) -> HashMap<VarId, HashSet<usize>> {
-    let mut adjacency: HashMap<VarId, Vec<PackedTransferEdge>> = HashMap::default();
+    let mut adjacency: HashMap<VarId, VarEdges> = HashMap::default();
     for (index, transfer) in transfers.iter().enumerate() {
         adjacency
             .entry(transfer.left_id)
             .or_default()
+            .edges
             .push(PackedTransferEdge {
                 index,
                 reverse: false,
@@ -219,6 +263,7 @@ fn propagate_packed_endpoints(
         adjacency
             .entry(transfer.right_id)
             .or_default()
+            .edges
             .push(PackedTransferEdge {
                 index,
                 reverse: true,
@@ -226,6 +271,9 @@ fn propagate_packed_endpoints(
                 destination_id: transfer.left_id,
                 destination: transfer.left,
             });
+    }
+    for edges in adjacency.values_mut() {
+        edges.finish();
     }
 
     let mut seeds = HashSet::default();
@@ -251,24 +299,30 @@ fn propagate_packed_endpoints(
     // paths retain every arrival. Reusing a direction around an offset cycle
     // would materialize periodic repetitions as one boundary per vector bit.
     let mut endpoints: HashMap<VarId, HashSet<usize>> = HashMap::default();
+    // Per-seed state, reused across seeds: a design has tens of thousands of
+    // them, and rebuilding these each time costs more than the traversal.
+    let mut used = vec![false; transfers.len() * 2];
+    let mut used_positions: Vec<usize> = Vec::new();
+    let mut used_this_round: Vec<usize> = Vec::new();
+    let mut visited: HashSet<(VarId, usize)> = HashSet::default();
+    let mut frontier: Vec<(VarId, usize)> = Vec::new();
+    let mut next: Vec<(VarId, usize)> = Vec::new();
     for seed in seeds {
-        let mut frontier = vec![seed];
-        let mut visited = [seed].into_iter().collect::<HashSet<_>>();
-        let mut used_directions = HashSet::default();
+        frontier.clear();
+        frontier.push(seed);
+        visited.clear();
+        visited.insert(seed);
         while !frontier.is_empty() {
-            let mut next = Vec::new();
-            let mut used_this_round = HashSet::default();
-            for (id, point) in frontier {
+            next.clear();
+            used_this_round.clear();
+            for &(id, point) in &frontier {
                 endpoints.entry(id).or_default().insert(point);
                 let Some(edges) = adjacency.get(&id) else {
                     continue;
                 };
-                for edge in edges {
-                    let direction = (edge.index, edge.reverse);
-                    if point < edge.source.start
-                        || point > edge.source.end()
-                        || used_directions.contains(&direction)
-                    {
+                for edge in edges.containing(point) {
+                    let direction = edge.index * 2 + usize::from(edge.reverse);
+                    if used[direction] {
                         continue;
                     }
                     let Some(mapped) = point
@@ -277,16 +331,25 @@ fn propagate_packed_endpoints(
                     else {
                         continue;
                     };
-                    used_this_round.insert(direction);
+                    used_this_round.push(direction);
                     if visited.insert((edge.destination_id, mapped)) {
                         next.push((edge.destination_id, mapped));
                     }
                 }
             }
-            used_directions.extend(used_this_round);
-            frontier = next;
+            for &direction in &used_this_round {
+                if !used[direction] {
+                    used[direction] = true;
+                    used_positions.push(direction);
+                }
+            }
+            std::mem::swap(&mut frontier, &mut next);
+        }
+        for direction in used_positions.drain(..) {
+            used[direction] = false;
         }
     }
+
     endpoints
 }
 
@@ -1687,5 +1750,40 @@ mod region_tests {
         let endpoints = propagate_packed_endpoints(&accesses, &transfers);
         let expected = [5, 6, 7].into_iter().collect::<HashSet<_>>();
         assert!(endpoints[&q].is_superset(&expected));
+    }
+
+    #[test]
+    fn point_query_answers_exactly_what_a_full_scan_would() {
+        let id = VarId::from_raw(0);
+        // A long span ahead of short ones: sorting by start alone would stop
+        // the walk before reaching it.
+        let spans = [(0, 64), (8, 4), (16, 4), (16, 32), (60, 8), (100, 4)];
+        let mut edges = VarEdges::default();
+        for (index, (start, length)) in spans.into_iter().enumerate() {
+            edges.edges.push(PackedTransferEdge {
+                index,
+                reverse: false,
+                source: PackedSpan { start, length },
+                destination_id: id,
+                destination: PackedSpan {
+                    start: 0,
+                    length: 1,
+                },
+            });
+        }
+        let scan = edges.edges.clone();
+        edges.finish();
+
+        for point in 0..=120 {
+            let mut indexed: Vec<usize> = edges.containing(point).map(|edge| edge.index).collect();
+            indexed.sort_unstable();
+            let mut scanned: Vec<usize> = scan
+                .iter()
+                .filter(|edge| point >= edge.source.start && point <= edge.source.end())
+                .map(|edge| edge.index)
+                .collect();
+            scanned.sort_unstable();
+            assert_eq!(indexed, scanned, "point {point}");
+        }
     }
 }
