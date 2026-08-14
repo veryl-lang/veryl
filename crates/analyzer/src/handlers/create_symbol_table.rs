@@ -613,7 +613,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                             false,
                             DocComment::default(),
                         );
-                        let _ = symbol_table::insert(token, symbol);
+                        symbol_table::insert_sv_member(token, symbol);
                     }
                     namespace.push(token.text);
                 }
