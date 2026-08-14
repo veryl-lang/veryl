@@ -138,6 +138,9 @@ pub struct ReadmemhElement {
     pub next_offset: Option<isize>,
 }
 
+/// (current, next, native_bytes, use_4state) for one `$readmemh` word.
+type ReadmemhSlot = (*mut u8, Option<*mut u8>, usize, bool);
+
 #[derive(Clone)]
 pub enum SystemFunctionCall {
     Display {
@@ -150,8 +153,8 @@ pub enum SystemFunctionCall {
     },
     Readmemh {
         filename: String,
-        /// (current_ptr, next_ptr, native_bytes, use_4state)
-        elements: Vec<(*mut u8, Option<*mut u8>, usize, bool)>,
+        /// Shared because building the testbench program clones the statement.
+        elements: Arc<[ReadmemhSlot]>,
         width: usize,
     },
     Assert {
@@ -773,15 +776,19 @@ impl SystemFunctionCall {
                 elements,
                 width,
             } => {
-                let values = parse_hex_file(filename, *width);
-                let count = values.len().min(elements.len());
-                for i in 0..count {
-                    let (current, next, nb, use_4state) = elements[i];
-                    unsafe { write_native_value(current, nb, use_4state, &values[i]) };
+                let content = read_hex_file(filename);
+                let mut i = 0usize;
+                for_each_hex_word(&content, *width, |value| {
+                    let Some(&(current, next, nb, use_4state)) = elements.get(i) else {
+                        return false;
+                    };
+                    unsafe { write_native_value(current, nb, use_4state, &value) };
                     if let Some(next) = next {
-                        unsafe { write_native_value(next, nb, use_4state, &values[i]) };
+                        unsafe { write_native_value(next, nb, use_4state, &value) };
                     }
-                }
+                    i += 1;
+                    true
+                });
             }
             SystemFunctionCall::Assert {
                 kind,
@@ -2019,7 +2026,7 @@ impl ProtoStatement {
                         width,
                     } => {
                         let nb = calc_native_bytes(*width);
-                        let resolved: Vec<_> = elements
+                        let resolved: Arc<[_]> = elements
                             .iter()
                             .map(|elem| {
                                 let current = if elem.current.is_ff() {
@@ -4426,23 +4433,33 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
     }
 }
 
-fn parse_hex_file(filename: &str, width: usize) -> Vec<AnalyzerValue> {
-    let content = match std::fs::read_to_string(filename) {
-        Ok(c) => c,
-        Err(e) => {
-            log::warn!("$readmemh: failed to read '{}': {}", filename, e);
-            return vec![];
-        }
-    };
-    parse_hex_content(&content, width)
+fn read_hex_file(filename: &str) -> Vec<u8> {
+    let content = std::fs::read(filename).unwrap_or_else(|e| {
+        log::warn!("$readmemh: failed to read '{filename}': {e}");
+        Vec::new()
+    });
+    // Otherwise every word drops and the image loads empty in silence.
+    if std::str::from_utf8(&content).is_err() {
+        log::warn!("$readmemh: '{filename}' is not text");
+    }
+    content
 }
 
 pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
     let bytes = content.as_bytes();
     let mut result: Vec<AnalyzerValue> = Vec::with_capacity(bytes.len() / 4 + 1);
-    let mut i = 0usize;
+    for_each_hex_word(bytes, width, |v| {
+        result.push(v);
+        true
+    });
+    result
+}
+
+/// `sink` returns false to stop early.  A word carrying a character outside
+/// `[0-9a-fA-F_]`, or a value past 64 bits, is dropped.
+fn for_each_hex_word(bytes: &[u8], width: usize, mut sink: impl FnMut(AnalyzerValue) -> bool) {
     let len = bytes.len();
-    let mut digits: Vec<u8> = Vec::with_capacity(32);
+    let mut i = 0usize;
 
     while i < len {
         let c = bytes[i];
@@ -4470,42 +4487,34 @@ pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
                 continue;
             }
         }
-        let start = i;
+        let mut acc = 0u64;
+        let mut digits = 0usize;
+        let mut ok = true;
         while i < len {
             let c = bytes[i];
-            if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
-                break;
-            }
-            if c == b'/' && i + 1 < len && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') {
-                break;
-            }
+            let d = match c {
+                b'0'..=b'9' => c - b'0',
+                b'a'..=b'f' => c - b'a' + 10,
+                b'A'..=b'F' => c - b'A' + 10,
+                b' ' | b'\t' | b'\n' | b'\r' => break,
+                b'/' if i + 1 < len && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') => break,
+                b'_' => {
+                    i += 1;
+                    continue;
+                }
+                _ => {
+                    ok = false;
+                    i += 1;
+                    continue;
+                }
+            };
+            ok &= acc >> 60 == 0;
+            acc = (acc << 4) | d as u64;
+            digits += 1;
             i += 1;
         }
-        if start == i {
-            continue;
-        }
-        let tok = &bytes[start..i];
-        let parsed = if tok.contains(&b'_') {
-            digits.clear();
-            for &b in tok {
-                if b != b'_' {
-                    digits.push(b);
-                }
-            }
-            if digits.is_empty() {
-                continue;
-            }
-            std::str::from_utf8(&digits)
-                .ok()
-                .and_then(|s| u64::from_str_radix(s, 16).ok())
-        } else {
-            std::str::from_utf8(tok)
-                .ok()
-                .and_then(|s| u64::from_str_radix(s, 16).ok())
-        };
-        if let Some(val) = parsed {
-            result.push(AnalyzerValue::new(val, width, false));
+        if ok && digits > 0 && !sink(AnalyzerValue::new(acc, width, false)) {
+            return;
         }
     }
-    result
 }
