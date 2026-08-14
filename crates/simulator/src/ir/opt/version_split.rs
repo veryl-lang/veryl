@@ -22,6 +22,7 @@
 //! here is applied to both sides and is therefore invisible to it.  Changes
 //! to this pass must be gated on golden SystemVerilog co-simulation.
 
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::expression::{ExpressionContext, ProtoExpression};
 use crate::ir::statement::{ProtoAssignStatement, ProtoIfStatement, ProtoStatement};
 use crate::ir::variable::VarOffset;
@@ -246,9 +247,9 @@ struct BlockCol {
     pos: u32,
 }
 
-fn gather_comb_reads(expr: &ProtoExpression, out: &mut Vec<i64>) {
+fn gather_comb_reads(fold: &BigArrayFold, expr: &ProtoExpression, out: &mut Vec<i64>) {
     let mut ins = Vec::new();
-    expr.gather_variable_offsets_expanded(&mut ins);
+    expr.gather_variable_offsets_expanded(fold, &mut ins);
     for off in ins {
         if let VarOffset::Comb(o) = off {
             out.push(o as i64);
@@ -258,18 +259,25 @@ fn gather_comb_reads(expr: &ProtoExpression, out: &mut Vec<i64>) {
 
 /// True when the statement tree consists solely of capturable comb Assigns
 /// under (possibly nested) If statements.
-fn is_eventable_tree(stmt: &ProtoStatement, depth: usize) -> bool {
+fn is_eventable_tree(fold: &BigArrayFold, stmt: &ProtoStatement, depth: usize) -> bool {
     match stmt {
         ProtoStatement::Assign(x) => {
             matches!(x.dst, VarOffset::Comb(_))
                 && x.dynamic_select.is_none()
                 && x.rhs_select.is_none()
+                // `read_pos` / `max_write_pos` are array-wide for a folded
+                // element, too coarse to place this write precisely.
+                && !fold.covers(x.dst)
         }
         ProtoStatement::If(x) => {
             depth < MAX_TREE_DEPTH
                 && x.cond.is_some()
-                && x.true_side.iter().all(|s| is_eventable_tree(s, depth + 1))
-                && x.false_side.iter().all(|s| is_eventable_tree(s, depth + 1))
+                && x.true_side
+                    .iter()
+                    .all(|s| is_eventable_tree(fold, s, depth + 1))
+                && x.false_side
+                    .iter()
+                    .all(|s| is_eventable_tree(fold, s, depth + 1))
         }
         _ => false,
     }
@@ -279,6 +287,7 @@ fn is_eventable_tree(stmt: &ProtoStatement, depth: usize) -> bool {
 /// `tree_reads` accumulates every comb offset read anywhere in the tree
 /// (conds + exprs); the caller attributes it to all dsts written by the tree.
 fn record_tree(
+    fold: &BigArrayFold,
     stmt: &ProtoStatement,
     stmt_idx: usize,
     col: &mut BlockCol,
@@ -294,7 +303,7 @@ fn record_tree(
             col.pos += 1;
             let pos = col.pos;
             let mut reads = Vec::new();
-            gather_comb_reads(&x.expr, &mut reads);
+            gather_comb_reads(fold, &x.expr, &mut reads);
             // Reads of the destination itself (RMW self-reads) are the
             // fold's own business — it substitutes the accumulated value —
             // so they count neither as intermediate readers nor as
@@ -323,7 +332,7 @@ fn record_tree(
         ProtoStatement::If(x) => {
             let cond = x.cond.as_ref().unwrap();
             let mut cond_reads = Vec::new();
-            gather_comb_reads(cond, &mut cond_reads);
+            gather_comb_reads(fold, cond, &mut cond_reads);
             // Position the cond read at the next statement position (the
             // guard is evaluated together with its first guarded write).
             let cpos = col.pos + 1;
@@ -332,7 +341,7 @@ fn record_tree(
             }
             tree_reads.extend(cond_reads);
             for s in x.true_side.iter().chain(&x.false_side) {
-                record_tree(s, stmt_idx, col, tree_reads, tree_dsts);
+                record_tree(fold, s, stmt_idx, col, tree_reads, tree_dsts);
             }
         }
         _ => unreachable!("checked by is_eventable_tree"),
@@ -391,15 +400,16 @@ fn split_block(
         return;
     }
     // Pass 1: classify statements and capture write events.
+    let fold = BigArrayFold::from_statements(body.iter());
     let mut col = BlockCol::default();
     let mut eventable: Vec<bool> = Vec::with_capacity(body.len());
     for (idx, stmt) in body.iter().enumerate() {
-        let ok = is_eventable_tree(stmt, 0);
+        let ok = is_eventable_tree(&fold, stmt, 0);
         eventable.push(ok);
         if ok {
             let mut tree_reads = Vec::new();
             let mut tree_dsts = HashSet::default();
-            record_tree(stmt, idx, &mut col, &mut tree_reads, &mut tree_dsts);
+            record_tree(&fold, stmt, idx, &mut col, &mut tree_reads, &mut tree_dsts);
             // Attribute the tree's reads (conds included) to every dst it
             // writes, for the input-stability check.
             for &dst in &tree_dsts {
@@ -1496,10 +1506,7 @@ fn duplicates_entry(x: &ProtoIfStatement, dst: i64, width: usize) -> bool {
 }
 
 fn expr_reads_dst(e: &ProtoExpression, dst: i64) -> bool {
-    let mut ins = Vec::new();
-    e.gather_variable_offsets_expanded(&mut ins);
-    ins.iter()
-        .any(|off| matches!(off, VarOffset::Comb(o) if *o as i64 == dst))
+    e.reads_offset(VarOffset::Comb(dst as isize))
 }
 
 fn fold_stmt(

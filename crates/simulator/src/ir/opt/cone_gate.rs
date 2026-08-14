@@ -32,6 +32,7 @@
 //! `AUTO_OFF_STREAK`), so the bet is bounded from both ends.
 
 use crate::HashMap;
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::{ModuleVariableMeta, VarOffset, VariableMeta, value_size};
 use veryl_analyzer::ir::VarId;
@@ -693,10 +694,12 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
     let mut poisoned: Vec<bool> = vec![false; inputs.node_parent.len()];
     let mut ins: Vec<VarOffset> = Vec::new();
     let mut outs: Vec<VarOffset> = Vec::new();
+    // Segment membership and the compare sets are keyed on unfolded offsets.
+    let unfolded = BigArrayFold::default();
     for s in stmts {
         ins.clear();
         outs.clear();
-        s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+        s.gather_variable_offsets_expanded(&unfolded, &mut ins, &mut outs);
         let mut info = StmtInfo {
             node: root,
             in_comb: Vec::new(),

@@ -2,6 +2,7 @@ use crate::HashMap;
 use crate::HashSet;
 use crate::assert_buffer;
 use crate::backend::ChunkArtifact;
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
 use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
@@ -1648,22 +1649,32 @@ impl ProtoStatement {
     /// encoding.
     pub fn gather_variable_offsets_expanded(
         &self,
+        fold: &BigArrayFold,
         inputs: &mut Vec<VarOffset>,
         outputs: &mut Vec<VarOffset>,
     ) {
         match self {
             ProtoStatement::Assign(x) => {
-                x.expr.gather_variable_offsets_expanded(inputs);
+                x.expr.gather_variable_offsets_expanded(fold, inputs);
                 if let Some(dyn_sel) = &x.dynamic_select {
-                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                    dyn_sel
+                        .index_expr
+                        .gather_variable_offsets_expanded(fold, inputs);
                 }
-                outputs.push(x.dst);
+                outputs.push(fold.canon(x.dst));
             }
             ProtoStatement::AssignDynamic(x) => {
-                x.dst_index_expr.gather_variable_offsets_expanded(inputs);
-                x.expr.gather_variable_offsets_expanded(inputs);
+                x.dst_index_expr
+                    .gather_variable_offsets_expanded(fold, inputs);
+                x.expr.gather_variable_offsets_expanded(fold, inputs);
                 if let Some(dyn_sel) = &x.dynamic_select {
-                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                    dyn_sel
+                        .index_expr
+                        .gather_variable_offsets_expanded(fold, inputs);
+                }
+                if fold.covers(x.dst_base) {
+                    outputs.push(x.dst_base);
+                    return;
                 }
                 for i in 0..x.dst_num_elements {
                     let off = VarOffset::new(
@@ -1675,42 +1686,42 @@ impl ProtoStatement {
             }
             ProtoStatement::If(x) => {
                 if let Some(cond) = &x.cond {
-                    cond.gather_variable_offsets_expanded(inputs);
+                    cond.gather_variable_offsets_expanded(fold, inputs);
                 }
                 for s in &x.true_side {
-                    s.gather_variable_offsets_expanded(inputs, outputs);
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
                 for s in &x.false_side {
-                    s.gather_variable_offsets_expanded(inputs, outputs);
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
             }
             ProtoStatement::Case(x) => {
                 for arm in &x.arms {
-                    arm.cond.gather_variable_offsets_expanded(inputs);
+                    arm.cond.gather_variable_offsets_expanded(fold, inputs);
                     for s in &arm.body {
-                        s.gather_variable_offsets_expanded(inputs, outputs);
+                        s.gather_variable_offsets_expanded(fold, inputs, outputs);
                     }
                 }
                 for s in &x.default {
-                    s.gather_variable_offsets_expanded(inputs, outputs);
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
             }
             ProtoStatement::SystemFunctionCall(x) => match x {
                 ProtoSystemFunctionCall::Display { args, .. }
                 | ProtoSystemFunctionCall::Write { args, .. } => {
                     for arg in args {
-                        arg.gather_variable_offsets_expanded(inputs);
+                        arg.gather_variable_offsets_expanded(fold, inputs);
                     }
                 }
                 ProtoSystemFunctionCall::Readmemh { .. } => {}
                 ProtoSystemFunctionCall::Assert {
                     condition, args, ..
                 } => {
-                    condition.gather_variable_offsets_expanded(inputs);
+                    condition.gather_variable_offsets_expanded(fold, inputs);
                     // Assert message args are also reads (mirror the
                     // non-expanded variant).
                     for arg in args {
-                        arg.gather_variable_offsets_expanded(inputs);
+                        arg.gather_variable_offsets_expanded(fold, inputs);
                     }
                 }
                 ProtoSystemFunctionCall::Finish => {}
@@ -1722,32 +1733,32 @@ impl ProtoStatement {
                 // originals weren't retained.
                 if !x.original_stmts.is_empty() {
                     for s in &x.original_stmts {
-                        s.gather_variable_offsets_expanded(inputs, outputs);
+                        s.gather_variable_offsets_expanded(fold, inputs, outputs);
                     }
                 } else if !x.stmt_deps.is_empty() {
                     for (ins, outs) in &x.stmt_deps {
                         for &off in ins {
-                            inputs.push(off);
+                            inputs.push(fold.canon(off));
                         }
                         for &off in outs {
-                            outputs.push(off);
+                            outputs.push(fold.canon(off));
                         }
                     }
                 } else {
                     for &off in &x.input_offsets {
-                        inputs.push(off);
+                        inputs.push(fold.canon(off));
                     }
                     for &off in &x.output_offsets {
-                        outputs.push(off);
+                        outputs.push(fold.canon(off));
                     }
                 }
             }
             ProtoStatement::For(x) => {
                 for e in x.range.dynamic_bounds() {
-                    e.gather_variable_offsets_expanded(inputs);
+                    e.gather_variable_offsets_expanded(fold, inputs);
                 }
                 for s in &x.body {
-                    s.gather_variable_offsets_expanded(inputs, outputs);
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
             }
             ProtoStatement::SequentialBlock(body) => {
@@ -1758,11 +1769,91 @@ impl ProtoStatement {
                 // just have no external readers), so we keep the full
                 // input/output sets.
                 for s in body {
-                    s.gather_variable_offsets_expanded(inputs, outputs);
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}
             ProtoStatement::Break => {}
+        }
+    }
+
+    /// Record every dynamically-indexed array this statement reaches, so
+    /// [`BigArrayFold`] can decide which are large enough to fold.
+    pub fn collect_big_arrays(&self, fold: &mut BigArrayFold) {
+        match self {
+            ProtoStatement::Assign(x) => {
+                x.expr.collect_big_arrays(fold);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::AssignDynamic(x) => {
+                x.dst_index_expr.collect_big_arrays(fold);
+                x.expr.collect_big_arrays(fold);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.collect_big_arrays(fold);
+                }
+                fold.record(x.dst_base, x.dst_stride, x.dst_num_elements);
+            }
+            ProtoStatement::If(x) => {
+                if let Some(cond) = &x.cond {
+                    cond.collect_big_arrays(fold);
+                }
+                for s in x.true_side.iter().chain(&x.false_side) {
+                    s.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    arm.cond.collect_big_arrays(fold);
+                    for s in &arm.body {
+                        s.collect_big_arrays(fold);
+                    }
+                }
+                for s in &x.default {
+                    s.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => match x {
+                ProtoSystemFunctionCall::Display { args, .. }
+                | ProtoSystemFunctionCall::Write { args, .. } => {
+                    for arg in args {
+                        arg.collect_big_arrays(fold);
+                    }
+                }
+                ProtoSystemFunctionCall::Assert {
+                    condition, args, ..
+                } => {
+                    condition.collect_big_arrays(fold);
+                    for arg in args {
+                        arg.collect_big_arrays(fold);
+                    }
+                }
+                ProtoSystemFunctionCall::Readmemh { .. } | ProtoSystemFunctionCall::Finish => {}
+            },
+            ProtoStatement::CompiledBlock(x) => {
+                // The cached offset lists carry no array shape, so only the
+                // retained originals can name a foldable array.  A block
+                // reduced to its cache keeps its arrays expanded — safe,
+                // since the gather reads the same lists.
+                for s in &x.original_stmts {
+                    s.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::For(x) => {
+                for e in x.range.dynamic_bounds() {
+                    e.collect_big_arrays(fold);
+                }
+                for s in &x.body {
+                    s.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    s.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
         }
     }
 

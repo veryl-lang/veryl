@@ -5695,12 +5695,10 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                 } = eff_expr
                     && *cw == a.dst_width
                 {
-                    // Expanded: the compact gather hides dynamic reads of
-                    // an array's middle elements, and the into-form zeroes
-                    // the destination before the elements evaluate.
-                    let mut ins: Vec<VarOffset> = vec![];
-                    eff_expr.gather_variable_offsets_expanded(&mut ins);
-                    if !ins.contains(&a.dst) {
+                    // The into-form zeroes the destination before the elements
+                    // evaluate, and the compact gather hides dynamic reads of
+                    // an array's middle ones.
+                    if !eff_expr.reads_offset(a.dst) {
                         let mut pre = String::new();
                         if emit_wide_concat_into(elements, *cw, nb, &dst, &mut pre).is_some() {
                             return Some(format!("{{ {pre}}}"));
