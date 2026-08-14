@@ -4364,6 +4364,25 @@ fn parse_hex_content_comments_and_underscores() {
 }
 
 #[test]
+fn parse_hex_content_drops_a_word_wider_than_the_payload() {
+    let content = "1 00000000000000ff 100000000000000000 2";
+    let values = parse_hex_content(content, 64);
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0].payload_u64(), 0x1);
+    assert_eq!(values[1].payload_u64(), 0xff);
+    assert_eq!(values[2].payload_u64(), 0x2);
+}
+
+#[test]
+fn parse_hex_content_drops_a_word_with_a_stray_character() {
+    let content = "11 2g2 __ 33";
+    let values = parse_hex_content(content, 16);
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].payload_u64(), 0x11);
+    assert_eq!(values[1].payload_u64(), 0x33);
+}
+
+#[test]
 fn readmemh_basic() {
     let dir = std::env::temp_dir();
     let hex_path = dir.join("veryl_test_readmemh.hex");
