@@ -5155,3 +5155,70 @@ fn dynamic_bit_select_on_struct_member_writes_the_addressed_bit() {
         }
     }
 }
+
+#[test]
+fn inst_unpacked_array_slice_output_port_keeps_element_order() {
+    // A concat destructure is MSB-first; applying that order to an element-wise
+    // slice swaps the elements.
+    let code = r#"
+        module Top (
+            a:  input  logic,
+            b:  input  logic,
+            o0: output logic,
+            o1: output logic,
+        ) {
+            var arr: logic [2];
+
+            inst u: Leaf (
+                i_a: a         ,
+                i_b: b         ,
+                o_q: arr[0+:2] ,
+            );
+
+            assign o0 = arr[0];
+            assign o1 = arr[1];
+        }
+
+        module Leaf (
+            i_a: input  logic   ,
+            i_b: input  logic   ,
+            o_q: output logic[2],
+        ) {
+            assign o_q[0] = i_a & i_b;
+            assign o_q[1] = i_a | i_b;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+
+    // Walk past Buf aliases to reach the real driver cell.
+    let trace_driver_kind = |net_id: veryl_synthesizer::NetId| -> Option<CellKind> {
+        let mut cur = net_id;
+        loop {
+            match &gate.module.nets[cur as usize].driver {
+                NetDriver::Cell(idx) => {
+                    let cell = &gate.module.cells[*idx];
+                    if cell.kind == CellKind::Buf {
+                        cur = cell.inputs[0];
+                        continue;
+                    }
+                    return Some(cell.kind);
+                }
+                _ => return None,
+            }
+        }
+    };
+
+    let mut checked = 0;
+    for port in &gate.module.ports {
+        let port_name = format!("{}", port.name);
+        if port_name == "o0" {
+            assert_eq!(trace_driver_kind(port.nets[0]), Some(CellKind::And2));
+            checked += 1;
+        } else if port_name == "o1" {
+            assert_eq!(trace_driver_kind(port.nets[0]), Some(CellKind::Or2));
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 2, "both outputs must be present");
+}

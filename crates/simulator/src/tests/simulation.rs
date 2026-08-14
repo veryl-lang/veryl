@@ -2590,6 +2590,113 @@ fn inst_array_input_port_shorthand() {
 }
 
 #[test]
+fn inst_unpacked_array_slice_output_port() {
+    // The distinct BASE per instance catches a wrong element-to-element mapping.
+    let code = r#"
+    module Top (
+        o_flat: output logic<32>,
+    ) {
+        var all: logic<8> [4];
+
+        for n in 0..2 :g_leaf {
+            inst u: Leaf #(
+                BASE: 16 * n,
+            ) (
+                o_q: all[2 * n+:2],
+            );
+        }
+
+        assign o_flat = {all[3], all[2], all[1], all[0]};
+    }
+
+    module Leaf #(
+        param BASE: logic<8> = 0,
+    ) (
+        o_q: output logic<8> [2],
+    ) {
+        assign o_q[0] = BASE + 1;
+        assign o_q[1] = BASE + 2;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            sim.get("o_flat").unwrap(),
+            Value::new(0x1211_0201, 32, false)
+        );
+    }
+}
+
+#[test]
+fn inst_unpacked_array_slice_input_port() {
+    // The analyzer used to emit `Unknown` for a slice on the read side.
+    let code = r#"
+    module Top (
+        o_flat: output logic<16>,
+        o_one : output logic<8> ,
+    ) {
+        var all: logic<8> [4];
+        var sum: logic<8> [2];
+
+        assign all[0] = 8'h01;
+        assign all[1] = 8'h02;
+        assign all[2] = 8'h10;
+        assign all[3] = 8'h20;
+
+        for n in 0..2 :g_leaf {
+            inst u: Leaf (
+                i_d: all[2 * n+:2],
+                o_s: sum[n]       ,
+            );
+        }
+
+        assign o_flat = {sum[1], sum[0]};
+
+        // A one-element array port is an array too, so its slice expands.
+        inst v: One (
+            i_d: all[3+:1],
+            o_s: o_one    ,
+        );
+    }
+
+    module Leaf (
+        i_d: input  logic<8> [2],
+        o_s: output logic<8>    ,
+    ) {
+        assign o_s = i_d[0] + i_d[1];
+    }
+
+    module One (
+        i_d: input  logic<8> [1],
+        o_s: output logic<8>    ,
+    ) {
+        assign o_s = i_d[0];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o_flat").unwrap(), Value::new(0x3003, 16, false));
+        assert_eq!(sim.get("o_one").unwrap(), Value::new(0x20, 8, false));
+    }
+}
+
+#[test]
 fn inst_ff() {
     let code = r#"
     module Top (

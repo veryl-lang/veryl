@@ -12785,6 +12785,65 @@ fn clock_domain_select_index() {
 }
 
 #[test]
+fn clock_domain_inst_port_unpacked_array_slice() {
+    // Regression: the slice evaluated to `Unknown`, which carries no clock
+    // domain, so the crossing went unreported.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock     ,
+        i_clk_b: input  'b clock     ,
+        i_a    : input  'a logic<8>[4],
+        o_b    : output 'b logic<8>  ,
+    ) {
+        inst u: ModuleB (
+            i_d: i_a[0+:2],
+            o_q: o_b      ,
+        );
+    }
+    module ModuleB (
+        i_d: input  logic<8>[2],
+        o_q: output logic<8>   ,
+    ) {
+        assign o_q = i_d[0] | i_d[1];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Same-domain slice stays accepted.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock     ,
+        i_a    : input  'a logic<8>[4],
+        o_a    : output 'a logic<8>  ,
+    ) {
+        inst u: ModuleB (
+            i_d: i_a[0+:2],
+            o_q: o_a      ,
+        );
+    }
+    module ModuleB (
+        i_d: input  logic<8>[2],
+        o_q: output logic<8>   ,
+    ) {
+        assign o_q = i_d[0] | i_d[1];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn clock_domain_array_literal_compound_element() {
     // Regression: an array-literal element wrapped in any operator was left
     // unevaluated at gather time (clock_domain None), so the crossing that is

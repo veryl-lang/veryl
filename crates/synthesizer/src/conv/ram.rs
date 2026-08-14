@@ -619,7 +619,9 @@ fn for_each_read_in_decl(decl: &Declaration, vid: air::VarId, f: &mut ReadVisito
         }
         Declaration::Inst(inst) => {
             for input in &inst.inputs {
-                for_each_read_in_expr(&input.expr, vid, f);
+                for expr in &input.exprs {
+                    for_each_read_in_expr(expr, vid, f);
+                }
             }
         }
         _ => {}

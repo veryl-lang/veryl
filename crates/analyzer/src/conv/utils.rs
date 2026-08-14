@@ -3694,11 +3694,40 @@ pub fn get_port_connects(
     Ok(ret)
 }
 
+/// Expands an unpacked-array slice connection (`i: arr[2*n+:2]`) into one
+/// expression per port element; anything else stays a single expression.
+///
+/// Separate from `insert_port_connect` so the caller can clock-domain check the
+/// result: unexpanded, the slice evaluates to `Unknown`, which carries no domain.
+pub fn expand_input_connect(
+    context: &mut Context,
+    variable: &ir::Variable,
+    dst: &[VarPathSelect],
+    expr: ir::Expression,
+) -> Vec<ir::Expression> {
+    if variable.kind != VarKind::Input
+        || variable.r#type.array.is_empty()
+        || dst.len() != 1
+        || !dst[0].is_array_range(context)
+    {
+        return vec![expr];
+    }
+
+    // A mismatched count keeps the single-expression form, so a malformed
+    // connection is diagnosed downstream as before.
+    let exprs = dst[0].clone().to_expressions(context);
+    if exprs.len() == variable.r#type.total_array().unwrap_or(1) {
+        exprs
+    } else {
+        vec![expr]
+    }
+}
+
 pub fn insert_port_connect(
     context: &mut Context,
     variable: &ir::Variable,
     dst: Vec<VarPathSelect>,
-    expr: ir::Expression,
+    exprs: Vec<ir::Expression>,
     inputs: &mut Vec<ir::InstInput>,
     outputs: &mut Vec<ir::InstOutput>,
 ) {
@@ -3706,10 +3735,12 @@ pub fn insert_port_connect(
         VarKind::Input => {
             inputs.push(ir::InstInput {
                 id: variable.id,
-                expr,
+                exprs,
             });
         }
         VarKind::Output => {
+            // Expansion applies to inputs only, so an output always has one.
+            let expr = &exprs[0];
             if !expr.is_assignable() {
                 context.insert_error(AnalyzerError::unassignable_output(&expr.token_range()));
             }
