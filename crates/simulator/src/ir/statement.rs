@@ -138,6 +138,12 @@ pub struct ReadmemhElement {
     pub next_offset: Option<isize>,
 }
 
+/// A `@` directive in a `$readmemh` file moves the load position.
+enum HexItem {
+    Address(u64),
+    Word(AnalyzerValue),
+}
+
 /// (current, next, native_bytes, use_4state) for one `$readmemh` word.
 type ReadmemhSlot = (*mut u8, Option<*mut u8>, usize, bool);
 
@@ -778,7 +784,16 @@ impl SystemFunctionCall {
             } => {
                 let content = read_hex_file(filename);
                 let mut i = 0usize;
-                for_each_hex_word(&content, *width, |value| {
+                for_each_hex_item(&content, *width, |item| {
+                    let value = match item {
+                        HexItem::Address(a) => {
+                            // An address too large for the host is past the end
+                            // of any memory, so let the next word stop the load.
+                            i = usize::try_from(a).unwrap_or(usize::MAX);
+                            return true;
+                        }
+                        HexItem::Word(v) => v,
+                    };
                     let Some(&(current, next, nb, use_4state)) = elements.get(i) else {
                         return false;
                     };
@@ -4448,16 +4463,18 @@ fn read_hex_file(filename: &str) -> Vec<u8> {
 pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
     let bytes = content.as_bytes();
     let mut result: Vec<AnalyzerValue> = Vec::with_capacity(bytes.len() / 4 + 1);
-    for_each_hex_word(bytes, width, |v| {
-        result.push(v);
+    for_each_hex_item(bytes, width, |item| {
+        if let HexItem::Word(v) = item {
+            result.push(v);
+        }
         true
     });
     result
 }
 
-/// `sink` returns false to stop early.  A word carrying a character outside
+/// `sink` returns false to stop early.  A token carrying a character outside
 /// `[0-9a-fA-F_]`, or a value past 64 bits, is dropped.
-fn for_each_hex_word(bytes: &[u8], width: usize, mut sink: impl FnMut(AnalyzerValue) -> bool) {
+fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -> bool) {
     let len = bytes.len();
     let mut i = 0usize;
 
@@ -4487,6 +4504,10 @@ fn for_each_hex_word(bytes: &[u8], width: usize, mut sink: impl FnMut(AnalyzerVa
                 continue;
             }
         }
+        let is_address = bytes[i] == b'@';
+        if is_address {
+            i += 1;
+        }
         let mut acc = 0u64;
         let mut digits = 0usize;
         let mut ok = true;
@@ -4513,8 +4534,15 @@ fn for_each_hex_word(bytes: &[u8], width: usize, mut sink: impl FnMut(AnalyzerVa
             digits += 1;
             i += 1;
         }
-        if ok && digits > 0 && !sink(AnalyzerValue::new(acc, width, false)) {
-            return;
+        if ok && digits > 0 {
+            let item = if is_address {
+                HexItem::Address(acc)
+            } else {
+                HexItem::Word(AnalyzerValue::new(acc, width, false))
+            };
+            if !sink(item) {
+                return;
+            }
         }
     }
 }
