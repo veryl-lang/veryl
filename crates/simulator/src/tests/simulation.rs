@@ -4383,6 +4383,15 @@ fn parse_hex_content_drops_a_word_with_a_stray_character() {
 }
 
 #[test]
+fn parse_hex_content_skips_an_address_directive() {
+    let content = "11 @0004 22";
+    let values = parse_hex_content(content, 8);
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].payload_u64(), 0x11);
+    assert_eq!(values[1].payload_u64(), 0x22);
+}
+
+#[test]
 fn readmemh_basic() {
     let dir = std::env::temp_dir();
     let hex_path = dir.join("veryl_test_readmemh.hex");
@@ -4417,6 +4426,46 @@ fn readmemh_basic() {
         assert!(dump.contains("mem[1] = 8'h14"));
         assert!(dump.contains("mem[2] = 8'h1e"));
         assert!(dump.contains("mem[3] = 8'h28"));
+    }
+
+    let _ = std::fs::remove_file(&hex_path);
+}
+
+#[test]
+fn readmemh_address_directive_moves_the_load_position() {
+    let dir = std::env::temp_dir();
+    let hex_path = dir.join("veryl_test_readmemh_at.hex");
+    std::fs::write(&hex_path, "0A 14\n@0004\n1E 28\n").unwrap();
+    let hex_path_str = hex_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+    ) {{
+        var mem: logic<8> [6];
+        initial {{
+            $readmemh("{}", mem);
+        }}
+    }}
+    "#,
+        hex_path_str
+    );
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(&code, &config);
+
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+
+        let dump = sim.ir.dump_variables();
+        println!("{}", dump);
+
+        assert!(dump.contains("mem[0] = 8'h0a"));
+        assert!(dump.contains("mem[1] = 8'h14"));
+        assert!(dump.contains("mem[4] = 8'h1e"));
+        assert!(dump.contains("mem[5] = 8'h28"));
     }
 
     let _ = std::fs::remove_file(&hex_path);
