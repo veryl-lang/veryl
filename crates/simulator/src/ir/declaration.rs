@@ -685,14 +685,11 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 // cross-test caches, so every module's always_comb is seen
                 // while still a flat SequentialBlock (at top level the DUT's
                 // blocks end up nested inside CompiledBlocks).
-                //
-                // Skipped when the block alone already makes the incremental
-                // plan infeasible (a statement reading a whole memory): the
-                // plan the transform serves will be declined, so its cost —
-                // and its select chains over huge reads — buy nothing.
+                // Skipped when a statement in the block reads a whole memory:
+                // the pass's select chains over such reads buy nothing.
                 #[cfg(not(target_family = "wasm"))]
                 if version_split::pass_enabled(context.config.use_4state)
-                    && !crate::ir::incremental::stmts_infeasible(&comb_statements)
+                    && !crate::ir::deps::stmts_infeasible(&comb_statements)
                 {
                     // Fresh comb offsets for rename temps come from the same
                     // allocator as function locals; instance-reuse records

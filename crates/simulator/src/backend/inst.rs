@@ -89,8 +89,8 @@ pub fn port_alias_enabled(
     }
     // `mark_seen` is order-dependent (first seer wins): two tests reaching a
     // shared component in different orders leave it in different alias states —
-    // an aliased-parent / de-aliased-child mix that mis-plans the incremental
-    // settle (a child's writes never fire, e.g. an LSU memory region stays 0).
+    // an aliased-parent / de-aliased-child mix in which a child's writes never
+    // fire (e.g. an LSU memory region stays 0).
     // Prefer the deterministic precomputed set, falling back only when absent.
     let recurring = match recurring_precomputed(component_key) {
         Some(r) => r,

@@ -373,9 +373,8 @@ impl ProtoExpression {
     /// element, not the post-select width).  The span travels with the read
     /// because meta-less storage (inlined-function and version-split
     /// temps) cannot be sized by a variable-meta lookup later — an 8-byte
-    /// fallback there silently under-covers a wide temp's readers in the
-    /// incremental plan.  Dynamic array reads expand to every element
-    /// (full coverage), range-unknown.
+    /// fallback there silently under-covers a wide temp.  Dynamic array
+    /// reads expand to every element (full coverage), range-unknown.
     pub fn gather_reads_expanded_ranged(&self, out: &mut Vec<RangedRead>) {
         match self {
             ProtoExpression::HierVariable(_) => {
@@ -430,16 +429,12 @@ impl ProtoExpression {
                 if let Some(dyn_sel) = dynamic_select {
                     dyn_sel.index_expr.gather_reads_expanded_ranged(out);
                 }
-                // A whole-array read above the plan's per-entry expansion cap
-                // collapses to one whole-span dep: the plan downgrades any
-                // entry carrying such a span to always_run before per-element
-                // precision is ever consumed, while the expansion itself is
-                // GBs of resident deps on an SoC (a multi-M-element DRAM read
-                // is captured per chunk AND per sub-group).  The union only
-                // widens (stride padding gaps), never narrows, so coverage
-                // stays safe.
+                // Past the cap, per-element precision buys nothing while
+                // the expansion costs GBs of resident entries on an SoC (a
+                // multi-M-element DRAM read).  The whole-span union only
+                // widens (stride padding gaps), so coverage stays safe.
                 let span = (*stride as usize).saturating_mul(*num_elements);
-                if *stride > 0 && span > crate::ir::incremental::read_expand_cap_bytes() {
+                if *stride > 0 && span > READ_EXPAND_CAP_BYTES {
                     out.push((*base_offset, None, span));
                 } else {
                     for i in 0..*num_elements {
@@ -670,6 +665,9 @@ pub struct DynamicBitSelect {
 /// One read gathered by `gather_reads_expanded_ranged`:
 /// `(offset, static bit range when known, native byte span of the read)`.
 pub type RangedRead = (VarOffset, Option<(usize, usize)>, usize);
+
+/// Read-expansion cap for `gather_reads_expanded_ranged`.
+const READ_EXPAND_CAP_BYTES: usize = (1 << 20) * 8;
 
 #[derive(Clone, Debug, Hash)]
 pub enum ProtoExpression {

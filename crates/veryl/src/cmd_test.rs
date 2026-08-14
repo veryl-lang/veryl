@@ -173,15 +173,13 @@ impl CmdTest {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        // A dump wants every comb word.  Localization, the incremental
-        // settle, and the comb fusion leave the words no later reader needs
-        // holding stale values, so waveforms would disagree with a full
-        // settle while the run still passes.  Before analysis: the blocklist
-        // is computed during conv, the plan shapes chunking, and the fusion
-        // decision is baked into the memoised pipeline.
+        // A dump wants every comb word.  Localization and the comb fusion
+        // leave the words no later reader needs holding stale values, so
+        // waveforms would disagree with a full settle while the run still
+        // passes.  Before analysis: the blocklist is computed during conv and
+        // the fusion decision is baked into the memoised pipeline.
         if self.opt.wave {
             veryl_simulator::backend::aot_c::force_disable_localize();
-            veryl_simulator::ir::incremental::force_disable();
             veryl_simulator::ir::force_disable_comb_fusion();
         }
 
@@ -320,14 +318,6 @@ impl CmdTest {
                 .or(metadata.test.seed)
                 .unwrap_or_else(random_seed),
             use_4state: self.opt.four_state || metadata.test.four_state,
-            // Persist runtime-infeasible incremental verdicts (see
-            // `backend::late`) so a DUT that abandoned its plan once skips
-            // the incremental conv configuration in later runs too.
-            incr_feedback_path: Some(
-                metadata
-                    .project_dot_build_path()
-                    .join("incr_infeasible_keys"),
-            ),
             ..Config::default()
         };
         config.apply_env();

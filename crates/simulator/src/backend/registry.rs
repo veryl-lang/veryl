@@ -149,38 +149,11 @@ impl BackendRegistry {
         ctx: &CompileCtx,
         stmts: &[ProtoStatement],
     ) -> Option<Arc<ChunkArtifact>> {
-        // Dependency sets for the incremental settle plan, captured while
-        // the source statements are still at hand.
-        //
-        // Unconditional on purpose.  Whether a module wants a plan is decided
-        // per comb list (from its recorded verdict), but compiled chunks are
-        // shared through `CHUNK_ARTIFACT_CACHE`, whose key is the statement
-        // fingerprint and does NOT record whether deps were captured.  A
-        // conditional capture would therefore let a deps-less artifact,
-        // cached by a module that wanted no plan, silently decline the plan
-        // of a module that did.  Capturing always costs one dependency walk
-        // per compiled chunk at build time and nothing at run time, and
-        // removes the invariant.
-        let incr_deps = Some(Arc::new(crate::ir::incremental::chunk_deps(stmts)));
-
         if !ctx.config.dut_reuse {
-            let mut artifact = self
+            return self
                 .backends
                 .iter_mut()
                 .find_map(|b| b.compile_chunk(ctx, stmts));
-            if let (Some(artifact), Some(deps)) = (&mut artifact, incr_deps) {
-                if let Some(a) = Arc::get_mut(artifact) {
-                    a.deps = Some(deps);
-                } else {
-                    // compile_chunk must return a uniquely-owned Arc; a shared
-                    // one would silently drop deps and decline the whole plan.
-                    debug_assert!(
-                        false,
-                        "compile_chunk returned a shared Arc<ChunkArtifact>; incremental deps not attached"
-                    );
-                }
-            }
-            return artifact;
         }
         let key = chunk_fingerprint(ctx.use_4state, ctx.contains_compiled_block, stmts);
         if let Some(artifact) = CHUNK_ARTIFACT_CACHE.lock().unwrap().get(&key) {
@@ -199,12 +172,6 @@ impl BackendRegistry {
             // Arc is fresh here (refcount 1), so `get_mut` always succeeds.
             if let Some(a) = Arc::get_mut(artifact) {
                 a.content_fp = Some(key);
-                a.deps = incr_deps;
-            } else {
-                debug_assert!(
-                    false,
-                    "compile_chunk returned a shared Arc<ChunkArtifact>; incremental deps not attached"
-                );
             }
             CHUNK_ARTIFACT_CACHE
                 .lock()
