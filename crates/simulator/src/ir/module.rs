@@ -2876,8 +2876,7 @@ impl Conv<&air::Module> for ProtoModule {
             context.config.use_4state,
             ff_start,
             comb_start,
-        )
-        .unwrap();
+        )?;
 
         context.ff_total_bytes += ff_bytes;
         context.comb_total_bytes += comb_bytes;

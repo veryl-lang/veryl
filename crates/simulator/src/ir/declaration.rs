@@ -936,8 +936,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             context.config.use_4state,
             ff_start,
             comb_start,
-        )
-        .unwrap();
+        )?;
 
         context.ff_total_bytes += child_ff_count;
         context.comb_total_bytes += child_comb_count;

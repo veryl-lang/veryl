@@ -40,6 +40,50 @@ fn combinational_loop() {
 }
 
 #[test]
+fn undetermined_width() {
+    // An unevaluatable width used to panic during IR construction.
+    let code = r#"
+    module Top (
+        a: input  logic,
+        c: output logic,
+    ) {
+        var d: logic<$sv::some_pkg::WIDTH>;
+        assign d = a;
+        assign c = d[0];
+    }
+    "#;
+
+    let result = analyze_top(code, &Config::default(), "Top");
+    assert!(matches!(
+        result,
+        Err(SimulatorError::UndeterminedWidth { .. })
+    ));
+
+    // A package const gets a synthesized path that must not reach the message.
+    let code = r#"
+    package P {
+        const X: logic<$sv::some_pkg::WIDTH> = 0;
+    }
+    module Top (
+        c: output logic,
+    ) {
+        assign c = P::X[0];
+    }
+    "#;
+
+    match analyze_top(code, &Config::default(), "Top") {
+        Err(SimulatorError::UndeterminedWidth { subject, .. }) => {
+            assert!(
+                !subject.contains("__const_"),
+                "internal name leaked: {subject}"
+            );
+        }
+        Err(x) => panic!("unexpected error: {x:?}"),
+        Ok(_) => panic!("expected UndeterminedWidth"),
+    }
+}
+
+#[test]
 fn no_initial_block() {
     let code = r#"
     module Top (
