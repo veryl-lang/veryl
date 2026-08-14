@@ -3,9 +3,10 @@
 //! Rewrites the dominant shape — an unconditional full-width base write
 //! followed by guarded full/partial overrides inside one `always_comb`
 //! (a priority chain, e.g. an unrolled `for` + `if` scan) — into a single
-//! unconditional write whose RHS is a ternary select chain.  One writer
-//! per variable lets the whole-comb backends localize and fuse storage
-//! they otherwise must keep materialized.
+//! unconditional write whose RHS is a ternary select chain.  Bit-disjoint
+//! writers (per-field assigns) fold the same way, into a concatenation.
+//! One writer per variable lets the whole-comb backends localize and fuse
+//! storage they otherwise must keep materialized.
 //!
 //! Runs on the merged comb list before dependency analysis, while
 //! `SequentialBlock`s (one per multi-statement `always_comb`) are intact,
@@ -48,7 +49,6 @@ pub struct RunStats {
     pub removed_stmts: usize,
     pub skip_opaque: usize,
     pub skip_read: usize,
-    pub skip_disjoint: usize,
     pub skip_unstable: usize,
     pub skip_width: usize,
     pub skip_fold: usize,
@@ -60,26 +60,31 @@ pub struct RunStats {
     pub skip_break: usize,
 }
 
+type Counter = (&'static str, fn(&RunStats) -> usize);
+
+/// Report order.  Pairing each label with its accessor here is what keeps a
+/// counter from being reported under another one's name.
+const COUNTERS: [Counter; 11] = [
+    ("blocks", |s| s.blocks),
+    ("fused_vars", |s| s.fused_vars),
+    ("fused_writes", |s| s.fused_writes),
+    ("removed_stmts", |s| s.removed_stmts),
+    ("skip.opaque", |s| s.skip_opaque),
+    ("skip.read", |s| s.skip_read),
+    ("skip.unstable", |s| s.skip_unstable),
+    ("skip.width", |s| s.skip_width),
+    ("skip.fold", |s| s.skip_fold),
+    ("skip.budget", |s| s.skip_budget),
+    ("skip.break", |s| s.skip_break),
+];
+
 /// Process-wide totals: the pass runs per always_comb during conv (including
 /// inside cross-test cached subtrees), so per-call logging would be noise.
-static TOTALS: [AtomicUsize; 12] = [const { AtomicUsize::new(0) }; 12];
+static TOTALS: [AtomicUsize; COUNTERS.len()] = [const { AtomicUsize::new(0) }; COUNTERS.len()];
 
 pub fn accumulate(s: &RunStats) {
-    let vals = [
-        s.blocks,
-        s.fused_vars,
-        s.fused_writes,
-        s.removed_stmts,
-        s.skip_opaque,
-        s.skip_read,
-        s.skip_disjoint,
-        s.skip_unstable,
-        s.skip_width,
-        s.skip_fold,
-        s.skip_budget,
-        s.skip_break,
-    ];
-    for (t, v) in TOTALS.iter().zip(vals) {
+    for (t, (_, get)) in TOTALS.iter().zip(COUNTERS) {
+        let v = get(s);
         if v > 0 {
             t.fetch_add(v, Relaxed);
         }
@@ -88,12 +93,12 @@ pub fn accumulate(s: &RunStats) {
 
 /// Formatted process-wide totals for diagnostics.
 pub fn totals_line() -> String {
-    let v: Vec<usize> = TOTALS.iter().map(|t| t.load(Relaxed)).collect();
-    format!(
-        "blocks={} fused_vars={} fused_writes={} removed_stmts={} \
-         skip: opaque={} read={} disjoint={} unstable={} width={} fold={} budget={} break={}",
-        v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11]
-    )
+    COUNTERS
+        .iter()
+        .zip(TOTALS.iter())
+        .map(|((label, _), t)| format!("{label}={}", t.load(Relaxed)))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Rewrite multi-write comb variables inside each `SequentialBlock` into
@@ -213,10 +218,8 @@ fn expr_nodes_capped(root: &ProtoExpression, cap: usize) -> usize {
 struct Ev {
     dst: i64,
     full_width: usize,
-    /// Written bit range (inclusive); full width when no select.  Feeds
-    /// the same-bit-overlap prefilter and the width sanity check.
+    /// Highest written bit (inclusive); `dst_width - 1` when no select.
     hi: u32,
-    lo: u32,
     stmt_idx: usize,
     /// Statement-order position within the block (Assign granularity).
     pos: u32,
@@ -299,15 +302,14 @@ fn record_tree(
             }
             tree_reads.extend(reads);
             tree_dsts.insert(dst);
-            let (hi, lo) = match x.select {
-                Some((a, b)) => (a.max(b) as u32, a.min(b) as u32),
-                None => (x.dst_width.saturating_sub(1) as u32, 0),
+            let hi = match x.select {
+                Some((a, b)) => a.max(b) as u32,
+                None => x.dst_width.saturating_sub(1) as u32,
             };
             col.events.push(Ev {
                 dst,
                 full_width: x.dst_width,
                 hi,
-                lo,
                 stmt_idx,
                 pos,
                 token: x.token,
@@ -470,17 +472,6 @@ fn split_block(
             stats.skip_width += 1;
             continue;
         }
-        // Pairwise-disjoint writers (per-field assigns) are already
-        // conflict-free, so a select chain buys no single-writer benefit.
-        let overlaps = evs
-            .iter()
-            .enumerate()
-            .any(|(i, a)| evs[i + 1..].iter().any(|b| a.lo <= b.hi && b.lo <= a.hi));
-        if !overlaps {
-            stats.skip_disjoint += 1;
-            continue;
-        }
-
         // Fold the writer statements (program order, deduped) into one RHS.
         let mut writer_stmts: Vec<usize> = evs.iter().map(|e| e.stmt_idx).collect();
         writer_stmts.dedup();
@@ -603,11 +594,11 @@ fn prune_stmt(stmt: ProtoStatement, dsts: &HashSet<i64>) -> Option<ProtoStatemen
 /// A fold operand.  `Val` and `Var` can be split at any bit boundary
 /// (constant select / narrower variable read); `Op` is opaque.
 ///
-/// The interval map starts as a `Var` read of the destination itself: an
-/// interval no write ever covers materializes as a self-read, matching the
-/// keep-previous-value semantics of a guard-only chain (`w = c ? e : w`).
-/// The settle evaluates the self-read against the previous pass's value —
-/// the same fixpoint the original guarded statements converge to.
+/// The interval map starts as a `Var` read of the destination itself, so an
+/// interval no write covers — an unfired guard, or a bit no field assign
+/// touches — materializes as a self-read.  The settle evaluates it against
+/// the previous pass's value, the same fixpoint the original statements
+/// converge to.
 #[derive(Clone)]
 enum Fe {
     Val(Value),
