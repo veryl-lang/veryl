@@ -302,7 +302,9 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
     // Inst input expressions are not represented by procedure statements.
     for inst in walk_insts(module) {
         for inp in &inst.inputs {
-            collect_expr_spans(&inp.expr, &mut accesses, ctx);
+            for expr in &inp.exprs {
+                collect_expr_spans(expr, &mut accesses, ctx);
+            }
         }
         for out in &inst.outputs {
             for dst in &out.dst {
@@ -976,7 +978,9 @@ fn add_inst_feedthrough_edges(
             continue;
         }
         let mut reads = Vec::new();
-        collect_expr_node_keys(&inp.expr, bit_part, &mut reads, ctx);
+        for expr in &inp.exprs {
+            collect_expr_node_keys(expr, bit_part, &mut reads, ctx);
+        }
         if !reads.is_empty() {
             input_reads.insert(inp.id, reads);
         }
@@ -1058,7 +1062,7 @@ fn add_sparse_whole_port_copy_edges(
         let Some(input) = inst.inputs.iter().find(|input| input.id == *input_id) else {
             continue;
         };
-        let Expression::Term(input_factor) = &input.expr else {
+        let Some(Expression::Term(input_factor)) = input.single() else {
             continue;
         };
         let Factor::Variable(parent_input, parent_input_index, parent_input_select, _) =

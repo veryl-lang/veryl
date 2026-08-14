@@ -957,7 +957,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for input in &src.inputs {
-                let air::Expression::Term(factor) = &input.expr else {
+                let Some(air::Expression::Term(factor)) = input.single() else {
                     continue;
                 };
                 let air::Factor::Variable(parent_id, idx, sel, _) = factor.as_ref() else {
@@ -1220,8 +1220,32 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
             let child_meta = child_variable_meta.get(&input.id).unwrap();
 
+            // One expression per port element: an unpacked-array slice, wired
+            // element-wise.
+            if input.exprs.len() != 1 {
+                if input.exprs.len() != child_meta.elements.len() {
+                    return Err(SimulatorError::unsupported_description(&src.token));
+                }
+                for (child_element, expr) in child_meta.elements.iter().zip(&input.exprs) {
+                    let mut proto_expr: ProtoExpression = Conv::conv(context, expr)?;
+                    size_fill_literal_rhs(&mut proto_expr, None, None, child_meta.width);
+                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: child_element.current,
+                        dst_width: child_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr: proto_expr,
+                        dst_ff_current_offset: 0, // not FF
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
+            let input_expr = &input.exprs[0];
+
             // Array port fed by a const array (`inst u: Sub (i: pk::TBL)`).
-            if let Some(exprs) = const_array_element_exprs(&input.expr, child_meta.elements.len()) {
+            if let Some(exprs) = const_array_element_exprs(input_expr, child_meta.elements.len()) {
                 for (child_element, expr) in child_meta.elements.iter().zip(exprs) {
                     all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                         dst: child_element.current,
@@ -1240,7 +1264,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // Array port fed by a bare or constant partial-index variable
             // (e.g. `w_q[i]` from `logic [N, M]`): expand per-element.
             if child_meta.elements.len() > 1
-                && let air::Expression::Term(factor) = &input.expr
+                && let air::Expression::Term(factor) = input_expr
                 && let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref()
                 && select.is_empty()
             {
@@ -1294,7 +1318,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
             }
 
-            let mut proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
+            let mut proto_expr: ProtoExpression = Conv::conv(context, input_expr)?;
             // Size an unsized all-bit literal (`'1` etc.) to the port
             // width — there is no assignment statement here to do it.
             size_fill_literal_rhs(&mut proto_expr, None, None, child_meta.width);
@@ -1320,11 +1344,15 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
             let child_meta = child_variable_meta.get(&output.id).unwrap();
             let multi_dst = output.dst.len() > 1;
+            // One dst per array element (`o: arr[2*n+:2]`) is element-wise
+            // wiring, not a concat destructure of a single packed port value.
+            let element_wise = multi_dst && child_meta.elements.len() == output.dst.len();
+            let concat_dst = multi_dst && !element_wise;
 
             // Field widths for the windows below, which slice a single
             // packed child port value.
             let mut dst_widths: Vec<usize> = Vec::with_capacity(output.dst.len());
-            if multi_dst {
+            if concat_dst {
                 if child_meta.elements.len() != 1 {
                     return Err(SimulatorError::unsupported_description(
                         &output.dst[0].token,
@@ -1416,7 +1444,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
                 // MSB-first window, clamped to the port width: bits above
                 // it read zero (SV zero-extension of the RHS).
-                let (rhs_select, field_above_port) = if multi_dst {
+                let (rhs_select, field_above_port) = if concat_dst {
                     let (msb, lsb) = msb_first_window(&mut remaining, dst_widths[dst_idx]);
                     if lsb >= child_meta.width {
                         (None, true)
@@ -1455,7 +1483,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
 
                 for (elem_idx, &parent_elem_idx) in parent_element_indices.iter().enumerate() {
-                    let child_element = &child_meta.elements[elem_idx];
+                    // Element-wise wiring puts one parent element per dst, so
+                    // the child element advances with the dst.
+                    let child_elem_idx = if element_wise { dst_idx } else { elem_idx };
+                    let child_element = &child_meta.elements[child_elem_idx];
                     let parent_element = &parent_meta.elements[parent_elem_idx];
 
                     let child_expr = if field_above_port {
@@ -1507,7 +1538,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // Remap child event keys (clock/reset) to parent VarIds via input port connections
         let mut child_to_parent_var: HashMap<air::VarId, air::VarId> = HashMap::default();
         for input in &src.inputs {
-            if let air::Expression::Term(factor) = &input.expr
+            if let Some(air::Expression::Term(factor)) = input.single()
                 && let air::Factor::Variable(parent_var_id, _, _, _) = factor.as_ref()
             {
                 child_to_parent_var.insert(input.id, *parent_var_id);

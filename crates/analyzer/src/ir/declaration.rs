@@ -304,12 +304,37 @@ impl fmt::Display for FfDeclaration {
 #[derive(Clone)]
 pub struct InstInput {
     pub id: VarId,
-    pub expr: Expression,
+    /// One entry per port array element for a slice of an unpacked array
+    /// (`i: arr[2*n+:2]`), which has no single-expression form; one entry
+    /// otherwise.
+    pub exprs: Vec<Expression>,
+}
+
+impl InstInput {
+    pub fn single(&self) -> Option<&Expression> {
+        if self.exprs.len() == 1 {
+            Some(&self.exprs[0])
+        } else {
+            None
+        }
+    }
 }
 
 impl fmt::Display for InstInput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} <- {}", self.id, self.expr)
+        let mut ret = format!("{} <- ", self.id);
+
+        if self.exprs.len() == 1 {
+            ret.push_str(&format!("{}", self.exprs[0]));
+        } else if !self.exprs.is_empty() {
+            ret.push_str(&format!("{{{}", self.exprs[0]));
+            for e in &self.exprs[1..] {
+                ret.push_str(&format!(", {}", e));
+            }
+            ret.push('}');
+        }
+
+        ret.fmt(f)
     }
 }
 
@@ -374,7 +399,9 @@ impl InstDeclaration {
     /// `from_ff=false` so the `is_ff` classifier ignores them.
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
         for input in &self.inputs {
-            input.expr.gather_ff(context, table, decl, None, false);
+            for expr in &input.exprs {
+                expr.gather_ff(context, table, decl, None, false);
+            }
         }
     }
 }
