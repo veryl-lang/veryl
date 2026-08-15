@@ -1,7 +1,8 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
-use super::region::{BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
-use super::ssa::{BranchState, SsaStore, VersionId};
+use super::BitDependency;
+use super::region::{ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
+use super::ssa::{BranchState, PositionOffset, SourceKind, SsaStore, VersionId};
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
@@ -12,6 +13,57 @@ use crate::ir::{
 use crate::value::Value;
 use crate::{HashMap, HashSet};
 use std::rc::Rc;
+
+fn signed_difference(destination: usize, source: usize) -> Option<i128> {
+    i128::try_from(destination)
+        .ok()?
+        .checked_sub(i128::try_from(source).ok()?)
+}
+
+enum RepeatedProjection {
+    Empty,
+    Single {
+        local_start: usize,
+        length: usize,
+        output_start: usize,
+    },
+    Multiple,
+}
+
+fn project_repeated_span(
+    requested_start: usize,
+    requested_length: usize,
+    output_start: usize,
+    item_length: usize,
+    repeat: usize,
+) -> RepeatedProjection {
+    let Some(output_length) = item_length.checked_mul(repeat) else {
+        return RepeatedProjection::Multiple;
+    };
+    let Some(requested_end) = requested_start.checked_add(requested_length) else {
+        return RepeatedProjection::Multiple;
+    };
+    let Some(output_end) = output_start.checked_add(output_length) else {
+        return RepeatedProjection::Multiple;
+    };
+    let overlap_start = requested_start.max(output_start);
+    let overlap_end = requested_end.min(output_end);
+    if item_length == 0 || overlap_start >= overlap_end {
+        return RepeatedProjection::Empty;
+    }
+    let relative_start = overlap_start - output_start;
+    let relative_end = overlap_end - output_start;
+    let first = relative_start / item_length;
+    let last = (relative_end - 1) / item_length;
+    if first != last {
+        return RepeatedProjection::Multiple;
+    }
+    RepeatedProjection::Single {
+        local_start: relative_start % item_length,
+        length: overlap_end - overlap_start,
+        output_start: output_start + first * item_length,
+    }
+}
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -172,8 +224,68 @@ pub(super) fn analyze(
     bit_part: &BitPartition,
     statements: &[Statement],
     context: &mut ProcedureContext,
-) -> Vec<(NodeKey, NodeKey)> {
+) -> Vec<Dependency> {
     ProcedureAnalysis::analyze(bit_part, statements, context)
+}
+
+pub(super) struct Dependency {
+    pub(super) source: NodeKey,
+    pub(super) destination: NodeKey,
+    pub(super) kind: BitDependency,
+}
+
+#[derive(Default)]
+struct ExpressionSources {
+    positional: Vec<(VersionId, PositionOffset)>,
+    whole: Vec<VersionId>,
+}
+
+impl ExpressionSources {
+    fn whole(versions: Vec<VersionId>) -> Self {
+        Self {
+            positional: Vec::new(),
+            whole: versions,
+        }
+    }
+
+    fn extend(&mut self, other: Self) {
+        self.positional.extend(other.positional);
+        self.whole.extend(other.whole);
+    }
+
+    fn translate(&mut self, offset: PositionOffset) {
+        let mut overflow = false;
+        for (_, current) in &mut self.positional {
+            if let Some(translated) = current.checked_add(offset) {
+                *current = translated;
+            } else {
+                overflow = true;
+                break;
+            }
+        }
+        if overflow {
+            self.whole
+                .extend(self.positional.drain(..).map(|(version, _)| version));
+        }
+    }
+
+    fn normalize(&mut self) {
+        self.positional.sort_unstable();
+        self.positional.dedup();
+        self.whole.sort_unstable();
+        self.whole.dedup();
+        let mut conflicting = Vec::new();
+        for pair in self.positional.windows(2) {
+            if pair[0].0 == pair[1].0 && pair[0].1 != pair[1].1 {
+                conflicting.push(pair[0].0);
+            }
+        }
+        self.whole.extend(conflicting);
+        self.whole.sort_unstable();
+        self.whole.dedup();
+        self.positional
+            .retain(|(source, _)| self.whole.binary_search(source).is_err());
+    }
 }
 
 pub(super) struct ExpressionAnalysis<'a, 's> {
@@ -199,7 +311,59 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         self.inner().eval_expression_sources(expression)
     }
 
-    pub(super) fn dependencies(&mut self) -> Vec<(NodeKey, NodeKey)> {
+    pub(super) fn eval_region(
+        &mut self,
+        expression: &Expression,
+        array: super::region::ArraySpan,
+        packed: PackedSpan,
+        context_width: usize,
+    ) -> Vec<RegionSource> {
+        let inner = self.inner.as_mut().expect("expression analysis is active");
+        let mut sources = inner.eval_expr_requested(expression, array, packed, context_width);
+        sources.normalize();
+        let mut mapped = Vec::new();
+        for (version, expression_offset) in sources.positional {
+            let wrapper = inner
+                .ssa
+                .positional_definition(vec![(version, expression_offset)], Vec::new());
+            for (source, kind) in inner.ssa.root_source_kinds(wrapper) {
+                if source.call_frame.is_some() {
+                    continue;
+                }
+                let source = source.node;
+                let offset = match kind {
+                    SourceKind::Offset(offset) => offset
+                        .checked_neg()
+                        .map(|offset| (offset.array, offset.packed)),
+                    SourceKind::Whole => None,
+                };
+                mapped.push(RegionSource {
+                    key: source,
+                    offset,
+                });
+            }
+        }
+        for version in sources.whole {
+            let wrapper = inner.ssa.definition(vec![version]);
+            mapped.extend(
+                inner
+                    .ssa
+                    .root_source_kinds(wrapper)
+                    .into_keys()
+                    .filter_map(|source| {
+                        source.call_frame.is_none().then_some(RegionSource {
+                            key: source.node,
+                            offset: None,
+                        })
+                    }),
+            );
+        }
+        mapped.sort_unstable_by_key(|source| (source.key, source.offset));
+        mapped.dedup();
+        mapped
+    }
+
+    pub(super) fn dependencies(&mut self) -> Vec<Dependency> {
         self.inner().dependencies()
     }
 
@@ -207,6 +371,12 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         let inner = self.inner.take().expect("expression analysis is active");
         context.restore(inner.ctx);
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RegionSource {
+    pub(super) key: NodeKey,
+    pub(super) offset: Option<(i128, i128)>,
 }
 
 struct ProcedureAnalysis<'a, 's> {
@@ -240,7 +410,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         bit_part: &'a BitPartition,
         statements: &[Statement],
         context: &mut ProcedureContext,
-    ) -> Vec<(NodeKey, NodeKey)> {
+    ) -> Vec<Dependency> {
         let mut this = Self::from_context(bit_part, context.take());
         this.eval_block(statements, &[]);
         let dependencies = this.dependencies();
@@ -353,7 +523,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some(summary)
     }
 
-    fn dependencies(&mut self) -> Vec<(NodeKey, NodeKey)> {
+    fn dependencies(&mut self) -> Vec<Dependency> {
         let mut dependencies = Vec::new();
         let destinations: Vec<_> = self
             .written
@@ -363,18 +533,35 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .collect();
         for destination in destinations {
             let version = self.read_key(destination);
-            let sources = self.ssa.root_sources(version);
+            let sources = self.ssa.root_source_kinds(version);
             dependencies.extend(
                 sources
                     .into_iter()
-                    .filter_map(|source| source.call_frame.is_none().then_some(source.node))
-                    .filter(|source| self.is_module_scope_key(*source))
-                    .map(|source| (source, destination)),
+                    .filter_map(|(source, source_kind)| {
+                        source
+                            .call_frame
+                            .is_none()
+                            .then_some((source.node, source_kind))
+                    })
+                    .filter(|(source, _)| self.is_module_scope_key(*source))
+                    .map(|(source, source_kind)| Dependency {
+                        source,
+                        destination,
+                        kind: Self::dependency_kind(source_kind),
+                    }),
             );
         }
-        dependencies.sort_unstable();
-        dependencies.dedup();
+        dependencies.sort_unstable_by_key(|dependency| (dependency.source, dependency.destination));
         dependencies
+    }
+
+    fn dependency_kind(source_kind: SourceKind) -> BitDependency {
+        match source_kind {
+            SourceKind::Offset(PositionOffset { array, packed }) => {
+                BitDependency::Offset { array, packed }
+            }
+            SourceKind::Whole => BitDependency::Whole,
+        }
     }
 
     fn is_module_scope_key(&self, key: NodeKey) -> bool {
@@ -507,32 +694,59 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         } else {
             None
         };
+        let destination_array = dst_writes(destination, &mut self.ctx)
+            .into_iter()
+            .map(|(array, _)| array)
+            .next();
+        let destination_offset = destination_array
+            .zip(selected)
+            .and_then(|(array, (_, low))| {
+                Some(PositionOffset {
+                    array: i128::try_from(array.start).ok()?,
+                    packed: signed_difference(low, expression_offset)?,
+                })
+            });
         let keys = self.write_keys(destination);
         for key in keys {
-            let mut dependencies = controls.to_vec();
+            let mut whole = controls.to_vec();
             for selector in destination
                 .index
                 .0
                 .iter()
                 .chain(destination.select.0.iter())
             {
-                dependencies.extend(self.eval_expr(selector));
+                whole.extend(self.eval_expr(selector));
             }
             if let Some((_, selector)) = &destination.select.1 {
-                dependencies.extend(self.eval_expr(selector));
+                whole.extend(self.eval_expr(selector));
             }
-            if let (Some((_, low)), Some(key_span)) = (selected, self.key_span(key)) {
-                if let Some(requested) = key_span.translated(low, expression_offset) {
-                    dependencies.extend(self.eval_expr_requested(
-                        expression,
-                        requested,
-                        expression_context_width,
-                    ));
+            let mut sources = if let (Some(destination_array), Some((_, low)), Some(key_span)) =
+                (destination_array, selected, self.key_span(key))
+            {
+                if let (Some(array), Some(packed)) = (
+                    key.1
+                        .intersection(destination_array)
+                        .and_then(|array| array.translated(destination_array.start, 0)),
+                    key_span.translated(low, expression_offset),
+                ) {
+                    self.eval_expr_requested(expression, array, packed, expression_context_width)
+                } else {
+                    ExpressionSources::default()
                 }
             } else {
-                dependencies.extend(self.eval_expr(expression));
+                ExpressionSources::whole(self.eval_expr(expression))
+            };
+            sources.whole.extend(whole);
+            sources.normalize();
+            let mut positional = Vec::new();
+            for (version, offset) in sources.positional {
+                if let Some(offset) = destination_offset.and_then(|base| offset.checked_add(base)) {
+                    positional.push((version, offset));
+                } else {
+                    sources.whole.push(version);
+                }
             }
-            let version = self.ssa.definition(dependencies);
+            let version = self.ssa.positional_definition(positional, sources.whole);
             self.bind_key(key, version);
             self.written.insert(key);
         }
@@ -695,9 +909,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn eval_expr_requested(
         &mut self,
         expression: &Expression,
+        requested_array: ArraySpan,
         requested: PackedSpan,
         context_width: usize,
-    ) -> Vec<VersionId> {
+    ) -> ExpressionSources {
+        let requested_array = if matches!(expression, Expression::ArrayLiteral(_, _)) {
+            requested_array
+        } else {
+            let expression_array = expression.comptime().r#type.array.total().unwrap_or(1);
+            let Some(requested_array) = requested_array.intersection(ArraySpan {
+                start: 0,
+                length: expression_array,
+            }) else {
+                return ExpressionSources::default();
+            };
+            requested_array
+        };
         let expression_width = expression
             .comptime()
             .r#type
@@ -705,30 +932,45 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .unwrap_or(context_width);
         let mut reads = PackedSpan::whole(expression_width)
             .and_then(|width| requested.intersection(width))
-            .map(|span| self.eval_expr_bits(expression, span))
+            .map(|span| self.eval_expr_bits(expression, requested_array, span))
             .unwrap_or_default();
         if context_width > expression_width
             && expression.comptime().r#type.signed
             && requested.end() > expression_width
             && expression_width != 0
         {
-            reads.extend(self.eval_expr_bits(
+            let mut sign = self.eval_expr_bits(
                 expression,
+                requested_array,
                 PackedSpan {
                     start: expression_width - 1,
                     length: 1,
                 },
-            ));
+            );
+            sign.whole
+                .extend(sign.positional.drain(..).map(|(version, _)| version));
+            reads.extend(sign);
         }
-        reads.sort_unstable();
-        reads.dedup();
+        reads.normalize();
         reads
     }
 
-    fn eval_expr_bits(&mut self, expression: &Expression, requested: PackedSpan) -> Vec<VersionId> {
+    fn eval_expr_bits(
+        &mut self,
+        expression: &Expression,
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+    ) -> ExpressionSources {
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::Variable(id, index, select, _) => {
+                    let mut selector_sources = Vec::new();
+                    for expression in index.0.iter().chain(select.0.iter()) {
+                        selector_sources.extend(self.eval_expr(expression));
+                    }
+                    if let Some((_, expression)) = &select.1 {
+                        selector_sources.extend(self.eval_expr(expression));
+                    }
                     let variable = self.ctx.variables.get(id).cloned();
                     let selected = if select.is_const_with_range() {
                         variable.as_ref().and_then(|variable| {
@@ -739,53 +981,97 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     };
                     if let Some((_, low)) = selected {
                         let mut reads = Vec::new();
+                        let accesses = var_reads(*id, index, select, &mut self.ctx);
                         if let Some(source_span) = requested.translated(0, low) {
-                            for (idx, access) in var_reads(*id, index, select, &mut self.ctx) {
-                                if let Some(source_span) = source_span.intersection(access) {
-                                    for key in
-                                        self.bit_part.overlapping_access(*id, idx, source_span)
-                                    {
+                            for (idx, access) in &accesses {
+                                let source_array = requested_array
+                                    .translated(0, idx.start)
+                                    .and_then(|requested| requested.intersection(*idx));
+                                if let (Some(source_array), Some(source_span)) =
+                                    (source_array, source_span.intersection(*access))
+                                {
+                                    for key in self.bit_part.overlapping_access(
+                                        *id,
+                                        source_array,
+                                        source_span,
+                                    ) {
                                         reads.push(self.read_key(key));
                                     }
                                 }
                             }
                         }
-                        reads
+                        let offset = (index.0.iter().all(|index| index.comptime().is_const)
+                            && accesses.len() == 1)
+                            .then(|| {
+                                Some(PositionOffset {
+                                    array: i128::try_from(accesses[0].0.start)
+                                        .ok()?
+                                        .checked_neg()?,
+                                    packed: i128::try_from(low).ok()?.checked_neg()?,
+                                })
+                            })
+                            .flatten();
+                        if let Some(offset) = offset {
+                            ExpressionSources {
+                                positional: reads
+                                    .into_iter()
+                                    .map(|version| (version, offset))
+                                    .collect(),
+                                whole: selector_sources,
+                            }
+                        } else {
+                            selector_sources.extend(reads);
+                            ExpressionSources::whole(selector_sources)
+                        }
                     } else {
-                        self.read_variable(*id, index, select)
+                        selector_sources.extend(self.read_variable(*id, index, select));
+                        ExpressionSources::whole(selector_sources)
                     }
                 }
                 Factor::SystemFunctionCall(call) => match &call.kind {
                     SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
-                        self.eval_expr_bits(&input.0, requested)
+                        self.eval_expr_bits(&input.0, requested_array, requested)
                     }
-                    _ => self.eval_system_call(call, &[], true),
+                    _ => ExpressionSources::whole(self.eval_system_call(call, &[], true)),
                 },
-                Factor::FunctionCall(call) => self.eval_call_requested(call, &[], Some(requested)),
+                Factor::FunctionCall(call) => {
+                    ExpressionSources::whole(self.eval_call_requested(call, &[], Some(requested)))
+                }
                 Factor::HierVariable(_)
                 | Factor::Value(_)
                 | Factor::Anonymous(_)
-                | Factor::Unknown(_) => Vec::new(),
+                | Factor::Unknown(_) => ExpressionSources::default(),
             },
             Expression::Unary(op, operand, _) => match op {
-                Op::BitNot | Op::Add | Op::Sub => self.eval_expr_bits(operand, requested),
-                _ => self.eval_expr(operand),
+                Op::BitNot | Op::Add => self.eval_expr_bits(operand, requested_array, requested),
+                _ => ExpressionSources::whole(self.eval_expr(operand)),
             },
             Expression::Binary(left, op, right, _) => match op {
                 Op::LogicShiftL | Op::ArithShiftL => {
                     let shift = right
                         .eval_value(&mut self.ctx)
                         .and_then(|value| value.to_usize());
-                    let mut reads = self.eval_expr(right);
+                    let mut reads = ExpressionSources::whole(self.eval_expr(right));
                     if let Some(shift) = shift {
                         let start = requested.start.max(shift);
                         if let Some(length) = requested.end().checked_sub(start)
                             && let Some(input) = PackedSpan::new(start - shift, length)
                         {
-                            reads.extend(self.eval_expr_bits(left, input));
+                            let mut input = self.eval_expr_bits(left, requested_array, input);
+                            if let Ok(shift) = i128::try_from(shift) {
+                                input.translate(PositionOffset {
+                                    array: 0,
+                                    packed: shift,
+                                });
+                            } else {
+                                input
+                                    .whole
+                                    .extend(input.positional.drain(..).map(|(version, _)| version));
+                            }
+                            reads.extend(input);
                         }
                     } else {
-                        reads.extend(self.eval_expr(left));
+                        reads.whole.extend(self.eval_expr(left));
                     }
                     reads
                 }
@@ -793,69 +1079,291 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     let shift = right
                         .eval_value(&mut self.ctx)
                         .and_then(|value| value.to_usize());
-                    let mut reads = self.eval_expr(right);
+                    let mut reads = ExpressionSources::whole(self.eval_expr(right));
                     if let Some(shift) = shift {
                         let width = left.comptime().r#type.total_width().unwrap_or(0);
                         let shifted = requested.translated(0, shift);
                         if let Some(input) = shifted
                             .and_then(|shifted| PackedSpan::whole(width)?.intersection(shifted))
                         {
-                            reads.extend(self.eval_expr_bits(left, input));
+                            let mut input = self.eval_expr_bits(left, requested_array, input);
+                            if let Ok(shift) = i128::try_from(shift) {
+                                input.translate(PositionOffset {
+                                    array: 0,
+                                    packed: -shift,
+                                });
+                            } else {
+                                input
+                                    .whole
+                                    .extend(input.positional.drain(..).map(|(version, _)| version));
+                            }
+                            reads.extend(input);
                         }
                         if *op == Op::ArithShiftR
                             && left.comptime().r#type.signed
                             && width != 0
                             && shifted.is_some_and(|shifted| shifted.end() > width)
                         {
-                            reads.extend(self.eval_expr_bits(
+                            let mut sign = self.eval_expr_bits(
                                 left,
+                                requested_array,
                                 PackedSpan {
                                     start: width - 1,
                                     length: 1,
                                 },
-                            ));
+                            );
+                            sign.whole
+                                .extend(sign.positional.drain(..).map(|(version, _)| version));
+                            reads.extend(sign);
                         }
                     } else {
-                        reads.extend(self.eval_expr(left));
+                        reads.whole.extend(self.eval_expr(left));
                     }
                     reads
                 }
                 Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
-                    let mut reads = self.eval_expr_bits(left, requested);
-                    reads.extend(self.eval_expr_bits(right, requested));
+                    let mut reads = self.eval_expr_bits(left, requested_array, requested);
+                    reads.extend(self.eval_expr_bits(right, requested_array, requested));
                     reads
                 }
-                _ => self.eval_expr(expression),
+                _ => ExpressionSources::whole(self.eval_expr(expression)),
             },
             Expression::Ternary(condition, left, right, _) => {
-                let mut reads = self.eval_expr(condition);
-                reads.extend(self.eval_expr_bits(left, requested));
-                reads.extend(self.eval_expr_bits(right, requested));
+                let mut reads = ExpressionSources::whole(self.eval_expr(condition));
+                reads.extend(self.eval_expr_bits(left, requested_array, requested));
+                reads.extend(self.eval_expr_bits(right, requested_array, requested));
                 reads
             }
             Expression::Concatenation(parts, _) => {
-                if parts.iter().any(|(_, repeat)| repeat.is_some()) {
-                    return self.eval_expr(expression);
-                }
                 let mut low = 0usize;
-                let mut reads = Vec::new();
-                for (part, _) in parts.iter().rev() {
+                let mut reads = ExpressionSources::default();
+                for (part, repeat) in parts.iter().rev() {
                     let Some(width) = part.comptime().r#type.total_width() else {
-                        return self.eval_expr(expression);
+                        return ExpressionSources::whole(self.eval_expr(expression));
+                    };
+                    let count = if let Some(repeat) = repeat {
+                        let Some(count) = repeat
+                            .eval_value(&mut self.ctx)
+                            .and_then(|value| value.to_usize())
+                        else {
+                            return ExpressionSources::whole(self.eval_expr(expression));
+                        };
+                        reads.whole.extend(self.eval_expr_inner(repeat, false));
+                        count
+                    } else {
+                        1
+                    };
+                    match project_repeated_span(
+                        requested.start,
+                        requested.length,
+                        low,
+                        width,
+                        count,
+                    ) {
+                        RepeatedProjection::Empty => {}
+                        RepeatedProjection::Single {
+                            local_start,
+                            length,
+                            output_start,
+                        } => {
+                            let Some(local) = PackedSpan::new(local_start, length) else {
+                                continue;
+                            };
+                            let mut part = self.eval_expr_bits(part, requested_array, local);
+                            if let Ok(output_start) = i128::try_from(output_start) {
+                                part.translate(PositionOffset {
+                                    array: 0,
+                                    packed: output_start,
+                                });
+                            } else {
+                                part.whole
+                                    .extend(part.positional.drain(..).map(|(version, _)| version));
+                            }
+                            reads.extend(part);
+                        }
+                        RepeatedProjection::Multiple => {
+                            reads.whole.extend(self.eval_expr(part));
+                        }
+                    }
+                    let Some(part_width) = width.checked_mul(count) else {
+                        return ExpressionSources::whole(self.eval_expr(expression));
+                    };
+                    let Some(next) = low.checked_add(part_width) else {
+                        return ExpressionSources::whole(self.eval_expr(expression));
+                    };
+                    low = next;
+                }
+                reads
+            }
+            Expression::ArrayLiteral(items, _) => {
+                let Some(requested_end) = requested_array.end() else {
+                    return ExpressionSources::whole(self.eval_expr(expression));
+                };
+                let total = expression
+                    .comptime()
+                    .r#type
+                    .array
+                    .total()
+                    .unwrap_or(1)
+                    .max(requested_end);
+                let mut cursor = 0usize;
+                let mut default = None;
+                let mut reads = ExpressionSources::default();
+                for item in items {
+                    let ArrayLiteralItem::Value(value, repeat) = item else {
+                        let ArrayLiteralItem::Defaul(value) = item else {
+                            unreachable!();
+                        };
+                        default = Some(value.as_ref());
+                        continue;
+                    };
+                    let item_length = value.comptime().r#type.array.total().unwrap_or(1);
+                    let count = if let Some(repeat) = repeat {
+                        let Some(count) = repeat
+                            .eval_value(&mut self.ctx)
+                            .and_then(|value| value.to_usize())
+                        else {
+                            return ExpressionSources::whole(self.eval_expr(expression));
+                        };
+                        reads.whole.extend(self.eval_expr_inner(repeat, false));
+                        count
+                    } else {
+                        1
+                    };
+                    match project_repeated_span(
+                        requested_array.start,
+                        requested_array.length,
+                        cursor,
+                        item_length,
+                        count,
+                    ) {
+                        RepeatedProjection::Empty => {}
+                        RepeatedProjection::Single {
+                            local_start,
+                            length,
+                            output_start,
+                        } => {
+                            let mut item = self.eval_expr_requested(
+                                value,
+                                ArraySpan {
+                                    start: local_start,
+                                    length,
+                                },
+                                requested,
+                                value
+                                    .comptime()
+                                    .r#type
+                                    .total_width()
+                                    .unwrap_or(requested.length),
+                            );
+                            if let Ok(output_start) = i128::try_from(output_start) {
+                                item.translate(PositionOffset {
+                                    array: output_start,
+                                    packed: 0,
+                                });
+                            } else {
+                                item.whole
+                                    .extend(item.positional.drain(..).map(|(version, _)| version));
+                            }
+                            reads.extend(item);
+                        }
+                        RepeatedProjection::Multiple => {
+                            reads.whole.extend(self.eval_expr(value));
+                        }
+                    }
+                    let Some(item_extent) = item_length.checked_mul(count) else {
+                        return ExpressionSources::whole(self.eval_expr(expression));
+                    };
+                    let Some(next) = cursor.checked_add(item_extent) else {
+                        return ExpressionSources::whole(self.eval_expr(expression));
+                    };
+                    cursor = next;
+                }
+                if let Some(default) = default
+                    && cursor < total
+                {
+                    let item_length = default.comptime().r#type.array.total().unwrap_or(1);
+                    let remaining = total - cursor;
+                    let count = remaining.div_ceil(item_length);
+                    match project_repeated_span(
+                        requested_array.start,
+                        requested_array.length,
+                        cursor,
+                        item_length,
+                        count,
+                    ) {
+                        RepeatedProjection::Empty => {}
+                        RepeatedProjection::Single {
+                            local_start,
+                            length,
+                            output_start,
+                        } => {
+                            let mut item = self.eval_expr_requested(
+                                default,
+                                ArraySpan {
+                                    start: local_start,
+                                    length,
+                                },
+                                requested,
+                                default
+                                    .comptime()
+                                    .r#type
+                                    .total_width()
+                                    .unwrap_or(requested.length),
+                            );
+                            if let Ok(output_start) = i128::try_from(output_start) {
+                                item.translate(PositionOffset {
+                                    array: output_start,
+                                    packed: 0,
+                                });
+                            } else {
+                                item.whole
+                                    .extend(item.positional.drain(..).map(|(version, _)| version));
+                            }
+                            reads.extend(item);
+                        }
+                        RepeatedProjection::Multiple => {
+                            reads.whole.extend(self.eval_expr(default));
+                        }
+                    }
+                }
+                reads
+            }
+            Expression::StructConstructor(r#type, fields, _) => {
+                let mut low = 0usize;
+                let mut reads = ExpressionSources::default();
+                for (name, value) in fields.iter().rev() {
+                    let Some(member) = r#type.get_member_type(*name) else {
+                        return ExpressionSources::whole(self.eval_expr(expression));
+                    };
+                    let Some(width) = member.total_width() else {
+                        return ExpressionSources::whole(self.eval_expr(expression));
                     };
                     if let Some(window) = PackedSpan::new(low, width)
                         && let Some(local) = requested
                             .intersection(window)
                             .and_then(|span| span.translated(low, 0))
                     {
-                        reads.extend(self.eval_expr_bits(part, local));
+                        let mut field =
+                            self.eval_expr_requested(value, requested_array, local, width);
+                        if let Ok(low) = i128::try_from(low) {
+                            field.translate(PositionOffset {
+                                array: 0,
+                                packed: low,
+                            });
+                        } else {
+                            field
+                                .whole
+                                .extend(field.positional.drain(..).map(|(version, _)| version));
+                        }
+                        reads.extend(field);
                     }
-                    low = low.saturating_add(width);
+                    let Some(next) = low.checked_add(width) else {
+                        return ExpressionSources::whole(self.eval_expr(expression));
+                    };
+                    low = next;
                 }
                 reads
-            }
-            Expression::ArrayLiteral(_, _) | Expression::StructConstructor(_, _, _) => {
-                self.eval_expr(expression)
             }
         }
     }
@@ -1085,7 +1593,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 continue;
             };
             for key in self.keys_for_id(formal) {
-                let sources = self.eval_actual_for_formal_key(actual, key);
+                let mut sources = self.eval_actual_for_formal_key(actual, key);
+                sources.normalize();
                 input_bindings.push((key, sources));
             }
         }
@@ -1105,7 +1614,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         }
         for (key, sources) in input_bindings {
-            let version = self.ssa.definition(sources);
+            let version = self
+                .ssa
+                .positional_definition(sources.positional, sources.whole);
             self.bind_key(key, version);
         }
 
@@ -1276,7 +1787,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     .flatten()
             });
             if let Some(actual) = actual {
-                versions.extend(self.eval_actual_for_formal_key(actual, *source));
+                let sources = self.eval_actual_for_formal_key(actual, *source);
+                versions.extend(sources.positional.into_iter().map(|(version, _)| version));
+                versions.extend(sources.whole);
             }
         }
         versions.sort_unstable();
@@ -1329,23 +1842,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         &mut self,
         actual: &Expression,
         formal_key: NodeKey,
-    ) -> Vec<VersionId> {
+    ) -> ExpressionSources {
         let Some(span) = self.key_span(formal_key) else {
-            return self.eval_expr(actual);
+            return ExpressionSources::whole(self.eval_expr(actual));
         };
-        if let Expression::Term(factor) = actual
-            && let Factor::Variable(id, index, select, _) = factor.as_ref()
-            && index.0.is_empty()
-            && select.is_empty()
-        {
-            return self
-                .bit_part
-                .overlapping((*id, formal_key.1), span)
-                .into_iter()
-                .map(|range| self.read_key((*id, formal_key.1, range)))
-                .collect();
-        }
-        self.eval_expr_bits(actual, span)
+        self.eval_expr_bits(actual, formal_key.1, span)
     }
 
     fn write_formal_output(
@@ -1366,29 +1867,50 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         } else {
             None
         };
+        let destination_array = dst_writes(destination, &mut self.ctx)
+            .into_iter()
+            .map(|(array, _)| array)
+            .next();
+        let position_offset = destination_array
+            .zip(selected)
+            .and_then(|(array, (_, low))| {
+                Some(PositionOffset {
+                    array: i128::try_from(array.start).ok()?,
+                    packed: signed_difference(low, formal_offset)?,
+                })
+            });
         for key in self.write_keys(destination) {
-            let mut sources = controls.to_vec();
-            if let (Some((_, low)), Some(span)) = (selected, self.key_span(key)) {
-                if let Some(requested) = span
-                    .translated(low, formal_offset)
-                    .and_then(|span| PackedSpan::whole(formal_width)?.intersection(span))
-                {
+            let mut positional = Vec::new();
+            let mut whole = controls.to_vec();
+            if let (Some(destination_array), Some((_, low)), Some(span), Some(position_offset)) = (
+                destination_array,
+                selected,
+                self.key_span(key),
+                position_offset,
+            ) {
+                if let (Some(requested_array), Some(requested)) = (
+                    key.1
+                        .intersection(destination_array)
+                        .and_then(|array| array.translated(destination_array.start, 0)),
+                    span.translated(low, formal_offset)
+                        .and_then(|span| PackedSpan::whole(formal_width)?.intersection(span)),
+                ) {
                     for (formal_key, version) in formal_versions {
-                        if formal_key.1.start != 0 {
+                        if !formal_key.1.overlaps(requested_array) {
                             continue;
                         }
                         let Some(formal_span) = self.key_span(*formal_key) else {
                             continue;
                         };
                         if formal_span.overlaps(requested) {
-                            sources.push(*version);
+                            positional.push((*version, position_offset));
                         }
                     }
                 }
             } else {
-                sources.extend(formal_versions.iter().map(|(_, version)| *version));
+                whole.extend(formal_versions.iter().map(|(_, version)| *version));
             }
-            let version = self.ssa.definition(sources);
+            let version = self.ssa.positional_definition(positional, whole);
             self.bind_key(key, version);
             self.written.insert(key);
         }
