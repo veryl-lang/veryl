@@ -9,6 +9,8 @@ use veryl_parser::doc_comment_table;
 
 mod comb_loop_diagnostic_tests;
 
+mod comb_loop_adversarial_tests;
+
 mod comb_loop_conservative_tests;
 
 mod comb_loop_incomplete_tests;

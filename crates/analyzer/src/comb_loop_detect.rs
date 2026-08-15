@@ -34,9 +34,10 @@ use crate::ir::{
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::Graph;
 use daggy::petgraph::algo::tarjan_scc;
-use daggy::petgraph::graph::NodeIndex;
+use daggy::petgraph::graph::{EdgeIndex, NodeIndex};
 use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
+use std::ops::{Deref, DerefMut};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct SummaryRegion {
@@ -45,7 +46,7 @@ struct SummaryRegion {
     packed: PackedSpan,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct BitDependency {
     /// `None` means that every source coordinate on this axis may affect the
     /// destination region. `Some(C)` preserves `source + C = destination`.
@@ -105,7 +106,33 @@ impl GraphDependency {
     }
 }
 
-type DependencyGraph = Graph<NodeKey, GraphDependency>;
+struct DependencyGraph {
+    graph: Graph<NodeKey, GraphDependency>,
+    edges: HashMap<(NodeIndex, NodeIndex, BitDependency), EdgeIndex>,
+}
+
+impl DependencyGraph {
+    fn new() -> Self {
+        Self {
+            graph: Graph::new(),
+            edges: HashMap::default(),
+        }
+    }
+}
+
+impl Deref for DependencyGraph {
+    type Target = Graph<NodeKey, GraphDependency>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.graph
+    }
+}
+
+impl DerefMut for DependencyGraph {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.graph
+    }
+}
 
 /// Sparse region-to-region reachability across a module boundary. Endpoints
 /// include ordinary ports and interface members captured by imported modport
@@ -1114,7 +1141,8 @@ fn build_module_graph(
             }
             let source = ensure_node(&mut graph, &mut node_map, source);
             let destination = ensure_node(&mut graph, &mut node_map, destination);
-            graph.add_edge(
+            add_dependency_edge(
+                &mut graph,
                 source,
                 destination,
                 GraphDependency {
@@ -1184,14 +1212,17 @@ fn add_inst_feedthrough_edges<'a>(
             for dependency in dependencies {
                 let source = ensure_node(graph, node_map, dependency.source);
                 let destination = ensure_node(graph, node_map, dependency.destination);
-                graph.add_edge(
+                add_dependency_edge(
+                    graph,
                     source,
                     destination,
                     GraphDependency::unconditional(dependency.kind),
                 );
             }
         }
-        reads.sort_unstable_by_key(|source| (source.key, source.offset, source.condition.clone()));
+        reads.sort_unstable_by_key(|source| {
+            (source.key, source.offset, source.condition.clone())
+        });
         reads.dedup_by(|left, right| {
             left.key == right.key
                 && left.offset == right.offset
@@ -1222,7 +1253,8 @@ fn add_inst_feedthrough_edges<'a>(
             for dependency in dependencies {
                 let source = ensure_node(graph, node_map, dependency.source);
                 let destination = ensure_node(graph, node_map, dependency.destination);
-                graph.add_edge(
+                add_dependency_edge(
+                    graph,
                     source,
                     destination,
                     GraphDependency::unconditional(dependency.kind),
@@ -1232,7 +1264,8 @@ fn add_inst_feedthrough_edges<'a>(
                 for destination in &destination_keys {
                     let source_node = ensure_node(graph, node_map, source.key);
                     let destination = ensure_node(graph, node_map, *destination);
-                    graph.add_edge(
+                    add_dependency_edge(
+                        graph,
                         source_node,
                         destination,
                         GraphDependency {
@@ -1270,7 +1303,6 @@ fn add_inst_feedthrough_edges<'a>(
                 inst,
                 child,
                 child_destination,
-                dependency,
                 Direction::Output,
                 output_dsts.get(&child_destination.id).map(Vec::as_slice),
                 bit_part,
@@ -1385,7 +1417,6 @@ fn map_instance_source_region<'a>(
         inst,
         child,
         region,
-        dependency,
         Direction::Input,
         allowed,
         bit_part,
@@ -1452,7 +1483,7 @@ fn remap_module_summary_branches(
     branches
         .into_iter()
         .enumerate()
-        .map(|(local, branch)| (branch, BranchId::new(namespace, local)))
+        .map(|(local, branch)| (branch, BranchId::new(namespace, local, branch.arms())))
         .collect()
 }
 
@@ -1559,7 +1590,6 @@ fn instance_region_mapping(
     inst: &InstDeclaration,
     child: &Module,
     region: SummaryRegion,
-    dependency: BitDependency,
     direction: Direction,
     fallback: Option<&[procedure::RegionSource]>,
     bit_part: &BitPartition,
@@ -1570,7 +1600,6 @@ fn instance_region_mapping(
         .get(&region.id)
         .or_else(|| child.interface_members.get(&region.id));
     if let Some(variable) = variable
-        && (direction == Direction::Input || dependency.has_position())
         && let Some((parent, index, select)) =
             instance_port_region_actual(inst, region.id, direction)
     {
@@ -1750,7 +1779,8 @@ fn add_mapped_dependency_edges(
             }
             let source = ensure_node(graph, node_map, source.key);
             let destination = ensure_node(graph, node_map, destination.key);
-            graph.add_edge(
+            add_dependency_edge(
+                graph,
                 source,
                 destination,
                 GraphDependency {
@@ -1759,6 +1789,24 @@ fn add_mapped_dependency_edges(
                 },
             );
         }
+    }
+}
+
+fn add_dependency_edge(
+    graph: &mut DependencyGraph,
+    source: NodeIndex,
+    destination: NodeIndex,
+    dependency: GraphDependency,
+) {
+    let key = (source, destination, dependency.kind);
+    if let Some(&existing) = graph.edges.get(&key) {
+        let weight = graph
+            .edge_weight_mut(existing)
+            .expect("an edge found in the graph must remain present");
+        weight.condition = weight.condition.disjoin(&dependency.condition);
+    } else {
+        let edge = graph.add_edge(source, destination, dependency);
+        graph.edges.insert(key, edge);
     }
 }
 
@@ -2095,7 +2143,7 @@ fn collect_dst_node_keys(
 }
 
 fn check_graph(module: &Module, graph: &DependencyGraph, errors: &mut Vec<AnalyzerError>) {
-    let sccs = tarjan_scc(graph);
+    let sccs = tarjan_scc(&graph.graph);
     let mut reported: HashSet<Vec<NodeKey>> = HashSet::default();
     for scc in sccs {
         if !has_compatible_cycle(graph, &scc) {
@@ -2254,8 +2302,9 @@ fn compute_module_summary(
     destination_ids.extend(interface_ids);
 
     let mut feedthrough: HashMap<SummaryRegion, Vec<SummaryDependency>> = HashMap::default();
-    let mut reached: HashMap<(NodeIndex, PathCondition), BitDependency> = HashMap::default();
-    let mut queue: VecDeque<(NodeIndex, PathCondition)> = VecDeque::new();
+    let mut reached: HashMap<(NodeIndex, BitDependency), PathCondition> = HashMap::default();
+    let mut queued: HashSet<(NodeIndex, BitDependency)> = HashSet::default();
+    let mut queue: VecDeque<(NodeIndex, BitDependency)> = VecDeque::new();
     for ni in graph.node_indices() {
         let key = graph[ni];
         if !source_ids.contains(&key.0) {
@@ -2266,17 +2315,61 @@ fn compute_module_summary(
         };
         let mut destinations = Vec::new();
         reached.clear();
+        queued.clear();
         queue.clear();
         for edge in graph.edges(ni) {
+            let state = (edge.target(), edge.weight().kind);
             let condition = edge.weight().condition.clone();
-            reached
-                .entry((edge.target(), condition.clone()))
-                .and_modify(|dependency| *dependency = dependency.union(edge.weight().kind))
-                .or_insert(edge.weight().kind);
-            queue.push_back((edge.target(), condition));
+            let changed = match reached.entry(state) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    let merged = entry.get().disjoin(&condition);
+                    if *entry.get() == merged {
+                        false
+                    } else {
+                        entry.insert(merged);
+                        true
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(condition);
+                    true
+                }
+            };
+            if changed && queued.insert(state) {
+                queue.push_back(state);
+            }
         }
-        while let Some((n, condition)) = queue.pop_front() {
-            let dependency = reached[&(n, condition.clone())];
+        while let Some(state @ (n, dependency)) = queue.pop_front() {
+            queued.remove(&state);
+            let condition = reached[&state].clone();
+            for e in graph.edges(n) {
+                let Some(next_condition) = condition.union_if_compatible(&e.weight().condition)
+                else {
+                    continue;
+                };
+                let next = dependency.compose(e.weight().kind);
+                let next_state = (e.target(), next);
+                let changed = match reached.entry(next_state) {
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        let merged = entry.get().disjoin(&next_condition);
+                        if *entry.get() == merged {
+                            false
+                        } else {
+                            entry.insert(merged);
+                            true
+                        }
+                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert(next_condition);
+                        true
+                    }
+                };
+                if changed && queued.insert(next_state) {
+                    queue.push_back(next_state);
+                }
+            }
+        }
+        for (&(n, dependency), condition) in &reached {
             let nk = graph[n];
             if destination_ids.contains(&nk.0)
                 && let Some(destination) = summary_region(nk, bit_part)
@@ -2286,31 +2379,6 @@ fn compute_module_summary(
                     kind: dependency,
                     condition: condition.clone(),
                 });
-            }
-            for e in graph.edges(n) {
-                let Some(next_condition) = condition.union_if_compatible(&e.weight().condition)
-                else {
-                    continue;
-                };
-                let next = dependency.compose(e.weight().kind);
-                let changed = match reached.entry((e.target(), next_condition.clone())) {
-                    std::collections::hash_map::Entry::Occupied(mut entry) => {
-                        let merged = entry.get().union(next);
-                        if *entry.get() == merged {
-                            false
-                        } else {
-                            entry.insert(merged);
-                            true
-                        }
-                    }
-                    std::collections::hash_map::Entry::Vacant(entry) => {
-                        entry.insert(next);
-                        true
-                    }
-                };
-                if changed {
-                    queue.push_back((e.target(), next_condition));
-                }
             }
         }
         feedthrough.insert(source, coalesce_summary_destinations(destinations));
@@ -2371,6 +2439,35 @@ fn summary_region(key: NodeKey, bit_part: &BitPartition) -> Option<SummaryRegion
 #[cfg(test)]
 mod region_tests {
     use super::*;
+
+    #[test]
+    fn graph_coalesces_alternative_conditions_for_the_same_dependency() {
+        let region = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let mut graph = DependencyGraph::new();
+        let source = graph.add_node((VarId::from_raw(0), region, 0));
+        let destination = graph.add_node((VarId::from_raw(1), region, 0));
+        let branch = BranchId::new(1, 0, 2);
+        for arm in 0..2 {
+            add_dependency_edge(
+                &mut graph,
+                source,
+                destination,
+                GraphDependency {
+                    kind: BitDependency::WHOLE,
+                    condition: PathCondition::default().with_choice(branch, arm),
+                },
+            );
+        }
+
+        assert_eq!(graph.edge_count(), 1);
+        assert_eq!(
+            graph.edge_weights().next().unwrap().condition,
+            PathCondition::default()
+        );
+    }
 
     #[test]
     fn packed_partition_storage_depends_on_endpoints_not_declared_width() {

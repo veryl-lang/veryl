@@ -3,7 +3,8 @@
 use super::BitDependency;
 use super::region::{ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
 use super::ssa::{
-    BranchId, BranchState, Checkpoint, PathCondition, PositionRelation, SsaStore, VersionId,
+    BranchId, BranchState, Checkpoint, PathCondition, PositionRelation, SourceCache, SsaStore,
+    VersionId,
 };
 use crate::conv::Context;
 use crate::ir::VarId;
@@ -20,6 +21,25 @@ fn signed_difference(destination: usize, source: usize) -> Option<isize> {
     isize::try_from(destination)
         .ok()?
         .checked_sub(isize::try_from(source).ok()?)
+}
+
+fn translated_start(start: usize, offset: isize) -> Option<usize> {
+    if offset >= 0 {
+        start.checked_add(usize::try_from(offset).ok()?)
+    } else {
+        start.checked_sub(offset.unsigned_abs())
+    }
+}
+
+fn translate_array_span(span: ArraySpan, offset: isize) -> Option<ArraySpan> {
+    Some(ArraySpan {
+        start: translated_start(span.start, offset)?,
+        length: span.length,
+    })
+}
+
+fn translate_packed_span(span: PackedSpan, offset: isize) -> Option<PackedSpan> {
+    PackedSpan::new(translated_start(span.start, offset)?, span.length)
 }
 
 enum RepeatedProjection {
@@ -72,7 +92,7 @@ use std::cell::Cell;
 
 #[derive(Clone)]
 struct CallResult {
-    region_groups: Vec<Vec<(PackedSpan, VersionId)>>,
+    region_groups: Vec<(ArraySpan, Vec<(PackedSpan, VersionId)>)>,
     opaque_sources: Vec<VersionId>,
 }
 
@@ -127,11 +147,13 @@ struct FunctionSummaryKey {
 #[derive(Clone)]
 struct FunctionSummary {
     arg_map: HashMap<VarPath, VarId>,
-    result: Vec<Vec<(PackedSpan, Vec<SummarySource>)>>,
+    result: FunctionResultSummary,
     writes: Vec<(NodeKey, Vec<SummarySource>)>,
     opaque_sources: Vec<NodeKey>,
     complete: bool,
 }
+
+type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Vec<SummarySource>)>)>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct SummarySource {
@@ -538,10 +560,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         this.receiver_indices.pop();
         this.call_caches.pop();
 
-        let visible_sources = |this: &Self, version| {
+        let mut visible_keys = this.module_scope_keys();
+        visible_keys.extend(
+            formal_ids
+                .iter()
+                .flat_map(|formal| this.keys_for_id(*formal)),
+        );
+        visible_keys.sort_unstable();
+        visible_keys.dedup();
+        let mut source_cache = SourceCache::restricted(
+            visible_keys
+                .into_iter()
+                .map(|node| SsaKey { node, call_frame: None }),
+        );
+        let mut visible_sources = |this: &Self, version| {
             let mut sources = this
                 .ssa
-                .root_source_relations_guarded(version)
+                .root_source_relations_guarded_cached(version, &mut source_cache)
                 .into_iter()
                 .filter_map(|(source, _, condition)| {
                     source.call_frame.is_none().then_some(SummarySource {
@@ -550,7 +585,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     })
                 })
                 .filter(|source| {
-                    formal_ids.contains(&source.key.0) || this.is_module_scope_key(source.key)
+                    formal_ids.contains(&source.key.0)
+                        || this.is_module_scope_key(source.key)
                 })
                 .collect::<Vec<_>>();
             sources.sort_unstable();
@@ -563,11 +599,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .map(|ret| {
                 this.current_region_groups_for_id(ret)
                     .into_iter()
-                    .map(|regions| {
-                        regions
+                    .map(|(array, regions)| {
+                        let regions = regions
                             .into_iter()
                             .map(|(span, version)| (span, visible_sources(&this, version)))
-                            .collect()
+                            .collect();
+                        (array, regions)
                     })
                     .collect()
             })
@@ -615,6 +652,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn dependencies(&mut self) -> Vec<Dependency> {
         let mut dependencies = Vec::new();
+        let mut source_cache = SourceCache::restricted(
+            self.module_scope_keys()
+                .into_iter()
+                .map(|node| SsaKey { node, call_frame: None }),
+        );
         let destinations: Vec<_> = self
             .written
             .iter()
@@ -623,7 +665,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .collect();
         for destination in destinations {
             let version = self.read_key(destination);
-            let sources = self.ssa.root_source_relations_guarded(version);
+            let sources = self
+                .ssa
+                .root_source_relations_guarded_cached(version, &mut source_cache);
             dependencies.extend(
                 sources
                     .into_iter()
@@ -685,6 +729,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn bind_key(&mut self, node: NodeKey, version: VersionId) {
         self.ssa.bind(self.ssa_key(node), version);
+    }
+
+    fn module_scope_keys(&self) -> Vec<NodeKey> {
+        let mut keys = self
+            .ctx
+            .variables
+            .iter()
+            .filter(|(_, variable)| {
+                matches!(
+                    variable.affiliation,
+                    crate::symbol::Affiliation::Module | crate::symbol::Affiliation::Interface
+                )
+            })
+            .flat_map(|(&id, _)| self.keys_for_id(id))
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys.dedup();
+        keys
     }
 
     fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
@@ -929,8 +991,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .push(state);
     }
 
-    fn next_branch_id(&mut self) -> BranchId {
-        let branch = BranchId::new(self.branch_namespace, self.next_branch);
+    fn next_branch_id(&mut self, arms: usize) -> BranchId {
+        let branch = BranchId::new(self.branch_namespace, self.next_branch, arms);
         self.next_branch += 1;
         branch
     }
@@ -951,7 +1013,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         {
             return *branch;
         }
-        let branch = self.next_branch_id();
+        let branch = self.next_branch_id(2);
         if let Some(Some(cache)) = self.call_caches.last_mut() {
             cache.expression_branches.insert(key, branch);
         }
@@ -1089,7 +1151,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             None => {}
         }
 
-        let branch = self.next_branch_id();
+        let branch = self.next_branch_id(2);
         let parent_condition = self.path_condition.clone();
         self.path_condition = parent_condition.with_choice(branch, 0);
         let checkpoint = self.ssa.checkpoint();
@@ -1161,7 +1223,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 return self.eval_block(&statement.arms[possible[0]].body, &nested_controls);
             }
 
-            let branch = self.next_branch_id();
+            let branch = self.next_branch_id(statement.arms.len() + 1);
             let parent_condition = self.path_condition.clone();
             let mut states = Vec::with_capacity(possible.len() + usize::from(!has_definite_match));
             for index in possible {
@@ -1182,7 +1244,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return self.merge_branches(states);
         }
 
-        let branch = self.next_branch_id();
+        let branch = self.next_branch_id(statement.arms.len() + 1);
         let parent_condition = self.path_condition.clone();
         let mut states = Vec::with_capacity(statement.arms.len() + 1);
         for (index, arm) in statement.arms.iter().enumerate() {
@@ -1413,9 +1475,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                     _ => ExpressionSources::whole(self.eval_system_call(call, &[], true)),
                 },
-                Factor::FunctionCall(call) => {
-                    ExpressionSources::whole(self.eval_call_requested(call, &[], Some(requested)))
-                }
+                Factor::FunctionCall(call) => ExpressionSources::whole(self.eval_call_requested(
+                    call,
+                    &[],
+                    Some((requested_array, requested)),
+                )),
                 Factor::Unknown(_) => {
                     if self.function_flows.is_empty() {
                         self.complete = false;
@@ -1519,6 +1583,37 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         requested,
                         context_width,
                     ));
+                    reads
+                }
+                Op::LogicAnd | Op::LogicOr => {
+                    let mut reads = ExpressionSources::whole(self.eval_expr(left));
+                    let execute_right = match (op, self.constant_truth(left)) {
+                        (Op::LogicAnd, Some(false)) | (Op::LogicOr, Some(true)) => Some(false),
+                        (Op::LogicAnd, Some(true)) | (Op::LogicOr, Some(false)) => Some(true),
+                        _ => None,
+                    };
+                    match execute_right {
+                        Some(false) => {}
+                        Some(true) => reads.whole.extend(self.eval_expr(right)),
+                        None => {
+                            let branch = self.expression_branch_id(expression);
+                            let parent_condition = self.path_condition.clone();
+
+                            let checkpoint = self.ssa.checkpoint();
+                            self.path_condition = parent_condition.with_choice(branch, 0);
+                            let right = self.eval_expr(right);
+                            let right = self.ssa.definition_guarded(right, &self.path_condition);
+                            let evaluated_state = self.ssa.capture_and_rollback(checkpoint);
+
+                            let checkpoint = self.ssa.checkpoint();
+                            self.path_condition = parent_condition.with_choice(branch, 1);
+                            let skipped_state = self.ssa.capture_and_rollback(checkpoint);
+
+                            self.ssa.merge([&evaluated_state, &skipped_state]);
+                            self.path_condition = parent_condition;
+                            reads.whole.push(right);
+                        }
+                    }
                     reads
                 }
                 _ => ExpressionSources::whole(self.eval_expr(expression)),
@@ -2017,7 +2112,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         &mut self,
         call: &FunctionCall,
         controls: &[VersionId],
-        requested: Option<PackedSpan>,
+        requested: Option<(ArraySpan, PackedSpan)>,
     ) -> Vec<VersionId> {
         #[cfg(test)]
         if matches!(self.call_caches.last(), Some(None)) {
@@ -2029,8 +2124,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .last()
             .and_then(Option::as_ref)
             .and_then(|cache| cache.calls.get(&cache_key))
+            .cloned()
         {
-            let result = self.select_call_result(cached, requested);
+            let result = self.select_call_result(&cached, requested);
             #[cfg(test)]
             FUNCTION_RESULT_VERSIONS.set(FUNCTION_RESULT_VERSIONS.get() + result.len());
             return result;
@@ -2047,13 +2143,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn select_call_result(
-        &self,
+        &mut self,
         evaluated: &CallResult,
-        requested: Option<PackedSpan>,
+        requested: Option<(ArraySpan, PackedSpan)>,
     ) -> Vec<VersionId> {
         let mut result = Vec::new();
-        for regions in &evaluated.region_groups {
-            let first = requested.map_or(0, |requested| {
+        for (array, regions) in &evaluated.region_groups {
+            if requested.is_some_and(|(requested_array, _)| !array.overlaps(requested_array)) {
+                continue;
+            }
+            let requested_packed = requested.map(|(_, packed)| packed);
+            let first = requested_packed.map_or(0, |requested| {
                 regions.partition_point(|(span, _)| {
                     #[cfg(test)]
                     FUNCTION_RESULT_REGION_PROBES.set(FUNCTION_RESULT_REGION_PROBES.get() + 1);
@@ -2063,10 +2163,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             for (span, version) in &regions[first..] {
                 #[cfg(test)]
                 FUNCTION_RESULT_REGION_PROBES.set(FUNCTION_RESULT_REGION_PROBES.get() + 1);
-                if requested.is_some_and(|requested| span.start >= requested.end()) {
+                if requested_packed.is_some_and(|requested| span.start >= requested.end()) {
                     break;
                 }
-                result.push(*version);
+                if let Some((requested_array, requested_packed)) = requested {
+                    result.extend(self.project_version_sources(
+                        *version,
+                        requested_array,
+                        requested_packed,
+                    ));
+                } else {
+                    result.push(*version);
+                }
             }
         }
         result.extend_from_slice(&evaluated.opaque_sources);
@@ -2279,8 +2387,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let region_groups = summary
             .result
             .iter()
-            .map(|regions| {
-                regions
+            .map(|(array, regions)| {
+                let regions = regions
                     .iter()
                     .map(|(span, sources)| {
                         let sources = self.map_summary_sources(call, summary, sources, &branch_map);
@@ -2289,7 +2397,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             self.ssa.definition_guarded(sources, &self.path_condition),
                         )
                     })
-                    .collect()
+                    .collect();
+                (*array, regions)
             })
             .collect();
         let opaque_sources = summary
@@ -2361,7 +2470,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut branches = summary
             .result
             .iter()
-            .flat_map(|regions| regions.iter())
+            .flat_map(|(_, regions)| regions.iter())
             .flat_map(|(_, sources)| sources)
             .chain(summary.writes.iter().flat_map(|(_, sources)| sources))
             .flat_map(|source| source.condition.branches())
@@ -2370,7 +2479,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         branches.dedup();
         branches
             .into_iter()
-            .map(|branch| (branch, self.next_branch_id()))
+            .map(|branch| (branch, self.next_branch_id(branch.arms())))
             .collect()
     }
 
@@ -2395,18 +2504,52 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .collect()
     }
 
-    fn current_region_groups_for_id(&mut self, id: VarId) -> Vec<Vec<(PackedSpan, VersionId)>> {
-        let mut groups = Vec::<Vec<(PackedSpan, VersionId)>>::new();
+    fn project_version_sources(
+        &mut self,
+        version: VersionId,
+        requested_array: ArraySpan,
+        requested_packed: PackedSpan,
+    ) -> Vec<VersionId> {
+        let sources = self.ssa.root_source_relations_guarded(version);
+        if sources.is_empty() {
+            return vec![version];
+        }
+        let mut projected = Vec::new();
+        for (key, relation, condition) in sources {
+            let array_matches = relation.array.is_none_or(|offset| {
+                translate_array_span(key.node.1, offset)
+                    .is_some_and(|span| span.overlaps(requested_array))
+            });
+            let packed_matches = relation.packed.is_none_or(|offset| {
+                self.key_span(key.node)
+                    .and_then(|span| translate_packed_span(span, offset))
+                    .is_some_and(|span| span.overlaps(requested_packed))
+            });
+            if array_matches && packed_matches {
+                let source = self.ssa.read(key);
+                projected.push(self.ssa.definition_guarded(vec![source], &condition));
+            }
+        }
+        projected.sort_unstable();
+        projected.dedup();
+        projected
+    }
+
+    fn current_region_groups_for_id(
+        &mut self,
+        id: VarId,
+    ) -> Vec<(ArraySpan, Vec<(PackedSpan, VersionId)>)> {
+        let mut groups = Vec::<(ArraySpan, Vec<(PackedSpan, VersionId)>)>::new();
         let mut previous_array_span = None;
         for key in self.keys_for_id(id) {
             let Some(span) = self.key_span(key) else {
                 continue;
             };
             if previous_array_span != Some(key.1) {
-                groups.push(Vec::new());
+                groups.push((key.1, Vec::new()));
                 previous_array_span = Some(key.1);
             }
-            let group = groups.last_mut().expect("pushed above");
+            let group = &mut groups.last_mut().expect("pushed above").1;
             debug_assert!(group.last().is_none_or(|(previous, _)| {
                 previous.start <= span.start && previous.end() <= span.start
             }));
@@ -2481,7 +2624,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             continue;
                         };
                         if formal_span.overlaps(requested) {
-                            positional.push((*version, position_offset));
+                            positional.extend(
+                                self.project_version_sources(*version, requested_array, requested)
+                                    .into_iter()
+                                    .map(|version| (version, position_offset)),
+                            );
                         }
                     }
                 }

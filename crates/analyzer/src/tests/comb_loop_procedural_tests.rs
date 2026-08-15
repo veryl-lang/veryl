@@ -1472,7 +1472,6 @@ fn comb_loop_if_expression_function_side_effects_remain_arm_exclusive() {
 }
 
 #[test]
-#[ignore = "a runtime short-circuit RHS write is applied as an unconditional overwrite"]
 fn comb_loop_false_negative_runtime_short_circuit_write_kills_disabled_feedback() {
     assert_comb_loop(
         "a conditionally skipped function write cannot kill a realizable loop",

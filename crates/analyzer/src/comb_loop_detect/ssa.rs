@@ -1,9 +1,39 @@
 //! IR-independent statement-ordered SSA state.
 
 use crate::{HashMap, HashSet};
+use std::collections::VecDeque;
 use std::hash::Hash;
+use std::rc::Rc;
 
 pub(super) type VersionId = usize;
+
+type SourceMap<K> = HashMap<(K, PositionRelation), PathCondition>;
+
+pub(super) struct SourceCache<K> {
+    summaries: HashMap<(VersionId, bool), Rc<SourceMap<K>>>,
+    allowed: Option<HashSet<K>>,
+}
+
+impl<K> Default for SourceCache<K> {
+    fn default() -> Self {
+        Self {
+            summaries: HashMap::default(),
+            allowed: None,
+        }
+    }
+}
+
+impl<K> SourceCache<K>
+where
+    K: Eq + Hash,
+{
+    pub(super) fn restricted(allowed: impl IntoIterator<Item = K>) -> Self {
+        Self {
+            summaries: HashMap::default(),
+            allowed: Some(allowed.into_iter().collect()),
+        }
+    }
+}
 
 #[derive(Clone)]
 enum Version<K> {
@@ -20,37 +50,54 @@ enum Version<K> {
 pub(super) struct BranchId {
     procedure: usize,
     local: usize,
+    arms: usize,
 }
 
 impl BranchId {
-    pub(super) const fn new(procedure: usize, local: usize) -> Self {
-        Self { procedure, local }
+    pub(super) const fn new(procedure: usize, local: usize, arms: usize) -> Self {
+        Self {
+            procedure,
+            local,
+            arms,
+        }
+    }
+
+    pub(super) const fn arms(self) -> usize {
+        self.arms
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct BranchChoice {
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct BranchConstraint {
     branch: BranchId,
-    arm: usize,
+    allowed: Vec<usize>,
 }
 
+/// A compact Cartesian over-approximation of feasible branch choices.
+///
+/// Correlations between distinct syntactic branches are intentionally not
+/// retained. Choices of the same branch remain exact, which is sufficient to
+/// reject cycles assembled from mutually exclusive arms without enumerating
+/// every combination of independent conditions.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct PathCondition {
-    // These are syntactic arm choices, not symbolic expressions. Distinct
-    // `if` statements remain compatible even when their conditions look like
-    // logical complements.
-    choices: Vec<BranchChoice>,
+    constraints: Rc<Vec<BranchConstraint>>,
 }
 
 impl PathCondition {
     pub(super) fn with_choice(&self, branch: BranchId, arm: usize) -> Self {
-        let mut choices = self.choices.clone();
-        let choice = BranchChoice { branch, arm };
-        match choices.binary_search_by_key(&branch, |choice| choice.branch) {
-            Ok(index) => choices[index] = choice,
-            Err(index) => choices.insert(index, choice),
+        let mut constraints = self.constraints.as_ref().clone();
+        let constraint = BranchConstraint {
+            branch,
+            allowed: vec![arm],
+        };
+        match constraints.binary_search_by_key(&branch, |constraint| constraint.branch) {
+            Ok(index) => constraints[index] = constraint,
+            Err(index) => constraints.insert(index, constraint),
         }
-        Self { choices }
+        Self {
+            constraints: Rc::new(constraints),
+        }
     }
 
     pub(super) fn intersection<'a>(conditions: impl IntoIterator<Item = &'a Self>) -> Self {
@@ -58,73 +105,124 @@ impl PathCondition {
         let Some(first) = conditions.next() else {
             return Self::default();
         };
-        let mut choices = first.choices.clone();
+        let mut combined = first.clone();
         for condition in conditions {
-            choices.retain(|choice| condition.choices.binary_search(choice).is_ok());
+            combined = combined.disjoin(condition);
         }
-        Self { choices }
+        combined
     }
 
     pub(super) fn union_if_compatible(&self, other: &Self) -> Option<Self> {
-        let mut choices = Vec::with_capacity(self.choices.len() + other.choices.len());
-        let mut left = self.choices.iter().peekable();
-        let mut right = other.choices.iter().peekable();
+        let mut constraints = Vec::with_capacity(self.constraints.len() + other.constraints.len());
+        let mut left = self.constraints.iter().peekable();
+        let mut right = other.constraints.iter().peekable();
         loop {
             match (left.peek(), right.peek()) {
                 (Some(a), Some(b)) if a.branch == b.branch => {
-                    if a.arm != b.arm {
+                    let allowed = a
+                        .allowed
+                        .iter()
+                        .copied()
+                        .filter(|arm| b.allowed.binary_search(arm).is_ok())
+                        .collect::<Vec<_>>();
+                    if allowed.is_empty() {
                         return None;
                     }
-                    choices.push(**a);
+                    constraints.push(BranchConstraint {
+                        branch: a.branch,
+                        allowed,
+                    });
                     left.next();
                     right.next();
                 }
                 (Some(a), Some(b)) if a.branch < b.branch => {
-                    choices.push(**a);
+                    constraints.push((*a).clone());
                     left.next();
                 }
                 (Some(_), Some(b)) => {
-                    choices.push(**b);
+                    constraints.push((*b).clone());
                     right.next();
                 }
                 (Some(a), None) => {
-                    choices.push(**a);
+                    constraints.push((*a).clone());
                     left.next();
                 }
                 (None, Some(b)) => {
-                    choices.push(**b);
+                    constraints.push((*b).clone());
                     right.next();
                 }
                 (None, None) => break,
             }
         }
-        Some(Self { choices })
+        Some(Self {
+            constraints: Rc::new(constraints),
+        })
     }
 
     pub(super) fn is_subset_of(&self, other: &Self) -> bool {
-        self.choices
-            .iter()
-            .all(|choice| other.choices.binary_search(choice).is_ok())
+        self.constraints.iter().all(|constraint| {
+            other
+                .constraints
+                .binary_search_by_key(&constraint.branch, |other| other.branch)
+                .ok()
+                .is_some_and(|index| {
+                    other.constraints[index]
+                        .allowed
+                        .iter()
+                        .all(|arm| constraint.allowed.binary_search(arm).is_ok())
+                })
+        })
     }
 
-    pub(super) fn branches(&self) -> impl Iterator<Item = BranchId> + '_ {
-        self.choices.iter().map(|choice| choice.branch)
+    pub(super) fn branches(&self) -> impl Iterator<Item = BranchId> {
+        self.constraints
+            .iter()
+            .map(|constraint| constraint.branch)
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     pub(super) fn remapped(&self, branches: &HashMap<BranchId, BranchId>) -> Self {
-        let mut choices = self
-            .choices
+        let mut constraints = self
+            .constraints
             .iter()
-            .map(|choice| BranchChoice {
+            .map(|constraint| BranchConstraint {
                 branch: branches
-                    .get(&choice.branch)
+                    .get(&constraint.branch)
                     .copied()
-                    .unwrap_or(choice.branch),
-                arm: choice.arm,
+                    .unwrap_or(constraint.branch),
+                allowed: constraint.allowed.clone(),
             })
             .collect::<Vec<_>>();
-        choices.sort_unstable();
-        Self { choices }
+        constraints.sort_unstable_by_key(|constraint| constraint.branch);
+        Self {
+            constraints: Rc::new(constraints),
+        }
+    }
+
+    pub(super) fn disjoin(&self, other: &Self) -> Self {
+        let mut constraints = Vec::new();
+        for constraint in self.constraints.iter() {
+            let Ok(index) = other
+                .constraints
+                .binary_search_by_key(&constraint.branch, |other| other.branch)
+            else {
+                continue;
+            };
+            let mut allowed = constraint.allowed.clone();
+            allowed.extend_from_slice(&other.constraints[index].allowed);
+            allowed.sort_unstable();
+            allowed.dedup();
+            if allowed.len() != constraint.branch.arms {
+                constraints.push(BranchConstraint {
+                    branch: constraint.branch,
+                    allowed,
+                });
+            }
+        }
+        Self {
+            constraints: Rc::new(constraints),
+        }
     }
 }
 
@@ -416,84 +514,21 @@ where
         &self,
         version: VersionId,
     ) -> Vec<(K, PositionRelation, PathCondition)> {
-        let mut sources: HashMap<(K, PathCondition), PositionRelation> = HashMap::default();
-        let mut visited = HashSet::default();
-        let mut pending = Vec::new();
-        match &self.versions[version] {
-            // A final LiveOnEntry value is retained state, not a combinational
-            // read. Entry versions reached through an explicit definition are.
-            Version::Entry(_) => {}
-            Version::Definition {
-                positional,
-                whole,
-                condition,
-            } => {
-                pending.extend(
-                    positional
-                        .iter()
-                        .map(|(input, relation)| (*input, true, *relation, condition.clone())),
-                );
-                pending.extend(
-                    whole
-                        .iter()
-                        .map(|input| (*input, true, PositionRelation::whole(), condition.clone())),
-                );
-            }
-            Version::Phi(inputs) => {
-                pending.extend(inputs.iter().map(|input| {
-                    (
-                        *input,
-                        false,
-                        PositionRelation::default(),
-                        PathCondition::default(),
-                    )
-                }));
-            }
-        }
+        self.root_source_relations_guarded_cached(version, &mut SourceCache::default())
+    }
 
-        while let Some((version, include_entry, relation, condition)) = pending.pop() {
-            if !visited.insert((version, include_entry, relation, condition.clone())) {
-                continue;
-            }
-            match &self.versions[version] {
-                Version::Entry(key) => {
-                    if include_entry {
-                        sources
-                            .entry((*key, condition))
-                            .and_modify(|existing| *existing = existing.union(relation))
-                            .or_insert(relation);
-                    }
-                }
-                Version::Definition {
-                    positional,
-                    whole,
-                    condition: definition_condition,
-                } => {
-                    let Some(condition) = condition.union_if_compatible(definition_condition)
-                    else {
-                        continue;
-                    };
-                    pending.extend(positional.iter().map(|(input, inner)| {
-                        (*input, true, relation.compose(*inner), condition.clone())
-                    }));
-                    pending.extend(
-                        whole.iter().map(|input| {
-                            (*input, true, PositionRelation::whole(), condition.clone())
-                        }),
-                    );
-                }
-                Version::Phi(inputs) => {
-                    pending.extend(
-                        inputs
-                            .iter()
-                            .map(|input| (*input, include_entry, relation, condition.clone())),
-                    );
-                }
-            }
-        }
+    pub(super) fn root_source_relations_guarded_cached(
+        &self,
+        version: VersionId,
+        cache: &mut SourceCache<K>,
+    ) -> Vec<(K, PositionRelation, PathCondition)> {
+        // SSA versions form a DAG. Summarize each (version, relation) once and
+        // combine branch alternatives at the join instead of re-walking the
+        // same suffix for every feasible path.
+        let sources = self.source_summary(version, false, cache);
         sources
-            .into_iter()
-            .map(|((source, condition), relation)| (source, relation, condition))
+            .iter()
+            .map(|(&(source, relation), condition)| (source, relation, condition.clone()))
             .collect()
     }
 
@@ -506,6 +541,132 @@ where
         let version = self.versions.len();
         self.versions.push(Version::Phi(inputs));
         version
+    }
+
+    fn source_summary(
+        &self,
+        version: VersionId,
+        include_entry: bool,
+        cache: &mut SourceCache<K>,
+    ) -> Rc<SourceMap<K>> {
+        let cache_key = (version, include_entry);
+        if let Some(sources) = cache.summaries.get(&cache_key) {
+            return sources.clone();
+        }
+
+        let mut sources = HashMap::default();
+        let start = (version, include_entry, PositionRelation::default());
+        let mut reached = HashMap::default();
+        reached.insert(start, PathCondition::default());
+        let mut queued = HashSet::default();
+        queued.insert(start);
+        let mut queue = VecDeque::from([start]);
+
+        while let Some(state @ (current, include_entry, relation)) = queue.pop_front() {
+            queued.remove(&state);
+            let condition = reached[&state].clone();
+
+            if current != version
+                && let Some(cached) = cache.summaries.get(&(current, include_entry))
+            {
+                merge_source_summaries(&mut sources, cached, Some(&condition), Some(relation));
+                continue;
+            }
+
+            let mut enqueue = |next: (VersionId, bool, PositionRelation),
+                               condition: PathCondition| {
+                let changed = if let Some(existing) = reached.get_mut(&next) {
+                    let widened = existing.disjoin(&condition);
+                    if *existing == widened {
+                        false
+                    } else {
+                        *existing = widened;
+                        true
+                    }
+                } else {
+                    reached.insert(next, condition);
+                    true
+                };
+                if changed && queued.insert(next) {
+                    queue.push_back(next);
+                }
+            };
+
+            match &self.versions[current] {
+                Version::Entry(key) => {
+                    if include_entry
+                        && cache
+                            .allowed
+                            .as_ref()
+                            .is_none_or(|allowed| allowed.contains(key))
+                    {
+                        merge_source(&mut sources, (*key, relation), condition);
+                    }
+                }
+                Version::Definition {
+                    positional,
+                    whole,
+                    condition: definition_condition,
+                } => {
+                    let Some(condition) = condition.union_if_compatible(definition_condition)
+                    else {
+                        continue;
+                    };
+                    for (input, offset) in positional {
+                        enqueue((*input, true, relation.compose(*offset)), condition.clone());
+                    }
+                    for input in whole {
+                        enqueue((*input, true, PositionRelation::whole()), condition.clone());
+                    }
+                }
+                Version::Phi(inputs) => {
+                    for input in inputs {
+                        enqueue((*input, include_entry, relation), condition.clone());
+                    }
+                }
+            }
+        }
+        let sources = Rc::new(sources);
+        cache.summaries.insert(cache_key, sources.clone());
+        sources
+    }
+}
+
+fn merge_source<K>(
+    destination: &mut SourceMap<K>,
+    key: (K, PositionRelation),
+    condition: PathCondition,
+) where
+    K: Copy + Eq + Hash,
+{
+    destination
+        .entry(key)
+        .and_modify(|existing| *existing = existing.disjoin(&condition))
+        .or_insert(condition);
+}
+
+fn merge_source_summaries<K>(
+    destination: &mut SourceMap<K>,
+    sources: &SourceMap<K>,
+    guard: Option<&PathCondition>,
+    prefix: Option<PositionRelation>,
+) where
+    K: Copy + Eq + Hash,
+{
+    for (&(source, relation), condition) in sources {
+        let key = (
+            source,
+            prefix.map_or(relation, |prefix| prefix.compose(relation)),
+        );
+        let condition = if let Some(guard) = guard {
+            let Some(condition) = condition.union_if_compatible(guard) else {
+                continue;
+            };
+            condition
+        } else {
+            condition.clone()
+        };
+        merge_source(destination, key, condition);
     }
 }
 
@@ -719,7 +880,7 @@ mod tests {
 
     #[test]
     fn opposite_arms_of_one_branch_are_incompatible() {
-        let branch = BranchId::new(1, 0);
+        let branch = BranchId::new(1, 0, 2);
         let true_path = PathCondition::default().with_choice(branch, 0);
         let false_path = PathCondition::default().with_choice(branch, 1);
 
@@ -728,13 +889,41 @@ mod tests {
 
     #[test]
     fn arms_of_distinct_branches_are_compatible() {
-        let first = PathCondition::default().with_choice(BranchId::new(1, 0), 0);
-        let second = PathCondition::default().with_choice(BranchId::new(1, 1), 1);
+        let first = PathCondition::default().with_choice(BranchId::new(1, 0, 2), 0);
+        let second = PathCondition::default().with_choice(BranchId::new(1, 1, 2), 1);
 
         let combined = first
             .union_if_compatible(&second)
             .expect("distinct branches can execute on the same path");
         assert!(first.is_subset_of(&combined));
         assert!(second.is_subset_of(&combined));
+    }
+
+    #[test]
+    fn sequential_branch_joins_do_not_enumerate_path_combinations() {
+        let mut ssa = SsaStore::default();
+        let source = ssa.read("source");
+        let mut value = source;
+        for local in 0..128 {
+            let branch = BranchId::new(1, local, 2);
+            let left = ssa.definition_guarded(
+                vec![value],
+                &PathCondition::default().with_choice(branch, 0),
+            );
+            let right = ssa.definition_guarded(
+                vec![value],
+                &PathCondition::default().with_choice(branch, 1),
+            );
+            value = ssa.phi(vec![left, right]);
+        }
+
+        assert_eq!(
+            ssa.root_source_relations_guarded(value),
+            vec![(
+                "source",
+                PositionRelation::whole(),
+                PathCondition::default()
+            )]
+        );
     }
 }

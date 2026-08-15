@@ -573,7 +573,6 @@ fn comb_loop_disabled_interface_function_specialization_ignores_member() {
 }
 
 #[test]
-#[ignore = "whole dependencies widen a bit-specific child output to every actual output bit"]
 fn comb_loop_false_positive_imported_interface_function_widens_output_region() {
     assert_interface_function_comb_loop(
         r#"
@@ -609,5 +608,44 @@ fn comb_loop_false_positive_imported_interface_function_widens_output_region() {
         }
         "#,
         false,
+    );
+}
+
+#[test]
+fn comb_loop_imported_interface_function_retains_matching_output_region_feedback() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var a: logic;
+            var b: logic;
+            function choose (sel: input logic) -> logic<2> {
+                return if sel ? {a, 1'b0} : {1'b0, b};
+            }
+            modport monitor {
+                choose: import,
+            }
+        }
+        module Observer (
+            bus: modport Bus::monitor,
+            sel: input  logic,
+            o  : output logic<2>,
+        ) {
+            assign o = bus.choose(sel);
+        }
+        module Top (
+            sel: input logic,
+        ) {
+            inst bus: Bus;
+            var passed: logic<2>;
+            inst observer: Observer (
+                bus: bus,
+                sel: sel,
+                o  : passed,
+            );
+            assign bus.a = passed[1];
+            assign bus.b = 1'b0;
+        }
+        "#,
+        true,
     );
 }
