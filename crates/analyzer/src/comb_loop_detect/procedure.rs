@@ -7,10 +7,11 @@ use crate::ir::VarId;
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CaseStatement, Expression, Factor, ForBound, ForRange,
     ForStatement, FunctionCall, IfStatement, Module, Op, Statement, SystemFunctionKind, VarIndex,
-    VarSelect,
+    VarPath, VarSelect,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
+use std::rc::Rc;
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -32,6 +33,55 @@ type CallCache = Option<HashMap<*const FunctionCall, CallResult>>;
 struct SsaKey {
     node: NodeKey,
     call_frame: Option<usize>,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct FunctionSummaryKey {
+    id: VarId,
+    index: Option<Vec<usize>>,
+}
+
+#[derive(Clone)]
+struct FunctionSummary {
+    arg_map: HashMap<VarPath, VarId>,
+    result: Vec<Vec<(PackedSpan, Vec<NodeKey>)>>,
+    writes: Vec<(NodeKey, Vec<NodeKey>)>,
+    opaque_sources: Vec<NodeKey>,
+}
+
+pub(super) struct FunctionSummaries<'a> {
+    module: &'a Module,
+    bit_part: &'a BitPartition,
+    summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
+}
+
+impl<'a> FunctionSummaries<'a> {
+    pub(super) fn new(module: &'a Module, bit_part: &'a BitPartition) -> Self {
+        Self {
+            module,
+            bit_part,
+            summaries: HashMap::default(),
+        }
+    }
+
+    fn get(&mut self, call: &FunctionCall) -> Option<Rc<FunctionSummary>> {
+        let key = FunctionSummaryKey {
+            id: call.id,
+            index: call.index.clone(),
+        };
+        if let Some(summary) = self.summaries.get(&key) {
+            return summary.clone();
+        }
+        let summary = ProcedureAnalysis::summarize_function(
+            self.module,
+            self.bit_part,
+            call.id,
+            call.index.as_deref(),
+        )
+        .map(Rc::new);
+        self.summaries.insert(key, summary.clone());
+        summary
+    }
 }
 
 #[cfg(test)]
@@ -78,7 +128,31 @@ pub(super) fn analyze(
     ProcedureAnalysis::analyze(module, bit_part, statements)
 }
 
-struct ProcedureAnalysis<'a> {
+pub(super) struct ExpressionAnalysis<'a, 's> {
+    inner: ProcedureAnalysis<'a, 's>,
+}
+
+impl<'a, 's> ExpressionAnalysis<'a, 's> {
+    pub(super) fn new(
+        module: &'a Module,
+        bit_part: &'a BitPartition,
+        summaries: &'s mut FunctionSummaries<'a>,
+    ) -> Self {
+        Self {
+            inner: ProcedureAnalysis::with_summaries(module, bit_part, summaries),
+        }
+    }
+
+    pub(super) fn eval(&mut self, expression: &Expression) -> Vec<NodeKey> {
+        self.inner.eval_expression_sources(expression)
+    }
+
+    pub(super) fn dependencies(&mut self) -> Vec<(NodeKey, NodeKey)> {
+        self.inner.dependencies()
+    }
+}
+
+struct ProcedureAnalysis<'a, 's> {
     bit_part: &'a BitPartition,
     ctx: Context,
     ssa: SsaStore<SsaKey>,
@@ -86,18 +160,15 @@ struct ProcedureAnalysis<'a> {
     call_caches: Vec<CallCache>,
     call_frames: Vec<usize>,
     next_call_frame: usize,
+    summaries: Option<&'s mut FunctionSummaries<'a>>,
 }
 
-impl<'a> ProcedureAnalysis<'a> {
-    fn analyze(
-        module: &'a Module,
-        bit_part: &'a BitPartition,
-        statements: &[Statement],
-    ) -> Vec<(NodeKey, NodeKey)> {
+impl<'a, 's> ProcedureAnalysis<'a, 's> {
+    fn new(module: &'a Module, bit_part: &'a BitPartition) -> Self {
         let mut ctx = Context::default();
         ctx.variables = module.variables.clone();
         ctx.functions = module.functions.clone();
-        let mut this = Self {
+        Self {
             bit_part,
             ctx,
             ssa: SsaStore::default(),
@@ -105,27 +176,149 @@ impl<'a> ProcedureAnalysis<'a> {
             call_caches: Vec::new(),
             call_frames: Vec::new(),
             next_call_frame: 0,
-        };
-        this.eval_block(statements, &[]);
+            summaries: None,
+        }
+    }
 
-        let mut dependencies = Vec::new();
-        let destinations: Vec<_> = this
+    fn with_summaries(
+        module: &'a Module,
+        bit_part: &'a BitPartition,
+        summaries: &'s mut FunctionSummaries<'a>,
+    ) -> Self {
+        let mut this = Self::new(module, bit_part);
+        this.summaries = Some(summaries);
+        this
+    }
+
+    fn analyze(
+        module: &'a Module,
+        bit_part: &'a BitPartition,
+        statements: &[Statement],
+    ) -> Vec<(NodeKey, NodeKey)> {
+        let mut this = Self::new(module, bit_part);
+        this.eval_block(statements, &[]);
+        this.dependencies()
+    }
+
+    fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<NodeKey> {
+        let versions = self.eval_reachable_expr(expression);
+        let value = self.ssa.definition(versions);
+        let mut sources = self
+            .ssa
+            .root_sources(value)
+            .into_iter()
+            .filter_map(|source| source.call_frame.is_none().then_some(source.node))
+            .filter(|source| self.is_module_scope_key(*source))
+            .collect::<Vec<_>>();
+        sources.sort_unstable();
+        sources.dedup();
+        sources
+    }
+
+    fn summarize_function(
+        module: &'a Module,
+        bit_part: &'a BitPartition,
+        id: VarId,
+        index: Option<&[usize]>,
+    ) -> Option<FunctionSummary> {
+        let function = module.functions.get(&id)?;
+        let body = function.get_function(index.unwrap_or_default())?;
+        let formal_ids = body.arg_map.values().copied().collect::<HashSet<_>>();
+        let mut this = Self::new(module, bit_part);
+        this.call_caches.push(None);
+        this.eval_block(&body.statements, &[]);
+        this.call_caches.pop();
+
+        let visible_sources = |this: &Self, version| {
+            let mut sources = this
+                .ssa
+                .root_sources(version)
+                .into_iter()
+                .filter_map(|source| {
+                    source.call_frame.is_none().then_some(source.node)
+                })
+                .filter(|source| {
+                    formal_ids.contains(&source.0) || this.is_module_scope_key(*source)
+                })
+                .collect::<Vec<_>>();
+            sources.sort_unstable();
+            sources.dedup();
+            sources
+        };
+
+        let result = body
+            .ret
+            .map(|ret| {
+                this.current_region_groups_for_id(ret)
+                    .into_iter()
+                    .map(|regions| {
+                        regions
+                            .into_iter()
+                            .map(|(span, version)| (span, visible_sources(&this, version)))
+                            .collect()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let mut destinations = this
             .written
             .iter()
             .copied()
-            .filter(|key| this.is_module_scope_key(*key))
+            .filter(|destination| {
+                formal_ids.contains(&destination.0) || this.is_module_scope_key(*destination)
+            })
+            .collect::<Vec<_>>();
+        destinations.sort_unstable();
+        let writes = destinations
+            .into_iter()
+            .map(|destination| {
+                let version = this.ssa.read(destination);
+                (destination, visible_sources(&this, version))
+            })
+            .collect();
+
+        let opaque_sources = if statements_have_unknown(&body.statements) {
+            let mut sources = formal_ids
+                .into_iter()
+                .flat_map(|formal| this.keys_for_id(formal))
+                .collect::<Vec<_>>();
+            sources.sort_unstable();
+            sources.dedup();
+            sources
+        } else {
+            Vec::new()
+        };
+
+        Some(FunctionSummary {
+            arg_map: body.arg_map,
+            result,
+            writes,
+            opaque_sources,
+        })
+    }
+
+    fn dependencies(&mut self) -> Vec<(NodeKey, NodeKey)> {
+        let mut dependencies = Vec::new();
+        let destinations: Vec<_> = self
+            .written
+            .iter()
+            .copied()
+            .filter(|key| self.is_module_scope_key(*key))
             .collect();
         for destination in destinations {
-            let version = this.read_key(destination);
-            let sources = this.ssa.root_sources(version);
+            let version = self.read_key(destination);
+            let sources = self.ssa.root_sources(version);
             dependencies.extend(
                 sources
                     .into_iter()
                     .filter_map(|source| source.call_frame.is_none().then_some(source.node))
-                    .filter(|source| this.is_module_scope_key(*source))
+                    .filter(|source| self.is_module_scope_key(*source))
                     .map(|source| (source, destination)),
             );
         }
+        dependencies.sort_unstable();
+        dependencies.dedup();
         dependencies
     }
 
@@ -595,24 +788,58 @@ impl<'a> ProcedureAnalysis<'a> {
     }
 
     fn eval_expr(&mut self, expression: &Expression) -> Vec<VersionId> {
+        self.eval_expr_inner(expression, false)
+    }
+
+    fn eval_reachable_expr(&mut self, expression: &Expression) -> Vec<VersionId> {
+        self.eval_expr_inner(expression, true)
+    }
+
+    fn eval_expr_inner(
+        &mut self,
+        expression: &Expression,
+        prune_constant_branches: bool,
+    ) -> Vec<VersionId> {
         let mut reads = Vec::new();
         match expression {
             Expression::Term(factor) => self.eval_factor(factor, &mut reads),
-            Expression::Unary(_, expression, _) => reads.extend(self.eval_expr(expression)),
-            Expression::Binary(left, _, right, _) => {
-                reads.extend(self.eval_expr(left));
-                reads.extend(self.eval_expr(right));
+            Expression::Unary(_, expression, _) => {
+                reads.extend(self.eval_expr_inner(expression, prune_constant_branches));
+            }
+            Expression::Binary(left, op, right, _) => {
+                reads.extend(self.eval_expr_inner(left, prune_constant_branches));
+                let evaluate_right = match (prune_constant_branches, op) {
+                    (true, Op::LogicAnd) => self.constant_truth(left) != Some(false),
+                    (true, Op::LogicOr) => self.constant_truth(left) != Some(true),
+                    _ => true,
+                };
+                if evaluate_right {
+                    reads.extend(self.eval_expr_inner(right, prune_constant_branches));
+                }
             }
             Expression::Ternary(condition, left, right, _) => {
-                reads.extend(self.eval_expr(condition));
-                reads.extend(self.eval_expr(left));
-                reads.extend(self.eval_expr(right));
+                reads.extend(self.eval_expr_inner(condition, prune_constant_branches));
+                match prune_constant_branches
+                    .then(|| self.constant_truth(condition))
+                    .flatten()
+                {
+                    Some(true) => {
+                        reads.extend(self.eval_expr_inner(left, prune_constant_branches));
+                    }
+                    Some(false) => {
+                        reads.extend(self.eval_expr_inner(right, prune_constant_branches));
+                    }
+                    None => {
+                        reads.extend(self.eval_expr_inner(left, prune_constant_branches));
+                        reads.extend(self.eval_expr_inner(right, prune_constant_branches));
+                    }
+                }
             }
             Expression::Concatenation(parts, _) => {
                 for (part, repeat) in parts {
-                    reads.extend(self.eval_expr(part));
+                    reads.extend(self.eval_expr_inner(part, prune_constant_branches));
                     if let Some(repeat) = repeat {
-                        reads.extend(self.eval_expr(repeat));
+                        reads.extend(self.eval_expr_inner(repeat, prune_constant_branches));
                     }
                 }
             }
@@ -620,24 +847,33 @@ impl<'a> ProcedureAnalysis<'a> {
                 for item in items {
                     match item {
                         ArrayLiteralItem::Value(value, repeat) => {
-                            reads.extend(self.eval_expr(value));
+                            reads.extend(self.eval_expr_inner(value, prune_constant_branches));
                             if let Some(repeat) = repeat {
-                                reads.extend(self.eval_expr(repeat));
+                                reads.extend(self.eval_expr_inner(repeat, prune_constant_branches));
                             }
                         }
-                        ArrayLiteralItem::Defaul(value) => reads.extend(self.eval_expr(value)),
+                        ArrayLiteralItem::Defaul(value) => {
+                            reads.extend(self.eval_expr_inner(value, prune_constant_branches));
+                        }
                     }
                 }
             }
             Expression::StructConstructor(_, fields, _) => {
                 for (_, value) in fields {
-                    reads.extend(self.eval_expr(value));
+                    reads.extend(self.eval_expr_inner(value, prune_constant_branches));
                 }
             }
         }
         reads.sort_unstable();
         reads.dedup();
         reads
+    }
+
+    fn constant_truth(&mut self, expression: &Expression) -> Option<bool> {
+        expression
+            .eval_value(&mut self.ctx)
+            .and_then(|value| value.to_usize())
+            .map(|value| value != 0)
     }
 
     fn eval_factor(&mut self, factor: &Factor, reads: &mut Vec<VersionId>) {
@@ -731,6 +967,14 @@ impl<'a> ProcedureAnalysis<'a> {
     fn eval_call_uncached(&mut self, call: &FunctionCall, controls: &[VersionId]) -> CallResult {
         #[cfg(test)]
         FUNCTION_EVALUATIONS.set(FUNCTION_EVALUATIONS.get() + 1);
+
+        let summary = self
+            .summaries
+            .as_deref_mut()
+            .and_then(|summaries| summaries.get(call));
+        if let Some(summary) = summary {
+            return self.apply_function_summary(call, controls, summary.as_ref());
+        }
 
         let body = self.ctx.functions.get(&call.id).and_then(|function| {
             if let Some(index) = &call.index {
@@ -853,6 +1097,100 @@ impl<'a> ProcedureAnalysis<'a> {
             region_groups,
             opaque_sources,
         }
+    }
+
+    fn apply_function_summary(
+        &mut self,
+        call: &FunctionCall,
+        controls: &[VersionId],
+        summary: &FunctionSummary,
+    ) -> CallResult {
+        self.call_caches.push(Some(HashMap::default()));
+        for actual in call.inputs.values() {
+            self.eval_expr(actual);
+        }
+
+        for (destination, sources) in &summary.writes {
+            let mut sources = self.map_summary_sources(call, summary, sources);
+            sources.extend_from_slice(controls);
+            let version = self.ssa.definition(sources);
+            self.ssa.bind(*destination, version);
+            self.written.insert(*destination);
+        }
+
+        for (path, destinations) in &call.outputs {
+            let Some(&formal) = summary.arg_map.get(path) else {
+                continue;
+            };
+            let widths: Vec<_> = destinations
+                .iter()
+                .map(|destination| self.destination_width(destination))
+                .collect();
+            if widths.iter().all(Option::is_some) {
+                let total_width = widths.iter().flatten().sum();
+                let mut offset = total_width;
+                for (destination, width) in destinations.iter().zip(widths) {
+                    let width = width.expect("checked above");
+                    offset -= width;
+                    self.write_formal_output(destination, formal, offset, total_width, controls);
+                }
+            } else {
+                let sources = self.current_versions_for_id(formal);
+                for destination in destinations {
+                    self.write_destination(destination, &sources, controls);
+                }
+            }
+        }
+
+        let region_groups = summary
+            .result
+            .iter()
+            .map(|regions| {
+                regions
+                    .iter()
+                    .map(|(span, sources)| {
+                        let sources = self.map_summary_sources(call, summary, sources);
+                        (*span, self.ssa.definition(sources))
+                    })
+                    .collect()
+            })
+            .collect();
+        let opaque_sources = self.map_summary_sources(call, summary, &summary.opaque_sources);
+        self.call_caches.pop();
+        CallResult {
+            region_groups,
+            opaque_sources,
+        }
+    }
+
+    fn map_summary_sources(
+        &mut self,
+        call: &FunctionCall,
+        summary: &FunctionSummary,
+        sources: &[NodeKey],
+    ) -> Vec<VersionId> {
+        let mut versions = Vec::new();
+        for source in sources {
+            if self.is_module_scope_key(*source) {
+                versions.push(self.ssa.read(*source));
+                continue;
+            }
+            let actual = summary.arg_map.iter().find_map(|(path, formal)| {
+                (*formal == source.0)
+                    .then(|| {
+                        call.inputs.iter().find_map(|(actual_path, actual)| {
+                            (actual_path == path).then_some(actual)
+                        })
+                    })
+                    .flatten()
+            });
+            if let Some(actual) = actual {
+                versions.extend(self.eval_actual_for_formal_key(actual, *source));
+            }
+        }
+        versions.sort_unstable();
+        versions.dedup();
+        versions
     }
 
     fn keys_for_id(&self, id: VarId) -> Vec<NodeKey> {
@@ -986,8 +1324,19 @@ impl<'a> ProcedureAnalysis<'a> {
                 }
                 Vec::new()
             }
-            SystemFunctionKind::Display(_) | SystemFunctionKind::Write(_) => Vec::new(),
-            SystemFunctionKind::Assert { .. } => Vec::new(),
+            SystemFunctionKind::Display(inputs) | SystemFunctionKind::Write(inputs) => {
+                for input in inputs {
+                    self.eval_expr(&input.0);
+                }
+                Vec::new()
+            }
+            SystemFunctionKind::Assert { cond, args, .. } => {
+                self.eval_expr(&cond.0);
+                for input in args {
+                    self.eval_expr(&input.0);
+                }
+                Vec::new()
+            }
         }
     }
 }

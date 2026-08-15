@@ -667,7 +667,6 @@ fn instance_logical_actual_code(expression: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; dead logical-and instance RHS"]
 fn comb_loop_false_logical_and_instance_actual_drops_rhs() {
     assert_comb_loop(
         "a false logical-and instance actual drops its dead RHS",
@@ -677,7 +676,6 @@ fn comb_loop_false_logical_and_instance_actual_drops_rhs() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; dead logical-or instance RHS"]
 fn comb_loop_true_logical_or_instance_actual_drops_rhs() {
     assert_comb_loop(
         "a true logical-or instance actual drops its dead RHS",
