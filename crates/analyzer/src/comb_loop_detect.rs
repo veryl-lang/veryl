@@ -15,8 +15,8 @@ mod ssa;
 #[cfg(test)]
 pub(crate) use procedure::{
     function_barrier_evaluation_count, function_evaluation_count,
-    function_result_region_probe_count, function_result_version_count,
-    reset_function_evaluation_count,
+    function_result_region_probe_count, function_result_version_count, module_context_entries,
+    reset_function_evaluation_count, reset_module_context_entries,
 };
 
 use region::{ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, var_reads};
@@ -916,12 +916,15 @@ fn build_module_graph(
     let mut graph: Graph<NodeKey, ()> = Graph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
     let mut function_summaries = procedure::FunctionSummaries::new(module, &bit_part);
+    let mut procedure_context = procedure::ProcedureContext::new(module);
 
     for declaration in &module.declarations {
         let Declaration::Comb(comb) = declaration else {
             continue;
         };
-        for (source, destination) in procedure::analyze(module, &bit_part, &comb.statements) {
+        for (source, destination) in
+            procedure::analyze(&bit_part, &comb.statements, &mut procedure_context)
+        {
             if !is_module_scope_var(source.0, &module.variables)
                 || !is_module_scope_var(destination.0, &module.variables)
             {
@@ -940,7 +943,6 @@ fn build_module_graph(
                     continue;
                 };
                 add_inst_feedthrough_edges(
-                    module,
                     inst,
                     child,
                     summary,
@@ -949,6 +951,7 @@ fn build_module_graph(
                     &mut node_map,
                     &module.variables,
                     &mut ctx,
+                    &mut procedure_context,
                     &mut function_summaries,
                 );
             }
@@ -964,7 +967,6 @@ fn build_module_graph(
 
 #[allow(clippy::too_many_arguments)]
 fn add_inst_feedthrough_edges<'a>(
-    module: &'a Module,
     inst: &InstDeclaration,
     child: &Module,
     summary: &ModuleCombSummary,
@@ -973,6 +975,7 @@ fn add_inst_feedthrough_edges<'a>(
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
+    procedure_context: &mut procedure::ProcedureContext,
     function_summaries: &mut procedure::FunctionSummaries<'a>,
 ) {
     add_sparse_whole_port_copy_edges(inst, child, bit_part, graph, node_map, parent_vars);
@@ -985,7 +988,7 @@ fn add_inst_feedthrough_edges<'a>(
         let mut reads = Vec::new();
         for expr in &inp.exprs {
             let (sources, dependencies) =
-                analyze_instance_actual(module, bit_part, expr, ctx, function_summaries);
+                analyze_instance_actual(bit_part, expr, ctx, procedure_context, function_summaries);
             reads.extend(sources);
             for (source, destination) in dependencies {
                 let source = ensure_node(graph, node_map, source);
@@ -1148,16 +1151,16 @@ fn is_pure_input_or_output(id: VarId, vars: &HashMap<VarId, Variable>, want: Dir
 }
 
 fn analyze_instance_actual<'a>(
-    module: &'a Module,
     bit_part: &'a BitPartition,
     expression: &Expression,
     ctx: &mut Context,
+    procedure_context: &mut procedure::ProcedureContext,
     summaries: &mut procedure::FunctionSummaries<'a>,
 ) -> (Vec<NodeKey>, Vec<(NodeKey, NodeKey)>) {
     let mut analysis = InstanceActualAnalysis {
-        module,
         bit_part,
         ctx,
+        procedure_context,
         summaries: Some(summaries),
         procedure: None,
         reads: Vec::new(),
@@ -1167,18 +1170,20 @@ fn analyze_instance_actual<'a>(
     analysis.eval(expression);
     analysis.reads.sort_unstable();
     analysis.reads.dedup();
-    let dependencies = analysis
-        .procedure
-        .as_mut()
-        .map(procedure::ExpressionAnalysis::dependencies)
-        .unwrap_or_default();
+    let dependencies = if let Some(mut procedure) = analysis.procedure.take() {
+        let dependencies = procedure.dependencies();
+        procedure.restore(analysis.procedure_context);
+        dependencies
+    } else {
+        Vec::new()
+    };
     (analysis.reads, dependencies)
 }
 
 struct InstanceActualAnalysis<'a, 's, 'c> {
-    module: &'a Module,
     bit_part: &'a BitPartition,
     ctx: &'c mut Context,
+    procedure_context: &'c mut procedure::ProcedureContext,
     summaries: Option<&'s mut procedure::FunctionSummaries<'a>>,
     procedure: Option<procedure::ExpressionAnalysis<'a, 's>>,
     reads: Vec<NodeKey>,
@@ -1196,8 +1201,11 @@ impl InstanceActualAnalysis<'_, '_, '_> {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::FunctionCall(_) => {
                     let summaries = self.summaries.take().expect("initialized once");
-                    let procedure =
-                        procedure::ExpressionAnalysis::new(self.module, self.bit_part, summaries);
+                    let procedure = procedure::ExpressionAnalysis::new(
+                        self.bit_part,
+                        self.procedure_context,
+                        summaries,
+                    );
                     self.procedure = Some(procedure);
                     self.eval(expression);
                 }

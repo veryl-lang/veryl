@@ -1699,6 +1699,47 @@ fn comb_loop_function_summary_fanout_is_memoized() {
 }
 
 #[test]
+fn function_summaries_reuse_module_metadata() {
+    const COUNT: usize = 16;
+    let padding = (0..COUNT)
+        .map(|index| format!("var padding_{index}: logic;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut functions = String::new();
+    let mut calls = String::new();
+    for index in 0..COUNT {
+        functions.push_str(&format!(
+            "function function_{index} (value: input logic) -> logic {{ return value; }}\n"
+        ));
+        calls.push_str(&format!("padding_{index} = function_{index}(seed);\n"));
+    }
+    let code = format!(
+        r#"
+        module Top (seed: input logic, o: output logic) {{
+            {padding}
+            {functions}
+            always_comb {{
+                {calls}
+                o = padding_0;
+            }}
+        }}
+        "#
+    );
+
+    crate::comb_loop_detect::reset_module_context_entries();
+    let errors = analyze(&code);
+    assert!(
+        errors.is_empty(),
+        "independent calls are acyclic: {errors:#?}"
+    );
+    assert!(
+        crate::comb_loop_detect::module_context_entries() <= COUNT * 6,
+        "function summaries must share their module metadata: {}",
+        crate::comb_loop_detect::module_context_entries(),
+    );
+}
+
+#[test]
 #[ignore = "comb-loop migration: false positive; unreachable code after function return"]
 fn comb_loop_early_return_excludes_unreachable_function_dependency() {
     assert_comb_loop(

@@ -53,6 +53,38 @@ pub(super) struct FunctionSummaries<'a> {
     module: &'a Module,
     bit_part: &'a BitPartition,
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
+    context: Option<ProcedureContext>,
+}
+
+/// Reusable module-local evaluation context for independent procedural
+/// declarations. Its large variable and function maps are built once per
+/// module; every analysis still gets fresh SSA and control-flow state.
+pub(super) struct ProcedureContext {
+    ctx: Option<Context>,
+}
+
+impl ProcedureContext {
+    pub(super) fn new(module: &Module) -> Self {
+        let mut ctx = Context::default();
+        ctx.variables = module.variables.clone();
+        ctx.functions = module.functions.clone();
+        #[cfg(test)]
+        MODULE_CONTEXT_ENTRIES
+            .set(MODULE_CONTEXT_ENTRIES.get() + ctx.variables.len() + ctx.functions.len());
+        Self { ctx: Some(ctx) }
+    }
+
+    fn take(&mut self) -> Context {
+        let mut ctx = self.ctx.take().expect("procedure context is not reentrant");
+        ctx.begin_analysis_transaction();
+        ctx
+    }
+
+    fn restore(&mut self, mut ctx: Context) {
+        ctx.rollback_analysis_transaction();
+        debug_assert!(self.ctx.is_none());
+        self.ctx = Some(ctx);
+    }
 }
 
 impl<'a> FunctionSummaries<'a> {
@@ -61,6 +93,7 @@ impl<'a> FunctionSummaries<'a> {
             module,
             bit_part,
             summaries: HashMap::default(),
+            context: None,
         }
     }
 
@@ -72,11 +105,15 @@ impl<'a> FunctionSummaries<'a> {
         if let Some(summary) = self.summaries.get(&key) {
             return summary.clone();
         }
+        let context = self
+            .context
+            .get_or_insert_with(|| ProcedureContext::new(self.module));
         let summary = ProcedureAnalysis::summarize_function(
             self.module,
             self.bit_part,
             call.id,
             call.index.as_deref(),
+            context,
         )
         .map(Rc::new);
         self.summaries.insert(key, summary.clone());
@@ -90,6 +127,7 @@ thread_local! {
     static FUNCTION_RESULT_VERSIONS: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_RESULT_REGION_PROBES: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_BARRIER_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
+    static MODULE_CONTEXT_ENTRIES: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -120,35 +158,54 @@ pub(crate) fn function_barrier_evaluation_count() -> usize {
     FUNCTION_BARRIER_EVALUATIONS.get()
 }
 
+#[cfg(test)]
+pub(crate) fn reset_module_context_entries() {
+    MODULE_CONTEXT_ENTRIES.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn module_context_entries() -> usize {
+    MODULE_CONTEXT_ENTRIES.get()
+}
+
 pub(super) fn analyze(
-    module: &Module,
     bit_part: &BitPartition,
     statements: &[Statement],
+    context: &mut ProcedureContext,
 ) -> Vec<(NodeKey, NodeKey)> {
-    ProcedureAnalysis::analyze(module, bit_part, statements)
+    ProcedureAnalysis::analyze(bit_part, statements, context)
 }
 
 pub(super) struct ExpressionAnalysis<'a, 's> {
-    inner: ProcedureAnalysis<'a, 's>,
+    inner: Option<ProcedureAnalysis<'a, 's>>,
 }
 
 impl<'a, 's> ExpressionAnalysis<'a, 's> {
     pub(super) fn new(
-        module: &'a Module,
         bit_part: &'a BitPartition,
+        context: &mut ProcedureContext,
         summaries: &'s mut FunctionSummaries<'a>,
     ) -> Self {
-        Self {
-            inner: ProcedureAnalysis::with_summaries(module, bit_part, summaries),
-        }
+        let mut inner = ProcedureAnalysis::from_context(bit_part, context.take());
+        inner.summaries = Some(summaries);
+        Self { inner: Some(inner) }
+    }
+
+    fn inner(&mut self) -> &mut ProcedureAnalysis<'a, 's> {
+        self.inner.as_mut().expect("expression analysis is active")
     }
 
     pub(super) fn eval(&mut self, expression: &Expression) -> Vec<NodeKey> {
-        self.inner.eval_expression_sources(expression)
+        self.inner().eval_expression_sources(expression)
     }
 
     pub(super) fn dependencies(&mut self) -> Vec<(NodeKey, NodeKey)> {
-        self.inner.dependencies()
+        self.inner().dependencies()
+    }
+
+    pub(super) fn restore(mut self, context: &mut ProcedureContext) {
+        let inner = self.inner.take().expect("expression analysis is active");
+        context.restore(inner.ctx);
     }
 }
 
@@ -165,10 +222,7 @@ struct ProcedureAnalysis<'a, 's> {
 }
 
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
-    fn new(module: &'a Module, bit_part: &'a BitPartition) -> Self {
-        let mut ctx = Context::default();
-        ctx.variables = module.variables.clone();
-        ctx.functions = module.functions.clone();
+    fn from_context(bit_part: &'a BitPartition, ctx: Context) -> Self {
         Self {
             bit_part,
             ctx,
@@ -182,24 +236,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    fn with_summaries(
-        module: &'a Module,
-        bit_part: &'a BitPartition,
-        summaries: &'s mut FunctionSummaries<'a>,
-    ) -> Self {
-        let mut this = Self::new(module, bit_part);
-        this.summaries = Some(summaries);
-        this
-    }
-
     fn analyze(
-        module: &'a Module,
         bit_part: &'a BitPartition,
         statements: &[Statement],
+        context: &mut ProcedureContext,
     ) -> Vec<(NodeKey, NodeKey)> {
-        let mut this = Self::new(module, bit_part);
+        let mut this = Self::from_context(bit_part, context.take());
         this.eval_block(statements, &[]);
-        this.dependencies()
+        let dependencies = this.dependencies();
+        context.restore(this.ctx);
+        dependencies
     }
 
     fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<NodeKey> {
@@ -222,11 +268,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         bit_part: &'a BitPartition,
         id: VarId,
         index: Option<&[usize]>,
+        context: &mut ProcedureContext,
     ) -> Option<FunctionSummary> {
         let function = module.functions.get(&id)?;
         let body = function.get_function(index.unwrap_or_default())?;
         let formal_ids = body.arg_map.values().copied().collect::<HashSet<_>>();
-        let mut this = Self::new(module, bit_part);
+        let mut this = Self::from_context(bit_part, context.take());
         this.call_caches.push(None);
         this.receiver_indices.push(
             (!function.path.path.0.is_empty())
@@ -296,12 +343,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Vec::new()
         };
 
-        Some(FunctionSummary {
+        let summary = FunctionSummary {
             arg_map: body.arg_map,
             result,
             writes,
             opaque_sources,
-        })
+        };
+        context.restore(this.ctx);
+        Some(summary)
     }
 
     fn dependencies(&mut self) -> Vec<(NodeKey, NodeKey)> {
@@ -618,7 +667,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
         if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
             for value in iterations {
-                if let Some(variable) = self.ctx.variables.get_mut(&statement.var_id)
+                if let Some(variable) = self.ctx.variable_mut(&statement.var_id)
                     && let Some(width) = statement.var_type.total_width()
                 {
                     variable.set_value(
