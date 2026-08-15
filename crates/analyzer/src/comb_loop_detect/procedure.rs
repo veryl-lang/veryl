@@ -160,6 +160,7 @@ struct ProcedureAnalysis<'a, 's> {
     call_caches: Vec<CallCache>,
     call_frames: Vec<usize>,
     next_call_frame: usize,
+    receiver_indices: Vec<Option<VarIndex>>,
     summaries: Option<&'s mut FunctionSummaries<'a>>,
 }
 
@@ -176,6 +177,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             call_caches: Vec::new(),
             call_frames: Vec::new(),
             next_call_frame: 0,
+            receiver_indices: Vec::new(),
             summaries: None,
         }
     }
@@ -226,7 +228,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let formal_ids = body.arg_map.values().copied().collect::<HashSet<_>>();
         let mut this = Self::new(module, bit_part);
         this.call_caches.push(None);
+        this.receiver_indices.push(
+            (!function.path.path.0.is_empty())
+                .then(|| index.map(concrete_var_index))
+                .flatten(),
+        );
         this.eval_block(&body.statements, &[]);
+        this.receiver_indices.pop();
         this.call_caches.pop();
 
         let visible_sources = |this: &Self, version| {
@@ -352,7 +360,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
         let mut keys = Vec::new();
-        for (idx, span) in var_reads(id, index, select, &mut self.ctx) {
+        let index = self.receiver_index(id, index);
+        for (idx, span) in var_reads(id, &index, select, &mut self.ctx) {
             keys.extend(self.bit_part.overlapping_access(id, idx, span));
         }
         keys.sort_unstable();
@@ -362,12 +371,29 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn write_keys(&mut self, destination: &AssignDestination) -> Vec<NodeKey> {
         let mut keys = Vec::new();
-        for (idx, span) in dst_writes(destination, &mut self.ctx) {
+        let mut destination = destination.clone();
+        destination.index = self.receiver_index(destination.id, &destination.index);
+        for (idx, span) in dst_writes(&destination, &mut self.ctx) {
             keys.extend(self.bit_part.overlapping_access(destination.id, idx, span));
         }
         keys.sort_unstable();
         keys.dedup();
         keys
+    }
+
+    fn receiver_index(&self, id: VarId, index: &VarIndex) -> VarIndex {
+        if !self.ctx.variables.get(&id).is_some_and(|variable| {
+            matches!(
+                variable.affiliation,
+                crate::symbol::Affiliation::Module | crate::symbol::Affiliation::Interface
+            )
+        }) {
+            return index.clone();
+        }
+        self.receiver_indices
+            .last()
+            .and_then(Clone::clone)
+            .unwrap_or_else(|| index.clone())
     }
 
     fn read_variable(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<VersionId> {
@@ -976,6 +1002,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return self.apply_function_summary(call, controls, summary.as_ref());
         }
 
+        let receiver_index = self.ctx.functions.get(&call.id).and_then(|function| {
+            (!function.path.path.0.is_empty())
+                .then(|| call.index.as_deref().map(concrete_var_index))
+                .flatten()
+        });
         let body = self.ctx.functions.get(&call.id).and_then(|function| {
             if let Some(index) = &call.index {
                 function.get_function(index)
@@ -1032,7 +1063,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
 
         self.call_caches.push(None);
+        self.receiver_indices.push(receiver_index);
         self.eval_block(&body.statements, controls);
+        self.receiver_indices.pop();
         self.call_caches.pop();
 
         let mut formal_outputs = HashMap::default();
@@ -1360,6 +1393,20 @@ fn statements_have_unknown(statements: &[Statement]) -> bool {
         Statement::For(statement) => statements_have_unknown(&statement.body),
         _ => false,
     })
+}
+
+fn concrete_var_index(index: &[usize]) -> VarIndex {
+    VarIndex(
+        index
+            .iter()
+            .map(|index| {
+                Expression::create_value(
+                    Value::new(*index as u64, 32, false),
+                    veryl_parser::token_range::TokenRange::default(),
+                )
+            })
+            .collect(),
+    )
 }
 
 fn expression_has_unknown(expression: &Expression) -> bool {

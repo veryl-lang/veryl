@@ -1024,9 +1024,6 @@ fn add_inst_feedthrough_edges<'a>(
             };
             for r in parent_reads {
                 for d in parent_dsts {
-                    if r == d {
-                        continue;
-                    }
                     let s = ensure_node(graph, node_map, *r);
                     let t = ensure_node(graph, node_map, *d);
                     graph.add_edge(s, t, ());
