@@ -1,5 +1,73 @@
 use super::*;
 
+#[test]
+fn comb_loop_false_negative_early_return_controls_a_later_captured_write() {
+    // update(stop) leaves value at zero on the return path and writes one on
+    // the continuation path. Since stop = value, the captured write is in a
+    // real control-dependency loop even though the function result is constant.
+    let errors = analyze(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var stop : logic;
+            var value: logic;
+            var dummy: logic;
+            function update (condition: input logic) -> logic {
+                value = 0;
+                if condition {
+                    return 0;
+                }
+                value = 1;
+                return 0;
+            }
+            assign stop = value;
+            always_comb {
+                dummy = update(stop);
+                o = value | dummy;
+            }
+        }
+        "#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "an early return condition controls the captured final value: {errors:#?}"
+    );
+}
+
+#[test]
+fn comb_loop_condition_with_two_continuing_function_arms_does_not_control_later_write() {
+    assert_comb_loop(
+        "a condition does not control continuation when both function arms continue",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var condition: logic;
+            var value    : logic;
+            var dummy    : logic;
+            function update (select: input logic) -> logic {
+                value = 0;
+                if select {
+                    dummy = 0;
+                } else {
+                    dummy = 1;
+                }
+                value = 1;
+                return dummy;
+            }
+            assign condition = value;
+            always_comb {
+                o = update(condition);
+            }
+        }
+        "#,
+        false,
+    );
+}
+
 fn assert_comb_loop(case: &str, code: &str, expected: bool) {
     let errors = analyze(code);
     let actual = errors

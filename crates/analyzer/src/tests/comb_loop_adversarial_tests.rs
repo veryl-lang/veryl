@@ -797,11 +797,11 @@ fn comb_loop_runtime_iterator_and_other_dynamic_index_share_an_lsp() {
 
 #[test]
 fn comb_loop_dynamic_non_additive_step_retains_possible_feedback() {
-    // This is not an intentional false positive: for n > 1 the loop executes
-    // and assigns b from a, so the feedback is realizable.
+    // This is not an intentional false positive: when (n | 1) is below ten,
+    // the loop executes and assigns b from a, so the feedback is realizable.
     let code = r#"
         module Top (
-            n: input  logic<32>,
+            n: input  logic<4>,
             o: output logic,
         ) {
             var a: logic;
@@ -809,7 +809,7 @@ fn comb_loop_dynamic_non_additive_step_retains_possible_feedback() {
             assign a = b;
             always_comb {
                 b = 0;
-                for _index in 1..n step *= 2 {
+                for _index in (n | 1)..10 step *= 2 {
                     b = a;
                 }
                 o = b;

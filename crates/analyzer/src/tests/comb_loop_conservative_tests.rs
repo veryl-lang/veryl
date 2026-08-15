@@ -5,7 +5,7 @@
 //! are:
 //! - algebraic identities and cancellation;
 //! - equivalent results behind data-dependent control flow;
-//! - correlations between separately written predicates;
+//! - correlations between separately written or instantiated predicates;
 //! - runtime indices below one longest static prefix, including affine offsets,
 //!   range-disjoint indices, and static suffix dimensions below a dynamic one;
 //! - runtime ranges whose emptiness or exact iteration count requires bound
@@ -151,6 +151,51 @@ fn complementary_short_circuit_predicates_are_not_correlated() {
                 dummy = (sel && write_a(b)) | (!sel && write_b(a));
                 o = a | b | dummy;
             }
+        }
+        "#,
+    );
+}
+
+#[test]
+fn shared_selector_across_instances_is_not_correlated() {
+    assert_intentional_false_positive(
+        "separate child instances do not share predicate identity through a common actual",
+        r#"
+        module SelectRoute (
+            sel    : input  logic,
+            i      : input  logic,
+            o_true : output logic,
+            o_false: output logic,
+        ) {
+            always_comb {
+                if sel {
+                    o_true = i;
+                    o_false = 0;
+                } else {
+                    o_true = 0;
+                    o_false = i;
+                }
+            }
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var x: logic;
+            var y: logic;
+            inst forward: SelectRoute (
+                sel,
+                i      : x,
+                o_true : y,
+                o_false: _,
+            );
+            inst reverse: SelectRoute (
+                sel,
+                i      : y,
+                o_true : _,
+                o_false: x,
+            );
+            assign o = x | y;
         }
         "#,
     );

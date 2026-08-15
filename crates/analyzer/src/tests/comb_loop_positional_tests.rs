@@ -710,6 +710,77 @@ fn comb_loop_structural_dependency_semantics_adding_the_wraparound_bit_turns_a_s
 }
 
 #[test]
+fn comb_loop_nonzero_composed_offset_is_acyclic() {
+    // b[i] = a[i + 3] and a[i] = b[i] compose to a[i] = a[i + 3].
+    // Every dependency moves toward the finite upper boundary; no bit feeds
+    // itself, even though the coarse region graph contains an SCC.
+    assert_comb_loop(
+        "a shift followed by an identity copy has a nonzero composed offset",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic<16>;
+            var b: logic<16>;
+            assign b[12:0] = a[15:3];
+            assign b[15:13] = 0;
+            assign a = b;
+            assign o = a[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_mixed_static_offsets_with_nonzero_composition_are_acyclic() {
+    // b[i] = a[i + 3] and a[i + 1] = b[i] compose to
+    // a[i + 1] = a[i + 3]. The edge offsets have opposite signs, but their
+    // exact sum is nonzero and therefore cannot return to the same bit.
+    assert_comb_loop(
+        "opposing static offsets compose before cycle classification",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic<16>;
+            var b: logic<16>;
+            assign b[12:0] = a[15:3];
+            assign b[15:13] = 0;
+            assign a[15:1] = b[14:0];
+            assign a[0] = 0;
+            assign o = a[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_opposing_static_offsets_without_a_reachable_return_are_acyclic() {
+    // The +5 edge can only leave bit 0, and the -3 edge takes bit 5 to bit 2.
+    // Neither edge is applicable at bit 2, so their opposite directions do
+    // not by themselves form a cycle.
+    assert_comb_loop(
+        "opposing offsets must have a positionally feasible closed walk",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic<6>;
+            always_comb {
+                a[5] = a[0];
+                a[2:0] = a[5:3];
+                a[4:3] = 0;
+            }
+            assign o = a[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
 fn comb_loop_structural_dependency_semantics_concatenation_permutation_preserves_structural_feedback()
  {
     assert_comb_loop(
