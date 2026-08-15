@@ -503,7 +503,6 @@ fn comb_loop_core_semantics_and_region_regressions_false_positive_cycle_through_
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; observer-only evaluation is not a value edge"]
 fn comb_loop_statement_order_and_observer_semantics_an_observer_inside_a_writer_process_does_not_create_a_signal_value_edge()
  {
     // An observer inside a writer process does not create a signal-value edge.
@@ -582,7 +581,6 @@ fn comb_loop_ordered_module_scope_reassignments_are_feed_forward() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; entry-value dependency closes a real loop"]
 fn comb_loop_statement_order_and_observer_semantics_the_converse_is_real_after_x_0_consumes_the_entry_value_of_x_1_the()
  {
     // The converse is real: after x[0] consumes the entry value of x[1], the
@@ -635,7 +633,6 @@ fn comb_loop_dynamic_select_is_confined_to_static_prefix() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; procedural reaching definitions"]
 fn comb_loop_dynamic_write_is_a_weak_update_a_dynamic_store_cannot_kill_every_candidate_definition()
 {
     assert_comb_loop(
@@ -710,7 +707,6 @@ fn comb_loop_false_logical_and_suppresses_rhs_side_effect() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; live logical-and RHS side effect"]
 fn comb_loop_true_logical_and_retains_rhs_side_effect() {
     assert_comb_loop(
         "a true logical-and LHS retains RHS function side effects",
@@ -729,7 +725,6 @@ fn comb_loop_true_logical_or_suppresses_rhs_side_effect() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; live logical-or RHS side effect"]
 fn comb_loop_false_logical_or_retains_rhs_side_effect() {
     assert_comb_loop(
         "a false logical-or LHS retains RHS function side effects",
@@ -783,7 +778,6 @@ fn comb_loop_statement_order_and_control_flow_regressions_opposite_directions_on
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural reaching definitions"]
 fn comb_loop_statement_order_and_control_flow_regressions_observer_in_a_writer_with_a_multi_stage_assign_chain()
  {
     assert_comb_loop(
@@ -923,7 +917,6 @@ fn comb_loop_structural_dependency_semantics_dynamic_data_write_without_an_old_v
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; procedural reaching definitions"]
 fn comb_loop_structural_dependency_semantics_a_value_controlling_its_own_dynamic_write_address_closes_a_loop()
  {
     assert_comb_loop(
@@ -981,7 +974,6 @@ fn comb_loop_structural_dependency_semantics_read_before_write_across_disjoint_n
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural reaching definitions"]
 fn comb_loop_structural_dependency_semantics_complete_overwrite_after_a_rotate_shaped_dead_store_kills_the_loop()
  {
     assert_comb_loop(

@@ -461,7 +461,6 @@ fn comb_loop_instance_output_address_contributes_dependency() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_instance_input_selector_side_effect_is_recorded() {
     // Why this case exists: an otherwise plain instance actual still evaluates
     // the expressions in its selectors. Skipping the observer for mem[touch(o)]

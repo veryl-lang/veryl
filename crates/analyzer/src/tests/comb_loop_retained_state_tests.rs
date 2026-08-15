@@ -106,7 +106,6 @@ fn comb_loop_drops_unreachable_statements_after_break() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural control flow and retained state"]
 fn comb_loop_dynamic_write_kill_semantics_a_full_write_after_a_dynamic_self_store_kills_the_dead_feedback()
  {
     assert_comb_loop(
@@ -167,7 +166,6 @@ fn comb_loop_dynamic_write_kill_semantics_an_unrelated_exact_bit_write_cannot_ki
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural control flow and retained state"]
 fn comb_loop_dynamic_write_kill_semantics_all_branch_exits_overwriting_the_object_kill_earlier_dynamic_feedback()
  {
     assert_comb_loop(
@@ -236,7 +234,6 @@ fn comb_loop_dynamic_write_kill_semantics_a_dominating_value_write_also_kills_a_
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; procedural control flow and retained state"]
 fn comb_loop_dynamic_write_kill_semantics_an_undominated_value_driving_its_own_dynamic_address_is_feedback()
  {
     assert_comb_loop(
@@ -409,7 +406,6 @@ fn comb_loop_retention_still_reports_incomplete_assignment() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; retained state hides a real cross-variable loop"]
 fn comb_loop_retention_does_not_hide_cross_variable_feedback() {
     let errors = analyze(
         r#"

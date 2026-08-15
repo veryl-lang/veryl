@@ -238,7 +238,6 @@ fn comb_loop_aliases_overlapping_unknown_regions_disjoint_dynamic_prefixes_remai
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; sparse and dynamic regions"]
 fn comb_loop_alias_and_opaque_effect_boundaries_local_copy_chains_propagate_bit_identity_through_every_hop()
  {
     assert_comb_loop(

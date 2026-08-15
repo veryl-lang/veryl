@@ -442,7 +442,6 @@ fn comb_loop_procedural_modport_connect_detects_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural modport connect killed by later overrides"]
 fn comb_loop_procedural_modport_connect_overrides_kill_feedback() {
     assert_interface_comb_loop(
         &procedural_modport_connect_code(
