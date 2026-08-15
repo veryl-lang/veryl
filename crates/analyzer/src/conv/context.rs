@@ -50,10 +50,12 @@ pub struct Context {
     pub var_id: VarId,
     pub var_paths: HashMap<VarPath, (VarId, Comptime)>,
     pub func_paths: HashMap<FuncPath, VarId>,
-    /// Symbols whose function bodies are mid-conversion. Carried (via `inherit`)
-    /// across the fresh per-call contexts that mutual recursion creates, so
-    /// re-entry is detected and the IR conversion doesn't overflow.
+    /// Symbols whose function bodies are mid-conversion. Retained for public
+    /// API compatibility; conversion itself uses the specialization-aware
+    /// paths below.
     pub converting_funcs: Vec<SymbolId>,
+    /// Specialized function paths whose bodies are mid-conversion.
+    pub(crate) converting_func_paths: Vec<FuncPath>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,
@@ -226,6 +228,10 @@ impl Context {
         );
         std::mem::swap(&mut self.function_call_stack, &mut tgt.function_call_stack);
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
+        std::mem::swap(
+            &mut self.converting_func_paths,
+            &mut tgt.converting_func_paths,
+        );
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
         self.disalbe_const_opt = tgt.disalbe_const_opt;
@@ -406,13 +412,15 @@ impl Context {
         for (id, mut function) in context.functions.drain() {
             if !array.is_empty() {
                 let total_array = array.total();
-                let func_body = function.functions.remove(0);
-                if let Some(total_array) = total_array {
-                    for i in 0..total_array {
-                        let var_index = VarIndex::from_index(i, array);
-                        let mut func_body = func_body.clone();
-                        func_body.set_index(&var_index);
-                        function.functions.push(func_body);
+                if let Some(function_body) = function.functions.first().cloned() {
+                    function.functions.clear();
+                    if let Some(total_array) = total_array {
+                        for i in 0..total_array {
+                            let index = VarIndex::from_index(i, array);
+                            let mut body = function_body.clone();
+                            body.set_index(&index);
+                            function.functions.push(body);
+                        }
                     }
                 }
             }
@@ -424,7 +432,84 @@ impl Context {
         }
     }
 
+    pub(crate) fn extract_function_with_receiver(
+        &mut self,
+        context: &mut Context,
+        base: &VarPath,
+        array: &ShapeRef,
+        relative_variables: &HashSet<VarId>,
+        root_function: Option<VarId>,
+    ) {
+        // Receiver-relative storage is identified when paths are imported from
+        // the receiver namespace. Affiliation cannot distinguish a modport
+        // formal member from an ordinary scalar function formal.
+        let receiver_variables = relative_variables.clone();
+        // Only the requested receiver method and nested receiver methods whose
+        // storage is below that receiver acquire this receiver axis. A global
+        // receiver or a modport-array formal may be converted in the same
+        // local context, but its storage ids do not belong to `base`.
+        let mut receiver_functions = context
+            .functions
+            .values()
+            .filter(|function| {
+                function.receiver_relative
+                    && function
+                        .receiver_variables
+                        .iter()
+                        .any(|id| relative_variables.contains(id))
+            })
+            .map(|function| function.id)
+            .collect::<HashSet<_>>();
+        if let Some(root_function) = root_function {
+            receiver_functions.insert(root_function);
+        }
+        for (id, mut variable) in context.variables.drain() {
+            variable.path.add_prelude(&base.0);
+            if receiver_variables.contains(&id) {
+                variable.prepend_array_with_limit(array, self.config.evaluate_array_limit);
+            }
+            self.variables.insert(id, variable);
+        }
+
+        for (mut path, id) in context.func_paths.drain() {
+            if !path.path.starts_with(&base.0) {
+                path.path.add_prelude(&base.0);
+            }
+            self.func_paths.insert(path, id);
+        }
+
+        for (id, mut function) in context.functions.drain() {
+            if receiver_functions.contains(&id) {
+                let function_receiver_variables = if Some(id) == root_function {
+                    receiver_variables.clone()
+                } else {
+                    function
+                        .receiver_variables
+                        .intersection(relative_variables)
+                        .copied()
+                        .collect()
+                };
+                function.prepend_receiver(array, &function_receiver_variables, &receiver_functions);
+            }
+
+            if !function.path.path.starts_with(&base.0) {
+                function.path.path.add_prelude(&base.0);
+            }
+            self.functions.insert(id, function);
+        }
+    }
+
     pub fn extract_var_paths(&mut self, context: &Context, base: &VarPath, array: &ShapeRef) {
+        self.extract_var_paths_with_receiver(context, base, array);
+    }
+
+    pub(crate) fn extract_var_paths_with_receiver(
+        &mut self,
+        context: &Context,
+        base: &VarPath,
+        array: &ShapeRef,
+    ) -> HashSet<VarId> {
+        let mut relative_variables = HashSet::default();
         for (path, (id, comptime)) in &context.var_paths {
             if path.starts_with(&base.0) {
                 let mut path = path.clone();
@@ -435,9 +520,11 @@ impl Context {
                         comptime.r#type.array.remove(0);
                     }
                     self.var_paths.insert(path, (*id, comptime));
+                    relative_variables.insert(*id);
                 }
             }
         }
+        relative_variables
     }
 
     pub fn extract_interface_member(
@@ -473,7 +560,7 @@ impl Context {
                 }
             }
 
-            variable.prepend_array(array);
+            variable.prepend_array_with_limit(array, self.config.evaluate_array_limit);
 
             // override token, affiliation to interface instance
             variable.token = token;

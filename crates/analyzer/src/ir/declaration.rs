@@ -308,6 +308,10 @@ pub struct InstInput {
     /// (`i: arr[2*n+:2]`), which has no single-expression form; one entry
     /// otherwise.
     pub exprs: Vec<Expression>,
+    /// Exact parent storage for a single contiguous unpacked-array actual.
+    /// `exprs` remains populated for existing IR consumers; the comb-loop
+    /// analysis uses this side metadata to preserve every selected element.
+    pub range_src: Option<InstActualFragment>,
 }
 
 impl InstInput {
@@ -342,12 +346,18 @@ impl fmt::Display for InstInput {
 pub struct InstOutput {
     pub id: VarId,
     pub dst: Vec<AssignDestination>,
+    /// A single contiguous unpacked-array range is also retained as one
+    /// symbolic storage fragment. `dst` remains populated for existing IR
+    /// consumers; the comb-loop analysis gives this metadata precedence.
+    pub range_dst: Option<InstActualFragment>,
 }
 
 impl fmt::Display for InstOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut ret = format!("{} -> ", self.id);
 
+        // `range_dst` is analyzer-only side metadata. Keep the historical AIR
+        // rendering driven by `dst`, as existing consumers and snapshots are.
         if self.dst.len() == 1 {
             ret.push_str(&format!("{}", self.dst[0]));
         } else if !self.dst.is_empty() {
@@ -363,11 +373,21 @@ impl fmt::Display for InstOutput {
 }
 
 #[derive(Clone)]
+pub struct InstActualFragment {
+    pub parent: VarId,
+    pub parent_array_start: usize,
+    pub parent_array_length: usize,
+    pub parent_packed_start: usize,
+    pub parent_packed_length: usize,
+}
+
+#[derive(Clone)]
 pub struct InstInterfaceBinding {
     pub child: VarId,
-    pub parent: VarId,
-    pub index: VarIndex,
-    pub select: VarSelect,
+    /// One contiguous parent storage region corresponding to the whole child
+    /// interface member. Keeping the range symbolic avoids expanding a large
+    /// interface-array slice into one destination per element.
+    pub actual: InstActualFragment,
 }
 
 #[derive(Clone)]
@@ -379,9 +399,10 @@ pub struct InstDeclaration {
     pub hierarchy: Vec<StrId>,
     pub inputs: Vec<InstInput>,
     pub outputs: Vec<InstOutput>,
-    /// Bindings for interface members captured by imported modport functions.
-    /// These members do not appear in `inputs` or `outputs` because the
-    /// modport exposes the function rather than the underlying signal.
+    /// Exact parent-side regions for modport members. Imported function members
+    /// may exist only here; signal members also retain this mapping because a
+    /// ranged actual cannot be represented by one input expression without
+    /// losing element identity.
     pub interface_bindings: Vec<InstInterfaceBinding>,
     /// `Arc`-shared: without it, repeated instantiations of the same generic
     /// module each deep-clone the `Component`, blowing pass2 memory.

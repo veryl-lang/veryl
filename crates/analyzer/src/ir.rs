@@ -20,13 +20,14 @@ mod width_expr;
 mod write_count;
 pub use assign_table::ReferencedEntry;
 pub use comptime::{
-    Comptime, ExpressionContext, InstanceKind, PartSelectPath, Type, TypeKind, TypeKindEnum,
-    TypeKindMember, TypeKindStruct, TypeKindUnion, ValueVariant,
+    Comptime, ExpressionContext, InstanceKind, MemberSelectDomain, PartSelectPath, Type, TypeKind,
+    TypeKindEnum, TypeKindMember, TypeKindStruct, TypeKindUnion, ValueVariant,
 };
 pub use declaration::{
     CombDeclaration, Declaration, DeclarationBlock, ExternalConnect, ExternalDeclaration,
     ExternalParamValue, FfClock, FfDeclaration, FfReset, FinalDeclaration, InitialDeclaration,
-    InstDeclaration, InstInput, InstInterfaceBinding, InstOutput, qualified_prefix_len,
+    InstActualFragment, InstDeclaration, InstInput, InstInterfaceBinding, InstOutput,
+    qualified_prefix_len,
 };
 pub use expression::{ArrayLiteralItem, Expression, Factor, HierVarRef};
 pub use ff_table::FfTable;

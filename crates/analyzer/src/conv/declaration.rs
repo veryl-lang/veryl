@@ -19,8 +19,9 @@ use crate::conv::utils::{
     eval_assign_statement, eval_clock, eval_const_assign, eval_expr, eval_factor_symbol,
     eval_factor_symbol_external, eval_generate_for_range, eval_reset, eval_size, eval_type,
     eval_variable, expand_connect, expand_connect_const, expand_input_connect, get_component,
-    get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
+    get_overridden_params, get_port_connects_with_binding, get_return_str, insert_port_connect,
     try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
+    var_path_to_contiguous_fragment,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::definition_table::{self, Definition};
@@ -1130,15 +1131,26 @@ fn conv_function(
         let path = FuncPath::new(symbol.id);
         (path, symbol.token.text, symbol.inner_namespace())
     };
-
     if context.func_paths.contains_key(&path) {
         // The given function has already been added through function reference before definition.
         return Ok(());
     }
-    // Re-entry while mid-conversion is a call cycle (mutual recursion
-    // `f0 -> f1 -> f0`) that the same-context `func_paths` guard above misses,
-    // since it recurses through fresh contexts. Bail; `type_dag` reports it.
-    if context.converting_funcs.contains(&symbol.id) {
+    // Exact re-entry is a call cycle (including mutual recursion through a
+    // fresh context). An unresolved symbolic specialization belongs to the
+    // active template too; only distinct concrete specializations may recurse.
+    let unresolved_specialization = path
+        .sig
+        .generic_parameters
+        .iter()
+        .any(|(_, argument)| argument.is_generic_reference());
+    if context.converting_funcs.contains(&symbol.id)
+        || context.converting_func_paths.iter().any(|active| {
+            active == &path
+                || (unresolved_specialization
+                    && active.path == path.path
+                    && active.sig.symbol == path.sig.symbol)
+        })
+    {
         return Ok(());
     }
     let id = context.insert_func_path(path.clone());
@@ -1176,7 +1188,7 @@ fn conv_function(
 
     // Mark in-progress for the body conversion only (where recursion lands);
     // kept below the `?`-bearing setup so an early error leaves no stale entry.
-    context.converting_funcs.push(symbol.id);
+    context.converting_func_paths.push(path.clone());
     context.push_affiliation(Affiliation::Function);
     context.push_hierarchy(name);
     context.push_namespace(namespace);
@@ -1290,7 +1302,7 @@ fn conv_function(
     context.pop_affiliation();
     context.pop_hierarchy();
     context.pop_namespace();
-    context.converting_funcs.pop();
+    context.converting_func_paths.pop();
 
     let (args, body) = func?;
     let func = ir::Function {
@@ -1301,6 +1313,9 @@ fn conv_function(
         array: Shape::default(),
         arity,
         args,
+        receiver_relative: proeprty.affiliation == Affiliation::Interface,
+        receiver_variables: HashSet::default(),
+        receiver_prefixes: HashMap::default(),
         is_const: proeprty.constantable.unwrap_or_default(),
         functions: body,
         token,
@@ -1614,32 +1629,41 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                                 .get(&path)
                                 .and_then(|id| component.variables.get(id))
                                 .is_some_and(|v| v.kind == ir::VarKind::Input);
-                            let connects =
-                                get_port_connects(context, component, port, &path, dst_type, token);
+                            let connects = get_port_connects_with_binding(
+                                context, component, port, &path, dst_type, token,
+                            );
                             context.in_inst_port = false;
                             let Ok(connects) = connects else {
                                 continue;
                             };
 
                             if let Some(actual) = connects.interface_binding {
-                                for (child, child_variable) in &component.interface_members {
+                                for (child, child_variable) in component
+                                    .interface_members
+                                    .iter()
+                                    .chain(component.variables.iter())
+                                {
                                     if !child_variable.path.starts_with(&path.0) {
                                         continue;
                                     }
                                     let mut parent_path = actual.0.clone();
                                     parent_path.append(&child_variable.path.0[path.0.len()..]);
-                                    let Some((parent, comptime)) = context.find_path(&parent_path)
-                                    else {
-                                        continue;
-                                    };
-                                    let (array_select, width_select) =
-                                        actual.1.clone().split(comptime.r#type.array.dims());
-                                    interface_bindings.push(ir::InstInterfaceBinding {
-                                        child: *child,
-                                        parent,
-                                        index: array_select.to_index(),
-                                        select: width_select,
-                                    });
+                                    let parent_actual =
+                                        VarPathSelect(parent_path, actual.1.clone(), actual.2);
+                                    if let Some(actual) = var_path_to_contiguous_fragment(
+                                        context,
+                                        &parent_actual,
+                                        true,
+                                    ) && child_variable.r#type.array.total()
+                                        == Some(actual.parent_array_length)
+                                        && child_variable.total_width()
+                                            == Some(actual.parent_packed_length)
+                                    {
+                                        interface_bindings.push(ir::InstInterfaceBinding {
+                                            child: *child,
+                                            actual,
+                                        });
+                                    }
                                 }
                             }
 

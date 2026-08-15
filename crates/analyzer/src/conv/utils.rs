@@ -2309,7 +2309,11 @@ fn eval_factor_path_inner(
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
 
         let width_select = if let Some(part_select) = &comptime.part_select {
-            part_select.to_base_select(context, &width_select)
+            let (select, domain) = part_select
+                .to_base_select_with_domain(context, &width_select)
+                .ok_or_else(|| ir_error!(token))?;
+            comptime.member_select_domain = domain;
+            Some(select)
         } else {
             eval_width_select(context, &path, &comptime.r#type, width_select)
         };
@@ -3498,13 +3502,13 @@ fn resolve_array_value(
                 return None;
             }
             let (beg, end) = shape.calc_range(&idx)?;
-            let inner_total = end - beg + 1;
             let total = var.r#type.total_array().unwrap_or(var.value.len());
             if var.value.len() == total {
                 var.value.get(beg..=end).map(<[Value]>::to_vec)
             } else if var.value.len() == 1 {
-                // All-same array stored as a single template value.
-                Some(vec![var.value[0].clone(); inner_total])
+                // Preserve the all-same template instead of materializing a
+                // potentially huge selected sub-array.
+                Some(var.value.clone())
             } else {
                 None
             }
@@ -3593,12 +3597,24 @@ pub fn get_return_str() -> StrId {
     resource_table::insert_str("return")
 }
 
-pub struct PortConnects {
-    pub connects: Vec<(VarPath, Vec<VarPathSelect>, ir::Expression)>,
-    pub interface_binding: Option<VarPathSelect>,
+pub(crate) struct PortConnects {
+    pub(crate) connects: Vec<(VarPath, Vec<VarPathSelect>, ir::Expression)>,
+    pub(crate) interface_binding: Option<VarPathSelect>,
 }
 
 pub fn get_port_connects(
+    context: &mut Context,
+    component: &ir::Module,
+    port: &InstPortItem,
+    port_path: &VarPath,
+    port_type: &ir::Type,
+    token: TokenRange,
+) -> IrResult<Vec<(VarPath, Vec<VarPathSelect>, ir::Expression)>> {
+    get_port_connects_with_binding(context, component, port, port_path, port_type, token)
+        .map(|connects| connects.connects)
+}
+
+pub(crate) fn get_port_connects_with_binding(
     context: &mut Context,
     component: &ir::Module,
     port: &InstPortItem,
@@ -3745,9 +3761,16 @@ pub fn insert_port_connect(
 ) {
     match variable.kind {
         VarKind::Input => {
+            let range_src = match dst.as_slice() {
+                [actual] if actual.is_array_range(context) => {
+                    var_path_to_contiguous_fragment(context, actual, true)
+                }
+                _ => None,
+            };
             inputs.push(ir::InstInput {
                 id: variable.id,
                 exprs,
+                range_src,
             });
         }
         VarKind::Output => {
@@ -3756,10 +3779,17 @@ pub fn insert_port_connect(
             if !expr.is_assignable() {
                 context.insert_error(AnalyzerError::unassignable_output(&expr.token_range()));
             }
+            let range_dst = match dst.as_slice() {
+                [actual] if actual.is_array_range(context) => {
+                    var_path_to_contiguous_fragment(context, actual, false)
+                }
+                _ => None,
+            };
             let dst = var_path_to_assign_destination(context, dst, false);
             outputs.push(ir::InstOutput {
                 id: variable.id,
                 dst,
+                range_dst,
             });
         }
         _ => (),
@@ -3903,6 +3933,68 @@ pub fn expand_connect_const(
     Ok(ret)
 }
 
+fn inclusive_storage_span(left: usize, right: usize, total: usize) -> Option<(usize, usize)> {
+    let start = left.min(right);
+    let end = left.max(right);
+    (end < total).then_some((start, end.checked_sub(start)?.checked_add(1)?))
+}
+
+/// Resolve a constant variable selection to one contiguous storage fragment.
+/// Unlike `to_assign_destinations`, this never enumerates an unpacked range.
+pub(crate) fn var_path_to_contiguous_fragment(
+    context: &mut Context,
+    actual: &VarPathSelect,
+    ignore_error: bool,
+) -> Option<ir::InstActualFragment> {
+    let (parent_path, select, token) = actual.clone().into();
+    let (parent, mut comptime) = context.find_path(&parent_path)?;
+    let part_select = comptime.part_select.clone();
+    if let Some(part_select) = &part_select {
+        comptime.r#type = part_select.base.clone();
+    }
+
+    let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+    if !array_select.is_const_with_range() || !width_select.is_const_with_range() {
+        return None;
+    }
+    array_select.eval_comptime(context, &comptime.r#type, true)?;
+
+    let (array_left, array_right) =
+        array_select.eval_value_unbounded(context, &comptime.r#type, true)?;
+    let (parent_array_start, parent_array_length) =
+        inclusive_storage_span(array_left, array_right, comptime.r#type.total_array()?)?;
+
+    let width_select = if let Some(part_select) = &part_select {
+        part_select.to_base_select(context, &width_select)?
+    } else {
+        width_select.eval_comptime(context, &comptime.r#type, false)?;
+        width_select
+    };
+    let (packed_left, packed_right) =
+        width_select.eval_value_unbounded(context, &comptime.r#type, false)?;
+    let (parent_packed_start, parent_packed_length) =
+        inclusive_storage_span(packed_left, packed_right, comptime.r#type.total_width()?)?;
+
+    if let Some(variable) = context.variables.get(&parent)
+        && !variable.is_assignable()
+        && !ignore_error
+    {
+        context.insert_error(AnalyzerError::invalid_assignment(
+            &parent_path.to_string(),
+            &variable.kind.description(),
+            &token,
+        ));
+    }
+
+    Some(ir::InstActualFragment {
+        parent,
+        parent_array_start,
+        parent_array_length,
+        parent_packed_start,
+        parent_packed_length,
+    })
+}
+
 pub fn var_path_to_assign_destination(
     context: &mut Context,
     path: Vec<VarPathSelect>,
@@ -3968,7 +4060,8 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             let mut local_context = Context::default();
             local_context.var_id = context.var_id;
             local_context.inherit(context);
-            local_context.extract_var_paths(context, &path.path, &array);
+            let receiver_variables =
+                local_context.extract_var_paths_with_receiver(context, &path.path, &array);
 
             for path in &generic_arg_paths {
                 // Copy var path referenced as resolved generic arg from the given context
@@ -3983,6 +4076,7 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             }
 
             let ret = conv_function(&mut local_context, definition, path);
+            let root_function = local_context.func_paths.get(path).copied();
 
             for path in &generic_arg_paths {
                 if let Some((var_id, _)) = local_context.var_paths.remove(path) {
@@ -3990,7 +4084,13 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
                 }
             }
 
-            context.extract_function(&mut local_context, &path.path, &array);
+            context.extract_function_with_receiver(
+                &mut local_context,
+                &path.path,
+                &array,
+                &receiver_variables,
+                root_function,
+            );
             context.inherit(&mut local_context);
             context.var_id = local_context.var_id;
 
@@ -4015,24 +4115,35 @@ pub fn function_call(
     token: TokenRange,
 ) -> IrResult<ir::FunctionCall> {
     let generic_path: GenericSymbolPath = path.into();
-
     check_generic_refereence(context, &generic_path);
 
     let mut parent_path = generic_path.clone();
     parent_path.paths.pop();
     let mut sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
     sig.normalize();
-
     // same signature re-entered => true infinite recursion
     if context.function_call_stack.contains(&sig) {
         context.insert_error(AnalyzerError::infinite_recursion(&token));
         return Err(ir_error!(token));
     }
+    let call_depth = context.function_call_stack.len() + 1;
+    if call_depth > context.config.function_instance_depth_limit {
+        if context.function_eval_overflow.is_none() {
+            context.function_eval_overflow = Some((token, call_depth));
+        }
+        return Err(ir_error!(token));
+    }
 
     let path: VarPathSelect = Conv::conv(context, path)?;
     let (mut base_path, select, _) = path.into();
-    let index = select.to_index();
-    let index = index.eval_value(context);
+    let receiver_index = select.to_index();
+    // `VarIndex::eval_value` retains its legacy X/Z-to-zero behavior. Do not
+    // let a runtime receiver become the static summary-cache key for index 0:
+    // summaries of different call sites would then reuse the first selector.
+    let index = receiver_index
+        .is_const()
+        .then(|| receiver_index.eval_value(context))
+        .flatten();
 
     // remove function name
     base_path.pop();
@@ -4043,7 +4154,6 @@ pub fn function_call(
     };
 
     let mut map = sig.to_generic_map();
-
     if !parent_path.is_empty()
         && let Ok(symbol) = symbol_table::resolve(&parent_path)
     {
@@ -4092,10 +4202,13 @@ pub fn function_call(
 
         Ok(ir::FunctionCall {
             id: func.id,
+            receiver_index,
+            receiver_prefix_dims: 0,
             index,
             comptime,
             inputs,
             outputs,
+            receiver_relative: func.receiver_relative,
         })
     });
 

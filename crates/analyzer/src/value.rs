@@ -1100,6 +1100,25 @@ impl Value {
         }
     }
 
+    /// Concatenate `count` copies without rebuilding the growing prefix once
+    /// per copy. Binary doubling keeps the number of concatenations
+    /// logarithmic in `count`; the total materialized value is still exactly
+    /// the declared result width.
+    pub(crate) fn repeat(&self, mut count: usize) -> Value {
+        let mut result = Value::new(0, 0, false);
+        let mut block = self.clone();
+        while count != 0 {
+            if count & 1 != 0 {
+                result = result.concat(&block);
+            }
+            count >>= 1;
+            if count != 0 {
+                block = block.concat(&block);
+            }
+        }
+        result
+    }
+
     pub fn expand(&self, width: usize, use_sign: bool) -> Cow<'_, Self> {
         if self.width() >= width && self.width() != 0 {
             return Cow::Borrowed(self);
@@ -2046,6 +2065,33 @@ mod tests {
             &format!("{:x}", x12),
             "240'h70700000808000009090d0d00000e0e00000f0f0a0a00000b0b00000c0c0"
         );
+    }
+
+    #[test]
+    fn repeat_concatenates_the_pattern() {
+        fn assert_matches_naive(pattern: &Value, count: usize) {
+            let naive =
+                (0..count).fold(Value::new(0, 0, false), |result, _| result.concat(pattern));
+            let repeated = pattern.repeat(count);
+            assert_eq!(repeated, naive);
+            assert_eq!(format!("{:b}", repeated), format!("{:b}", naive));
+        }
+
+        let pattern = Value::new(0b101, 3, false);
+        assert_eq!(format!("{:b}", pattern.repeat(0)), "'0");
+        assert_eq!(format!("{:b}", pattern.repeat(1)), "3'b101");
+        assert_eq!(format!("{:b}", pattern.repeat(5)), "15'b101101101101101");
+
+        let numeric = Value::new(0b10110, 5, false);
+        let four_state = Value::from_str("5'b10xz1").unwrap();
+        for count in [0, 1, 2, 3, 5, 13, 17] {
+            assert_matches_naive(&numeric, count);
+            assert_matches_naive(&four_state, count);
+        }
+
+        let unknown = Value::new_x(4, false).repeat(200_000);
+        assert_eq!(unknown.width(), 800_000);
+        assert!(unknown.is_xz());
     }
 
     #[test]

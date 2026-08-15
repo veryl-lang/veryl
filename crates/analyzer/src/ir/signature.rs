@@ -24,6 +24,28 @@ pub struct Signature {
     pub modport_signatures: Vec<(StrId, Signature)>,
 }
 
+fn same_generic_argument(left: &GenericSymbolPath, right: &GenericSymbolPath) -> bool {
+    left.kind == right.kind && left.mangled_path() == right.mangled_path()
+}
+
+fn canonical_function_argument(
+    context: &Context,
+    symbol: SymbolId,
+    name: StrId,
+    argument: GenericSymbolPath,
+) -> GenericSymbolPath {
+    context
+        .func_paths
+        .keys()
+        .filter(|path| path.sig.symbol == symbol)
+        .flat_map(|path| &path.sig.generic_parameters)
+        .find(|(existing_name, existing)| {
+            *existing_name == name && same_generic_argument(existing, &argument)
+        })
+        .map(|(_, existing)| existing.clone())
+        .unwrap_or(argument)
+}
+
 impl Signature {
     pub fn new(symbol: SymbolId) -> Self {
         Self {
@@ -150,6 +172,26 @@ impl Signature {
 
                 // Apply generic map
                 let path = context.resolve_path(path);
+                let mut structurally_resolved_function_parameters = Vec::new();
+                let direct_function_arguments = {
+                    let base = symbol_table::get(sig.symbol).unwrap();
+                    if matches!(base.kind, SymbolKind::Function(_)) {
+                        let params = base.generic_parameters();
+                        path.paths
+                            .last()
+                            .filter(|segment| segment.arguments.len() == params.len())
+                            .map(|segment| {
+                                params
+                                    .into_iter()
+                                    .zip(&segment.arguments)
+                                    .map(|((name, _), argument)| (name, argument.clone()))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    }
+                };
 
                 if let Some((found, full_path)) =
                     symbol_table::resolve_generic_structural(&path, path.paths[0].base.id)
@@ -172,12 +214,32 @@ impl Signature {
                                     arg.append_namespace_path(current_namespace, &base.namespace);
                                 }
                                 sig.add_generic_parameter(*name, arg);
+                                if inst.base == sig.symbol {
+                                    structurally_resolved_function_parameters.push(*name);
+                                }
                             }
                         }
                     }
 
                     sig.full_path
                         .append(&mut found.inner_namespace().paths.to_vec());
+                }
+
+                // A generic const evaluated while converting one function
+                // specialization can produce a concrete specialization that
+                // pass1 did not register as a `GenericInstance`. The resolved
+                // final-segment arguments still form its canonical call key.
+                for (name, argument) in direct_function_arguments {
+                    // Structural resolution is authoritative when it found
+                    // this parameter: it may have qualified a container-local
+                    // generic const (for example `Pkg::<1>::B`). The direct
+                    // syntax is only a fallback for a missing function
+                    // specialization and must not replace that resolved path.
+                    if !structurally_resolved_function_parameters.contains(&name) {
+                        let argument =
+                            canonical_function_argument(context, sig.symbol, name, argument);
+                        sig.add_generic_parameter(name, argument);
+                    }
                 }
             }
         }

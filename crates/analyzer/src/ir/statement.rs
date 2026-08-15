@@ -1,4 +1,3 @@
-use crate::AnalyzerError;
 use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
@@ -9,6 +8,7 @@ use crate::ir::{
 };
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
+use crate::{AnalyzerError, HashMap, HashSet};
 use indent::indent_all_by;
 use std::borrow::Cow;
 use std::fmt;
@@ -65,6 +65,18 @@ impl ForBound {
             }
         }
     }
+
+    fn set_index(&mut self, index: &VarIndex, receiver_variables: &HashMap<VarId, usize>) {
+        if let Self::Expression(expression) = self {
+            expression.set_index_with_receiver(index, receiver_variables);
+        }
+    }
+
+    fn prepend_call_receiver(&mut self, dims: usize, receiver_functions: &HashSet<VarId>) {
+        if let Self::Expression(expression) = self {
+            expression.prepend_call_receiver(dims, receiver_functions);
+        }
+    }
 }
 
 impl fmt::Display for ForBound {
@@ -104,6 +116,26 @@ pub enum ForRange {
 }
 
 impl ForRange {
+    fn set_index(&mut self, index: &VarIndex, receiver_variables: &HashMap<VarId, usize>) {
+        let (start, end) = match self {
+            Self::Forward { start, end, .. }
+            | Self::Reverse { start, end, .. }
+            | Self::Stepped { start, end, .. } => (start, end),
+        };
+        start.set_index(index, receiver_variables);
+        end.set_index(index, receiver_variables);
+    }
+
+    fn prepend_call_receiver(&mut self, dims: usize, receiver_functions: &HashSet<VarId>) {
+        let (start, end) = match self {
+            Self::Forward { start, end, .. }
+            | Self::Reverse { start, end, .. }
+            | Self::Stepped { start, end, .. } => (start, end),
+        };
+        start.prepend_call_receiver(dims, receiver_functions);
+        end.prepend_call_receiver(dims, receiver_functions);
+    }
+
     /// True when the range has const-evaluable bounds whose span exceeds
     /// evaluate_size_limit — i.e. eval_iter declines because of the limit,
     /// not because the bounds are runtime values.
@@ -469,13 +501,111 @@ impl Statement {
             Statement::SystemFunctionCall(_) => (),
             Statement::FunctionCall(x) => x.set_index(index),
             Statement::For(x) => {
-                for s in &mut x.body {
-                    s.set_index(index);
+                for statement in &mut x.body {
+                    statement.set_index(index);
                 }
             }
             Statement::TbMethodCall(_) | Statement::Break => (),
             Statement::Unsupported(_) => (),
             Statement::Null => (),
+        }
+    }
+
+    pub(crate) fn set_index_with_receiver(
+        &mut self,
+        index: &VarIndex,
+        receiver_variables: &HashMap<VarId, usize>,
+    ) {
+        match self {
+            Statement::Assign(x) => x.set_index_with_receiver(index, receiver_variables),
+            Statement::If(x) => x.set_index_with_receiver(index, receiver_variables),
+            Statement::IfReset(x) => x.set_index_with_receiver(index, receiver_variables),
+            Statement::Case(x) => x.set_index_with_receiver(index, receiver_variables),
+            Statement::SystemFunctionCall(x) => {
+                x.set_index_with_receiver(index, receiver_variables)
+            }
+            Statement::FunctionCall(x) => x.set_index_with_receiver(index, receiver_variables),
+            Statement::For(x) => {
+                x.range.set_index(index, receiver_variables);
+                for s in &mut x.body {
+                    s.set_index_with_receiver(index, receiver_variables);
+                }
+            }
+            Statement::TbMethodCall(_) | Statement::Break => (),
+            Statement::Unsupported(_) => (),
+            Statement::Null => (),
+        }
+    }
+
+    pub(crate) fn prepend_call_receiver(
+        &mut self,
+        dims: usize,
+        receiver_functions: &HashSet<VarId>,
+    ) {
+        match self {
+            Statement::Assign(assign) => {
+                for destination in &mut assign.dst {
+                    destination.prepend_call_receiver(dims, receiver_functions);
+                }
+                assign.expr.prepend_call_receiver(dims, receiver_functions);
+            }
+            Statement::If(statement) => {
+                statement
+                    .cond
+                    .prepend_call_receiver(dims, receiver_functions);
+                for statement in statement
+                    .true_side
+                    .iter_mut()
+                    .chain(statement.false_side.iter_mut())
+                {
+                    statement.prepend_call_receiver(dims, receiver_functions);
+                }
+            }
+            Statement::IfReset(statement) => {
+                for statement in statement
+                    .true_side
+                    .iter_mut()
+                    .chain(statement.false_side.iter_mut())
+                {
+                    statement.prepend_call_receiver(dims, receiver_functions);
+                }
+            }
+            Statement::Case(statement) => {
+                statement
+                    .case_target
+                    .prepend_call_receiver(dims, receiver_functions);
+                for arm in &mut statement.arms {
+                    for pattern in &mut arm.patterns {
+                        pattern.for_each_expr_mut(|expression| {
+                            expression.prepend_call_receiver(dims, receiver_functions)
+                        });
+                    }
+                    for statement in &mut arm.body {
+                        statement.prepend_call_receiver(dims, receiver_functions);
+                    }
+                }
+                for statement in &mut statement.default {
+                    statement.prepend_call_receiver(dims, receiver_functions);
+                }
+            }
+            Statement::For(statement) => {
+                statement
+                    .range
+                    .prepend_call_receiver(dims, receiver_functions);
+                for statement in &mut statement.body {
+                    statement.prepend_call_receiver(dims, receiver_functions);
+                }
+            }
+            Statement::SystemFunctionCall(call) => {
+                call.prepend_call_receiver(dims, receiver_functions);
+            }
+            Statement::FunctionCall(call) => {
+                call.prepend_receiver_axes(dims, receiver_functions);
+            }
+            Statement::TbMethodCall(_)
+            | Statement::Break
+            | Statement::Unsupported(_)
+            | Statement::Null => {}
         }
     }
 }
@@ -609,7 +739,7 @@ impl AssignDestination {
     ) {
         if let Some(variable) = context.get_variable_info(self.id) {
             let is_index_const = self.index.is_const();
-            let is_select_const = self.select.is_const();
+            let is_select_const = self.select.is_const_with_range();
             let is_const = is_index_const & is_select_const;
 
             let range = if !is_index_const {
@@ -621,33 +751,14 @@ impl AssignDestination {
                 variable.r#type.array.calc_range(&index)
             };
 
-            // A dynamic select can only reach inside the region its const prefix
-            // pins down (`x[const][dyn]`); masking the whole width would merge
-            // writes that provably land on different regions.
-            let mask = if !is_select_const {
-                let const_len = self
-                    .select
-                    .0
-                    .iter()
-                    .take_while(|x| x.comptime().is_const)
-                    .count();
-                let prefix = self.select.clone().split(const_len).0;
-                match prefix.eval_value(context, &variable.r#type, false) {
-                    Some((beg, end)) => ValueBigUint::gen_mask_range(beg, end),
-                    None => {
-                        let Some(width) = variable.total_width() else {
-                            return;
-                        };
-                        ValueBigUint::gen_mask(width)
-                    }
-                }
-            } else {
-                let Some((beg, end)) = self.select.eval_value(context, &variable.r#type, false)
-                else {
-                    return;
-                };
-                ValueBigUint::gen_mask_range(beg, end)
+            let Some((beg, end)) = self.select.conservative_packed_range(
+                context,
+                &variable.r#type,
+                self.comptime.member_select_domain,
+            ) else {
+                return;
             };
+            let mask = ValueBigUint::gen_mask_range(beg, end);
 
             let mut errors = vec![];
             if let Some((beg, end)) = range {
@@ -735,6 +846,34 @@ impl AssignDestination {
     pub fn set_index(&mut self, index: &VarIndex) {
         self.index.add_prelude(index);
     }
+
+    pub(crate) fn set_index_with_receiver(
+        &mut self,
+        index: &VarIndex,
+        receiver_variables: &HashMap<VarId, usize>,
+    ) {
+        for expression in &mut self.index.0 {
+            expression.set_index_with_receiver(index, receiver_variables);
+        }
+        self.select
+            .set_index_with_receiver(index, receiver_variables);
+        if let Some(dims) = receiver_variables.get(&self.id)
+            && let Some(prefix) = index.0.get(..*dims)
+        {
+            self.index.add_prelude(&VarIndex(prefix.to_vec()));
+        }
+    }
+
+    pub(crate) fn prepend_call_receiver(
+        &mut self,
+        dims: usize,
+        receiver_functions: &HashSet<VarId>,
+    ) {
+        for expression in &mut self.index.0 {
+            expression.prepend_call_receiver(dims, receiver_functions);
+        }
+        self.select.prepend_call_receiver(dims, receiver_functions);
+    }
 }
 
 impl fmt::Display for AssignDestination {
@@ -761,17 +900,11 @@ fn compute_assign_target(
     } else {
         None
     };
-    // A non-const select targets an indeterminate bit range, so fall back to
-    // the full-width mask.
-    let mask = if dst.select.is_const()
-        && let Some((beg, end)) = dst.select.eval_value(context, &var_info.r#type, false)
-    {
-        ValueBigUint::gen_mask_range(beg, end)
-    } else if let Some(width) = var_info.total_width() {
-        ValueBigUint::gen_mask(width)
-    } else {
-        crate::BigUint::default()
-    };
+    let mask = dst
+        .select
+        .conservative_packed_range(context, &var_info.r#type, dst.comptime.member_select_domain)
+        .map(|(beg, end)| ValueBigUint::gen_mask_range(beg, end))
+        .unwrap_or_default();
     Some((dst.id, arr_idx, mask))
 }
 
@@ -830,10 +963,21 @@ impl AssignStatement {
     }
 
     pub fn set_index(&mut self, index: &VarIndex) {
-        for dst in &mut self.dst {
-            dst.set_index(index);
+        for destination in &mut self.dst {
+            destination.set_index(index);
         }
         self.expr.set_index(index);
+    }
+
+    pub(crate) fn set_index_with_receiver(
+        &mut self,
+        index: &VarIndex,
+        receiver_variables: &HashMap<VarId, usize>,
+    ) {
+        for dst in &mut self.dst {
+            dst.set_index_with_receiver(index, receiver_variables);
+        }
+        self.expr.set_index_with_receiver(index, receiver_variables);
     }
 }
 
@@ -940,11 +1084,25 @@ impl IfStatement {
 
     pub fn set_index(&mut self, index: &VarIndex) {
         self.cond.set_index(index);
+        for statement in &mut self.true_side {
+            statement.set_index(index);
+        }
+        for statement in &mut self.false_side {
+            statement.set_index(index);
+        }
+    }
+
+    pub(crate) fn set_index_with_receiver(
+        &mut self,
+        index: &VarIndex,
+        receiver_variables: &HashMap<VarId, usize>,
+    ) {
+        self.cond.set_index_with_receiver(index, receiver_variables);
         for x in &mut self.true_side {
-            x.set_index(index);
+            x.set_index_with_receiver(index, receiver_variables);
         }
         for x in &mut self.false_side {
-            x.set_index(index);
+            x.set_index_with_receiver(index, receiver_variables);
         }
     }
 }
@@ -1019,11 +1177,24 @@ impl IfResetStatement {
     }
 
     pub fn set_index(&mut self, index: &VarIndex) {
+        for statement in &mut self.true_side {
+            statement.set_index(index);
+        }
+        for statement in &mut self.false_side {
+            statement.set_index(index);
+        }
+    }
+
+    pub(crate) fn set_index_with_receiver(
+        &mut self,
+        index: &VarIndex,
+        receiver_variables: &HashMap<VarId, usize>,
+    ) {
         for x in &mut self.true_side {
-            x.set_index(index);
+            x.set_index_with_receiver(index, receiver_variables);
         }
         for x in &mut self.false_side {
-            x.set_index(index);
+            x.set_index_with_receiver(index, receiver_variables);
         }
     }
 }
@@ -1285,15 +1456,35 @@ impl CaseStatement {
     pub fn set_index(&mut self, index: &VarIndex) {
         self.case_target.set_index(index);
         for arm in &mut self.arms {
+            for pattern in &mut arm.patterns {
+                pattern.for_each_expr_mut(|expression| expression.set_index(index));
+            }
+            for statement in &mut arm.body {
+                statement.set_index(index);
+            }
+        }
+        for statement in &mut self.default {
+            statement.set_index(index);
+        }
+    }
+
+    pub(crate) fn set_index_with_receiver(
+        &mut self,
+        index: &VarIndex,
+        receiver_variables: &HashMap<VarId, usize>,
+    ) {
+        self.case_target
+            .set_index_with_receiver(index, receiver_variables);
+        for arm in &mut self.arms {
             for p in &mut arm.patterns {
-                p.for_each_expr_mut(|e| e.set_index(index));
+                p.for_each_expr_mut(|e| e.set_index_with_receiver(index, receiver_variables));
             }
             for s in &mut arm.body {
-                s.set_index(index);
+                s.set_index_with_receiver(index, receiver_variables);
             }
         }
         for s in &mut self.default {
-            s.set_index(index);
+            s.set_index_with_receiver(index, receiver_variables);
         }
     }
 
