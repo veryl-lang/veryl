@@ -428,7 +428,6 @@ fn comb_loop_module_summary_detects_packed_struct_member_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_instance_output_address_contributes_dependency() {
     // Why this case exists: idx selects the instance output destination and
     // is itself read from one candidate destination. This is the same address
@@ -493,7 +492,6 @@ fn comb_loop_instance_input_selector_side_effect_is_recorded() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_instance_output_selector_side_effect_is_recorded() {
     // Why this case exists: an output connection evaluates the selector in its
     // destination. The observer must retain touch(o)'s module-scope write even
@@ -524,6 +522,42 @@ fn comb_loop_instance_output_selector_side_effect_is_recorded() {
         }
         "#,
         true,
+    );
+}
+
+#[test]
+fn comb_loop_instance_output_selector_without_a_return_path_is_feed_forward() {
+    // The selector controls the output destination and its function writes x,
+    // but neither dependency returns to the selector. Recording both effects
+    // must not manufacture a cycle.
+    assert_comb_loop(
+        "an independent instance output selector remains feed-forward",
+        r#"
+        module Source (
+            o: output logic,
+        ) {
+            assign o = 0;
+        }
+        module Top (
+            index: input  logic,
+            seed : input  logic,
+            o    : output logic,
+        ) {
+            var bus: logic<2>;
+            var x  : logic;
+            function touch (
+                a: input logic,
+            ) -> logic {
+                x = a;
+                return index;
+            }
+            inst u: Source (
+                o: bus[touch(seed)],
+            );
+            assign o = x;
+        }
+        "#,
+        false,
     );
 }
 
