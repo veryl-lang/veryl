@@ -12,9 +12,9 @@ use super::ssa::{
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, CaseStatement, Expression, Factor, ForBound, ForRange,
-    ForStatement, FunctionCall, IfStatement, Module, Op, Statement, SystemFunctionKind, VarIndex,
-    VarPath, VarSelect,
+    ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, Factor, ForBound,
+    ForRange, ForStatement, FunctionCall, IfStatement, MemberSelectDomain, Module, Op, Statement,
+    SystemFunctionCall, SystemFunctionKind, TbMethod, VarIndex, VarPath, VarSelect,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
@@ -316,6 +316,7 @@ pub(super) struct FunctionSummaries<'a> {
     bit_part: &'a BitPartition,
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
     contexts: Vec<ProcedureContext>,
+    module_scope_ids: Rc<HashSet<VarId>>,
 }
 
 /// Reusable module-local evaluation context for independent procedural
@@ -324,6 +325,7 @@ pub(super) struct FunctionSummaries<'a> {
 pub(super) struct ProcedureContext {
     ctx: Option<Context>,
     module_scope_ids: Rc<HashSet<VarId>>,
+    summary_scratch: bool,
 }
 
 impl ProcedureContext {
@@ -348,6 +350,15 @@ impl ProcedureContext {
         Self {
             ctx: Some(ctx),
             module_scope_ids: Rc::new(module_scope_ids),
+            summary_scratch: false,
+        }
+    }
+
+    fn new_summary(module_scope_ids: Rc<HashSet<VarId>>) -> Self {
+        Self {
+            ctx: Some(Context::default()),
+            module_scope_ids,
+            summary_scratch: true,
         }
     }
 
@@ -362,19 +373,335 @@ impl ProcedureContext {
         debug_assert!(self.ctx.is_none());
         self.ctx = Some(ctx);
     }
+
+    fn prepare_summary(&mut self, module: &Module, id: VarId, receiver_index: &VarIndex) {
+        debug_assert!(self.summary_scratch);
+        let ctx = self.ctx.as_mut().expect("summary context is available");
+        debug_assert!(ctx.variables.is_empty());
+        debug_assert!(ctx.functions.is_empty());
+
+        let Some(function) = module.functions.get(&id) else {
+            return;
+        };
+        let Some(body) = function.get_function_for_index(receiver_index) else {
+            return;
+        };
+        let mut ids = body.arg_map.values().copied().collect::<HashSet<_>>();
+        ids.extend(body.ret);
+        collect_summary_statement_variables(module, &body.statements, &mut ids);
+        ctx.variables.reserve(ids.len());
+        for id in ids {
+            let variable = module
+                .interface_members
+                .get(&id)
+                .or_else(|| module.variables.get(&id));
+            if let Some(variable) = variable {
+                ctx.variables.insert(id, variable.clone());
+            }
+        }
+        #[cfg(test)]
+        MODULE_CONTEXT_ENTRIES.set(MODULE_CONTEXT_ENTRIES.get() + ctx.variables.len());
+    }
+
+    fn install_functions(&mut self, functions: HashMap<VarId, crate::ir::Function>) {
+        debug_assert!(self.summary_scratch);
+        let ctx = self.ctx.as_mut().expect("summary context is available");
+        debug_assert!(ctx.functions.is_empty());
+        ctx.functions = functions;
+    }
+
+    fn take_functions(&mut self) -> HashMap<VarId, crate::ir::Function> {
+        debug_assert!(self.summary_scratch);
+        let ctx = self.ctx.as_mut().expect("summary context is available");
+        std::mem::take(&mut ctx.functions)
+    }
+
+    fn clear_summary(&mut self) {
+        debug_assert!(self.summary_scratch);
+        let ctx = self.ctx.as_mut().expect("summary context is available");
+        debug_assert!(ctx.functions.is_empty());
+        ctx.variables.clear();
+    }
 }
 
+fn collect_summary_statement_variables(
+    module: &Module,
+    statements: &[Statement],
+    ids: &mut HashSet<VarId>,
+) {
+    for statement in statements {
+        match statement {
+            Statement::Assign(statement) => {
+                for destination in &statement.dst {
+                    collect_summary_destination_variables(module, destination, ids);
+                }
+                collect_summary_expression_variables(module, &statement.expr, ids);
+            }
+            Statement::If(statement) => {
+                collect_summary_expression_variables(module, &statement.cond, ids);
+                collect_summary_statement_variables(module, &statement.true_side, ids);
+                collect_summary_statement_variables(module, &statement.false_side, ids);
+            }
+            Statement::IfReset(statement) => {
+                collect_summary_statement_variables(module, &statement.true_side, ids);
+                collect_summary_statement_variables(module, &statement.false_side, ids);
+            }
+            Statement::Case(statement) => {
+                collect_summary_expression_variables(module, &statement.case_target, ids);
+                for arm in &statement.arms {
+                    for pattern in &arm.patterns {
+                        match pattern {
+                            CasePattern::Eq(expression) => {
+                                collect_summary_expression_variables(module, expression, ids);
+                            }
+                            CasePattern::Range { lo, hi, .. } => {
+                                collect_summary_expression_variables(module, lo, ids);
+                                collect_summary_expression_variables(module, hi, ids);
+                            }
+                        }
+                    }
+                    collect_summary_statement_variables(module, &arm.body, ids);
+                }
+                collect_summary_statement_variables(module, &statement.default, ids);
+            }
+            Statement::For(statement) => {
+                ids.insert(statement.var_id);
+                let (start, end) = match &statement.range {
+                    ForRange::Forward { start, end, .. }
+                    | ForRange::Reverse { start, end, .. }
+                    | ForRange::Stepped { start, end, .. } => (start, end),
+                };
+                for bound in [start, end] {
+                    if let ForBound::Expression(expression) = bound {
+                        collect_summary_expression_variables(module, expression, ids);
+                    }
+                }
+                collect_summary_statement_variables(module, &statement.body, ids);
+            }
+            Statement::FunctionCall(call) => {
+                collect_summary_call_variables(module, call, ids);
+            }
+            Statement::SystemFunctionCall(call) => {
+                collect_summary_system_call_variables(module, call, ids);
+            }
+            Statement::TbMethodCall(call) => {
+                if let Some(destination) = &call.ret {
+                    collect_summary_destination_variables(module, destination, ids);
+                }
+                match &call.method {
+                    TbMethod::ClockNext { count, period } => {
+                        if let Some(count) = count {
+                            collect_summary_expression_variables(module, count, ids);
+                        }
+                        if let Some(period) = period {
+                            collect_summary_expression_variables(module, period, ids);
+                        }
+                    }
+                    TbMethod::ResetAssert { duration, .. } => {
+                        if let Some(duration) = duration {
+                            collect_summary_expression_variables(module, duration, ids);
+                        }
+                    }
+                    TbMethod::FileOpen { name, .. } => {
+                        collect_summary_expression_variables(module, &name.0, ids);
+                    }
+                    TbMethod::FileWrite { args } | TbMethod::Component { args, .. } => {
+                        for argument in args {
+                            collect_summary_expression_variables(module, &argument.0, ids);
+                        }
+                    }
+                    TbMethod::RandomSeed { value } => {
+                        collect_summary_expression_variables(module, value, ids);
+                    }
+                    TbMethod::RandomGetRange { min, max, .. } => {
+                        collect_summary_expression_variables(module, min, ids);
+                        collect_summary_expression_variables(module, max, ids);
+                    }
+                    TbMethod::FileClose
+                    | TbMethod::FileFlush
+                    | TbMethod::RandomGet { .. }
+                    | TbMethod::RandomGetSeed => {}
+                }
+            }
+            Statement::Break | Statement::Unsupported(_) | Statement::Null => {}
+        }
+    }
+}
+
+fn collect_summary_expression_variables(
+    module: &Module,
+    expression: &Expression,
+    ids: &mut HashSet<VarId>,
+) {
+    match expression {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::Variable(id, index, select, _) => {
+                ids.insert(*id);
+                collect_summary_index_variables(module, index, ids);
+                collect_summary_select_variables(module, select, ids);
+            }
+            Factor::HierVariable(reference) => {
+                collect_summary_index_variables(module, &reference.index, ids);
+                collect_summary_select_variables(module, &reference.select, ids);
+            }
+            Factor::FunctionCall(call) => collect_summary_call_variables(module, call, ids),
+            Factor::SystemFunctionCall(call) => {
+                collect_summary_system_call_variables(module, call, ids);
+            }
+            Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => {}
+        },
+        Expression::Unary(_, expression, _) => {
+            collect_summary_expression_variables(module, expression, ids);
+        }
+        Expression::Binary(left, _, right, _) => {
+            collect_summary_expression_variables(module, left, ids);
+            collect_summary_expression_variables(module, right, ids);
+        }
+        Expression::Ternary(condition, left, right, _) => {
+            collect_summary_expression_variables(module, condition, ids);
+            collect_summary_expression_variables(module, left, ids);
+            collect_summary_expression_variables(module, right, ids);
+        }
+        Expression::Concatenation(parts, _) => {
+            for (part, repeat) in parts {
+                collect_summary_expression_variables(module, part, ids);
+                if let Some(repeat) = repeat {
+                    collect_summary_expression_variables(module, repeat, ids);
+                }
+            }
+        }
+        Expression::ArrayLiteral(items, _) => {
+            for item in items {
+                match item {
+                    ArrayLiteralItem::Value(value, repeat) => {
+                        collect_summary_expression_variables(module, value, ids);
+                        if let Some(repeat) = repeat {
+                            collect_summary_expression_variables(module, repeat, ids);
+                        }
+                    }
+                    ArrayLiteralItem::Defaul(value) => {
+                        collect_summary_expression_variables(module, value, ids);
+                    }
+                }
+            }
+        }
+        Expression::StructConstructor(_, members, _) => {
+            for (_, value) in members {
+                collect_summary_expression_variables(module, value, ids);
+            }
+        }
+    }
+}
+
+fn collect_summary_call_variables(module: &Module, call: &FunctionCall, ids: &mut HashSet<VarId>) {
+    collect_summary_index_variables(module, &call.receiver_index, ids);
+    for input in call.inputs.values() {
+        collect_summary_expression_variables(module, input, ids);
+    }
+    for outputs in call.outputs.values() {
+        for destination in outputs {
+            collect_summary_destination_variables(module, destination, ids);
+        }
+    }
+    if let Some(body) = module
+        .functions
+        .get(&call.id)
+        .and_then(|function| function.get_function_for_index(&call.receiver_index))
+    {
+        ids.extend(body.arg_map.values().copied());
+        ids.extend(body.ret);
+    }
+}
+
+fn collect_summary_system_call_variables(
+    module: &Module,
+    call: &SystemFunctionCall,
+    ids: &mut HashSet<VarId>,
+) {
+    match &call.kind {
+        SystemFunctionKind::Bits(input)
+        | SystemFunctionKind::Size(input)
+        | SystemFunctionKind::Clog2(input)
+        | SystemFunctionKind::Onehot(input)
+        | SystemFunctionKind::Signed(input)
+        | SystemFunctionKind::Unsigned(input) => {
+            collect_summary_expression_variables(module, &input.0, ids);
+        }
+        SystemFunctionKind::Readmemh(input, output) => {
+            collect_summary_expression_variables(module, &input.0, ids);
+            for destination in &output.0 {
+                collect_summary_destination_variables(module, destination, ids);
+            }
+        }
+        SystemFunctionKind::Display(inputs) | SystemFunctionKind::Write(inputs) => {
+            for input in inputs {
+                collect_summary_expression_variables(module, &input.0, ids);
+            }
+        }
+        SystemFunctionKind::Assert { cond, args, .. } => {
+            collect_summary_expression_variables(module, &cond.0, ids);
+            for input in args {
+                collect_summary_expression_variables(module, &input.0, ids);
+            }
+        }
+        SystemFunctionKind::Finish => {}
+    }
+}
+
+fn collect_summary_destination_variables(
+    module: &Module,
+    destination: &AssignDestination,
+    ids: &mut HashSet<VarId>,
+) {
+    ids.insert(destination.id);
+    collect_summary_index_variables(module, &destination.index, ids);
+    collect_summary_select_variables(module, &destination.select, ids);
+}
+
+fn collect_summary_index_variables(module: &Module, index: &VarIndex, ids: &mut HashSet<VarId>) {
+    for expression in &index.0 {
+        collect_summary_expression_variables(module, expression, ids);
+    }
+}
+
+fn collect_summary_select_variables(module: &Module, select: &VarSelect, ids: &mut HashSet<VarId>) {
+    for expression in &select.0 {
+        collect_summary_expression_variables(module, expression, ids);
+    }
+    if let Some((_, expression)) = &select.1 {
+        collect_summary_expression_variables(module, expression, ids);
+    }
+}
+
+fn module_scope_ids(module: &Module) -> HashSet<VarId> {
+    module
+        .variables
+        .iter()
+        .chain(&module.interface_members)
+        .filter_map(|(&id, variable)| {
+            matches!(
+                variable.affiliation,
+                crate::symbol::Affiliation::Module | crate::symbol::Affiliation::Interface
+            )
+            .then_some(id)
+        })
+        .collect()
+}
 impl<'a> FunctionSummaries<'a> {
     pub(super) fn new(module: &'a Module, bit_part: &'a BitPartition) -> Self {
         Self {
             module,
             bit_part,
             summaries: HashMap::default(),
+            // Most modules never need a function summary. Allocate the
+            // baseline scratch context lazily so ordinary declarations keep
+            // just the reusable top-level procedure context.
             contexts: Vec::new(),
+            module_scope_ids: Rc::new(module_scope_ids(module)),
         }
     }
 
-    fn get(&mut self, call: &FunctionCall) -> FunctionSummaryLookup {
+    fn get(&mut self, call: &FunctionCall, caller_ctx: &mut Context) -> FunctionSummaryLookup {
         let key = FunctionSummaryKey {
             id: call.id,
             index: call.index.clone(),
@@ -389,7 +716,13 @@ impl<'a> FunctionSummaries<'a> {
         let mut context = self
             .contexts
             .pop()
-            .unwrap_or_else(|| ProcedureContext::new(self.module));
+            .unwrap_or_else(|| ProcedureContext::new_summary(Rc::clone(&self.module_scope_ids)));
+        context.prepare_summary(self.module, call.id, &call.receiver_index);
+        // Function IR is immutable during dependency analysis. Move the one
+        // module-wide map down the suspended call chain instead of cloning it
+        // into every recursive scratch context, then restore it before the
+        // caller resumes.
+        context.install_functions(std::mem::take(&mut caller_ctx.functions));
         let summary = ProcedureAnalysis::summarize_function(
             self.module,
             self.bit_part,
@@ -399,6 +732,8 @@ impl<'a> FunctionSummaries<'a> {
             self,
         )
         .map(Rc::new);
+        caller_ctx.functions = context.take_functions();
+        context.clear_summary();
         self.contexts.push(context);
         if let Some(summary) = summary {
             self.summaries.insert(key, Some(summary.clone()));
@@ -418,6 +753,7 @@ thread_local! {
     static FUNCTION_BARRIER_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_SUMMARY_GRAPH_NODES: Cell<usize> = const { Cell::new(0) };
     static MODULE_CONTEXT_ENTRIES: Cell<usize> = const { Cell::new(0) };
+    static WRITE_FOOTPRINT_STATEMENT_VISITS: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -428,6 +764,7 @@ pub(crate) fn reset_function_evaluation_count() {
     FUNCTION_BARRIER_EVALUATIONS.set(0);
     FUNCTION_SUMMARY_GRAPH_NODES.set(0);
     MODULE_CONTEXT_ENTRIES.set(0);
+    WRITE_FOOTPRINT_STATEMENT_VISITS.set(0);
 }
 
 #[cfg(test)]
@@ -453,6 +790,11 @@ pub(crate) fn function_barrier_evaluation_count() -> usize {
 #[cfg(test)]
 pub(crate) fn function_summary_graph_node_count() -> usize {
     FUNCTION_SUMMARY_GRAPH_NODES.get()
+}
+
+#[cfg(test)]
+pub(crate) fn write_footprint_statement_visits() -> usize {
+    WRITE_FOOTPRINT_STATEMENT_VISITS.get()
 }
 
 #[cfg(test)]
@@ -589,7 +931,8 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
     ) -> Self {
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
-        let mut inner = ProcedureAnalysis::from_context(bit_part, ctx, module_scope_ids);
+        let mut inner =
+            ProcedureAnalysis::from_context(bit_part, summaries.module, ctx, module_scope_ids);
         inner.summaries = Some(summaries);
         Self { inner: Some(inner) }
     }
@@ -674,6 +1017,7 @@ pub(super) struct RegionSource {
 
 struct ProcedureAnalysis<'a, 's> {
     bit_part: &'a BitPartition,
+    module: &'a Module,
     ctx: Context,
     module_scope_ids: Rc<HashSet<VarId>>,
     ssa: SsaStore<SsaKey>,
@@ -694,11 +1038,13 @@ struct ProcedureAnalysis<'a, 's> {
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn from_context(
         bit_part: &'a BitPartition,
+        module: &'a Module,
         ctx: Context,
         module_scope_ids: Rc<HashSet<VarId>>,
     ) -> Self {
         Self {
             bit_part,
+            module,
             ctx,
             module_scope_ids,
             ssa: SsaStore::default(),
@@ -726,8 +1072,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     ) -> ProcedureResult {
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
-        let mut this = Self::from_context(bit_part, ctx, module_scope_ids);
+        let mut this = Self::from_context(bit_part, summaries.module, ctx, module_scope_ids);
         this.summaries = Some(summaries);
+        this.causal_write_keys = this.process_write_footprint(statements);
         this.branch_namespace = branch_namespace;
         this.eval_block(statements, &[]);
         let (graph, destinations) = this.dependency_graph();
@@ -775,7 +1122,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let formal_ids = body.arg_map.values().copied().collect::<HashSet<_>>();
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
-        let mut this = Self::from_context(bit_part, ctx, module_scope_ids);
+        let mut this = Self::from_context(bit_part, module, ctx, module_scope_ids);
         this.summaries = Some(summaries);
         this.call_caches.push(None);
         this.receiver_indices.push(
@@ -1027,6 +1374,328 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         keys.sort_unstable();
         keys.dedup();
         keys
+    }
+
+    fn process_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
+        let mut keys = HashSet::default();
+
+        // Prefer the sparse IR destinations. Besides covering ordinary writes
+        // exactly, this avoids scanning a dense assignment mask merely to add
+        // a NodeKey that is already known from the statement itself.
+        let mut visited = HashSet::default();
+        self.collect_statement_write_footprint(statements, &mut keys, &mut visited);
+
+        let mut keys = keys.into_iter().collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys
+    }
+
+    fn statement_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
+        let mut keys = HashSet::default();
+        let mut visited = HashSet::default();
+        self.collect_statement_write_footprint(statements, &mut keys, &mut visited);
+        let mut keys = keys.into_iter().collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys
+    }
+
+    fn function_call_write_footprint(&mut self, call: &FunctionCall) -> Vec<NodeKey> {
+        let mut keys = HashSet::default();
+        let mut visited = HashSet::default();
+        self.collect_function_call_write_footprint(call, &mut keys, &mut visited);
+        let mut keys = keys.into_iter().collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys
+    }
+
+    fn collect_statement_write_footprint(
+        &mut self,
+        statements: &[Statement],
+        keys: &mut HashSet<NodeKey>,
+        visited: &mut HashSet<FunctionSummaryKey>,
+    ) {
+        for statement in statements {
+            #[cfg(test)]
+            WRITE_FOOTPRINT_STATEMENT_VISITS
+                .set(WRITE_FOOTPRINT_STATEMENT_VISITS.get().saturating_add(1));
+            match statement {
+                Statement::Assign(assign) => {
+                    self.collect_expression_write_footprint(&assign.expr, keys, visited);
+                    for destination in &assign.dst {
+                        self.collect_destination_write_footprint(destination, keys, visited);
+                    }
+                }
+                Statement::If(statement) => {
+                    self.collect_expression_write_footprint(&statement.cond, keys, visited);
+                    self.collect_statement_write_footprint(&statement.true_side, keys, visited);
+                    self.collect_statement_write_footprint(&statement.false_side, keys, visited);
+                }
+                Statement::IfReset(statement) => {
+                    self.collect_statement_write_footprint(&statement.true_side, keys, visited);
+                    self.collect_statement_write_footprint(&statement.false_side, keys, visited);
+                }
+                Statement::Case(statement) => {
+                    self.collect_expression_write_footprint(&statement.case_target, keys, visited);
+                    for arm in &statement.arms {
+                        for pattern in &arm.patterns {
+                            match pattern {
+                                crate::ir::CasePattern::Eq(expression) => self
+                                    .collect_expression_write_footprint(expression, keys, visited),
+                                crate::ir::CasePattern::Range { lo, hi, .. } => {
+                                    self.collect_expression_write_footprint(lo, keys, visited);
+                                    self.collect_expression_write_footprint(hi, keys, visited);
+                                }
+                            }
+                        }
+                        self.collect_statement_write_footprint(&arm.body, keys, visited);
+                    }
+                    self.collect_statement_write_footprint(&statement.default, keys, visited);
+                }
+                Statement::For(statement) => {
+                    let (start, end, _) = for_range_bounds(&statement.range);
+                    for bound in [start, end] {
+                        if let ForBound::Expression(expression) = bound {
+                            self.collect_expression_write_footprint(expression, keys, visited);
+                        }
+                    }
+                    self.collect_statement_write_footprint(&statement.body, keys, visited);
+                }
+                Statement::FunctionCall(call) => {
+                    self.collect_function_call_write_footprint(call, keys, visited);
+                }
+                Statement::SystemFunctionCall(call) => {
+                    self.collect_system_call_write_footprint(call, keys, visited);
+                }
+                Statement::TbMethodCall(_)
+                | Statement::Break
+                | Statement::Unsupported(_)
+                | Statement::Null => {}
+            }
+        }
+    }
+
+    fn collect_destination_write_footprint(
+        &mut self,
+        destination: &AssignDestination,
+        keys: &mut HashSet<NodeKey>,
+        visited: &mut HashSet<FunctionSummaryKey>,
+    ) {
+        let mut resolved = destination.clone();
+        resolved.index = self.receiver_index(resolved.id, &resolved.index);
+        for (array, packed) in dst_writes(&resolved, &mut self.ctx) {
+            keys.extend(self.bit_part.overlapping_access(resolved.id, array, packed));
+        }
+        for expression in destination
+            .index
+            .0
+            .iter()
+            .chain(destination.select.0.iter())
+        {
+            self.collect_expression_write_footprint(expression, keys, visited);
+        }
+        if let Some((_, expression)) = &destination.select.1 {
+            self.collect_expression_write_footprint(expression, keys, visited);
+        }
+    }
+
+    fn collect_expression_write_footprint(
+        &mut self,
+        expression: &Expression,
+        keys: &mut HashSet<NodeKey>,
+        visited: &mut HashSet<FunctionSummaryKey>,
+    ) {
+        match expression {
+            Expression::Term(factor) => match factor.as_ref() {
+                Factor::Variable(_, index, select, _) => {
+                    for expression in index.0.iter().chain(select.0.iter()) {
+                        self.collect_expression_write_footprint(expression, keys, visited);
+                    }
+                    if let Some((_, expression)) = &select.1 {
+                        self.collect_expression_write_footprint(expression, keys, visited);
+                    }
+                }
+                Factor::FunctionCall(call) => {
+                    self.collect_function_call_write_footprint(call, keys, visited);
+                }
+                Factor::SystemFunctionCall(call) => {
+                    self.collect_system_call_write_footprint(call, keys, visited);
+                }
+                Factor::HierVariable(reference) => {
+                    for expression in reference.index.0.iter().chain(reference.select.0.iter()) {
+                        self.collect_expression_write_footprint(expression, keys, visited);
+                    }
+                    if let Some((_, expression)) = &reference.select.1 {
+                        self.collect_expression_write_footprint(expression, keys, visited);
+                    }
+                }
+                Factor::Unknown(_) | Factor::Value(_) | Factor::Anonymous(_) => {}
+            },
+            Expression::Unary(_, expression, _) => {
+                self.collect_expression_write_footprint(expression, keys, visited);
+            }
+            Expression::Binary(left, _, right, _) => {
+                self.collect_expression_write_footprint(left, keys, visited);
+                self.collect_expression_write_footprint(right, keys, visited);
+            }
+            Expression::Ternary(condition, left, right, _) => {
+                self.collect_expression_write_footprint(condition, keys, visited);
+                self.collect_expression_write_footprint(left, keys, visited);
+                self.collect_expression_write_footprint(right, keys, visited);
+            }
+            Expression::Concatenation(parts, _) => {
+                for (expression, repeat) in parts {
+                    self.collect_expression_write_footprint(expression, keys, visited);
+                    if let Some(repeat) = repeat {
+                        self.collect_expression_write_footprint(repeat, keys, visited);
+                    }
+                }
+            }
+            Expression::ArrayLiteral(items, _) => {
+                for item in items {
+                    match item {
+                        ArrayLiteralItem::Value(expression, repeat) => {
+                            self.collect_expression_write_footprint(expression, keys, visited);
+                            if let Some(repeat) = repeat {
+                                self.collect_expression_write_footprint(repeat, keys, visited);
+                            }
+                        }
+                        ArrayLiteralItem::Defaul(expression) => {
+                            self.collect_expression_write_footprint(expression, keys, visited);
+                        }
+                    }
+                }
+            }
+            Expression::StructConstructor(_, fields, _) => {
+                for (_, expression) in fields {
+                    self.collect_expression_write_footprint(expression, keys, visited);
+                }
+            }
+        }
+    }
+
+    fn collect_function_call_write_footprint(
+        &mut self,
+        call: &FunctionCall,
+        keys: &mut HashSet<NodeKey>,
+        visited: &mut HashSet<FunctionSummaryKey>,
+    ) {
+        for expression in &call.receiver_index.0 {
+            self.collect_expression_write_footprint(expression, keys, visited);
+        }
+        for actual in call.inputs.values() {
+            self.collect_expression_write_footprint(actual, keys, visited);
+        }
+        for destinations in call.outputs.values() {
+            for destination in destinations {
+                self.collect_destination_write_footprint(destination, keys, visited);
+            }
+        }
+
+        let summary_key = FunctionSummaryKey {
+            id: call.id,
+            index: call.index.clone(),
+        };
+        if !visited.insert(summary_key.clone()) {
+            return;
+        }
+        let Some(statements) = self
+            .module
+            .functions
+            .get(&call.id)
+            .and_then(|function| function.get_function_for_index(&call.receiver_index))
+            .map(|body| body.statements)
+        else {
+            visited.remove(&summary_key);
+            return;
+        };
+        self.collect_statement_write_footprint(&statements, keys, visited);
+        // The actual expressions and output destinations above remain
+        // call-site-specific and are always visited. A plain function body,
+        // or a receiver body selected by a concrete index, is identical for
+        // every later call in this footprint traversal; retaining its key
+        // avoids walking an N-statement body at N call sites. Dynamic receiver
+        // bodies embed the call-site selector and therefore remain uncached.
+        if call.index.is_none() && !call.receiver_index.0.is_empty() {
+            visited.remove(&summary_key);
+        }
+    }
+
+    fn collect_system_call_write_footprint(
+        &mut self,
+        call: &crate::ir::SystemFunctionCall,
+        keys: &mut HashSet<NodeKey>,
+        visited: &mut HashSet<FunctionSummaryKey>,
+    ) {
+        match &call.kind {
+            SystemFunctionKind::Bits(input)
+            | SystemFunctionKind::Size(input)
+            | SystemFunctionKind::Clog2(input)
+            | SystemFunctionKind::Onehot(input)
+            | SystemFunctionKind::Signed(input)
+            | SystemFunctionKind::Unsigned(input) => {
+                self.collect_expression_write_footprint(&input.0, keys, visited);
+            }
+            SystemFunctionKind::Readmemh(input, output) => {
+                self.collect_expression_write_footprint(&input.0, keys, visited);
+                for destination in &output.0 {
+                    self.collect_destination_write_footprint(destination, keys, visited);
+                }
+            }
+            SystemFunctionKind::Display(inputs) | SystemFunctionKind::Write(inputs) => {
+                for input in inputs {
+                    self.collect_expression_write_footprint(&input.0, keys, visited);
+                }
+            }
+            SystemFunctionKind::Assert { cond, args, .. } => {
+                self.collect_expression_write_footprint(&cond.0, keys, visited);
+                for input in args {
+                    self.collect_expression_write_footprint(&input.0, keys, visited);
+                }
+            }
+            SystemFunctionKind::Finish => {}
+        }
+    }
+
+    fn opaque_value(&mut self) -> VersionId {
+        self.status = self.status.max(AnalysisStatus::Partial);
+        self.ssa.definition(Vec::new())
+    }
+
+    fn opaque_kill_keys(&mut self, keys: Vec<NodeKey>, weak: bool) {
+        self.status = self.status.max(AnalysisStatus::Partial);
+        self.bind_opaque_keys(keys, weak);
+    }
+
+    fn bind_opaque_keys(&mut self, keys: Vec<NodeKey>, weak: bool) {
+        for key in keys {
+            let opaque = self.ssa.definition(Vec::new());
+            self.bind_destination(key, opaque, weak);
+        }
+    }
+
+    fn opaque_causal_boundary(&mut self) {
+        self.opaque_kill_keys(self.causal_write_keys.clone(), false);
+    }
+
+    fn opaque_function_call_boundary(&mut self, call: &FunctionCall) {
+        for input in call.inputs.values() {
+            self.eval_expr(input);
+        }
+        let mut keys = self.function_call_write_footprint(call);
+        // This helper is used only when the callee effect summary is missing
+        // or recursive. Its hidden writes may target any key owned by the
+        // current unit, but never a continuous/other-process-only source.
+        keys.extend_from_slice(&self.causal_write_keys);
+        keys.sort_unstable();
+        keys.dedup();
+        self.opaque_kill_keys(keys, false);
+        for destinations in call.outputs.values() {
+            for destination in destinations {
+                // Output lvalue selectors still execute, but an unresolved
+                // callee supplies no proven value or control dependency.
+                self.write_destination(destination, &[], &[]);
+            }
+        }
     }
 
     fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
@@ -2705,7 +3374,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let summary = self
             .summaries
             .as_deref_mut()
-            .map(|summaries| summaries.get(call));
+            .map(|summaries| summaries.get(call, &mut self.ctx));
         match summary {
             Some(FunctionSummaryLookup::Ready(summary)) => {
                 return self.apply_function_summary(call, controls, summary.as_ref());

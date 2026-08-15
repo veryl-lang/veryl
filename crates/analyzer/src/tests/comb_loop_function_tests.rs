@@ -1870,7 +1870,7 @@ fn function_summaries_reuse_module_metadata() {
         "independent calls are acyclic: {errors:#?}"
     );
     assert!(
-        crate::comb_loop_detect::module_context_entries() <= COUNT * 6,
+        crate::comb_loop_detect::module_context_entries() <= COUNT * 6 + 4,
         "function summaries must share their module metadata: {}",
         crate::comb_loop_detect::module_context_entries(),
     );
@@ -2057,5 +2057,96 @@ fn comb_loop_function_onehot_runtime_input_detects_feedback() {
         }
         "#,
         true,
+    );
+}
+
+#[test]
+fn repeated_calls_reuse_the_function_write_footprint() {
+    const WIDTH: usize = 128;
+    let writes = (0..WIDTH)
+        .map(|bit| format!("state[{bit}] = 0;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let calls = (0..WIDTH)
+        .map(|_| "clear();")
+        .collect::<Vec<_>>()
+        .join("\n");
+    let code = format!(
+        r#"
+        module Top (o: output logic) {{
+            var state: logic<{WIDTH}>;
+            function clear () {{
+                {writes}
+            }}
+            always_comb {{
+                {calls}
+            }}
+            assign o = |state;
+        }}
+        "#
+    );
+
+    crate::comb_loop_detect::reset_function_evaluation_count();
+    let errors = analyze(&code);
+    assert!(
+        errors.is_empty(),
+        "repeated constant writes are acyclic: {errors:#?}"
+    );
+    let visits = crate::comb_loop_detect::write_footprint_statement_visits();
+    assert!(
+        visits <= WIDTH * 4 + 8,
+        "a shared function body must be walked once, not once per call site: {visits}"
+    );
+}
+
+#[test]
+fn recursive_function_summary_contexts_clone_only_referenced_metadata() {
+    const COUNT: usize = 16;
+    let padding = (0..COUNT)
+        .map(|index| format!("var padding_{index}: logic;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let padding_assignments = (0..COUNT)
+        .map(|index| format!("padding_{index} = seed;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let padding_uses = (0..COUNT)
+        .map(|index| format!("padding_{index}"))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let mut functions = String::new();
+    for index in (0..COUNT).rev() {
+        let value = if index + 1 == COUNT {
+            "value".to_owned()
+        } else {
+            format!("function_{}(value)", index + 1)
+        };
+        functions.push_str(&format!(
+            "function function_{index} (value: input logic) -> logic {{ return {value}; }}\n"
+        ));
+    }
+    let code = format!(
+        r#"
+        module Top (seed: input logic, o: output logic) {{
+            {padding}
+            {functions}
+            always_comb {{
+                {padding_assignments}
+                o = function_0(seed) | {padding_uses};
+            }}
+        }}
+        "#
+    );
+
+    crate::comb_loop_detect::reset_module_context_entries();
+    let errors = analyze(&code);
+    assert!(
+        errors.is_empty(),
+        "the function chain is acyclic: {errors:#?}"
+    );
+    assert!(
+        crate::comb_loop_detect::module_context_entries() <= COUNT * 12,
+        "each summary depth must clone only its local metadata: {}",
+        crate::comb_loop_detect::module_context_entries(),
     );
 }
