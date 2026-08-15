@@ -46,8 +46,9 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, Component, Declaration, Expression, Factor, InstDeclaration, Ir, Module, Op,
-    Signature, Statement, SystemFunctionKind, VarSelect, Variable,
+    AssignDestination, Component, Declaration, Expression, Factor, InstDeclaration,
+    InstInterfaceBinding, Ir, Module, Op, Signature, Statement, SystemFunctionKind, VarSelect,
+    Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
@@ -266,15 +267,30 @@ fn summary_parent_access(
         .interface_bindings
         .iter()
         .find(|binding| binding.child == region.id)?;
-    translated_summary_access(
-        region,
-        variable,
-        binding.parent,
-        &binding.index,
-        &binding.select,
-        ctx,
-    )
-    .map(|(array, packed, _)| (binding.parent, array, packed))
+    translated_interface_binding_access(region, variable, binding)
+        .map(|(parent, array, packed, _)| (parent, array, packed))
+}
+
+fn translated_interface_binding_access(
+    region: SummaryRegion,
+    child: &Variable,
+    binding: &InstInterfaceBinding,
+) -> Option<(VarId, ArraySpan, PackedSpan, (isize, isize))> {
+    let child_array_length = child.r#type.array.total()?;
+    let child_packed_width = child.total_width()?;
+    let actual = &binding.actual;
+    if child_array_length != actual.parent_array_length
+        || child_packed_width != actual.parent_packed_length
+    {
+        return None;
+    }
+    let array = region.array.translated(0, actual.parent_array_start)?;
+    let packed = region.packed.translated(0, actual.parent_packed_start)?;
+    let offset = (
+        signed_difference(actual.parent_array_start, 0)?,
+        signed_difference(actual.parent_packed_start, 0)?,
+    );
+    Some((actual.parent, array, packed, offset))
 }
 
 fn split_array_spans(
@@ -1160,15 +1176,21 @@ fn instance_region_mapping(
             .iter()
             .find(|binding| binding.child == region.id),
     ) {
-        return map_summary_region(
-            region,
-            variable,
-            binding.parent,
-            &binding.index,
-            &binding.select,
-            bit_part,
-            ctx,
-        );
+        if let Some((parent, array, packed, offset)) =
+            translated_interface_binding_access(region, variable, binding)
+        {
+            return InstanceRegionMapping {
+                nodes: bit_part
+                    .overlapping_access(parent, array, packed)
+                    .into_iter()
+                    .map(|key| MappedNode {
+                        key,
+                        offset: Some(offset),
+                        condition: PathCondition::default(),
+                    })
+                    .collect(),
+            };
+        }
     }
 
     InstanceRegionMapping {
