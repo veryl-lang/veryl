@@ -1334,3 +1334,61 @@ fn many_comb_declarations_build_the_module_context_once() {
         "module variable/function maps must not be cloned per declaration",
     );
 }
+
+#[test]
+fn comb_loop_module_summary_preserves_if_expression_arm_exclusivity() {
+    assert_comb_loop(
+        "a child summary must not combine mutually exclusive expression arms",
+        r#"
+        module Conditional (
+            i  : input  logic<2>,
+            sel: input  logic,
+            o  : output logic<2>,
+        ) {
+            assign o = if sel ? {i[0], 1'b0} : {1'b0, i[1]};
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var state: logic<2>;
+            inst conditional: Conditional (
+                i  : state,
+                sel: sel,
+                o  : state,
+            );
+            assign o = |state;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_module_summary_retains_feedback_reachable_in_one_expression_arm() {
+    assert_comb_loop(
+        "a child summary retains feedback reachable in one expression arm",
+        r#"
+        module Conditional (
+            i  : input  logic,
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            assign o = if sel ? i : 1'b0;
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var state: logic;
+            inst conditional: Conditional (
+                i  : state,
+                sel: sel,
+                o  : state,
+            );
+            assign o = state;
+        }
+        "#,
+        true,
+    );
+}

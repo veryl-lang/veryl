@@ -11,14 +11,127 @@ enum Version<K> {
     Definition {
         positional: Vec<(VersionId, PositionRelation)>,
         whole: Vec<VersionId>,
+        condition: PathCondition,
     },
     Phi(Vec<VersionId>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct BranchId {
+    procedure: usize,
+    local: usize,
+}
+
+impl BranchId {
+    pub(super) const fn new(procedure: usize, local: usize) -> Self {
+        Self { procedure, local }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct BranchChoice {
+    branch: BranchId,
+    arm: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct PathCondition {
+    // These are syntactic arm choices, not symbolic expressions. Distinct
+    // `if` statements remain compatible even when their conditions look like
+    // logical complements.
+    choices: Vec<BranchChoice>,
+}
+
+impl PathCondition {
+    pub(super) fn with_choice(&self, branch: BranchId, arm: usize) -> Self {
+        let mut choices = self.choices.clone();
+        let choice = BranchChoice { branch, arm };
+        match choices.binary_search_by_key(&branch, |choice| choice.branch) {
+            Ok(index) => choices[index] = choice,
+            Err(index) => choices.insert(index, choice),
+        }
+        Self { choices }
+    }
+
+    pub(super) fn intersection<'a>(conditions: impl IntoIterator<Item = &'a Self>) -> Self {
+        let mut conditions = conditions.into_iter();
+        let Some(first) = conditions.next() else {
+            return Self::default();
+        };
+        let mut choices = first.choices.clone();
+        for condition in conditions {
+            choices.retain(|choice| condition.choices.binary_search(choice).is_ok());
+        }
+        Self { choices }
+    }
+
+    pub(super) fn union_if_compatible(&self, other: &Self) -> Option<Self> {
+        let mut choices = Vec::with_capacity(self.choices.len() + other.choices.len());
+        let mut left = self.choices.iter().peekable();
+        let mut right = other.choices.iter().peekable();
+        loop {
+            match (left.peek(), right.peek()) {
+                (Some(a), Some(b)) if a.branch == b.branch => {
+                    if a.arm != b.arm {
+                        return None;
+                    }
+                    choices.push(**a);
+                    left.next();
+                    right.next();
+                }
+                (Some(a), Some(b)) if a.branch < b.branch => {
+                    choices.push(**a);
+                    left.next();
+                }
+                (Some(_), Some(b)) => {
+                    choices.push(**b);
+                    right.next();
+                }
+                (Some(a), None) => {
+                    choices.push(**a);
+                    left.next();
+                }
+                (None, Some(b)) => {
+                    choices.push(**b);
+                    right.next();
+                }
+                (None, None) => break,
+            }
+        }
+        Some(Self { choices })
+    }
+
+    pub(super) fn is_subset_of(&self, other: &Self) -> bool {
+        self.choices
+            .iter()
+            .all(|choice| other.choices.binary_search(choice).is_ok())
+    }
+
+    pub(super) fn branches(&self) -> impl Iterator<Item = BranchId> + '_ {
+        self.choices.iter().map(|choice| choice.branch)
+    }
+
+    pub(super) fn remapped(&self, branches: &HashMap<BranchId, BranchId>) -> Self {
+        let mut choices = self
+            .choices
+            .iter()
+            .map(|choice| BranchChoice {
+                branch: branches
+                    .get(&choice.branch)
+                    .copied()
+                    .unwrap_or(choice.branch),
+                arm: choice.arm,
+            })
+            .collect::<Vec<_>>();
+        choices.sort_unstable();
+        Self { choices }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct PositionRelation {
-    pub(super) array: Option<i128>,
-    pub(super) packed: Option<i128>,
+    pub(super) array: Option<isize>,
+    pub(super) packed: Option<isize>,
 }
 
 impl Default for PositionRelation {
@@ -47,8 +160,8 @@ impl PositionRelation {
 
     pub(super) fn reversed(self) -> Self {
         Self {
-            array: self.array.and_then(i128::checked_neg),
-            packed: self.packed.and_then(i128::checked_neg),
+            array: self.array.and_then(isize::checked_neg),
+            packed: self.packed.and_then(isize::checked_neg),
         }
     }
 
@@ -62,7 +175,7 @@ impl PositionRelation {
     }
 }
 
-fn compose_axis(left: Option<i128>, right: Option<i128>) -> Option<i128> {
+fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
     left?.checked_add(right?)
 }
 
@@ -131,21 +244,39 @@ where
         }
     }
 
-    pub(super) fn definition(&mut self, mut sources: Vec<VersionId>) -> VersionId {
+    pub(super) fn definition(&mut self, sources: Vec<VersionId>) -> VersionId {
+        self.definition_guarded(sources, &PathCondition::default())
+    }
+
+    pub(super) fn definition_guarded(
+        &mut self,
+        mut sources: Vec<VersionId>,
+        condition: &PathCondition,
+    ) -> VersionId {
         sources.sort_unstable();
         sources.dedup();
         let version = self.versions.len();
         self.versions.push(Version::Definition {
             positional: Vec::new(),
             whole: sources,
+            condition: condition.clone(),
         });
         version
     }
 
     pub(super) fn positional_definition(
         &mut self,
+        positional: Vec<(VersionId, PositionRelation)>,
+        whole: Vec<VersionId>,
+    ) -> VersionId {
+        self.positional_definition_guarded(positional, whole, &PathCondition::default())
+    }
+
+    pub(super) fn positional_definition_guarded(
+        &mut self,
         mut positional: Vec<(VersionId, PositionRelation)>,
         mut whole: Vec<VersionId>,
+        condition: &PathCondition,
     ) -> VersionId {
         positional.sort_unstable();
         let mut merged: Vec<(VersionId, PositionRelation)> = Vec::with_capacity(positional.len());
@@ -163,8 +294,11 @@ where
         whole.dedup();
         positional.retain(|(source, _)| whole.binary_search(source).is_err());
         let version = self.versions.len();
-        self.versions
-            .push(Version::Definition { positional, whole });
+        self.versions.push(Version::Definition {
+            positional,
+            whole,
+            condition: condition.clone(),
+        });
         version
     }
 
@@ -232,9 +366,14 @@ where
         BranchState { bindings }
     }
 
-    pub(super) fn merge(&mut self, states: &[BranchState<K>]) {
+    pub(super) fn merge<'b>(&mut self, states: impl IntoIterator<Item = &'b BranchState<K>>)
+    where
+        K: 'b,
+    {
         let mut inputs_by_key: HashMap<K, (Vec<VersionId>, usize)> = HashMap::default();
+        let mut state_count = 0;
         for state in states {
+            state_count += 1;
             for (&key, &version) in &state.bindings {
                 let (inputs, bound_branches) =
                     inputs_by_key.entry(key).or_insert_with(|| (Vec::new(), 0));
@@ -248,7 +387,7 @@ where
                 .get(&key)
                 .copied()
                 .unwrap_or_else(|| self.entry(key));
-            if bound_branches < states.len() {
+            if bound_branches < state_count {
                 inputs.push(fallback);
             }
             let version = self.phi(inputs);
@@ -256,70 +395,106 @@ where
         }
     }
 
+    #[cfg(test)]
     pub(super) fn root_sources(&self, version: VersionId) -> HashSet<K> {
         self.root_source_relations(version).into_keys().collect()
     }
 
+    #[cfg(test)]
     pub(super) fn root_source_relations(&self, version: VersionId) -> HashMap<K, PositionRelation> {
         let mut sources: HashMap<K, PositionRelation> = HashMap::default();
+        for (source, relation, _) in self.root_source_relations_guarded(version) {
+            sources
+                .entry(source)
+                .and_modify(|existing| *existing = existing.union(relation))
+                .or_insert(relation);
+        }
+        sources
+    }
+
+    pub(super) fn root_source_relations_guarded(
+        &self,
+        version: VersionId,
+    ) -> Vec<(K, PositionRelation, PathCondition)> {
+        let mut sources: HashMap<(K, PathCondition), PositionRelation> = HashMap::default();
         let mut visited = HashSet::default();
         let mut pending = Vec::new();
         match &self.versions[version] {
             // A final LiveOnEntry value is retained state, not a combinational
             // read. Entry versions reached through an explicit definition are.
             Version::Entry(_) => {}
-            Version::Definition { positional, whole } => {
+            Version::Definition {
+                positional,
+                whole,
+                condition,
+            } => {
                 pending.extend(
                     positional
                         .iter()
-                        .map(|(input, relation)| (*input, true, *relation)),
+                        .map(|(input, relation)| (*input, true, *relation, condition.clone())),
                 );
                 pending.extend(
                     whole
                         .iter()
-                        .map(|input| (*input, true, PositionRelation::whole())),
+                        .map(|input| (*input, true, PositionRelation::whole(), condition.clone())),
                 );
             }
             Version::Phi(inputs) => {
-                pending.extend(
-                    inputs
-                        .iter()
-                        .map(|input| (*input, false, PositionRelation::default())),
-                );
+                pending.extend(inputs.iter().map(|input| {
+                    (
+                        *input,
+                        false,
+                        PositionRelation::default(),
+                        PathCondition::default(),
+                    )
+                }));
             }
         }
 
-        while let Some((version, include_entry, relation)) = pending.pop() {
-            if !visited.insert((version, include_entry, relation)) {
+        while let Some((version, include_entry, relation, condition)) = pending.pop() {
+            if !visited.insert((version, include_entry, relation, condition.clone())) {
                 continue;
             }
             match &self.versions[version] {
                 Version::Entry(key) => {
                     if include_entry {
                         sources
-                            .entry(*key)
+                            .entry((*key, condition))
                             .and_modify(|existing| *existing = existing.union(relation))
                             .or_insert(relation);
                     }
                 }
-                Version::Definition { positional, whole } => {
+                Version::Definition {
+                    positional,
+                    whole,
+                    condition: definition_condition,
+                } => {
+                    let Some(condition) = condition.union_if_compatible(definition_condition)
+                    else {
+                        continue;
+                    };
+                    pending.extend(positional.iter().map(|(input, inner)| {
+                        (*input, true, relation.compose(*inner), condition.clone())
+                    }));
                     pending.extend(
-                        positional
-                            .iter()
-                            .map(|(input, inner)| (*input, true, relation.compose(*inner))),
-                    );
-                    pending.extend(
-                        whole
-                            .iter()
-                            .map(|input| (*input, true, PositionRelation::whole())),
+                        whole.iter().map(|input| {
+                            (*input, true, PositionRelation::whole(), condition.clone())
+                        }),
                     );
                 }
                 Version::Phi(inputs) => {
-                    pending.extend(inputs.iter().map(|input| (*input, include_entry, relation)));
+                    pending.extend(
+                        inputs
+                            .iter()
+                            .map(|input| (*input, include_entry, relation, condition.clone())),
+                    );
                 }
             }
         }
         sources
+            .into_iter()
+            .map(|((source, condition), relation)| (source, relation, condition))
+            .collect()
     }
 
     fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
@@ -540,5 +715,26 @@ mod tests {
         ssa.merge(&states);
 
         assert_eq!(ssa.current.len(), states.len());
+    }
+
+    #[test]
+    fn opposite_arms_of_one_branch_are_incompatible() {
+        let branch = BranchId::new(1, 0);
+        let true_path = PathCondition::default().with_choice(branch, 0);
+        let false_path = PathCondition::default().with_choice(branch, 1);
+
+        assert!(true_path.union_if_compatible(&false_path).is_none());
+    }
+
+    #[test]
+    fn arms_of_distinct_branches_are_compatible() {
+        let first = PathCondition::default().with_choice(BranchId::new(1, 0), 0);
+        let second = PathCondition::default().with_choice(BranchId::new(1, 1), 1);
+
+        let combined = first
+            .union_if_compatible(&second)
+            .expect("distinct branches can execute on the same path");
+        assert!(first.is_subset_of(&combined));
+        assert!(second.is_subset_of(&combined));
     }
 }

@@ -2,7 +2,9 @@
 
 use super::BitDependency;
 use super::region::{ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
-use super::ssa::{BranchState, Checkpoint, PositionRelation, SsaStore, VersionId};
+use super::ssa::{
+    BranchId, BranchState, Checkpoint, PathCondition, PositionRelation, SsaStore, VersionId,
+};
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
@@ -14,10 +16,10 @@ use crate::value::Value;
 use crate::{HashMap, HashSet};
 use std::rc::Rc;
 
-fn signed_difference(destination: usize, source: usize) -> Option<i128> {
-    i128::try_from(destination)
+fn signed_difference(destination: usize, source: usize) -> Option<isize> {
+    isize::try_from(destination)
         .ok()?
-        .checked_sub(i128::try_from(source).ok()?)
+        .checked_sub(isize::try_from(source).ok()?)
 }
 
 enum RepeatedProjection {
@@ -77,7 +79,13 @@ struct CallResult {
 // Region-split writes query one RHS several times, but a function call in that
 // RHS is one procedural evaluation. `None` is an invocation barrier: temporary
 // call nodes in a cloned callee body must never enter the caller's cache.
-type CallCache = Option<HashMap<*const FunctionCall, CallResult>>;
+#[derive(Default)]
+struct EvaluationCache {
+    calls: HashMap<*const FunctionCall, CallResult>,
+    expression_branches: HashMap<*const Expression, BranchId>,
+}
+
+type CallCache = Option<EvaluationCache>;
 
 // Module and interface storage is shared by every call. Function-owned
 // storage is automatic, so its SSA identity also includes the invocation.
@@ -100,6 +108,16 @@ struct FunctionFlow {
     returns: Vec<BranchState<SsaKey>>,
 }
 
+struct LoopFlow {
+    checkpoint: Checkpoint,
+    breaks: Vec<FlowState>,
+}
+
+struct FlowState {
+    state: BranchState<SsaKey>,
+    condition: PathCondition,
+}
+
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct FunctionSummaryKey {
     id: VarId,
@@ -109,10 +127,16 @@ struct FunctionSummaryKey {
 #[derive(Clone)]
 struct FunctionSummary {
     arg_map: HashMap<VarPath, VarId>,
-    result: Vec<Vec<(PackedSpan, Vec<NodeKey>)>>,
-    writes: Vec<(NodeKey, Vec<NodeKey>)>,
+    result: Vec<Vec<(PackedSpan, Vec<SummarySource>)>>,
+    writes: Vec<(NodeKey, Vec<SummarySource>)>,
     opaque_sources: Vec<NodeKey>,
     complete: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SummarySource {
+    key: NodeKey,
+    condition: PathCondition,
 }
 
 pub(super) struct FunctionSummaries<'a> {
@@ -237,9 +261,10 @@ pub(crate) fn module_context_entries() -> usize {
 pub(super) fn analyze(
     bit_part: &BitPartition,
     statements: &[Statement],
+    branch_namespace: usize,
     context: &mut ProcedureContext,
 ) -> ProcedureResult {
-    ProcedureAnalysis::analyze(bit_part, statements, context)
+    ProcedureAnalysis::analyze(bit_part, statements, branch_namespace, context)
 }
 
 pub(super) struct ProcedureResult {
@@ -251,6 +276,7 @@ pub(super) struct Dependency {
     pub(super) source: NodeKey,
     pub(super) destination: NodeKey,
     pub(super) kind: BitDependency,
+    pub(super) condition: PathCondition,
 }
 
 #[derive(Default)]
@@ -330,7 +356,8 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         self.inner.as_mut().expect("expression analysis is active")
     }
 
-    pub(super) fn eval(&mut self, expression: &Expression) -> Vec<NodeKey> {
+    pub(super) fn eval(&mut self, expression: &Expression) -> Vec<RegionSource> {
+        self.inner().use_expression_namespace(expression);
         self.inner().eval_expression_sources(expression)
     }
 
@@ -342,6 +369,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         context_width: usize,
     ) -> Vec<RegionSource> {
         let inner = self.inner.as_mut().expect("expression analysis is active");
+        inner.use_expression_namespace(expression);
         let mut sources = inner.eval_expr_requested(expression, array, packed, context_width);
         sources.normalize();
         let mut mapped = Vec::new();
@@ -349,7 +377,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
             let wrapper = inner
                 .ssa
                 .positional_definition(vec![(version, expression_offset)], Vec::new());
-            for (source, relation) in inner.ssa.root_source_relations(wrapper) {
+            for (source, relation, condition) in inner.ssa.root_source_relations_guarded(wrapper) {
                 if source.call_frame.is_some() {
                     continue;
                 }
@@ -359,6 +387,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
                 mapped.push(RegionSource {
                     key: source,
                     offset,
+                    condition,
                 });
             }
         }
@@ -367,18 +396,23 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
             mapped.extend(
                 inner
                     .ssa
-                    .root_source_relations(wrapper)
-                    .into_keys()
-                    .filter_map(|source| {
+                    .root_source_relations_guarded(wrapper)
+                    .into_iter()
+                    .filter_map(|(source, _, condition)| {
                         source.call_frame.is_none().then_some(RegionSource {
                             key: source.node,
                             offset: None,
+                            condition,
                         })
                     }),
             );
         }
-        mapped.sort_unstable_by_key(|source| (source.key, source.offset));
-        mapped.dedup();
+        mapped.sort_unstable_by_key(|source| (source.key, source.offset, source.condition.clone()));
+        mapped.dedup_by(|left, right| {
+            left.key == right.key
+                && left.offset == right.offset
+                && left.condition == right.condition
+        });
         mapped
     }
 
@@ -399,10 +433,11 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RegionSource {
     pub(super) key: NodeKey,
-    pub(super) offset: Option<(i128, i128)>,
+    pub(super) offset: Option<(isize, isize)>,
+    pub(super) condition: PathCondition,
 }
 
 struct ProcedureAnalysis<'a, 's> {
@@ -415,6 +450,10 @@ struct ProcedureAnalysis<'a, 's> {
     next_call_frame: usize,
     receiver_indices: Vec<Option<VarIndex>>,
     function_flows: Vec<FunctionFlow>,
+    loop_flows: Vec<LoopFlow>,
+    path_condition: PathCondition,
+    branch_namespace: usize,
+    next_branch: usize,
     complete: bool,
     summaries: Option<&'s mut FunctionSummaries<'a>>,
 }
@@ -431,6 +470,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             next_call_frame: 0,
             receiver_indices: Vec::new(),
             function_flows: Vec::new(),
+            loop_flows: Vec::new(),
+            path_condition: PathCondition::default(),
+            branch_namespace: 0,
+            next_branch: 0,
             complete: true,
             summaries: None,
         }
@@ -439,9 +482,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn analyze(
         bit_part: &'a BitPartition,
         statements: &[Statement],
+        branch_namespace: usize,
         context: &mut ProcedureContext,
     ) -> ProcedureResult {
         let mut this = Self::from_context(bit_part, context.take());
+        this.branch_namespace = branch_namespace;
         this.eval_block(statements, &[]);
         let result = ProcedureResult {
             dependencies: this.dependencies(),
@@ -451,18 +496,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         result
     }
 
-    fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<NodeKey> {
+    fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<RegionSource> {
         let versions = self.eval_reachable_expr(expression);
         let value = self.ssa.definition(versions);
         let mut sources = self
             .ssa
-            .root_sources(value)
+            .root_source_relations_guarded(value)
             .into_iter()
-            .filter_map(|source| source.call_frame.is_none().then_some(source.node))
-            .filter(|source| self.is_module_scope_key(*source))
+            .filter_map(|(source, _, condition)| {
+                source.call_frame.is_none().then_some(RegionSource {
+                    key: source.node,
+                    offset: None,
+                    condition,
+                })
+            })
+            .filter(|source| self.is_module_scope_key(source.key))
             .collect::<Vec<_>>();
-        sources.sort_unstable();
-        sources.dedup();
+        sources.sort_unstable_by_key(|source| (source.key, source.condition.clone()));
+        sources.dedup_by(|left, right| left.key == right.key && left.condition == right.condition);
         sources
     }
 
@@ -490,11 +541,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let visible_sources = |this: &Self, version| {
             let mut sources = this
                 .ssa
-                .root_sources(version)
+                .root_source_relations_guarded(version)
                 .into_iter()
-                .filter_map(|source| source.call_frame.is_none().then_some(source.node))
+                .filter_map(|(source, _, condition)| {
+                    source.call_frame.is_none().then_some(SummarySource {
+                        key: source.node,
+                        condition,
+                    })
+                })
                 .filter(|source| {
-                    formal_ids.contains(&source.0) || this.is_module_scope_key(*source)
+                    formal_ids.contains(&source.key.0) || this.is_module_scope_key(source.key)
                 })
                 .collect::<Vec<_>>();
             sources.sort_unstable();
@@ -567,25 +623,32 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .collect();
         for destination in destinations {
             let version = self.read_key(destination);
-            let sources = self.ssa.root_source_relations(version);
+            let sources = self.ssa.root_source_relations_guarded(version);
             dependencies.extend(
                 sources
                     .into_iter()
-                    .filter_map(|(source, source_kind)| {
+                    .filter_map(|(source, source_kind, condition)| {
                         source
                             .call_frame
                             .is_none()
-                            .then_some((source.node, source_kind))
+                            .then_some((source.node, source_kind, condition))
                     })
-                    .filter(|(source, _)| self.is_module_scope_key(*source))
-                    .map(|(source, source_kind)| Dependency {
+                    .filter(|(source, _, _)| self.is_module_scope_key(*source))
+                    .map(|(source, source_kind, condition)| Dependency {
                         source,
                         destination,
                         kind: Self::dependency_kind(source_kind),
+                        condition,
                     }),
             );
         }
-        dependencies.sort_unstable_by_key(|dependency| (dependency.source, dependency.destination));
+        dependencies.sort_unstable_by_key(|dependency| {
+            (
+                dependency.source,
+                dependency.destination,
+                dependency.condition.clone(),
+            )
+        });
         dependencies
     }
 
@@ -713,7 +776,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         let keys = self.write_keys(destination);
         let dynamic = self.destination_is_dynamic(destination);
-        let version = self.ssa.definition(dependencies);
+        let version = self
+            .ssa
+            .definition_guarded(dependencies, &self.path_condition);
         for key in keys {
             self.bind_destination(key, version, dynamic);
         }
@@ -757,7 +822,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .zip(selected)
             .and_then(|(array, (_, low))| {
                 Some(PositionRelation {
-                    array: Some(i128::try_from(array.start).ok()?),
+                    array: Some(isize::try_from(array.start).ok()?),
                     packed: Some(signed_difference(low, expression_offset)?),
                 })
             });
@@ -802,7 +867,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     sources.whole.push(version);
                 }
             }
-            let version = self.ssa.positional_definition(positional, sources.whole);
+            let version = self.ssa.positional_definition_guarded(
+                positional,
+                sources.whole,
+                &self.path_condition,
+            );
             self.bind_destination(key, version, dynamic);
         }
     }
@@ -813,6 +882,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         return_id: Option<VarId>,
         controls: &[VersionId],
     ) {
+        let caller_condition = self.path_condition.clone();
         let checkpoint = self.ssa.checkpoint();
         self.function_flows.push(FunctionFlow {
             return_id,
@@ -829,6 +899,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             function.returns.push(fallthrough);
         }
         self.ssa.merge(&function.returns);
+        self.path_condition = caller_condition;
     }
 
     fn record_return(&mut self) {
@@ -841,6 +912,56 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .expect("checked above")
             .returns
             .push(state);
+    }
+
+    fn record_break(&mut self) {
+        let Some(r#loop) = self.loop_flows.last() else {
+            return;
+        };
+        let state = FlowState {
+            state: self.ssa.snapshot_since(r#loop.checkpoint),
+            condition: self.path_condition.clone(),
+        };
+        self.loop_flows
+            .last_mut()
+            .expect("checked above")
+            .breaks
+            .push(state);
+    }
+
+    fn next_branch_id(&mut self) -> BranchId {
+        let branch = BranchId::new(self.branch_namespace, self.next_branch);
+        self.next_branch += 1;
+        branch
+    }
+
+    fn use_expression_namespace(&mut self, expression: &Expression) {
+        if self.branch_namespace == 0 && self.next_branch == 0 {
+            self.branch_namespace = std::ptr::from_ref(expression).addr();
+        }
+    }
+
+    fn expression_branch_id(&mut self, expression: &Expression) -> BranchId {
+        let key = std::ptr::from_ref(expression);
+        if let Some(branch) = self
+            .call_caches
+            .last()
+            .and_then(Option::as_ref)
+            .and_then(|cache| cache.expression_branches.get(&key))
+        {
+            return *branch;
+        }
+        let branch = self.next_branch_id();
+        if let Some(Some(cache)) = self.call_caches.last_mut() {
+            cache.expression_branches.insert(key, branch);
+        }
+        branch
+    }
+
+    fn merge_flow_states(&mut self, states: &[FlowState]) {
+        self.ssa.merge(states.iter().map(|state| &state.state));
+        self.path_condition =
+            PathCondition::intersection(states.iter().map(|state| &state.condition));
     }
 
     fn is_return_assignment(&self, destinations: &[AssignDestination]) -> bool {
@@ -867,7 +988,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> ProcedureFlow {
         match statement {
             Statement::Assign(assign) => {
-                self.call_caches.push(Some(HashMap::default()));
+                self.call_caches.push(Some(EvaluationCache::default()));
                 let widths: Vec<_> = assign
                     .dst
                     .iter()
@@ -912,7 +1033,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 self.eval_system_call(call, controls, false);
                 ProcedureFlow::Continue
             }
-            Statement::Break => ProcedureFlow::Break,
+            Statement::Break => {
+                self.record_break();
+                ProcedureFlow::Break
+            }
             Statement::IfReset(_) | Statement::TbMethodCall(_) | Statement::Null => {
                 ProcedureFlow::Continue
             }
@@ -925,26 +1049,28 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn merge_branches(
         &mut self,
-        branches: Vec<(ProcedureFlow, BranchState<SsaKey>)>,
+        branches: Vec<(ProcedureFlow, BranchState<SsaKey>, PathCondition)>,
     ) -> ProcedureFlow {
         let mut continuation = Vec::new();
+        let mut continuation_conditions = Vec::new();
         let mut has_continue = false;
         let mut has_break = false;
-        for (flow, state) in branches {
+        for (flow, state, condition) in branches {
             match flow {
                 ProcedureFlow::Continue => {
                     has_continue = true;
                     continuation.push(state);
+                    continuation_conditions.push(condition);
                 }
                 ProcedureFlow::Break => {
                     has_break = true;
-                    continuation.push(state);
                 }
                 ProcedureFlow::Return => {}
             }
         }
         self.ssa.merge(&continuation);
         if has_continue {
+            self.path_condition = PathCondition::intersection(&continuation_conditions);
             ProcedureFlow::Continue
         } else if has_break {
             ProcedureFlow::Break
@@ -963,15 +1089,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             None => {}
         }
 
+        let branch = self.next_branch_id();
+        let parent_condition = self.path_condition.clone();
+        self.path_condition = parent_condition.with_choice(branch, 0);
         let checkpoint = self.ssa.checkpoint();
         let true_flow = self.eval_block(&statement.true_side, &nested_controls);
         let true_state = self.ssa.capture_and_rollback(checkpoint);
+        let true_condition = self.path_condition.clone();
 
+        self.path_condition = parent_condition.with_choice(branch, 1);
         let checkpoint = self.ssa.checkpoint();
         let false_flow = self.eval_block(&statement.false_side, &nested_controls);
         let false_state = self.ssa.capture_and_rollback(checkpoint);
+        let false_condition = self.path_condition.clone();
 
-        self.merge_branches(vec![(true_flow, true_state), (false_flow, false_state)])
+        self.path_condition = parent_condition;
+        self.merge_branches(vec![
+            (true_flow, true_state, true_condition),
+            (false_flow, false_state, false_condition),
+        ])
     }
 
     fn eval_case(&mut self, statement: &CaseStatement, controls: &[VersionId]) -> ProcedureFlow {
@@ -1025,29 +1161,43 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 return self.eval_block(&statement.arms[possible[0]].body, &nested_controls);
             }
 
+            let branch = self.next_branch_id();
+            let parent_condition = self.path_condition.clone();
             let mut states = Vec::with_capacity(possible.len() + usize::from(!has_definite_match));
             for index in possible {
+                self.path_condition = parent_condition.with_choice(branch, index);
                 let checkpoint = self.ssa.checkpoint();
                 let flow = self.eval_block(&statement.arms[index].body, &nested_controls);
-                states.push((flow, self.ssa.capture_and_rollback(checkpoint)));
+                let state = self.ssa.capture_and_rollback(checkpoint);
+                states.push((flow, state, self.path_condition.clone()));
             }
             if !has_definite_match {
+                self.path_condition = parent_condition.with_choice(branch, statement.arms.len());
                 let checkpoint = self.ssa.checkpoint();
                 let flow = self.eval_block(&statement.default, &nested_controls);
-                states.push((flow, self.ssa.capture_and_rollback(checkpoint)));
+                let state = self.ssa.capture_and_rollback(checkpoint);
+                states.push((flow, state, self.path_condition.clone()));
             }
+            self.path_condition = parent_condition;
             return self.merge_branches(states);
         }
 
+        let branch = self.next_branch_id();
+        let parent_condition = self.path_condition.clone();
         let mut states = Vec::with_capacity(statement.arms.len() + 1);
-        for arm in &statement.arms {
+        for (index, arm) in statement.arms.iter().enumerate() {
+            self.path_condition = parent_condition.with_choice(branch, index);
             let checkpoint = self.ssa.checkpoint();
             let flow = self.eval_block(&arm.body, &nested_controls);
-            states.push((flow, self.ssa.capture_and_rollback(checkpoint)));
+            let state = self.ssa.capture_and_rollback(checkpoint);
+            states.push((flow, state, self.path_condition.clone()));
         }
+        self.path_condition = parent_condition.with_choice(branch, statement.arms.len());
         let checkpoint = self.ssa.checkpoint();
         let flow = self.eval_block(&statement.default, &nested_controls);
-        states.push((flow, self.ssa.capture_and_rollback(checkpoint)));
+        let state = self.ssa.capture_and_rollback(checkpoint);
+        states.push((flow, state, self.path_condition.clone()));
+        self.path_condition = parent_condition;
         self.merge_branches(states)
     }
 
@@ -1065,6 +1215,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
 
         if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
+            let parent_condition = self.path_condition.clone();
+            let checkpoint = self.ssa.checkpoint();
+            self.loop_flows.push(LoopFlow {
+                checkpoint,
+                breaks: Vec::new(),
+            });
+            let mut flow = ProcedureFlow::Continue;
             for value in iterations {
                 if let Some(variable) = self.ctx.variable_mut(&statement.var_id)
                     && let Some(width) = statement.var_type.total_width()
@@ -1075,26 +1232,50 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         None,
                     );
                 }
-                match self.eval_block(&statement.body, &range_controls) {
-                    ProcedureFlow::Continue => {}
-                    ProcedureFlow::Break => break,
-                    ProcedureFlow::Return => return ProcedureFlow::Return,
+                flow = self.eval_block(&statement.body, &range_controls);
+                if flow != ProcedureFlow::Continue {
+                    break;
                 }
             }
+            let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
+            let fallthrough = self.ssa.capture_and_rollback(checkpoint);
+            if flow == ProcedureFlow::Continue {
+                loop_flow.breaks.push(FlowState {
+                    state: fallthrough,
+                    condition: self.path_condition.clone(),
+                });
+            }
+            if loop_flow.breaks.is_empty() {
+                self.path_condition = parent_condition;
+                return ProcedureFlow::Return;
+            }
+            self.merge_flow_states(&loop_flow.breaks);
             return ProcedureFlow::Continue;
         }
 
         // Runtime loops have a zero-trip path. One symbolic body traversal is
         // enough to expose all explicit reads; the exit phi keeps LiveOnEntry
         // separate so retained state does not become a loop edge.
+        let parent_condition = self.path_condition.clone();
         let checkpoint = self.ssa.checkpoint();
+        self.loop_flows.push(LoopFlow {
+            checkpoint,
+            breaks: Vec::new(),
+        });
         let flow = self.eval_block(&statement.body, &range_controls);
+        let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let body_state = self.ssa.capture_and_rollback(checkpoint);
-        if flow == ProcedureFlow::Return {
-            self.ssa.merge(&[BranchState::unchanged()]);
-        } else {
-            self.ssa.merge(&[BranchState::unchanged(), body_state]);
+        loop_flow.breaks.push(FlowState {
+            state: BranchState::unchanged(),
+            condition: parent_condition,
+        });
+        if flow == ProcedureFlow::Continue {
+            loop_flow.breaks.push(FlowState {
+                state: body_state,
+                condition: self.path_condition.clone(),
+            });
         }
+        self.merge_flow_states(&loop_flow.breaks);
         ProcedureFlow::Continue
     }
 
@@ -1203,9 +1384,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             .then(|| {
                                 Some(PositionRelation {
                                     array: Some(
-                                        i128::try_from(accesses[0].0.start).ok()?.checked_neg()?,
+                                        isize::try_from(accesses[0].0.start).ok()?.checked_neg()?,
                                     ),
-                                    packed: Some(i128::try_from(low).ok()?.checked_neg()?),
+                                    packed: Some(isize::try_from(low).ok()?.checked_neg()?),
                                 })
                             })
                             .flatten();
@@ -1265,7 +1446,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             && let Some(input) = PackedSpan::new(start - shift, length)
                         {
                             let mut input = self.eval_expr_bits(left, requested_array, input);
-                            if let Ok(shift) = i128::try_from(shift) {
+                            if let Ok(shift) = isize::try_from(shift) {
                                 input.translate(PositionRelation {
                                     array: Some(0),
                                     packed: Some(shift),
@@ -1294,7 +1475,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             .and_then(|shifted| PackedSpan::whole(width)?.intersection(shifted))
                         {
                             let mut input = self.eval_expr_bits(left, requested_array, input);
-                            if let Ok(shift) = i128::try_from(shift) {
+                            if let Ok(shift) = isize::try_from(shift) {
                                 input.translate(PositionRelation {
                                     array: Some(0),
                                     packed: Some(-shift),
@@ -1345,18 +1526,51 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Expression::Ternary(condition, left, right, comptime) => {
                 let context_width = comptime.r#type.total_width().unwrap_or(requested.end());
                 let mut reads = ExpressionSources::whole(self.eval_expr(condition));
-                reads.extend(self.eval_expr_requested(
-                    left,
-                    requested_array,
-                    requested,
-                    context_width,
-                ));
-                reads.extend(self.eval_expr_requested(
-                    right,
-                    requested_array,
-                    requested,
-                    context_width,
-                ));
+                match self.constant_truth(condition) {
+                    Some(true) => reads.extend(self.eval_expr_requested(
+                        left,
+                        requested_array,
+                        requested,
+                        context_width,
+                    )),
+                    Some(false) => reads.extend(self.eval_expr_requested(
+                        right,
+                        requested_array,
+                        requested,
+                        context_width,
+                    )),
+                    None => {
+                        let branch = self.expression_branch_id(expression);
+                        let parent_condition = self.path_condition.clone();
+
+                        let checkpoint = self.ssa.checkpoint();
+                        self.path_condition = parent_condition.with_choice(branch, 0);
+                        let left = self.eval_expr_requested(
+                            left,
+                            requested_array,
+                            requested,
+                            context_width,
+                        );
+                        let left = self.guard_expression_sources(left);
+                        let left_state = self.ssa.capture_and_rollback(checkpoint);
+
+                        let checkpoint = self.ssa.checkpoint();
+                        self.path_condition = parent_condition.with_choice(branch, 1);
+                        let right = self.eval_expr_requested(
+                            right,
+                            requested_array,
+                            requested,
+                            context_width,
+                        );
+                        let right = self.guard_expression_sources(right);
+                        let right_state = self.ssa.capture_and_rollback(checkpoint);
+
+                        self.ssa.merge([&left_state, &right_state]);
+                        self.path_condition = parent_condition;
+                        reads.extend(left);
+                        reads.extend(right);
+                    }
+                }
                 reads
             }
             Expression::Concatenation(parts, _) => {
@@ -1395,7 +1609,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 continue;
                             };
                             let mut part = self.eval_expr_bits(part, requested_array, local);
-                            if let Ok(output_start) = i128::try_from(output_start) {
+                            if let Ok(output_start) = isize::try_from(output_start) {
                                 part.translate(PositionRelation {
                                     array: Some(0),
                                     packed: Some(output_start),
@@ -1484,7 +1698,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     .total_width()
                                     .unwrap_or(requested.length),
                             );
-                            if let Ok(output_start) = i128::try_from(output_start) {
+                            if let Ok(output_start) = isize::try_from(output_start) {
                                 item.translate(PositionRelation {
                                     array: Some(output_start),
                                     packed: Some(0),
@@ -1553,7 +1767,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     .total_width()
                                     .unwrap_or(requested.length),
                             );
-                            if let Ok(output_start) = i128::try_from(output_start) {
+                            if let Ok(output_start) = isize::try_from(output_start) {
                                 item.translate(PositionRelation {
                                     array: Some(output_start),
                                     packed: Some(0),
@@ -1602,7 +1816,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     {
                         let mut field =
                             self.eval_expr_requested(value, requested_array, local, width);
-                        if let Ok(low) = i128::try_from(low) {
+                        if let Ok(low) = isize::try_from(low) {
                             field.translate(PositionRelation {
                                 array: Some(0),
                                 packed: Some(low),
@@ -1653,6 +1867,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.eval_expr_inner(expression, false)
     }
 
+    fn guard_expression_sources(&mut self, mut sources: ExpressionSources) -> ExpressionSources {
+        sources.normalize();
+        if sources.positional.is_empty() && sources.whole.is_empty() {
+            return sources;
+        }
+        let version = self.ssa.positional_definition_guarded(
+            sources.positional,
+            sources.whole,
+            &self.path_condition,
+        );
+        ExpressionSources {
+            positional: vec![(version, PositionRelation::default())],
+            whole: Vec::new(),
+        }
+    }
+
     fn eval_reachable_expr(&mut self, expression: &Expression) -> Vec<VersionId> {
         self.eval_expr_inner(expression, true)
     }
@@ -1692,8 +1922,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         reads.extend(self.eval_expr_inner(right, prune_constant_branches));
                     }
                     None => {
-                        reads.extend(self.eval_expr_inner(left, prune_constant_branches));
-                        reads.extend(self.eval_expr_inner(right, prune_constant_branches));
+                        let branch = self.expression_branch_id(expression);
+                        let parent_condition = self.path_condition.clone();
+
+                        let checkpoint = self.ssa.checkpoint();
+                        self.path_condition = parent_condition.with_choice(branch, 0);
+                        let left = self.eval_expr_inner(left, prune_constant_branches);
+                        let left = self.ssa.definition_guarded(left, &self.path_condition);
+                        let left_state = self.ssa.capture_and_rollback(checkpoint);
+
+                        let checkpoint = self.ssa.checkpoint();
+                        self.path_condition = parent_condition.with_choice(branch, 1);
+                        let right = self.eval_expr_inner(right, prune_constant_branches);
+                        let right = self.ssa.definition_guarded(right, &self.path_condition);
+                        let right_state = self.ssa.capture_and_rollback(checkpoint);
+
+                        self.ssa.merge([&left_state, &right_state]);
+                        self.path_condition = parent_condition;
+                        reads.push(left);
+                        reads.push(right);
                     }
                 }
             }
@@ -1781,7 +2028,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .call_caches
             .last()
             .and_then(Option::as_ref)
-            .and_then(|cache| cache.get(&cache_key))
+            .and_then(|cache| cache.calls.get(&cache_key))
         {
             let result = self.select_call_result(cached, requested);
             #[cfg(test)]
@@ -1792,7 +2039,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let evaluated = self.eval_call_uncached(call, controls);
         let result = self.select_call_result(&evaluated, requested);
         if let Some(Some(cache)) = self.call_caches.last_mut() {
-            cache.insert(cache_key, evaluated);
+            cache.calls.insert(cache_key, evaluated);
         }
         #[cfg(test)]
         FUNCTION_RESULT_VERSIONS.set(FUNCTION_RESULT_VERSIONS.get() + result.len());
@@ -1980,15 +2227,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         summary: &FunctionSummary,
     ) -> CallResult {
         self.complete &= summary.complete;
-        self.call_caches.push(Some(HashMap::default()));
+        self.call_caches.push(Some(EvaluationCache::default()));
         for actual in call.inputs.values() {
             self.eval_expr(actual);
         }
+        let branch_map = self.instantiate_summary_branches(summary);
 
         for (destination, sources) in &summary.writes {
-            let mut sources = self.map_summary_sources(call, summary, sources);
+            let mut sources = self.map_summary_sources(call, summary, sources, &branch_map);
             sources.extend_from_slice(controls);
-            let version = self.ssa.definition(sources);
+            let version = self.ssa.definition_guarded(sources, &self.path_condition);
             self.bind_key(*destination, version);
             self.written.insert(*destination);
         }
@@ -2035,13 +2283,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 regions
                     .iter()
                     .map(|(span, sources)| {
-                        let sources = self.map_summary_sources(call, summary, sources);
-                        (*span, self.ssa.definition(sources))
+                        let sources = self.map_summary_sources(call, summary, sources, &branch_map);
+                        (
+                            *span,
+                            self.ssa.definition_guarded(sources, &self.path_condition),
+                        )
                     })
                     .collect()
             })
             .collect();
-        let opaque_sources = self.map_summary_sources(call, summary, &summary.opaque_sources);
+        let opaque_sources = summary
+            .opaque_sources
+            .iter()
+            .flat_map(|source| self.map_summary_node_source(call, summary, *source))
+            .collect();
         self.call_caches.pop();
         CallResult {
             region_groups,
@@ -2053,32 +2308,70 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         &mut self,
         call: &FunctionCall,
         summary: &FunctionSummary,
-        sources: &[NodeKey],
+        sources: &[SummarySource],
+        branch_map: &HashMap<BranchId, BranchId>,
     ) -> Vec<VersionId> {
         let mut versions = Vec::new();
         for source in sources {
-            if self.is_module_scope_key(*source) {
-                versions.push(self.read_key(*source));
-                continue;
-            }
-            let actual = summary.arg_map.iter().find_map(|(path, formal)| {
-                (*formal == source.0)
-                    .then(|| {
-                        call.inputs.iter().find_map(|(actual_path, actual)| {
-                            (actual_path == path).then_some(actual)
-                        })
-                    })
-                    .flatten()
-            });
-            if let Some(actual) = actual {
-                let sources = self.eval_actual_for_formal_key(actual, *source);
-                versions.extend(sources.positional.into_iter().map(|(version, _)| version));
-                versions.extend(sources.whole);
+            let mapped = self.map_summary_node_source(call, summary, source.key);
+            if !mapped.is_empty() {
+                let condition = source.condition.remapped(branch_map);
+                versions.push(self.ssa.definition_guarded(mapped, &condition));
             }
         }
         versions.sort_unstable();
         versions.dedup();
         versions
+    }
+
+    fn map_summary_node_source(
+        &mut self,
+        call: &FunctionCall,
+        summary: &FunctionSummary,
+        source: NodeKey,
+    ) -> Vec<VersionId> {
+        if self.is_module_scope_key(source) {
+            return vec![self.read_key(source)];
+        }
+        let actual = summary.arg_map.iter().find_map(|(path, formal)| {
+            (*formal == source.0)
+                .then(|| {
+                    call.inputs
+                        .iter()
+                        .find_map(|(actual_path, actual)| (actual_path == path).then_some(actual))
+                })
+                .flatten()
+        });
+        let Some(actual) = actual else {
+            return Vec::new();
+        };
+        let sources = self.eval_actual_for_formal_key(actual, source);
+        sources
+            .positional
+            .into_iter()
+            .map(|(version, _)| version)
+            .chain(sources.whole)
+            .collect()
+    }
+
+    fn instantiate_summary_branches(
+        &mut self,
+        summary: &FunctionSummary,
+    ) -> HashMap<BranchId, BranchId> {
+        let mut branches = summary
+            .result
+            .iter()
+            .flat_map(|regions| regions.iter())
+            .flat_map(|(_, sources)| sources)
+            .chain(summary.writes.iter().flat_map(|(_, sources)| sources))
+            .flat_map(|source| source.condition.branches())
+            .collect::<Vec<_>>();
+        branches.sort_unstable();
+        branches.dedup();
+        branches
+            .into_iter()
+            .map(|branch| (branch, self.next_branch_id()))
+            .collect()
     }
 
     fn keys_for_id(&self, id: VarId) -> Vec<NodeKey> {
@@ -2159,7 +2452,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .zip(selected)
             .and_then(|(array, (_, low))| {
                 Some(PositionRelation {
-                    array: Some(i128::try_from(array.start).ok()?),
+                    array: Some(isize::try_from(array.start).ok()?),
                     packed: Some(signed_difference(low, formal_offset)?),
                 })
             });
@@ -2195,7 +2488,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             } else {
                 whole.extend(formal_versions.iter().map(|(_, version)| *version));
             }
-            let version = self.ssa.positional_definition(positional, whole);
+            let version =
+                self.ssa
+                    .positional_definition_guarded(positional, whole, &self.path_condition);
             self.bind_destination(key, version, dynamic);
         }
     }

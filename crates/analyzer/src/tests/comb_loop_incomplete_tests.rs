@@ -90,6 +90,10 @@ fn comb_loop_dynamic_for_bound_over_known_regions_is_complete_and_loop_free() {
 
 #[test]
 fn comb_loop_dynamic_for_bound_over_known_regions_detects_feedback() {
+    // False-negative guard: the loop may execute zero times, but an
+    // unconstrained runtime bound may also execute the feedback body. Treating
+    // the existence of the zero-trip path as proof that the body is unreachable
+    // would miss a realizable combinational loop.
     let code = r#"
         module Top (
             n: input  logic<32>,
@@ -111,6 +115,33 @@ fn comb_loop_dynamic_for_bound_over_known_regions_detects_feedback() {
         analyze(code)
             .iter()
             .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+    );
+}
+
+#[test]
+fn comb_loop_const_zero_for_bound_skips_unreachable_feedback() {
+    // True negative: unlike the runtime-bound case above, this range is proven
+    // empty, so the feedback-shaped body is unreachable.
+    let code = r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for _index in 0..0 {
+                    a = b;
+                    b = a;
+                }
+                o = b;
+            }
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert!(
+        analyze(code)
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. }))
     );
 }
 

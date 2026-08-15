@@ -1861,3 +1861,63 @@ fn comb_loop_function_formal_high_bit_ignores_short_unsigned_actual() {
         false,
     );
 }
+
+#[test]
+fn comb_loop_function_if_expression_arms_are_mutually_exclusive() {
+    // Each function invocation selects one feed-forward equation. Flattening
+    // both result alternatives into one source set invents the reverse edge.
+    assert_comb_loop(
+        "a function summary must not combine mutually exclusive expression arms",
+        r#"
+        module Identity (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            assign o = i;
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            function choose (
+                state: input logic<2>,
+                sel  : input logic,
+            ) -> logic<2> {
+                return if sel ? {state[0], 1'b0} : {1'b0, state[1]};
+            }
+            var state: logic<2>;
+            inst passthrough: Identity (
+                i: choose(state, sel),
+                o: state,
+            );
+            assign o = |state;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_function_onehot_runtime_input_detects_feedback() {
+    // `$onehot(value)` is synthesized from the runtime value. Therefore the
+    // two assignments form value -> o -> value feedback through the function.
+    assert_comb_loop(
+        "a runtime system function in a user function carries its input dependency",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function exactly_one (
+                value: input logic<2>,
+            ) -> logic {
+                return $onehot(value);
+            }
+            var value: logic<2>;
+            assign o = exactly_one(value);
+            assign value[0] = o;
+            assign value[1] = 1'b0;
+        }
+        "#,
+        true,
+    );
+}
