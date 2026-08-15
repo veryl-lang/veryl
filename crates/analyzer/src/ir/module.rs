@@ -5,7 +5,7 @@ use crate::attribute_table;
 use crate::conv::Context;
 use crate::ir::assign_table::{AssignTable, ReferencedEntry};
 use crate::ir::{
-    Declaration, FfTable, Function, Type, VarId, VarIndex, VarKind, VarPath, Variable,
+    Declaration, FfTable, Function, Signature, Type, VarId, VarIndex, VarKind, VarPath, Variable,
 };
 use crate::symbol::ClockDomain;
 use crate::value::ValueBigUint;
@@ -22,6 +22,9 @@ pub type AssignTokens = HashMap<VarId, Vec<TokenRange>>;
 #[derive(Clone)]
 pub struct Module {
     pub name: StrId,
+    /// Fully specialized identity of this IR body. Generic arguments and
+    /// connected modport-interface signatures distinguish monomorphizations.
+    pub signature: Signature,
     pub token: TokenRange,
     pub ports: HashMap<VarPath, VarId>,
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,

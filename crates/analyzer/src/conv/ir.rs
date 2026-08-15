@@ -208,7 +208,8 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::Module);
 
-        if let Ok(symbol) = symbol_table::resolve(module_declaration.identifier.as_ref())
+        let signature = if let Ok(symbol) =
+            symbol_table::resolve(module_declaration.identifier.as_ref())
             && let SymbolKind::Module(x) = &symbol.found.kind
             && !x.is_proto
         {
@@ -222,10 +223,11 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
                 let path = VarPath::new(symbol_table::get(x).unwrap().token.text);
                 context.set_default_reset(path, x);
             }
+            ir::Signature::new(symbol.found.id)
         } else {
             let token: TokenRange = module_declaration.identifier.as_ref().into();
             return Err(ir_error!(token));
-        }
+        };
 
         if let Some(x) = &module_declaration.module_declaration_opt {
             check_generic_bound(&mut context, &x.with_generic_parameter);
@@ -334,6 +336,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
 
         Ok(ir::Module {
             name: module_declaration.identifier.text(),
+            signature,
             token: module_declaration.identifier.as_ref().into(),
             ports,
             port_types,
@@ -516,14 +519,15 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::ProtoModule);
 
-        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+        let signature = if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
             && matches!(symbol.found.kind, SymbolKind::Module(ref x) if x.is_proto)
         {
             context.push_namespace(symbol.found.inner_namespace());
+            ir::Signature::new(symbol.found.id)
         } else {
             let token: TokenRange = value.identifier.as_ref().into();
             return Err(ir_error!(token));
-        }
+        };
 
         if let Some(x) = &value.proto_module_declaration_opt
             && let Some(x) = &x.with_parameter.with_parameter_opt
@@ -560,6 +564,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
 
         Ok(ir::Module {
             name: value.identifier.text(),
+            signature,
             token: value.identifier.as_ref().into(),
             ports,
             port_types,
