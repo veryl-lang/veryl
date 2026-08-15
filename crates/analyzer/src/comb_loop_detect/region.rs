@@ -22,6 +22,21 @@ impl ArraySpan {
         };
         self.start < right_end && other.start < left_end
     }
+
+    pub(super) fn intersection(self, other: Self) -> Option<Self> {
+        let start = self.start.max(other.start);
+        let end = self.end()?.min(other.end()?);
+        let length = end.checked_sub(start)?;
+        (length != 0).then_some(Self { start, length })
+    }
+
+    pub(super) fn translated(self, from: usize, to: usize) -> Option<Self> {
+        let start = self.start.checked_sub(from)?.checked_add(to)?;
+        (self.length != 0 && start.checked_add(self.length).is_some()).then_some(Self {
+            start,
+            length: self.length,
+        })
+    }
 }
 
 /// Half-open packed-bit interval. Unlike a dense bit mask, its storage and

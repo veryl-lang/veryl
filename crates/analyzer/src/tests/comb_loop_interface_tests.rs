@@ -101,7 +101,6 @@ fn comb_loop_modport_ff_output_breaks_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; disjoint bits through modport feedthrough"]
 fn comb_loop_modport_feedthrough_keeps_disjoint_bits_independent() {
     let code = modport_feedthrough_code("assign bus.response[0] = bus.request[0];");
     let code = code.replace(
@@ -288,7 +287,6 @@ fn modport_array_code(top_assignments: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; same interface array element feedback"]
 fn comb_loop_modport_array_detects_same_element_feedback() {
     assert_interface_comb_loop(
         &modport_array_code("assign bus[0].request = bus[0].response; assign bus[1].request = 0;"),
@@ -305,7 +303,6 @@ fn comb_loop_modport_array_keeps_one_way_cross_element_flow_loop_free() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; cross-element interface array feedback"]
 fn comb_loop_modport_array_detects_cross_element_feedback() {
     assert_interface_comb_loop(
         &modport_array_code(
