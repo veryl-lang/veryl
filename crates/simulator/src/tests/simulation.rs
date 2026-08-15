@@ -17871,7 +17871,9 @@ fn false_comb_cycle_with_split_drivers() {
 fn runtime_stepped_for_stall_guard_terminates() {
     // `*= 2` from 0 stalls at 0.  With a runtime bound the loop can't be
     // unrolled or rejected at analysis, so the simulator's progress guard
-    // must break out instead of spinning forever in one delta step.
+    // must break out instead of spinning forever in one delta step, and
+    // report it: the emitted SystemVerilog loops here instead of stopping.
+    // https://github.com/veryl-lang/veryl/issues/3134
     let code = r#"
     module Top (
         i_n: input  logic<8>,
@@ -17887,6 +17889,7 @@ fn runtime_stepped_for_stall_guard_terminates() {
     "#;
     for config in Config::all() {
         dbg!(&config);
+        crate::assert_buffer::reset();
         let ir = analyze(code, &config);
         let mut sim = Simulator::new(ir, None);
         sim.set("i_n", Value::new(10, 8, false));
@@ -17897,6 +17900,11 @@ fn runtime_stepped_for_stall_guard_terminates() {
             Value::new(1, 8, false),
             "config={config:?}"
         );
+        assert!(
+            crate::assert_buffer::has_fatal(),
+            "non-progressing loop should be reported: config={config:?}"
+        );
+        crate::assert_buffer::reset();
     }
 }
 

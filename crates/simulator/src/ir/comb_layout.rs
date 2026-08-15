@@ -827,6 +827,7 @@ mod tests {
             var_width: 32,
             var_native_bytes: 8,
             var_signed: false,
+            token: veryl_parser::token_range::TokenRange::default(),
             range: crate::ir::statement::ProtoForRange::Forward {
                 start: crate::ir::statement::ProtoForBound::Const(0),
                 end: crate::ir::statement::ProtoForBound::Const(4),
