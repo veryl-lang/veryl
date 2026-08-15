@@ -1,5 +1,6 @@
 //! Guarded composition of non-zero positional cycles.
 
+use super::relation::PositionRelationSet;
 use super::{FeasiblePosition, dependency_may_return_to_same_position, intersect_axis};
 use crate::comb_loop_detect::model::BitDependency;
 use crate::comb_loop_detect::ssa::PathCondition;
@@ -8,14 +9,114 @@ use std::collections::VecDeque;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct GuardedCycle {
-    /// Net translation after returning to the same graph node.
-    pub(super) dependency: BitDependency,
+    pub(super) relation: PositionRelationSet,
     pub(super) condition: PathCondition,
-    /// Positions at which every edge of this cycle is applicable.
-    pub(super) feasible: Vec<FeasiblePosition>,
 }
 
 pub(super) fn guarded_cycle_displacements_cancel(cycles: &HashSet<GuardedCycle>) -> bool {
+    let translations = cycles
+        .iter()
+        .filter_map(|cycle| {
+            let (dependency, feasible) = cycle.relation.exact_translation()?;
+            Some(GuardedTranslation {
+                dependency,
+                condition: cycle.condition.clone(),
+                feasible,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if guarded_translations_cancel(&translations) {
+        return true;
+    }
+    if translations.len() == cycles.len() {
+        return false;
+    }
+    for cycle in cycles {
+        for translation in &translations {
+            if cycle
+                .condition
+                .union_if_compatible(&translation.condition)
+                .is_some()
+                && translation.dependency.exact_offset().is_some_and(|offset| {
+                    cycle
+                        .relation
+                        .closes_after_repeating_translation(offset, &translation.feasible)
+                })
+            {
+                return true;
+            }
+        }
+    }
+
+    guarded_relations_close(cycles)
+}
+
+fn guarded_relations_close(cycles: &HashSet<GuardedCycle>) -> bool {
+    let cycles = cycles.iter().collect::<Vec<_>>();
+    let mut reached: Vec<(PositionRelationSet, PathCondition)> = Vec::new();
+    let mut queue = VecDeque::new();
+    // Exact-only closed walks were decided above. Any remaining closed walk
+    // contains a non-translation relation and can be rotated to start there,
+    // so do not enumerate arbitrarily long exact prefixes here.
+    for cycle in cycles
+        .iter()
+        .filter(|cycle| cycle.relation.exact_translation().is_none())
+    {
+        insert_guarded_relation(
+            &mut reached,
+            &mut queue,
+            cycle.relation.clone(),
+            cycle.condition.clone(),
+        );
+    }
+    while let Some((relation, condition)) = queue.pop_front() {
+        for cycle in &cycles {
+            let Some(next_condition) = condition.union_if_compatible(&cycle.condition) else {
+                continue;
+            };
+            let next_relation = relation.then(&cycle.relation);
+            if next_relation.is_empty() {
+                continue;
+            }
+            if next_relation.intersects_identity() {
+                return true;
+            }
+            insert_guarded_relation(&mut reached, &mut queue, next_relation, next_condition);
+        }
+    }
+    false
+}
+
+fn insert_guarded_relation(
+    reached: &mut Vec<(PositionRelationSet, PathCondition)>,
+    queue: &mut VecDeque<(PositionRelationSet, PathCondition)>,
+    relation: PositionRelationSet,
+    condition: PathCondition,
+) {
+    if reached
+        .iter()
+        .any(|(existing_relation, existing_condition)| {
+            existing_relation.contains(&relation) && existing_condition.is_subset_of(&condition)
+        })
+    {
+        return;
+    }
+    reached.retain(|(existing_relation, existing_condition)| {
+        !relation.contains(existing_relation) || !condition.is_subset_of(existing_condition)
+    });
+    reached.push((relation.clone(), condition.clone()));
+    queue.push_back((relation, condition));
+}
+
+#[derive(Clone, Debug)]
+struct GuardedTranslation {
+    dependency: BitDependency,
+    condition: PathCondition,
+    feasible: Vec<FeasiblePosition>,
+}
+
+fn guarded_translations_cancel(cycles: &[GuardedTranslation]) -> bool {
     // Displacement geometry is a cheap necessary test. It is deliberately
     // not sufficient: cycles whose guards cannot be connected must not be
     // reported merely because their vectors add to zero.
@@ -78,7 +179,7 @@ pub(super) fn guarded_cycle_displacements_cancel(cycles: &HashSet<GuardedCycle>)
     false
 }
 
-fn guarded_opposing_pair_closes(cycles: &[&GuardedCycle]) -> bool {
+fn guarded_opposing_pair_closes(cycles: &[&GuardedTranslation]) -> bool {
     for left in 0..cycles.len() {
         for right in (left + 1)..cycles.len() {
             if cycles[left]
@@ -143,7 +244,7 @@ fn guarded_opposing_pair_closes(cycles: &[&GuardedCycle]) -> bool {
     false
 }
 
-fn guarded_three_cycle_closes(cycles: &[&GuardedCycle]) -> bool {
+fn guarded_three_cycle_closes(cycles: &[&GuardedTranslation]) -> bool {
     const ORDERS: [[usize; 3]; 6] = [
         [0, 1, 2],
         [0, 2, 1],
@@ -254,7 +355,7 @@ fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
 }
 
 fn repeat_guarded_cycle(
-    cycle: &GuardedCycle,
+    cycle: &GuardedTranslation,
     count: usize,
 ) -> Option<(BitDependency, Vec<FeasiblePosition>)> {
     let offset = cycle.dependency.exact_offset()?;

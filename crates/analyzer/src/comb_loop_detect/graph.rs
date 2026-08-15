@@ -1,6 +1,7 @@
 //! Dependency graph storage, edge normalization, and cycle detection.
 
 mod guarded;
+mod relation;
 
 use super::model::{BitDependency, SummaryRegion};
 use super::region::{BitPartition, NodeKey, translate_position};
@@ -15,6 +16,7 @@ use daggy::petgraph::visit::EdgeRef;
 #[cfg(test)]
 use guarded::compatible_cycle_displacements_cancel;
 use guarded::{GuardedCycle, guarded_cycle_displacements_cancel};
+use relation::PositionRelationSet;
 use std::ops::{Deref, DerefMut};
 
 #[derive(Clone, Debug)]
@@ -240,18 +242,12 @@ fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
     starts.sort_unstable_by_key(|&node| std::cmp::Reverse(domain_area(&graph[node])));
     for start in starts {
         let returnable = nodes_that_may_reach_start(graph, &nodes, start);
-        let identity = BitDependency {
-            array: Some(0),
-            packed: Some(0),
-        };
-        let initial = initial_feasible_positions(&graph[start]);
+        let initial = PositionRelationSet::identity(&graph[start].domains);
         let mut cycles = HashSet::default();
-        let mut stack = vec![(start, PathCondition::default(), identity, initial)];
-        let mut reached: HashMap<
-            NodeIndex,
-            Vec<(BitDependency, PathCondition, Vec<FeasiblePosition>)>,
-        > = HashMap::default();
-        while let Some((node, condition, dependency, feasible)) = stack.pop() {
+        let mut stack = vec![(start, PathCondition::default(), initial)];
+        let mut reached: HashMap<NodeIndex, Vec<(PositionRelationSet, PathCondition)>> =
+            HashMap::default();
+        while let Some((node, condition, relation)) = stack.pop() {
             for edge in graph.edges(node) {
                 let next = edge.target();
                 if !returnable.contains(&next) {
@@ -261,48 +257,40 @@ fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
                 else {
                     continue;
                 };
-                // Keep every traversed edge in the start node's coordinate
-                // system. A return to `start` can then be classified by the
-                // composed displacement instead of individual edge signs.
-                let next_dependency = dependency.compose(edge.weight().kind);
-                let feasible =
-                    restrict_feasible_positions(&feasible, next_dependency, &graph[next].domains);
-                if feasible.is_empty() {
+                // Retain the full binary relation from the anchor position to
+                // the current position. Unlike a single optional offset, this
+                // preserves the reachable current range after a WHOLE edge.
+                let next_relation =
+                    relation.then_dependency(edge.weight().kind, &graph[next].domains);
+                if next_relation.is_empty() {
                     continue;
                 }
                 if next == start {
-                    if dependency_may_return_to_same_position(next_dependency) {
-                        return true;
-                    }
-                    if next_dependency.exact_offset().is_none() {
+                    if next_relation.intersects_identity() {
                         return true;
                     }
                     cycles.insert(GuardedCycle {
-                        dependency: next_dependency,
+                        relation: next_relation,
                         condition: next_condition,
-                        feasible,
                     });
                     continue;
                 }
                 let states = reached.entry(next).or_default();
-                if states.iter().any(
-                    |(existing_dependency, existing_condition, existing_feasible)| {
-                        *existing_dependency == next_dependency
+                if states
+                    .iter()
+                    .any(|(existing_relation, existing_condition)| {
+                        existing_relation.contains(&next_relation)
                             && existing_condition.is_subset_of(&next_condition)
-                            && *existing_feasible == feasible
-                    },
-                ) {
+                    })
+                {
                     continue;
                 }
-                states.retain(
-                    |(existing_dependency, existing_condition, existing_feasible)| {
-                        *existing_dependency != next_dependency
-                            || !next_condition.is_subset_of(existing_condition)
-                            || *existing_feasible != feasible
-                    },
-                );
-                states.push((next_dependency, next_condition.clone(), feasible.clone()));
-                stack.push((next, next_condition, next_dependency, feasible));
+                states.retain(|(existing_relation, existing_condition)| {
+                    !next_relation.contains(existing_relation)
+                        || !next_condition.is_subset_of(existing_condition)
+                });
+                states.push((next_relation.clone(), next_condition.clone()));
+                stack.push((next, next_condition, next_relation));
             }
         }
         if guarded_cycle_displacements_cancel(&cycles) {
@@ -371,7 +359,7 @@ fn has_zero_dependency_cycle(
             HashMap::default();
         while let Some((node, condition, feasible)) = stack.pop() {
             for edge in graph.edges(node) {
-                if !dependency_may_return_to_same_position(edge.weight().kind) {
+                if !dependency_is_identity(edge.weight().kind) {
                     continue;
                 }
                 let next = edge.target();
@@ -500,6 +488,10 @@ fn intersect_axis(
 fn dependency_may_return_to_same_position(dependency: BitDependency) -> bool {
     dependency.array.is_none_or(|offset| offset == 0)
         && dependency.packed.is_none_or(|offset| offset == 0)
+}
+
+fn dependency_is_identity(dependency: BitDependency) -> bool {
+    dependency.array == Some(0) && dependency.packed == Some(0)
 }
 
 fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
@@ -686,6 +678,196 @@ mod tests {
         );
 
         assert!(!has_compatible_cycle(&graph, &[a, b]));
+    }
+
+    #[test]
+    fn whole_dependency_retains_the_reachable_current_range() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let mut graph = DependencyGraph::new();
+        let mut node = |id| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(0, 5).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: 0,
+                    packed_length: 5,
+                }],
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let a = node(0);
+        let b = node(1);
+        let c = node(2);
+        let d = node(3);
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        // The exact prefix is feasible only from a[0]. WHOLE can then reach
+        // any d bit, but the final +2 edge can return only to a[2..5], never
+        // to the original a[0].
+        graph.add_edge(a, b, edge(3));
+        graph.add_edge(b, c, edge(1));
+        graph.add_edge(c, d, GraphDependency::unconditional(BitDependency::WHOLE));
+        graph.add_edge(d, a, edge(2));
+
+        assert!(!has_compatible_cycle(&graph, &[a, b, c, d]));
+    }
+
+    #[test]
+    fn whole_dependency_composes_with_a_later_translation() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let mut graph = DependencyGraph::new();
+        let mut node = |id, start, length| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(0, 3).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: start,
+                    packed_length: length,
+                }],
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let anchor = node(0, 0, 3);
+        let low = node(1, 0, 1);
+        let high = node(2, 2, 1);
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        // One first-return path maps anchor[0] to anchor[2] through WHOLE;
+        // the other maps anchor[2] back to anchor[0]. Neither closes alone.
+        graph.add_edge(anchor, low, edge(0));
+        graph.add_edge(
+            low,
+            high,
+            GraphDependency::unconditional(BitDependency::WHOLE),
+        );
+        graph.add_edge(high, anchor, edge(0));
+        graph.add_edge(anchor, anchor, edge(-2));
+
+        assert!(has_compatible_cycle(&graph, &[anchor, low, high]));
+    }
+
+    #[test]
+    fn whole_dependency_and_repeated_shift_are_sparse_at_scale() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let width = 1_000_000;
+        let mut graph = DependencyGraph::new();
+        let mut node = |id, start, length| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(0, width).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: start,
+                    packed_length: length,
+                }],
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let anchor = node(0, 0, width);
+        let low = node(1, 0, 1);
+        let high = node(2, width - 1, 1);
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        // WHOLE maps anchor[0] to anchor[width - 1]. Repeating the -1
+        // translation closes the walk without enumerating every position.
+        graph.add_edge(anchor, low, edge(0));
+        graph.add_edge(
+            low,
+            high,
+            GraphDependency::unconditional(BitDependency::WHOLE),
+        );
+        graph.add_edge(high, anchor, edge(0));
+        graph.add_edge(anchor, anchor, edge(-1));
+
+        assert!(has_compatible_cycle(&graph, &[anchor, low, high]));
+    }
+
+    #[test]
+    fn whole_dependency_and_diverging_shift_are_sparse_at_scale() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let width = 1_000_000;
+        let mut graph = DependencyGraph::new();
+        let mut node = |id, start, length| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(0, width).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: start,
+                    packed_length: length,
+                }],
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let anchor = node(0, 0, width);
+        let low = node(1, 0, 1);
+        let high = node(2, width - 1, 1);
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        graph.add_edge(anchor, low, edge(0));
+        graph.add_edge(
+            low,
+            high,
+            GraphDependency::unconditional(BitDependency::WHOLE),
+        );
+        graph.add_edge(high, anchor, edge(0));
+        graph.add_edge(anchor, anchor, edge(1));
+
+        assert!(!has_compatible_cycle(&graph, &[anchor, low, high]));
     }
 
     #[test]
@@ -1067,14 +1249,15 @@ mod tests {
             for _ in 0..edge_count {
                 let source = random() as usize % node_count;
                 let destination = random() as usize % node_count;
-                let packed = random() as isize % 7 - 3;
+                let raw_dependency = random();
+                let packed = (raw_dependency % 4 != 0).then_some(raw_dependency as isize % 7 - 3);
                 let arm = match random() % 3 {
                     0 => None,
                     arm => Some(arm as usize - 1),
                 };
                 let dependency = BitDependency {
                     array: Some(0),
-                    packed: Some(packed),
+                    packed,
                 };
                 if node_regions_overlap_with_dependency(
                     &graph[nodes[source]],
@@ -1117,20 +1300,28 @@ mod tests {
                         let source_allowed = domain_specs[*source].is_none_or(|(start, length)| {
                             (start..start + length).contains(&position)
                         });
-                        let Some(mapped) = translate_position(position, dependency.packed.unwrap())
-                        else {
+                        if !source_allowed {
                             continue;
+                        }
+                        let mapped = match dependency.packed {
+                            Some(offset) => translate_position(position, offset)
+                                .filter(|&mapped| mapped < width)
+                                .into_iter()
+                                .collect::<Vec<_>>(),
+                            None => (0..width).collect(),
                         };
-                        let destination_allowed =
-                            domain_specs[*destination].is_none_or(|(start, length)| {
-                                (start..start + length).contains(&mapped)
-                            });
-                        if source_allowed && mapped < width && destination_allowed {
-                            expanded.add_edge(
-                                expanded_nodes[*source][position],
-                                expanded_nodes[*destination][mapped],
-                                (),
-                            );
+                        for mapped in mapped {
+                            let destination_allowed =
+                                domain_specs[*destination].is_none_or(|(start, length)| {
+                                    (start..start + length).contains(&mapped)
+                                });
+                            if destination_allowed {
+                                expanded.add_edge(
+                                    expanded_nodes[*source][position],
+                                    expanded_nodes[*destination][mapped],
+                                    (),
+                                );
+                            }
                         }
                     }
                 }
@@ -1140,6 +1331,169 @@ mod tests {
                 coarse, exact,
                 "case {case}, width {width}, edges {edge_specs:?}"
             );
+        }
+    }
+
+    #[test]
+    fn positional_cycle_detection_matches_two_dimensional_expansion() {
+        use daggy::petgraph::algo::is_cyclic_directed;
+
+        let mut state = 0x243f_6a88_u32;
+        let mut random = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            state
+        };
+        for case in 0..20_000 {
+            let node_count = 2 + random() as usize % 3;
+            let array_width = 2 + random() as usize % 3;
+            let packed_width = 2 + random() as usize % 3;
+            let array = ArraySpan {
+                start: 0,
+                length: array_width,
+            };
+            let mut graph = DependencyGraph::new();
+            let mut domain_specs = Vec::new();
+            let nodes = (0..node_count)
+                .map(|id| {
+                    let domain = if case % 2 == 0 {
+                        (0, array_width, 0, packed_width)
+                    } else {
+                        let array_start = random() as usize % array_width;
+                        let packed_start = random() as usize % packed_width;
+                        (
+                            array_start,
+                            1 + random() as usize % (array_width - array_start),
+                            packed_start,
+                            1 + random() as usize % (packed_width - packed_start),
+                        )
+                    };
+                    domain_specs.push(domain);
+                    let id = VarId::from_raw(id as u32);
+                    graph.add_node(GraphNode {
+                        region: SummaryRegion {
+                            id,
+                            array,
+                            packed: PackedSpan::new(0, packed_width).unwrap(),
+                        },
+                        domains: vec![PositionDomain {
+                            array_start: domain.0,
+                            array_length: domain.1,
+                            packed_start: domain.2,
+                            packed_length: domain.3,
+                        }],
+                        diagnostic: Some((id, array, 0)),
+                    })
+                })
+                .collect::<Vec<_>>();
+            let edge_count = 1 + random() as usize % (node_count * node_count * 2);
+            let branch = BranchId::new(case + 100_001, 0, 2);
+            let mut edge_specs = Vec::new();
+            for _ in 0..edge_count {
+                let source = random() as usize % node_count;
+                let destination = random() as usize % node_count;
+                let raw_array = random();
+                let raw_packed = random();
+                let dependency = BitDependency {
+                    array: (raw_array % 4 != 0).then_some(raw_array as isize % 5 - 2),
+                    packed: (raw_packed % 4 != 0).then_some(raw_packed as isize % 5 - 2),
+                };
+                let arm = match random() % 3 {
+                    0 => None,
+                    arm => Some(arm as usize - 1),
+                };
+                if node_regions_overlap_with_dependency(
+                    &graph[nodes[source]],
+                    &graph[nodes[destination]],
+                    dependency,
+                ) {
+                    edge_specs.push((source, destination, dependency, arm));
+                    add_dependency_edge(
+                        &mut graph,
+                        nodes[source],
+                        nodes[destination],
+                        GraphDependency {
+                            kind: dependency,
+                            condition: arm.map_or_else(PathCondition::default, |arm| {
+                                PathCondition::default().with_choice(branch, arm)
+                            }),
+                        },
+                    );
+                }
+            }
+
+            let symbolic = tarjan_scc(&graph.graph)
+                .iter()
+                .any(|scc| has_compatible_cycle(&graph, scc));
+            let mut concrete = false;
+            for selected_arm in 0..2 {
+                let mut expanded = Graph::<(), ()>::new();
+                let expanded_nodes = (0..node_count)
+                    .map(|_| {
+                        (0..array_width * packed_width)
+                            .map(|_| expanded.add_node(()))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                for (source, destination, dependency, arm) in &edge_specs {
+                    if arm.is_some_and(|arm| arm != selected_arm) {
+                        continue;
+                    }
+                    let source_domain = domain_specs[*source];
+                    let destination_domain = domain_specs[*destination];
+                    for source_array in 0..array_width {
+                        for source_packed in 0..packed_width {
+                            if !(source_domain.0..source_domain.0 + source_domain.1)
+                                .contains(&source_array)
+                                || !(source_domain.2..source_domain.2 + source_domain.3)
+                                    .contains(&source_packed)
+                            {
+                                continue;
+                            }
+                            let destination_arrays =
+                                mapped_positions(source_array, dependency.array, array_width);
+                            let destination_packeds =
+                                mapped_positions(source_packed, dependency.packed, packed_width);
+                            for destination_array in &destination_arrays {
+                                for destination_packed in &destination_packeds {
+                                    if !(destination_domain.0
+                                        ..destination_domain.0 + destination_domain.1)
+                                        .contains(destination_array)
+                                        || !(destination_domain.2
+                                            ..destination_domain.2 + destination_domain.3)
+                                            .contains(destination_packed)
+                                    {
+                                        continue;
+                                    }
+                                    let source_position =
+                                        source_array * packed_width + source_packed;
+                                    let destination_position =
+                                        destination_array * packed_width + destination_packed;
+                                    expanded.add_edge(
+                                        expanded_nodes[*source][source_position],
+                                        expanded_nodes[*destination][destination_position],
+                                        (),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                concrete |= is_cyclic_directed(&expanded);
+            }
+            assert_eq!(
+                symbolic, concrete,
+                "case {case}, shape [{array_width}, {packed_width}], domains {domain_specs:?}, edges {edge_specs:?}"
+            );
+        }
+    }
+
+    fn mapped_positions(position: usize, offset: Option<isize>, width: usize) -> Vec<usize> {
+        match offset {
+            Some(offset) => translate_position(position, offset)
+                .filter(|&position| position < width)
+                .into_iter()
+                .collect(),
+            None => (0..width).collect(),
         }
     }
 }
