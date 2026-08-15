@@ -14013,6 +14013,29 @@ fn exceed_limit() {
     let errors = analyze_with_large_stack(code);
     assert!(matches!(errors[0], AnalyzerError::ExceedLimit { .. }));
 
+    // Each specialization is distinct, so exact recursion detection cannot
+    // stop this monotone generic chain. Function elaboration must use the
+    // configured function-instantiation depth instead of exhausting the stack.
+    let code = r#"
+    package Pkg {
+        function diverge::<N: u32> -> u32 {
+            gen M: u32 = N + 1;
+            return diverge::<M>();
+        }
+    }
+    module ModuleB {
+        let _a: u32 = Pkg::diverge::<0>();
+    }
+    "#;
+
+    let errors = analyze_with_large_stack(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::ExceedLimit { .. })),
+        "an unbounded specialization chain must stop at the configured function depth: {errors:?}"
+    );
+
     let code = r#"
     module ModuleA {
         let _a: logic = {1'b1 repeat 10000000};
@@ -14138,6 +14161,31 @@ fn recursive_generic_function() {
 
     let errors = analyze_with_large_stack(code);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn function_generic_shadows_container_generic() {
+    let code = r#"
+    package Pkg::<W: u32> {
+        function value::<W: u32> () -> u32 {
+            return W;
+        }
+    }
+    module Top {
+        var result: logic;
+        if Pkg::<2>::value::<1>() == 1 :selected {
+            assign result = 0;
+        } else {
+            assign result = result;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors.is_empty(),
+        "the function-local W must shadow Pkg::W: {errors:#?}"
+    );
 }
 
 #[test]
@@ -18782,6 +18830,96 @@ fn maybe_driver_cross_process_conflict() {
     }
     "#
     ));
+}
+
+#[test]
+fn dynamic_select_write_does_not_escape_its_struct_member() {
+    let errors = analyze(
+        r#"
+        module Top (
+            index: input bit<2>,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            var pair: Pair;
+            always_comb {
+                pair.selected[index] = 0;
+            }
+            always_comb {
+                pair.result = 0;
+            }
+        }
+        "#,
+    );
+
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::MultipleAssignment { .. })),
+        "disjoint member writes must remain separate LSPs: {errors:?}"
+    );
+}
+
+#[test]
+fn dynamic_select_read_is_confined_to_its_struct_member() {
+    let errors = analyze(
+        r#"
+        module Top (
+            index: input  bit<2>,
+            o    : output bit,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            var pair: Pair;
+            always_comb {
+                pair.selected = 0;
+                o = pair.selected[index];
+                pair.result = 0;
+            }
+        }
+        "#,
+    );
+
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { .. })),
+        "a read from one member must not precede a write to another: {errors:?}"
+    );
+}
+
+#[test]
+fn dynamic_select_read_is_recorded_within_its_struct_member() {
+    let errors = analyze(
+        r#"
+        module Top (
+            index: input  bit<2>,
+            o    : output bit,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            var pair: Pair;
+            always_comb {
+                pair.result = 0;
+                o = pair.selected[index];
+                pair.selected = 0;
+            }
+        }
+        "#,
+    );
+
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { .. })),
+        "a dynamic read before a same-member write must be recorded: {errors:?}"
+    );
 }
 
 #[test]

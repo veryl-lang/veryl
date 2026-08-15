@@ -46,12 +46,13 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, Component, Declaration, Expression, Factor, InstDeclaration,
-    InstInterfaceBinding, Ir, Module, Op, Signature, Statement, SystemFunctionKind, VarSelect,
-    Variable,
+    AssignDestination, Component, Declaration, Expression, Factor, FunctionCall,
+    InstActualFragment, InstDeclaration, InstInterfaceBinding, Ir, MemberSelectDomain, Module, Op,
+    Signature, Statement, SystemFunctionCall, SystemFunctionKind, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
+use veryl_parser::token_range::TokenRange;
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
     check_inner(ir).0
@@ -117,33 +118,80 @@ fn build_bit_partition(
     ctx: &mut Context,
 ) -> BitPartition {
     let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
+    let mut visited_functions = HashSet::default();
 
     for declaration in &module.declarations {
         if let Declaration::Comb(comb) = declaration {
             collect_statement_spans(&comb.statements, &mut accesses, ctx);
+            collect_called_function_statement_spans(
+                &comb.statements,
+                module,
+                &mut accesses,
+                &mut visited_functions,
+                ctx,
+            );
         }
     }
 
     // Inst input expressions are not represented by procedure statements.
     for inst in walk_insts(module) {
         for inp in &inst.inputs {
-            for expr in &inp.exprs {
-                collect_expr_spans(expr, &mut accesses, ctx);
+            if let Some(src) = &inp.range_src
+                && let Some(packed) =
+                    PackedSpan::new(src.parent_packed_start, src.parent_packed_length)
+            {
+                accesses
+                    .entry((
+                        src.parent,
+                        ArraySpan {
+                            start: src.parent_array_start,
+                            length: src.parent_array_length,
+                        },
+                    ))
+                    .or_default()
+                    .push(packed);
+            } else {
+                for expr in &inp.exprs {
+                    collect_expr_spans(expr, &mut accesses, ctx);
+                    collect_called_function_expr_spans(
+                        expr,
+                        module,
+                        &mut accesses,
+                        &mut visited_functions,
+                        ctx,
+                    );
+                }
             }
         }
         for out in &inst.outputs {
-            for dst in &out.dst {
-                if let Some((idx, packed)) = eval_dst_span(dst, &module.variables, ctx) {
-                    accesses
-                        .entry((
-                            dst.id,
-                            ArraySpan {
-                                start: idx,
-                                length: 1,
-                            },
-                        ))
-                        .or_default()
-                        .push(packed);
+            if let Some(dst) = &out.range_dst
+                && let Some(packed) =
+                    PackedSpan::new(dst.parent_packed_start, dst.parent_packed_length)
+            {
+                accesses
+                    .entry((
+                        dst.parent,
+                        ArraySpan {
+                            start: dst.parent_array_start,
+                            length: dst.parent_array_length,
+                        },
+                    ))
+                    .or_default()
+                    .push(packed);
+            } else {
+                for dst in &out.dst {
+                    if let Some((idx, packed)) = eval_dst_span(dst, &module.variables, ctx) {
+                        accesses
+                            .entry((
+                                dst.id,
+                                ArraySpan {
+                                    start: idx,
+                                    length: 1,
+                                },
+                            ))
+                            .or_default()
+                            .push(packed);
+                    }
                 }
             }
         }
@@ -239,8 +287,8 @@ fn collect_instance_summary_spans(
                 SummaryNodeKind::Output => Direction::Output,
                 SummaryNodeKind::Internal => continue,
             };
-            if let Some((parent, array, packed)) =
-                summary_parent_access(inst, child, node.region, direction, ctx)
+            for (parent, array, packed) in
+                summary_parent_accesses(inst, child, node.region, direction, ctx)
             {
                 accesses.entry((parent, array)).or_default().push(packed);
             }
@@ -248,49 +296,72 @@ fn collect_instance_summary_spans(
     }
 }
 
-fn summary_parent_access(
+fn summary_parent_accesses(
     inst: &InstDeclaration,
     child: &Module,
     region: SummaryRegion,
     direction: Direction,
     ctx: &mut Context,
-) -> Option<(VarId, ArraySpan, PackedSpan)> {
-    let variable = child
+) -> Vec<(VarId, ArraySpan, PackedSpan)> {
+    let Some(variable) = child
         .variables
         .get(&region.id)
-        .or_else(|| child.interface_members.get(&region.id))?;
-    if let Some((parent, index, select)) = instance_port_region_actual(inst, region.id, direction) {
-        return translated_summary_access(region, variable, parent, index, select, ctx)
-            .map(|(array, packed, _)| (parent, array, packed));
-    }
-    let binding = inst
+        .or_else(|| child.interface_members.get(&region.id))
+    else {
+        return Vec::new();
+    };
+    if let Some(binding) = inst
         .interface_bindings
         .iter()
-        .find(|binding| binding.child == region.id)?;
-    translated_interface_binding_access(region, variable, binding)
-        .map(|(parent, array, packed, _)| (parent, array, packed))
-}
-
-fn translated_interface_binding_access(
-    region: SummaryRegion,
-    child: &Variable,
-    binding: &InstInterfaceBinding,
-) -> Option<(VarId, ArraySpan, PackedSpan, (isize, isize))> {
-    let child_array_length = child.r#type.array.total()?;
-    let child_packed_width = child.total_width()?;
-    let actual = &binding.actual;
-    if child_array_length != actual.parent_array_length
-        || child_packed_width != actual.parent_packed_length
+        .find(|binding| binding.child == region.id)
+        && let Some(accesses) = translated_interface_binding_accesses(region, variable, binding)
     {
-        return None;
+        return accesses
+            .into_iter()
+            .map(|access| (access.parent, access.array, access.packed))
+            .collect();
     }
-    let array = region.array.translated(0, actual.parent_array_start)?;
-    let packed = region.packed.translated(0, actual.parent_packed_start)?;
-    let offset = (
-        signed_difference(actual.parent_array_start, 0)?,
-        signed_difference(actual.parent_packed_start, 0)?,
-    );
-    Some((actual.parent, array, packed, offset))
+    if direction == Direction::Output
+        && let Some(output) = inst.outputs.iter().find(|output| output.id == region.id)
+    {
+        let accesses = if let Some(actual) = &output.range_dst {
+            translated_contiguous_actual_accesses(region, variable, actual)
+        } else {
+            translated_fragment_accesses(region, variable, &output.dst, ctx)
+        };
+        if let Some(accesses) = accesses {
+            return accesses
+                .into_iter()
+                .map(|access| (access.parent, access.array, access.packed))
+                .collect();
+        }
+    }
+    if direction == Direction::Input
+        && let Some(input) = inst.inputs.iter().find(|input| input.id == region.id)
+        && let Some(actual) = &input.range_src
+        && let Some(accesses) = translated_contiguous_actual_accesses(region, variable, actual)
+    {
+        return accesses
+            .into_iter()
+            .map(|access| (access.parent, access.array, access.packed))
+            .collect();
+    }
+    if let Some((parent, index, select, member_select_domain)) =
+        instance_port_region_actual(inst, region.id, direction)
+    {
+        return translated_summary_access(
+            region,
+            variable,
+            parent,
+            index,
+            select,
+            member_select_domain,
+            ctx,
+        )
+        .map(|(array, packed, _)| vec![(parent, array, packed)])
+        .unwrap_or_default();
+    }
+    Vec::new()
 }
 
 fn split_array_spans(
@@ -420,26 +491,55 @@ fn collect_factor_spans(
             }
         }
         Factor::FunctionCall(call) => {
+            for coordinate in &call.receiver_index.0 {
+                collect_expr_spans(coordinate, out, ctx);
+            }
             for input in call.inputs.values() {
                 collect_expr_spans(input, out, ctx);
             }
         }
-        Factor::SystemFunctionCall(call) => match &call.kind {
-            SystemFunctionKind::Onehot(input)
-            | SystemFunctionKind::Signed(input)
-            | SystemFunctionKind::Unsigned(input)
-            | SystemFunctionKind::Readmemh(input, _) => {
-                collect_expr_spans(&input.0, out, ctx);
+        Factor::SystemFunctionCall(call) => {
+            for_each_system_function_input(call, |expression| {
+                collect_expr_spans(expression, out, ctx);
+            });
+            for destination in system_function_outputs(call) {
+                for (index, packed) in dst_writes(destination, ctx) {
+                    out.entry((destination.id, index)).or_default().push(packed);
+                }
             }
-            SystemFunctionKind::Bits(_)
-            | SystemFunctionKind::Size(_)
-            | SystemFunctionKind::Clog2(_)
-            | SystemFunctionKind::Display(_)
-            | SystemFunctionKind::Write(_)
-            | SystemFunctionKind::Assert { .. }
-            | SystemFunctionKind::Finish => {}
-        },
+        }
         _ => {}
+    }
+}
+
+fn for_each_system_function_input(call: &SystemFunctionCall, mut visit: impl FnMut(&Expression)) {
+    match &call.kind {
+        SystemFunctionKind::Bits(input)
+        | SystemFunctionKind::Size(input)
+        | SystemFunctionKind::Clog2(input)
+        | SystemFunctionKind::Onehot(input)
+        | SystemFunctionKind::Signed(input)
+        | SystemFunctionKind::Unsigned(input)
+        | SystemFunctionKind::Readmemh(input, _) => visit(&input.0),
+        SystemFunctionKind::Display(inputs) | SystemFunctionKind::Write(inputs) => {
+            for input in inputs {
+                visit(&input.0);
+            }
+        }
+        SystemFunctionKind::Assert { cond, args, .. } => {
+            visit(&cond.0);
+            for input in args {
+                visit(&input.0);
+            }
+        }
+        SystemFunctionKind::Finish => {}
+    }
+}
+
+fn system_function_outputs(call: &SystemFunctionCall) -> &[AssignDestination] {
+    match &call.kind {
+        SystemFunctionKind::Readmemh(_, output) => &output.0,
+        _ => &[],
     }
 }
 
@@ -496,9 +596,355 @@ fn collect_statement_spans(
                     }
                 }
             }
-            Statement::SystemFunctionCall(_)
-            | Statement::IfReset(_)
-            | Statement::TbMethodCall(_)
+            Statement::SystemFunctionCall(call) => {
+                for_each_system_function_input(call, |expression| {
+                    collect_expr_spans(expression, out, ctx);
+                });
+                for destination in system_function_outputs(call) {
+                    for (index, packed) in dst_writes(destination, ctx) {
+                        out.entry((destination.id, index)).or_default().push(packed);
+                    }
+                }
+            }
+            Statement::IfReset(statement) => {
+                collect_statement_spans(&statement.true_side, out, ctx);
+                collect_statement_spans(&statement.false_side, out, ctx);
+            }
+            Statement::TbMethodCall(_)
+            | Statement::Break
+            | Statement::Unsupported(_)
+            | Statement::Null => {}
+        }
+    }
+}
+
+fn collect_called_function_expr_spans(
+    expression: &Expression,
+    module: &Module,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    visited: &mut HashSet<CalledFunctionKey>,
+    ctx: &mut Context,
+) {
+    match expression {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::Variable(_, index, select, _) => {
+                for expression in index
+                    .0
+                    .iter()
+                    .chain(select.0.iter())
+                    .chain(select.1.iter().map(|(_, expression)| expression))
+                {
+                    collect_called_function_expr_spans(expression, module, out, visited, ctx);
+                }
+            }
+            Factor::HierVariable(variable) => {
+                for expression in variable
+                    .index
+                    .0
+                    .iter()
+                    .chain(variable.select.0.iter())
+                    .chain(variable.select.1.iter().map(|(_, expression)| expression))
+                {
+                    collect_called_function_expr_spans(expression, module, out, visited, ctx);
+                }
+            }
+            Factor::FunctionCall(call) => {
+                for coordinate in &call.receiver_index.0 {
+                    collect_called_function_expr_spans(coordinate, module, out, visited, ctx);
+                }
+                for input in call.inputs.values() {
+                    collect_called_function_expr_spans(input, module, out, visited, ctx);
+                }
+                collect_called_function_body_spans(call, module, out, visited, ctx);
+            }
+            Factor::SystemFunctionCall(call) => {
+                for_each_system_function_input(call, |expression| {
+                    collect_called_function_expr_spans(expression, module, out, visited, ctx);
+                });
+                for destination in system_function_outputs(call) {
+                    collect_called_function_destination_spans(
+                        destination,
+                        module,
+                        out,
+                        visited,
+                        ctx,
+                    );
+                }
+            }
+            _ => {}
+        },
+        Expression::Unary(_, expression, _) => {
+            collect_called_function_expr_spans(expression, module, out, visited, ctx);
+        }
+        Expression::Binary(left, _, right, _) => {
+            collect_called_function_expr_spans(left, module, out, visited, ctx);
+            collect_called_function_expr_spans(right, module, out, visited, ctx);
+        }
+        Expression::Ternary(condition, left, right, _) => {
+            collect_called_function_expr_spans(condition, module, out, visited, ctx);
+            collect_called_function_expr_spans(left, module, out, visited, ctx);
+            collect_called_function_expr_spans(right, module, out, visited, ctx);
+        }
+        Expression::Concatenation(parts, _) => {
+            for (value, repeat) in parts {
+                collect_called_function_expr_spans(value, module, out, visited, ctx);
+                if let Some(repeat) = repeat {
+                    collect_called_function_expr_spans(repeat, module, out, visited, ctx);
+                }
+            }
+        }
+        Expression::StructConstructor(_, fields, _) => {
+            for (_, value) in fields {
+                collect_called_function_expr_spans(value, module, out, visited, ctx);
+            }
+        }
+        Expression::ArrayLiteral(items, _) => {
+            for item in items {
+                match item {
+                    crate::ir::ArrayLiteralItem::Value(value, repeat) => {
+                        collect_called_function_expr_spans(value, module, out, visited, ctx);
+                        if let Some(repeat) = repeat {
+                            collect_called_function_expr_spans(repeat, module, out, visited, ctx);
+                        }
+                    }
+                    crate::ir::ArrayLiteralItem::Defaul(value) => {
+                        collect_called_function_expr_spans(value, module, out, visited, ctx);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn collect_called_function_destination_spans(
+    destination: &AssignDestination,
+    module: &Module,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    visited: &mut HashSet<CalledFunctionKey>,
+    ctx: &mut Context,
+) {
+    for expression in destination
+        .index
+        .0
+        .iter()
+        .chain(destination.select.0.iter())
+        .chain(
+            destination
+                .select
+                .1
+                .iter()
+                .map(|(_, expression)| expression),
+        )
+    {
+        collect_called_function_expr_spans(expression, module, out, visited, ctx);
+    }
+}
+
+fn collect_called_function_for_range_spans(
+    range: &crate::ir::ForRange,
+    module: &Module,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    visited: &mut HashSet<CalledFunctionKey>,
+    ctx: &mut Context,
+) {
+    use crate::ir::{ForBound, ForRange};
+
+    let (start, end) = match range {
+        ForRange::Forward { start, end, .. }
+        | ForRange::Reverse { start, end, .. }
+        | ForRange::Stepped { start, end, .. } => (start, end),
+    };
+    for bound in [start, end] {
+        if let ForBound::Expression(expression) = bound {
+            collect_called_function_expr_spans(expression, module, out, visited, ctx);
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum ReceiverCoordinateKey {
+    Constant(usize),
+    Dynamic(TokenRange),
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct CalledFunctionKey {
+    id: VarId,
+    receiver: Vec<ReceiverCoordinateKey>,
+}
+
+fn called_function_key(call: &FunctionCall) -> CalledFunctionKey {
+    let receiver = call
+        .receiver_index
+        .0
+        .iter()
+        .map(|expression| {
+            expression
+                .comptime()
+                .get_value()
+                .ok()
+                .and_then(|value| value.to_usize())
+                .map_or_else(
+                    || ReceiverCoordinateKey::Dynamic(expression.token_range()),
+                    ReceiverCoordinateKey::Constant,
+                )
+        })
+        .collect();
+    CalledFunctionKey {
+        id: call.id,
+        receiver,
+    }
+}
+
+fn collect_called_function_body_spans(
+    call: &crate::ir::FunctionCall,
+    module: &Module,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    visited: &mut HashSet<CalledFunctionKey>,
+    ctx: &mut Context,
+) {
+    if !visited.insert(called_function_key(call)) {
+        return;
+    }
+    let Some(body) = module
+        .functions
+        .get(&call.id)
+        .and_then(|function| function.get_function_for_index(&call.receiver_index))
+    else {
+        return;
+    };
+    collect_statement_spans(&body.statements, out, ctx);
+    collect_called_function_statement_spans(&body.statements, module, out, visited, ctx);
+}
+
+fn collect_called_function_statement_spans(
+    statements: &[Statement],
+    module: &Module,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    visited: &mut HashSet<CalledFunctionKey>,
+    ctx: &mut Context,
+) {
+    for statement in statements {
+        match statement {
+            Statement::Assign(assign) => {
+                collect_called_function_expr_spans(&assign.expr, module, out, visited, ctx);
+                for destination in &assign.dst {
+                    collect_called_function_destination_spans(
+                        destination,
+                        module,
+                        out,
+                        visited,
+                        ctx,
+                    );
+                }
+            }
+            Statement::If(statement) => {
+                collect_called_function_expr_spans(&statement.cond, module, out, visited, ctx);
+                collect_called_function_statement_spans(
+                    &statement.true_side,
+                    module,
+                    out,
+                    visited,
+                    ctx,
+                );
+                collect_called_function_statement_spans(
+                    &statement.false_side,
+                    module,
+                    out,
+                    visited,
+                    ctx,
+                );
+            }
+            Statement::Case(statement) => {
+                collect_called_function_expr_spans(
+                    &statement.case_target,
+                    module,
+                    out,
+                    visited,
+                    ctx,
+                );
+                for arm in &statement.arms {
+                    for pattern in &arm.patterns {
+                        match pattern {
+                            crate::ir::CasePattern::Eq(expression) => {
+                                collect_called_function_expr_spans(
+                                    expression, module, out, visited, ctx,
+                                );
+                            }
+                            crate::ir::CasePattern::Range { lo, hi, .. } => {
+                                collect_called_function_expr_spans(lo, module, out, visited, ctx);
+                                collect_called_function_expr_spans(hi, module, out, visited, ctx);
+                            }
+                        }
+                    }
+                    collect_called_function_statement_spans(&arm.body, module, out, visited, ctx);
+                }
+                collect_called_function_statement_spans(
+                    &statement.default,
+                    module,
+                    out,
+                    visited,
+                    ctx,
+                );
+            }
+            Statement::For(statement) => {
+                collect_called_function_for_range_spans(
+                    &statement.range,
+                    module,
+                    out,
+                    visited,
+                    ctx,
+                );
+                collect_called_function_statement_spans(&statement.body, module, out, visited, ctx);
+            }
+            Statement::FunctionCall(call) => {
+                for input in call.inputs.values() {
+                    collect_called_function_expr_spans(input, module, out, visited, ctx);
+                }
+                for outputs in call.outputs.values() {
+                    for destination in outputs {
+                        collect_called_function_destination_spans(
+                            destination,
+                            module,
+                            out,
+                            visited,
+                            ctx,
+                        );
+                    }
+                }
+                collect_called_function_body_spans(call, module, out, visited, ctx);
+            }
+            Statement::SystemFunctionCall(call) => {
+                for_each_system_function_input(call, |expression| {
+                    collect_called_function_expr_spans(expression, module, out, visited, ctx);
+                });
+                for destination in system_function_outputs(call) {
+                    collect_called_function_destination_spans(
+                        destination,
+                        module,
+                        out,
+                        visited,
+                        ctx,
+                    );
+                }
+            }
+            Statement::IfReset(statement) => {
+                collect_called_function_statement_spans(
+                    &statement.true_side,
+                    module,
+                    out,
+                    visited,
+                    ctx,
+                );
+                collect_called_function_statement_spans(
+                    &statement.false_side,
+                    module,
+                    out,
+                    visited,
+                    ctx,
+                );
+            }
+            Statement::TbMethodCall(_)
             | Statement::Break
             | Statement::Unsupported(_)
             | Statement::Null => {}
@@ -716,25 +1162,48 @@ impl<'a> ModuleGraphBuilder<'a> {
                 continue;
             }
             let mut reads = Vec::new();
-            for expression in &inp.exprs {
-                let (sources, dependencies, actual_complete) = analyze_instance_actual(
-                    bit_part,
-                    expression,
-                    ctx,
-                    procedure_context,
-                    function_summaries,
-                );
-                complete &= actual_complete;
-                reads.extend(sources);
-                for dependency in dependencies {
-                    add_region_dependency(
-                        graph,
-                        node_map,
+            if let Some(src) = &inp.range_src {
+                let range_reads: Vec<procedure::RegionSource> =
+                    PackedSpan::new(src.parent_packed_start, src.parent_packed_length)
+                        .into_iter()
+                        .flat_map(|packed| {
+                            bit_part.overlapping_access(
+                                src.parent,
+                                ArraySpan {
+                                    start: src.parent_array_start,
+                                    length: src.parent_array_length,
+                                },
+                                packed,
+                            )
+                        })
+                        .map(|key| procedure::RegionSource {
+                            key,
+                            offset: None,
+                            condition: PathCondition::default(),
+                        })
+                        .collect();
+                reads.extend(range_reads);
+            } else {
+                for expression in &inp.exprs {
+                    let (sources, dependencies, actual_complete) = analyze_instance_actual(
                         bit_part,
-                        dependency.source,
-                        dependency.destination,
-                        GraphDependency::unconditional(dependency.kind),
+                        expression,
+                        ctx,
+                        procedure_context,
+                        function_summaries,
                     );
+                    complete &= actual_complete;
+                    reads.extend(sources);
+                    for dependency in dependencies {
+                        add_region_dependency(
+                            graph,
+                            node_map,
+                            bit_part,
+                            dependency.source,
+                            dependency.destination,
+                            GraphDependency::unconditional(dependency.kind),
+                        );
+                    }
                 }
             }
             reads.sort_unstable_by_key(|source| {
@@ -756,45 +1225,60 @@ impl<'a> ModuleGraphBuilder<'a> {
                 continue;
             }
             let mut keys = Vec::new();
-            for dst in &out.dst {
-                let mut destination_keys = Vec::new();
-                collect_dst_node_keys(dst, bit_part, &mut destination_keys, parent_vars, ctx);
-                let (selector_reads, dependencies, selector_complete) =
-                    analyze_instance_destination(
-                        bit_part,
-                        dst,
-                        ctx,
-                        procedure_context,
-                        function_summaries,
-                    );
-                complete &= selector_complete;
-                for dependency in dependencies {
-                    add_region_dependency(
-                        graph,
-                        node_map,
-                        bit_part,
-                        dependency.source,
-                        dependency.destination,
-                        GraphDependency::unconditional(dependency.kind),
-                    );
-                }
-                for source in selector_reads {
-                    for destination in &destination_keys {
+            if out.range_dst.is_none() {
+                for dst in &out.dst {
+                    let mut destination_keys = Vec::new();
+                    collect_dst_node_keys(dst, bit_part, &mut destination_keys, parent_vars, ctx);
+                    let (selector_reads, dependencies, selector_complete) =
+                        analyze_instance_destination(
+                            bit_part,
+                            dst,
+                            ctx,
+                            procedure_context,
+                            function_summaries,
+                        );
+                    complete &= selector_complete;
+                    for dependency in dependencies {
                         add_region_dependency(
                             graph,
                             node_map,
                             bit_part,
-                            source.key,
-                            *destination,
-                            GraphDependency {
-                                kind: BitDependency::WHOLE,
-                                condition: source.condition.clone(),
-                                carrier: false,
-                            },
+                            dependency.source,
+                            dependency.destination,
+                            GraphDependency::unconditional(dependency.kind),
                         );
                     }
+                    for source in selector_reads {
+                        for destination in &destination_keys {
+                            add_region_dependency(
+                                graph,
+                                node_map,
+                                bit_part,
+                                source.key,
+                                *destination,
+                                GraphDependency {
+                                    kind: BitDependency::WHOLE,
+                                    condition: source.condition.clone(),
+                                    carrier: false,
+                                },
+                            );
+                        }
+                    }
+                    keys.extend(destination_keys);
                 }
-                keys.extend(destination_keys);
+            }
+            if let Some(dst) = &out.range_dst
+                && let Some(packed) =
+                    PackedSpan::new(dst.parent_packed_start, dst.parent_packed_length)
+            {
+                keys.extend(bit_part.overlapping_access(
+                    dst.parent,
+                    ArraySpan {
+                        start: dst.parent_array_start,
+                        length: dst.parent_array_length,
+                    },
+                    packed,
+                ));
             }
             keys.sort_unstable();
             keys.dedup();
@@ -931,6 +1415,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                                 &destinations,
                                 edge.kind,
                                 &condition,
+                                edge.carrier,
                             );
                         }
                         RegionProjection::Disjoint => {}
@@ -956,6 +1441,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                     &destinations,
                     edge.kind,
                     &condition,
+                    edge.carrier,
                 );
                 continue;
             }
@@ -965,6 +1451,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                 &mapped_nodes[edge.destination],
                 edge.kind,
                 &condition,
+                edge.carrier,
             );
         }
         self.complete &= complete;
@@ -997,6 +1484,11 @@ fn map_instance_source_region<'a>(
             .nodes
             .iter()
             .any(|source| source.offset.is_some())
+        || inst
+            .inputs
+            .iter()
+            .find(|input| input.id == region.id)
+            .is_some_and(|input| input.range_src.is_some())
     {
         return parent_sources;
     }
@@ -1171,34 +1663,59 @@ fn instance_region_mapping(
         .variables
         .get(&region.id)
         .or_else(|| child.interface_members.get(&region.id));
-    if let Some(variable) = variable
-        && let Some((parent, index, select)) =
-            instance_port_region_actual(inst, region.id, direction)
-    {
-        return map_summary_region(region, variable, parent, index, select, bit_part, ctx);
-    }
-
     if let (Some(variable), Some(binding)) = (
         variable,
         inst.interface_bindings
             .iter()
             .find(|binding| binding.child == region.id),
-    ) {
-        if let Some((parent, array, packed, offset)) =
-            translated_interface_binding_access(region, variable, binding)
-        {
-            return InstanceRegionMapping {
-                nodes: bit_part
-                    .overlapping_access(parent, array, packed)
-                    .into_iter()
-                    .map(|key| MappedNode {
-                        key,
-                        offset: Some(offset),
-                        condition: PathCondition::default(),
-                    })
-                    .collect(),
-            };
+    ) && let Some(mapping) =
+        map_summary_region_to_interface_binding(region, variable, binding, bit_part)
+    {
+        return mapping;
+    }
+
+    if direction == Direction::Output
+        && let (Some(variable), Some(output)) = (
+            variable,
+            inst.outputs.iter().find(|output| output.id == region.id),
+        )
+    {
+        let mapping = if let Some(actual) = &output.range_dst {
+            map_summary_region_to_contiguous_actual(region, variable, actual, bit_part)
+        } else {
+            map_summary_region_to_fragments(region, variable, &output.dst, bit_part, ctx)
+        };
+        if let Some(mapping) = mapping {
+            return mapping;
         }
+    }
+
+    if direction == Direction::Input
+        && let (Some(variable), Some(input)) = (
+            variable,
+            inst.inputs.iter().find(|input| input.id == region.id),
+        )
+        && let Some(actual) = &input.range_src
+        && let Some(mapping) =
+            map_summary_region_to_contiguous_actual(region, variable, actual, bit_part)
+    {
+        return mapping;
+    }
+
+    if let Some(variable) = variable
+        && let Some((parent, index, select, member_select_domain)) =
+            instance_port_region_actual(inst, region.id, direction)
+    {
+        return map_summary_region(
+            region,
+            variable,
+            parent,
+            index,
+            select,
+            member_select_domain,
+            bit_part,
+            ctx,
+        );
     }
 
     InstanceRegionMapping {
@@ -1218,27 +1735,270 @@ fn instance_port_region_actual(
     inst: &InstDeclaration,
     child: VarId,
     direction: Direction,
-) -> Option<(VarId, &crate::ir::VarIndex, &VarSelect)> {
+) -> Option<(
+    VarId,
+    &crate::ir::VarIndex,
+    &VarSelect,
+    Option<MemberSelectDomain>,
+)> {
     match direction {
         Direction::Input => {
             let input = inst.inputs.iter().find(|input| input.id == child)?;
             let Expression::Term(factor) = input.single()? else {
                 return None;
             };
-            let Factor::Variable(parent, index, select, _) = factor.as_ref() else {
+            let Factor::Variable(parent, index, select, comptime) = factor.as_ref() else {
                 return None;
             };
-            Some((*parent, index, select))
+            Some((*parent, index, select, comptime.member_select_domain))
         }
         Direction::Output => {
             let output = inst.outputs.iter().find(|output| output.id == child)?;
             let [destination] = output.dst.as_slice() else {
                 return None;
             };
-            Some((destination.id, &destination.index, &destination.select))
+            Some((
+                destination.id,
+                &destination.index,
+                &destination.select,
+                destination.comptime.member_select_domain,
+            ))
         }
         Direction::Inout | Direction::Interface | Direction::Modport | Direction::Import => None,
     }
+}
+
+#[derive(Clone, Copy)]
+struct ActualFragment {
+    parent: VarId,
+    child_array: ArraySpan,
+    child_packed: PackedSpan,
+    parent_array: ArraySpan,
+    parent_packed: PackedSpan,
+}
+
+#[derive(Clone, Copy)]
+struct TranslatedFragmentAccess {
+    parent: VarId,
+    array: ArraySpan,
+    packed: PackedSpan,
+    offset: (isize, isize),
+}
+
+fn actual_fragments(
+    child: &Variable,
+    actual: &[AssignDestination],
+    ctx: &mut Context,
+) -> Option<Vec<ActualFragment>> {
+    let child_array_length = child.r#type.array.total()?;
+    let child_packed_width = child.total_width()?;
+    let child_packed = PackedSpan::whole(child_packed_width)?;
+    let accesses = actual
+        .iter()
+        .map(|destination| {
+            let spans = var_reads(
+                destination.id,
+                &destination.index,
+                &destination.select,
+                destination.comptime.member_select_domain,
+                ctx,
+            );
+            let [(parent_array, parent_packed)] = spans.as_slice() else {
+                return None;
+            };
+            Some((destination.id, *parent_array, *parent_packed))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let array_length = accesses.iter().try_fold(0usize, |total, (_, array, _)| {
+        total.checked_add(array.length)
+    })?;
+    if array_length == child_array_length
+        && accesses
+            .iter()
+            .all(|(_, _, packed)| packed.length == child_packed_width)
+    {
+        let mut child_start = 0usize;
+        return accesses
+            .into_iter()
+            .map(|(parent, parent_array, parent_packed)| {
+                let child_array = ArraySpan {
+                    start: child_start,
+                    length: parent_array.length,
+                };
+                child_start = child_start.checked_add(parent_array.length)?;
+                Some(ActualFragment {
+                    parent,
+                    child_array,
+                    child_packed,
+                    parent_array,
+                    parent_packed,
+                })
+            })
+            .collect();
+    }
+
+    let packed_width = accesses.iter().try_fold(0usize, |total, (_, _, packed)| {
+        total.checked_add(packed.length)
+    })?;
+    if child_array_length != 1
+        || packed_width != child_packed_width
+        || accesses.iter().any(|(_, array, _)| array.length != 1)
+    {
+        return None;
+    }
+
+    let mut child_start = child_packed_width;
+    accesses
+        .into_iter()
+        .map(|(parent, parent_array, parent_packed)| {
+            child_start = child_start.checked_sub(parent_packed.length)?;
+            Some(ActualFragment {
+                parent,
+                child_array: ArraySpan {
+                    start: 0,
+                    length: 1,
+                },
+                child_packed: PackedSpan::new(child_start, parent_packed.length)?,
+                parent_array,
+                parent_packed,
+            })
+        })
+        .collect()
+}
+
+fn contiguous_actual_fragment(
+    child: &Variable,
+    actual: &InstActualFragment,
+) -> Option<ActualFragment> {
+    let child_array_length = child.r#type.array.total()?;
+    let child_packed_width = child.total_width()?;
+    if child_array_length != actual.parent_array_length
+        || child_packed_width != actual.parent_packed_length
+    {
+        return None;
+    }
+    Some(ActualFragment {
+        parent: actual.parent,
+        child_array: ArraySpan {
+            start: 0,
+            length: child_array_length,
+        },
+        child_packed: PackedSpan::whole(child_packed_width)?,
+        parent_array: ArraySpan {
+            start: actual.parent_array_start,
+            length: actual.parent_array_length,
+        },
+        parent_packed: PackedSpan::new(actual.parent_packed_start, actual.parent_packed_length)?,
+    })
+}
+
+fn translate_actual_fragments(
+    region: SummaryRegion,
+    fragments: impl IntoIterator<Item = ActualFragment>,
+) -> Option<Vec<TranslatedFragmentAccess>> {
+    fragments
+        .into_iter()
+        .filter_map(|fragment| {
+            let array = region.array.intersection(fragment.child_array)?;
+            let packed = region.packed.intersection(fragment.child_packed)?;
+            Some((fragment, array, packed))
+        })
+        .map(|(fragment, child_array, child_packed)| {
+            let array =
+                child_array.translated(fragment.child_array.start, fragment.parent_array.start)?;
+            let packed = child_packed
+                .translated(fragment.child_packed.start, fragment.parent_packed.start)?;
+            Some(TranslatedFragmentAccess {
+                parent: fragment.parent,
+                array,
+                packed,
+                offset: (
+                    signed_difference(fragment.parent_array.start, fragment.child_array.start)?,
+                    signed_difference(fragment.parent_packed.start, fragment.child_packed.start)?,
+                ),
+            })
+        })
+        .collect()
+}
+
+fn translated_fragment_accesses(
+    region: SummaryRegion,
+    child: &Variable,
+    actual: &[AssignDestination],
+    ctx: &mut Context,
+) -> Option<Vec<TranslatedFragmentAccess>> {
+    let fragments = actual_fragments(child, actual, ctx)?;
+    translate_actual_fragments(region, fragments)
+}
+
+fn translated_interface_binding_accesses(
+    region: SummaryRegion,
+    child: &Variable,
+    binding: &InstInterfaceBinding,
+) -> Option<Vec<TranslatedFragmentAccess>> {
+    translate_actual_fragments(
+        region,
+        [contiguous_actual_fragment(child, &binding.actual)?],
+    )
+}
+
+fn translated_contiguous_actual_accesses(
+    region: SummaryRegion,
+    child: &Variable,
+    actual: &InstActualFragment,
+) -> Option<Vec<TranslatedFragmentAccess>> {
+    translate_actual_fragments(region, [contiguous_actual_fragment(child, actual)?])
+}
+
+fn map_translated_fragment_accesses(
+    accesses: Vec<TranslatedFragmentAccess>,
+    bit_part: &BitPartition,
+) -> InstanceRegionMapping {
+    let mut nodes = Vec::new();
+    for access in accesses {
+        nodes.extend(
+            bit_part
+                .overlapping_access(access.parent, access.array, access.packed)
+                .into_iter()
+                .map(|key| MappedNode {
+                    key,
+                    offset: Some(access.offset),
+                    condition: PathCondition::default(),
+                }),
+        );
+    }
+    InstanceRegionMapping { nodes }
+}
+
+fn map_summary_region_to_fragments(
+    region: SummaryRegion,
+    child: &Variable,
+    actual: &[AssignDestination],
+    bit_part: &BitPartition,
+    ctx: &mut Context,
+) -> Option<InstanceRegionMapping> {
+    let accesses = translated_fragment_accesses(region, child, actual, ctx)?;
+    Some(map_translated_fragment_accesses(accesses, bit_part))
+}
+
+fn map_summary_region_to_interface_binding(
+    region: SummaryRegion,
+    child: &Variable,
+    binding: &InstInterfaceBinding,
+    bit_part: &BitPartition,
+) -> Option<InstanceRegionMapping> {
+    let accesses = translated_interface_binding_accesses(region, child, binding)?;
+    Some(map_translated_fragment_accesses(accesses, bit_part))
+}
+
+fn map_summary_region_to_contiguous_actual(
+    region: SummaryRegion,
+    child: &Variable,
+    actual: &InstActualFragment,
+    bit_part: &BitPartition,
+) -> Option<InstanceRegionMapping> {
+    let accesses = translated_contiguous_actual_accesses(region, child, actual)?;
+    Some(map_translated_fragment_accesses(accesses, bit_part))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1248,17 +2008,24 @@ fn map_summary_region(
     parent: VarId,
     index: &crate::ir::VarIndex,
     select: &VarSelect,
+    member_select_domain: Option<MemberSelectDomain>,
     bit_part: &BitPartition,
     ctx: &mut Context,
 ) -> InstanceRegionMapping {
     let mut keys = Vec::new();
-    let offset = if let Some((array, packed, offset)) =
-        translated_summary_access(region, child, parent, index, select, ctx)
-    {
+    let offset = if let Some((array, packed, offset)) = translated_summary_access(
+        region,
+        child,
+        parent,
+        index,
+        select,
+        member_select_domain,
+        ctx,
+    ) {
         keys.extend(bit_part.overlapping_access(parent, array, packed));
         Some(offset)
     } else {
-        for (array, packed) in var_reads(parent, index, select, None, ctx) {
+        for (array, packed) in var_reads(parent, index, select, member_select_domain, ctx) {
             keys.extend(bit_part.overlapping_access(parent, array, packed));
         }
         None
@@ -1283,9 +2050,10 @@ fn translated_summary_access(
     parent: VarId,
     index: &crate::ir::VarIndex,
     select: &VarSelect,
+    member_select_domain: Option<MemberSelectDomain>,
     ctx: &mut Context,
 ) -> Option<(ArraySpan, PackedSpan, (isize, isize))> {
-    let accesses = var_reads(parent, index, select, None, ctx);
+    let accesses = var_reads(parent, index, select, member_select_domain, ctx);
     let [(parent_array, parent_packed)] = accesses.as_slice() else {
         return None;
     };
@@ -1342,6 +2110,7 @@ fn add_resolved_dependency_edges(
     destinations: &ResolvedInstanceRegionMapping,
     dependency: BitDependency,
     condition: &PathCondition,
+    carrier: bool,
 ) {
     for source in &sources.nodes {
         for destination in &destinations.nodes {
@@ -1390,7 +2159,7 @@ fn add_resolved_dependency_edges(
                 GraphDependency {
                     kind,
                     condition: edge_condition,
-                    carrier: false,
+                    carrier,
                 },
             );
         }

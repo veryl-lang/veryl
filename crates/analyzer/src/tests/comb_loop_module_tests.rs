@@ -146,6 +146,216 @@ comb_loop_case!(
     false
 );
 
+fn packed_repeat_code(body: &str, count: usize, phase: usize) -> String {
+    let width = count * 4;
+    format!(
+        r#"
+        module Top (o: output logic) {{
+            var feedback: logic<4>;
+            var passed: logic<{width}>;
+            {body}
+            assign feedback[0] = passed[{phase}];
+            assign feedback[3:1] = 0;
+            assign o = passed[0];
+        }}
+        "#
+    )
+}
+
+comb_loop_case!(
+    comb_loop_local_packed_repeat_retains_matching_phase,
+    "a broad local packed repeat retains matching phase feedback",
+    packed_repeat_code("assign passed = {feedback repeat 64};", 64, 0),
+    true
+);
+
+comb_loop_case!(
+    comb_loop_local_packed_repeat_keeps_disjoint_phase,
+    "a broad local packed repeat keeps a disjoint phase independent",
+    packed_repeat_code("assign passed = {feedback repeat 64};", 64, 1),
+    false
+);
+
+comb_loop_case!(
+    comb_loop_nested_packed_repeats_with_a_shifted_source_are_loop_free_at_scale,
+    "nested broad repeats retain the shifted source's nonzero displacement",
+    r#"
+    module Top (o: output logic) {
+        const N: u32 = 5000;
+        var x: logic<105 * N>;
+        assign x = {{{(x >> 2) as u32, 3'b0} repeat N} repeat 3};
+        assign o = x[0];
+    }
+    "#,
+    false
+);
+
+fn function_packed_repeat_code(phase: usize) -> String {
+    format!(
+        r#"
+        module Top (o: output logic) {{
+            var feedback: logic<4>;
+            var passed: logic<256>;
+            function broadcast (x: input logic<4>) -> logic<256> {{
+                return {{x repeat 64}};
+            }}
+            assign passed = broadcast(feedback);
+            assign feedback[0] = passed[{phase}];
+            assign feedback[3:1] = 0;
+            assign o = passed[0];
+        }}
+        "#
+    )
+}
+
+comb_loop_case!(
+    comb_loop_function_packed_repeat_retains_matching_phase,
+    "a packed repeat remains positional through a function summary",
+    function_packed_repeat_code(0),
+    true
+);
+
+comb_loop_case!(
+    comb_loop_function_packed_repeat_keeps_disjoint_phase,
+    "a function summary keeps disjoint packed-repeat phases independent",
+    function_packed_repeat_code(1),
+    false
+);
+
+fn child_packed_repeat_code(internal_temporary: bool, count: usize, phase: usize) -> String {
+    let width = count * 4;
+    let body = if internal_temporary {
+        format!(
+            "var repeated: logic<{width}>; assign repeated = {{i repeat {count}}}; assign o = repeated;"
+        )
+    } else {
+        format!("assign o = {{i repeat {count}}};")
+    };
+    format!(
+        r#"
+        module Broadcast (i: input logic<4>, o: output logic<{width}>) {{
+            {body}
+        }}
+        module Top (o: output logic) {{
+            var feedback: logic<4>;
+            var passed: logic<{width}>;
+            inst u: Broadcast (i: feedback, o: passed);
+            assign feedback[0] = passed[{phase}];
+            assign feedback[3:1] = 0;
+            assign o = passed[0];
+        }}
+        "#
+    )
+}
+
+comb_loop_case!(
+    comb_loop_child_packed_repeat_retains_matching_phase_at_scale,
+    "a 200k-copy packed repeat retains matching phase through a module summary",
+    child_packed_repeat_code(false, 200_000, 0),
+    true
+);
+
+comb_loop_case!(
+    comb_loop_child_packed_repeat_keeps_disjoint_phase_at_scale,
+    "a 200k-copy packed repeat keeps a disjoint phase independent",
+    child_packed_repeat_code(false, 200_000, 1),
+    false
+);
+
+comb_loop_case!(
+    comb_loop_child_temporary_packed_repeat_retains_matching_phase,
+    "an internal temporary preserves matching packed-repeat phase",
+    child_packed_repeat_code(true, 64, 0),
+    true
+);
+
+comb_loop_case!(
+    comb_loop_child_temporary_packed_repeat_keeps_disjoint_phase,
+    "an internal temporary preserves disjoint packed-repeat phase",
+    child_packed_repeat_code(true, 64, 1),
+    false
+);
+
+fn child_array_repeat_code(element: usize) -> String {
+    format!(
+        r#"
+        module Broadcast (i: input logic [2], o: output logic [64, 2]) {{
+            assign o = '{{i repeat 64}};
+        }}
+        module Top (o: output logic) {{
+            var feedback: logic [2];
+            var passed: logic [64, 2];
+            inst u: Broadcast (i: feedback, o: passed);
+            assign feedback[0] = passed[42][{element}];
+            assign feedback[1] = 0;
+            assign o = passed[0][0];
+        }}
+        "#
+    )
+}
+
+comb_loop_case!(
+    comb_loop_child_array_repeat_retains_matching_element_phase,
+    "an array repeat retains the matching source-element residue",
+    child_array_repeat_code(0),
+    true
+);
+
+comb_loop_case!(
+    comb_loop_child_array_repeat_keeps_disjoint_element_phase,
+    "an array repeat keeps a disjoint source-element residue independent",
+    child_array_repeat_code(1),
+    false
+);
+
+fn multidimensional_repeat_code(source_element: usize, packed_phase: usize) -> String {
+    format!(
+        r#"
+        module Broadcast (
+            i: input logic<2> [2],
+            o: output logic<128> [8, 8, 2],
+        ) {{
+            var tile: logic<128> [2];
+            var repeated_tile: logic<128> [8, 2];
+            assign tile[0] = {{i[0] repeat 64}};
+            assign tile[1] = {{i[1] repeat 64}};
+            assign repeated_tile = '{{tile repeat 8}};
+            assign o = '{{repeated_tile repeat 8}};
+        }}
+        module Top (o: output logic) {{
+            var feedback: logic<2> [2];
+            var passed: logic<128> [8, 8, 2];
+            inst u: Broadcast (i: feedback, o: passed);
+            assign feedback[0][0] = passed[6][4][{source_element}][{packed_phase}];
+            assign feedback[0][1] = 0;
+            assign feedback[1] = 0;
+            assign o = passed[0][0][0][0];
+        }}
+        "#
+    )
+}
+
+comb_loop_case!(
+    comb_loop_multidimensional_repeat_retains_matching_phase,
+    "nested repeats retain matching unpacked and packed phases",
+    multidimensional_repeat_code(0, 0),
+    true
+);
+
+comb_loop_case!(
+    comb_loop_multidimensional_repeat_keeps_disjoint_array_phase,
+    "nested repeats keep a disjoint unpacked phase independent",
+    multidimensional_repeat_code(1, 0),
+    false
+);
+
+comb_loop_case!(
+    comb_loop_multidimensional_repeat_keeps_disjoint_packed_phase,
+    "nested repeats keep a disjoint packed phase independent",
+    multidimensional_repeat_code(0, 1),
+    false
+);
+
 #[test]
 fn comb_loop_core_semantics_and_region_regressions_module_instance_feedthrough_child_has_assign_out_in_parent()
  {
