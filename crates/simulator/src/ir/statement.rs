@@ -646,6 +646,50 @@ impl Statement {
     }
 }
 
+/// Turn every FF store in `stmts` into a plain store into the addressed slot.
+///
+/// An RTL store defers to the cycle write log: it pushes the value and lets
+/// `ff_commit_from_log` deposit it once the event ends, which is what gives an
+/// `always_ff` its next-value semantics.  A testbench store is a blocking
+/// assignment made between events, where no log is installed and nothing would
+/// apply one, so it writes the slot itself — the same way `$readmemh` preloads
+/// memory.  Applied to `Event::Initial` / `Event::Final` only, where every FF
+/// store comes from a testbench block.
+pub(crate) fn make_ff_stores_direct(stmts: &mut [Statement]) {
+    for stmt in stmts {
+        match stmt {
+            Statement::Assign(x) => {
+                x.ff_log_offset = None;
+                x.ff_is_packed = false;
+            }
+            Statement::AssignDynamic(x) => {
+                x.ff_log_base_current_offset = None;
+                x.ff_is_packed = false;
+            }
+            Statement::If(x) => {
+                make_ff_stores_direct(&mut x.true_side);
+                make_ff_stores_direct(&mut x.false_side);
+            }
+            Statement::Case(x) => {
+                for arm in &mut x.arms {
+                    make_ff_stores_direct(&mut arm.body);
+                }
+                make_ff_stores_direct(&mut x.default);
+            }
+            Statement::For(x) => make_ff_stores_direct(&mut x.body),
+            Statement::SequentialBlock(body) => make_ff_stores_direct(body),
+            // Compiled chunks carry the log convention in their emitted code;
+            // `writes_ff` keeps a testbench event that stores into an FF off
+            // the JIT path, so none reach here.
+            Statement::Compiled(_)
+            | Statement::CompiledBatch(_)
+            | Statement::SystemFunctionCall(_)
+            | Statement::Break
+            | Statement::TbMethodCall { .. } => {}
+        }
+    }
+}
+
 pub fn format_assert_message(
     format_str: &str,
     args: &[Expression],
@@ -1151,6 +1195,44 @@ pub enum ProtoStatement {
         inst: StrId,
         method: ProtoTbMethodKind,
     },
+    /// Testbench write into a child instance (`dut.u_core.mem[0] = x`), still
+    /// naming its target by path. `resolve_hier_refs` rewrites it into a plain
+    /// `Assign` once the instance tree gives the path an offset, so no later
+    /// stage ever sees this — the write-side twin of
+    /// `ProtoExpression::HierVariable`.
+    HierAssign(Box<ProtoHierAssign>),
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtoHierAssign {
+    /// Instance names from the referencing module down to the target module.
+    pub inst_path: Vec<StrId>,
+    /// Variable path within the target module.
+    pub var_path: air::VarPath,
+    pub index: air::VarIndex,
+    pub select: air::VarSelect,
+    pub expr: ProtoExpression,
+    pub token: TokenRange,
+}
+
+// `VarIndex` / `VarSelect` are not `Hash`, and this node never reaches the
+// hashed artifacts anyway: `resolve_hier_refs` replaces it with an `Assign`
+// before any chunk is fingerprinted. Hash what identifies the target so the
+// impl stays honest if that ever changes.
+impl std::hash::Hash for ProtoHierAssign {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ProtoHierAssign {
+            inst_path,
+            var_path,
+            index: _,
+            select: _,
+            expr,
+            token: _,
+        } = self;
+        inst_path.hash(state);
+        var_path.hash(state);
+        expr.hash(state);
+    }
 }
 
 impl ProtoStatement {
@@ -1182,6 +1264,39 @@ impl ProtoStatement {
             _ => 0,
         };
         1 + kids
+    }
+
+    /// True when the statement stores into FF storage.
+    ///
+    /// The JIT path skips a testbench event on this: its FF stores are
+    /// direct (see [`make_ff_stores_direct`]), which a compiled chunk cannot
+    /// express — its emitted code pushes into the cycle write log.
+    pub(crate) fn writes_ff(&self) -> bool {
+        match self {
+            ProtoStatement::Assign(x) => x.dst.is_ff(),
+            ProtoStatement::AssignDynamic(x) => x.dst_base.is_ff(),
+            ProtoStatement::If(x) => x
+                .true_side
+                .iter()
+                .chain(x.false_side.iter())
+                .any(Self::writes_ff),
+            ProtoStatement::Case(x) => x
+                .arms
+                .iter()
+                .flat_map(|arm| arm.body.iter())
+                .chain(x.default.iter())
+                .any(Self::writes_ff),
+            ProtoStatement::For(x) => x.body.iter().any(Self::writes_ff),
+            ProtoStatement::SequentialBlock(body) => body.iter().any(Self::writes_ff),
+            ProtoStatement::CompiledBlock(x) => x.output_offsets.iter().any(|o| o.is_ff()),
+            // `$readmemh` stores into the FF slots directly already.
+            ProtoStatement::SystemFunctionCall(_)
+            | ProtoStatement::Break
+            | ProtoStatement::TbMethodCall { .. } => false,
+            ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+        }
     }
 
     /// Adjust all embedded byte offsets by the given deltas.
@@ -1328,6 +1443,9 @@ impl ProtoStatement {
                 | ProtoTbMethodKind::RandomGetSeed { .. } => {}
             },
             ProtoStatement::Break => {}
+            &mut ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 
@@ -1378,6 +1496,9 @@ impl ProtoStatement {
             }
             ProtoStatement::TbMethodCall { .. } => {}
             ProtoStatement::Break => {}
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 
@@ -1517,6 +1638,9 @@ impl ProtoStatement {
                 | ProtoTbMethodKind::RandomGetSeed { .. } => {}
             },
             ProtoStatement::Break => {}
+            &mut ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 
@@ -1672,6 +1796,9 @@ impl ProtoStatement {
             }
             ProtoStatement::TbMethodCall { .. } => {}
             ProtoStatement::Break => {}
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 
@@ -1777,6 +1904,9 @@ impl ProtoStatement {
             }
             ProtoStatement::TbMethodCall { .. } => {}
             ProtoStatement::Break => {}
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 
@@ -1793,6 +1923,9 @@ impl ProtoStatement {
         match self {
             ProtoStatement::AssignDynamic(x) if x.dst_num_elements > 2 => {
                 out.push((x.dst_base, x.dst_stride, x.dst_num_elements));
+            }
+            ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
             }
             ProtoStatement::AssignDynamic(_)
             | ProtoStatement::Assign(_)
@@ -1959,6 +2092,9 @@ impl ProtoStatement {
             }
             ProtoStatement::TbMethodCall { .. } => {}
             ProtoStatement::Break => {}
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 
@@ -2039,6 +2175,9 @@ impl ProtoStatement {
                 }
             }
             ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
+            ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 
@@ -2127,6 +2266,9 @@ impl ProtoStatement {
             }
             ProtoStatement::TbMethodCall { .. } => {}
             ProtoStatement::Break => {}
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 
@@ -2188,6 +2330,9 @@ impl ProtoStatement {
             }
             ProtoStatement::TbMethodCall { .. } => {}
             ProtoStatement::Break => {}
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
         result
     }
@@ -2660,6 +2805,9 @@ impl ProtoStatement {
                         inst: *inst,
                         method,
                     }
+                }
+                &ProtoStatement::HierAssign(_) => {
+                    unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
                 }
             }
         }
@@ -3864,6 +4012,7 @@ fn conv_assign_statements(
                             vidx.append(&air::VarIndex::from_index(i, &rhs_shape));
                         }
                         let element_assign = air::AssignStatement {
+                            hier_dst: None,
                             dst: vec![new_dst],
                             width: src.width,
                             expr: new_expr,
@@ -3896,6 +4045,7 @@ fn conv_assign_statements(
                             .index
                             .append(&air::VarIndex::from_index(i, &dst_shape));
                         let element_assign = air::AssignStatement {
+                            hier_dst: None,
                             dst: vec![new_dst],
                             width: src.width,
                             expr: src.expr.clone(),
@@ -3929,6 +4079,7 @@ fn conv_assign_statements(
                         let mut element_comptime = element_comptime.clone();
                         element_comptime.value = ValueVariant::Numeric(value.clone());
                         let element_assign = air::AssignStatement {
+                            hier_dst: None,
                             dst: vec![new_dst],
                             width: src.width,
                             expr: air::Expression::Term(Box::new(air::Factor::Value(
@@ -4023,7 +4174,10 @@ fn conv_assign_statements(
             }
         }
 
-        if matches!(src.expr, air::Expression::ArrayLiteral(..)) {
+        // A hierarchical destination carries no local variable, so `dst` is
+        // empty; the branches around this one guard on its length for the same
+        // reason.
+        if matches!(src.expr, air::Expression::ArrayLiteral(..)) && src.dst.len() == 1 {
             let dst = &src.dst[0];
             let scope = context.scope();
             let meta = scope.variable_meta.get(&dst.id).unwrap();
@@ -4048,6 +4202,7 @@ fn conv_assign_statements(
                 new_dst.select = select;
 
                 let element_assign = air::AssignStatement {
+                    hier_dst: None,
                     dst: vec![new_dst],
                     width: src.width,
                     expr: array_expr.expr,
@@ -4410,6 +4565,25 @@ pub(crate) fn msb_first_window(remaining: &mut usize, elem_width: usize) -> (usi
 
 impl Conv<&air::AssignStatement> for ProtoStatement {
     fn conv(context: &mut Context, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
+        // A child-instance destination has no offset yet — the instance tree is
+        // not assembled at conv time — so it travels as a path.
+        if let Some(hier) = &src.hier_dst {
+            // An array literal is lowered per element against the destination's
+            // shape, which a hierarchical path does not carry at conv time.
+            if matches!(src.expr, air::Expression::ArrayLiteral(..)) {
+                return Err(SimulatorError::unsupported_description(&hier.token));
+            }
+            let expr = ProtoExpression::conv(context, &src.expr)?;
+            return Ok(ProtoStatement::HierAssign(Box::new(ProtoHierAssign {
+                inst_path: hier.inst_path.clone(),
+                var_path: hier.var_path.clone(),
+                index: hier.index.clone(),
+                select: hier.select.clone(),
+                expr,
+                token: hier.token,
+            })));
+        }
+
         // TODO multiple dst
         let dst = &src.dst[0];
         let id = dst.id;

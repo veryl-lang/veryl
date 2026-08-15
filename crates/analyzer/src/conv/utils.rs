@@ -728,6 +728,7 @@ pub fn eval_assign_statement(
             dst.select = select;
 
             let statement = ir::Statement::Assign(ir::AssignStatement {
+                hier_dst: None,
                 dst: vec![dst],
                 width,
                 expr: expr.expr,
@@ -739,6 +740,7 @@ pub fn eval_assign_statement(
         check_reset_non_elaborative(context, expr);
 
         let statement = ir::Statement::Assign(ir::AssignStatement {
+            hier_dst: None,
             dst: vec![dst.clone()],
             width,
             expr: expr.clone(),
@@ -2442,6 +2444,76 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
     } else {
         HierReference::InstanceArray(segs[0])
     }
+}
+
+/// The write-side counterpart of the `HierReference::Resolved` arm in
+/// [`eval_factor_path_inner`]: turns `dut.u_core.mem[0]` on the left of an
+/// assignment into a [`ir::HierAssignDestination`], which the simulator
+/// resolves to a buffer offset after elaboration.
+///
+/// Returns `None` when the path is not a hierarchical reference at all, so the
+/// caller can fall through to its ordinary "destination not found" handling.
+/// Like the read side this is testbench-only; a hierarchical write from RTL is
+/// reported as an invisible identifier.
+pub fn to_hier_assign_destination(
+    context: &mut Context,
+    dst: VarPathSelect,
+) -> IrResult<Option<ir::HierAssignDestination>> {
+    let (path, select, token) = dst.into();
+    let HierReference::Resolved {
+        inst_path,
+        var_path,
+        r#type,
+        part_select,
+    } = classify_hier_reference(context, &path)
+    else {
+        return Ok(None);
+    };
+
+    if !context.in_tb_block {
+        context.insert_error(AnalyzerError::invisible_identifier(
+            &path.0[1].to_string(),
+            &token,
+        ));
+        return Err(ir_error!(token));
+    }
+
+    let mut comptime = Comptime::from_type(*r#type, ClockDomain::None, token);
+
+    let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+    let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+    let width_select = if let Some(part_select) = &part_select {
+        part_select.to_base_select(context, &width_select)
+    } else {
+        eval_width_select(context, &var_path, &comptime.r#type, width_select)
+    }
+    .ok_or_else(|| ir_error!(token))?;
+
+    // An array RANGE destination would need one write per covered element;
+    // `to_assign_destinations` does that for local paths and has no
+    // hierarchical twin, so reject it rather than write the wrong element.
+    if array_select.is_range() {
+        return Err(ir_error!(token));
+    }
+
+    let index = array_select.to_index();
+    comptime.r#type.array.drain(0..index.dimension());
+    if !width_select.is_empty() {
+        comptime.r#type.flatten_struct_union_enum();
+        if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
+            comptime.r#type.set_concrete_width(width);
+        }
+    }
+    comptime.token = token;
+
+    Ok(Some(ir::HierAssignDestination {
+        inst_path,
+        var_path,
+        index,
+        select: width_select,
+        comptime,
+        token,
+    }))
 }
 
 pub fn eval_factor_path(
@@ -4188,6 +4260,7 @@ pub fn expand_connect(
                 {
                     let width = dst.total_width(context);
                     let statement = ir::Statement::Assign(ir::AssignStatement {
+                        hier_dst: None,
                         dst: vec![dst],
                         width,
                         expr: src,
@@ -4236,6 +4309,7 @@ pub fn expand_connect_const(
                 if let Some(dst) = dst.to_assign_destination(context, false) {
                     let width = dst.total_width(context);
                     let statement = ir::Statement::Assign(ir::AssignStatement {
+                        hier_dst: None,
                         dst: vec![dst],
                         width,
                         expr: src,

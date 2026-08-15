@@ -602,6 +602,9 @@ impl LocalAnalysis {
             ProtoStatement::SystemFunctionCall(_)
             | ProtoStatement::TbMethodCall { .. }
             | ProtoStatement::Break => {}
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 
@@ -761,6 +764,9 @@ impl LocalAnalysis {
                 self.poison(s);
             }
             ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 }
@@ -2416,6 +2422,9 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
         ProtoStatement::SystemFunctionCall(_) => out.push("SysFn".to_string()),
         ProtoStatement::TbMethodCall { .. } => out.push("TbMethodCall".to_string()),
         ProtoStatement::Break => out.push("Break".to_string()),
+        ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 
@@ -2892,6 +2901,9 @@ fn comb_touches(
         // testbench call can reach anything.
         ProtoStatement::CompiledBlock(_) | ProtoStatement::TbMethodCall { .. } => false,
         ProtoStatement::Break => true,
+        &ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 
@@ -3510,6 +3522,9 @@ fn const_cone_partition(
             }
             // TB-method writes are not modeled either.
             ProtoStatement::TbMethodCall { .. } => false,
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
     let mut wranges: WRanges = Vec::new();
@@ -8540,6 +8555,9 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // testbench Module that contains them stays on the
             // Cranelift dispatch path.
             None
+        }
+        &ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }
     }
 }

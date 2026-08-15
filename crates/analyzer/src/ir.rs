@@ -42,8 +42,8 @@ pub use shape::{Shape, ShapeRef};
 pub use signature::Signature;
 pub use statement::{
     AssignDestination, AssignStatement, CaseArm, CasePattern, CaseStatement, ControlFlow, ForBound,
-    ForRange, ForStatement, IfResetStatement, IfStatement, Statement, StatementBlock, TbMethod,
-    TbMethodCall,
+    ForRange, ForStatement, HierAssignDestination, IfResetStatement, IfStatement, Statement,
+    StatementBlock, TbMethod, TbMethodCall,
 };
 pub use system_function::{
     AssertKind, Input as SystemFunctionInput, Output as SystemFunctionOutput, SystemFunctionCall,

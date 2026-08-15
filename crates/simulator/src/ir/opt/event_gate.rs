@@ -284,6 +284,9 @@ fn stmt_ranges(s: &ProtoStatement, reads: &mut Vec<Range>, writes: &mut Vec<Rang
         ProtoStatement::SystemFunctionCall(_)
         | ProtoStatement::TbMethodCall { .. }
         | ProtoStatement::Break => {}
+        ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 

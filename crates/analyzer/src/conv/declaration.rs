@@ -1019,6 +1019,7 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                     check_assign_clock_domain(context, d, &comptime, &token);
                 }
                 let statement = ir::Statement::Assign(ir::AssignStatement {
+                    hier_dst: None,
                     dst,
                     width,
                     expr,
