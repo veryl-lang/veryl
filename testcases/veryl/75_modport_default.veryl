@@ -6,6 +6,8 @@ interface Interface75 {
 
     #[ifdef(TRACE)]
     var f: logic;
+    #[else]
+    var g: logic;
 
     function Func75 () -> logic {
         var e: logic;
@@ -37,7 +39,9 @@ interface Interface75 {
         a: input ,
         c: output,
         #[ifdef(TRACE)]
-        f    : input ,
+        f: input,
+        #[else]
+        g    : input ,
         get_a: import,
         set_c: import,
     }

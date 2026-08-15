@@ -6,6 +6,8 @@ interface veryl_testcase_Interface75;
 
     `ifdef TRACE
     logic f;
+    `else
+    logic g;
     `endif
 
     function automatic logic Func75() ;
@@ -38,7 +40,9 @@ interface veryl_testcase_Interface75;
         input  a,
         output c,
         `ifdef TRACE
-        input  f    ,
+        input f,
+        `else
+        input  g    ,
         `endif
         import get_a,
         import set_c
@@ -52,13 +56,16 @@ interface veryl_testcase_Interface75;
     );
 
     modport master (
+        `ifdef TRACE
+        input  f    ,
+        `endif
+        `ifndef TRACE
+        input  g    ,
+        `endif
         input  a    ,
         input  b    ,
         output c    ,
-        output d    
-        `ifdef TRACE
-        , input  f    ,
-        `endif
+        output d    ,
         import get_a,
         import get_b,
         import set_c,
@@ -66,11 +73,14 @@ interface veryl_testcase_Interface75;
     );
 
     modport slave_ac (
+        `ifdef TRACE
+        output f,
+        `endif
+        `ifndef TRACE
+        output g,
+        `endif
         output a,
         input  c
-        `ifdef TRACE
-        , output f
-        `endif
     );
 
     modport slave_db (
@@ -79,63 +89,81 @@ interface veryl_testcase_Interface75;
     );
 
     modport slave (
+        `ifdef TRACE
+        output f,
+        `endif
+        `ifndef TRACE
+        output g,
+        `endif
         output a,
         output b,
         input  c,
         input  d
-        `ifdef TRACE
-        , output f
-        `endif
     );
 
     modport all_input (
+        `ifdef TRACE
+        input f,
+        `endif
+        `ifndef TRACE
+        input g,
+        `endif
         input a,
         input b,
         input c,
         input d
-        `ifdef TRACE
-        , input f
-        `endif
     );
 
     modport all_output (
+        `ifdef TRACE
+        input f,
+        `endif
+        `ifndef TRACE
+        input g,
+        `endif
         input a,
         input b,
         input c,
         input d
-        `ifdef TRACE
-        , input f
-        `endif
     );
 
     modport partial_converse (
         input  a,
+        `ifdef TRACE
+        output f,
+        `endif
+        `ifndef TRACE
+        output g,
+        `endif
         output b,
         input  c,
         input  d
-        `ifdef TRACE
-        , output f
-        `endif
     );
 
     modport partial_input (
         output c,
+        `ifdef TRACE
+        input  f,
+        `endif
+        `ifndef TRACE
+        input  g,
+        `endif
         input  a,
         input  b,
         input  d
-        `ifdef TRACE
-        , input  f
-        `endif
     );
 
     modport partial_same (
         output a    ,
+        `ifdef TRACE
+        input  f    ,
+        `endif
+        `ifndef TRACE
+        input  g    ,
+        `endif
         input  b    ,
         output c    ,
-        output d    
-        `ifdef TRACE
-        , input  f    ,
-        `endif
+        output d    ,
         import get_a,
         import get_b,
         import set_c,

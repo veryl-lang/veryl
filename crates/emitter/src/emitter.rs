@@ -2759,32 +2759,46 @@ impl Emitter {
                             SymbolKind::ModportFunctionMember(ref x) => Some(x.function),
                             _ => None,
                         };
+                        // `else` / `elsif` have no guarded neighbour to attach to
+                        // here, so the branch is rebuilt as a standalone nested
+                        // guard: `pos` must be defined and `neg` must not.
+                        let preceding = |pos: Vec<StrId>, neg: Vec<StrId>| {
+                            pos.into_iter()
+                                .map(|x| ("ifdef", x))
+                                .chain(neg.into_iter().map(|x| ("ifndef", x)))
+                        };
                         let defines: Vec<_> = source
                             .and_then(symbol_table::get)
                             .map(|x| attribute_table::get(&x.token))
                             .unwrap_or_default()
                             .into_iter()
-                            .filter_map(|x| match x {
-                                Attr::Ifdef(x) => Some(("ifdef", x)),
-                                Attr::Ifndef(x) => Some(("ifndef", x)),
-                                _ => None,
+                            .flat_map(|x| match x {
+                                Attr::Ifdef(x) => vec![("ifdef", x)],
+                                Attr::Ifndef(x) => vec![("ifndef", x)],
+                                Attr::Elsif(x, pos, neg) => preceding(pos, neg)
+                                    .chain(std::iter::once(("ifdef", x)))
+                                    .collect(),
+                                Attr::Else(pos, neg) => preceding(pos, neg).collect(),
+                                _ => vec![],
                             })
                             .collect();
                         (i, symbol, direction, defines)
                     })
                     .collect();
+                // Each member carries its comma inside its own guard so the comma
+                // vanishes with it. Only the last member's absent comma can't, so
+                // guarded members go first and an unconditional one ends the list.
+                // Modport item order is not significant.
+                let (guarded, unguarded): (Vec<_>, Vec<_>) =
+                    members.into_iter().partition(|x| !x.3.is_empty());
+                let members: Vec<_> = guarded.into_iter().chain(unguarded).collect();
                 let last = members.len().saturating_sub(1);
 
-                for (n, (i, symbol, direction, defines)) in members.iter().enumerate() {
-                    let guarded = !defines.is_empty();
-                    let has_prev = *i != 0 || arg.modport_declaration_opt.is_some();
-                    // A guarded member keeps its comma inside its own guard, so the
-                    // comma disappears with it. The explicit list emits none.
-                    let leading = has_prev && (guarded || n == 0);
-                    let trailing = n != last && members[n + 1].3.is_empty();
+                for (n, (_, symbol, direction, defines)) in members.iter().enumerate() {
+                    let has_prev = n != 0 || arg.modport_declaration_opt.is_some();
 
                     if has_prev {
-                        if leading && !guarded {
+                        if n == 0 {
                             self.str(",");
                         }
                         self.newline();
@@ -2801,10 +2815,6 @@ impl Emitter {
                         self.str(&format!("`{kind} {define}"));
                         self.newline();
                     }
-                    if leading && guarded {
-                        self.str(",");
-                        self.space(1);
-                    }
                     self.align_start(align_kind::DIRECTION);
                     self.duplicated_token(&token.replace(&direction.to_string()));
                     self.align_finish(align_kind::DIRECTION);
@@ -2812,7 +2822,7 @@ impl Emitter {
                     self.align_start(align_kind::IDENTIFIER);
                     self.duplicated_token(&token.replace(&symbol.token.text.to_string()));
                     self.align_finish(align_kind::IDENTIFIER);
-                    if trailing {
+                    if n != last {
                         self.str(",");
                     }
                     for _ in defines {
