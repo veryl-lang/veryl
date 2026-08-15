@@ -42,6 +42,154 @@ fn translate_packed_span(span: PackedSpan, offset: isize) -> Option<PackedSpan> 
     PackedSpan::new(translated_start(span.start, offset)?, span.length)
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct AffineIndex {
+    terms: Vec<(VarId, isize)>,
+    constant: isize,
+}
+
+impl AffineIndex {
+    fn variable(id: VarId) -> Self {
+        Self {
+            terms: vec![(id, 1)],
+            constant: 0,
+        }
+    }
+
+    fn add_scaled(&mut self, other: &Self, scale: isize) -> Option<()> {
+        self.constant = self
+            .constant
+            .checked_add(other.constant.checked_mul(scale)?)?;
+        for &(id, coefficient) in &other.terms {
+            let coefficient = coefficient.checked_mul(scale)?;
+            match self.terms.binary_search_by_key(&id, |(id, _)| *id) {
+                Ok(index) => {
+                    self.terms[index].1 = self.terms[index].1.checked_add(coefficient)?;
+                }
+                Err(index) => self.terms.insert(index, (id, coefficient)),
+            }
+        }
+        self.terms.retain(|(_, coefficient)| *coefficient != 0);
+        Some(())
+    }
+
+    fn scaled(mut self, scale: isize) -> Option<Self> {
+        self.constant = self.constant.checked_mul(scale)?;
+        for (_, coefficient) in &mut self.terms {
+            *coefficient = coefficient.checked_mul(scale)?;
+        }
+        Some(self)
+    }
+
+    /// Destination position minus source position when both use the same
+    /// symbolic coordinates.
+    fn destination_offset_from(&self, source: &Self) -> Option<isize> {
+        (self.terms == source.terms).then(|| self.constant.checked_sub(source.constant))?
+    }
+
+    fn evaluate(&self, values: &[(VarId, isize)]) -> Option<usize> {
+        let mut result = self.constant;
+        for &(id, coefficient) in &self.terms {
+            let value = values
+                .iter()
+                .rev()
+                .find_map(|(candidate, value)| (*candidate == id).then_some(*value))?;
+            result = result.checked_add(coefficient.checked_mul(value)?)?;
+        }
+        usize::try_from(result).ok()
+    }
+
+    fn solve_for(
+        &self,
+        variable: VarId,
+        target: usize,
+        values: &[(VarId, isize)],
+    ) -> Option<usize> {
+        let mut remainder = isize::try_from(target).ok()?.checked_sub(self.constant)?;
+        let mut variable_coefficient = None;
+        for &(id, coefficient) in &self.terms {
+            if id == variable {
+                variable_coefficient = Some(coefficient);
+            } else {
+                let value = values
+                    .iter()
+                    .rev()
+                    .find_map(|(candidate, value)| (*candidate == id).then_some(*value))?;
+                remainder = remainder.checked_sub(coefficient.checked_mul(value)?)?;
+            }
+        }
+        let coefficient = variable_coefficient?;
+        if coefficient == 0 || remainder % coefficient != 0 {
+            return None;
+        }
+        usize::try_from(remainder / coefficient).ok()
+    }
+}
+
+fn affine_constant(expression: &Expression, ctx: &mut Context) -> Option<AffineIndex> {
+    let constant = expression
+        .eval_value(ctx)
+        .and_then(|value| value.to_usize())
+        .and_then(|value| isize::try_from(value).ok())?;
+    Some(AffineIndex {
+        terms: Vec::new(),
+        constant,
+    })
+}
+
+fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineIndex> {
+    match expression {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::Variable(id, index, select, _) if index.0.is_empty() && select.is_empty() => {
+                Some(AffineIndex::variable(*id))
+            }
+            Factor::Value(_) => affine_constant(expression, ctx),
+            _ if expression.comptime().is_const => affine_constant(expression, ctx),
+            _ => None,
+        },
+        Expression::Unary(Op::Add, expression, _) => affine_index(expression, ctx),
+        Expression::Unary(Op::Sub, expression, _) => affine_index(expression, ctx)?.scaled(-1),
+        Expression::Binary(left, Op::Add | Op::Sub, right, _) => {
+            let mut result = affine_index(left, ctx)?;
+            let right = affine_index(right, ctx)?;
+            result.add_scaled(
+                &right,
+                if matches!(expression, Expression::Binary(_, Op::Sub, _, _)) {
+                    -1
+                } else {
+                    1
+                },
+            )?;
+            Some(result)
+        }
+        Expression::Binary(left, Op::Mul, right, _) => {
+            let left = affine_index(left, ctx)?;
+            let right = affine_index(right, ctx)?;
+            if left.terms.is_empty() {
+                right.scaled(left.constant)
+            } else if right.terms.is_empty() {
+                left.scaled(right.constant)
+            } else {
+                None
+            }
+        }
+        Expression::Binary(left, Op::As, _, _) => affine_index(left, ctx),
+        _ if expression.comptime().is_const => affine_constant(expression, ctx),
+        _ => None,
+    }
+}
+
+fn runtime_bound_end(expression: &Expression, inclusive: bool) -> Option<usize> {
+    let r#type = &expression.comptime().r#type;
+    let width = r#type.total_width()?;
+    let value_bits = width.checked_sub(usize::from(r#type.signed))?;
+    if value_bits >= usize::BITS as usize {
+        return None;
+    }
+    let maximum = (1usize << value_bits).checked_sub(1)?;
+    maximum.checked_add(usize::from(inclusive))
+}
+
 enum RepeatedProjection {
     Empty,
     Single {
@@ -158,6 +306,7 @@ type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Vec<SummarySource>
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct SummarySource {
     key: NodeKey,
+    relation: PositionRelation,
     condition: PathCondition,
 }
 
@@ -477,6 +626,9 @@ struct ProcedureAnalysis<'a, 's> {
     branch_namespace: usize,
     next_branch: usize,
     complete: bool,
+    requested_array_index: Option<AffineIndex>,
+    requested_destination_array: Option<ArraySpan>,
+    runtime_loop_values: Vec<(VarId, isize)>,
     summaries: Option<&'s mut FunctionSummaries<'a>>,
 }
 
@@ -497,6 +649,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             branch_namespace: 0,
             next_branch: 0,
             complete: true,
+            requested_array_index: None,
+            requested_destination_array: None,
+            runtime_loop_values: Vec::new(),
             summaries: None,
         }
     }
@@ -568,24 +723,26 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         );
         visible_keys.sort_unstable();
         visible_keys.dedup();
-        let mut source_cache =
-            SourceCache::restricted(visible_keys.into_iter().map(|node| SsaKey {
-                node,
-                call_frame: None,
-            }));
+        let mut source_cache = SourceCache::restricted(
+            visible_keys
+                .into_iter()
+                .map(|node| SsaKey { node, call_frame: None }),
+        );
         let mut visible_sources = |this: &Self, version| {
             let mut sources = this
                 .ssa
                 .root_source_relations_guarded_cached(version, &mut source_cache)
                 .into_iter()
-                .filter_map(|(source, _, condition)| {
+                .filter_map(|(source, relation, condition)| {
                     source.call_frame.is_none().then_some(SummarySource {
                         key: source.node,
+                        relation,
                         condition,
                     })
                 })
                 .filter(|source| {
-                    formal_ids.contains(&source.key.0) || this.is_module_scope_key(source.key)
+                    formal_ids.contains(&source.key.0)
+                        || this.is_module_scope_key(source.key)
                 })
                 .collect::<Vec<_>>();
             sources.sort_unstable();
@@ -651,11 +808,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn dependencies(&mut self) -> Vec<Dependency> {
         let mut dependencies = Vec::new();
-        let mut source_cache =
-            SourceCache::restricted(self.module_scope_keys().into_iter().map(|node| SsaKey {
-                node,
-                call_frame: None,
-            }));
+        let mut source_cache = SourceCache::restricted(
+            self.module_scope_keys()
+                .into_iter()
+                .map(|node| SsaKey { node, call_frame: None }),
+        );
         let destinations: Vec<_> = self
             .written
             .iter()
@@ -767,12 +924,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut keys = Vec::new();
         let mut destination = destination.clone();
         destination.index = self.receiver_index(destination.id, &destination.index);
+        let concrete_array = self
+            .flattened_affine_index(destination.id, &destination.index)
+            .and_then(|index| index.evaluate(&self.runtime_loop_values))
+            .map(|start| ArraySpan { start, length: 1 });
         let accesses = dst_writes(&destination, &mut self.ctx);
         if accesses.is_empty() {
             self.complete = false;
         }
         for (idx, span) in accesses {
-            keys.extend(self.bit_part.overlapping_access(destination.id, idx, span));
+            keys.extend(self.bit_part.overlapping_access(
+                destination.id,
+                concrete_array.unwrap_or(idx),
+                span,
+            ));
         }
         keys.sort_unstable();
         keys.dedup();
@@ -782,6 +947,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn destination_is_dynamic(&self, destination: &AssignDestination) -> bool {
         let index = self.receiver_index(destination.id, &destination.index);
         !index.is_const() || !destination.select.is_const_with_range()
+    }
+
+    fn flattened_affine_index(&mut self, id: VarId, index: &VarIndex) -> Option<AffineIndex> {
+        let index = self.receiver_index(id, index);
+        let variable = self.ctx.variables.get(&id)?;
+        if index.dimension() != variable.r#type.array.dims() {
+            return None;
+        }
+        let flattened = variable.r#type.array.calc_index_expr(&index.0)?;
+        affine_index(&flattened, &mut self.ctx)
     }
 
     fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
@@ -887,8 +1062,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     packed: Some(signed_difference(low, expression_offset)?),
                 })
             });
+        let destination_index = self.flattened_affine_index(destination.id, &destination.index);
         let keys = self.write_keys(destination);
-        let dynamic = self.destination_is_dynamic(destination);
+        let dynamic_array = !destination.index.is_const()
+            && destination_index
+                .as_ref()
+                .and_then(|index| index.evaluate(&self.runtime_loop_values))
+                .is_none();
+        let dynamic_packed = !destination.select.is_const_with_range();
+        let dynamic = dynamic_array || dynamic_packed;
         for key in keys {
             let mut whole = controls.to_vec();
             for selector in destination
@@ -905,13 +1087,40 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let mut sources = if let (Some(destination_array), Some((_, low)), Some(key_span)) =
                 (destination_array, selected, self.key_span(key))
             {
-                if let (Some(array), Some(packed)) = (
-                    key.1
-                        .intersection(destination_array)
-                        .and_then(|array| array.translated(destination_array.start, 0)),
+                let destination_region = key.1.intersection(destination_array);
+                let expression_array = destination_region.and_then(|array| {
+                    if destination_index
+                        .as_ref()
+                        .is_some_and(|index| !index.terms.is_empty())
+                    {
+                        Some(ArraySpan {
+                            start: 0,
+                            length: array.length,
+                        })
+                    } else {
+                        array.translated(destination_array.start, 0)
+                    }
+                });
+                if let (Some(array), Some(destination_region), Some(packed)) = (
+                    expression_array,
+                    destination_region,
                     key_span.translated(low, expression_offset),
                 ) {
-                    self.eval_expr_requested(expression, array, packed, expression_context_width)
+                    let previous_index = std::mem::replace(
+                        &mut self.requested_array_index,
+                        destination_index.clone(),
+                    );
+                    let previous_destination =
+                        self.requested_destination_array.replace(destination_region);
+                    let sources = self.eval_expr_requested(
+                        expression,
+                        array,
+                        packed,
+                        expression_context_width,
+                    );
+                    self.requested_array_index = previous_index;
+                    self.requested_destination_array = previous_destination;
+                    sources
                 } else {
                     ExpressionSources::default()
                 }
@@ -1262,6 +1471,90 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.merge_branches(states)
     }
 
+    fn runtime_loop_candidates(&mut self, statement: &ForStatement) -> Vec<usize> {
+        let mut destinations = Vec::new();
+        collect_assign_destinations(&statement.body, &mut destinations);
+        let mut candidates = HashSet::default();
+        for destination in destinations {
+            let Some(index) = self.flattened_affine_index(destination.id, &destination.index)
+            else {
+                continue;
+            };
+            for span in self.bit_part.array_spans(destination.id) {
+                for target in [
+                    Some(span.start),
+                    span.end().and_then(|end| end.checked_sub(1)),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if let Some(candidate) =
+                        index.solve_for(statement.var_id, target, &self.runtime_loop_values)
+                    {
+                        candidates.insert(candidate);
+                    }
+                }
+            }
+        }
+
+        let (start, end, step, reverse) = match &statement.range {
+            ForRange::Forward {
+                start,
+                end,
+                inclusive,
+                step,
+            }
+            | ForRange::Reverse {
+                start,
+                end,
+                inclusive,
+                step,
+            } => (
+                match start {
+                    ForBound::Const(value) => Some(*value),
+                    ForBound::Expression(_) => None,
+                },
+                match end {
+                    ForBound::Const(value) => Some(value.saturating_add(usize::from(*inclusive))),
+                    ForBound::Expression(expression) => runtime_bound_end(expression, *inclusive),
+                },
+                Some(*step),
+                matches!(statement.range, ForRange::Reverse { .. }),
+            ),
+            ForRange::Stepped {
+                start,
+                end,
+                inclusive,
+                ..
+            } => (
+                match start {
+                    ForBound::Const(value) => Some(*value),
+                    ForBound::Expression(_) => None,
+                },
+                match end {
+                    ForBound::Const(value) => Some(value.saturating_add(usize::from(*inclusive))),
+                    ForBound::Expression(expression) => runtime_bound_end(expression, *inclusive),
+                },
+                None,
+                false,
+            ),
+        };
+        candidates.retain(|candidate| {
+            start.is_none_or(|start| *candidate >= start)
+                && end.is_none_or(|end| *candidate < end)
+                && step.is_none_or(|step| {
+                    step != 0
+                        && start.is_none_or(|start| candidate.saturating_sub(start) % step == 0)
+                })
+        });
+        let mut candidates = candidates.into_iter().collect::<Vec<_>>();
+        candidates.sort_unstable();
+        if reverse {
+            candidates.reverse();
+        }
+        candidates
+    }
+
     fn eval_for(&mut self, statement: &ForStatement, controls: &[VersionId]) -> ProcedureFlow {
         let mut range_controls = controls.to_vec();
         let bounds = match &statement.range {
@@ -1314,16 +1607,42 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return ProcedureFlow::Continue;
         }
 
-        // Runtime loops have a zero-trip path. One symbolic body traversal is
-        // enough to expose all explicit reads; the exit phi keeps LiveOnEntry
-        // separate so retained state does not become a loop edge.
+        // Runtime loops have a zero-trip path. Split only at sparse partition
+        // boundaries touched by affine iterator expressions. This preserves
+        // iteration and statement order without scaling with the declared
+        // array shape. Non-affine bodies retain one conservative traversal.
         let parent_condition = self.path_condition.clone();
         let checkpoint = self.ssa.checkpoint();
         self.loop_flows.push(LoopFlow {
             checkpoint,
             breaks: Vec::new(),
         });
-        let flow = self.eval_block(&statement.body, &range_controls);
+        let candidates = self.runtime_loop_candidates(statement);
+        let mut flow = ProcedureFlow::Continue;
+        if candidates.is_empty() {
+            flow = self.eval_block(&statement.body, &range_controls);
+        } else {
+            for candidate in candidates {
+                if let Some(variable) = self.ctx.variables.get_mut(&statement.var_id)
+                    && let Some(width) = statement.var_type.total_width()
+                {
+                    variable.set_value(
+                        &[],
+                        Value::new(candidate as u64, width, statement.var_type.signed),
+                        None,
+                    );
+                }
+                let Some(candidate) = isize::try_from(candidate).ok() else {
+                    continue;
+                };
+                self.runtime_loop_values.push((statement.var_id, candidate));
+                flow = self.eval_block(&statement.body, &range_controls);
+                self.runtime_loop_values.pop();
+                if flow != ProcedureFlow::Continue {
+                    break;
+                }
+            }
+        }
         let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let body_state = self.ssa.capture_and_rollback(checkpoint);
         loop_flow.breaks.push(FlowState {
@@ -1416,12 +1735,31 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     if let Some((_, low)) = selected {
                         let mut reads = Vec::new();
                         let accesses = var_reads(*id, index, select, &mut self.ctx);
+                        let dynamic_array_offset = self
+                            .requested_array_index
+                            .clone()
+                            .filter(|destination| !destination.terms.is_empty())
+                            .and_then(|destination| {
+                                let source = self.flattened_affine_index(*id, index)?;
+                                destination.destination_offset_from(&source)
+                            });
                         let position_preserving =
                             index.0.iter().all(|index| index.comptime().is_const)
                                 && accesses.len() == 1;
                         if let Some(source_span) = requested.translated(0, low) {
                             for (idx, access) in &accesses {
-                                let source_array = if position_preserving {
+                                let source_array = if let Some(offset) = dynamic_array_offset {
+                                    offset
+                                        .checked_neg()
+                                        .and_then(|offset| {
+                                            translate_array_span(
+                                                self.requested_destination_array
+                                                    .unwrap_or(requested_array),
+                                                offset,
+                                            )
+                                        })
+                                        .and_then(|requested| requested.intersection(*idx))
+                                } else if position_preserving {
                                     requested_array
                                         .translated(0, idx.start)
                                         .and_then(|requested| requested.intersection(*idx))
@@ -1441,16 +1779,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 }
                             }
                         }
-                        let offset = position_preserving
-                            .then(|| {
+                        let offset = dynamic_array_offset
+                            .and_then(|array| {
                                 Some(PositionRelation {
-                                    array: Some(
-                                        isize::try_from(accesses[0].0.start).ok()?.checked_neg()?,
-                                    ),
+                                    array: Some(array),
                                     packed: Some(isize::try_from(low).ok()?.checked_neg()?),
                                 })
                             })
-                            .flatten();
+                            .or_else(|| {
+                                position_preserving
+                                    .then(|| {
+                                        Some(PositionRelation {
+                                            array: Some(
+                                                isize::try_from(accesses[0].0.start)
+                                                    .ok()?
+                                                    .checked_neg()?,
+                                            ),
+                                            packed: Some(isize::try_from(low).ok()?.checked_neg()?),
+                                        })
+                                    })
+                                    .flatten()
+                            });
                         if let Some(offset) = offset {
                             ExpressionSources {
                                 positional: reads
@@ -1474,11 +1823,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                     _ => ExpressionSources::whole(self.eval_system_call(call, &[], true)),
                 },
-                Factor::FunctionCall(call) => ExpressionSources::whole(self.eval_call_requested(
-                    call,
-                    &[],
-                    Some((requested_array, requested)),
-                )),
+                Factor::FunctionCall(call) => ExpressionSources {
+                    positional: self
+                        .eval_call_requested(call, &[], Some((requested_array, requested)))
+                        .into_iter()
+                        .map(|version| (version, PositionRelation::default()))
+                        .collect(),
+                    whole: Vec::new(),
+                },
                 Factor::Unknown(_) => {
                     if self.function_flows.is_empty() {
                         self.complete = false;
@@ -2342,8 +2694,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
         for (destination, sources) in &summary.writes {
             let mut sources = self.map_summary_sources(call, summary, sources, &branch_map);
-            sources.extend_from_slice(controls);
-            let version = self.ssa.definition_guarded(sources, &self.path_condition);
+            sources.whole.extend_from_slice(controls);
+            let version = self.ssa.positional_definition_guarded(
+                sources.positional,
+                sources.whole,
+                &self.path_condition,
+            );
             self.bind_key(*destination, version);
             self.written.insert(*destination);
         }
@@ -2393,7 +2749,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let sources = self.map_summary_sources(call, summary, sources, &branch_map);
                         (
                             *span,
-                            self.ssa.definition_guarded(sources, &self.path_condition),
+                            self.ssa.positional_definition_guarded(
+                                sources.positional,
+                                sources.whole,
+                                &self.path_condition,
+                            ),
                         )
                     })
                     .collect();
@@ -2403,7 +2763,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let opaque_sources = summary
             .opaque_sources
             .iter()
-            .flat_map(|source| self.map_summary_node_source(call, summary, *source))
+            .flat_map(|source| {
+                let sources = self.map_summary_node_source(call, summary, *source);
+                sources
+                    .positional
+                    .into_iter()
+                    .map(|(version, _)| version)
+                    .chain(sources.whole)
+            })
             .collect();
         self.call_caches.pop();
         CallResult {
@@ -2418,18 +2785,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         summary: &FunctionSummary,
         sources: &[SummarySource],
         branch_map: &HashMap<BranchId, BranchId>,
-    ) -> Vec<VersionId> {
-        let mut versions = Vec::new();
+    ) -> ExpressionSources {
+        let mut result = ExpressionSources::default();
         for source in sources {
-            let mapped = self.map_summary_node_source(call, summary, source.key);
-            if !mapped.is_empty() {
+            let mut mapped = self.map_summary_node_source(call, summary, source.key);
+            if !mapped.positional.is_empty() || !mapped.whole.is_empty() {
+                mapped.translate(source.relation);
                 let condition = source.condition.remapped(branch_map);
-                versions.push(self.ssa.definition_guarded(mapped, &condition));
+                let version = self.ssa.positional_definition_guarded(
+                    mapped.positional,
+                    mapped.whole,
+                    &condition,
+                );
+                result
+                    .positional
+                    .push((version, PositionRelation::default()));
             }
         }
-        versions.sort_unstable();
-        versions.dedup();
-        versions
+        result.normalize();
+        result
     }
 
     fn map_summary_node_source(
@@ -2437,9 +2811,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         call: &FunctionCall,
         summary: &FunctionSummary,
         source: NodeKey,
-    ) -> Vec<VersionId> {
+    ) -> ExpressionSources {
         if self.is_module_scope_key(source) {
-            return vec![self.read_key(source)];
+            return ExpressionSources {
+                positional: vec![(self.read_key(source), PositionRelation::default())],
+                whole: Vec::new(),
+            };
         }
         let actual = summary.arg_map.iter().find_map(|(path, formal)| {
             (*formal == source.0)
@@ -2451,15 +2828,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .flatten()
         });
         let Some(actual) = actual else {
-            return Vec::new();
+            return ExpressionSources::default();
         };
-        let sources = self.eval_actual_for_formal_key(actual, source);
-        sources
-            .positional
-            .into_iter()
-            .map(|(version, _)| version)
-            .chain(sources.whole)
-            .collect()
+        self.eval_actual_for_formal_key(actual, source)
     }
 
     fn instantiate_summary_branches(
@@ -2526,7 +2897,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             });
             if array_matches && packed_matches {
                 let source = self.ssa.read(key);
-                projected.push(self.ssa.definition_guarded(vec![source], &condition));
+                projected.push(self.ssa.positional_definition_guarded(
+                    vec![(source, relation)],
+                    Vec::new(),
+                    &condition,
+                ));
             }
         }
         projected.sort_unstable();
@@ -2698,6 +3073,39 @@ fn statements_have_unknown(statements: &[Statement]) -> bool {
         Statement::For(statement) => statements_have_unknown(&statement.body),
         _ => false,
     })
+}
+
+fn collect_assign_destinations<'a>(
+    statements: &'a [Statement],
+    destinations: &mut Vec<&'a AssignDestination>,
+) {
+    for statement in statements {
+        match statement {
+            Statement::Assign(assign) => destinations.extend(assign.dst.iter()),
+            Statement::If(statement) => {
+                collect_assign_destinations(&statement.true_side, destinations);
+                collect_assign_destinations(&statement.false_side, destinations);
+            }
+            Statement::Case(statement) => {
+                for arm in &statement.arms {
+                    collect_assign_destinations(&arm.body, destinations);
+                }
+                collect_assign_destinations(&statement.default, destinations);
+            }
+            Statement::For(statement) => {
+                collect_assign_destinations(&statement.body, destinations);
+            }
+            Statement::FunctionCall(call) => {
+                destinations.extend(call.outputs.values().flatten());
+            }
+            Statement::IfReset(_)
+            | Statement::SystemFunctionCall(_)
+            | Statement::TbMethodCall(_)
+            | Statement::Break
+            | Statement::Unsupported(_)
+            | Statement::Null => {}
+        }
+    }
 }
 
 fn concrete_var_index(index: &[usize]) -> VarIndex {

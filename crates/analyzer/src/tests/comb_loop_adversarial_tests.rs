@@ -342,3 +342,239 @@ fn switch_statement_arms_are_path_exclusive() {
         false,
     );
 }
+
+#[test]
+fn comb_loop_false_positive_nested_function_array_identity_widens_elements() {
+    assert_comb_loop(
+        "nested unpacked-array identity calls preserve element identity",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            type Pair = logic [2];
+            function identity (x: input Pair) -> Pair {
+                return x;
+            }
+            function nested (x: input Pair) -> Pair {
+                return identity(identity(x));
+            }
+            var source  : Pair;
+            var returned: Pair;
+            assign returned = nested(source);
+            assign source[0] = returned[1];
+            assign source[1] = 0;
+            assign o = returned[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn nested_function_array_identity_retains_matching_feedback() {
+    assert_comb_loop(
+        "nested unpacked-array identity calls retain matching-element feedback",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            type Pair = logic [2];
+            function identity (x: input Pair) -> Pair {
+                return x;
+            }
+            function nested (x: input Pair) -> Pair {
+                return identity(identity(x));
+            }
+            var source  : Pair;
+            var returned: Pair;
+            assign returned = nested(source);
+            assign source[0] = returned[0];
+            assign source[1] = 0;
+            assign o = returned[1];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn function_array_permutation_keeps_distinct_elements_disjoint() {
+    assert_comb_loop(
+        "an unpacked-array function permutation preserves the source element mapping",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            type Pair = logic [2];
+            function swap (x: input Pair) -> Pair {
+                return '{x[1], x[0]};
+            }
+            var source  : Pair;
+            var returned: Pair;
+            assign returned = swap(source);
+            assign source[0] = returned[0];
+            assign source[1] = 0;
+            assign o = returned[1];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn function_array_permutation_retains_mapped_feedback() {
+    assert_comb_loop(
+        "an unpacked-array function permutation retains feedback through the mapped element",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            type Pair = logic [2];
+            function swap (x: input Pair) -> Pair {
+                return '{x[1], x[0]};
+            }
+            var source  : Pair;
+            var returned: Pair;
+            assign returned = swap(source);
+            assign source[0] = returned[1];
+            assign source[1] = 0;
+            assign o = returned[0];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn runtime_loop_forward_array_chain_is_not_feedback() {
+    assert_comb_loop(
+        "each runtime-loop iteration copies a lower element into a higher element",
+        r#"
+        module Top (
+            n: input  logic<2>,
+            i: input  logic,
+            o: output logic,
+        ) {
+            var value: logic [4];
+            always_comb {
+                value = '{default: 0};
+                value[0] = i;
+                for index in 0..n {
+                    value[index + 1] = value[index];
+                }
+                o = value[3];
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_false_negative_runtime_loop_requires_multiple_iterations() {
+    let code = r#"
+        module Top (
+            n: input  logic<2>,
+            o: output logic,
+        ) {
+            var value   : logic [4];
+            var feedback: logic;
+            assign feedback = value[3];
+            always_comb {
+                value = '{default: 0};
+                value[0] = feedback;
+                for index in 0..n {
+                    value[index + 1] = value[index];
+                }
+                o = feedback;
+            }
+        }
+        "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_comb_loop(
+        "runtime-loop iterations can carry a dependency from element zero to element three",
+        code,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_runtime_reverse_loop_requires_multiple_iterations() {
+    assert_comb_loop(
+        "a descending runtime loop carries a dependency from the high element to the low element",
+        r#"
+        module Top (
+            n: input  logic<2>,
+            o: output logic,
+        ) {
+            var value   : logic [4];
+            var feedback: logic;
+            assign feedback = value[0];
+            always_comb {
+                value = '{default: 0};
+                value[3] = feedback;
+                for index in rev 0..n {
+                    value[index] = value[index + 1];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_multidimensional_runtime_loop_uses_flattened_stride() {
+    assert_comb_loop(
+        "a runtime loop carries dependencies between rows of a multidimensional array",
+        r#"
+        module Top (
+            n: input  logic<2>,
+            o: output logic,
+        ) {
+            var value   : logic [4, 2];
+            var feedback: logic;
+            assign feedback = value[3][0];
+            always_comb {
+                value = '{default: 0};
+                value[0][0] = feedback;
+                for index in 0..n {
+                    value[index + 1][0] = value[index][0];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_runtime_loop_carries_dependencies_across_body_statements() {
+    assert_comb_loop(
+        "runtime-loop iterations compose dependencies across ordered body statements",
+        r#"
+        module Top (
+            n: input  logic<2>,
+            o: output logic,
+        ) {
+            var a       : logic [3];
+            var b       : logic [3];
+            var feedback: logic;
+            assign feedback = a[2];
+            always_comb {
+                a = '{default: 0};
+                b = '{default: 0};
+                a[0] = feedback;
+                for index in 0..n {
+                    a[index + 1] = b[index];
+                    b[index + 1] = a[index];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
