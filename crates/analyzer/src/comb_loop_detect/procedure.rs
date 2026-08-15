@@ -6,8 +6,8 @@ use super::region::{
     translate_position, var_reads,
 };
 use super::ssa::{
-    BranchId, BranchState, Checkpoint, PathCondition, PositionRelation, SourceCache, SsaStore,
-    VersionId,
+    BranchId, BranchState, Checkpoint, DependencyDag, DependencyDagNode, PathCondition,
+    PositionDomain, PositionRelation, SourceCache, SsaStore, VersionId,
 };
 use crate::conv::Context;
 use crate::ir::VarId;
@@ -25,6 +25,15 @@ fn translate_array_span(span: ArraySpan, offset: isize) -> Option<ArraySpan> {
         start: translate_position(span.start, offset)?,
         length: span.length,
     })
+}
+
+fn position_domain(array: ArraySpan, packed: PackedSpan) -> PositionDomain {
+    PositionDomain {
+        array_start: array.start,
+        array_length: array.length,
+        packed_start: packed.start,
+        packed_length: packed.length,
+    }
 }
 
 fn translate_packed_span(span: PackedSpan, offset: isize) -> Option<PackedSpan> {
@@ -235,7 +244,7 @@ type CallCache = Option<EvaluationCache>;
 
 // Module and interface storage is shared by every call. Function-owned
 // storage is automatic, so its SSA identity also includes the invocation.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct SsaKey {
     node: NodeKey,
     call_frame: Option<usize>,
@@ -287,33 +296,34 @@ struct FunctionSummaryKey {
 #[derive(Clone)]
 struct FunctionSummary {
     arg_map: HashMap<VarPath, VarId>,
+    graph: Rc<DependencyDag<SsaKey>>,
     result: FunctionResultSummary,
-    writes: Vec<(NodeKey, Vec<SummarySource>)>,
+    writes: Vec<(NodeKey, Option<usize>)>,
     opaque_sources: Vec<NodeKey>,
     status: AnalysisStatus,
 }
 
-type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Vec<SummarySource>)>)>;
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct SummarySource {
-    key: NodeKey,
-    relation: PositionRelation,
-    condition: PathCondition,
+enum FunctionSummaryLookup {
+    Ready(Rc<FunctionSummary>),
+    Recursive,
+    Missing,
 }
+
+type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 
 pub(super) struct FunctionSummaries<'a> {
     module: &'a Module,
     bit_part: &'a BitPartition,
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
-    context: Option<ProcedureContext>,
+    contexts: Vec<ProcedureContext>,
 }
 
 /// Reusable module-local evaluation context for independent procedural
 /// declarations. Its large variable and function maps are built once per
-/// module; every analysis still gets fresh SSA and control-flow state.
+/// active analysis context; SSA and control-flow state remain per analysis.
 pub(super) struct ProcedureContext {
     ctx: Option<Context>,
+    module_scope_ids: Rc<HashSet<VarId>>,
 }
 
 impl ProcedureContext {
@@ -321,20 +331,34 @@ impl ProcedureContext {
         let mut ctx = Context::default();
         ctx.variables = module.variables.clone();
         ctx.functions = module.functions.clone();
+        let module_scope_ids = ctx
+            .variables
+            .iter()
+            .filter_map(|(&id, variable)| {
+                matches!(
+                    variable.affiliation,
+                    crate::symbol::Affiliation::Module | crate::symbol::Affiliation::Interface
+                )
+                .then_some(id)
+            })
+            .collect::<HashSet<_>>();
         #[cfg(test)]
         MODULE_CONTEXT_ENTRIES
             .set(MODULE_CONTEXT_ENTRIES.get() + ctx.variables.len() + ctx.functions.len());
-        Self { ctx: Some(ctx) }
+        Self {
+            ctx: Some(ctx),
+            module_scope_ids: Rc::new(module_scope_ids),
+        }
     }
 
-    fn take(&mut self) -> Context {
-        let mut ctx = self.ctx.take().expect("procedure context is not reentrant");
-        ctx.begin_analysis_transaction();
-        ctx
+    fn take(&mut self) -> (Context, Rc<HashSet<VarId>>) {
+        (
+            self.ctx.take().expect("procedure context is not reentrant"),
+            Rc::clone(&self.module_scope_ids),
+        )
     }
 
-    fn restore(&mut self, mut ctx: Context) {
-        ctx.rollback_analysis_transaction();
+    fn restore(&mut self, ctx: Context) {
         debug_assert!(self.ctx.is_none());
         self.ctx = Some(ctx);
     }
@@ -346,31 +370,43 @@ impl<'a> FunctionSummaries<'a> {
             module,
             bit_part,
             summaries: HashMap::default(),
-            context: None,
+            contexts: Vec::new(),
         }
     }
 
-    fn get(&mut self, call: &FunctionCall) -> Option<Rc<FunctionSummary>> {
+    fn get(&mut self, call: &FunctionCall) -> FunctionSummaryLookup {
         let key = FunctionSummaryKey {
             id: call.id,
             index: call.index.clone(),
         };
-        if let Some(summary) = self.summaries.get(&key) {
-            return summary.clone();
+        if let Some(summary) = self.summaries.get(&key).cloned() {
+            return summary.map_or(
+                FunctionSummaryLookup::Recursive,
+                FunctionSummaryLookup::Ready,
+            );
         }
-        let context = self
-            .context
-            .get_or_insert_with(|| ProcedureContext::new(self.module));
+        self.summaries.insert(key.clone(), None);
+        let mut context = self
+            .contexts
+            .pop()
+            .unwrap_or_else(|| ProcedureContext::new(self.module));
         let summary = ProcedureAnalysis::summarize_function(
             self.module,
             self.bit_part,
             call.id,
             call.index.as_deref(),
-            context,
+            &mut context,
+            self,
         )
         .map(Rc::new);
-        self.summaries.insert(key, summary.clone());
-        summary
+        self.contexts.push(context);
+        if let Some(summary) = summary {
+            self.summaries.insert(key, Some(summary.clone()));
+            FunctionSummaryLookup::Ready(summary)
+        } else {
+            self.summaries.remove(&key);
+            FunctionSummaryLookup::Missing
+        }
     }
 }
 
@@ -380,6 +416,7 @@ thread_local! {
     static FUNCTION_RESULT_VERSIONS: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_RESULT_REGION_PROBES: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_BARRIER_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
+    static FUNCTION_SUMMARY_GRAPH_NODES: Cell<usize> = const { Cell::new(0) };
     static MODULE_CONTEXT_ENTRIES: Cell<usize> = const { Cell::new(0) };
 }
 
@@ -389,6 +426,8 @@ pub(crate) fn reset_function_evaluation_count() {
     FUNCTION_RESULT_VERSIONS.set(0);
     FUNCTION_RESULT_REGION_PROBES.set(0);
     FUNCTION_BARRIER_EVALUATIONS.set(0);
+    FUNCTION_SUMMARY_GRAPH_NODES.set(0);
+    MODULE_CONTEXT_ENTRIES.set(0);
 }
 
 #[cfg(test)]
@@ -412,6 +451,11 @@ pub(crate) fn function_barrier_evaluation_count() -> usize {
 }
 
 #[cfg(test)]
+pub(crate) fn function_summary_graph_node_count() -> usize {
+    FUNCTION_SUMMARY_GRAPH_NODES.get()
+}
+
+#[cfg(test)]
 pub(crate) fn reset_module_context_entries() {
     MODULE_CONTEXT_ENTRIES.set(0);
 }
@@ -421,17 +465,19 @@ pub(crate) fn module_context_entries() -> usize {
     MODULE_CONTEXT_ENTRIES.get()
 }
 
-pub(super) fn analyze(
-    bit_part: &BitPartition,
+pub(super) fn analyze<'a>(
+    bit_part: &'a BitPartition,
     statements: &[Statement],
     branch_namespace: usize,
     context: &mut ProcedureContext,
+    summaries: &mut FunctionSummaries<'a>,
 ) -> ProcedureResult {
-    ProcedureAnalysis::analyze(bit_part, statements, branch_namespace, context)
+    ProcedureAnalysis::analyze(bit_part, statements, branch_namespace, context, summaries)
 }
 
 pub(super) struct ProcedureResult {
-    pub(super) dependencies: Vec<Dependency>,
+    pub(super) graph: DependencyDag<NodeKey>,
+    pub(super) destinations: Vec<(NodeKey, Option<usize>)>,
     pub(super) status: AnalysisStatus,
 }
 
@@ -527,17 +573,7 @@ impl ExpressionSources {
 
     fn normalize(&mut self) {
         self.sources.sort_unstable();
-        let mut merged: Vec<(VersionId, PositionRelation)> = Vec::with_capacity(self.sources.len());
-        for (source, relation) in self.sources.drain(..) {
-            if let Some((previous_source, previous_relation)) = merged.last_mut()
-                && *previous_source == source
-            {
-                *previous_relation = previous_relation.union(relation);
-            } else {
-                merged.push((source, relation));
-            }
-        }
-        self.sources = merged;
+        self.sources.dedup();
     }
 }
 
@@ -551,7 +587,9 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         context: &mut ProcedureContext,
         summaries: &'s mut FunctionSummaries<'a>,
     ) -> Self {
-        let mut inner = ProcedureAnalysis::from_context(bit_part, context.take());
+        let (mut ctx, module_scope_ids) = context.take();
+        ctx.begin_analysis_transaction();
+        let mut inner = ProcedureAnalysis::from_context(bit_part, ctx, module_scope_ids);
         inner.summaries = Some(summaries);
         Self { inner: Some(inner) }
     }
@@ -572,16 +610,20 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         packed: PackedSpan,
         context_width: usize,
     ) -> Vec<RegionSource> {
-        let inner = self.inner.as_mut().expect("expression analysis is active");
-        inner.use_expression_namespace(expression);
-        let mut sources = inner.eval_expr_requested(expression, array, packed, context_width);
+        self.inner().use_expression_namespace(expression);
+        let mut sources =
+            self.inner()
+                .eval_expr_requested(expression, array, packed, context_width);
         sources.normalize();
         let mut mapped = Vec::new();
         for (version, expression_offset) in sources.sources {
-            let wrapper = inner
+            let wrapper = self
+                .inner()
                 .ssa
                 .related_definition(vec![(version, expression_offset)]);
-            for (source, relation, condition) in inner.ssa.root_source_relations_guarded(wrapper) {
+            for (source, relation, condition) in
+                self.inner().ssa.root_source_relations_guarded(wrapper)
+            {
                 if source.call_frame.is_some() {
                     continue;
                 }
@@ -609,7 +651,8 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
     }
 
     pub(super) fn restore(mut self, context: &mut ProcedureContext) {
-        let inner = self.inner.take().expect("expression analysis is active");
+        let mut inner = self.inner.take().expect("expression analysis is active");
+        inner.ctx.rollback_analysis_transaction();
         context.restore(inner.ctx);
     }
 
@@ -632,6 +675,7 @@ pub(super) struct RegionSource {
 struct ProcedureAnalysis<'a, 's> {
     bit_part: &'a BitPartition,
     ctx: Context,
+    module_scope_ids: Rc<HashSet<VarId>>,
     ssa: SsaStore<SsaKey>,
     written: HashSet<NodeKey>,
     call_caches: Vec<CallCache>,
@@ -648,10 +692,15 @@ struct ProcedureAnalysis<'a, 's> {
 }
 
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
-    fn from_context(bit_part: &'a BitPartition, ctx: Context) -> Self {
+    fn from_context(
+        bit_part: &'a BitPartition,
+        ctx: Context,
+        module_scope_ids: Rc<HashSet<VarId>>,
+    ) -> Self {
         Self {
             bit_part,
             ctx,
+            module_scope_ids,
             ssa: SsaStore::default(),
             written: HashSet::default(),
             call_caches: Vec::new(),
@@ -673,14 +722,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         statements: &[Statement],
         branch_namespace: usize,
         context: &mut ProcedureContext,
+        summaries: &'s mut FunctionSummaries<'a>,
     ) -> ProcedureResult {
-        let mut this = Self::from_context(bit_part, context.take());
+        let (mut ctx, module_scope_ids) = context.take();
+        ctx.begin_analysis_transaction();
+        let mut this = Self::from_context(bit_part, ctx, module_scope_ids);
+        this.summaries = Some(summaries);
         this.branch_namespace = branch_namespace;
         this.eval_block(statements, &[]);
+        let (graph, destinations) = this.dependency_graph();
         let result = ProcedureResult {
-            dependencies: this.dependencies(),
+            graph,
+            destinations,
             status: this.status,
         };
+        this.ctx.rollback_analysis_transaction();
         context.restore(this.ctx);
         result
     }
@@ -712,11 +768,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         id: VarId,
         index: Option<&[usize]>,
         context: &mut ProcedureContext,
+        summaries: &'s mut FunctionSummaries<'a>,
     ) -> Option<FunctionSummary> {
         let function = module.functions.get(&id)?;
         let body = function.get_function(index.unwrap_or_default())?;
         let formal_ids = body.arg_map.values().copied().collect::<HashSet<_>>();
-        let mut this = Self::from_context(bit_part, context.take());
+        let (mut ctx, module_scope_ids) = context.take();
+        ctx.begin_analysis_transaction();
+        let mut this = Self::from_context(bit_part, ctx, module_scope_ids);
+        this.summaries = Some(summaries);
         this.call_caches.push(None);
         this.receiver_indices.push(
             (!function.path.path.0.is_empty())
@@ -735,46 +795,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         );
         visible_keys.sort_unstable();
         visible_keys.dedup();
-        let mut source_cache =
-            SourceCache::restricted(visible_keys.into_iter().map(|node| SsaKey {
+        let allowed = visible_keys
+            .into_iter()
+            .map(|node| SsaKey {
                 node,
                 call_frame: None,
-            }));
-        let mut visible_sources = |this: &Self, version| {
-            let mut sources = this
-                .ssa
-                .root_source_relations_guarded_cached(version, &mut source_cache)
-                .into_iter()
-                .filter_map(|(source, relation, condition)| {
-                    source.call_frame.is_none().then_some(SummarySource {
-                        key: source.node,
-                        relation,
-                        condition,
-                    })
-                })
-                .filter(|source| {
-                    formal_ids.contains(&source.key.0) || this.is_module_scope_key(source.key)
-                })
-                .collect::<Vec<_>>();
-            sources.sort_unstable();
-            sources.dedup();
-            sources
-        };
-
-        let result = body
-            .ret
-            .map(|ret| {
-                this.current_region_groups_for_id(ret)
-                    .into_iter()
-                    .map(|(array, regions)| {
-                        let regions = regions
-                            .into_iter()
-                            .map(|(span, version)| (span, visible_sources(&this, version)))
-                            .collect();
-                        (array, regions)
-                    })
-                    .collect()
             })
+            .collect::<HashSet<_>>();
+
+        let result_versions: Vec<(ArraySpan, Vec<(PackedSpan, VersionId)>)> = body
+            .ret
+            .map(|ret| this.current_region_groups_for_id(ret))
             .unwrap_or_default();
 
         let mut destinations = this
@@ -786,13 +817,49 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             })
             .collect::<Vec<_>>();
         destinations.sort_unstable();
-        let writes = destinations
+        let write_versions = destinations
             .into_iter()
             .map(|destination| {
                 let version = this.read_key(destination);
-                (destination, visible_sources(&this, version))
+                (destination, version)
+            })
+            .collect::<Vec<_>>();
+
+        let mut roots = result_versions
+            .iter()
+            .flat_map(|(_, regions)| regions.iter().map(|(_, version)| *version))
+            .collect::<Vec<_>>();
+        roots.extend(write_versions.iter().map(|(_, version)| *version));
+        let graph = this.ssa.dependency_dag(&roots, &allowed);
+        let graph = Rc::new(graph);
+        #[cfg(test)]
+        FUNCTION_SUMMARY_GRAPH_NODES.set(FUNCTION_SUMMARY_GRAPH_NODES.get().max(graph.nodes.len()));
+        let mut root = graph.roots.iter().copied();
+        let result = result_versions
+            .into_iter()
+            .map(|(array, regions)| {
+                let regions = regions
+                    .into_iter()
+                    .map(|(span, _)| {
+                        (
+                            span,
+                            root.next().expect("every function result has a DAG root"),
+                        )
+                    })
+                    .collect();
+                (array, regions)
             })
             .collect();
+        let writes = write_versions
+            .into_iter()
+            .map(|(destination, _)| {
+                (
+                    destination,
+                    root.next().expect("every function write has a DAG root"),
+                )
+            })
+            .collect();
+        debug_assert!(root.next().is_none());
 
         let opaque_sources = if statements_have_unknown(&body.statements) {
             let mut sources = formal_ids
@@ -808,11 +875,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
         let summary = FunctionSummary {
             arg_map: body.arg_map,
+            graph,
             result,
             writes,
             opaque_sources,
             status: this.status,
         };
+        this.ctx.rollback_analysis_transaction();
         context.restore(this.ctx);
         Some(summary)
     }
@@ -863,6 +932,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         dependencies
     }
 
+    fn dependency_graph(&mut self) -> (DependencyDag<NodeKey>, Vec<(NodeKey, Option<usize>)>) {
+        let mut destinations = self
+            .written
+            .iter()
+            .copied()
+            .filter(|key| self.is_module_scope_key(*key))
+            .collect::<Vec<_>>();
+        destinations.sort_unstable();
+        let roots = destinations
+            .iter()
+            .map(|destination| self.read_key(*destination))
+            .collect::<Vec<_>>();
+        let allowed = self.module_scope_keys().into_iter().collect::<HashSet<_>>();
+        let graph = self.dependency_dag_for_nodes(&roots, allowed);
+        let destinations = destinations
+            .into_iter()
+            .zip(graph.roots.iter().copied())
+            .collect();
+        (graph, destinations)
+    }
+
     fn dependency_kind(source_kind: PositionRelation) -> BitDependency {
         BitDependency {
             array: source_kind.array,
@@ -871,12 +961,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn is_module_scope_key(&self, key: NodeKey) -> bool {
-        self.ctx.variables.get(&key.0).is_none_or(|variable| {
-            matches!(
-                variable.affiliation,
-                crate::symbol::Affiliation::Module | crate::symbol::Affiliation::Interface
-            )
-        })
+        self.module_scope_ids.contains(&key.0)
     }
 
     fn ssa_key(&self, node: NodeKey) -> SsaKey {
@@ -898,18 +983,46 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.ssa.bind(self.ssa_key(node), version);
     }
 
+    fn dependency_dag_for_nodes(
+        &self,
+        roots: &[VersionId],
+        allowed: impl IntoIterator<Item = NodeKey>,
+    ) -> DependencyDag<NodeKey> {
+        let allowed = allowed
+            .into_iter()
+            .map(|node| SsaKey {
+                node,
+                call_frame: None,
+            })
+            .collect::<HashSet<_>>();
+        let graph = self.ssa.dependency_dag(roots, &allowed);
+        DependencyDag {
+            nodes: graph
+                .nodes
+                .into_iter()
+                .map(|node| match node {
+                    DependencyDagNode::External(SsaKey {
+                        node,
+                        call_frame: None,
+                    }) => DependencyDagNode::External(node),
+                    DependencyDagNode::External(SsaKey {
+                        call_frame: Some(_),
+                        ..
+                    }) => unreachable!("call-frame storage is not a visible DAG source"),
+                    DependencyDagNode::Internal => DependencyDagNode::Internal,
+                })
+                .collect(),
+            edges: graph.edges,
+            roots: graph.roots,
+            domains: graph.domains,
+        }
+    }
+
     fn module_scope_keys(&self) -> Vec<NodeKey> {
         let mut keys = self
-            .ctx
-            .variables
+            .module_scope_ids
             .iter()
-            .filter(|(_, variable)| {
-                matches!(
-                    variable.affiliation,
-                    crate::symbol::Affiliation::Module | crate::symbol::Affiliation::Interface
-                )
-            })
-            .flat_map(|(&id, _)| self.keys_for_id(id))
+            .flat_map(|&id| self.keys_for_id(id))
             .collect::<Vec<_>>();
         keys.sort_unstable();
         keys.dedup();
@@ -917,6 +1030,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
+        if !self.ctx.variables.contains_key(&id) && index.0.is_empty() && select.is_empty() {
+            return self.keys_for_id(id);
+        }
         let mut keys = Vec::new();
         let index = self.receiver_index(id, index);
         let accesses = var_reads(id, &index, select, &mut self.ctx);
@@ -932,6 +1048,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn write_keys(&mut self, destination: &AssignDestination) -> Vec<NodeKey> {
+        if !self.ctx.variables.contains_key(&destination.id)
+            && destination.index.0.is_empty()
+            && destination.select.is_empty()
+        {
+            return self.keys_for_id(destination.id);
+        }
         let mut keys = Vec::new();
         let mut destination = destination.clone();
         destination.index = self.receiver_index(destination.id, &destination.index);
@@ -1536,7 +1658,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn set_known_iterator_value(&mut self, statement: &ForStatement, value: usize) {
-        let Some(variable) = self.ctx.variable_mut(&statement.var_id) else {
+        let Some(variable) = self.ctx.variables.get_mut(&statement.var_id) else {
             return;
         };
         let Some(width) = statement.var_type.total_width() else {
@@ -1550,7 +1672,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn forget_runtime_iterator_value(&mut self, iterator: VarId) {
-        if let Some(variable) = self.ctx.variable_mut(&iterator) {
+        if let Some(variable) = self.ctx.variables.get_mut(&iterator) {
             // Conversion may leave the range's initial value in the shared
             // compile-time store. It is not a constant in a runtime loop and
             // must not prune iterator-dependent branches.
@@ -2349,7 +2471,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn eval_expr(&mut self, expression: &Expression) -> Vec<VersionId> {
-        self.eval_expr_inner(expression, false)
+        self.eval_expr_inner(expression, true)
     }
 
     fn guard_expression_sources(&mut self, mut sources: ExpressionSources) -> ExpressionSources {
@@ -2554,11 +2676,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     break;
                 }
                 if let Some((requested_array, requested_packed)) = requested {
-                    result.extend(self.project_version_sources(
-                        *version,
-                        requested_array,
-                        requested_packed,
-                    ));
+                    if requested_array.intersection(*array) == Some(*array)
+                        && requested_packed.intersection(*span) == Some(*span)
+                    {
+                        result.push(*version);
+                    } else {
+                        result.extend(self.project_version_sources(
+                            *version,
+                            requested_array,
+                            requested_packed,
+                        ));
+                    }
                 } else {
                     result.push(*version);
                 }
@@ -2577,9 +2705,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let summary = self
             .summaries
             .as_deref_mut()
-            .and_then(|summaries| summaries.get(call));
-        if let Some(summary) = summary {
-            return self.apply_function_summary(call, controls, summary.as_ref());
+            .map(|summaries| summaries.get(call));
+        match summary {
+            Some(FunctionSummaryLookup::Ready(summary)) => {
+                return self.apply_function_summary(call, controls, summary.as_ref());
+            }
+            Some(FunctionSummaryLookup::Recursive) => {
+                self.status = AnalysisStatus::Barrier;
+                let mut sources = Vec::new();
+                for input in call.inputs.values() {
+                    sources.extend(self.eval_expr(input));
+                }
+                return CallResult {
+                    region_groups: Vec::new(),
+                    opaque_sources: sources,
+                };
+            }
+            Some(FunctionSummaryLookup::Missing) | None => {}
         }
 
         let receiver_index = self.ctx.functions.get(&call.id).and_then(|function| {
@@ -2725,9 +2867,30 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             self.eval_expr(actual);
         }
         let branch_map = self.instantiate_summary_branches(summary);
+        let mut bindings = HashMap::default();
+        for node in &summary.graph.nodes {
+            let DependencyDagNode::External(key) = node else {
+                continue;
+            };
+            if !bindings.contains_key(key) {
+                bindings.insert(
+                    *key,
+                    self.map_summary_node_source(call, summary, key.node)
+                        .sources,
+                );
+            }
+        }
 
-        for (destination, sources) in &summary.writes {
-            let mut sources = self.map_summary_sources(call, summary, sources, &branch_map);
+        for (destination, root) in &summary.writes {
+            let imported = self.ssa.imported(
+                summary.graph.clone(),
+                *root,
+                bindings.clone(),
+                branch_map.clone(),
+            );
+            let mut sources = ExpressionSources {
+                sources: vec![(imported, PositionRelation::default())],
+            };
             sources.extend_whole(controls.iter().copied());
             let version = self
                 .ssa
@@ -2777,13 +2940,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .map(|(array, regions)| {
                 let regions = regions
                     .iter()
-                    .map(|(span, sources)| {
-                        let sources = self.map_summary_sources(call, summary, sources, &branch_map);
-                        (
-                            *span,
-                            self.ssa
-                                .related_definition_guarded(sources.sources, &self.path_condition),
-                        )
+                    .map(|(span, root)| {
+                        let imported = self.ssa.imported(
+                            summary.graph.clone(),
+                            *root,
+                            bindings.clone(),
+                            branch_map.clone(),
+                        );
+                        let version = if self.path_condition.is_unconditional() {
+                            imported
+                        } else {
+                            self.ssa.related_definition_guarded(
+                                vec![(imported, PositionRelation::default())],
+                                &self.path_condition,
+                            )
+                        };
+                        (*span, version)
                     })
                     .collect();
                 (*array, regions)
@@ -2793,8 +2965,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .opaque_sources
             .iter()
             .flat_map(|source| {
-                let sources = self.map_summary_node_source(call, summary, *source);
-                sources.sources.into_iter().map(|(version, _)| version)
+                self.map_summary_node_source(call, summary, *source)
+                    .sources
+                    .into_iter()
+                    .map(|(version, _)| version)
             })
             .collect();
         self.call_caches.pop();
@@ -2802,29 +2976,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             region_groups,
             opaque_sources,
         }
-    }
-
-    fn map_summary_sources(
-        &mut self,
-        call: &FunctionCall,
-        summary: &FunctionSummary,
-        sources: &[SummarySource],
-        branch_map: &HashMap<BranchId, BranchId>,
-    ) -> ExpressionSources {
-        let mut result = ExpressionSources::default();
-        for source in sources {
-            let mut mapped = self.map_summary_node_source(call, summary, source.key);
-            if !mapped.is_empty() {
-                mapped.translate(source.relation);
-                let condition = source.condition.remapped(branch_map);
-                let version = self
-                    .ssa
-                    .related_definition_guarded(mapped.sources, &condition);
-                result.push(version, PositionRelation::default());
-            }
-        }
-        result.normalize();
-        result
     }
 
     fn map_summary_node_source(
@@ -2858,12 +3009,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         summary: &FunctionSummary,
     ) -> HashMap<BranchId, BranchId> {
         let mut branches = summary
-            .result
+            .graph
+            .edges
             .iter()
-            .flat_map(|(_, regions)| regions.iter())
-            .flat_map(|(_, sources)| sources)
-            .chain(summary.writes.iter().flat_map(|(_, sources)| sources))
-            .flat_map(|source| source.condition.branches())
+            .flat_map(|edge| edge.condition.branches())
             .collect::<Vec<_>>();
         branches.sort_unstable();
         branches.dedup();
@@ -2900,6 +3049,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         requested_array: ArraySpan,
         requested_packed: PackedSpan,
     ) -> Vec<VersionId> {
+        if self.ssa.has_structural_dependency(version) {
+            return vec![
+                self.ssa
+                    .projected(version, position_domain(requested_array, requested_packed)),
+            ];
+        }
         let sources = self.ssa.root_source_relations_guarded(version);
         if sources.is_empty() {
             return vec![version];

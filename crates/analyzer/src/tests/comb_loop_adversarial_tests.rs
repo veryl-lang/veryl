@@ -854,3 +854,76 @@ fn comb_loop_runtime_iterator_conditions_retain_reachable_iterations() {
         true,
     );
 }
+
+#[test]
+fn constant_dead_function_in_destination_index_does_not_create_feedback() {
+    assert_comb_loop(
+        "a function in a constant-dead destination index operand is not evaluated",
+        r#"
+        module Top (o: output logic) {
+            var a: logic;
+            var b: logic;
+            var value: logic [2];
+            function write_a (x: input logic) -> logic {
+                a = x;
+                return 0;
+            }
+            always_comb {
+                a = 0;
+                value[1'b0 && write_a(b)] = 0;
+                b = a;
+                o = b | value[0];
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn constant_dead_function_in_source_index_does_not_kill_feedback() {
+    assert_comb_loop(
+        "a function in a constant-dead source index operand cannot overwrite feedback",
+        r#"
+        module Top (o: output logic) {
+            var a: logic;
+            var b: logic;
+            var dummy: logic;
+            var value: logic [2];
+            function clear_a () -> logic {
+                a = 0;
+                return 0;
+            }
+            always_comb {
+                a = b;
+                value = '{default: 0};
+                dummy = value[1'b0 && clear_a()];
+                b = a;
+                o = b | dummy;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn zero_offset_cycle_is_not_hidden_by_parallel_shifted_paths() {
+    assert_comb_loop(
+        "parallel shifted dependencies cannot hide the same-bit cycle",
+        r#"
+        module Top (o: output logic<3>) {
+            var a: logic<3>;
+            var b: logic<3>;
+            var c: logic<3>;
+            var d: logic<3>;
+            assign a = b | (b << 1) | (b << 2);
+            assign d = a | (a << 1) | (a << 2);
+            assign c = d | (d << 1) | (d << 2);
+            assign b = c | (c << 1) | (c << 2);
+            assign o = a;
+        }
+        "#,
+        true,
+    );
+}

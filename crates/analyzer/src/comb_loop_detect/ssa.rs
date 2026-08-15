@@ -43,6 +43,16 @@ enum Version<K> {
         condition: PathCondition,
     },
     Phi(Vec<VersionId>),
+    Imported {
+        graph: Rc<DependencyDag<K>>,
+        root: Option<usize>,
+        bindings: Rc<HashMap<K, Vec<(VersionId, PositionRelation)>>>,
+        branches: Rc<HashMap<BranchId, BranchId>>,
+    },
+    Projected {
+        source: VersionId,
+        domain: PositionDomain,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -151,6 +161,10 @@ pub(super) struct PathCondition {
 }
 
 impl PathCondition {
+    pub(super) fn is_unconditional(&self) -> bool {
+        self.constraints.is_empty()
+    }
+
     pub(super) fn with_choice(&self, branch: BranchId, arm: usize) -> Self {
         self.with_choice_range(branch, arm, arm.saturating_add(1))
     }
@@ -294,6 +308,36 @@ pub(super) struct PositionRelation {
     pub(super) packed: Option<isize>,
 }
 
+#[derive(Clone)]
+pub(super) enum DependencyDagNode<K> {
+    External(K),
+    Internal,
+}
+
+#[derive(Clone)]
+pub(super) struct DependencyDagEdge {
+    pub(super) source: usize,
+    pub(super) destination: usize,
+    pub(super) relation: PositionRelation,
+    pub(super) condition: PathCondition,
+}
+
+#[derive(Clone)]
+pub(super) struct DependencyDag<K> {
+    pub(super) nodes: Vec<DependencyDagNode<K>>,
+    pub(super) edges: Vec<DependencyDagEdge>,
+    pub(super) roots: Vec<Option<usize>>,
+    pub(super) domains: Vec<Vec<PositionDomain>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct PositionDomain {
+    pub(super) array_start: usize,
+    pub(super) array_length: usize,
+    pub(super) packed_start: usize,
+    pub(super) packed_length: usize,
+}
+
 impl Default for PositionRelation {
     fn default() -> Self {
         Self {
@@ -325,6 +369,7 @@ impl PositionRelation {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn union(self, other: Self) -> Self {
         Self {
             array: (self.array == other.array).then_some(self.array).flatten(),
@@ -457,22 +502,55 @@ where
     ) -> VersionId {
         let mut sources = sources;
         sources.sort_unstable();
-        let mut merged: Vec<(VersionId, PositionRelation)> = Vec::with_capacity(sources.len());
-        for (source, relation) in sources {
-            if let Some((previous_source, previous_relation)) = merged.last_mut()
-                && *previous_source == source
-            {
-                *previous_relation = previous_relation.union(relation);
-            } else {
-                merged.push((source, relation));
-            }
-        }
+        sources.dedup();
         let version = self.versions.len();
         self.versions.push(Version::Definition {
-            sources: merged,
+            sources,
             condition: condition.clone(),
         });
         version
+    }
+
+    pub(super) fn imported(
+        &mut self,
+        graph: Rc<DependencyDag<K>>,
+        root: Option<usize>,
+        bindings: HashMap<K, Vec<(VersionId, PositionRelation)>>,
+        branches: HashMap<BranchId, BranchId>,
+    ) -> VersionId {
+        let version = self.versions.len();
+        self.versions.push(Version::Imported {
+            graph,
+            root,
+            bindings: Rc::new(bindings),
+            branches: Rc::new(branches),
+        });
+        version
+    }
+
+    pub(super) fn projected(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
+        let version = self.versions.len();
+        self.versions.push(Version::Projected { source, domain });
+        version
+    }
+
+    pub(super) fn has_structural_dependency(&self, version: VersionId) -> bool {
+        let mut visited = HashSet::default();
+        let mut queue = VecDeque::from([version]);
+        while let Some(version) = queue.pop_front() {
+            if !visited.insert(version) {
+                continue;
+            }
+            match &self.versions[version] {
+                Version::Imported { .. } | Version::Projected { .. } => return true,
+                Version::Definition { sources, .. } => {
+                    queue.extend(sources.iter().map(|(source, _)| *source));
+                }
+                Version::Phi(inputs) => queue.extend(inputs.iter().copied()),
+                Version::Entry(_) => {}
+            }
+        }
+        false
     }
 
     pub(super) fn bind(&mut self, key: K, version: VersionId) {
@@ -649,6 +727,20 @@ where
                         }
                     }
                 }
+                Version::Imported { bindings, .. } => {
+                    for sources in bindings.values() {
+                        for (input, _) in sources {
+                            if visited.insert(*input) {
+                                queue.push_back(*input);
+                            }
+                        }
+                    }
+                }
+                Version::Projected { source, .. } => {
+                    if visited.insert(*source) {
+                        queue.push_back(*source);
+                    }
+                }
             }
         }
         reached
@@ -691,6 +783,177 @@ where
             .iter()
             .map(|(&(source, relation), condition)| (source, relation, condition.clone()))
             .collect()
+    }
+
+    pub(super) fn dependency_dag(
+        &self,
+        roots: &[VersionId],
+        allowed: &HashSet<K>,
+    ) -> DependencyDag<K>
+    where
+        K: Ord,
+    {
+        let mut states = HashSet::default();
+        let mut queue = VecDeque::new();
+        for &root in roots {
+            if states.insert((root, false)) {
+                queue.push_back((root, false));
+            }
+        }
+        while let Some((version, include_entry)) = queue.pop_front() {
+            let mut enqueue = |state| {
+                if states.insert(state) {
+                    queue.push_back(state);
+                }
+            };
+            match &self.versions[version] {
+                Version::Entry(_) => {}
+                Version::Definition { sources, .. } => {
+                    for (source, _) in sources {
+                        enqueue((*source, true));
+                    }
+                }
+                Version::Phi(inputs) => {
+                    for input in inputs {
+                        enqueue((*input, include_entry));
+                    }
+                }
+                Version::Imported { bindings, .. } => {
+                    for sources in bindings.values() {
+                        for (source, _) in sources {
+                            enqueue((*source, true));
+                        }
+                    }
+                }
+                Version::Projected { source, .. } => enqueue((*source, true)),
+            }
+        }
+
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        let mut domains = Vec::new();
+        let mut mapped: HashMap<(VersionId, bool), Option<usize>> = HashMap::default();
+        type ImportKey<K> = (
+            usize,
+            Option<usize>,
+            Vec<(K, Vec<(usize, PositionRelation)>)>,
+            Vec<(BranchId, BranchId)>,
+        );
+        let mut imports: HashMap<ImportKey<K>, Option<usize>> = HashMap::default();
+
+        let mut ordered = states.into_iter().collect::<Vec<_>>();
+        ordered.sort_unstable();
+        for state @ (version, include_entry) in ordered {
+            let node = match &self.versions[version] {
+                Version::Entry(key) => (include_entry && allowed.contains(key)).then(|| {
+                    let node = nodes.len();
+                    nodes.push(DependencyDagNode::External(*key));
+                    domains.push(Vec::new());
+                    node
+                }),
+                Version::Definition { sources, condition } => {
+                    let node = nodes.len();
+                    nodes.push(DependencyDagNode::Internal);
+                    domains.push(Vec::new());
+                    for (source, relation) in sources {
+                        if let Some(source) = mapped[&(*source, true)] {
+                            edges.push(DependencyDagEdge {
+                                source,
+                                destination: node,
+                                relation: *relation,
+                                condition: condition.clone(),
+                            });
+                        }
+                    }
+                    Some(node)
+                }
+                Version::Phi(inputs) => {
+                    let node = nodes.len();
+                    nodes.push(DependencyDagNode::Internal);
+                    domains.push(Vec::new());
+                    for input in inputs {
+                        if let Some(source) = mapped[&(*input, include_entry)] {
+                            edges.push(DependencyDagEdge {
+                                source,
+                                destination: node,
+                                relation: PositionRelation::default(),
+                                condition: PathCondition::default(),
+                            });
+                        }
+                    }
+                    Some(node)
+                }
+                Version::Imported {
+                    graph,
+                    root,
+                    bindings,
+                    branches,
+                } => {
+                    let mut mapped_bindings = bindings
+                        .iter()
+                        .map(|(&key, sources)| {
+                            let mut sources = sources
+                                .iter()
+                                .filter_map(|(source, relation)| {
+                                    mapped[&(*source, true)].map(|source| (source, *relation))
+                                })
+                                .collect::<Vec<_>>();
+                            sources.sort_unstable();
+                            (key, sources)
+                        })
+                        .collect::<Vec<_>>();
+                    mapped_bindings.sort_unstable_by_key(|(key, _)| *key);
+                    let mut mapped_branches = branches
+                        .iter()
+                        .map(|(&source, &destination)| (source, destination))
+                        .collect::<Vec<_>>();
+                    mapped_branches.sort_unstable();
+                    let key = (
+                        Rc::as_ptr(graph) as usize,
+                        *root,
+                        mapped_bindings.clone(),
+                        mapped_branches,
+                    );
+                    if let Some(node) = imports.get(&key) {
+                        *node
+                    } else {
+                        let node = inline_dependency_dag(
+                            graph,
+                            *root,
+                            &mapped_bindings.into_iter().collect(),
+                            branches,
+                            &mut nodes,
+                            &mut edges,
+                            &mut domains,
+                        );
+                        imports.insert(key, node);
+                        node
+                    }
+                }
+                Version::Projected { source, domain } => {
+                    let node = nodes.len();
+                    nodes.push(DependencyDagNode::Internal);
+                    domains.push(vec![*domain]);
+                    if let Some(source) = mapped[&(*source, true)] {
+                        edges.push(DependencyDagEdge {
+                            source,
+                            destination: node,
+                            relation: PositionRelation::default(),
+                            condition: PathCondition::default(),
+                        });
+                    }
+                    Some(node)
+                }
+            };
+            mapped.insert(state, node);
+        }
+
+        DependencyDag {
+            nodes,
+            edges,
+            roots: roots.iter().map(|root| mapped[&(*root, false)]).collect(),
+            domains,
+        }
     }
 
     fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
@@ -781,12 +1044,158 @@ where
                         enqueue((*input, include_entry, relation), condition.clone());
                     }
                 }
+                Version::Imported {
+                    graph,
+                    root,
+                    bindings,
+                    branches,
+                } => {
+                    for (key, imported_relation, imported_condition) in
+                        dependency_dag_external_sources(graph, *root)
+                    {
+                        let imported_condition = imported_condition.remapped(branches);
+                        let Some(condition) = condition.union_if_compatible(&imported_condition)
+                        else {
+                            continue;
+                        };
+                        for (source, binding_relation) in bindings.get(&key).into_iter().flatten() {
+                            enqueue(
+                                (
+                                    *source,
+                                    true,
+                                    relation
+                                        .compose(*binding_relation)
+                                        .compose(imported_relation),
+                                ),
+                                condition.clone(),
+                            );
+                        }
+                    }
+                }
+                Version::Projected { source, .. } => {
+                    enqueue((*source, true, relation), condition);
+                }
             }
         }
         let sources = Rc::new(sources);
         cache.summaries.insert(cache_key, sources.clone());
         sources
     }
+}
+
+fn dependency_dag_external_sources<K>(
+    graph: &DependencyDag<K>,
+    root: Option<usize>,
+) -> Vec<(K, PositionRelation, PathCondition)>
+where
+    K: Copy + Eq + Hash,
+{
+    let Some(root) = root else {
+        return Vec::new();
+    };
+    let mut incoming: HashMap<usize, Vec<&DependencyDagEdge>> = HashMap::default();
+    for edge in &graph.edges {
+        incoming.entry(edge.destination).or_default().push(edge);
+    }
+    let mut reached = HashMap::default();
+    let start = (root, PositionRelation::default());
+    reached.insert(start, PathCondition::default());
+    let mut queue = VecDeque::from([start]);
+    let mut queued = [start].into_iter().collect::<HashSet<_>>();
+    let mut sources: HashMap<(K, PositionRelation), PathCondition> = HashMap::default();
+    while let Some(state @ (node, relation)) = queue.pop_front() {
+        queued.remove(&state);
+        let condition = reached[&state].clone();
+        if let DependencyDagNode::External(key) = graph.nodes[node] {
+            merge_source(&mut sources, (key, relation), condition);
+            continue;
+        }
+        for edge in incoming.get(&node).into_iter().flatten() {
+            let Some(next_condition) = condition.union_if_compatible(&edge.condition) else {
+                continue;
+            };
+            let next = (edge.source, relation.compose(edge.relation));
+            let changed = if let Some(existing) = reached.get_mut(&next) {
+                let merged = existing.disjoin(&next_condition);
+                if *existing == merged {
+                    false
+                } else {
+                    *existing = merged;
+                    true
+                }
+            } else {
+                reached.insert(next, next_condition);
+                true
+            };
+            if changed && queued.insert(next) {
+                queue.push_back(next);
+            }
+        }
+    }
+    sources
+        .into_iter()
+        .map(|((key, relation), condition)| (key, relation, condition))
+        .collect()
+}
+
+fn inline_dependency_dag<K>(
+    graph: &DependencyDag<K>,
+    root: Option<usize>,
+    bindings: &HashMap<K, Vec<(usize, PositionRelation)>>,
+    branches: &HashMap<BranchId, BranchId>,
+    nodes: &mut Vec<DependencyDagNode<K>>,
+    edges: &mut Vec<DependencyDagEdge>,
+    domains: &mut Vec<Vec<PositionDomain>>,
+) -> Option<usize>
+where
+    K: Copy + Eq + Hash,
+{
+    let root = root?;
+    let mut retained = HashSet::default();
+    let mut queue = VecDeque::from([root]);
+    retained.insert(root);
+    while let Some(node) = queue.pop_front() {
+        for edge in graph.edges.iter().filter(|edge| edge.destination == node) {
+            if retained.insert(edge.source) {
+                queue.push_back(edge.source);
+            }
+        }
+    }
+
+    let mut mapped: HashMap<usize, usize> = HashMap::default();
+    for (child, child_node) in graph.nodes.iter().enumerate() {
+        if !retained.contains(&child) {
+            continue;
+        }
+        let node = nodes.len();
+        nodes.push(DependencyDagNode::Internal);
+        domains.push(graph.domains[child].clone());
+        mapped.insert(child, node);
+        if let DependencyDagNode::External(key) = child_node {
+            for &(source, relation) in bindings.get(key).into_iter().flatten() {
+                edges.push(DependencyDagEdge {
+                    source,
+                    destination: node,
+                    relation,
+                    condition: PathCondition::default(),
+                });
+            }
+        }
+    }
+    for edge in &graph.edges {
+        let (Some(&source), Some(&destination)) =
+            (mapped.get(&edge.source), mapped.get(&edge.destination))
+        else {
+            continue;
+        };
+        edges.push(DependencyDagEdge {
+            source,
+            destination,
+            relation: edge.relation,
+            condition: edge.condition.remapped(branches),
+        });
+    }
+    mapped.get(&root).copied()
 }
 
 fn merge_source<K>(

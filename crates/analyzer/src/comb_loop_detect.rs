@@ -23,20 +23,21 @@ mod summary;
 pub(crate) use procedure::{
     function_barrier_evaluation_count, function_evaluation_count,
     function_result_region_probe_count, function_result_version_count,
-    module_context_entries, reset_function_evaluation_count, reset_module_context_entries,
+    function_summary_graph_node_count, module_context_entries, reset_function_evaluation_count,
+    reset_module_context_entries,
 };
 
 use graph::{
-    DependencyGraph, GraphDependency, add_region_dependency, check_graph,
-    node_regions_overlap_with_dependency,
+    DependencyGraph, GraphDependency, GraphNode, add_dependency_edge, add_region_dependency,
+    check_graph, ensure_node, node_regions_overlap_with_dependency,
 };
 use hierarchy::{module_postorder, walk_insts};
-use model::{BitDependency, ModuleCombSummary, SummaryRegion};
+use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
 use region::{
     ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, signed_difference,
     translate_position, var_reads,
 };
-use ssa::{BranchId, PathCondition};
+use ssa::{BranchId, DependencyDagNode, PathCondition};
 use summary::compute_module_summary;
 
 use crate::AnalyzerError;
@@ -45,8 +46,8 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, Component, Declaration, Expression, Factor, FunctionCall, InstDeclaration,
-    Ir, Module, Op, Signature, Statement, SystemFunctionKind, VarSelect, Variable,
+    AssignDestination, Component, Declaration, Expression, Factor, InstDeclaration, Ir, Module, Op,
+    Signature, Statement, SystemFunctionKind, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
@@ -66,9 +67,9 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
     let mut summaries: HashMap<Signature, ModuleCombSummary> = HashMap::default();
 
     for module in module_postorder(ir) {
-        let (graph, bit_part, module_complete) = build_module_graph(module, &summaries);
+        let (graph, _bit_part, module_complete) = build_module_graph(module, &summaries);
         check_graph(module, &graph, &mut errors);
-        let mut summary = compute_module_summary(module, &graph, &bit_part);
+        let mut summary = compute_module_summary(module, &graph);
         summary.complete = module_complete;
         summaries.insert(module.signature.clone(), summary);
         complete &= module_complete;
@@ -107,130 +108,6 @@ fn atomic_ranges(spans: &[PackedSpan], endpoints: Option<&HashSet<usize>>) -> Ve
         }
     }
     atoms
-}
-
-#[derive(Clone, Copy, Debug)]
-struct PackedTransfer {
-    left_id: VarId,
-    left: PackedSpan,
-    right_id: VarId,
-    right: PackedSpan,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct PackedTransferEdge {
-    index: usize,
-    reverse: bool,
-    source: PackedSpan,
-    destination_id: VarId,
-    destination: PackedSpan,
-}
-
-fn add_transfer(
-    transfers: &mut Vec<PackedTransfer>,
-    left_id: VarId,
-    left: PackedSpan,
-    right_id: VarId,
-    right: PackedSpan,
-) {
-    if left.length == right.length {
-        transfers.push(PackedTransfer {
-            left_id,
-            left,
-            right_id,
-            right,
-        });
-    }
-}
-
-fn propagate_packed_endpoints(
-    accesses: &HashMap<IdxKey, Vec<PackedSpan>>,
-    transfers: &[PackedTransfer],
-) -> HashMap<VarId, HashSet<usize>> {
-    let mut adjacency: HashMap<VarId, Vec<PackedTransferEdge>> = HashMap::default();
-    for (index, transfer) in transfers.iter().enumerate() {
-        adjacency
-            .entry(transfer.left_id)
-            .or_default()
-            .push(PackedTransferEdge {
-                index,
-                reverse: false,
-                source: transfer.left,
-                destination_id: transfer.right_id,
-                destination: transfer.right,
-            });
-        adjacency
-            .entry(transfer.right_id)
-            .or_default()
-            .push(PackedTransferEdge {
-                index,
-                reverse: true,
-                source: transfer.right,
-                destination_id: transfer.left_id,
-                destination: transfer.left,
-            });
-    }
-
-    let mut seeds = HashSet::default();
-    for ((id, _), spans) in accesses {
-        for span in spans {
-            seeds.insert((*id, span.start));
-            seeds.insert((*id, span.end()));
-        }
-    }
-    for transfer in transfers {
-        for (id, point) in [
-            (transfer.left_id, transfer.left.start),
-            (transfer.left_id, transfer.left.end()),
-            (transfer.right_id, transfer.right.start),
-            (transfer.right_id, transfer.right.end()),
-        ] {
-            seeds.insert((id, point));
-        }
-    }
-
-    // Each observed endpoint crosses each directed relation once. Process all
-    // points at the same depth before consuming a direction so converging copy
-    // paths retain every arrival. Reusing a direction around an offset cycle
-    // would materialize periodic repetitions as one boundary per vector bit.
-    let mut endpoints: HashMap<VarId, HashSet<usize>> = HashMap::default();
-    for seed in seeds {
-        let mut frontier = vec![seed];
-        let mut visited = [seed].into_iter().collect::<HashSet<_>>();
-        let mut used_directions = HashSet::default();
-        while !frontier.is_empty() {
-            let mut next = Vec::new();
-            let mut used_this_round = HashSet::default();
-            for (id, point) in frontier {
-                endpoints.entry(id).or_default().insert(point);
-                let Some(edges) = adjacency.get(&id) else {
-                    continue;
-                };
-                for edge in edges {
-                    let direction = (edge.index, edge.reverse);
-                    if point < edge.source.start
-                        || point > edge.source.end()
-                        || used_directions.contains(&direction)
-                    {
-                        continue;
-                    }
-                    let Some(mapped) = point
-                        .checked_sub(edge.source.start)
-                        .and_then(|offset| edge.destination.start.checked_add(offset))
-                    else {
-                        continue;
-                    };
-                    used_this_round.insert(direction);
-                    if visited.insert((edge.destination_id, mapped)) {
-                        next.push((edge.destination_id, mapped));
-                    }
-                }
-            }
-            used_directions.extend(used_this_round);
-            frontier = next;
-        }
-    }
-    endpoints
 }
 
 fn build_bit_partition(
@@ -278,15 +155,68 @@ fn build_bit_partition(
     // the same SSA version graph as their caller.
     for function in module.functions.values() {
         for body in &function.functions {
+            for (path, id) in &body.arg_map {
+                let r#type = module
+                    .variables
+                    .get(id)
+                    .map(|variable| &variable.r#type)
+                    .or_else(|| {
+                        function
+                            .args
+                            .iter()
+                            .flat_map(|argument| &argument.members)
+                            .find_map(|(member, comptime, _)| {
+                                (member == path).then_some(&comptime.r#type)
+                            })
+                    });
+                if let Some(r#type) = r#type {
+                    add_whole_type_access(&mut accesses, *id, r#type);
+                }
+            }
+            if let Some(id) = body.ret {
+                let r#type = module
+                    .variables
+                    .get(&id)
+                    .map(|variable| &variable.r#type)
+                    .unwrap_or(&function.r#type.r#type);
+                add_whole_type_access(&mut accesses, id, r#type);
+            }
             collect_statement_spans(&body.statements, &mut accesses, ctx);
         }
     }
 
-    let transfers = collect_packed_transfers(module, ctx);
-    let endpoints = propagate_packed_endpoints(&accesses, &transfers);
+    // SSA evaluation carries positional transfers on dependency edges. The
+    // storage partition therefore needs only syntactically observed access
+    // boundaries. Closing boundaries over the transfer graph can generate all
+    // subset sums of independent shifts and silently devolve into bit-level
+    // expansion.
+    let endpoints = HashMap::default();
     let ranges = split_array_spans(accesses, &endpoints);
 
     BitPartition::new(ranges)
+}
+
+fn add_whole_type_access(
+    accesses: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    id: VarId,
+    r#type: &crate::ir::Type,
+) {
+    let Some(array_length) = r#type.array.total() else {
+        return;
+    };
+    let Some(packed) = r#type.total_width().and_then(PackedSpan::whole) else {
+        return;
+    };
+    accesses
+        .entry((
+            id,
+            ArraySpan {
+                start: 0,
+                length: array_length,
+            },
+        ))
+        .or_default()
+        .push(packed);
 }
 
 fn collect_instance_summary_spans(
@@ -302,22 +232,16 @@ fn collect_instance_summary_spans(
         let Some(summary) = summaries.get(&child.signature) else {
             continue;
         };
-        for (source, destinations) in &summary.feedthrough {
+        for node in &summary.nodes {
+            let direction = match node.kind {
+                SummaryNodeKind::Input | SummaryNodeKind::Interface => Direction::Input,
+                SummaryNodeKind::Output => Direction::Output,
+                SummaryNodeKind::Internal => continue,
+            };
             if let Some((parent, array, packed)) =
-                summary_parent_access(inst, child, *source, Direction::Input, ctx)
+                summary_parent_access(inst, child, node.region, direction, ctx)
             {
                 accesses.entry((parent, array)).or_default().push(packed);
-            }
-            for destination in destinations {
-                if let Some((parent, array, packed)) = summary_parent_access(
-                    inst,
-                    child,
-                    destination.destination,
-                    Direction::Output,
-                    ctx,
-                ) {
-                    accesses.entry((parent, array)).or_default().push(packed);
-                }
             }
         }
     }
@@ -566,375 +490,6 @@ fn collect_statement_spans(
     }
 }
 
-fn variable_packed_span(id: VarId, select: &VarSelect, ctx: &mut Context) -> Option<PackedSpan> {
-    if !select.is_const_with_range() {
-        return None;
-    }
-    let variable = ctx.variables.get(&id)?.clone();
-    let (high, low) = select.eval_value(ctx, &variable.r#type, false)?;
-    PackedSpan::from_select(high, low)
-}
-
-fn collect_packed_transfers(module: &Module, ctx: &mut Context) -> Vec<PackedTransfer> {
-    let mut transfers = Vec::new();
-    for declaration in &module.declarations {
-        if let Declaration::Comb(comb) = declaration {
-            collect_statement_transfers(&comb.statements, ctx, &mut transfers);
-        }
-    }
-    for function in module.functions.values() {
-        for body in &function.functions {
-            collect_statement_transfers(&body.statements, ctx, &mut transfers);
-        }
-    }
-    for inst in walk_insts(module) {
-        for input in &inst.inputs {
-            for expression in &input.exprs {
-                collect_expression_calls(expression, ctx, &mut transfers);
-            }
-        }
-    }
-    transfers.sort_unstable_by_key(|transfer| {
-        (
-            transfer.left_id,
-            transfer.left,
-            transfer.right_id,
-            transfer.right,
-        )
-    });
-    transfers.dedup_by_key(|transfer| {
-        (
-            transfer.left_id,
-            transfer.left,
-            transfer.right_id,
-            transfer.right,
-        )
-    });
-    transfers
-}
-
-fn collect_statement_transfers(
-    statements: &[Statement],
-    ctx: &mut Context,
-    transfers: &mut Vec<PackedTransfer>,
-) {
-    for statement in statements {
-        match statement {
-            Statement::Assign(assign) => {
-                collect_expression_calls(&assign.expr, ctx, transfers);
-                let destinations = assign
-                    .dst
-                    .iter()
-                    .map(|destination| {
-                        variable_packed_span(destination.id, &destination.select, ctx)
-                            .map(|span| (destination.id, span))
-                    })
-                    .collect::<Option<Vec<_>>>();
-                let Some(destinations) = destinations else {
-                    continue;
-                };
-                let total_width = destinations.iter().map(|(_, span)| span.length).sum();
-                let mut offset = total_width;
-                for (id, destination) in destinations {
-                    offset -= destination.length;
-                    let expression = PackedSpan {
-                        start: offset,
-                        length: destination.length,
-                    };
-                    collect_expression_transfers(
-                        &assign.expr,
-                        expression,
-                        id,
-                        destination,
-                        ctx,
-                        transfers,
-                    );
-                }
-            }
-            Statement::If(statement) => {
-                collect_expression_calls(&statement.cond, ctx, transfers);
-                collect_statement_transfers(&statement.true_side, ctx, transfers);
-                collect_statement_transfers(&statement.false_side, ctx, transfers);
-            }
-            Statement::Case(statement) => {
-                collect_expression_calls(&statement.case_target, ctx, transfers);
-                for arm in &statement.arms {
-                    for pattern in &arm.patterns {
-                        match pattern {
-                            crate::ir::CasePattern::Eq(expression) => {
-                                collect_expression_calls(expression, ctx, transfers);
-                            }
-                            crate::ir::CasePattern::Range { lo, hi, .. } => {
-                                collect_expression_calls(lo, ctx, transfers);
-                                collect_expression_calls(hi, ctx, transfers);
-                            }
-                        }
-                    }
-                    collect_statement_transfers(&arm.body, ctx, transfers);
-                }
-                collect_statement_transfers(&statement.default, ctx, transfers);
-            }
-            Statement::For(statement) => {
-                collect_statement_transfers(&statement.body, ctx, transfers);
-            }
-            Statement::FunctionCall(call) => collect_call_transfers(call, ctx, transfers),
-            Statement::SystemFunctionCall(_)
-            | Statement::IfReset(_)
-            | Statement::TbMethodCall(_)
-            | Statement::Break
-            | Statement::Unsupported(_)
-            | Statement::Null => {}
-        }
-    }
-}
-
-fn collect_expression_calls(
-    expression: &Expression,
-    ctx: &mut Context,
-    transfers: &mut Vec<PackedTransfer>,
-) {
-    match expression {
-        Expression::Term(factor) => match factor.as_ref() {
-            Factor::FunctionCall(call) => collect_call_transfers(call, ctx, transfers),
-            Factor::SystemFunctionCall(call) => match &call.kind {
-                SystemFunctionKind::Onehot(input)
-                | SystemFunctionKind::Signed(input)
-                | SystemFunctionKind::Unsigned(input) => {
-                    collect_expression_calls(&input.0, ctx, transfers);
-                }
-                SystemFunctionKind::Readmemh(input, _) => {
-                    collect_expression_calls(&input.0, ctx, transfers);
-                }
-                _ => {}
-            },
-            _ => {}
-        },
-        Expression::Unary(_, operand, _) => collect_expression_calls(operand, ctx, transfers),
-        Expression::Binary(left, _, right, _) => {
-            collect_expression_calls(left, ctx, transfers);
-            collect_expression_calls(right, ctx, transfers);
-        }
-        Expression::Ternary(condition, left, right, _) => {
-            collect_expression_calls(condition, ctx, transfers);
-            collect_expression_calls(left, ctx, transfers);
-            collect_expression_calls(right, ctx, transfers);
-        }
-        Expression::Concatenation(parts, _) => {
-            for (part, repeat) in parts {
-                collect_expression_calls(part, ctx, transfers);
-                if let Some(repeat) = repeat {
-                    collect_expression_calls(repeat, ctx, transfers);
-                }
-            }
-        }
-        Expression::ArrayLiteral(items, _) => {
-            for item in items {
-                match item {
-                    crate::ir::ArrayLiteralItem::Value(value, repeat) => {
-                        collect_expression_calls(value, ctx, transfers);
-                        if let Some(repeat) = repeat {
-                            collect_expression_calls(repeat, ctx, transfers);
-                        }
-                    }
-                    crate::ir::ArrayLiteralItem::Defaul(value) => {
-                        collect_expression_calls(value, ctx, transfers);
-                    }
-                }
-            }
-        }
-        Expression::StructConstructor(_, fields, _) => {
-            for (_, value) in fields {
-                collect_expression_calls(value, ctx, transfers);
-            }
-        }
-    }
-}
-
-fn collect_call_transfers(
-    call: &FunctionCall,
-    ctx: &mut Context,
-    transfers: &mut Vec<PackedTransfer>,
-) {
-    let body = ctx.functions.get(&call.id).and_then(|function| {
-        if let Some(index) = &call.index {
-            function.get_function(index)
-        } else {
-            function.get_function(&[])
-        }
-    });
-    let Some(body) = body else {
-        for input in call.inputs.values() {
-            collect_expression_calls(input, ctx, transfers);
-        }
-        return;
-    };
-
-    for (path, actual) in &call.inputs {
-        collect_expression_calls(actual, ctx, transfers);
-        let Some(&formal) = body.arg_map.get(path) else {
-            continue;
-        };
-        let Some(width) = ctx.variables.get(&formal).and_then(Variable::total_width) else {
-            continue;
-        };
-        let Some(span) = PackedSpan::whole(width) else {
-            continue;
-        };
-        collect_expression_transfers(actual, span, formal, span, ctx, transfers);
-    }
-
-    for (path, destinations) in &call.outputs {
-        let Some(&formal) = body.arg_map.get(path) else {
-            continue;
-        };
-        let destination_spans = destinations
-            .iter()
-            .map(|destination| {
-                variable_packed_span(destination.id, &destination.select, ctx)
-                    .map(|span| (destination.id, span))
-            })
-            .collect::<Option<Vec<_>>>();
-        let Some(destination_spans) = destination_spans else {
-            continue;
-        };
-        let total_width = destination_spans.iter().map(|(_, span)| span.length).sum();
-        let mut offset = total_width;
-        for (destination_id, destination) in destination_spans {
-            offset -= destination.length;
-            add_transfer(
-                transfers,
-                formal,
-                PackedSpan {
-                    start: offset,
-                    length: destination.length,
-                },
-                destination_id,
-                destination,
-            );
-        }
-    }
-}
-
-fn collect_expression_transfers(
-    expression: &Expression,
-    requested: PackedSpan,
-    target_id: VarId,
-    target: PackedSpan,
-    ctx: &mut Context,
-    transfers: &mut Vec<PackedTransfer>,
-) {
-    if requested.length != target.length {
-        return;
-    }
-    match expression {
-        Expression::Term(factor) => match factor.as_ref() {
-            Factor::Variable(id, _, select, _) => {
-                let Some(selected) = variable_packed_span(*id, select, ctx) else {
-                    return;
-                };
-                let Some(expression_width) = PackedSpan::whole(selected.length) else {
-                    return;
-                };
-                let Some(valid) = requested.intersection(expression_width) else {
-                    return;
-                };
-                let Some(source) = valid.translated(0, selected.start) else {
-                    return;
-                };
-                let Some(target) = valid.translated(requested.start, target.start) else {
-                    return;
-                };
-                add_transfer(transfers, *id, source, target_id, target);
-            }
-            Factor::FunctionCall(call) => {
-                collect_call_transfers(call, ctx, transfers);
-                let body = ctx.functions.get(&call.id).and_then(|function| {
-                    if let Some(index) = &call.index {
-                        function.get_function(index)
-                    } else {
-                        function.get_function(&[])
-                    }
-                });
-                if let Some(ret) = body.and_then(|body| body.ret)
-                    && let Some(width) = ctx.variables.get(&ret).and_then(Variable::total_width)
-                    && let Some(valid) =
-                        PackedSpan::whole(width).and_then(|width| requested.intersection(width))
-                    && let Some(target) = valid.translated(requested.start, target.start)
-                {
-                    add_transfer(transfers, ret, valid, target_id, target);
-                }
-            }
-            Factor::SystemFunctionCall(call) => match &call.kind {
-                SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
-                    collect_expression_transfers(
-                        &input.0, requested, target_id, target, ctx, transfers,
-                    );
-                }
-                _ => collect_expression_calls(expression, ctx, transfers),
-            },
-            _ => {}
-        },
-        Expression::Unary(Op::BitNot | Op::Add | Op::Sub, operand, _) => {
-            collect_expression_transfers(operand, requested, target_id, target, ctx, transfers);
-        }
-        Expression::Binary(left, Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor, right, _) => {
-            collect_expression_transfers(left, requested, target_id, target, ctx, transfers);
-            collect_expression_transfers(right, requested, target_id, target, ctx, transfers);
-        }
-        Expression::Binary(left, op, right, _)
-            if matches!(
-                op,
-                Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR | Op::ArithShiftR
-            ) =>
-        {
-            let shift = right.eval_value(ctx).and_then(|value| value.to_usize());
-            let width = left.comptime().r#type.total_width();
-            if let (Some(shift), Some(width)) = (shift, width) {
-                let mapped = if matches!(op, Op::LogicShiftL | Op::ArithShiftL) {
-                    PackedSpan::new(shift, width)
-                        .and_then(|window| requested.intersection(window))
-                        .and_then(|valid| Some((valid, valid.translated(shift, 0)?)))
-                } else {
-                    width
-                        .checked_sub(shift)
-                        .and_then(PackedSpan::whole)
-                        .and_then(|window| requested.intersection(window))
-                        .and_then(|valid| Some((valid, valid.translated(0, shift)?)))
-                };
-                if let Some((valid, source)) = mapped
-                    && let Some(target) = valid.translated(requested.start, target.start)
-                {
-                    collect_expression_transfers(left, source, target_id, target, ctx, transfers);
-                }
-            }
-            collect_expression_calls(right, ctx, transfers);
-        }
-        Expression::Ternary(_, left, right, _) => {
-            collect_expression_transfers(left, requested, target_id, target, ctx, transfers);
-            collect_expression_transfers(right, requested, target_id, target, ctx, transfers);
-        }
-        Expression::Concatenation(parts, _) if parts.iter().all(|(_, repeat)| repeat.is_none()) => {
-            let mut low = 0usize;
-            for (part, _) in parts.iter().rev() {
-                let Some(width) = part.comptime().r#type.total_width() else {
-                    return;
-                };
-                let Some(window) = PackedSpan::new(low, width) else {
-                    return;
-                };
-                if let Some(overlap) = requested.intersection(window)
-                    && let Some(local) = overlap.translated(low, 0)
-                    && let Some(target) = overlap.translated(requested.start, target.start)
-                {
-                    collect_expression_transfers(part, local, target_id, target, ctx, transfers);
-                }
-                low = low.saturating_add(width);
-            }
-        }
-        _ => collect_expression_calls(expression, ctx, transfers),
-    }
-}
-
 /// None if the index is dynamic.
 fn eval_dst_span(
     dst: &AssignDestination,
@@ -973,6 +528,7 @@ fn build_module_graph(
             &comb.statements,
             declaration_index + 1,
             &mut builder.procedure_context,
+            &mut builder.function_summaries,
         );
         if !analysis.status.is_complete() {
             builder.complete = false;
@@ -980,27 +536,7 @@ fn build_module_graph(
         if analysis.status.is_barrier() {
             continue;
         }
-        for dependency in analysis.dependencies {
-            let source = dependency.source;
-            let destination = dependency.destination;
-            if !is_module_scope_var(source.0, &module.variables)
-                || !is_module_scope_var(destination.0, &module.variables)
-                || is_inout(source.0, &module.variables)
-                || is_inout(destination.0, &module.variables)
-            {
-                continue;
-            }
-            add_region_dependency(
-                &mut builder.graph,
-                &mut builder.node_map,
-                source,
-                destination,
-                GraphDependency {
-                    kind: dependency.kind,
-                    condition: dependency.condition,
-                },
-            );
-        }
+        builder.add_procedure_graph(module, analysis);
     }
 
     for inst in walk_insts(module) {
@@ -1054,6 +590,89 @@ impl<'a> ModuleGraphBuilder<'a> {
         (self.graph, self.complete)
     }
 
+    fn add_procedure_graph(&mut self, module: &Module, analysis: procedure::ProcedureResult) {
+        let destinations = analysis
+            .destinations
+            .into_iter()
+            .filter_map(|(key, root)| {
+                (is_module_scope_var(key.0, &module.variables)
+                    && !is_inout(key.0, &module.variables))
+                .then_some((key, root))
+            })
+            .collect::<Vec<_>>();
+        let Some(internal_region) = destinations.iter().find_map(|(key, _)| {
+            ensure_node(&mut self.graph, &mut self.node_map, self.bit_part, *key)
+                .map(|node| self.graph[node].region)
+        }) else {
+            return;
+        };
+
+        let mapped = analysis
+            .graph
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| match node {
+                DependencyDagNode::External(key)
+                    if is_module_scope_var(key.0, &module.variables)
+                        && !is_inout(key.0, &module.variables) =>
+                {
+                    ensure_node(&mut self.graph, &mut self.node_map, self.bit_part, *key)
+                }
+                DependencyDagNode::External(_) => None,
+                DependencyDagNode::Internal => Some(self.graph.add_node(GraphNode {
+                    // Internal nodes carry no variable identity. The region is
+                    // only a coordinate carrier; exact edge relations retain
+                    // the positional semantics.
+                    region: internal_region,
+                    domains: analysis.graph.domains[index].clone(),
+                    diagnostic: None,
+                })),
+            })
+            .collect::<Vec<_>>();
+
+        for edge in analysis.graph.edges {
+            let (Some(source), Some(destination)) = (mapped[edge.source], mapped[edge.destination])
+            else {
+                continue;
+            };
+            add_dependency_edge(
+                &mut self.graph,
+                source,
+                destination,
+                GraphDependency {
+                    kind: BitDependency {
+                        array: edge.relation.array,
+                        packed: edge.relation.packed,
+                    },
+                    condition: edge.condition,
+                },
+            );
+        }
+        for (destination, root) in destinations {
+            let (Some(root), Some(destination)) = (
+                root.and_then(|root| mapped[root]),
+                ensure_node(
+                    &mut self.graph,
+                    &mut self.node_map,
+                    self.bit_part,
+                    destination,
+                ),
+            ) else {
+                continue;
+            };
+            add_dependency_edge(
+                &mut self.graph,
+                root,
+                destination,
+                GraphDependency::unconditional(BitDependency {
+                    array: Some(0),
+                    packed: Some(0),
+                }),
+            );
+        }
+    }
+
     fn add_instance_feedthrough(
         &mut self,
         module: &'a Module,
@@ -1076,20 +695,20 @@ impl<'a> ModuleGraphBuilder<'a> {
             }
             let mut reads = Vec::new();
             for expression in &inp.exprs {
-                let (sources, dependencies, actual_complete) =
-                    analyze_instance_actual(
-                        bit_part,
-                        expression,
-                        ctx,
-                        procedure_context,
-                        function_summaries,
-                    );
+                let (sources, dependencies, actual_complete) = analyze_instance_actual(
+                    bit_part,
+                    expression,
+                    ctx,
+                    procedure_context,
+                    function_summaries,
+                );
                 complete &= actual_complete;
                 reads.extend(sources);
                 for dependency in dependencies {
                     add_region_dependency(
                         graph,
                         node_map,
+                        bit_part,
                         dependency.source,
                         dependency.destination,
                         GraphDependency::unconditional(dependency.kind),
@@ -1131,6 +750,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                     add_region_dependency(
                         graph,
                         node_map,
+                        bit_part,
                         dependency.source,
                         dependency.destination,
                         GraphDependency::unconditional(dependency.kind),
@@ -1141,6 +761,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                         add_region_dependency(
                             graph,
                             node_map,
+                            bit_part,
                             source.key,
                             *destination,
                             GraphDependency {
@@ -1169,112 +790,158 @@ impl<'a> ModuleGraphBuilder<'a> {
         }
 
         let summary_branches = remap_module_summary_branches(summary, inst);
-        for (child_source, destination_set) in &summary.feedthrough {
-            for summary_dependency in destination_set {
-                let child_destination = summary_dependency.destination;
-                let dependency = summary_dependency.kind;
-                let condition = summary_dependency.condition.remapped(&summary_branches);
-                let parent_destinations = instance_region_mapping(
-                    inst,
-                    child,
-                    child_destination,
-                    Direction::Output,
-                    output_dsts.get(&child_destination.id).map(Vec::as_slice),
-                    bit_part,
-                    ctx,
-                );
-
-                if let Some((array, packed)) = dependency.exact_offset() {
-                    let mut fallback_destinations = Vec::new();
-                    for destination in parent_destinations.nodes {
-                        match child_source_region_for_destination(
-                            *child_source,
-                            child_destination,
-                            array,
-                            packed,
-                            &destination,
-                            bit_part,
-                        ) {
-                            RegionProjection::Exact(source_region) => {
-                                let parent_sources = map_instance_source_region(
-                                    module,
-                                    inst,
-                                    child,
-                                    source_region,
-                                    dependency,
-                                    input_reads.get(&child_source.id).map(Vec::as_slice),
-                                    bit_part,
-                                    ctx,
-                                    procedure_context,
-                                    function_summaries,
-                                );
-                                add_mapped_dependency_edges(
-                                    graph,
-                                    node_map,
-                                    bit_part,
-                                    &parent_sources,
-                                    &InstanceRegionMapping {
-                                        nodes: vec![destination],
-                                    },
-                                    dependency,
-                                    &condition,
-                                );
-                            }
-                            RegionProjection::Disjoint => {}
-                            RegionProjection::Unknown => fallback_destinations.push(destination),
-                        }
-                    }
-                    if fallback_destinations.is_empty() {
-                        continue;
-                    }
-                    let parent_sources = map_instance_source_region(
-                        module,
+        let mut mapped_nodes = Vec::with_capacity(summary.nodes.len());
+        let mut endpoint_mappings = Vec::with_capacity(summary.nodes.len());
+        for (index, node) in summary.nodes.iter().enumerate() {
+            let (mapping, endpoint_mapping) = match node.kind {
+                SummaryNodeKind::Input => {
+                    let preserve_position = summary
+                        .edges
+                        .iter()
+                        .any(|edge| edge.source == index && edge.kind.has_position());
+                    let mapping = map_instance_source_region(
                         inst,
                         child,
-                        *child_source,
-                        dependency,
-                        input_reads.get(&child_source.id).map(Vec::as_slice),
+                        node.region,
+                        preserve_position,
+                        input_reads.get(&node.region.id).map(Vec::as_slice),
                         bit_part,
                         ctx,
                         procedure_context,
                         function_summaries,
                     );
-                    add_mapped_dependency_edges(
-                        graph,
-                        node_map,
+                    let resolved =
+                        resolve_instance_mapping(graph, node_map, bit_part, mapping.clone());
+                    (resolved, Some(mapping))
+                }
+                SummaryNodeKind::Output => {
+                    let mapping = instance_region_mapping(
+                        inst,
+                        child,
+                        node.region,
+                        Direction::Output,
+                        output_dsts.get(&node.region.id).map(Vec::as_slice),
                         bit_part,
-                        &parent_sources,
-                        &InstanceRegionMapping {
-                            nodes: fallback_destinations,
-                        },
-                        dependency,
-                        &condition,
+                        ctx,
                     );
+                    let resolved =
+                        resolve_instance_mapping(graph, node_map, bit_part, mapping.clone());
+                    (resolved, Some(mapping))
+                }
+                SummaryNodeKind::Interface => {
+                    let mapping = instance_region_mapping(
+                        inst,
+                        child,
+                        node.region,
+                        Direction::Input,
+                        None,
+                        bit_part,
+                        ctx,
+                    );
+                    let resolved =
+                        resolve_instance_mapping(graph, node_map, bit_part, mapping.clone());
+                    (resolved, Some(mapping))
+                }
+                SummaryNodeKind::Internal => (
+                    ResolvedInstanceRegionMapping {
+                        nodes: vec![ResolvedMappedNode {
+                            node: graph.add_node(GraphNode {
+                                region: node.region,
+                                domains: node.domains.clone(),
+                                diagnostic: None,
+                            }),
+                            offset: Some((0, 0)),
+                            condition: PathCondition::default(),
+                        }],
+                    },
+                    None,
+                ),
+            };
+            mapped_nodes.push(mapping);
+            endpoint_mappings.push(endpoint_mapping);
+        }
+
+        for edge in &summary.edges {
+            let condition = edge.condition.remapped(&summary_branches);
+            if summary.nodes[edge.source].kind == SummaryNodeKind::Input
+                && let Some((array, packed)) = edge.kind.exact_offset()
+                && let Some(destinations) = &endpoint_mappings[edge.destination]
+            {
+                let mut fallback_destinations = Vec::new();
+                for destination in &destinations.nodes {
+                    match child_source_region_for_destination(
+                        summary.nodes[edge.source].region,
+                        summary.nodes[edge.destination].region,
+                        array,
+                        packed,
+                        destination,
+                        bit_part,
+                    ) {
+                        RegionProjection::Exact(source_region) => {
+                            let sources = map_instance_source_region(
+                                inst,
+                                child,
+                                source_region,
+                                true,
+                                input_reads
+                                    .get(&summary.nodes[edge.source].region.id)
+                                    .map(Vec::as_slice),
+                                bit_part,
+                                ctx,
+                                procedure_context,
+                                function_summaries,
+                            );
+                            let sources =
+                                resolve_instance_mapping(graph, node_map, bit_part, sources);
+                            let destinations = resolve_instance_mapping(
+                                graph,
+                                node_map,
+                                bit_part,
+                                InstanceRegionMapping {
+                                    nodes: vec![destination.clone()],
+                                },
+                            );
+                            add_resolved_dependency_edges(
+                                graph,
+                                &sources,
+                                &destinations,
+                                edge.kind,
+                                &condition,
+                            );
+                        }
+                        RegionProjection::Disjoint => {}
+                        RegionProjection::Unknown => {
+                            fallback_destinations.push(destination.clone())
+                        }
+                    }
+                }
+                if fallback_destinations.is_empty() {
                     continue;
                 }
-
-                let parent_sources = map_instance_source_region(
-                    module,
-                    inst,
-                    child,
-                    *child_source,
-                    dependency,
-                    input_reads.get(&child_source.id).map(Vec::as_slice),
-                    bit_part,
-                    ctx,
-                    procedure_context,
-                    function_summaries,
-                );
-                add_mapped_dependency_edges(
+                let destinations = resolve_instance_mapping(
                     graph,
                     node_map,
                     bit_part,
-                    &parent_sources,
-                    &parent_destinations,
-                    dependency,
+                    InstanceRegionMapping {
+                        nodes: fallback_destinations,
+                    },
+                );
+                add_resolved_dependency_edges(
+                    graph,
+                    &mapped_nodes[edge.source],
+                    &destinations,
+                    edge.kind,
                     &condition,
                 );
+                continue;
             }
+            add_resolved_dependency_edges(
+                graph,
+                &mapped_nodes[edge.source],
+                &mapped_nodes[edge.destination],
+                edge.kind,
+                &condition,
+            );
         }
         self.complete &= complete;
     }
@@ -1282,11 +949,10 @@ impl<'a> ModuleGraphBuilder<'a> {
 
 #[allow(clippy::too_many_arguments)]
 fn map_instance_source_region<'a>(
-    module: &'a Module,
     inst: &InstDeclaration,
     child: &Module,
     region: SummaryRegion,
-    dependency: BitDependency,
+    preserve_position: bool,
     allowed: Option<&[procedure::RegionSource]>,
     bit_part: &'a BitPartition,
     ctx: &mut Context,
@@ -1302,7 +968,7 @@ fn map_instance_source_region<'a>(
         bit_part,
         ctx,
     );
-    if !dependency.has_position()
+    if !preserve_position
         || parent_sources
             .nodes
             .iter()
@@ -1336,6 +1002,7 @@ fn map_instance_source_region<'a>(
     mapping
 }
 
+#[derive(Clone)]
 struct InstanceRegionMapping {
     nodes: Vec<MappedNode>,
 }
@@ -1347,14 +1014,23 @@ struct MappedNode {
     condition: PathCondition,
 }
 
+struct ResolvedInstanceRegionMapping {
+    nodes: Vec<ResolvedMappedNode>,
+}
+
+struct ResolvedMappedNode {
+    node: NodeIndex,
+    offset: Option<(isize, isize)>,
+    condition: PathCondition,
+}
+
 fn remap_module_summary_branches(
     summary: &ModuleCombSummary,
     inst: &InstDeclaration,
 ) -> HashMap<BranchId, BranchId> {
     let mut branches = summary
-        .feedthrough
-        .values()
-        .flatten()
+        .edges
+        .iter()
         .flat_map(|dependency| dependency.condition.branches())
         .collect::<Vec<_>>();
     branches.sort_unstable();
@@ -1609,12 +1285,31 @@ fn translated_summary_access(
     Some((array, packed, offset))
 }
 
-fn add_mapped_dependency_edges(
+fn resolve_instance_mapping(
     graph: &mut DependencyGraph,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     bit_part: &BitPartition,
-    sources: &InstanceRegionMapping,
-    destinations: &InstanceRegionMapping,
+    mapping: InstanceRegionMapping,
+) -> ResolvedInstanceRegionMapping {
+    let nodes = mapping
+        .nodes
+        .into_iter()
+        .filter_map(|mapped| {
+            let node = ensure_node(graph, node_map, bit_part, mapped.key)?;
+            Some(ResolvedMappedNode {
+                node,
+                offset: mapped.offset,
+                condition: mapped.condition,
+            })
+        })
+        .collect();
+    ResolvedInstanceRegionMapping { nodes }
+}
+
+fn add_resolved_dependency_edges(
+    graph: &mut DependencyGraph,
+    sources: &ResolvedInstanceRegionMapping,
+    destinations: &ResolvedInstanceRegionMapping,
     dependency: BitDependency,
     condition: &PathCondition,
 ) {
@@ -1646,14 +1341,20 @@ fn add_mapped_dependency_edges(
             } else {
                 BitDependency::WHOLE
             };
-            if !node_regions_overlap_with_dependency(source.key, destination.key, kind, bit_part) {
+            if graph[source.node].diagnostic.is_some()
+                && graph[destination.node].diagnostic.is_some()
+                && !node_regions_overlap_with_dependency(
+                    &graph[source.node],
+                    &graph[destination.node],
+                    kind,
+                )
+            {
                 continue;
             }
-            add_region_dependency(
+            add_dependency_edge(
                 graph,
-                node_map,
-                source.key,
-                destination.key,
+                source.node,
+                destination.node,
                 GraphDependency {
                     kind,
                     condition: edge_condition,
@@ -1724,8 +1425,7 @@ fn analyze_instance_actual_region<'a>(
     procedure_context: &mut procedure::ProcedureContext,
     summaries: &mut procedure::FunctionSummaries<'a>,
 ) -> InstanceRegionMapping {
-    let mut analysis =
-        procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
+    let mut analysis = procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
     let sources = analysis.eval_region(expression, region.array, region.packed, context_width);
     let mapping = InstanceRegionMapping {
         nodes: sources
@@ -1969,118 +1669,5 @@ mod partition_tests {
         ];
 
         assert_eq!(atomic_ranges(&spans, None), spans);
-    }
-
-    #[test]
-    fn shifted_transfer_cycle_does_not_enumerate_declared_width() {
-        let width = 1_000_000_000;
-        let id = VarId::from_raw(0);
-        let mut accesses = HashMap::default();
-        accesses.insert(
-            (
-                id,
-                ArraySpan {
-                    start: 0,
-                    length: 1,
-                },
-            ),
-            vec![PackedSpan {
-                start: 0,
-                length: width,
-            }],
-        );
-        let transfers = [PackedTransfer {
-            left_id: id,
-            left: PackedSpan {
-                start: 0,
-                length: width - 1,
-            },
-            right_id: id,
-            right: PackedSpan {
-                start: 1,
-                length: width - 1,
-            },
-        }];
-
-        let endpoints = propagate_packed_endpoints(&accesses, &transfers);
-        assert_eq!(
-            endpoints[&id],
-            [0, 1, 2, width - 2, width - 1, width]
-                .into_iter()
-                .collect::<HashSet<_>>()
-        );
-    }
-
-    #[test]
-    fn endpoint_paths_do_not_hide_distinct_arrivals_at_a_shared_transfer() {
-        let x = VarId::from_raw(0);
-        let y = VarId::from_raw(1);
-        let z = VarId::from_raw(2);
-        let w = VarId::from_raw(3);
-        let q = VarId::from_raw(4);
-        let mut accesses = HashMap::default();
-        accesses.insert(
-            (
-                x,
-                ArraySpan {
-                    start: 0,
-                    length: 1,
-                },
-            ),
-            vec![PackedSpan {
-                start: 5,
-                length: 1,
-            }],
-        );
-        let aligned = PackedSpan {
-            start: 0,
-            length: 10,
-        };
-        let shifted = PackedSpan {
-            start: 1,
-            length: 10,
-        };
-        let transfers = [
-            PackedTransfer {
-                left_id: x,
-                left: aligned,
-                right_id: y,
-                right: aligned,
-            },
-            PackedTransfer {
-                left_id: x,
-                left: aligned,
-                right_id: z,
-                right: shifted,
-            },
-            PackedTransfer {
-                left_id: y,
-                left: aligned,
-                right_id: w,
-                right: aligned,
-            },
-            PackedTransfer {
-                left_id: z,
-                left: shifted,
-                right_id: w,
-                right: shifted,
-            },
-            PackedTransfer {
-                left_id: w,
-                left: PackedSpan {
-                    start: 0,
-                    length: 11,
-                },
-                right_id: q,
-                right: PackedSpan {
-                    start: 0,
-                    length: 11,
-                },
-            },
-        ];
-
-        let endpoints = propagate_packed_endpoints(&accesses, &transfers);
-        let expected = [5, 6, 7].into_iter().collect::<HashSet<_>>();
-        assert!(endpoints[&q].is_superset(&expected));
     }
 }

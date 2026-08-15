@@ -1392,3 +1392,72 @@ fn comb_loop_module_summary_retains_feedback_reachable_in_one_expression_arm() {
         true,
     );
 }
+
+fn shifted_recurrence_module_code(feedback_output: usize, feedback_input: usize) -> String {
+    let clears = (0..4)
+        .filter(|index| *index != feedback_input)
+        .map(|index| format!("assign child_i[{index}] = 0;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        r#"
+        module ShiftClosure (
+            i: input  logic<4>,
+            o: output logic<4>,
+        ) {{
+            var x: logic<4>;
+            assign x = (x << 1) | i;
+            assign o = x;
+        }}
+        module Top (o: output logic) {{
+            var child_i: logic<4>;
+            var child_o: logic<4>;
+            inst u: ShiftClosure (i: child_i, o: child_o);
+            assign child_i[{feedback_input}] = child_o[{feedback_output}];
+            {clears}
+            assign o = child_o[0];
+        }}
+        "#,
+    )
+}
+
+#[test]
+fn comb_loop_module_summary_shift_closure_terminates_without_wraparound() {
+    assert_comb_loop(
+        "a truncated left-shift recurrence does not wrap its high input to its low output",
+        &shifted_recurrence_module_code(0, 3),
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_module_summary_shift_closure_retains_reachable_feedback() {
+    assert_comb_loop(
+        "a left-shift recurrence retains transitive low-to-high feedthrough",
+        &shifted_recurrence_module_code(3, 0),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_wide_module_summary_shift_closure_is_sparse() {
+    assert_comb_loop(
+        "a wide truncated-shift recurrence must not enumerate its declared width",
+        r#"
+        module ShiftClosure (
+            i: input  logic<1000000>,
+            o: output logic<1000000>,
+        ) {
+            var x: logic<1000000>;
+            assign x = (x << 1) | i;
+            assign o = x;
+        }
+        module Top (o: output logic) {
+            var child_o: logic<1000000>;
+            inst u: ShiftClosure (i: 0, o: child_o);
+            assign o = child_o[0];
+        }
+        "#,
+        false,
+    );
+}

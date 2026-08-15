@@ -1,113 +1,159 @@
-//! Bottom-up module feedthrough summary construction.
+//! Bottom-up finite module dependency-graph summaries.
 
 use super::graph::DependencyGraph;
-use super::model::{BitDependency, ModuleCombSummary, SummaryDependency, SummaryRegion};
-use super::region::{BitPartition, NodeKey};
-use super::ssa::PathCondition;
-use crate::ir::{Module, VarId, VarKind};
+use super::model::{ModuleCombSummary, SummaryDependency, SummaryNode, SummaryNodeKind};
+use crate::ir::{Module, VarKind};
 use crate::{HashMap, HashSet};
+use daggy::petgraph::Direction;
+use daggy::petgraph::algo::tarjan_scc;
 use daggy::petgraph::graph::NodeIndex;
 use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
 
-type ReachabilityState = (NodeIndex, BitDependency);
-
 pub(super) fn compute_module_summary(
     module: &Module,
     graph: &DependencyGraph,
-    bit_part: &BitPartition,
 ) -> ModuleCombSummary {
-    let (source_ids, destination_ids) = summary_endpoint_ids(module);
-    let mut feedthrough: HashMap<SummaryRegion, Vec<SummaryDependency>> = HashMap::default();
-    let mut reached = HashMap::default();
-    let mut queued = HashSet::default();
-    let mut queue = VecDeque::new();
+    let sources = graph
+        .node_indices()
+        .filter(|&node| {
+            matches!(
+                node_kind(module, &graph[node]),
+                SummaryNodeKind::Input | SummaryNodeKind::Interface
+            )
+        })
+        .collect::<Vec<_>>();
+    let destinations = graph
+        .node_indices()
+        .filter(|&node| {
+            matches!(
+                node_kind(module, &graph[node]),
+                SummaryNodeKind::Output | SummaryNodeKind::Interface
+            )
+        })
+        .collect::<Vec<_>>();
 
-    for source_node in graph.node_indices() {
-        let source_key = graph[source_node];
-        if !source_ids.contains(&source_key.0) {
-            continue;
+    let forward = reachable(graph, sources, Direction::Outgoing);
+    let backward = reachable(graph, destinations, Direction::Incoming);
+    let retained = graph
+        .node_indices()
+        .filter(|node| forward.contains(node) && backward.contains(node))
+        .collect::<HashSet<_>>();
+    let mut cyclic = HashSet::default();
+    for scc in tarjan_scc(&**graph) {
+        if scc.len() > 1
+            || scc
+                .first()
+                .is_some_and(|&node| graph.edges(node).any(|edge| edge.target() == node))
+        {
+            cyclic.extend(scc);
         }
-        let Some(source) = summary_region(source_key, bit_part) else {
-            continue;
-        };
+    }
+    let kept = graph
+        .node_indices()
+        .filter(|node| {
+            let incoming = graph
+                .edges_directed(*node, Direction::Incoming)
+                .filter(|edge| retained.contains(&edge.source()))
+                .count();
+            let outgoing = graph
+                .edges_directed(*node, Direction::Outgoing)
+                .filter(|edge| retained.contains(&edge.target()))
+                .count();
+            retained.contains(node)
+                && (node_kind(module, &graph[*node]) != SummaryNodeKind::Internal
+                    || cyclic.contains(node)
+                    || !graph[*node].domains.is_empty()
+                    // Collapse only a linear series node. Eliminating a
+                    // branch or join would enumerate path combinations and
+                    // can make a compact dependency DAG exponential.
+                    || incoming != 1
+                    || outgoing != 1)
+        })
+        .collect::<Vec<_>>();
+    let indices = kept
+        .iter()
+        .enumerate()
+        .map(|(summary, graph)| (*graph, summary))
+        .collect::<HashMap<_, _>>();
 
-        reached.clear();
-        queued.clear();
-        queue.clear();
-        for edge in graph.edges(source_node) {
-            let state = (edge.target(), edge.weight().kind);
+    let nodes = kept
+        .iter()
+        .map(|&node| SummaryNode {
+            region: graph[node].region,
+            domains: graph[node].domains.clone(),
+            kind: node_kind(module, &graph[node]),
+        })
+        .collect();
+    let mut edges = Vec::new();
+    for &source in &kept {
+        let mut reached = HashMap::default();
+        let mut queued = HashSet::default();
+        let mut queue = VecDeque::new();
+        for edge in graph.edges(source) {
             enqueue_if_changed(
                 &mut reached,
                 &mut queued,
                 &mut queue,
-                state,
+                (edge.target(), edge.weight().kind),
                 edge.weight().condition.clone(),
             );
         }
-
         while let Some(state @ (node, dependency)) = queue.pop_front() {
             queued.remove(&state);
             let condition = reached[&state].clone();
+            if let Some(&destination) = indices.get(&node) {
+                edges.push(SummaryDependency {
+                    source: indices[&source],
+                    destination,
+                    kind: dependency,
+                    condition,
+                });
+                continue;
+            }
             for edge in graph.edges(node) {
                 let Some(condition) = condition.union_if_compatible(&edge.weight().condition)
                 else {
                     continue;
                 };
-                let state = (edge.target(), dependency.compose(edge.weight().kind));
-                enqueue_if_changed(&mut reached, &mut queued, &mut queue, state, condition);
+                enqueue_if_changed(
+                    &mut reached,
+                    &mut queued,
+                    &mut queue,
+                    (edge.target(), dependency.compose(edge.weight().kind)),
+                    condition,
+                );
             }
         }
-
-        let mut destinations = Vec::new();
-        for (&(node, kind), condition) in &reached {
-            let key = graph[node];
-            if destination_ids.contains(&key.0)
-                && let Some(destination) = summary_region(key, bit_part)
-            {
-                destinations.push(SummaryDependency {
-                    destination,
-                    kind,
-                    condition: condition.clone(),
-                });
-            }
-        }
-        feedthrough.insert(source, coalesce_destinations(destinations));
     }
+    edges.sort_unstable_by_key(|edge| {
+        (
+            edge.source,
+            edge.destination,
+            edge.kind,
+            edge.condition.clone(),
+        )
+    });
+    edges.dedup_by(|left, right| {
+        left.source == right.source
+            && left.destination == right.destination
+            && left.kind == right.kind
+            && left.condition == right.condition
+    });
 
     ModuleCombSummary {
-        feedthrough,
+        nodes,
+        edges,
         complete: true,
     }
 }
 
-fn summary_endpoint_ids(module: &Module) -> (HashSet<VarId>, HashSet<VarId>) {
-    let mut sources = HashSet::default();
-    let mut destinations = HashSet::default();
-    for variable in module.variables.values() {
-        match variable.kind {
-            VarKind::Input => {
-                sources.insert(variable.id);
-            }
-            VarKind::Output => {
-                destinations.insert(variable.id);
-            }
-            _ => {}
-        }
-    }
-    for &id in module.interface_members.keys() {
-        sources.insert(id);
-        destinations.insert(id);
-    }
-    (sources, destinations)
-}
-
 fn enqueue_if_changed(
-    reached: &mut HashMap<ReachabilityState, PathCondition>,
-    queued: &mut HashSet<ReachabilityState>,
-    queue: &mut VecDeque<ReachabilityState>,
-    state: ReachabilityState,
-    condition: PathCondition,
+    reached: &mut HashMap<(NodeIndex, super::model::BitDependency), super::ssa::PathCondition>,
+    queued: &mut HashSet<(NodeIndex, super::model::BitDependency)>,
+    queue: &mut VecDeque<(NodeIndex, super::model::BitDependency)>,
+    state: (NodeIndex, super::model::BitDependency),
+    condition: super::ssa::PathCondition,
 ) {
     let changed = if let Some(existing) = reached.get_mut(&state) {
         let merged = existing.disjoin(&condition);
@@ -126,47 +172,37 @@ fn enqueue_if_changed(
     }
 }
 
-fn coalesce_destinations(mut destinations: Vec<SummaryDependency>) -> Vec<SummaryDependency> {
-    destinations
-        .sort_unstable_by_key(|dependency| (dependency.destination, dependency.condition.clone()));
-    let mut merged: Vec<SummaryDependency> = Vec::with_capacity(destinations.len());
-    for dependency in destinations {
-        let Some(previous) = merged.last_mut() else {
-            merged.push(dependency);
-            continue;
-        };
-        if previous.destination == dependency.destination
-            && previous.condition == dependency.condition
-        {
-            previous.kind = previous.kind.union(dependency.kind);
-            continue;
-        }
-        let adjacent = previous.condition == dependency.condition
-            && previous.destination.id == dependency.destination.id
-            && previous.destination.packed == dependency.destination.packed
-            && previous.kind.packed == dependency.kind.packed
-            && previous.destination.array.end() == Some(dependency.destination.array.start);
-        if adjacent
-            && let Some(length) = previous
-                .destination
-                .array
-                .length
-                .checked_add(dependency.destination.array.length)
-        {
-            previous.destination.array.length = length;
-            previous.kind = previous.kind.union(dependency.kind);
-        } else {
-            merged.push(dependency);
+fn reachable(
+    graph: &DependencyGraph,
+    seeds: Vec<NodeIndex>,
+    direction: Direction,
+) -> HashSet<NodeIndex> {
+    let mut reached = seeds.iter().copied().collect::<HashSet<_>>();
+    let mut queue = VecDeque::from(seeds);
+    while let Some(node) = queue.pop_front() {
+        for edge in graph.edges_directed(node, direction) {
+            let next = match direction {
+                Direction::Outgoing => edge.target(),
+                Direction::Incoming => edge.source(),
+            };
+            if reached.insert(next) {
+                queue.push_back(next);
+            }
         }
     }
-    merged
+    reached
 }
 
-fn summary_region(key: NodeKey, bit_part: &BitPartition) -> Option<SummaryRegion> {
-    let packed = bit_part.ranges_of((key.0, key.1)).get(key.2).copied()?;
-    Some(SummaryRegion {
-        id: key.0,
-        array: key.1,
-        packed,
-    })
+fn node_kind(module: &Module, node: &super::graph::GraphNode) -> SummaryNodeKind {
+    let Some(key) = node.diagnostic else {
+        return SummaryNodeKind::Internal;
+    };
+    if module.interface_members.contains_key(&key.0) {
+        return SummaryNodeKind::Interface;
+    }
+    match module.variables.get(&key.0).map(|variable| variable.kind) {
+        Some(VarKind::Input) => SummaryNodeKind::Input,
+        Some(VarKind::Output) => SummaryNodeKind::Output,
+        _ => SummaryNodeKind::Internal,
+    }
 }

@@ -873,6 +873,75 @@ fn comb_loop_distinguishes_generic_function_specializations() {
 }
 
 #[test]
+fn function_summary_shift_fanout_stays_structural() {
+    const DEPTH: usize = 14;
+    const WIDTH: usize = 1 << DEPTH;
+    let mut functions =
+        format!("function f0 (x: input logic<{WIDTH}>) -> logic<{WIDTH}> {{ return x; }}\n");
+    for depth in 1..=DEPTH {
+        let previous = depth - 1;
+        let shift = 1usize << previous;
+        functions.push_str(&format!(
+            "function f{depth} (x: input logic<{WIDTH}>) -> logic<{WIDTH}> {{ return f{previous}(x) | (f{previous}(x) << {shift}); }}\n"
+        ));
+    }
+    let code = format!(
+        "module Top (i: input logic<{WIDTH}>, o: output logic<{WIDTH}>) {{ {functions} assign o = f{DEPTH}(i); }}"
+    );
+    crate::comb_loop_detect::reset_function_evaluation_count();
+    assert!(
+        analyze(&code)
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. }))
+    );
+    assert!(crate::comb_loop_detect::function_summary_graph_node_count() < 100);
+}
+
+#[test]
+fn function_summary_rejects_a_cycle_whose_intermediate_shift_is_out_of_range() {
+    assert_comb_loop(
+        "opposite offsets do not form a loop when the intermediate value is outside the vector",
+        r#"
+        module Top (o: output logic) {
+            function left (x: input logic<2>) -> logic<2> { return x << 1; }
+            function right (x: input logic<2>) -> logic<2> { return x >> 1; }
+            var a: logic<2>;
+            var b: logic<2>;
+            var c: logic<2>;
+            assign a = left(b);
+            assign c = right(a);
+            assign b[1] = c[1];
+            assign b[0] = 0;
+            assign o = a[0] | b[0] | c[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn function_summary_retains_a_cycle_with_feasible_intermediate_shifts() {
+    assert_comb_loop(
+        "opposite offsets retain the low-bit path that stays inside the vector",
+        r#"
+        module Top (o: output logic) {
+            function left (x: input logic<2>) -> logic<2> { return x << 1; }
+            function right (x: input logic<2>) -> logic<2> { return x >> 1; }
+            var a: logic<2>;
+            var b: logic<2>;
+            var c: logic<2>;
+            assign a = left(b);
+            assign c = right(a);
+            assign b[0] = c[0];
+            assign b[1] = 0;
+            assign o = a[0] | b[0] | c[0];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_short_circuits_instance_actual_side_effects_a_constant_dead_instance_actual_branch_has_no_function_side_effect()
  {
     assert_comb_loop(
@@ -1748,6 +1817,7 @@ fn comb_loop_function_summary_fanout_is_memoized() {
             previous = depth - 1,
         ));
     }
+    crate::comb_loop_detect::reset_function_evaluation_count();
     let errors = analyze(&format!(
         r#"
         module Top (
@@ -1763,6 +1833,7 @@ fn comb_loop_function_summary_fanout_is_memoized() {
         errors.is_empty(),
         "acyclic function fanout is valid: {errors:#?}"
     );
+    assert_eq!(crate::comb_loop_detect::function_evaluation_count(), 29);
 }
 
 #[test]
