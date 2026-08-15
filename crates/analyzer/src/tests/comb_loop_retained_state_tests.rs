@@ -79,7 +79,6 @@ cond_type_case!(
 cond_type_case!(comb_coverage_dynamic_case_none, "case", "none", true);
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural control flow and retained state"]
 fn comb_loop_drops_unreachable_statements_after_break() {
     // Why this case exists: IEEE 1800-2023 12.8 makes break jump to the loop
     // exit. Statements after it are unreachable and cannot prove a hard SCC.
@@ -521,7 +520,6 @@ fn comb_loop_nonempty_const_loop_has_no_zero_trip_path() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; unreachable empty-loop body creates diagnostics"]
 fn comb_loop_empty_const_loop_has_no_body_path() {
     // Why this case exists: `break` keeps this const-evaluable empty range in
     // runtime-form IR, but its body is still unreachable. Treating "empty" as
@@ -653,25 +651,21 @@ fn comb_loop_const_range_stepped_singleton_retains_coverage() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; exclusive empty range creates diagnostics"]
 fn comb_loop_const_range_exclusive_empty_has_no_body_path() {
     assert_empty_const_range_has_no_body_path("1..1");
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; reverse empty range creates diagnostics"]
 fn comb_loop_const_range_reverse_empty_has_no_body_path() {
     assert_empty_const_range_has_no_body_path("rev 1..1");
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; stepped empty range creates diagnostics"]
 fn comb_loop_const_range_stepped_empty_has_no_body_path() {
     assert_empty_const_range_has_no_body_path("2..2 step *= 2");
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural control flow and retained state"]
 fn comb_loop_const_iterator_prunes_dead_if_edges() {
     // Why this case exists: break keeps the singleton loop in runtime-form IR,
     // but its sole iterator value is still the constant 1. The unreachable
@@ -703,7 +697,34 @@ fn comb_loop_const_iterator_prunes_dead_if_edges() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural control flow and retained state"]
+fn comb_loop_const_iterator_keeps_taken_if_edges() {
+    assert_comb_loop(
+        "a reachable iterator-selected if arm retains its dependency",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for i in 1..2 {
+                    if i == 1 {
+                        a = b;
+                    } else {
+                        a = 0;
+                    }
+                    break;
+                }
+            }
+            assign b = a;
+            assign o = b;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_const_iterator_prunes_dead_case_arms() {
     // Why this case exists: case selection uses the same per-iteration SV
     // value as if selection. A dead i==0 arm in a singleton i==1 loop cannot
@@ -735,32 +756,68 @@ fn comb_loop_const_iterator_prunes_dead_case_arms() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; const iterator invents retained-state diagnostics"]
+fn comb_loop_const_iterator_keeps_taken_case_arms() {
+    assert_comb_loop(
+        "a reachable iterator-selected case arm retains its dependency",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for i in 1..2 {
+                    case i {
+                        1      : a = b;
+                        default: a = 0;
+                    }
+                    break;
+                }
+            }
+            assign b = a;
+            assign o = b;
+        }
+        "#,
+        true,
+    );
+}
+
+const CONST_ITERATOR_MUST_WRITE: &str = r#"
+    module Top (
+        stop: input  logic,
+        o   : output logic,
+    ) {
+        var value: logic;
+        always_comb {
+            for i in 0..2 {
+                if i == 1 {
+                    value = 1;
+                }
+                if i == 1 && stop {
+                    break;
+                }
+            }
+            o = value;
+        }
+    }
+"#;
+
+#[test]
 fn comb_loop_const_iterator_preserves_must_write_paths() {
+    assert_comb_loop(
+        "const iterator paths do not invent retained-state feedback",
+        CONST_ITERATOR_MUST_WRITE,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "SSA latch coverage follow-up after comb-loop migration: const iterator control flow"]
+fn latch_const_iterator_preserves_must_write_paths() {
     // Why this case exists: the two const iterations are i=0 and i=1, and the
     // only reachable break follows the i=1 assignment. Every exit is covered;
     // collapsing both iterations into one unknown body invents retention.
-    let errors = analyze(
-        r#"
-        module Top (
-            stop: input  logic,
-            o   : output logic,
-        ) {
-            var value: logic;
-            always_comb {
-                for i in 0..2 {
-                    if i == 1 {
-                        value = 1;
-                    }
-                    if i == 1 && stop {
-                        break;
-                    }
-                }
-                o = value;
-            }
-        }
-        "#,
-    );
+    let errors = analyze(CONST_ITERATOR_MUST_WRITE);
     assert!(
         errors.is_empty(),
         "all finite-loop exits assign value: {errors:#?}"

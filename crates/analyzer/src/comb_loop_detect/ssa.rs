@@ -66,6 +66,7 @@ fn compose_axis(left: Option<i128>, right: Option<i128>) -> Option<i128> {
     left?.checked_add(right?)
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct Checkpoint {
     undo_start: usize,
     depth: usize,
@@ -206,6 +207,22 @@ where
             }
         }
         bindings.retain(|key, version| self.current.get(key).copied() != Some(*version));
+        BranchState { bindings }
+    }
+
+    /// Capture bindings changed since an enclosing checkpoint without
+    /// disturbing the current transaction. This records an early-exit path
+    /// before its nearer branch checkpoint rolls back.
+    pub(super) fn snapshot_since(&self, checkpoint: Checkpoint) -> BranchState<K> {
+        assert!(checkpoint.depth < self.checkpoints.len());
+        assert_eq!(self.checkpoints[checkpoint.depth], checkpoint.undo_start);
+
+        let mut bindings = HashMap::default();
+        for undo in &self.undo[checkpoint.undo_start..] {
+            if let Some(version) = self.current.get(&undo.key) {
+                bindings.insert(undo.key, *version);
+            }
+        }
         BranchState { bindings }
     }
 

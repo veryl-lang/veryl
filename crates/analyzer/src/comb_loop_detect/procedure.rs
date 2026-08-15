@@ -2,7 +2,7 @@
 
 use super::BitDependency;
 use super::region::{ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
-use super::ssa::{BranchState, PositionRelation, SsaStore, VersionId};
+use super::ssa::{BranchState, Checkpoint, PositionRelation, SsaStore, VersionId};
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
@@ -85,6 +85,19 @@ type CallCache = Option<HashMap<*const FunctionCall, CallResult>>;
 struct SsaKey {
     node: NodeKey,
     call_frame: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProcedureFlow {
+    Continue,
+    Break,
+    Return,
+}
+
+struct FunctionFlow {
+    return_id: Option<VarId>,
+    checkpoint: Checkpoint,
+    returns: Vec<BranchState<SsaKey>>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -388,6 +401,7 @@ struct ProcedureAnalysis<'a, 's> {
     call_frames: Vec<usize>,
     next_call_frame: usize,
     receiver_indices: Vec<Option<VarIndex>>,
+    function_flows: Vec<FunctionFlow>,
     summaries: Option<&'s mut FunctionSummaries<'a>>,
 }
 
@@ -402,6 +416,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             call_frames: Vec::new(),
             next_call_frame: 0,
             receiver_indices: Vec::new(),
+            function_flows: Vec::new(),
             summaries: None,
         }
     }
@@ -450,7 +465,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .then(|| index.map(concrete_var_index))
                 .flatten(),
         );
-        this.eval_block(&body.statements, &[]);
+        this.eval_function_body(&body.statements, body.ret, &[]);
         this.receiver_indices.pop();
         this.call_caches.pop();
 
@@ -750,17 +765,64 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    /// Returns true when control leaves the current block through `break`.
-    fn eval_block(&mut self, statements: &[Statement], controls: &[VersionId]) -> bool {
-        for statement in statements {
-            if self.eval_statement(statement, controls) {
-                return true;
-            }
+    fn eval_function_body(
+        &mut self,
+        statements: &[Statement],
+        return_id: Option<VarId>,
+        controls: &[VersionId],
+    ) {
+        let checkpoint = self.ssa.checkpoint();
+        self.function_flows.push(FunctionFlow {
+            return_id,
+            checkpoint,
+            returns: Vec::new(),
+        });
+        let flow = self.eval_block(statements, controls);
+        let mut function = self
+            .function_flows
+            .pop()
+            .expect("function flow was pushed above");
+        let fallthrough = self.ssa.capture_and_rollback(checkpoint);
+        if flow != ProcedureFlow::Return {
+            function.returns.push(fallthrough);
         }
-        false
+        self.ssa.merge(&function.returns);
     }
 
-    fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> bool {
+    fn record_return(&mut self) {
+        let Some(function) = self.function_flows.last() else {
+            return;
+        };
+        let state = self.ssa.snapshot_since(function.checkpoint);
+        self.function_flows
+            .last_mut()
+            .expect("checked above")
+            .returns
+            .push(state);
+    }
+
+    fn is_return_assignment(&self, destinations: &[AssignDestination]) -> bool {
+        self.function_flows
+            .last()
+            .and_then(|function| function.return_id)
+            .is_some_and(|return_id| {
+                destinations
+                    .iter()
+                    .any(|destination| destination.id == return_id)
+            })
+    }
+
+    fn eval_block(&mut self, statements: &[Statement], controls: &[VersionId]) -> ProcedureFlow {
+        for statement in statements {
+            let flow = self.eval_statement(statement, controls);
+            if flow != ProcedureFlow::Continue {
+                return flow;
+            }
+        }
+        ProcedureFlow::Continue
+    }
+
+    fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> ProcedureFlow {
         match statement {
             Statement::Assign(assign) => {
                 self.call_caches.push(Some(HashMap::default()));
@@ -790,52 +852,84 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                 }
                 self.call_caches.pop();
-                false
+                if self.is_return_assignment(&assign.dst) {
+                    self.record_return();
+                    ProcedureFlow::Return
+                } else {
+                    ProcedureFlow::Continue
+                }
             }
-            Statement::If(statement) => {
-                self.eval_if(statement, controls);
-                false
-            }
-            Statement::Case(statement) => {
-                self.eval_case(statement, controls);
-                false
-            }
-            Statement::For(statement) => {
-                self.eval_for(statement, controls);
-                false
-            }
+            Statement::If(statement) => self.eval_if(statement, controls),
+            Statement::Case(statement) => self.eval_case(statement, controls),
+            Statement::For(statement) => self.eval_for(statement, controls),
             Statement::FunctionCall(call) => {
                 self.eval_call(call, controls);
-                false
+                ProcedureFlow::Continue
             }
             Statement::SystemFunctionCall(call) => {
                 self.eval_system_call(call, controls, false);
-                false
+                ProcedureFlow::Continue
             }
-            Statement::Break => true,
+            Statement::Break => ProcedureFlow::Break,
             Statement::IfReset(_)
             | Statement::TbMethodCall(_)
             | Statement::Unsupported(_)
-            | Statement::Null => false,
+            | Statement::Null => ProcedureFlow::Continue,
         }
     }
 
-    fn eval_if(&mut self, statement: &IfStatement, controls: &[VersionId]) {
+    fn merge_branches(
+        &mut self,
+        branches: Vec<(ProcedureFlow, BranchState<SsaKey>)>,
+    ) -> ProcedureFlow {
+        let mut continuation = Vec::new();
+        let mut has_continue = false;
+        let mut has_break = false;
+        for (flow, state) in branches {
+            match flow {
+                ProcedureFlow::Continue => {
+                    has_continue = true;
+                    continuation.push(state);
+                }
+                ProcedureFlow::Break => {
+                    has_break = true;
+                    continuation.push(state);
+                }
+                ProcedureFlow::Return => {}
+            }
+        }
+        self.ssa.merge(&continuation);
+        if has_continue {
+            ProcedureFlow::Continue
+        } else if has_break {
+            ProcedureFlow::Break
+        } else {
+            ProcedureFlow::Return
+        }
+    }
+
+    fn eval_if(&mut self, statement: &IfStatement, controls: &[VersionId]) -> ProcedureFlow {
         let condition = self.eval_expr(&statement.cond);
         let mut nested_controls = controls.to_vec();
         nested_controls.extend_from_slice(&condition);
+        match self.constant_truth(&statement.cond) {
+            Some(true) => return self.eval_block(&statement.true_side, &nested_controls),
+            Some(false) => return self.eval_block(&statement.false_side, &nested_controls),
+            None => {}
+        }
+
         let checkpoint = self.ssa.checkpoint();
-        self.eval_block(&statement.true_side, &nested_controls);
+        let true_flow = self.eval_block(&statement.true_side, &nested_controls);
         let true_state = self.ssa.capture_and_rollback(checkpoint);
 
         let checkpoint = self.ssa.checkpoint();
-        self.eval_block(&statement.false_side, &nested_controls);
+        let false_flow = self.eval_block(&statement.false_side, &nested_controls);
         let false_state = self.ssa.capture_and_rollback(checkpoint);
 
-        self.ssa.merge(&[true_state, false_state]);
+        self.merge_branches(vec![(true_flow, true_state), (false_flow, false_state)])
     }
 
-    fn eval_case(&mut self, statement: &CaseStatement, controls: &[VersionId]) {
+    fn eval_case(&mut self, statement: &CaseStatement, controls: &[VersionId]) -> ProcedureFlow {
         let mut condition = self.eval_expr(&statement.case_target);
         for arm in &statement.arms {
             for pattern in &arm.patterns {
@@ -852,19 +946,67 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         let mut nested_controls = controls.to_vec();
         nested_controls.extend(condition);
+
+        if let Some(target) = statement.case_target.eval_value(&mut self.ctx) {
+            let mut possible = Vec::new();
+            let mut has_definite_match = false;
+            for (index, arm) in statement.arms.iter().enumerate() {
+                let mut uncertain = false;
+                let mut matched = false;
+                for pattern in &arm.patterns {
+                    match pattern.matches(&target, &mut self.ctx) {
+                        Some(true) => {
+                            matched = true;
+                            break;
+                        }
+                        Some(false) => {}
+                        None => uncertain = true,
+                    }
+                }
+                if matched {
+                    possible.push(index);
+                    has_definite_match = true;
+                    break;
+                }
+                if uncertain {
+                    possible.push(index);
+                }
+            }
+
+            if possible.is_empty() {
+                return self.eval_block(&statement.default, &nested_controls);
+            }
+            if possible.len() == 1 && has_definite_match {
+                return self.eval_block(&statement.arms[possible[0]].body, &nested_controls);
+            }
+
+            let mut states = Vec::with_capacity(possible.len() + usize::from(!has_definite_match));
+            for index in possible {
+                let checkpoint = self.ssa.checkpoint();
+                let flow = self.eval_block(&statement.arms[index].body, &nested_controls);
+                states.push((flow, self.ssa.capture_and_rollback(checkpoint)));
+            }
+            if !has_definite_match {
+                let checkpoint = self.ssa.checkpoint();
+                let flow = self.eval_block(&statement.default, &nested_controls);
+                states.push((flow, self.ssa.capture_and_rollback(checkpoint)));
+            }
+            return self.merge_branches(states);
+        }
+
         let mut states = Vec::with_capacity(statement.arms.len() + 1);
         for arm in &statement.arms {
             let checkpoint = self.ssa.checkpoint();
-            self.eval_block(&arm.body, &nested_controls);
-            states.push(self.ssa.capture_and_rollback(checkpoint));
+            let flow = self.eval_block(&arm.body, &nested_controls);
+            states.push((flow, self.ssa.capture_and_rollback(checkpoint)));
         }
         let checkpoint = self.ssa.checkpoint();
-        self.eval_block(&statement.default, &nested_controls);
-        states.push(self.ssa.capture_and_rollback(checkpoint));
-        self.ssa.merge(&states);
+        let flow = self.eval_block(&statement.default, &nested_controls);
+        states.push((flow, self.ssa.capture_and_rollback(checkpoint)));
+        self.merge_branches(states)
     }
 
-    fn eval_for(&mut self, statement: &ForStatement, controls: &[VersionId]) {
+    fn eval_for(&mut self, statement: &ForStatement, controls: &[VersionId]) -> ProcedureFlow {
         let mut range_controls = controls.to_vec();
         let bounds = match &statement.range {
             ForRange::Forward { start, end, .. }
@@ -888,20 +1030,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         None,
                     );
                 }
-                if self.eval_block(&statement.body, &range_controls) {
-                    break;
+                match self.eval_block(&statement.body, &range_controls) {
+                    ProcedureFlow::Continue => {}
+                    ProcedureFlow::Break => break,
+                    ProcedureFlow::Return => return ProcedureFlow::Return,
                 }
             }
-            return;
+            return ProcedureFlow::Continue;
         }
 
         // Runtime loops have a zero-trip path. One symbolic body traversal is
         // enough to expose all explicit reads; the exit phi keeps LiveOnEntry
         // separate so retained state does not become a loop edge.
         let checkpoint = self.ssa.checkpoint();
-        self.eval_block(&statement.body, &range_controls);
+        let flow = self.eval_block(&statement.body, &range_controls);
         let body_state = self.ssa.capture_and_rollback(checkpoint);
-        self.ssa.merge(&[BranchState::unchanged(), body_state]);
+        if flow == ProcedureFlow::Return {
+            self.ssa.merge(&[BranchState::unchanged()]);
+        } else {
+            self.ssa.merge(&[BranchState::unchanged(), body_state]);
+        }
+        ProcedureFlow::Continue
     }
 
     fn eval_expr_requested(
@@ -1704,7 +1853,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
         self.call_caches.push(None);
         self.receiver_indices.push(receiver_index);
-        self.eval_block(&body.statements, controls);
+        self.eval_function_body(&body.statements, body.ret, controls);
         self.receiver_indices.pop();
         self.call_caches.pop();
 
