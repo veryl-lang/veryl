@@ -53,6 +53,16 @@ enum Version<K> {
         source: VersionId,
         domain: PositionDomain,
     },
+    /// A finite regular transfer. The dependency DAG lowers this to one
+    /// domain-bearing node reached by `initial`, with a self-edge `step`.
+    /// The node domain bounds the number of legal repetitions without
+    /// materializing one edge per repeated element.
+    Repeated {
+        source: VersionId,
+        initial: PositionRelation,
+        step: PositionRelation,
+        domain: PositionDomain,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -317,6 +327,9 @@ pub(super) struct PositionRelation {
 pub(super) enum DependencyDagNode<K> {
     External(K),
     Internal,
+    /// A finite regular transfer whose self-edge denotes repetition rather
+    /// than an independently authored dependency.
+    RegularTransfer,
 }
 
 #[derive(Clone)]
@@ -401,6 +414,16 @@ fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
         ),
         _ => None,
     }
+}
+
+fn widen_repeated_axis(mut relation: PositionRelation, step: PositionRelation) -> PositionRelation {
+    if step.array.is_some_and(|step| step != 0) {
+        relation.array = None;
+    }
+    if step.packed.is_some_and(|step| step != 0) {
+        relation.packed = None;
+    }
+    relation
 }
 
 fn reachable_versions(
@@ -553,6 +576,28 @@ where
         version
     }
 
+    pub(super) fn repeated(
+        &mut self,
+        source: VersionId,
+        initial: PositionRelation,
+        step: PositionRelation,
+        domain: PositionDomain,
+    ) -> VersionId {
+        debug_assert!(
+            (step.array == Some(0) && step.packed.is_some_and(|step| step != 0))
+                || (step.packed == Some(0) && step.array.is_some_and(|step| step != 0)),
+            "a regular transfer advances exactly one position axis"
+        );
+        let version = self.versions.len();
+        self.versions.push(Version::Repeated {
+            source,
+            initial,
+            step,
+            domain,
+        });
+        version
+    }
+
     pub(super) fn has_structural_dependency(&self, version: VersionId) -> bool {
         let mut visited = HashSet::default();
         let mut queue = VecDeque::from([version]);
@@ -561,7 +606,9 @@ where
                 continue;
             }
             match &self.versions[version] {
-                Version::Imported { .. } | Version::Projected { .. } => return true,
+                Version::Imported { .. } | Version::Projected { .. } | Version::Repeated { .. } => {
+                    return true;
+                }
                 Version::Definition { sources, .. } => {
                     queue.extend(sources.iter().map(|(source, _)| *source));
                 }
@@ -672,8 +719,12 @@ where
     /// `single_iteration` maps each written key to its output after one
     /// abstract iteration. Versions that predate `iteration_checkpoint` are
     /// that iteration's inputs, so they form the nodes of a finite transfer
-    /// graph. Its transitive closure models any positive number of iterations;
-    /// `may_skip` additionally retains each key's loop-entry version.
+    /// graph. Its transitive closure models any positive number of iterations.
+    /// When `may_skip` is true, a root phi keeps the loop-entry version as a
+    /// separate zero-iteration alternative. This distinction matters for a
+    /// raw live-on-entry value: dependency DAG roots intentionally suppress
+    /// that implicit latch input, while a concrete definition made before the
+    /// loop remains visible through the phi.
     pub(super) fn close_repeated_transfer(
         &mut self,
         single_iteration: &BranchState<K>,
@@ -702,16 +753,18 @@ where
         }
 
         for (&key, direct_inputs) in &direct_inputs_by_key {
-            let mut reached = reachable_versions(direct_inputs, &next_inputs_by_input);
-            if may_skip {
-                reached.insert(entry_version_by_key[&key]);
-            }
-            let output = self.related_definition(
+            let reached = reachable_versions(direct_inputs, &next_inputs_by_input);
+            let positive_closure = self.related_definition(
                 reached
                     .into_iter()
                     .map(|version| (version, PositionRelation::whole()))
                     .collect(),
             );
+            let output = if may_skip {
+                self.phi(vec![entry_version_by_key[&key], positive_closure])
+            } else {
+                positive_closure
+            };
             self.bind(key, output);
         }
     }
@@ -746,8 +799,16 @@ where
                         }
                     }
                 }
-                Version::Imported { bindings, .. } => {
-                    for sources in bindings.values() {
+                Version::Imported {
+                    graph,
+                    root,
+                    bindings,
+                    ..
+                } => {
+                    for key in dependency_dag_external_keys(graph, *root) {
+                        let Some(sources) = bindings.get(&key) else {
+                            continue;
+                        };
                         for (input, _) in sources {
                             if visited.insert(*input) {
                                 queue.push_back(*input);
@@ -756,6 +817,11 @@ where
                     }
                 }
                 Version::Projected { source, .. } => {
+                    if visited.insert(*source) {
+                        queue.push_back(*source);
+                    }
+                }
+                Version::Repeated { source, .. } => {
                     if visited.insert(*source) {
                         queue.push_back(*source);
                     }
@@ -845,6 +911,7 @@ where
                     }
                 }
                 Version::Projected { source, .. } => enqueue((*source, true)),
+                Version::Repeated { source, .. } => enqueue((*source, true)),
             }
         }
 
@@ -961,6 +1028,31 @@ where
                             condition: PathCondition::default(),
                         });
                     }
+                    Some(node)
+                }
+                Version::Repeated {
+                    source,
+                    initial,
+                    step,
+                    domain,
+                } => {
+                    let node = nodes.len();
+                    nodes.push(DependencyDagNode::RegularTransfer);
+                    domains.push(vec![*domain]);
+                    if let Some(source) = mapped[&(*source, true)] {
+                        edges.push(DependencyDagEdge {
+                            source,
+                            destination: node,
+                            relation: *initial,
+                            condition: PathCondition::default(),
+                        });
+                    }
+                    edges.push(DependencyDagEdge {
+                        source: node,
+                        destination: node,
+                        relation: *step,
+                        condition: PathCondition::default(),
+                    });
                     Some(node)
                 }
             };
@@ -1094,6 +1186,15 @@ where
                 Version::Projected { source, .. } => {
                     enqueue((*source, true, relation), condition);
                 }
+                Version::Repeated {
+                    source,
+                    initial,
+                    step,
+                    ..
+                } => {
+                    let relation = widen_repeated_axis(relation.compose(*initial), *step);
+                    enqueue((*source, true, relation), condition);
+                }
             }
         }
         let sources = Rc::new(sources);
@@ -1125,11 +1226,33 @@ where
     while let Some(state @ (node, relation)) = queue.pop_front() {
         queued.remove(&state);
         let condition = reached[&state].clone();
+        // A regular-transfer self-edge denotes any finite number of strides
+        // admitted by this node's domain. Flat source summaries cannot retain
+        // that arithmetic progression, so widen only the repeated axis and
+        // traverse every non-self edge once. Positional consumers import the
+        // graph itself and therefore never take this fallback. Arbitrary
+        // self-edges retain their ordinary graph semantics.
+        let regular_transfer = matches!(graph.nodes[node], DependencyDagNode::RegularTransfer);
+        let relation = if regular_transfer {
+            incoming
+                .get(&node)
+                .into_iter()
+                .flatten()
+                .filter(|edge| edge.source == node)
+                .fold(relation, |relation, edge| {
+                    widen_repeated_axis(relation, edge.relation)
+                })
+        } else {
+            relation
+        };
         if let DependencyDagNode::External(key) = graph.nodes[node] {
             merge_source(&mut sources, (key, relation), condition);
             continue;
         }
         for edge in incoming.get(&node).into_iter().flatten() {
+            if regular_transfer && edge.source == node {
+                continue;
+            }
             let Some(next_condition) = condition.conjoin_if_compatible(&edge.condition) else {
                 continue;
             };
@@ -1155,6 +1278,36 @@ where
         .into_iter()
         .map(|((key, relation), condition)| (key, relation, condition))
         .collect()
+}
+
+fn dependency_dag_external_keys<K>(graph: &DependencyDag<K>, root: Option<usize>) -> HashSet<K>
+where
+    K: Copy + Eq + Hash,
+{
+    let Some(root) = root else {
+        return HashSet::default();
+    };
+    let mut incoming: HashMap<usize, Vec<usize>> = HashMap::default();
+    for edge in &graph.edges {
+        incoming
+            .entry(edge.destination)
+            .or_default()
+            .push(edge.source);
+    }
+    let mut visited = HashSet::from_iter([root]);
+    let mut queue = VecDeque::from([root]);
+    let mut keys = HashSet::default();
+    while let Some(node) = queue.pop_front() {
+        if let DependencyDagNode::External(key) = graph.nodes[node] {
+            keys.insert(key);
+        }
+        for &source in incoming.get(&node).into_iter().flatten() {
+            if visited.insert(source) {
+                queue.push_back(source);
+            }
+        }
+    }
+    keys
 }
 
 fn inline_dependency_dag<K>(
@@ -1187,7 +1340,12 @@ where
             continue;
         }
         let node = nodes.len();
-        nodes.push(DependencyDagNode::Internal);
+        nodes.push(match child_node {
+            DependencyDagNode::RegularTransfer => DependencyDagNode::RegularTransfer,
+            DependencyDagNode::External(_) | DependencyDagNode::Internal => {
+                DependencyDagNode::Internal
+            }
+        });
         domains.push(graph.domains[child].clone());
         mapped.insert(child, node);
         if let DependencyDagNode::External(key) = child_node {
@@ -1307,6 +1465,80 @@ mod tests {
                 packed: Some(3),
             })
         );
+    }
+
+    #[test]
+    fn regular_transfer_is_constant_size_and_flattening_widens_only_its_axis() {
+        let mut ssa = SsaStore::default();
+        let source = ssa.read("source");
+        let repeated = ssa.repeated(
+            source,
+            PositionRelation::default(),
+            PositionRelation {
+                array: Some(0),
+                packed: Some(4),
+            },
+            PositionDomain {
+                array_start: 0,
+                array_length: 1,
+                packed_start: 0,
+                packed_length: 800_000,
+            },
+        );
+
+        let allowed = ["source"].into_iter().collect::<HashSet<_>>();
+        let graph = ssa.dependency_dag(&[repeated], &allowed);
+        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(graph.edges.len(), 2);
+        assert!(graph.edges.iter().any(|edge| {
+            edge.source == edge.destination
+                && edge.relation
+                    == PositionRelation {
+                        array: Some(0),
+                        packed: Some(4),
+                    }
+        }));
+        assert_eq!(
+            ssa.root_source_relations(repeated).get("source"),
+            Some(&PositionRelation {
+                array: Some(0),
+                packed: None,
+            })
+        );
+    }
+
+    #[test]
+    fn flat_summary_does_not_discard_an_arbitrary_self_loop() {
+        let graph = DependencyDag {
+            nodes: vec![
+                DependencyDagNode::External("source"),
+                DependencyDagNode::Internal,
+            ],
+            edges: vec![
+                DependencyDagEdge {
+                    source: 0,
+                    destination: 1,
+                    relation: PositionRelation::default(),
+                    condition: PathCondition::default(),
+                },
+                DependencyDagEdge {
+                    source: 1,
+                    destination: 1,
+                    relation: PositionRelation::whole(),
+                    condition: PathCondition::default(),
+                },
+            ],
+            roots: vec![Some(1)],
+            domains: vec![Vec::new(), Vec::new()],
+        };
+
+        let sources = dependency_dag_external_sources(&graph, Some(1));
+        assert!(sources.iter().any(|(key, relation, _)| {
+            *key == "source" && *relation == PositionRelation::default()
+        }));
+        assert!(sources.iter().any(|(key, relation, _)| {
+            *key == "source" && *relation == PositionRelation::whole()
+        }));
     }
 
     #[test]

@@ -414,8 +414,8 @@ fn collect_factor_spans(
     ctx: &mut Context,
 ) {
     match factor {
-        Factor::Variable(id, index, select, _) => {
-            for (idx, packed) in var_reads(*id, index, select, ctx) {
+        Factor::Variable(id, index, select, comptime) => {
+            for (idx, packed) in var_reads(*id, index, select, comptime.member_select_domain, ctx) {
                 out.entry((*id, idx)).or_default().push(packed);
             }
         }
@@ -540,17 +540,16 @@ fn build_module_graph(
             continue;
         };
         let analysis = procedure::analyze(
+            module,
             &bit_part,
             &comb.statements,
+            declaration_index,
             declaration_index + 1,
             &mut builder.procedure_context,
             &mut builder.function_summaries,
         );
         if !analysis.status.is_complete() {
             builder.complete = false;
-        }
-        if analysis.status.is_barrier() {
-            continue;
         }
         builder.add_procedure_graph(module, analysis);
     }
@@ -636,14 +635,14 @@ impl<'a> ModuleGraphBuilder<'a> {
                     ensure_node(&mut self.graph, &mut self.node_map, self.bit_part, *key)
                 }
                 DependencyDagNode::External(_) => None,
-                DependencyDagNode::Internal => {
+                DependencyDagNode::Internal | DependencyDagNode::RegularTransfer => {
                     Some(self.graph.add_node(GraphNode {
                         // Internal nodes carry no variable identity. The region is
                         // only a coordinate carrier; exact edge relations retain
                         // the positional semantics.
                         region: internal_region,
                         domains: analysis.graph.domains[index].clone(),
-                        regular_transfer: false,
+                        regular_transfer: matches!(node, DependencyDagNode::RegularTransfer),
                         diagnostic: None,
                     }))
                 }
@@ -665,7 +664,10 @@ impl<'a> ModuleGraphBuilder<'a> {
                         packed: edge.relation.packed,
                     },
                     condition: edge.condition,
-                    carrier: false,
+                    carrier: matches!(
+                        analysis.graph.nodes[edge.source],
+                        DependencyDagNode::RegularTransfer
+                    ) && edge.source == edge.destination,
                 },
             );
         }
@@ -1256,7 +1258,7 @@ fn map_summary_region(
         keys.extend(bit_part.overlapping_access(parent, array, packed));
         Some(offset)
     } else {
-        for (array, packed) in var_reads(parent, index, select, ctx) {
+        for (array, packed) in var_reads(parent, index, select, None, ctx) {
             keys.extend(bit_part.overlapping_access(parent, array, packed));
         }
         None
@@ -1283,7 +1285,7 @@ fn translated_summary_access(
     select: &VarSelect,
     ctx: &mut Context,
 ) -> Option<(ArraySpan, PackedSpan, (isize, isize))> {
-    let accesses = var_reads(parent, index, select, ctx);
+    let accesses = var_reads(parent, index, select, None, ctx);
     let [(parent_array, parent_packed)] = accesses.as_slice() else {
         return None;
     };
@@ -1637,8 +1639,8 @@ fn collect_factor_node_keys(
     ctx: &mut Context,
 ) {
     match factor {
-        Factor::Variable(id, index, select, _) => {
-            for (idx, span) in var_reads(*id, index, select, ctx) {
+        Factor::Variable(id, index, select, comptime) => {
+            for (idx, span) in var_reads(*id, index, select, comptime.member_select_domain, ctx) {
                 out.extend(bit_part.overlapping_access(*id, idx, span));
             }
         }

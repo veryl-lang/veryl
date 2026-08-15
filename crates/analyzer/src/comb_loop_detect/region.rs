@@ -1,6 +1,6 @@
 use crate::HashMap;
 use crate::conv::Context;
-use crate::ir::{AssignDestination, Type, VarId, VarIndex, VarSelect};
+use crate::ir::{AssignDestination, MemberSelectDomain, Type, VarId, VarIndex, VarSelect};
 
 pub(super) fn signed_difference(destination: usize, source: usize) -> Option<isize> {
     isize::try_from(destination)
@@ -185,21 +185,15 @@ pub(super) fn dst_writes(
     let Some(variable) = ctx.get_variable_info(dst.id) else {
         return Vec::new();
     };
-    let is_select_const = dst.select.is_const();
-
-    let packed = if !is_select_const {
-        let Some(packed) = conservative_select_span(&dst.select, &variable.r#type, ctx) else {
-            return Vec::new();
-        };
-        packed
-    } else {
-        let Some((high, low)) = dst.select.eval_value(ctx, &variable.r#type, false) else {
-            return Vec::new();
-        };
-        let Some(packed) = PackedSpan::from_select(high, low) else {
-            return Vec::new();
-        };
-        packed
+    let Some((high, low)) = dst.select.conservative_packed_range(
+        ctx,
+        &variable.r#type,
+        dst.comptime.member_select_domain,
+    ) else {
+        return Vec::new();
+    };
+    let Some(packed) = PackedSpan::from_select(high, low) else {
+        return Vec::new();
     };
 
     array_access_span(&dst.index, &variable.r#type, ctx)
@@ -211,23 +205,19 @@ pub(super) fn var_reads(
     id: VarId,
     index: &VarIndex,
     select: &VarSelect,
+    member_select_domain: Option<MemberSelectDomain>,
     ctx: &mut Context,
 ) -> Vec<(ArraySpan, PackedSpan)> {
     let Some(variable) = ctx.variables.get(&id).cloned() else {
         return Vec::new();
     };
-    let packed = if select.is_const_with_range()
-        && let Some((high, low)) = select.eval_value(ctx, &variable.r#type, false)
-    {
-        let Some(packed) = PackedSpan::from_select(high, low) else {
-            return Vec::new();
-        };
-        packed
-    } else {
-        let Some(packed) = conservative_select_span(select, &variable.r#type, ctx) else {
-            return Vec::new();
-        };
-        packed
+    let Some((high, low)) =
+        select.conservative_packed_range(ctx, &variable.r#type, member_select_domain)
+    else {
+        return Vec::new();
+    };
+    let Some(packed) = PackedSpan::from_select(high, low) else {
+        return Vec::new();
     };
     array_access_span(index, &variable.r#type, ctx)
         .map(|span| vec![(span, packed)])
@@ -247,25 +237,4 @@ fn array_access_span(index: &VarIndex, r#type: &Type, ctx: &mut Context) -> Opti
         start,
         length: inclusive_end.checked_sub(start)?.checked_add(1)?,
     })
-}
-
-fn conservative_select_span(
-    select: &VarSelect,
-    r#type: &Type,
-    ctx: &mut Context,
-) -> Option<PackedSpan> {
-    let prefix = VarSelect(
-        select
-            .0
-            .iter()
-            .take_while(|expression| expression.comptime().is_const)
-            .cloned()
-            .collect(),
-        None,
-    );
-    if let Some((high, low)) = prefix.eval_value(ctx, r#type, false) {
-        PackedSpan::from_select(high, low)
-    } else {
-        r#type.total_width().and_then(PackedSpan::whole)
-    }
 }
