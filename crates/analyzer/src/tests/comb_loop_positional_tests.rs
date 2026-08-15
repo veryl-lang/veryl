@@ -18,17 +18,6 @@ macro_rules! comb_loop_case {
     };
 }
 
-macro_rules! comb_loop_case_ignored {
-    ($name:ident, $reason:literal, $case:literal, $code:expr, $expected:expr) => {
-        #[test]
-        #[ignore = $reason]
-        fn $name() {
-            let code = $code;
-            assert_comb_loop($case, code.as_ref(), $expected);
-        }
-    };
-}
-
 fn nested_repeat_code(through_instance: bool, output_bit: usize) -> String {
     let assignment = if through_instance {
         "inst u: Identity (i: '{'{feedback repeat 20} repeat 100}, o: passed);".to_string()
@@ -80,9 +69,8 @@ comb_loop_case!(
     true
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_nested_repeat_actual_keeps_disjoint_phase,
-    "comb-loop migration: false positive; child summary is not clipped to a multidimensional repeated actual region",
     "nested actual axes keep a disjoint phase across a module",
     nested_repeat_code(true, 1),
     false
@@ -893,13 +881,11 @@ fn comb_loop_signed_ternary_high_bit_is_disjoint_from_non_sign_bit() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_signed_ternary_high_bit_retains_sign_bit() {
     assert_signed_ternary_coercion(1, true);
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_widening_cast_zero_fills_high_bits() {
     assert_expression_coercion("value as 4", "o[3]", false);
 }
@@ -927,6 +913,34 @@ fn comb_loop_mixed_width_bitwise_zero_fills_short_operand() {
 #[test]
 fn comb_loop_mixed_width_bitwise_retains_corresponding_bit() {
     assert_expression_coercion("value | 4'b0", "o[0]", true);
+}
+
+fn assert_signed_bitwise_coercion(target: usize, expected: bool) {
+    assert_comb_loop(
+        "a mixed-width bitwise operand retains only its replicated sign bit",
+        &format!(
+            r#"
+            module Top (o: output logic<4>) {{
+                var value: logic<2>;
+                assign o = $signed(value) | 4'sb0;
+                assign value[{target}] = o[3];
+                assign value[{}] = 0;
+            }}
+            "#,
+            1 - target
+        ),
+        expected,
+    );
+}
+
+#[test]
+fn comb_loop_mixed_width_signed_bitwise_ignores_non_sign_bit() {
+    assert_signed_bitwise_coercion(0, false);
+}
+
+#[test]
+fn comb_loop_mixed_width_signed_bitwise_retains_sign_bit() {
+    assert_signed_bitwise_coercion(1, true);
 }
 
 #[test]

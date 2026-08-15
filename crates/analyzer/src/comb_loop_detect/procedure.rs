@@ -2,7 +2,7 @@
 
 use super::BitDependency;
 use super::region::{ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
-use super::ssa::{BranchState, PositionOffset, SourceKind, SsaStore, VersionId};
+use super::ssa::{BranchState, PositionRelation, SsaStore, VersionId};
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
@@ -236,7 +236,7 @@ pub(super) struct Dependency {
 
 #[derive(Default)]
 struct ExpressionSources {
-    positional: Vec<(VersionId, PositionOffset)>,
+    positional: Vec<(VersionId, PositionRelation)>,
     whole: Vec<VersionId>,
 }
 
@@ -253,34 +253,38 @@ impl ExpressionSources {
         self.whole.extend(other.whole);
     }
 
-    fn translate(&mut self, offset: PositionOffset) {
-        let mut overflow = false;
+    fn translate(&mut self, offset: PositionRelation) {
         for (_, current) in &mut self.positional {
-            if let Some(translated) = current.checked_add(offset) {
-                *current = translated;
-            } else {
-                overflow = true;
-                break;
-            }
+            *current = current.compose(offset);
         }
-        if overflow {
-            self.whole
-                .extend(self.positional.drain(..).map(|(version, _)| version));
+    }
+
+    fn forget_array_position(&mut self) {
+        for (_, relation) in &mut self.positional {
+            relation.array = None;
+        }
+    }
+
+    fn forget_packed_position(&mut self) {
+        for (_, relation) in &mut self.positional {
+            relation.packed = None;
         }
     }
 
     fn normalize(&mut self) {
         self.positional.sort_unstable();
-        self.positional.dedup();
-        self.whole.sort_unstable();
-        self.whole.dedup();
-        let mut conflicting = Vec::new();
-        for pair in self.positional.windows(2) {
-            if pair[0].0 == pair[1].0 && pair[0].1 != pair[1].1 {
-                conflicting.push(pair[0].0);
+        let mut merged: Vec<(VersionId, PositionRelation)> =
+            Vec::with_capacity(self.positional.len());
+        for (source, relation) in self.positional.drain(..) {
+            if let Some((previous_source, previous_relation)) = merged.last_mut()
+                && *previous_source == source
+            {
+                *previous_relation = previous_relation.union(relation);
+            } else {
+                merged.push((source, relation));
             }
         }
-        self.whole.extend(conflicting);
+        self.positional = merged;
         self.whole.sort_unstable();
         self.whole.dedup();
         self.positional
@@ -326,17 +330,13 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
             let wrapper = inner
                 .ssa
                 .positional_definition(vec![(version, expression_offset)], Vec::new());
-            for (source, kind) in inner.ssa.root_source_kinds(wrapper) {
+            for (source, relation) in inner.ssa.root_source_relations(wrapper) {
                 if source.call_frame.is_some() {
                     continue;
                 }
                 let source = source.node;
-                let offset = match kind {
-                    SourceKind::Offset(offset) => offset
-                        .checked_neg()
-                        .map(|offset| (offset.array, offset.packed)),
-                    SourceKind::Whole => None,
-                };
+                let relation = relation.reversed();
+                let offset = relation.array.zip(relation.packed);
                 mapped.push(RegionSource {
                     key: source,
                     offset,
@@ -348,7 +348,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
             mapped.extend(
                 inner
                     .ssa
-                    .root_source_kinds(wrapper)
+                    .root_source_relations(wrapper)
                     .into_keys()
                     .filter_map(|source| {
                         source.call_frame.is_none().then_some(RegionSource {
@@ -533,7 +533,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .collect();
         for destination in destinations {
             let version = self.read_key(destination);
-            let sources = self.ssa.root_source_kinds(version);
+            let sources = self.ssa.root_source_relations(version);
             dependencies.extend(
                 sources
                     .into_iter()
@@ -555,12 +555,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         dependencies
     }
 
-    fn dependency_kind(source_kind: SourceKind) -> BitDependency {
-        match source_kind {
-            SourceKind::Offset(PositionOffset { array, packed }) => {
-                BitDependency::Offset { array, packed }
-            }
-            SourceKind::Whole => BitDependency::Whole,
+    fn dependency_kind(source_kind: PositionRelation) -> BitDependency {
+        BitDependency {
+            array: source_kind.array,
+            packed: source_kind.packed,
         }
     }
 
@@ -701,9 +699,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let destination_offset = destination_array
             .zip(selected)
             .and_then(|(array, (_, low))| {
-                Some(PositionOffset {
-                    array: i128::try_from(array.start).ok()?,
-                    packed: signed_difference(low, expression_offset)?,
+                Some(PositionRelation {
+                    array: Some(i128::try_from(array.start).ok()?),
+                    packed: Some(signed_difference(low, expression_offset)?),
                 })
             });
         let keys = self.write_keys(destination);
@@ -740,7 +738,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             sources.normalize();
             let mut positional = Vec::new();
             for (version, offset) in sources.positional {
-                if let Some(offset) = destination_offset.and_then(|base| offset.checked_add(base)) {
+                if let Some(offset) = destination_offset.map(|base| offset.compose(base)) {
                     positional.push((version, offset));
                 } else {
                     sources.whole.push(version);
@@ -982,11 +980,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     if let Some((_, low)) = selected {
                         let mut reads = Vec::new();
                         let accesses = var_reads(*id, index, select, &mut self.ctx);
+                        let position_preserving =
+                            index.0.iter().all(|index| index.comptime().is_const)
+                                && accesses.len() == 1;
                         if let Some(source_span) = requested.translated(0, low) {
                             for (idx, access) in &accesses {
-                                let source_array = requested_array
-                                    .translated(0, idx.start)
-                                    .and_then(|requested| requested.intersection(*idx));
+                                let source_array = if position_preserving {
+                                    requested_array
+                                        .translated(0, idx.start)
+                                        .and_then(|requested| requested.intersection(*idx))
+                                } else {
+                                    Some(*idx)
+                                };
                                 if let (Some(source_array), Some(source_span)) =
                                     (source_array, source_span.intersection(*access))
                                 {
@@ -1000,14 +1005,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 }
                             }
                         }
-                        let offset = (index.0.iter().all(|index| index.comptime().is_const)
-                            && accesses.len() == 1)
+                        let offset = position_preserving
                             .then(|| {
-                                Some(PositionOffset {
-                                    array: i128::try_from(accesses[0].0.start)
-                                        .ok()?
-                                        .checked_neg()?,
-                                    packed: i128::try_from(low).ok()?.checked_neg()?,
+                                Some(PositionRelation {
+                                    array: Some(
+                                        i128::try_from(accesses[0].0.start).ok()?.checked_neg()?,
+                                    ),
+                                    packed: Some(i128::try_from(low).ok()?.checked_neg()?),
                                 })
                             })
                             .flatten();
@@ -1046,7 +1050,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 Op::BitNot | Op::Add => self.eval_expr_bits(operand, requested_array, requested),
                 _ => ExpressionSources::whole(self.eval_expr(operand)),
             },
-            Expression::Binary(left, op, right, _) => match op {
+            Expression::Binary(left, op, right, comptime) => match op {
+                Op::As => {
+                    let context_width = comptime.r#type.total_width().unwrap_or(requested.end());
+                    self.eval_expr_requested(left, requested_array, requested, context_width)
+                }
                 Op::LogicShiftL | Op::ArithShiftL => {
                     let shift = right
                         .eval_value(&mut self.ctx)
@@ -1059,9 +1067,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         {
                             let mut input = self.eval_expr_bits(left, requested_array, input);
                             if let Ok(shift) = i128::try_from(shift) {
-                                input.translate(PositionOffset {
-                                    array: 0,
-                                    packed: shift,
+                                input.translate(PositionRelation {
+                                    array: Some(0),
+                                    packed: Some(shift),
                                 });
                             } else {
                                 input
@@ -1088,9 +1096,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         {
                             let mut input = self.eval_expr_bits(left, requested_array, input);
                             if let Ok(shift) = i128::try_from(shift) {
-                                input.translate(PositionOffset {
-                                    array: 0,
-                                    packed: -shift,
+                                input.translate(PositionRelation {
+                                    array: Some(0),
+                                    packed: Some(-shift),
                                 });
                             } else {
                                 input
@@ -1122,16 +1130,34 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     reads
                 }
                 Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
-                    let mut reads = self.eval_expr_bits(left, requested_array, requested);
-                    reads.extend(self.eval_expr_bits(right, requested_array, requested));
+                    let context_width = comptime.r#type.total_width().unwrap_or(requested.end());
+                    let mut reads =
+                        self.eval_expr_requested(left, requested_array, requested, context_width);
+                    reads.extend(self.eval_expr_requested(
+                        right,
+                        requested_array,
+                        requested,
+                        context_width,
+                    ));
                     reads
                 }
                 _ => ExpressionSources::whole(self.eval_expr(expression)),
             },
-            Expression::Ternary(condition, left, right, _) => {
+            Expression::Ternary(condition, left, right, comptime) => {
+                let context_width = comptime.r#type.total_width().unwrap_or(requested.end());
                 let mut reads = ExpressionSources::whole(self.eval_expr(condition));
-                reads.extend(self.eval_expr_bits(left, requested_array, requested));
-                reads.extend(self.eval_expr_bits(right, requested_array, requested));
+                reads.extend(self.eval_expr_requested(
+                    left,
+                    requested_array,
+                    requested,
+                    context_width,
+                ));
+                reads.extend(self.eval_expr_requested(
+                    right,
+                    requested_array,
+                    requested,
+                    context_width,
+                ));
                 reads
             }
             Expression::Concatenation(parts, _) => {
@@ -1171,9 +1197,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             };
                             let mut part = self.eval_expr_bits(part, requested_array, local);
                             if let Ok(output_start) = i128::try_from(output_start) {
-                                part.translate(PositionOffset {
-                                    array: 0,
-                                    packed: output_start,
+                                part.translate(PositionRelation {
+                                    array: Some(0),
+                                    packed: Some(output_start),
                                 });
                             } else {
                                 part.whole
@@ -1182,7 +1208,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             reads.extend(part);
                         }
                         RepeatedProjection::Multiple => {
-                            reads.whole.extend(self.eval_expr(part));
+                            let Some(local) = PackedSpan::whole(width) else {
+                                reads.whole.extend(self.eval_expr(part));
+                                continue;
+                            };
+                            let mut part = self.eval_expr_bits(part, requested_array, local);
+                            part.forget_packed_position();
+                            reads.extend(part);
                         }
                     }
                     let Some(part_width) = width.checked_mul(count) else {
@@ -1199,11 +1231,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 let Some(requested_end) = requested_array.end() else {
                     return ExpressionSources::whole(self.eval_expr(expression));
                 };
-                let total = expression
-                    .comptime()
-                    .r#type
-                    .array
-                    .total()
+                let total = self
+                    .expression_array_extent(expression)
                     .unwrap_or(1)
                     .max(requested_end);
                 let mut cursor = 0usize;
@@ -1217,7 +1246,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         default = Some(value.as_ref());
                         continue;
                     };
-                    let item_length = value.comptime().r#type.array.total().unwrap_or(1);
+                    let item_length = self.expression_array_extent(value).unwrap_or(1);
                     let count = if let Some(repeat) = repeat {
                         let Some(count) = repeat
                             .eval_value(&mut self.ctx)
@@ -1257,9 +1286,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     .unwrap_or(requested.length),
                             );
                             if let Ok(output_start) = i128::try_from(output_start) {
-                                item.translate(PositionOffset {
-                                    array: output_start,
-                                    packed: 0,
+                                item.translate(PositionRelation {
+                                    array: Some(output_start),
+                                    packed: Some(0),
                                 });
                             } else {
                                 item.whole
@@ -1268,7 +1297,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             reads.extend(item);
                         }
                         RepeatedProjection::Multiple => {
-                            reads.whole.extend(self.eval_expr(value));
+                            let mut item = self.eval_expr_requested(
+                                value,
+                                ArraySpan {
+                                    start: 0,
+                                    length: item_length,
+                                },
+                                requested,
+                                value
+                                    .comptime()
+                                    .r#type
+                                    .total_width()
+                                    .unwrap_or(requested.length),
+                            );
+                            item.forget_array_position();
+                            reads.extend(item);
                         }
                     }
                     let Some(item_extent) = item_length.checked_mul(count) else {
@@ -1282,7 +1325,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if let Some(default) = default
                     && cursor < total
                 {
-                    let item_length = default.comptime().r#type.array.total().unwrap_or(1);
+                    let item_length = self.expression_array_extent(default).unwrap_or(1);
                     let remaining = total - cursor;
                     let count = remaining.div_ceil(item_length);
                     match project_repeated_span(
@@ -1312,9 +1355,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     .unwrap_or(requested.length),
                             );
                             if let Ok(output_start) = i128::try_from(output_start) {
-                                item.translate(PositionOffset {
-                                    array: output_start,
-                                    packed: 0,
+                                item.translate(PositionRelation {
+                                    array: Some(output_start),
+                                    packed: Some(0),
                                 });
                             } else {
                                 item.whole
@@ -1323,7 +1366,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             reads.extend(item);
                         }
                         RepeatedProjection::Multiple => {
-                            reads.whole.extend(self.eval_expr(default));
+                            let mut item = self.eval_expr_requested(
+                                default,
+                                ArraySpan {
+                                    start: 0,
+                                    length: item_length,
+                                },
+                                requested,
+                                default
+                                    .comptime()
+                                    .r#type
+                                    .total_width()
+                                    .unwrap_or(requested.length),
+                            );
+                            item.forget_array_position();
+                            reads.extend(item);
                         }
                     }
                 }
@@ -1347,9 +1404,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let mut field =
                             self.eval_expr_requested(value, requested_array, local, width);
                         if let Ok(low) = i128::try_from(low) {
-                            field.translate(PositionOffset {
-                                array: 0,
-                                packed: low,
+                            field.translate(PositionRelation {
+                                array: Some(0),
+                                packed: Some(low),
                             });
                         } else {
                             field
@@ -1365,6 +1422,31 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
                 reads
             }
+        }
+    }
+
+    fn expression_array_extent(&mut self, expression: &Expression) -> Option<usize> {
+        match expression {
+            Expression::ArrayLiteral(items, _) if !items.is_empty() => {
+                let mut total = 0usize;
+                for item in items {
+                    let ArrayLiteralItem::Value(value, repeat) = item else {
+                        return expression.comptime().r#type.array.total();
+                    };
+                    let value_extent = self.expression_array_extent(value)?;
+                    let repeat = repeat
+                        .as_ref()
+                        .map(|repeat| {
+                            repeat
+                                .eval_value(&mut self.ctx)
+                                .and_then(|value| value.to_usize())
+                        })
+                        .unwrap_or(Some(1))?;
+                    total = total.checked_add(value_extent.checked_mul(repeat)?)?;
+                }
+                Some(total)
+            }
+            _ => expression.comptime().r#type.array.total().or(Some(1)),
         }
     }
 
@@ -1874,9 +1956,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let position_offset = destination_array
             .zip(selected)
             .and_then(|(array, (_, low))| {
-                Some(PositionOffset {
-                    array: i128::try_from(array.start).ok()?,
-                    packed: signed_difference(low, formal_offset)?,
+                Some(PositionRelation {
+                    array: Some(i128::try_from(array.start).ok()?),
+                    packed: Some(signed_difference(low, formal_offset)?),
                 })
             });
         for key in self.write_keys(destination) {

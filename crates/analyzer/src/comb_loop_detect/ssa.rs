@@ -9,54 +9,61 @@ pub(super) type VersionId = usize;
 enum Version<K> {
     Entry(K),
     Definition {
-        positional: Vec<(VersionId, PositionOffset)>,
+        positional: Vec<(VersionId, PositionRelation)>,
         whole: Vec<VersionId>,
     },
     Phi(Vec<VersionId>),
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct PositionOffset {
-    pub(super) array: i128,
-    pub(super) packed: i128,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct PositionRelation {
+    pub(super) array: Option<i128>,
+    pub(super) packed: Option<i128>,
 }
 
-impl PositionOffset {
-    pub(super) fn checked_add(self, other: Self) -> Option<Self> {
-        Some(Self {
-            array: self.array.checked_add(other.array)?,
-            packed: self.packed.checked_add(other.packed)?,
-        })
-    }
-
-    pub(super) fn checked_neg(self) -> Option<Self> {
-        Some(Self {
-            array: self.array.checked_neg()?,
-            packed: self.packed.checked_neg()?,
-        })
+impl Default for PositionRelation {
+    fn default() -> Self {
+        Self {
+            array: Some(0),
+            packed: Some(0),
+        }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(super) enum SourceKind {
-    Offset(PositionOffset),
-    Whole,
-}
-
-impl SourceKind {
-    fn compose(self, inner: Self) -> Self {
-        match (self, inner) {
-            (Self::Offset(outer), Self::Offset(inner)) => outer
-                .checked_add(inner)
-                .map(Self::Offset)
-                .unwrap_or(Self::Whole),
-            _ => Self::Whole,
+impl PositionRelation {
+    pub(super) const fn whole() -> Self {
+        Self {
+            array: None,
+            packed: None,
         }
     }
 
-    fn union(self, other: Self) -> Self {
-        if self == other { self } else { Self::Whole }
+    pub(super) fn compose(self, other: Self) -> Self {
+        Self {
+            array: compose_axis(self.array, other.array),
+            packed: compose_axis(self.packed, other.packed),
+        }
     }
+
+    pub(super) fn reversed(self) -> Self {
+        Self {
+            array: self.array.and_then(i128::checked_neg),
+            packed: self.packed.and_then(i128::checked_neg),
+        }
+    }
+
+    pub(super) fn union(self, other: Self) -> Self {
+        Self {
+            array: (self.array == other.array).then_some(self.array).flatten(),
+            packed: (self.packed == other.packed)
+                .then_some(self.packed)
+                .flatten(),
+        }
+    }
+}
+
+fn compose_axis(left: Option<i128>, right: Option<i128>) -> Option<i128> {
+    left?.checked_add(right?)
 }
 
 pub(super) struct Checkpoint {
@@ -136,20 +143,21 @@ where
 
     pub(super) fn positional_definition(
         &mut self,
-        mut positional: Vec<(VersionId, PositionOffset)>,
+        mut positional: Vec<(VersionId, PositionRelation)>,
         mut whole: Vec<VersionId>,
     ) -> VersionId {
         positional.sort_unstable();
-        positional.dedup();
-        whole.sort_unstable();
-        whole.dedup();
-        let mut conflicting = Vec::new();
-        for pair in positional.windows(2) {
-            if pair[0].0 == pair[1].0 && pair[0].1 != pair[1].1 {
-                conflicting.push(pair[0].0);
+        let mut merged: Vec<(VersionId, PositionRelation)> = Vec::with_capacity(positional.len());
+        for (source, relation) in positional {
+            if let Some((previous_source, previous_relation)) = merged.last_mut()
+                && *previous_source == source
+            {
+                *previous_relation = previous_relation.union(relation);
+            } else {
+                merged.push((source, relation));
             }
         }
-        whole.extend(conflicting);
+        let mut positional = merged;
         whole.sort_unstable();
         whole.dedup();
         positional.retain(|(source, _)| whole.binary_search(source).is_err());
@@ -226,11 +234,11 @@ where
     }
 
     pub(super) fn root_sources(&self, version: VersionId) -> HashSet<K> {
-        self.root_source_kinds(version).into_keys().collect()
+        self.root_source_relations(version).into_keys().collect()
     }
 
-    pub(super) fn root_source_kinds(&self, version: VersionId) -> HashMap<K, SourceKind> {
-        let mut sources: HashMap<K, SourceKind> = HashMap::default();
+    pub(super) fn root_source_relations(&self, version: VersionId) -> HashMap<K, PositionRelation> {
+        let mut sources: HashMap<K, PositionRelation> = HashMap::default();
         let mut visited = HashSet::default();
         let mut pending = Vec::new();
         match &self.versions[version] {
@@ -241,21 +249,25 @@ where
                 pending.extend(
                     positional
                         .iter()
-                        .map(|(input, offset)| (*input, true, SourceKind::Offset(*offset))),
+                        .map(|(input, relation)| (*input, true, *relation)),
                 );
-                pending.extend(whole.iter().map(|input| (*input, true, SourceKind::Whole)));
+                pending.extend(
+                    whole
+                        .iter()
+                        .map(|input| (*input, true, PositionRelation::whole())),
+                );
             }
             Version::Phi(inputs) => {
                 pending.extend(
-                    inputs.iter().map(|input| {
-                        (*input, false, SourceKind::Offset(PositionOffset::default()))
-                    }),
+                    inputs
+                        .iter()
+                        .map(|input| (*input, false, PositionRelation::default())),
                 );
             }
         }
 
-        while let Some((version, include_entry, kind)) = pending.pop() {
-            if !visited.insert((version, include_entry, kind)) {
+        while let Some((version, include_entry, relation)) = pending.pop() {
+            if !visited.insert((version, include_entry, relation)) {
                 continue;
             }
             match &self.versions[version] {
@@ -263,18 +275,24 @@ where
                     if include_entry {
                         sources
                             .entry(*key)
-                            .and_modify(|existing| *existing = existing.union(kind))
-                            .or_insert(kind);
+                            .and_modify(|existing| *existing = existing.union(relation))
+                            .or_insert(relation);
                     }
                 }
                 Version::Definition { positional, whole } => {
-                    pending.extend(positional.iter().map(|(input, offset)| {
-                        (*input, true, kind.compose(SourceKind::Offset(*offset)))
-                    }));
-                    pending.extend(whole.iter().map(|input| (*input, true, SourceKind::Whole)));
+                    pending.extend(
+                        positional
+                            .iter()
+                            .map(|(input, inner)| (*input, true, relation.compose(*inner))),
+                    );
+                    pending.extend(
+                        whole
+                            .iter()
+                            .map(|input| (*input, true, PositionRelation::whole())),
+                    );
                 }
                 Version::Phi(inputs) => {
-                    pending.extend(inputs.iter().map(|input| (*input, include_entry, kind)));
+                    pending.extend(inputs.iter().map(|input| (*input, include_entry, relation)));
                 }
             }
         }
@@ -308,15 +326,15 @@ mod tests {
     }
 
     #[test]
-    fn positional_definition_preserves_source_kind() {
+    fn positional_definition_preserves_source_relation() {
         let mut ssa = SsaStore::default();
         let source = ssa.read("source");
         let destination =
-            ssa.positional_definition(vec![(source, PositionOffset::default())], Vec::new());
+            ssa.positional_definition(vec![(source, PositionRelation::default())], Vec::new());
 
         assert_eq!(
-            ssa.root_source_kinds(destination).get("source"),
-            Some(&SourceKind::Offset(PositionOffset::default()))
+            ssa.root_source_relations(destination).get("source"),
+            Some(&PositionRelation::default())
         );
     }
 
@@ -327,9 +345,9 @@ mod tests {
         let first = ssa.positional_definition(
             vec![(
                 source,
-                PositionOffset {
-                    array: 3,
-                    packed: -2,
+                PositionRelation {
+                    array: Some(3),
+                    packed: Some(-2),
                 },
             )],
             Vec::new(),
@@ -337,35 +355,35 @@ mod tests {
         let destination = ssa.positional_definition(
             vec![(
                 first,
-                PositionOffset {
-                    array: -1,
-                    packed: 5,
+                PositionRelation {
+                    array: Some(-1),
+                    packed: Some(5),
                 },
             )],
             Vec::new(),
         );
 
         assert_eq!(
-            ssa.root_source_kinds(destination).get("source"),
-            Some(&SourceKind::Offset(PositionOffset {
-                array: 2,
-                packed: 3,
-            }))
+            ssa.root_source_relations(destination).get("source"),
+            Some(&PositionRelation {
+                array: Some(2),
+                packed: Some(3),
+            })
         );
     }
 
     #[test]
-    fn conflicting_positional_offsets_become_whole_dependencies() {
+    fn conflicting_offsets_only_widen_the_conflicting_axis() {
         let mut ssa = SsaStore::default();
         let source = ssa.read("source");
         let destination = ssa.positional_definition(
             vec![
-                (source, PositionOffset::default()),
+                (source, PositionRelation::default()),
                 (
                     source,
-                    PositionOffset {
-                        array: 0,
-                        packed: 1,
+                    PositionRelation {
+                        array: Some(0),
+                        packed: Some(1),
                     },
                 ),
             ],
@@ -373,8 +391,11 @@ mod tests {
         );
 
         assert_eq!(
-            ssa.root_source_kinds(destination).get("source"),
-            Some(&SourceKind::Whole)
+            ssa.root_source_relations(destination).get("source"),
+            Some(&PositionRelation {
+                array: Some(0),
+                packed: None,
+            })
         );
     }
 
@@ -383,11 +404,11 @@ mod tests {
         let mut ssa = SsaStore::default();
         let source = ssa.read("source");
         let destination =
-            ssa.positional_definition(vec![(source, PositionOffset::default())], vec![source]);
+            ssa.positional_definition(vec![(source, PositionRelation::default())], vec![source]);
 
         assert_eq!(
-            ssa.root_source_kinds(destination).get("source"),
-            Some(&SourceKind::Whole)
+            ssa.root_source_relations(destination).get("source"),
+            Some(&PositionRelation::whole())
         );
     }
 
