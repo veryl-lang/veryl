@@ -36,7 +36,11 @@ fn assert_intentional_false_positive(case: &str, code: &str) {
     );
 }
 
-// Value and control expressions remain structural dependencies.
+// Value and control expressions remain structural dependencies. The XOR case
+// below is a definite false positive for two-state `bit`. The corresponding
+// `logic` case is deliberately left unclassified: its answer depends on
+// whether loop detection follows four-state SystemVerilog evaluation or the
+// synthesized two-state circuit.
 
 #[test]
 fn duplicate_xor_operands_remain_structural_inputs() {

@@ -1554,3 +1554,138 @@ fn comb_loop_false_negative_runtime_short_circuit_write_kills_disabled_feedback(
         true,
     );
 }
+
+#[test]
+fn concatenated_assignment_snapshots_all_rhs_bits_before_writing_false_positive() {
+    assert_comb_loop(
+        "a later concatenated destination reads the pre-assignment value",
+        r#"
+        module Top (o: output bit) {
+            var a       : bit;
+            var b       : bit;
+            var feedback: bit;
+            assign feedback = b;
+            always_comb {
+                a = 0;
+                b = feedback;
+                {a, b} = {b, a};
+                a = 0;
+                o = b;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn concatenated_assignment_snapshots_all_rhs_bits_before_writing_false_negative() {
+    assert_comb_loop(
+        "a later concatenated destination retains its pre-assignment feedback source",
+        r#"
+        module Top (o: output bit) {
+            var a       : bit;
+            var b       : bit;
+            var feedback: bit;
+            assign feedback = b;
+            always_comb {
+                a = feedback;
+                b = 0;
+                {a, b} = {1'b0, a};
+                a = b;
+                o = a;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn truncated_rhs_still_executes_side_effects_from_discarded_bits() {
+    assert_comb_loop(
+        "requested-bit projection does not suppress a discarded expression effect",
+        r#"
+        module Top (o: output bit) {
+            var state: bit;
+            var dummy: bit;
+            function touch (value: input bit) -> bit {
+                state = value;
+                return 0;
+            }
+            always_comb {
+                dummy = {touch(o), 1'b0} as 1;
+                o = state;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn truncated_rhs_effect_from_a_discarded_bit_can_kill_feedback() {
+    assert_comb_loop(
+        "requested-bit projection executes a discarded expression overwrite",
+        r#"
+        module Top (o: output bit) {
+            var state: bit;
+            var dummy: bit;
+            function clear_state () -> bit {
+                state = 0;
+                return 0;
+            }
+            always_comb {
+                state = o;
+                dummy = {clear_state(), 1'b0} as 1;
+                o = state;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+fn runtime_logical_condition_side_effect_code(operator: &str) -> String {
+    format!(
+        r#"
+        module Top (enable: input bit, o: output bit) {{
+            var a   : bit;
+            var b   : bit;
+            var sink: bit;
+            function clear_a () -> bit {{
+                a = 0;
+                return 0;
+            }}
+            always_comb {{
+                a = b;
+                if enable {operator} clear_a() {{
+                    sink = 0;
+                }} else {{
+                    sink = 0;
+                }}
+                b = a;
+                o = b;
+            }}
+        }}
+        "#
+    )
+}
+
+#[test]
+fn runtime_logical_and_condition_merges_the_skipped_rhs_effect() {
+    assert_comb_loop(
+        "a runtime logical-and condition retains the skipped RHS state",
+        &runtime_logical_condition_side_effect_code("&&"),
+        true,
+    );
+}
+
+#[test]
+fn runtime_logical_or_condition_merges_the_skipped_rhs_effect() {
+    assert_comb_loop(
+        "a runtime logical-or condition retains the skipped RHS state",
+        &runtime_logical_condition_side_effect_code("||"),
+        true,
+    );
+}

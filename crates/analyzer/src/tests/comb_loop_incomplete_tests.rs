@@ -42,6 +42,117 @@ fn comb_loop_malformed_effect_is_a_causal_barrier() {
 }
 
 #[test]
+fn comb_loop_malformed_boundary_preserves_a_later_exact_loop() {
+    let code = r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            assign a = b;
+            always_comb {
+                missing_function();
+                b = a;
+                o = b;
+            }
+        }
+    "#;
+    assert!(!comb_loop_analysis_is_complete(code));
+    assert!(
+        analyze(code)
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "the continuous-only source must survive the boundary so the later exact loop is visible"
+    );
+}
+
+#[test]
+fn comb_loop_boundary_does_not_kill_a_disjoint_bit_owned_by_another_process() {
+    let code = r#"
+        module Top (
+            o: output logic,
+        ) {
+            var state   : logic<2>;
+            var feedback: logic;
+            assign feedback = state[1];
+            always_comb {
+                missing_function();
+                state[0] = 0;
+            }
+            always_comb {
+                state[1] = feedback;
+                o = state[1];
+            }
+        }
+    "#;
+    assert!(!comb_loop_analysis_is_complete(code));
+    assert!(
+        analyze(code)
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "a boundary in the bit-0 writer must not erase the independent bit-1 loop"
+    );
+}
+
+#[test]
+fn comb_loop_partial_function_summary_preserves_a_later_exact_return_path() {
+    let code = r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            function read_a () -> logic {
+                missing_function();
+                return a;
+            }
+            assign a = b;
+            always_comb {
+                b = read_a();
+                o = b;
+            }
+        }
+    "#;
+    assert!(!comb_loop_analysis_is_complete(code));
+    assert!(
+        analyze(code)
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "a partial callee must not discard the exact return dependency rebuilt after its boundary"
+    );
+}
+
+#[test]
+fn comb_loop_opaque_branch_does_not_erase_an_exact_sibling_branch() {
+    let code = r#"
+        module Top (
+            cond: input  logic,
+            o   : output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            assign b = a;
+            always_comb {
+                if cond {
+                    a = b;
+                } else {
+                    a = 0;
+                    missing_function();
+                }
+                o = a;
+            }
+        }
+    "#;
+    assert!(!comb_loop_analysis_is_complete(code));
+    assert!(
+        analyze(code)
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "an opaque sibling branch must not erase the exact feedback branch"
+    );
+}
+
+#[test]
 fn comb_loop_inout_boundary_does_not_prove_hard_feedback() {
     let errors = analyze(
         r#"
@@ -169,6 +280,36 @@ fn comb_loop_dynamic_for_bound_with_unknown_effect_is_incomplete() {
         analyze(code)
             .iter()
             .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. }))
+    );
+}
+
+#[test]
+fn comb_loop_zero_trip_path_preserves_preloop_value_after_unknown_effect() {
+    let code = r#"
+        module Top (
+            n: input  logic<32>,
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            var c: logic;
+            assign a = c;
+            always_comb {
+                b = a;
+                for _index in 0..n {
+                    missing_function();
+                }
+                c = b;
+                o = c;
+            }
+        }
+    "#;
+    assert!(!comb_loop_analysis_is_complete(code));
+    assert!(
+        analyze(code)
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "the zero-trip path must retain the exact pre-loop value consumed after the loop"
     );
 }
 

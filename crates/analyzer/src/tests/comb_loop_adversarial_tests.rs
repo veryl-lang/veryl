@@ -927,3 +927,67 @@ fn zero_offset_cycle_is_not_hidden_by_parallel_shifted_paths() {
         true,
     );
 }
+
+#[test]
+fn dynamic_packed_select_stays_within_its_struct_member() {
+    assert_comb_loop(
+        "a dynamic packed select cannot alias a disjoint struct member",
+        r#"
+        module Top (
+            index: input  bit<2>,
+            o    : output bit,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            var left : Pair;
+            var right: Pair;
+            assign left = Pair'{
+                selected: 0,
+                result  : right.result[0],
+            };
+            assign right = Pair'{
+                selected: 0,
+                result  : left.selected[index],
+            };
+            assign o = right.result[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn dynamic_packed_select_stays_within_a_struct_member_nested_in_a_union() {
+    assert_comb_loop(
+        "a dynamic packed select cannot escape a nested member through a union overlay",
+        r#"
+        module Top (
+            index: input  bit<2>,
+            o    : output bit,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            union Overlay {
+                pair: Pair,
+                raw : bit<8>,
+            }
+            var left : Overlay;
+            var right: Overlay;
+            assign left.pair = Pair'{
+                selected: 0,
+                result  : right.pair.result[0],
+            };
+            assign right.pair = Pair'{
+                selected: 0,
+                result  : left.pair.selected[index],
+            };
+            assign o = right.pair.result[0];
+        }
+        "#,
+        false,
+    );
+}

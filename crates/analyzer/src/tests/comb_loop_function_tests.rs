@@ -2061,6 +2061,94 @@ fn comb_loop_function_onehot_runtime_input_detects_feedback() {
 }
 
 #[test]
+fn function_summary_snapshots_actuals_in_source_order_false_negative() {
+    assert_comb_loop(
+        "a later actual side effect cannot replace an earlier captured value",
+        r#"
+        module Top (o: output bit) {
+            var x       : bit;
+            var y       : bit;
+            var feedback: bit;
+            function clear_x () -> bit {
+                x = 0;
+                return 0;
+            }
+            function first (
+                value  : input bit,
+                ignored: input bit,
+            ) -> bit {
+                return value;
+            }
+            assign feedback = x;
+            always_comb {
+                x = feedback;
+                y = first(x, clear_x());
+                x = y;
+                o = x;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn function_summary_snapshots_actuals_in_source_order_false_positive() {
+    assert_comb_loop(
+        "a later actual side effect cannot taint an earlier captured value",
+        r#"
+        module Top (
+            i: input  bit,
+            o: output bit,
+        ) {
+            var x       : bit;
+            var y       : bit;
+            var feedback: bit;
+            function write_x (value: input bit) -> bit {
+                x = value;
+                return 0;
+            }
+            function first (
+                value  : input bit,
+                ignored: input bit,
+            ) -> bit {
+                return value;
+            }
+            assign feedback = y;
+            always_comb {
+                x = i;
+                y = first(x, write_x(feedback));
+                x = 0;
+                o = y;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn expression_snapshot_preserves_nested_function_return_dependencies() {
+    assert_comb_loop(
+        "an effects pass cannot discard a nested call used by the cached return value",
+        r#"
+        module Top (o: output bit) {
+            function inner (value: input bit) -> bit {
+                return value;
+            }
+            function outer (value: input bit) -> bit {
+                return inner(value);
+            }
+            always_comb {
+                o = outer(o);
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn repeated_calls_reuse_the_function_write_footprint() {
     const WIDTH: usize = 128;
     let writes = (0..WIDTH)
