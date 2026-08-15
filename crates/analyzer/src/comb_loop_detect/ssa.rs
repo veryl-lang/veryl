@@ -243,16 +243,14 @@ where
                         .iter()
                         .map(|(input, offset)| (*input, true, SourceKind::Offset(*offset))),
                 );
-                pending.extend(
-                    whole
-                        .iter()
-                        .map(|input| (*input, true, SourceKind::Whole)),
-                );
+                pending.extend(whole.iter().map(|input| (*input, true, SourceKind::Whole)));
             }
             Version::Phi(inputs) => {
-                pending.extend(inputs.iter().map(|input| {
-                    (*input, false, SourceKind::Offset(PositionOffset::default()))
-                }));
+                pending.extend(
+                    inputs.iter().map(|input| {
+                        (*input, false, SourceKind::Offset(PositionOffset::default()))
+                    }),
+                );
             }
         }
 
@@ -271,24 +269,12 @@ where
                 }
                 Version::Definition { positional, whole } => {
                     pending.extend(positional.iter().map(|(input, offset)| {
-                        (
-                            *input,
-                            true,
-                            kind.compose(SourceKind::Offset(*offset)),
-                        )
+                        (*input, true, kind.compose(SourceKind::Offset(*offset)))
                     }));
-                    pending.extend(
-                        whole
-                            .iter()
-                            .map(|input| (*input, true, SourceKind::Whole)),
-                    );
+                    pending.extend(whole.iter().map(|input| (*input, true, SourceKind::Whole)));
                 }
                 Version::Phi(inputs) => {
-                    pending.extend(
-                        inputs
-                            .iter()
-                            .map(|input| (*input, include_entry, kind)),
-                    );
+                    pending.extend(inputs.iter().map(|input| (*input, include_entry, kind)));
                 }
             }
         }
