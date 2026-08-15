@@ -723,11 +723,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         );
         visible_keys.sort_unstable();
         visible_keys.dedup();
-        let mut source_cache = SourceCache::restricted(
-            visible_keys
-                .into_iter()
-                .map(|node| SsaKey { node, call_frame: None }),
-        );
+        let mut source_cache =
+            SourceCache::restricted(visible_keys.into_iter().map(|node| SsaKey {
+                node,
+                call_frame: None,
+            }));
         let mut visible_sources = |this: &Self, version| {
             let mut sources = this
                 .ssa
@@ -741,8 +741,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     })
                 })
                 .filter(|source| {
-                    formal_ids.contains(&source.key.0)
-                        || this.is_module_scope_key(source.key)
+                    formal_ids.contains(&source.key.0) || this.is_module_scope_key(source.key)
                 })
                 .collect::<Vec<_>>();
             sources.sort_unstable();
@@ -808,11 +807,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn dependencies(&mut self) -> Vec<Dependency> {
         let mut dependencies = Vec::new();
-        let mut source_cache = SourceCache::restricted(
-            self.module_scope_keys()
-                .into_iter()
-                .map(|node| SsaKey { node, call_frame: None }),
-        );
+        let mut source_cache =
+            SourceCache::restricted(self.module_scope_keys().into_iter().map(|node| SsaKey {
+                node,
+                call_frame: None,
+            }));
         let destinations: Vec<_> = self
             .written
             .iter()

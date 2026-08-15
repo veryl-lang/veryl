@@ -1220,9 +1220,7 @@ fn add_inst_feedthrough_edges<'a>(
                 );
             }
         }
-        reads.sort_unstable_by_key(|source| {
-            (source.key, source.offset, source.condition.clone())
-        });
+        reads.sort_unstable_by_key(|source| (source.key, source.offset, source.condition.clone()));
         reads.dedup_by(|left, right| {
             left.key == right.key
                 && left.offset == right.offset
