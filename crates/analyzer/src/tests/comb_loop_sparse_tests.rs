@@ -308,30 +308,6 @@ fn comb_loop_alias_and_opaque_effect_boundaries_same_width_bitwise_operators_ret
 }
 
 #[test]
-fn comb_loop_alias_and_opaque_effect_boundaries_structural_dependence_is_not_removed_by_boolean_cancellation()
- {
-    assert_comb_loop(
-        "structural dependence is not removed by Boolean cancellation",
-        r#"
-        module Top (
-            o: output logic,
-        ) {
-            function low (x: input logic<8>) -> logic {
-                var tmp: logic<8>;
-                tmp = x & 8'b00000000;
-                return tmp[0];
-            }
-            var value: logic<8>;
-            assign o = low(value);
-            assign value[0] = o;
-            assign value[7:1] = 0;
-        }
-        "#,
-        true,
-    );
-}
-
-#[test]
 fn comb_loop_alias_and_opaque_effect_boundaries_reduction_operators_remain_dependent_on_every_operand_bit()
  {
     assert_comb_loop(

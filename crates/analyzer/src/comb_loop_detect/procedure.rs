@@ -112,6 +112,7 @@ struct FunctionSummary {
     result: Vec<Vec<(PackedSpan, Vec<NodeKey>)>>,
     writes: Vec<(NodeKey, Vec<NodeKey>)>,
     opaque_sources: Vec<NodeKey>,
+    complete: bool,
 }
 
 pub(super) struct FunctionSummaries<'a> {
@@ -237,8 +238,13 @@ pub(super) fn analyze(
     bit_part: &BitPartition,
     statements: &[Statement],
     context: &mut ProcedureContext,
-) -> Vec<Dependency> {
+) -> ProcedureResult {
     ProcedureAnalysis::analyze(bit_part, statements, context)
+}
+
+pub(super) struct ProcedureResult {
+    pub(super) dependencies: Vec<Dependency>,
+    pub(super) complete: bool,
 }
 
 pub(super) struct Dependency {
@@ -384,6 +390,13 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         let inner = self.inner.take().expect("expression analysis is active");
         context.restore(inner.ctx);
     }
+
+    pub(super) fn is_complete(&self) -> bool {
+        self.inner
+            .as_ref()
+            .expect("expression analysis is active")
+            .complete
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -402,6 +415,7 @@ struct ProcedureAnalysis<'a, 's> {
     next_call_frame: usize,
     receiver_indices: Vec<Option<VarIndex>>,
     function_flows: Vec<FunctionFlow>,
+    complete: bool,
     summaries: Option<&'s mut FunctionSummaries<'a>>,
 }
 
@@ -417,6 +431,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             next_call_frame: 0,
             receiver_indices: Vec::new(),
             function_flows: Vec::new(),
+            complete: true,
             summaries: None,
         }
     }
@@ -425,12 +440,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         bit_part: &'a BitPartition,
         statements: &[Statement],
         context: &mut ProcedureContext,
-    ) -> Vec<Dependency> {
+    ) -> ProcedureResult {
         let mut this = Self::from_context(bit_part, context.take());
         this.eval_block(statements, &[]);
-        let dependencies = this.dependencies();
+        let result = ProcedureResult {
+            dependencies: this.dependencies(),
+            complete: this.complete,
+        };
         context.restore(this.ctx);
-        dependencies
+        result
     }
 
     fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<NodeKey> {
@@ -533,6 +551,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             result,
             writes,
             opaque_sources,
+            complete: this.complete,
         };
         context.restore(this.ctx);
         Some(summary)
@@ -608,7 +627,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
         let mut keys = Vec::new();
         let index = self.receiver_index(id, index);
-        for (idx, span) in var_reads(id, &index, select, &mut self.ctx) {
+        let accesses = var_reads(id, &index, select, &mut self.ctx);
+        if accesses.is_empty() {
+            self.complete = false;
+        }
+        for (idx, span) in accesses {
             keys.extend(self.bit_part.overlapping_access(id, idx, span));
         }
         keys.sort_unstable();
@@ -620,7 +643,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut keys = Vec::new();
         let mut destination = destination.clone();
         destination.index = self.receiver_index(destination.id, &destination.index);
-        for (idx, span) in dst_writes(&destination, &mut self.ctx) {
+        let accesses = dst_writes(&destination, &mut self.ctx);
+        if accesses.is_empty() {
+            self.complete = false;
+        }
+        for (idx, span) in accesses {
             keys.extend(self.bit_part.overlapping_access(destination.id, idx, span));
         }
         keys.sort_unstable();
@@ -886,10 +913,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 ProcedureFlow::Continue
             }
             Statement::Break => ProcedureFlow::Break,
-            Statement::IfReset(_)
-            | Statement::TbMethodCall(_)
-            | Statement::Unsupported(_)
-            | Statement::Null => ProcedureFlow::Continue,
+            Statement::IfReset(_) | Statement::TbMethodCall(_) | Statement::Null => {
+                ProcedureFlow::Continue
+            }
+            Statement::Unsupported(_) => {
+                self.complete = false;
+                ProcedureFlow::Continue
+            }
         }
     }
 
@@ -1205,10 +1235,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 Factor::FunctionCall(call) => {
                     ExpressionSources::whole(self.eval_call_requested(call, &[], Some(requested)))
                 }
-                Factor::HierVariable(_)
-                | Factor::Value(_)
-                | Factor::Anonymous(_)
-                | Factor::Unknown(_) => ExpressionSources::default(),
+                Factor::Unknown(_) => {
+                    if self.function_flows.is_empty() {
+                        self.complete = false;
+                    }
+                    ExpressionSources::default()
+                }
+                Factor::HierVariable(_) | Factor::Value(_) | Factor::Anonymous(_) => {
+                    ExpressionSources::default()
+                }
             },
             Expression::Unary(op, operand, _) => match op {
                 Op::BitNot | Op::Add => self.eval_expr_bits(operand, requested_array, requested),
@@ -1718,10 +1753,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Factor::SystemFunctionCall(call) => {
                 reads.extend(self.eval_system_call(call, &[], true));
             }
-            Factor::HierVariable(_)
-            | Factor::Value(_)
-            | Factor::Anonymous(_)
-            | Factor::Unknown(_) => {}
+            Factor::Unknown(_) => {
+                if self.function_flows.is_empty() {
+                    self.complete = false;
+                }
+            }
+            Factor::HierVariable(_) | Factor::Value(_) | Factor::Anonymous(_) => {}
         }
     }
 
@@ -1942,6 +1979,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         controls: &[VersionId],
         summary: &FunctionSummary,
     ) -> CallResult {
+        self.complete &= summary.complete;
         self.call_caches.push(Some(HashMap::default()));
         for actual in call.inputs.values() {
             self.eval_expr(actual);

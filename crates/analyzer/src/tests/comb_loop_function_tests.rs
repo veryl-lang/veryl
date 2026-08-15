@@ -1568,29 +1568,6 @@ fn comb_loop_alias_and_opaque_effect_boundaries_function_region_crossing_a_conca
 }
 
 #[test]
-fn comb_loop_structural_dependency_semantics_identical_function_branches_retain_structural_condition_dependence()
- {
-    assert_comb_loop(
-        "identical function branches retain structural condition dependence",
-        r#"
-        module Top (
-            o: output logic,
-        ) {
-            function choose (condition: input logic) -> logic {
-                if condition {
-                    return 0;
-                } else {
-                    return 0;
-                }
-            }
-            assign o = choose(o);
-        }
-        "#,
-        true,
-    );
-}
-
-#[test]
 fn comb_loop_function_capture_coverage_obeys_caller_order() {
     // Why this case exists: a function's module-scope write is part of its
     // caller procedure. A dominating default or a later full write supplies

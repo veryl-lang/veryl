@@ -672,22 +672,6 @@ fn comb_loop_alias_and_opaque_effect_boundaries_same_width_bitwise_operators_pre
 }
 
 #[test]
-fn comb_loop_structural_dependency_semantics_identical_ternary_arms_do_not_cancel_structural_control_dependence()
- {
-    assert_comb_loop(
-        "identical ternary arms do not cancel structural control dependence",
-        r#"
-        module Top (
-            o: output logic,
-        ) {
-            assign o = if o ? 1'b0 : 1'b0;
-        }
-        "#,
-        true,
-    );
-}
-
-#[test]
 fn comb_loop_structural_dependency_semantics_overlapping_left_shift_is_a_directed_acyclic_bit_chain()
  {
     assert_comb_loop(

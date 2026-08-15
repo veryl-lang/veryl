@@ -9,6 +9,8 @@ use veryl_parser::doc_comment_table;
 
 mod comb_loop_diagnostic_tests;
 
+mod comb_loop_conservative_tests;
+
 mod comb_loop_incomplete_tests;
 
 mod comb_loop_interface_tests;
@@ -46,6 +48,24 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
+}
+
+#[track_caller]
+fn comb_loop_analysis_is_complete(code: &str) -> bool {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    crate::comb_loop_detect::is_complete(&ir)
 }
 
 #[track_caller]

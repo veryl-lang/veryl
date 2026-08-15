@@ -95,20 +95,33 @@ impl BitDependency {
 #[derive(Clone, Debug, Default)]
 struct ModuleCombSummary {
     feedthrough: HashMap<SummaryRegion, HashMap<SummaryRegion, BitDependency>>,
+    complete: bool,
 }
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
+    check_inner(ir).0
+}
+
+#[cfg(test)]
+pub(crate) fn is_complete(ir: &Ir) -> bool {
+    check_inner(ir).1
+}
+
+fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
     let mut errors = Vec::new();
+    let mut complete = true;
     let mut summaries: HashMap<Signature, ModuleCombSummary> = HashMap::default();
 
     for module in module_postorder(ir) {
-        let (graph, bit_part) = build_module_graph(module, &summaries);
+        let (graph, bit_part, module_complete) = build_module_graph(module, &summaries);
         check_graph(module, &graph, &mut errors);
-        let summary = compute_module_summary(module, &graph, &bit_part);
+        let mut summary = compute_module_summary(module, &graph, &bit_part);
+        summary.complete = module_complete;
         summaries.insert(module.signature.clone(), summary);
+        complete &= module_complete;
     }
 
-    errors
+    (errors, complete)
 }
 
 /// Actual instantiated specializations in children-before-parents order.
@@ -1008,7 +1021,7 @@ fn eval_dst_span(
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
-) -> (Graph<NodeKey, BitDependency>, BitPartition) {
+) -> (Graph<NodeKey, BitDependency>, BitPartition, bool) {
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.variables.extend(module.interface_members.clone());
@@ -1019,18 +1032,27 @@ fn build_module_graph(
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
     let mut function_summaries = procedure::FunctionSummaries::new(module, &bit_part);
     let mut procedure_context = procedure::ProcedureContext::new(module);
+    let mut complete = !module
+        .variables
+        .values()
+        .any(|variable| matches!(variable.kind, crate::ir::VarKind::Inout));
 
     for declaration in &module.declarations {
         let Declaration::Comb(comb) = declaration else {
             continue;
         };
-        for dependency in
-            procedure::analyze(&bit_part, &comb.statements, &mut procedure_context)
-        {
+        let analysis = procedure::analyze(&bit_part, &comb.statements, &mut procedure_context);
+        if !analysis.complete {
+            complete = false;
+            continue;
+        }
+        for dependency in analysis.dependencies {
             let source = dependency.source;
             let destination = dependency.destination;
             if !is_module_scope_var(source.0, &module.variables)
                 || !is_module_scope_var(destination.0, &module.variables)
+                || is_inout(source.0, &module.variables)
+                || is_inout(destination.0, &module.variables)
             {
                 continue;
             }
@@ -1044,10 +1066,11 @@ fn build_module_graph(
         match inst.component.as_ref() {
             Component::Module(child) => {
                 let Some(summary) = summaries.get(&child.signature) else {
+                    complete = false;
                     continue;
                 };
-                add_inst_feedthrough_edges(
-                    module,
+                complete &= summary.complete;
+                complete &= add_inst_feedthrough_edges(
                     inst,
                     child,
                     summary,
@@ -1061,18 +1084,17 @@ fn build_module_graph(
                 );
             }
             // SV black box: under-detect.
-            Component::SystemVerilog(_) => {}
+            Component::SystemVerilog(_) => complete = false,
             // Interface signals are already lifted into the parent.
             Component::Interface(_) => {}
         }
     }
 
-    (graph, bit_part)
+    (graph, bit_part, complete)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn add_inst_feedthrough_edges<'a>(
-    module: &'a Module,
     inst: &InstDeclaration,
     child: &Module,
     summary: &ModuleCombSummary,
@@ -1083,7 +1105,8 @@ fn add_inst_feedthrough_edges<'a>(
     ctx: &mut Context,
     procedure_context: &mut procedure::ProcedureContext,
     function_summaries: &mut procedure::FunctionSummaries<'a>,
-) {
+) -> bool {
+    let mut complete = true;
     let mut input_reads: HashMap<VarId, Vec<NodeKey>> = HashMap::default();
     for inp in &inst.inputs {
         if !is_pure_input_or_output(inp.id, &child.variables, Direction::Input) {
@@ -1091,8 +1114,9 @@ fn add_inst_feedthrough_edges<'a>(
         }
         let mut reads = Vec::new();
         for expr in &inp.exprs {
-            let (sources, dependencies) =
+            let (sources, dependencies, actual_complete) =
                 analyze_instance_actual(bit_part, expr, ctx, procedure_context, function_summaries);
+            complete &= actual_complete;
             reads.extend(sources);
             for dependency in dependencies {
                 let source = ensure_node(graph, node_map, dependency.source);
@@ -1114,7 +1138,29 @@ fn add_inst_feedthrough_edges<'a>(
         }
         let mut keys = Vec::new();
         for dst in &out.dst {
-            collect_dst_node_keys(dst, bit_part, &mut keys, parent_vars, ctx);
+            let mut destination_keys = Vec::new();
+            collect_dst_node_keys(dst, bit_part, &mut destination_keys, parent_vars, ctx);
+            let (selector_reads, dependencies, selector_complete) = analyze_instance_destination(
+                bit_part,
+                dst,
+                ctx,
+                procedure_context,
+                function_summaries,
+            );
+            complete &= selector_complete;
+            for dependency in dependencies {
+                let source = ensure_node(graph, node_map, dependency.source);
+                let destination = ensure_node(graph, node_map, dependency.destination);
+                graph.add_edge(source, destination, dependency.kind);
+            }
+            for source in selector_reads {
+                for destination in &destination_keys {
+                    let source = ensure_node(graph, node_map, source);
+                    let destination = ensure_node(graph, node_map, *destination);
+                    graph.add_edge(source, destination, BitDependency::WHOLE);
+                }
+            }
+            keys.extend(destination_keys);
         }
         keys.sort_unstable();
         keys.dedup();
@@ -1149,7 +1195,6 @@ fn add_inst_feedthrough_edges<'a>(
                     ) {
                         RegionProjection::Exact(source_region) => {
                             let parent_sources = map_instance_source_region(
-                                module,
                                 inst,
                                 child,
                                 source_region,
@@ -1157,6 +1202,7 @@ fn add_inst_feedthrough_edges<'a>(
                                 input_reads.get(&child_source.id).map(Vec::as_slice),
                                 bit_part,
                                 ctx,
+                                procedure_context,
                                 function_summaries,
                             );
                             add_mapped_dependency_edges(
@@ -1178,7 +1224,6 @@ fn add_inst_feedthrough_edges<'a>(
                     continue;
                 }
                 let parent_sources = map_instance_source_region(
-                    module,
                     inst,
                     child,
                     *child_source,
@@ -1186,6 +1231,7 @@ fn add_inst_feedthrough_edges<'a>(
                     input_reads.get(&child_source.id).map(Vec::as_slice),
                     bit_part,
                     ctx,
+                    procedure_context,
                     function_summaries,
                 );
                 add_mapped_dependency_edges(
@@ -1202,7 +1248,6 @@ fn add_inst_feedthrough_edges<'a>(
             }
 
             let parent_sources = map_instance_source_region(
-                module,
                 inst,
                 child,
                 *child_source,
@@ -1210,6 +1255,7 @@ fn add_inst_feedthrough_edges<'a>(
                 input_reads.get(&child_source.id).map(Vec::as_slice),
                 bit_part,
                 ctx,
+                procedure_context,
                 function_summaries,
             );
             add_mapped_dependency_edges(
@@ -1222,11 +1268,11 @@ fn add_inst_feedthrough_edges<'a>(
             );
         }
     }
+    complete
 }
 
 #[allow(clippy::too_many_arguments)]
 fn map_instance_source_region<'a>(
-    module: &'a Module,
     inst: &InstDeclaration,
     child: &Module,
     region: SummaryRegion,
@@ -1234,6 +1280,7 @@ fn map_instance_source_region<'a>(
     allowed: Option<&[NodeKey]>,
     bit_part: &'a BitPartition,
     ctx: &mut Context,
+    procedure_context: &mut procedure::ProcedureContext,
     function_summaries: &mut procedure::FunctionSummaries<'a>,
 ) -> InstanceRegionMapping {
     let parent_sources = instance_region_mapping(
@@ -1267,11 +1314,11 @@ fn map_instance_source_region<'a>(
         return parent_sources;
     };
     let mut mapping = analyze_instance_actual_region(
-        module,
         bit_part,
         expression,
         region,
         width,
+        procedure_context,
         function_summaries,
     );
     mapping
@@ -1660,38 +1707,44 @@ fn analyze_instance_actual<'a>(
     ctx: &mut Context,
     procedure_context: &mut procedure::ProcedureContext,
     summaries: &mut procedure::FunctionSummaries<'a>,
-) -> (Vec<NodeKey>, Vec<procedure::Dependency>) {
-    let mut analysis = InstanceActualAnalysis {
-        bit_part,
-        ctx,
-        procedure_context,
-        summaries: Some(summaries),
-        procedure: None,
-        reads: Vec::new(),
-    };
+) -> (Vec<NodeKey>, Vec<procedure::Dependency>, bool) {
+    let mut analysis = InstanceActualAnalysis::new(bit_part, ctx, procedure_context, summaries);
     analysis.eval(expression);
-    analysis.reads.sort_unstable();
-    analysis.reads.dedup();
-    let dependencies = if let Some(mut procedure) = analysis.procedure.take() {
-        let dependencies = procedure.dependencies();
-        procedure.restore(analysis.procedure_context);
-        dependencies
-    } else {
-        Vec::new()
-    };
-    (analysis.reads, dependencies)
+    analysis.finish()
+}
+
+fn analyze_instance_destination<'a>(
+    bit_part: &'a BitPartition,
+    destination: &AssignDestination,
+    ctx: &mut Context,
+    procedure_context: &mut procedure::ProcedureContext,
+    summaries: &mut procedure::FunctionSummaries<'a>,
+) -> (Vec<NodeKey>, Vec<procedure::Dependency>, bool) {
+    let mut analysis = InstanceActualAnalysis::new(bit_part, ctx, procedure_context, summaries);
+    for expression in destination
+        .index
+        .0
+        .iter()
+        .chain(destination.select.0.iter())
+    {
+        analysis.eval(expression);
+    }
+    if let Some((_, expression)) = &destination.select.1 {
+        analysis.eval(expression);
+    }
+    analysis.finish()
 }
 
 fn analyze_instance_actual_region<'a>(
-    module: &'a Module,
     bit_part: &'a BitPartition,
     expression: &Expression,
     region: SummaryRegion,
     context_width: usize,
+    procedure_context: &mut procedure::ProcedureContext,
     summaries: &mut procedure::FunctionSummaries<'a>,
 ) -> InstanceRegionMapping {
-    let mut analysis = procedure::ExpressionAnalysis::new(module, bit_part, summaries);
-    InstanceRegionMapping {
+    let mut analysis = procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
+    let mapping = InstanceRegionMapping {
         nodes: analysis
             .eval_region(expression, region.array, region.packed, context_width)
             .into_iter()
@@ -1700,7 +1753,9 @@ fn analyze_instance_actual_region<'a>(
                 offset: source.offset,
             })
             .collect(),
-    }
+    };
+    analysis.restore(procedure_context);
+    mapping
 }
 
 struct InstanceActualAnalysis<'a, 's, 'c> {
@@ -1712,7 +1767,40 @@ struct InstanceActualAnalysis<'a, 's, 'c> {
     reads: Vec<NodeKey>,
 }
 
-impl InstanceActualAnalysis<'_, '_, '_> {
+impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
+    fn new(
+        bit_part: &'a BitPartition,
+        ctx: &'c mut Context,
+        procedure_context: &'c mut procedure::ProcedureContext,
+        summaries: &'s mut procedure::FunctionSummaries<'a>,
+    ) -> Self {
+        Self {
+            bit_part,
+            ctx,
+            procedure_context,
+            summaries: Some(summaries),
+            procedure: None,
+            reads: Vec::new(),
+        }
+    }
+
+    fn finish(mut self) -> (Vec<NodeKey>, Vec<procedure::Dependency>, bool) {
+        self.reads.sort_unstable();
+        self.reads.dedup();
+        let complete = self
+            .procedure
+            .as_ref()
+            .is_none_or(|analysis| analysis.is_complete());
+        let dependencies = if let Some(mut analysis) = self.procedure.take() {
+            let dependencies = analysis.dependencies();
+            analysis.restore(self.procedure_context);
+            dependencies
+        } else {
+            Vec::new()
+        };
+        (self.reads, dependencies, complete)
+    }
+
     fn eval(&mut self, expression: &Expression) {
         if let Some(procedure) = &mut self.procedure {
             self.reads.extend(procedure.eval(expression));
@@ -1957,6 +2045,12 @@ fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool 
     }
 }
 
+fn is_inout(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
+    variables
+        .get(&id)
+        .is_some_and(|variable| matches!(variable.kind, crate::ir::VarKind::Inout))
+}
+
 fn compute_module_summary(
     module: &Module,
     graph: &Graph<NodeKey, BitDependency>,
@@ -2047,7 +2141,10 @@ fn compute_module_summary(
                 .or_insert(dependency);
         }
     }
-    ModuleCombSummary { feedthrough }
+    ModuleCombSummary {
+        feedthrough,
+        complete: true,
+    }
 }
 
 fn coalesce_summary_destinations(
