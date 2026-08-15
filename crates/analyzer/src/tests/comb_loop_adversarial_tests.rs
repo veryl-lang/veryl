@@ -499,6 +499,140 @@ fn comb_loop_false_negative_runtime_loop_requires_multiple_iterations() {
 }
 
 #[test]
+fn comb_loop_runtime_loop_propagates_through_an_unsplit_middle_partition() {
+    assert_comb_loop(
+        "a runtime loop propagates through every iteration inside a sparse middle partition",
+        r#"
+        module Top (
+            n: input  logic<3>,
+            o: output logic,
+        ) {
+            var value   : logic [5];
+            var feedback: logic;
+            assign feedback = value[4];
+            always_comb {
+                value = '{default: 0};
+                value[0] = feedback;
+                for index in 0..n {
+                    value[index + 1] = value[index];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_runtime_loop_propagates_between_unsplit_partitions() {
+    assert_comb_loop(
+        "runtime-loop iterations compose dependencies between sparse middle partitions",
+        r#"
+        module Top (
+            n: input  logic<3>,
+            o: output logic,
+        ) {
+            var a       : logic [5];
+            var b       : logic [5];
+            var feedback: logic;
+            assign feedback = a[4];
+            always_comb {
+                a = '{default: 0};
+                b = '{default: 0};
+                a[0] = feedback;
+                for index in 0..n {
+                    a[index + 1] = b[index];
+                    b[index + 1] = a[index];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_runtime_loop_respects_a_dynamic_start_lower_bound() {
+    assert_comb_loop(
+        "runtime-loop splitting cannot execute indices below a dynamic start expression",
+        r#"
+        module Top (
+            n: input  logic<2>,
+            o: output logic,
+        ) {
+            var value   : logic [5];
+            var feedback: logic;
+            assign feedback = value[4];
+            always_comb {
+                value = '{default: 0};
+                value[1] = feedback;
+                for index in (n + 1)..4 {
+                    value[index + 1] = value[index];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn runtime_loop_with_identical_exclusive_bounds_is_empty() {
+    assert_comb_loop(
+        "an exclusive runtime range with identical bounds has no body path",
+        r#"
+        module Top (
+            n: input  logic<2>,
+            o: output logic,
+        ) {
+            var value   : logic [3];
+            var feedback: logic;
+            assign feedback = value[2];
+            always_comb {
+                value = '{default: 0};
+                value[0] = feedback;
+                for index in n..n {
+                    value[index + 1] = value[index];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn runtime_loop_with_two_dynamic_bounds_retains_a_feasible_feedback_path() {
+    assert_comb_loop(
+        "dynamic start and end cuts retain a feasible ordered iteration sequence",
+        r#"
+        module Top (
+            start: input  logic<3>,
+            stop : input  logic<3>,
+            o    : output logic,
+        ) {
+            var value   : logic [5];
+            var feedback: logic;
+            assign feedback = value[4];
+            always_comb {
+                value = '{default: 0};
+                value[1] = feedback;
+                for index in start..stop {
+                    value[index + 1] = value[index];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_runtime_reverse_loop_requires_multiple_iterations() {
     assert_comb_loop(
         "a descending runtime loop carries a dependency from the high element to the low element",
@@ -570,6 +704,148 @@ fn comb_loop_runtime_loop_carries_dependencies_across_body_statements() {
                 for index in 0..n {
                     a[index + 1] = b[index];
                     b[index + 1] = a[index];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_runtime_loop_with_modulo_index_may_wrap_to_its_seed() {
+    assert_comb_loop(
+        "a runtime loop with a modulo index may carry feedback around the array",
+        r#"
+        module Top (
+            n: input  logic<3>,
+            o: output logic,
+        ) {
+            var value   : logic [4];
+            var feedback: logic;
+            assign feedback = value[0];
+            always_comb {
+                value = '{default: 0};
+                value[1] = feedback;
+                for index in 1..n {
+                    value[(index + 1) % 4] = value[index % 4];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_runtime_loop_does_not_sample_modulo_access_at_affine_boundaries_only() {
+    assert_comb_loop(
+        "an unrelated affine access cannot hide intermediate modulo iterations",
+        r#"
+        module Top (
+            n: input  logic<4>,
+            o: output logic,
+        ) {
+            var value   : logic [4];
+            var scratch : logic [8];
+            var feedback: logic;
+            assign feedback = value[0];
+            always_comb {
+                value = '{default: 0};
+                scratch = '{default: 0};
+                value[1] = feedback;
+                for index in 1..n {
+                    value[(index + 1) % 4] = value[index % 4];
+                    scratch[index] = 1'b1;
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_runtime_iterator_and_other_dynamic_index_share_an_lsp() {
+    assert_comb_loop(
+        "the loop iterator and another dynamic index may address the same LSP region",
+        r#"
+        module Top (
+            n: input  logic<2>,
+            j: input  logic<2>,
+            o: output logic,
+        ) {
+            var value   : logic [4];
+            var feedback: logic;
+            assign feedback = value[2];
+            always_comb {
+                value = '{default: 0};
+                value[0] = feedback;
+                for i in 0..n {
+                    value[j] = value[i];
+                }
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_dynamic_non_additive_step_retains_possible_feedback() {
+    // This is not an intentional false positive: for n > 1 the loop executes
+    // and assigns b from a, so the feedback is realizable.
+    let code = r#"
+        module Top (
+            n: input  logic<32>,
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            assign a = b;
+            always_comb {
+                b = 0;
+                for _index in 1..n step *= 2 {
+                    b = a;
+                }
+                o = b;
+            }
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_comb_loop(
+        "a non-additive runtime step retains its realizable body feedback",
+        code,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_runtime_iterator_conditions_retain_reachable_iterations() {
+    assert_comb_loop(
+        "runtime iterator conditions retain a feedback path across iterations",
+        r#"
+        module Top (
+            n: input  logic<3>,
+            o: output logic,
+        ) {
+            var value   : logic [3];
+            var feedback: logic;
+            assign feedback = value[2];
+            always_comb {
+                value = '{default: 0};
+                value[0] = feedback;
+                for index in 0..n {
+                    if index == 0 {
+                        value[1] = value[0];
+                    }
+                    if index == 1 {
+                        value[2] = value[1];
+                    }
                 }
                 o = feedback;
             }

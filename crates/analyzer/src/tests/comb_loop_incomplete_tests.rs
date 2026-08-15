@@ -173,6 +173,43 @@ fn comb_loop_dynamic_for_bound_with_unknown_effect_is_incomplete() {
 }
 
 #[test]
+fn comb_loop_oversized_constant_range_is_incomplete_without_false_feedback() {
+    let evaluate_size_limit = Metadata::create_default("prj")
+        .unwrap()
+        .build
+        .evaluate_size_limit;
+    let code = format!(
+        r#"
+        module Top (
+            o: output logic,
+        ) {{
+            var value   : logic [3];
+            var feedback: logic;
+            assign feedback = value[2];
+            always_comb {{
+                value = '{{default: 0}};
+                value[1] = feedback;
+                for index in 0..{} {{
+                    value[index + 1] = value[index];
+                }}
+                o = feedback;
+            }}
+        }}
+        "#,
+        evaluate_size_limit + 1
+    );
+
+    assert!(!comb_loop_analysis_is_complete(&code));
+    let errors = analyze(&code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "the expansion limit must not create a combinational-loop diagnostic: {errors:#?}"
+    );
+}
+
+#[test]
 fn comb_loop_dynamic_for_incomplete_effect_keeps_an_independent_cycle() {
     let code = r#"
         module Top (

@@ -1125,8 +1125,10 @@ fn build_module_graph(
             declaration_index + 1,
             &mut procedure_context,
         );
-        if !analysis.complete {
+        if !analysis.status.is_complete() {
             complete = false;
+        }
+        if analysis.status.is_barrier() {
             continue;
         }
         for dependency in analysis.dependencies {

@@ -39,8 +39,7 @@ where
 enum Version<K> {
     Entry(K),
     Definition {
-        positional: Vec<(VersionId, PositionRelation)>,
-        whole: Vec<VersionId>,
+        sources: Vec<(VersionId, PositionRelation)>,
         condition: PathCondition,
     },
     Phi(Vec<VersionId>),
@@ -70,7 +69,74 @@ impl BranchId {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct BranchConstraint {
     branch: BranchId,
-    allowed: Vec<usize>,
+    allowed: ArmSet,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct ArmSet {
+    ranges: Vec<(usize, usize)>,
+}
+
+impl ArmSet {
+    fn range(start: usize, end: usize) -> Self {
+        Self {
+            ranges: (start < end).then_some((start, end)).into_iter().collect(),
+        }
+    }
+
+    fn intersection(&self, other: &Self) -> Self {
+        let mut ranges = Vec::new();
+        let mut left = 0;
+        let mut right = 0;
+        while left < self.ranges.len() && right < other.ranges.len() {
+            let a = self.ranges[left];
+            let b = other.ranges[right];
+            let start = a.0.max(b.0);
+            let end = a.1.min(b.1);
+            if start < end {
+                ranges.push((start, end));
+            }
+            if a.1 < b.1 {
+                left += 1;
+            } else {
+                right += 1;
+            }
+        }
+        Self { ranges }
+    }
+
+    fn union(&self, other: &Self) -> Self {
+        let mut ranges = self
+            .ranges
+            .iter()
+            .chain(&other.ranges)
+            .copied()
+            .collect::<Vec<_>>();
+        ranges.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            if let Some(previous) = merged.last_mut()
+                && range.0 <= previous.1
+            {
+                previous.1 = previous.1.max(range.1);
+            } else {
+                merged.push(range);
+            }
+        }
+        Self { ranges: merged }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.ranges.is_empty()
+    }
+
+    fn is_all(&self, arms: usize) -> bool {
+        self.ranges.as_slice() == [(0, arms)]
+    }
+
+    fn is_subset_of(&self, other: &Self) -> bool {
+        self.intersection(other) == *self
+    }
 }
 
 /// A compact Cartesian over-approximation of feasible branch choices.
@@ -86,10 +152,15 @@ pub(super) struct PathCondition {
 
 impl PathCondition {
     pub(super) fn with_choice(&self, branch: BranchId, arm: usize) -> Self {
+        self.with_choice_range(branch, arm, arm.saturating_add(1))
+    }
+
+    pub(super) fn with_choice_range(&self, branch: BranchId, start: usize, end: usize) -> Self {
+        debug_assert!(start < end && end <= branch.arms);
         let mut constraints = self.constraints.as_ref().clone();
         let constraint = BranchConstraint {
             branch,
-            allowed: vec![arm],
+            allowed: ArmSet::range(start, end),
         };
         match constraints.binary_search_by_key(&branch, |constraint| constraint.branch) {
             Ok(index) => constraints[index] = constraint,
@@ -119,12 +190,7 @@ impl PathCondition {
         loop {
             match (left.peek(), right.peek()) {
                 (Some(a), Some(b)) if a.branch == b.branch => {
-                    let allowed = a
-                        .allowed
-                        .iter()
-                        .copied()
-                        .filter(|arm| b.allowed.binary_search(arm).is_ok())
-                        .collect::<Vec<_>>();
+                    let allowed = a.allowed.intersection(&b.allowed);
                     if allowed.is_empty() {
                         return None;
                     }
@@ -168,8 +234,7 @@ impl PathCondition {
                 .is_some_and(|index| {
                     other.constraints[index]
                         .allowed
-                        .iter()
-                        .all(|arm| constraint.allowed.binary_search(arm).is_ok())
+                        .is_subset_of(&constraint.allowed)
                 })
         })
     }
@@ -209,11 +274,8 @@ impl PathCondition {
             else {
                 continue;
             };
-            let mut allowed = constraint.allowed.clone();
-            allowed.extend_from_slice(&other.constraints[index].allowed);
-            allowed.sort_unstable();
-            allowed.dedup();
-            if allowed.len() != constraint.branch.arms {
+            let allowed = constraint.allowed.union(&other.constraints[index].allowed);
+            if !allowed.is_all(constraint.branch.arms) {
                 constraints.push(BranchConstraint {
                     branch: constraint.branch,
                     allowed,
@@ -277,10 +339,30 @@ fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
     left?.checked_add(right?)
 }
 
+fn reachable_versions(
+    direct: &HashSet<VersionId>,
+    successors: &HashMap<VersionId, HashSet<VersionId>>,
+) -> HashSet<VersionId> {
+    let mut reached = direct.clone();
+    let mut queue = VecDeque::from_iter(direct.iter().copied());
+    while let Some(version) = queue.pop_front() {
+        let Some(next) = successors.get(&version) else {
+            continue;
+        };
+        for &next in next {
+            if reached.insert(next) {
+                queue.push_back(next);
+            }
+        }
+    }
+    reached
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Checkpoint {
     undo_start: usize,
     depth: usize,
+    version_start: usize,
 }
 
 pub(super) struct BranchState<K> {
@@ -288,6 +370,7 @@ pub(super) struct BranchState<K> {
 }
 
 impl<K> BranchState<K> {
+    #[cfg(test)]
     pub(super) fn unchanged() -> Self {
         Self {
             bindings: HashMap::default(),
@@ -348,37 +431,34 @@ where
 
     pub(super) fn definition_guarded(
         &mut self,
-        mut sources: Vec<VersionId>,
+        sources: Vec<VersionId>,
         condition: &PathCondition,
     ) -> VersionId {
+        self.related_definition_guarded(
+            sources
+                .into_iter()
+                .map(|source| (source, PositionRelation::whole()))
+                .collect(),
+            condition,
+        )
+    }
+
+    pub(super) fn related_definition(
+        &mut self,
+        sources: Vec<(VersionId, PositionRelation)>,
+    ) -> VersionId {
+        self.related_definition_guarded(sources, &PathCondition::default())
+    }
+
+    pub(super) fn related_definition_guarded(
+        &mut self,
+        sources: Vec<(VersionId, PositionRelation)>,
+        condition: &PathCondition,
+    ) -> VersionId {
+        let mut sources = sources;
         sources.sort_unstable();
-        sources.dedup();
-        let version = self.versions.len();
-        self.versions.push(Version::Definition {
-            positional: Vec::new(),
-            whole: sources,
-            condition: condition.clone(),
-        });
-        version
-    }
-
-    pub(super) fn positional_definition(
-        &mut self,
-        positional: Vec<(VersionId, PositionRelation)>,
-        whole: Vec<VersionId>,
-    ) -> VersionId {
-        self.positional_definition_guarded(positional, whole, &PathCondition::default())
-    }
-
-    pub(super) fn positional_definition_guarded(
-        &mut self,
-        mut positional: Vec<(VersionId, PositionRelation)>,
-        mut whole: Vec<VersionId>,
-        condition: &PathCondition,
-    ) -> VersionId {
-        positional.sort_unstable();
-        let mut merged: Vec<(VersionId, PositionRelation)> = Vec::with_capacity(positional.len());
-        for (source, relation) in positional {
+        let mut merged: Vec<(VersionId, PositionRelation)> = Vec::with_capacity(sources.len());
+        for (source, relation) in sources {
             if let Some((previous_source, previous_relation)) = merged.last_mut()
                 && *previous_source == source
             {
@@ -387,14 +467,9 @@ where
                 merged.push((source, relation));
             }
         }
-        let mut positional = merged;
-        whole.sort_unstable();
-        whole.dedup();
-        positional.retain(|(source, _)| whole.binary_search(source).is_err());
         let version = self.versions.len();
         self.versions.push(Version::Definition {
-            positional,
-            whole,
+            sources: merged,
             condition: condition.clone(),
         });
         version
@@ -417,6 +492,7 @@ where
         let checkpoint = Checkpoint {
             undo_start: self.undo.len(),
             depth: self.checkpoints.len(),
+            version_start: self.versions.len(),
         };
         self.checkpoints.push(checkpoint.undo_start);
         checkpoint
@@ -491,6 +567,91 @@ where
             let version = self.phi(inputs);
             self.bind(key, version);
         }
+    }
+
+    /// Apply the transitive closure of a runtime loop's may-dependency
+    /// transfer without enumerating runtime iterator values or iterations.
+    ///
+    /// `single_iteration` maps each written key to its output after one
+    /// abstract iteration. Versions that predate `iteration_checkpoint` are
+    /// that iteration's inputs, so they form the nodes of a finite transfer
+    /// graph. Its transitive closure models any positive number of iterations;
+    /// `may_skip` additionally retains each key's loop-entry version.
+    pub(super) fn close_repeated_transfer(
+        &mut self,
+        single_iteration: &BranchState<K>,
+        iteration_checkpoint: Checkpoint,
+        may_skip: bool,
+    ) {
+        let mut entry_version_by_key = HashMap::default();
+        for &key in single_iteration.bindings.keys() {
+            entry_version_by_key.insert(key, self.read(key));
+        }
+
+        let mut direct_inputs_by_key = HashMap::default();
+        for (&key, &output) in &single_iteration.bindings {
+            direct_inputs_by_key.insert(
+                key,
+                self.iteration_input_versions(output, iteration_checkpoint.version_start),
+            );
+        }
+
+        let mut next_inputs_by_input: HashMap<VersionId, HashSet<VersionId>> = HashMap::default();
+        for (&key, direct_inputs) in &direct_inputs_by_key {
+            next_inputs_by_input
+                .entry(entry_version_by_key[&key])
+                .or_default()
+                .extend(direct_inputs);
+        }
+
+        for (&key, direct_inputs) in &direct_inputs_by_key {
+            let mut reached = reachable_versions(direct_inputs, &next_inputs_by_input);
+            if may_skip {
+                reached.insert(entry_version_by_key[&key]);
+            }
+            let output = self.related_definition(
+                reached
+                    .into_iter()
+                    .map(|version| (version, PositionRelation::whole()))
+                    .collect(),
+            );
+            self.bind(key, output);
+        }
+    }
+
+    fn iteration_input_versions(
+        &self,
+        version: VersionId,
+        version_start: usize,
+    ) -> HashSet<VersionId> {
+        let mut reached = HashSet::default();
+        let mut visited = HashSet::default();
+        let mut queue = VecDeque::from([version]);
+        visited.insert(version);
+        while let Some(current) = queue.pop_front() {
+            if current < version_start || matches!(self.versions[current], Version::Entry(_)) {
+                reached.insert(current);
+                continue;
+            }
+            match &self.versions[current] {
+                Version::Entry(_) => unreachable!("entries are handled above"),
+                Version::Definition { sources, .. } => {
+                    for (source, _) in sources {
+                        if visited.insert(*source) {
+                            queue.push_back(*source);
+                        }
+                    }
+                }
+                Version::Phi(inputs) => {
+                    for input in inputs {
+                        if visited.insert(*input) {
+                            queue.push_back(*input);
+                        }
+                    }
+                }
+            }
+        }
+        reached
     }
 
     #[cfg(test)]
@@ -604,19 +765,15 @@ where
                     }
                 }
                 Version::Definition {
-                    positional,
-                    whole,
+                    sources,
                     condition: definition_condition,
                 } => {
                     let Some(condition) = condition.union_if_compatible(definition_condition)
                     else {
                         continue;
                     };
-                    for (input, offset) in positional {
+                    for (input, offset) in sources {
                         enqueue((*input, true, relation.compose(*offset)), condition.clone());
-                    }
-                    for input in whole {
-                        enqueue((*input, true, PositionRelation::whole()), condition.clone());
                     }
                 }
                 Version::Phi(inputs) => {
@@ -685,11 +842,10 @@ mod tests {
     }
 
     #[test]
-    fn positional_definition_preserves_source_relation() {
+    fn related_definition_preserves_source_relation() {
         let mut ssa = SsaStore::default();
         let source = ssa.read("source");
-        let destination =
-            ssa.positional_definition(vec![(source, PositionRelation::default())], Vec::new());
+        let destination = ssa.related_definition(vec![(source, PositionRelation::default())]);
 
         assert_eq!(
             ssa.root_source_relations(destination).get("source"),
@@ -701,26 +857,20 @@ mod tests {
     fn positional_offsets_compose_through_definitions() {
         let mut ssa = SsaStore::default();
         let source = ssa.read("source");
-        let first = ssa.positional_definition(
-            vec![(
-                source,
-                PositionRelation {
-                    array: Some(3),
-                    packed: Some(-2),
-                },
-            )],
-            Vec::new(),
-        );
-        let destination = ssa.positional_definition(
-            vec![(
-                first,
-                PositionRelation {
-                    array: Some(-1),
-                    packed: Some(5),
-                },
-            )],
-            Vec::new(),
-        );
+        let first = ssa.related_definition(vec![(
+            source,
+            PositionRelation {
+                array: Some(3),
+                packed: Some(-2),
+            },
+        )]);
+        let destination = ssa.related_definition(vec![(
+            first,
+            PositionRelation {
+                array: Some(-1),
+                packed: Some(5),
+            },
+        )]);
 
         assert_eq!(
             ssa.root_source_relations(destination).get("source"),
@@ -735,19 +885,16 @@ mod tests {
     fn conflicting_offsets_only_widen_the_conflicting_axis() {
         let mut ssa = SsaStore::default();
         let source = ssa.read("source");
-        let destination = ssa.positional_definition(
-            vec![
-                (source, PositionRelation::default()),
-                (
-                    source,
-                    PositionRelation {
-                        array: Some(0),
-                        packed: Some(1),
-                    },
-                ),
-            ],
-            Vec::new(),
-        );
+        let destination = ssa.related_definition(vec![
+            (source, PositionRelation::default()),
+            (
+                source,
+                PositionRelation {
+                    array: Some(0),
+                    packed: Some(1),
+                },
+            ),
+        ]);
 
         assert_eq!(
             ssa.root_source_relations(destination).get("source"),
@@ -762,8 +909,10 @@ mod tests {
     fn whole_dependency_dominates_a_positional_path() {
         let mut ssa = SsaStore::default();
         let source = ssa.read("source");
-        let destination =
-            ssa.positional_definition(vec![(source, PositionRelation::default())], vec![source]);
+        let destination = ssa.related_definition(vec![
+            (source, PositionRelation::default()),
+            (source, PositionRelation::whole()),
+        ]);
 
         assert_eq!(
             ssa.root_source_relations(destination).get("source"),
@@ -879,6 +1028,27 @@ mod tests {
     }
 
     #[test]
+    fn repeated_transfer_closes_dependencies_across_runtime_iterations() {
+        let mut ssa = SsaStore::default();
+        let checkpoint = ssa.checkpoint();
+
+        let previous_middle = ssa.read("middle");
+        let last = ssa.definition(vec![previous_middle]);
+        ssa.weak_bind("last", last);
+
+        let first = ssa.read("first");
+        let middle = ssa.definition(vec![first]);
+        ssa.weak_bind("middle", middle);
+
+        let iteration = ssa.capture_and_rollback(checkpoint);
+        ssa.close_repeated_transfer(&iteration, checkpoint, false);
+
+        let last = ssa.read("last");
+        let sources = ssa.root_sources(last);
+        assert!(sources.contains("first"));
+    }
+
+    #[test]
     fn opposite_arms_of_one_branch_are_incompatible() {
         let branch = BranchId::new(1, 0, 2);
         let true_path = PathCondition::default().with_choice(branch, 0);
@@ -897,6 +1067,16 @@ mod tests {
             .expect("distinct branches can execute on the same path");
         assert!(first.is_subset_of(&combined));
         assert!(second.is_subset_of(&combined));
+    }
+
+    #[test]
+    fn large_contiguous_arm_sets_remain_compact() {
+        let branch = BranchId::new(1, 0, 1_000_001);
+        let lower = PathCondition::default().with_choice_range(branch, 0, 500_000);
+        let upper = PathCondition::default().with_choice_range(branch, 500_000, 1_000_001);
+
+        assert_eq!(lower.disjoin(&upper), PathCondition::default());
+        assert!(lower.union_if_compatible(&upper).is_none());
     }
 
     #[test]
