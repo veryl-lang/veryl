@@ -46,39 +46,47 @@ struct SummaryRegion {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BitDependency {
-    /// Every source bit may affect every bit in the destination region.
-    Whole,
-    /// Position preserving on the sparse storage coordinates:
-    /// `(array, packed) -> (array + C_array, packed + C_packed)`.
-    /// Multidimensional unpacked indices use `Shape::calc_index`'s flat
-    /// coordinate; packed structs use their packed-bit coordinate.
-    Offset { array: i128, packed: i128 },
+struct BitDependency {
+    /// `None` means that every source coordinate on this axis may affect the
+    /// destination region. `Some(C)` preserves `source + C = destination`.
+    array: Option<i128>,
+    packed: Option<i128>,
 }
 
 impl BitDependency {
+    const WHOLE: Self = Self {
+        array: None,
+        packed: None,
+    };
+
+    fn exact_offset(self) -> Option<(i128, i128)> {
+        self.array.zip(self.packed)
+    }
+
+    fn has_position(self) -> bool {
+        self.array.is_some() || self.packed.is_some()
+    }
+
     fn compose(self, next: Self) -> Self {
-        match (self, next) {
-            (
-                Self::Offset {
-                    array: left_array,
-                    packed: left_packed,
-                },
-                Self::Offset {
-                    array: right_array,
-                    packed: right_packed,
-                },
-            ) => left_array
-                .checked_add(right_array)
-                .zip(left_packed.checked_add(right_packed))
-                .map(|(array, packed)| Self::Offset { array, packed })
-                .unwrap_or(Self::Whole),
-            _ => Self::Whole,
+        Self {
+            array: self
+                .array
+                .zip(next.array)
+                .and_then(|(left, right)| left.checked_add(right)),
+            packed: self
+                .packed
+                .zip(next.packed)
+                .and_then(|(left, right)| left.checked_add(right)),
         }
     }
 
     fn union(self, other: Self) -> Self {
-        if self == other { self } else { Self::Whole }
+        Self {
+            array: (self.array == other.array).then_some(self.array).flatten(),
+            packed: (self.packed == other.packed)
+                .then_some(self.packed)
+                .flatten(),
+        }
     }
 }
 
@@ -464,36 +472,55 @@ fn split_array_spans(
 
     let mut ranges = HashMap::default();
     for (id, accesses) in accesses {
-        let mut boundaries = Vec::with_capacity(accesses.len() * 2);
-        for (span, _) in &accesses {
+        let mut events = Vec::with_capacity(accesses.len() * 2);
+        for (span, packed) in accesses {
             if span.length == 0 {
                 continue;
             }
-            boundaries.push(span.start);
-            if let Some(end) = span.end() {
-                boundaries.push(end);
-            }
-        }
-        boundaries.sort_unstable();
-        boundaries.dedup();
-
-        for boundary in boundaries.windows(2) {
-            let split = ArraySpan {
-                start: boundary[0],
-                length: boundary[1] - boundary[0],
-            };
-            let split_spans = accesses
-                .iter()
-                .filter(|(access, _)| access.overlaps(split))
-                .map(|(_, span)| *span)
-                .collect::<Vec<_>>();
-            if split_spans.is_empty() {
+            let Some(end) = span.end() else {
                 continue;
+            };
+            events.push((span.start, true, packed));
+            events.push((end, false, packed));
+        }
+        events.sort_unstable_by_key(|(position, starts, packed)| {
+            (*position, *starts, packed.start, packed.length)
+        });
+
+        let mut active: HashMap<PackedSpan, usize> = HashMap::default();
+        let mut previous = events.first().map(|event| event.0);
+        let mut cursor = 0;
+        while cursor < events.len() {
+            let position = events[cursor].0;
+            if let Some(previous) = previous
+                && previous < position
+                && !active.is_empty()
+            {
+                let split = ArraySpan {
+                    start: previous,
+                    length: position - previous,
+                };
+                let split_spans = active.keys().copied().collect::<Vec<_>>();
+                let parts = atomic_ranges(&split_spans, endpoints.get(&id));
+                if !parts.is_empty() {
+                    ranges.insert((id, split), parts);
+                }
             }
-            let parts = atomic_ranges(&split_spans, endpoints.get(&id));
-            if !parts.is_empty() {
-                ranges.insert((id, split), parts);
+            while cursor < events.len() && events[cursor].0 == position {
+                let (_, starts, packed) = events[cursor];
+                if starts {
+                    *active.entry(packed).or_default() += 1;
+                } else if let std::collections::hash_map::Entry::Occupied(mut entry) =
+                    active.entry(packed)
+                {
+                    *entry.get_mut() -= 1;
+                    if *entry.get() == 0 {
+                        entry.remove();
+                    }
+                }
+                cursor += 1;
             }
+            previous = Some(position);
         }
     }
     ranges
@@ -529,7 +556,21 @@ fn collect_expr_spans(
                 collect_expr_spans(e, out, ctx);
             }
         }
-        Expression::ArrayLiteral(_, _) => {}
+        Expression::ArrayLiteral(items, _) => {
+            for item in items {
+                match item {
+                    crate::ir::ArrayLiteralItem::Value(value, repeat) => {
+                        collect_expr_spans(value, out, ctx);
+                        if let Some(repeat) = repeat {
+                            collect_expr_spans(repeat, out, ctx);
+                        }
+                    }
+                    crate::ir::ArrayLiteralItem::Defaul(value) => {
+                        collect_expr_spans(value, out, ctx);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1116,42 +1157,6 @@ fn add_inst_feedthrough_edges<'a>(
 
     for (child_source, destination_set) in &summary.feedthrough {
         for (child_destination, dependency) in destination_set {
-            let parent_sources = instance_region_mapping(
-                inst,
-                child,
-                *child_source,
-                *dependency,
-                Direction::Input,
-                input_reads.get(&child_source.id).map(Vec::as_slice),
-                bit_part,
-                ctx,
-            );
-            let parent_sources = if matches!(dependency, BitDependency::Offset { .. })
-                && parent_sources
-                    .nodes
-                    .iter()
-                    .all(|source| source.offset.is_none())
-                && let Some(input) = inst.inputs.iter().find(|input| input.id == child_source.id)
-                && let Some(expression) = input.single()
-                && let Some(variable) = child.variables.get(&child_source.id)
-                && let Some(width) = variable.total_width()
-            {
-                let mut mapping = analyze_instance_actual_region(
-                    module,
-                    bit_part,
-                    expression,
-                    *child_source,
-                    width,
-                    function_summaries,
-                );
-                let allowed = input_reads.get(&child_source.id).map(Vec::as_slice);
-                mapping.nodes.retain(|source| {
-                    allowed.is_some_and(|allowed| allowed.binary_search(&source.key).is_ok())
-                });
-                mapping
-            } else {
-                parent_sources
-            };
             let parent_destinations = instance_region_mapping(
                 inst,
                 child,
@@ -1161,6 +1166,83 @@ fn add_inst_feedthrough_edges<'a>(
                 output_dsts.get(&child_destination.id).map(Vec::as_slice),
                 bit_part,
                 ctx,
+            );
+
+            if let Some((array, packed)) = dependency.exact_offset() {
+                let mut fallback_destinations = Vec::new();
+                for destination in parent_destinations.nodes {
+                    match child_source_region_for_destination(
+                        *child_source,
+                        *child_destination,
+                        array,
+                        packed,
+                        destination,
+                        bit_part,
+                    ) {
+                        RegionProjection::Exact(source_region) => {
+                            let parent_sources = map_instance_source_region(
+                                module,
+                                inst,
+                                child,
+                                source_region,
+                                *dependency,
+                                input_reads.get(&child_source.id).map(Vec::as_slice),
+                                bit_part,
+                                ctx,
+                                function_summaries,
+                            );
+                            add_mapped_dependency_edges(
+                                graph,
+                                node_map,
+                                bit_part,
+                                &parent_sources,
+                                &InstanceRegionMapping {
+                                    nodes: vec![destination],
+                                },
+                                *dependency,
+                            );
+                        }
+                        RegionProjection::Disjoint => {}
+                        RegionProjection::Unknown => fallback_destinations.push(destination),
+                    }
+                }
+                if fallback_destinations.is_empty() {
+                    continue;
+                }
+                let parent_sources = map_instance_source_region(
+                    module,
+                    inst,
+                    child,
+                    *child_source,
+                    *dependency,
+                    input_reads.get(&child_source.id).map(Vec::as_slice),
+                    bit_part,
+                    ctx,
+                    function_summaries,
+                );
+                add_mapped_dependency_edges(
+                    graph,
+                    node_map,
+                    bit_part,
+                    &parent_sources,
+                    &InstanceRegionMapping {
+                        nodes: fallback_destinations,
+                    },
+                    *dependency,
+                );
+                continue;
+            }
+
+            let parent_sources = map_instance_source_region(
+                module,
+                inst,
+                child,
+                *child_source,
+                *dependency,
+                input_reads.get(&child_source.id).map(Vec::as_slice),
+                bit_part,
+                ctx,
+                function_summaries,
             );
             add_mapped_dependency_edges(
                 graph,
@@ -1174,6 +1256,62 @@ fn add_inst_feedthrough_edges<'a>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn map_instance_source_region<'a>(
+    module: &'a Module,
+    inst: &InstDeclaration,
+    child: &Module,
+    region: SummaryRegion,
+    dependency: BitDependency,
+    allowed: Option<&[NodeKey]>,
+    bit_part: &'a BitPartition,
+    ctx: &mut Context,
+    function_summaries: &mut procedure::FunctionSummaries<'a>,
+) -> InstanceRegionMapping {
+    let parent_sources = instance_region_mapping(
+        inst,
+        child,
+        region,
+        dependency,
+        Direction::Input,
+        allowed,
+        bit_part,
+        ctx,
+    );
+    if !dependency.has_position()
+        || parent_sources
+            .nodes
+            .iter()
+            .any(|source| source.offset.is_some())
+    {
+        return parent_sources;
+    }
+    let Some(input) = inst.inputs.iter().find(|input| input.id == region.id) else {
+        return parent_sources;
+    };
+    let Some(expression) = input.single() else {
+        return parent_sources;
+    };
+    let Some(variable) = child.variables.get(&region.id) else {
+        return parent_sources;
+    };
+    let Some(width) = variable.total_width() else {
+        return parent_sources;
+    };
+    let mut mapping = analyze_instance_actual_region(
+        module,
+        bit_part,
+        expression,
+        region,
+        width,
+        function_summaries,
+    );
+    mapping
+        .nodes
+        .retain(|source| allowed.is_some_and(|allowed| allowed.binary_search(&source.key).is_ok()));
+    mapping
+}
+
 struct InstanceRegionMapping {
     nodes: Vec<MappedNode>,
 }
@@ -1182,6 +1320,101 @@ struct InstanceRegionMapping {
 struct MappedNode {
     key: NodeKey,
     offset: Option<(i128, i128)>,
+}
+
+enum RegionProjection {
+    Exact(SummaryRegion),
+    Disjoint,
+    Unknown,
+}
+
+fn child_source_region_for_destination(
+    child_source: SummaryRegion,
+    child_destination: SummaryRegion,
+    dependency_array: i128,
+    dependency_packed: i128,
+    destination: MappedNode,
+    bit_part: &BitPartition,
+) -> RegionProjection {
+    let Some((destination_array_offset, destination_packed_offset)) = destination.offset else {
+        return RegionProjection::Unknown;
+    };
+    let Some(parent_packed) = bit_part
+        .ranges_of((destination.key.0, destination.key.1))
+        .get(destination.key.2)
+        .copied()
+    else {
+        return RegionProjection::Unknown;
+    };
+    let Some(destination_array_offset) = destination_array_offset.checked_neg() else {
+        return RegionProjection::Unknown;
+    };
+    let Some(destination_packed_offset) = destination_packed_offset.checked_neg() else {
+        return RegionProjection::Unknown;
+    };
+    let Some(child_destination_array) =
+        translate_array_span(destination.key.1, destination_array_offset)
+    else {
+        return RegionProjection::Unknown;
+    };
+    let Some(child_destination_packed) =
+        translate_packed_span(parent_packed, destination_packed_offset)
+    else {
+        return RegionProjection::Unknown;
+    };
+    let Some(child_destination_array) =
+        child_destination_array.intersection(child_destination.array)
+    else {
+        return RegionProjection::Disjoint;
+    };
+    let Some(child_destination_packed) =
+        child_destination_packed.intersection(child_destination.packed)
+    else {
+        return RegionProjection::Disjoint;
+    };
+    let Some(dependency_array) = dependency_array.checked_neg() else {
+        return RegionProjection::Unknown;
+    };
+    let Some(dependency_packed) = dependency_packed.checked_neg() else {
+        return RegionProjection::Unknown;
+    };
+    let Some(child_source_array) = translate_array_span(child_destination_array, dependency_array)
+    else {
+        return RegionProjection::Unknown;
+    };
+    let Some(child_source_packed) =
+        translate_packed_span(child_destination_packed, dependency_packed)
+    else {
+        return RegionProjection::Unknown;
+    };
+    let Some(array) = child_source_array.intersection(child_source.array) else {
+        return RegionProjection::Disjoint;
+    };
+    let Some(packed) = child_source_packed.intersection(child_source.packed) else {
+        return RegionProjection::Disjoint;
+    };
+    RegionProjection::Exact(SummaryRegion {
+        id: child_source.id,
+        array,
+        packed,
+    })
+}
+
+fn translate_array_span(span: ArraySpan, offset: i128) -> Option<ArraySpan> {
+    let start = translate_position(span.start, offset)?;
+    (span.length != 0 && start.checked_add(span.length).is_some()).then_some(ArraySpan {
+        start,
+        length: span.length,
+    })
+}
+
+fn translate_packed_span(span: PackedSpan, offset: i128) -> Option<PackedSpan> {
+    PackedSpan::new(translate_position(span.start, offset)?, span.length)
+}
+
+fn translate_position(position: usize, offset: i128) -> Option<usize> {
+    let position = i128::try_from(position).ok()?;
+    usize::try_from(position.checked_add(offset)?).ok()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1200,7 +1433,7 @@ fn instance_region_mapping(
         .get(&region.id)
         .or_else(|| child.interface_members.get(&region.id));
     if let Some(variable) = variable
-        && (direction == Direction::Input || matches!(dependency, BitDependency::Offset { .. }))
+        && (direction == Direction::Input || dependency.has_position())
         && let Some((parent, index, select)) =
             instance_port_region_actual(inst, region.id, direction)
     {
@@ -1341,45 +1574,29 @@ fn add_mapped_dependency_edges(
 ) {
     for source in &sources.nodes {
         for destination in &destinations.nodes {
-            let mapped_offset = match (dependency, source.offset, destination.offset) {
-                (
-                    BitDependency::Offset { array, packed },
-                    Some((source_array, source_packed)),
-                    Some((destination_array, destination_packed)),
-                ) => array
-                    .checked_add(destination_array)
-                    .and_then(|array| array.checked_sub(source_array))
-                    .zip(
+            let kind = if let (
+                Some((source_array, source_packed)),
+                Some((destination_array, destination_packed)),
+            ) = (source.offset, destination.offset)
+            {
+                BitDependency {
+                    array: dependency.array.and_then(|array| {
+                        array
+                            .checked_add(destination_array)?
+                            .checked_sub(source_array)
+                    }),
+                    packed: dependency.packed.and_then(|packed| {
                         packed
-                            .checked_add(destination_packed)
-                            .and_then(|packed| packed.checked_sub(source_packed)),
-                    ),
-                _ => None,
-            };
-            let kind = if let Some((array, packed)) = mapped_offset {
-                if !node_regions_overlap_with_offset(
-                    source.key,
-                    destination.key,
-                    array,
-                    packed,
-                    bit_part,
-                ) {
-                    continue;
-                }
-                if node_regions_match_with_offset(
-                    source.key,
-                    destination.key,
-                    array,
-                    packed,
-                    bit_part,
-                ) {
-                    BitDependency::Offset { array, packed }
-                } else {
-                    BitDependency::Whole
+                            .checked_add(destination_packed)?
+                            .checked_sub(source_packed)
+                    }),
                 }
             } else {
-                BitDependency::Whole
+                BitDependency::WHOLE
             };
+            if !node_regions_overlap_with_dependency(source.key, destination.key, kind, bit_part) {
+                continue;
+            }
             let source = ensure_node(graph, node_map, source.key);
             let destination = ensure_node(graph, node_map, destination.key);
             graph.add_edge(source, destination, kind);
@@ -1387,11 +1604,10 @@ fn add_mapped_dependency_edges(
     }
 }
 
-fn node_regions_overlap_with_offset(
+fn node_regions_overlap_with_dependency(
     source: NodeKey,
     destination: NodeKey,
-    array: i128,
-    packed: i128,
+    dependency: BitDependency,
     bit_part: &BitPartition,
 ) -> bool {
     let Some(source_packed) = bit_part.ranges_of((source.0, source.1)).get(source.2) else {
@@ -1403,41 +1619,23 @@ fn node_regions_overlap_with_offset(
     else {
         return false;
     };
-    spans_overlap_with_offset(
-        source.1.start,
-        source.1.length,
-        destination.1.start,
-        destination.1.length,
-        array,
-    ) && spans_overlap_with_offset(
-        source_packed.start,
-        source_packed.length,
-        destination_packed.start,
-        destination_packed.length,
-        packed,
-    )
-}
-
-fn node_regions_match_with_offset(
-    source: NodeKey,
-    destination: NodeKey,
-    array: i128,
-    packed: i128,
-    bit_part: &BitPartition,
-) -> bool {
-    let Some(source_packed) = bit_part.ranges_of((source.0, source.1)).get(source.2) else {
-        return false;
-    };
-    let Some(destination_packed) = bit_part
-        .ranges_of((destination.0, destination.1))
-        .get(destination.2)
-    else {
-        return false;
-    };
-    source.1.length == destination.1.length
-        && source_packed.length == destination_packed.length
-        && signed_difference(destination.1.start, source.1.start) == Some(array)
-        && signed_difference(destination_packed.start, source_packed.start) == Some(packed)
+    dependency.array.is_none_or(|array| {
+        spans_overlap_with_offset(
+            source.1.start,
+            source.1.length,
+            destination.1.start,
+            destination.1.length,
+            array,
+        )
+    }) && dependency.packed.is_none_or(|packed| {
+        spans_overlap_with_offset(
+            source_packed.start,
+            source_packed.length,
+            destination_packed.start,
+            destination_packed.length,
+            packed,
+        )
+    })
 }
 
 fn spans_overlap_with_offset(
@@ -1723,13 +1921,13 @@ fn has_self_edge(graph: &Graph<NodeKey, BitDependency>, node: NodeIndex) -> bool
         .edges(node)
         .filter(|edge| edge.source() == node && edge.target() == node)
     {
-        match edge.weight() {
-            BitDependency::Whole => return true,
-            BitDependency::Offset {
-                array: 0,
-                packed: 0,
-            } => return true,
-            BitDependency::Offset { array, packed } => offsets.push((*array, *packed)),
+        if let Some((array, packed)) = edge.weight().exact_offset() {
+            if array == 0 && packed == 0 {
+                return true;
+            }
+            offsets.push((array, packed));
+        } else {
+            return true;
         }
     }
     if offsets.len() <= 1 {
@@ -1833,6 +2031,7 @@ fn compute_module_summary(
         let Some(source) = summary_region(key, bit_part) else {
             continue;
         };
+        let mut destinations = Vec::new();
         reached.clear();
         queue.clear();
         for edge in graph.edges(ni) {
@@ -1848,12 +2047,7 @@ fn compute_module_summary(
             if destination_ids.contains(&nk.0)
                 && let Some(destination) = summary_region(nk, bit_part)
             {
-                feedthrough
-                    .entry(source)
-                    .or_default()
-                    .entry(destination)
-                    .and_modify(|existing| *existing = existing.union(dependency))
-                    .or_insert(dependency);
+                destinations.push((destination, dependency));
             }
             for e in graph.edges(n) {
                 let next = dependency.compose(*e.weight());
@@ -1877,8 +2071,45 @@ fn compute_module_summary(
                 }
             }
         }
+        let destination_set = feedthrough.entry(source).or_default();
+        for (destination, dependency) in coalesce_summary_destinations(destinations) {
+            destination_set
+                .entry(destination)
+                .and_modify(|existing| *existing = existing.union(dependency))
+                .or_insert(dependency);
+        }
     }
     ModuleCombSummary { feedthrough }
+}
+
+fn coalesce_summary_destinations(
+    mut destinations: Vec<(SummaryRegion, BitDependency)>,
+) -> Vec<(SummaryRegion, BitDependency)> {
+    destinations.sort_unstable_by_key(|(destination, _)| *destination);
+    let mut merged: Vec<(SummaryRegion, BitDependency)> = Vec::with_capacity(destinations.len());
+    for (destination, dependency) in destinations {
+        let Some((previous, previous_dependency)) = merged.last_mut() else {
+            merged.push((destination, dependency));
+            continue;
+        };
+        if *previous == destination {
+            *previous_dependency = previous_dependency.union(dependency);
+            continue;
+        }
+        let adjacent = previous.id == destination.id
+            && previous.packed == destination.packed
+            && previous_dependency.packed == dependency.packed
+            && previous.array.end() == Some(destination.array.start);
+        if adjacent
+            && let Some(length) = previous.array.length.checked_add(destination.array.length)
+        {
+            previous.array.length = length;
+            *previous_dependency = previous_dependency.union(dependency);
+        } else {
+            merged.push((destination, dependency));
+        }
+    }
+    merged
 }
 
 fn summary_region(key: NodeKey, bit_part: &BitPartition) -> Option<SummaryRegion> {

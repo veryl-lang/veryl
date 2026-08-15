@@ -630,13 +630,11 @@ fn comb_loop_shifted_dynamic_index_overlaps_element_zero() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; shifted dynamic index can select element two"]
 fn comb_loop_shifted_dynamic_index_overlaps_element_two() {
     assert_structural_dynamic_selector_element(2);
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; dynamic part-select can overlap bit three"]
 fn comb_loop_dynamic_part_select_overlaps_bit_three() {
     assert_structural_dynamic_part_select_bit(3);
 }
@@ -647,13 +645,11 @@ fn comb_loop_dynamic_part_select_overlaps_bit_zero() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; multiplied dynamic index can select element one"]
 fn comb_loop_multiplied_dynamic_index_overlaps_element_one() {
     assert_multiplied_dynamic_index_overlap(1);
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; multiplied dynamic index can select element two"]
 fn comb_loop_multiplied_dynamic_index_overlaps_element_two() {
     assert_multiplied_dynamic_index_overlap(2);
 }

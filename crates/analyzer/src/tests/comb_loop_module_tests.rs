@@ -18,17 +18,6 @@ macro_rules! comb_loop_case {
     };
 }
 
-macro_rules! comb_loop_case_ignored {
-    ($name:ident, $reason:literal, $case:literal, $code:expr, $expected:expr) => {
-        #[test]
-        #[ignore = $reason]
-        fn $name() {
-            let code = $code;
-            assert_comb_loop($case, code.as_ref(), $expected);
-        }
-    };
-}
-
 fn whole_unpacked_instance_code(output_index: usize) -> String {
     format!(
         r#"
@@ -129,9 +118,8 @@ fn periodic_repeat_two_level_code(bit: usize) -> String {
     )
 }
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_instance_repeat_retains_matching_phase_at_scale,
-    "comb-loop migration: false negative; module feedthrough and instance mapping",
     "instance repeat retains matching phase feedback",
     periodic_repeat_code(true, 200_000, 123_456, 0),
     true
@@ -144,9 +132,8 @@ comb_loop_case!(
     false
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_periodic_phase_survives_two_module_summaries,
-    "comb-loop migration: false negative; module feedthrough and instance mapping",
     "a periodic phase survives two module summaries",
     periodic_repeat_two_level_code(0),
     true
@@ -603,7 +590,6 @@ fn comb_loop_preserves_instance_shift_positions_an_instance_actual_left_shift_de
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_preserves_instance_repeat_positions_an_instance_repeat_actual_keeps_an_unrelated_operand_loop_free()
  {
     assert_comb_loop(
