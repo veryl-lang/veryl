@@ -628,6 +628,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         keys
     }
 
+    fn destination_is_dynamic(&self, destination: &AssignDestination) -> bool {
+        let index = self.receiver_index(destination.id, &destination.index);
+        !index.is_const() || !destination.select.is_const_with_range()
+    }
+
+    fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
+        if dynamic {
+            let key = self.ssa_key(key);
+            self.ssa.weak_bind(key, version);
+        } else {
+            self.bind_key(key, version);
+        }
+        self.written.insert(key);
+    }
+
     fn receiver_index(&self, id: VarId, index: &VarIndex) -> VarIndex {
         if !self.ctx.variables.get(&id).is_some_and(|variable| {
             matches!(
@@ -670,10 +685,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             dependencies.extend(self.eval_expr(expression));
         }
         let keys = self.write_keys(destination);
+        let dynamic = self.destination_is_dynamic(destination);
         let version = self.ssa.definition(dependencies);
         for key in keys {
-            self.bind_key(key, version);
-            self.written.insert(key);
+            self.bind_destination(key, version, dynamic);
         }
     }
 
@@ -720,6 +735,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 })
             });
         let keys = self.write_keys(destination);
+        let dynamic = self.destination_is_dynamic(destination);
         for key in keys {
             let mut whole = controls.to_vec();
             for selector in destination
@@ -760,8 +776,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
             }
             let version = self.ssa.positional_definition(positional, sources.whole);
-            self.bind_key(key, version);
-            self.written.insert(key);
+            self.bind_destination(key, version, dynamic);
         }
     }
 
@@ -2110,6 +2125,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     packed: Some(signed_difference(low, formal_offset)?),
                 })
             });
+        let dynamic = self.destination_is_dynamic(destination);
         for key in self.write_keys(destination) {
             let mut positional = Vec::new();
             let mut whole = controls.to_vec();
@@ -2142,8 +2158,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 whole.extend(formal_versions.iter().map(|(_, version)| *version));
             }
             let version = self.ssa.positional_definition(positional, whole);
-            self.bind_key(key, version);
-            self.written.insert(key);
+            self.bind_destination(key, version, dynamic);
         }
     }
 

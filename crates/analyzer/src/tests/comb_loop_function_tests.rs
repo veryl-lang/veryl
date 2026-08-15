@@ -124,7 +124,6 @@ fn comb_loop_core_semantics_and_region_regressions_function_call_caller_side_fee
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; unused function actual is not a return dependency"]
 fn comb_loop_statement_order_and_observer_semantics_function_summaries_come_from_the_specialized_body_merely_evaluating_an()
  {
     // Function summaries come from the specialized body. Merely evaluating an

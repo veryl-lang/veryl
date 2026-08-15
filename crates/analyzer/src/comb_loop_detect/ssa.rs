@@ -175,6 +175,12 @@ where
         }
     }
 
+    pub(super) fn weak_bind(&mut self, key: K, version: VersionId) {
+        let previous = self.read(key);
+        let version = self.phi(vec![previous, version]);
+        self.bind(key, version);
+    }
+
     pub(super) fn checkpoint(&mut self) -> Checkpoint {
         let checkpoint = Checkpoint {
             undo_start: self.undo.len(),
@@ -443,6 +449,20 @@ mod tests {
         let merged = ssa.read("destination");
         assert_ne!(merged, retained);
         assert!(ssa.root_sources(merged).is_empty());
+    }
+
+    #[test]
+    fn weak_bind_retains_entry_until_a_later_explicit_read() {
+        let mut ssa = SsaStore::<u8>::default();
+        let replacement = ssa.definition(Vec::new());
+        ssa.weak_bind(0, replacement);
+
+        let retained = ssa.read(0);
+        assert!(ssa.root_sources(retained).is_empty());
+
+        let observed = ssa.definition(vec![retained]);
+        let expected: HashSet<_> = [0].into_iter().collect();
+        assert_eq!(ssa.root_sources(observed), expected);
     }
 
     #[test]
