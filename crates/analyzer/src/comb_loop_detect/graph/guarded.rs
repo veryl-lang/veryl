@@ -43,6 +43,9 @@ use std::collections::VecDeque;
 pub(super) struct GuardedCycle {
     pub(super) relation: PositionRelationSet,
     pub(super) condition: PathCondition,
+    /// This first-return cycle is exactly the anchor's explicitly tagged
+    /// regular-transfer self-edge, not merely a relation with the same shape.
+    pub(super) carrier: bool,
 }
 
 pub(super) fn guarded_cycle_displacements_cancel(cycles: &HashSet<GuardedCycle>) -> bool {
@@ -54,6 +57,7 @@ pub(super) fn guarded_cycle_displacements_cancel(cycles: &HashSet<GuardedCycle>)
                 dependency,
                 condition: cycle.condition.clone(),
                 feasible,
+                carrier: cycle.carrier,
             })
         })
         .collect::<Vec<_>>();
@@ -146,6 +150,7 @@ struct GuardedTranslation {
     dependency: BitDependency,
     condition: PathCondition,
     feasible: Vec<FeasiblePosition>,
+    carrier: bool,
 }
 
 fn guarded_translations_cancel(cycles: &[GuardedTranslation]) -> bool {
@@ -156,6 +161,12 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation]) -> bool {
         // declared width.
         if guarded_opposing_pair_closes(&cycles) || guarded_three_cycle_closes(&cycles) {
             return true;
+        }
+        if let Some(closes) = tagged_carrier_with_singleton_resets_closes(&cycles) {
+            if closes {
+                return true;
+            }
+            continue;
         }
         // The remaining irregular cases retain the exact cumulative
         // translation. A state is reusable only when its branch condition and
@@ -200,6 +211,141 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation]) -> bool {
         }
     }
     false
+}
+
+/// Exactly decides the finite-repeat shape with one explicitly tagged
+/// carrier and singleton resets. Every word containing a reset can be rotated
+/// to start at one. Between consecutive resets, the only available
+/// non-singleton relation is `carrier^k`; the reset endpoints therefore fix
+/// `k` by sign and divisibility. An edge in the finite reset graph exists iff
+/// that exact segment is feasible. A directed cycle is consequently
+/// equivalent to a concrete zero-displacement word. A carrier-only word
+/// cannot close because its axis displacement is required to be non-zero.
+fn tagged_carrier_with_singleton_resets_closes(cycles: &[&GuardedTranslation]) -> Option<bool> {
+    if cycles
+        .iter()
+        .any(|cycle| !cycle.condition.is_unconditional())
+    {
+        return None;
+    }
+    let carriers = cycles
+        .iter()
+        .enumerate()
+        .filter(|(_, cycle)| cycle.carrier)
+        .collect::<Vec<_>>();
+    let [(carrier_index, carrier)] = carriers.as_slice() else {
+        return None;
+    };
+    if carrier.feasible.len() != 1 {
+        return None;
+    }
+    let carrier_offset = carrier.dependency.exact_offset()?;
+    let packed_axis = carrier_offset.0 == 0 && carrier_offset.1 != 0;
+    let array_axis = carrier_offset.1 == 0 && carrier_offset.0 != 0;
+    if !packed_axis && !array_axis {
+        return None;
+    }
+    let active_offset = |offset: (isize, isize)| {
+        if packed_axis { offset.1 } else { offset.0 }
+    };
+    let active_range = |position: FeasiblePosition| {
+        if packed_axis {
+            position.packed
+        } else {
+            position.array
+        }
+    };
+    let inactive_range = |position: FeasiblePosition| {
+        if packed_axis {
+            position.array
+        } else {
+            position.packed
+        }
+    };
+    let carrier_position = carrier.feasible[0];
+    let carrier_active = active_range(carrier_position)?;
+    let carrier_inactive = inactive_range(carrier_position);
+    if carrier_active.0 >= carrier_active.1 {
+        return None;
+    }
+
+    let resets = cycles
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| index != carrier_index)
+        .collect::<Vec<_>>();
+    if resets.is_empty() {
+        return Some(false);
+    }
+    let mut reset_starts = Vec::with_capacity(resets.len());
+    let mut reset_offsets = Vec::with_capacity(resets.len());
+    for (_, reset) in &resets {
+        if reset.carrier || reset.feasible.len() != 1 {
+            return None;
+        }
+        let offset = reset.dependency.exact_offset()?;
+        if (packed_axis && offset.0 != 0) || (array_axis && offset.1 != 0) {
+            return None;
+        }
+        let position = reset.feasible[0];
+        if inactive_range(position) != carrier_inactive {
+            return None;
+        }
+        let (start, end) = active_range(position)?;
+        if end != start.checked_add(1)? {
+            return None;
+        }
+        reset_starts.push(start);
+        reset_offsets.push(active_offset(offset));
+    }
+
+    let carrier_step = active_offset(carrier_offset);
+    let mut transitions = Graph::<(), ()>::new();
+    let nodes = (0..resets.len())
+        .map(|_| transitions.add_node(()))
+        .collect::<Vec<_>>();
+    for (left_index, (_, left)) in resets.iter().enumerate() {
+        let endpoint = reset_starts[left_index].checked_add(reset_offsets[left_index])?;
+        for (right_index, (_, right)) in resets.iter().enumerate() {
+            let Some(distance) = reset_starts[right_index].checked_sub(endpoint) else {
+                continue;
+            };
+            let carrier_count = if distance == 0 {
+                0
+            } else {
+                let Some(count) = distance.checked_div(carrier_step) else {
+                    continue;
+                };
+                if distance % carrier_step != 0 || count <= 0 {
+                    continue;
+                }
+                let Some(count) = usize::try_from(count).ok() else {
+                    continue;
+                };
+                count
+            };
+            let segment = if carrier_count == 0 {
+                (left.dependency, left.feasible.clone())
+            } else {
+                let Some(carrier_walk) = repeat_guarded_cycle(carrier, carrier_count) else {
+                    continue;
+                };
+                let Some(segment) =
+                    compose_guarded_walk(&(left.dependency, left.feasible.clone()), &carrier_walk)
+                else {
+                    continue;
+                };
+                segment
+            };
+            if compose_feasible_positions(&segment.1, segment.0.exact_offset()?, &right.feasible)
+                .is_empty()
+            {
+                continue;
+            }
+            transitions.add_edge(nodes[left_index], nodes[right_index], ());
+        }
+    }
+    Some(daggy::petgraph::algo::is_cyclic_directed(&transitions))
 }
 
 /// A closed word induces a directed cycle between the first-return relations
@@ -621,4 +767,215 @@ fn dot_product(left: (isize, isize), right: (isize, isize)) -> Option<isize> {
     left.0
         .checked_mul(right.0)?
         .checked_add(left.1.checked_mul(right.1)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn axis_translation(
+        packed_axis: bool,
+        start: isize,
+        length: isize,
+        offset: isize,
+        inactive: Option<(isize, isize)>,
+        carrier: bool,
+    ) -> GuardedTranslation {
+        let (array, packed) = if packed_axis {
+            (Some(0), Some(offset))
+        } else {
+            (Some(offset), Some(0))
+        };
+        let active = Some((start, start + length));
+        GuardedTranslation {
+            dependency: BitDependency { array, packed },
+            condition: PathCondition::default(),
+            feasible: vec![if packed_axis {
+                FeasiblePosition {
+                    array: inactive,
+                    packed: active,
+                }
+            } else {
+                FeasiblePosition {
+                    array: active,
+                    packed: inactive,
+                }
+            }],
+            carrier,
+        }
+    }
+
+    fn bounded_expansion_closes(cycles: &[GuardedTranslation], packed_axis: bool) -> bool {
+        let mut graph = Graph::<(usize, isize), ()>::new();
+        let mut nodes = HashMap::default();
+        let mut get_node = |cycle: usize, position: isize, graph: &mut Graph<_, _>| {
+            *nodes
+                .entry((cycle, position))
+                .or_insert_with(|| graph.add_node((cycle, position)))
+        };
+        for (left_index, left) in cycles.iter().enumerate() {
+            let left_offset = left.dependency.exact_offset().unwrap();
+            let left_offset = if packed_axis {
+                left_offset.1
+            } else {
+                left_offset.0
+            };
+            let left_range = if packed_axis {
+                left.feasible[0].packed
+            } else {
+                left.feasible[0].array
+            }
+            .unwrap();
+            for source in left_range.0..left_range.1 {
+                let endpoint = source + left_offset;
+                for (right_index, right) in cycles.iter().enumerate() {
+                    let right_range = if packed_axis {
+                        right.feasible[0].packed
+                    } else {
+                        right.feasible[0].array
+                    }
+                    .unwrap();
+                    if !(right_range.0..right_range.1).contains(&endpoint) {
+                        continue;
+                    }
+                    let left_node = get_node(left_index, source, &mut graph);
+                    let right_node = get_node(right_index, endpoint, &mut graph);
+                    graph.add_edge(left_node, right_node, ());
+                }
+            }
+        }
+        daggy::petgraph::algo::is_cyclic_directed(&graph)
+    }
+
+    #[test]
+    fn tagged_carrier_accelerator_matches_bounded_expansion() {
+        for packed_axis in [false, true] {
+            for carrier_start in -2..=1 {
+                for carrier_length in 2..=5 {
+                    for carrier_offset in [-2, -1, 1, 2] {
+                        for first_start in -3..=4 {
+                            for first_offset in -3..=3 {
+                                for second_start in -3..=4 {
+                                    for second_offset in -3..=3 {
+                                        let cycles = vec![
+                                            axis_translation(
+                                                packed_axis,
+                                                carrier_start,
+                                                carrier_length,
+                                                carrier_offset,
+                                                Some((-1, 2)),
+                                                true,
+                                            ),
+                                            axis_translation(
+                                                packed_axis,
+                                                first_start,
+                                                1,
+                                                first_offset,
+                                                Some((-1, 2)),
+                                                false,
+                                            ),
+                                            axis_translation(
+                                                packed_axis,
+                                                second_start,
+                                                1,
+                                                second_offset,
+                                                Some((-1, 2)),
+                                                false,
+                                            ),
+                                        ];
+                                        let references = cycles.iter().collect::<Vec<_>>();
+                                        assert_eq!(
+                                            tagged_carrier_with_singleton_resets_closes(
+                                                &references
+                                            ),
+                                            Some(bounded_expansion_closes(&cycles, packed_axis)),
+                                            "axis={packed_axis}, carrier=({carrier_start}, {carrier_length}, {carrier_offset}), resets=({first_start}, {first_offset}), ({second_start}, {second_offset})"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tagged_carrier_accelerator_matches_three_bounded_resets() {
+        let mut state = 0x9e37_79b9_u32;
+        let mut random = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            state
+        };
+        for packed_axis in [false, true] {
+            for case in 0..50_000 {
+                let carrier_start = random() as isize % 5 - 2;
+                let carrier_length = 2 + random() as isize % 4;
+                let carrier_offset = [-2, -1, 1, 2][random() as usize % 4];
+                let mut cycles = vec![axis_translation(
+                    packed_axis,
+                    carrier_start,
+                    carrier_length,
+                    carrier_offset,
+                    Some((-1, 2)),
+                    true,
+                )];
+                for _ in 0..3 {
+                    cycles.push(axis_translation(
+                        packed_axis,
+                        random() as isize % 8 - 3,
+                        1,
+                        random() as isize % 7 - 3,
+                        Some((-1, 2)),
+                        false,
+                    ));
+                }
+                let references = cycles.iter().collect::<Vec<_>>();
+                assert_eq!(
+                    tagged_carrier_with_singleton_resets_closes(&references),
+                    Some(bounded_expansion_closes(&cycles, packed_axis)),
+                    "case={case}, axis={packed_axis}, cycles={cycles:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tagged_carrier_accelerator_rejects_inferred_or_incompatible_shapes() {
+        let carrier = axis_translation(true, 0, 8, 1, Some((0, 2)), true);
+        let mut cycles = [
+            carrier.clone(),
+            axis_translation(true, 0, 1, 1, Some((0, 2)), false),
+        ];
+
+        cycles[0].carrier = false;
+        assert_eq!(
+            tagged_carrier_with_singleton_resets_closes(&cycles.iter().collect::<Vec<_>>()),
+            None
+        );
+        cycles[0] = carrier.clone();
+        cycles[1].carrier = true;
+        assert_eq!(
+            tagged_carrier_with_singleton_resets_closes(&cycles.iter().collect::<Vec<_>>()),
+            None
+        );
+        cycles[1] = axis_translation(true, 0, 1, 1, Some((1, 3)), false);
+        assert_eq!(
+            tagged_carrier_with_singleton_resets_closes(&cycles.iter().collect::<Vec<_>>()),
+            None
+        );
+        cycles[1] = axis_translation(true, 0, 2, 1, Some((0, 2)), false);
+        assert_eq!(
+            tagged_carrier_with_singleton_resets_closes(&cycles.iter().collect::<Vec<_>>()),
+            None
+        );
+        cycles[1] = axis_translation(true, 0, 1, 1, Some((0, 2)), false);
+        cycles[1].condition = PathCondition::default()
+            .with_choice(crate::comb_loop_detect::ssa::BranchId::new(1, 0, 2), 0);
+        assert_eq!(
+            tagged_carrier_with_singleton_resets_closes(&cycles.iter().collect::<Vec<_>>()),
+            None
+        );
+    }
 }

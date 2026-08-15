@@ -83,6 +83,7 @@ pub(super) fn compute_module_summary(
             region: graph[node].region,
             domains: graph[node].domains.clone(),
             kind: node_kind(module, &graph[node]),
+            regular_transfer: graph[node].regular_transfer,
         })
         .collect();
     let mut edges = Vec::new();
@@ -95,11 +96,11 @@ pub(super) fn compute_module_summary(
                 &mut reached,
                 &mut queued,
                 &mut queue,
-                (edge.target(), edge.weight().kind),
+                (edge.target(), edge.weight().kind, edge.weight().carrier),
                 edge.weight().condition.clone(),
             );
         }
-        while let Some(state @ (node, dependency)) = queue.pop_front() {
+        while let Some(state @ (node, dependency, carrier)) = queue.pop_front() {
             queued.remove(&state);
             let condition = reached[&state].clone();
             if let Some(&destination) = indices.get(&node) {
@@ -108,6 +109,7 @@ pub(super) fn compute_module_summary(
                     destination,
                     kind: dependency,
                     condition,
+                    carrier,
                 });
                 continue;
             }
@@ -120,7 +122,11 @@ pub(super) fn compute_module_summary(
                     &mut reached,
                     &mut queued,
                     &mut queue,
-                    (edge.target(), dependency.compose(edge.weight().kind)),
+                    (
+                        edge.target(),
+                        dependency.compose(edge.weight().kind),
+                        carrier && edge.weight().carrier,
+                    ),
                     condition,
                 );
             }
@@ -132,6 +138,7 @@ pub(super) fn compute_module_summary(
             edge.destination,
             edge.kind,
             edge.condition.clone(),
+            edge.carrier,
         )
     });
     edges.dedup_by(|left, right| {
@@ -139,6 +146,7 @@ pub(super) fn compute_module_summary(
             && left.destination == right.destination
             && left.kind == right.kind
             && left.condition == right.condition
+            && left.carrier == right.carrier
     });
 
     ModuleCombSummary {
@@ -149,10 +157,13 @@ pub(super) fn compute_module_summary(
 }
 
 fn enqueue_if_changed(
-    reached: &mut HashMap<(NodeIndex, super::model::BitDependency), super::ssa::PathCondition>,
-    queued: &mut HashSet<(NodeIndex, super::model::BitDependency)>,
-    queue: &mut VecDeque<(NodeIndex, super::model::BitDependency)>,
-    state: (NodeIndex, super::model::BitDependency),
+    reached: &mut HashMap<
+        (NodeIndex, super::model::BitDependency, bool),
+        super::ssa::PathCondition,
+    >,
+    queued: &mut HashSet<(NodeIndex, super::model::BitDependency, bool)>,
+    queue: &mut VecDeque<(NodeIndex, super::model::BitDependency, bool)>,
+    state: (NodeIndex, super::model::BitDependency, bool),
     condition: super::ssa::PathCondition,
 ) {
     let changed = if let Some(existing) = reached.get_mut(&state) {

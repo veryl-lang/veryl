@@ -72,6 +72,10 @@ pub(super) struct SummaryNode {
     pub(super) region: SummaryRegion,
     pub(super) domains: Vec<PositionDomain>,
     pub(super) kind: SummaryNodeKind,
+    /// Preserves compact finite-repeat nodes across hierarchy boundaries.
+    /// Only explicitly tagged nodes may use regular-transfer graph
+    /// accelerators after a child summary is imported.
+    pub(super) regular_transfer: bool,
 }
 
 /// Finite dependency graph across a module boundary. Retaining graph structure
@@ -90,4 +94,5 @@ pub(super) struct SummaryDependency {
     pub(super) destination: usize,
     pub(super) kind: BitDependency,
     pub(super) condition: PathCondition,
+    pub(super) carrier: bool,
 }

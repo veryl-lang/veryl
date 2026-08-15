@@ -153,6 +153,61 @@ impl PositionRelationSet {
         self.pieces.is_empty()
     }
 
+    /// Whether zero or more repetitions of one axis-aligned translation can
+    /// reach a source position accepted by `dependency` and `destination`.
+    ///
+    /// This projects away the anchor coordinate, so a `false` result proves
+    /// that no continuation can leave the translating node through that edge.
+    /// For integer intervals, all differences `destination - current` form an
+    /// interval; checking whether it contains a non-negative multiple of the
+    /// stride is therefore exact and independent of the interval width.
+    pub(super) fn may_take_after_repeating_translation(
+        &self,
+        translation: (isize, isize),
+        translation_domains: &[PositionDomain],
+        dependency: BitDependency,
+        destination_domains: &[PositionDomain],
+    ) -> bool {
+        let advances_array = translation.0 != 0 && translation.1 == 0;
+        let advances_packed = translation.0 == 0 && translation.1 != 0;
+        if !advances_array && !advances_packed {
+            return true;
+        }
+
+        let translation_domains = axis_domains(translation_domains);
+        let destination_domains = axis_domains(destination_domains);
+        for piece in &self.pieces {
+            let current_array = current_range(piece.array);
+            let current_packed = current_range(piece.packed);
+            for &(translation_array, translation_packed) in &translation_domains {
+                for &(destination_array, destination_packed) in &destination_domains {
+                    let Some(target_array) = dependency_source_range(
+                        translation_array,
+                        dependency.array,
+                        destination_array,
+                    ) else {
+                        continue;
+                    };
+                    let Some(target_packed) = dependency_source_range(
+                        translation_packed,
+                        dependency.packed,
+                        destination_packed,
+                    ) else {
+                        continue;
+                    };
+                    if repeated_axis_reaches(current_array, target_array, translation.0)
+                        .unwrap_or(true)
+                        && repeated_axis_reaches(current_packed, target_packed, translation.1)
+                            .unwrap_or(true)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     pub(super) fn piecewise_covers(&self, other: &Self) -> bool {
         other.pieces.iter().all(|inner| {
             self.pieces
@@ -298,6 +353,82 @@ impl PositionRelationSet {
         }
         Self { pieces: retained }
     }
+}
+
+fn axis_domains(domains: &[PositionDomain]) -> Vec<(AxisRange, AxisRange)> {
+    if domains.is_empty() {
+        return vec![(None, None)];
+    }
+    domains
+        .iter()
+        .filter_map(|domain| {
+            Some((
+                finite_range(domain.array_start, domain.array_length)?,
+                finite_range(domain.packed_start, domain.packed_length)?,
+            ))
+        })
+        .collect()
+}
+
+fn current_range(relation: AxisRelation) -> AxisRange {
+    match relation {
+        AxisRelation::Linked { offset, start } => translate_range(start, offset),
+        AxisRelation::Unlinked { current, .. } => current,
+    }
+}
+
+fn dependency_source_range(
+    translation_domain: AxisRange,
+    dependency: Option<isize>,
+    destination_domain: AxisRange,
+) -> Option<AxisRange> {
+    let accepted = if let Some(offset) = dependency {
+        let Some(offset) = offset.checked_neg() else {
+            return Some(None);
+        };
+        translate_range(destination_domain, offset)
+    } else {
+        None
+    };
+    intersect_range(translation_domain, accepted)
+}
+
+fn repeated_axis_reaches(current: AxisRange, target: AxisRange, step: isize) -> Option<bool> {
+    if step == 0 {
+        return Some(intersect_range(current, target).is_some());
+    }
+    let (Some((current_start, current_end)), Some((target_start, target_end))) = (current, target)
+    else {
+        return Some(true);
+    };
+    let current_last = current_end.checked_sub(1)?;
+    let target_last = target_end.checked_sub(1)?;
+    let difference_start = target_start.checked_sub(current_last)?;
+    let difference_end = target_last.checked_sub(current_start)?;
+    if step > 0 {
+        interval_contains_nonnegative_multiple(difference_start, difference_end, step)
+    } else {
+        interval_contains_nonnegative_multiple(
+            difference_end.checked_neg()?,
+            difference_start.checked_neg()?,
+            step.checked_neg()?,
+        )
+    }
+}
+
+fn interval_contains_nonnegative_multiple(start: isize, end: isize, step: isize) -> Option<bool> {
+    debug_assert!(step > 0);
+    let start = start.max(0);
+    if start > end {
+        return Some(false);
+    }
+    let quotient = start.div_euclid(step);
+    let quotient = if start.rem_euclid(step) == 0 {
+        quotient
+    } else {
+        quotient.checked_add(1)?
+    };
+    Some(quotient.checked_mul(step)? <= end)
 }
 
 fn linked_repetition_count(

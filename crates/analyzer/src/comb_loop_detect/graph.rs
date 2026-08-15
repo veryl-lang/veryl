@@ -25,12 +25,19 @@ use std::ops::{Deref, DerefMut};
 pub(super) struct GraphDependency {
     pub(super) kind: BitDependency,
     pub(super) condition: PathCondition,
+    /// This is the self-edge emitted by an explicitly tagged finite-repeat
+    /// node. It is preserved separately from the relation's structural shape.
+    pub(super) carrier: bool,
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct GraphNode {
     pub(super) region: SummaryRegion,
     pub(super) domains: Vec<PositionDomain>,
+    /// Only nodes created by compact finite-repeat lowering carry this tag.
+    /// Graph optimizations for regular-transfer self-loops must not be inferred
+    /// from the shape of arbitrary dependency nodes.
+    pub(super) regular_transfer: bool,
     /// Present only for a region belonging to the module currently being
     /// diagnosed. Instance-summary internals deliberately have no synthetic
     /// `VarId` and therefore cannot collide with real variables.
@@ -42,6 +49,7 @@ impl GraphDependency {
         Self {
             kind,
             condition: PathCondition::default(),
+            carrier: false,
         }
     }
 }
@@ -86,6 +94,9 @@ pub(super) fn add_dependency_edge(
             .edge_weight_mut(existing)
             .expect("an edge found in the graph must remain present");
         weight.condition = weight.condition.disjoin(&dependency.condition);
+        // Carrier provenance is valid only if every dependency coalesced into
+        // this structural edge is the same explicitly tagged carrier.
+        weight.carrier &= dependency.carrier;
     } else {
         let edge = graph.add_edge(source, destination, dependency);
         graph.edges.insert(key, edge);
@@ -131,6 +142,7 @@ pub(super) fn ensure_node(
             packed_start: packed.start,
             packed_length: packed.length,
         }],
+        regular_transfer: false,
         diagnostic: Some(key),
     });
     node_map.insert(key, node);
@@ -276,9 +288,32 @@ fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool {
 // that covers it as above. Conversely, compatible recorded relations whose
 // composition intersects identity concatenate to a real closed walk. The
 // guarded-composition argument in `guarded` proves that it finds exactly such
-// sequences. Trying every node as anchor therefore proves that this function
-// returns true exactly when the SCC contains a branch-compatible closed walk
-// that returns to the same array and packed position.
+// sequences. After an anchor has been checked, later searches remove it. This
+// loses no witness: a closed walk discarded by removing an anchor visits that
+// anchor, so rotating the walk to it gives a witness already covered by the
+// completed first-return search. Conversely, an induced subgraph introduces
+// no walk. Choosing bounded non-zero translation self-loops first makes a
+// regular repeat an immediate first-return relation instead of walking once
+// per repeated position from a later anchor.
+//
+// Before that search, each coordinate may be reweighted by a node potential:
+// `w'(u,v) = s*w(u,v) + h(u) - h(v)`. Bellman-Ford constructs `h` with every
+// `w' >= 0` when the corresponding difference constraints are feasible. The
+// potential terms telescope on a closed walk, so an identity walk can then use
+// only edges whose reduced displacement is zero in both coordinates. An
+// acyclic zero-edge subgraph therefore proves that no identity walk exists.
+// Trying both signs independently for both coordinates covers every orthant.
+//
+// Aligned axis translations at an anchor and an internal node commute across
+// an unconditional identity edge when their single rectangular domains are
+// equal. After `anchor_step / gcd(anchor_step, internal_step)` internal steps,
+// the displacement is an integer number of anchor steps. Moving those steps
+// before the identity edge preserves every intermediate domain check, so only
+// that finite set of internal residues must be searched. Separately, if the
+// current-position projection can never reach any non-self exit after further
+// strides, every return path is impossible because it must eventually take
+// such an exit. Both reductions remove only paths with an equivalent retained
+// word or with no concrete continuation.
 //
 // Termination assumes the builder invariant asserted by
 // `unconstrained_subgraph_is_acyclic` in debug builds. An empty-domain-only
@@ -296,24 +331,55 @@ fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool {
 // offset operation is a construction invariant required to be representable
 // in `isize`; overflow is not interpreted as a dependency relation.
 fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct CanonicalInternalRepeat {
+        node: NodeIndex,
+        repetitions: usize,
+        period: usize,
+    }
+
     let nodes: HashSet<_> = scc.iter().copied().collect();
     if has_zero_dependency_cycle(graph, scc, &nodes) {
         return true;
     }
-    // Returning to the anchor ends the first-return search, so choosing a
-    // broad domain first keeps that domain out of the internal search state.
-    // This is important for sparse graphs with a wide repeated shift and a
-    // narrow wrap region; correctness does not depend on the order.
+    // If node potentials put every exact displacement in one closed orthant,
+    // a zero-sum walk can contain only reduced-zero edges. An acyclic
+    // reduced-zero subgraph therefore lets us avoid walking a wide regular
+    // transfer merely to rediscover that its displacement cannot cancel.
+    if dependency_offsets_fit_acyclic_orthant(graph, &nodes) {
+        return false;
+    }
+    // Returning to the anchor ends the first-return search. Regular transfer
+    // nodes take precedence over even unconstrained internal nodes; domain
+    // area is the secondary heuristic.
     let mut starts = scc.to_vec();
-    starts.sort_unstable_by_key(|&node| std::cmp::Reverse(domain_area(&graph[node])));
+    starts.sort_unstable_by_key(|&node| {
+        std::cmp::Reverse((
+            has_bounded_nonzero_translation_self_loop(graph, node),
+            has_commuting_translation_successor(graph, node),
+            domain_area(&graph[node]),
+        ))
+    });
+    let mut remaining = nodes;
     for start in starts {
-        let returnable = nodes_that_may_reach_start(graph, &nodes, start);
+        let returnable = nodes_that_may_reach_start(graph, &remaining, start);
         let initial = PositionRelationSet::identity(&graph[start].domains);
         let mut cycles = HashSet::default();
-        let mut stack = vec![(start, PathCondition::default(), initial)];
-        let mut reached: HashMap<NodeIndex, Vec<(PositionRelationSet, PathCondition)>> =
-            HashMap::default();
-        while let Some((node, condition, relation)) = stack.pop() {
+        let mut stack: Vec<(
+            NodeIndex,
+            PathCondition,
+            PositionRelationSet,
+            Option<CanonicalInternalRepeat>,
+        )> = vec![(start, PathCondition::default(), initial, None)];
+        let mut reached: HashMap<
+            NodeIndex,
+            Vec<(
+                PositionRelationSet,
+                PathCondition,
+                Option<CanonicalInternalRepeat>,
+            )>,
+        > = HashMap::default();
+        while let Some((node, condition, relation, canonical_repeat)) = stack.pop() {
             for edge in graph.edges(node) {
                 let next = edge.target();
                 if !returnable.contains(&next) {
@@ -332,6 +398,57 @@ fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
                 if next_relation.is_empty() {
                     continue;
                 }
+                // Two aligned regular transfers commute. Once the internal
+                // stride has advanced by the anchor stride's least common
+                // multiple, the same positional walk is obtained by taking
+                // anchor self-loops before the identity bridge. Keep only the
+                // finite residue classes; guarded cycle composition retains
+                // the moved anchor repetitions and their domain feasibility.
+                let next_canonical_repeat = if let Some(mut repeat) = canonical_repeat {
+                    if node == repeat.node && next == node {
+                        repeat.repetitions += 1;
+                        if repeat.repetitions == repeat.period {
+                            continue;
+                        }
+                        Some(repeat)
+                    } else {
+                        None
+                    }
+                } else if node == start
+                    && next != start
+                    && edge.weight().condition.is_unconditional()
+                {
+                    commuting_translation_period(graph, start, next, edge.weight().kind).map(
+                        |period| CanonicalInternalRepeat {
+                            node: next,
+                            repetitions: 0,
+                            period,
+                        },
+                    )
+                } else {
+                    None
+                };
+                let is_carrier = node == start
+                    && graph[start].regular_transfer
+                    && edge.weight().carrier
+                    && edge.weight().condition.is_unconditional();
+                // A non-anchor regular transfer must eventually leave through
+                // a non-self edge. If interval/congruence arithmetic proves
+                // that no number of further strides can make any such edge
+                // feasible, do not enumerate the rest of its finite domain.
+                // The test ignores branch guards, so it is an over-approximate
+                // reachability check and can only suppress impossible paths.
+                if next == node
+                    && next != start
+                    && !translation_self_loop_can_eventually_leave(
+                        graph,
+                        node,
+                        &returnable,
+                        &next_relation,
+                    )
+                {
+                    continue;
+                }
                 if next == start {
                     if next_relation.intersects_identity() {
                         return true;
@@ -339,32 +456,285 @@ fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
                     cycles.insert(GuardedCycle {
                         relation: next_relation,
                         condition: next_condition,
+                        carrier: is_carrier,
                     });
                     continue;
                 }
+                debug_assert!(!is_carrier, "a carrier edge must be an anchor self-edge");
                 let states = reached.entry(next).or_default();
                 if states
                     .iter()
-                    .any(|(existing_relation, existing_condition)| {
-                        existing_relation.piecewise_covers(&next_relation)
+                    .any(|(existing_relation, existing_condition, existing_repeat)| {
+                        *existing_repeat == next_canonical_repeat
+                            && existing_relation.piecewise_covers(&next_relation)
                             && existing_condition.covers(&next_condition)
                     })
                 {
                     continue;
                 }
-                states.retain(|(existing_relation, existing_condition)| {
-                    !next_relation.piecewise_covers(existing_relation)
+                states.retain(|(existing_relation, existing_condition, existing_repeat)| {
+                    *existing_repeat != next_canonical_repeat
+                        || !next_relation.piecewise_covers(existing_relation)
                         || !next_condition.covers(existing_condition)
                 });
-                states.push((next_relation.clone(), next_condition.clone()));
-                stack.push((next, next_condition, next_relation));
+                states.push((
+                    next_relation.clone(),
+                    next_condition.clone(),
+                    next_canonical_repeat,
+                ));
+                stack.push((next, next_condition, next_relation, next_canonical_repeat));
             }
         }
         if guarded_cycle_displacements_cancel(&cycles) {
             return true;
         }
+        remaining.remove(&start);
     }
     false
+}
+
+fn has_commuting_translation_successor(graph: &DependencyGraph, anchor: NodeIndex) -> bool {
+    if !graph[anchor].regular_transfer {
+        return false;
+    }
+    graph.edges(anchor).any(|edge| {
+        edge.target() != anchor
+            && graph[edge.target()].regular_transfer
+            && edge.weight().condition.is_unconditional()
+            && commuting_translation_period(graph, anchor, edge.target(), edge.weight().kind)
+                .is_some()
+    })
+}
+
+fn commuting_translation_period(
+    graph: &DependencyGraph,
+    anchor: NodeIndex,
+    internal: NodeIndex,
+    bridge: BitDependency,
+) -> Option<usize> {
+    if !graph[anchor].regular_transfer || !graph[internal].regular_transfer {
+        return None;
+    }
+    let [anchor_domain] = graph[anchor].domains.as_slice() else {
+        return None;
+    };
+    let [internal_domain] = graph[internal].domains.as_slice() else {
+        return None;
+    };
+    let (array_bridge, packed_bridge) = bridge.exact_offset()?;
+    if anchor_domain.array_length != internal_domain.array_length
+        || anchor_domain.packed_length != internal_domain.packed_length
+        || anchor_domain.array_start.checked_add_signed(array_bridge)
+            != Some(internal_domain.array_start)
+        || anchor_domain.packed_start.checked_add_signed(packed_bridge)
+            != Some(internal_domain.packed_start)
+    {
+        return None;
+    }
+    let anchor_step = sole_unconditional_translation_self_loop(graph, anchor)?;
+    let internal_step = sole_unconditional_translation_self_loop(graph, internal)?;
+    let (anchor_step, internal_step) = match (anchor_step, internal_step) {
+        ((0, anchor), (0, internal)) if anchor.signum() == internal.signum() => (anchor, internal),
+        ((anchor, 0), (internal, 0)) if anchor.signum() == internal.signum() => (anchor, internal),
+        _ => return None,
+    };
+    let period = anchor_step
+        .unsigned_abs()
+        .checked_div(greatest_common_divisor(
+            anchor_step.unsigned_abs(),
+            internal_step.unsigned_abs(),
+        ))?;
+    Some(period)
+}
+
+fn sole_unconditional_translation_self_loop(
+    graph: &DependencyGraph,
+    node: NodeIndex,
+) -> Option<(isize, isize)> {
+    let mut self_edges = graph.edges(node).filter(|edge| edge.target() == node);
+    let edge = self_edges.next()?;
+    if self_edges.next().is_some()
+        || !edge.weight().carrier
+        || !edge.weight().condition.is_unconditional()
+    {
+        return None;
+    }
+    let offset = edge.weight().kind.exact_offset()?;
+    ((offset.0 != 0 && offset.1 == 0) || (offset.0 == 0 && offset.1 != 0)).then_some(offset)
+}
+
+fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
+    while right != 0 {
+        (left, right) = (right, left % right);
+    }
+    left
+}
+
+fn translation_self_loop_can_eventually_leave(
+    graph: &DependencyGraph,
+    node: NodeIndex,
+    returnable: &HashSet<NodeIndex>,
+    relation: &PositionRelationSet,
+) -> bool {
+    if !graph[node].regular_transfer {
+        return true;
+    }
+    let self_edges = graph
+        .edges(node)
+        .filter(|edge| edge.target() == node)
+        .collect::<Vec<_>>();
+    let [self_edge] = self_edges.as_slice() else {
+        return true;
+    };
+    if !self_edge.weight().carrier || !self_edge.weight().condition.is_unconditional() {
+        return true;
+    }
+    let Some(translation) = self_edge.weight().kind.exact_offset() else {
+        return true;
+    };
+    let axis_aligned =
+        (translation.0 != 0 && translation.1 == 0) || (translation.0 == 0 && translation.1 != 0);
+    if !axis_aligned {
+        return true;
+    }
+
+    graph.edges(node).any(|edge| {
+        let destination = edge.target();
+        destination != node
+            && returnable.contains(&destination)
+            && relation.may_take_after_repeating_translation(
+                translation,
+                &graph[node].domains,
+                edge.weight().kind,
+                &graph[destination].domains,
+            )
+    })
+}
+
+fn dependency_offsets_fit_acyclic_orthant(
+    graph: &DependencyGraph,
+    nodes: &HashSet<NodeIndex>,
+) -> bool {
+    let mut edges = Vec::new();
+    for &node in nodes {
+        for edge in graph.edges(node) {
+            if !nodes.contains(&edge.target()) {
+                continue;
+            }
+            let Some((array, packed)) = edge.weight().kind.exact_offset() else {
+                return false;
+            };
+            edges.push((node, edge.target(), (array, packed)));
+        }
+    }
+
+    let array = orthant_potentials(nodes, &edges, |offset| offset.0);
+    let packed = orthant_potentials(nodes, &edges, |offset| offset.1);
+    for (array_sign, array_potential) in &array {
+        for (packed_sign, packed_potential) in &packed {
+            let mut zero = Graph::<(), ()>::new();
+            let mapped = nodes
+                .iter()
+                .map(|&node| (node, zero.add_node(())))
+                .collect::<HashMap<_, _>>();
+            let mut representable = true;
+            for &(source, destination, offset) in &edges {
+                let Some(array) = reduced_offset(
+                    offset.0,
+                    *array_sign,
+                    array_potential[&source],
+                    array_potential[&destination],
+                ) else {
+                    representable = false;
+                    break;
+                };
+                let Some(packed) = reduced_offset(
+                    offset.1,
+                    *packed_sign,
+                    packed_potential[&source],
+                    packed_potential[&destination],
+                ) else {
+                    representable = false;
+                    break;
+                };
+                debug_assert!(array >= 0 && packed >= 0);
+                if array == 0 && packed == 0 {
+                    zero.add_edge(mapped[&source], mapped[&destination], ());
+                }
+            }
+            if representable && !daggy::petgraph::algo::is_cyclic_directed(&zero) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn orthant_potentials(
+    nodes: &HashSet<NodeIndex>,
+    edges: &[(NodeIndex, NodeIndex, (isize, isize))],
+    axis: impl Fn((isize, isize)) -> isize,
+) -> Vec<(isize, HashMap<NodeIndex, isize>)> {
+    [1, -1]
+        .into_iter()
+        .filter_map(|sign| {
+            let mut potential = nodes
+                .iter()
+                .map(|&node| (node, 0isize))
+                .collect::<HashMap<_, _>>();
+            for iteration in 0..nodes.len() {
+                let mut changed = false;
+                for &(source, destination, offset) in edges {
+                    let weight = signed_offset(axis(offset), sign)?;
+                    let candidate = potential[&source].checked_add(weight)?;
+                    if candidate < potential[&destination] {
+                        if iteration + 1 == nodes.len() {
+                            return None;
+                        }
+                        potential.insert(destination, candidate);
+                        changed = true;
+                    }
+                }
+                if !changed {
+                    return Some((sign, potential));
+                }
+            }
+            Some((sign, potential))
+        })
+        .collect()
+}
+
+fn reduced_offset(
+    offset: isize,
+    sign: isize,
+    source_potential: isize,
+    destination_potential: isize,
+) -> Option<isize> {
+    signed_offset(offset, sign)?
+        .checked_add(source_potential)?
+        .checked_sub(destination_potential)
+}
+
+fn signed_offset(offset: isize, sign: isize) -> Option<isize> {
+    if sign > 0 {
+        Some(offset)
+    } else {
+        offset.checked_neg()
+    }
+}
+
+fn has_bounded_nonzero_translation_self_loop(graph: &DependencyGraph, node: NodeIndex) -> bool {
+    graph[node].regular_transfer
+        && !graph[node].domains.is_empty()
+        && graph.edges(node).any(|edge| {
+            edge.target() == node
+                && edge.weight().carrier
+                && edge
+                    .weight()
+                    .kind
+                    .exact_offset()
+                    .is_some_and(|offset| offset != (0, 0))
+        })
 }
 
 fn nodes_that_may_reach_start(
@@ -617,6 +987,7 @@ mod tests {
                 packed_start: region.start,
                 packed_length: region.length,
             }],
+            regular_transfer: false,
             diagnostic: Some((id, region, 0)),
         }
     }
@@ -639,6 +1010,7 @@ mod tests {
                 GraphDependency {
                     kind: BitDependency::WHOLE,
                     condition: PathCondition::default().with_choice(branch, arm),
+                    carrier: false,
                 },
             );
         }
@@ -692,6 +1064,7 @@ mod tests {
                 packed: Some(0),
             },
             condition: PathCondition::default(),
+            carrier: false,
         };
         graph.add_edge(a, b, identity.clone());
         graph.add_edge(b, a, identity);
@@ -720,6 +1093,7 @@ mod tests {
                     packed_start: start,
                     packed_length: length,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -758,6 +1132,7 @@ mod tests {
                     packed: Some(3),
                 },
                 condition: PathCondition::default(),
+                carrier: false,
             },
         );
         graph.add_edge(
@@ -769,6 +1144,7 @@ mod tests {
                     packed: Some(-1),
                 },
                 condition: PathCondition::default(),
+                carrier: false,
             },
         );
 
@@ -796,6 +1172,7 @@ mod tests {
                     packed_start: 0,
                     packed_length: 5,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -842,6 +1219,7 @@ mod tests {
                     packed_start: start,
                     packed_length: length,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -891,6 +1269,7 @@ mod tests {
                     packed_start: start,
                     packed_length: length,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -940,6 +1319,7 @@ mod tests {
                     packed_start: start,
                     packed_length: length,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -1011,6 +1391,7 @@ mod tests {
                     packed_start: start,
                     packed_length: length,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -1054,6 +1435,7 @@ mod tests {
                     packed_start: start,
                     packed_length: length,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -1096,6 +1478,7 @@ mod tests {
                     packed_start: start,
                     packed_length: length,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -1119,6 +1502,326 @@ mod tests {
     }
 
     #[test]
+    fn regular_repeat_stays_sparse_with_an_unconstrained_internal_node() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let width = 1_000_000;
+        let mut graph = DependencyGraph::new();
+        let mut bounded_node = |id, start, length| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(start, length).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: start,
+                    packed_length: length,
+                }],
+                regular_transfer: false,
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let repeated = bounded_node(0, 0, width);
+        let output_phase = bounded_node(1, 1, 1);
+        let feedback_phase = bounded_node(2, 0, 1);
+        let internal = graph.add_node(GraphNode {
+            region: SummaryRegion {
+                id: VarId::from_raw(3),
+                array,
+                packed: PackedSpan::new(0, width).unwrap(),
+            },
+            domains: Vec::new(),
+            regular_transfer: false,
+            diagnostic: None,
+        });
+        graph[repeated].regular_transfer = true;
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        let mut carrier = edge(4);
+        carrier.carrier = true;
+        graph.add_edge(repeated, repeated, carrier);
+        graph.add_edge(repeated, internal, edge(0));
+        graph.add_edge(internal, output_phase, edge(0));
+        graph.add_edge(output_phase, feedback_phase, edge(-1));
+        graph.add_edge(feedback_phase, repeated, edge(0));
+
+        assert!(!has_compatible_cycle(
+            &graph,
+            &[repeated, internal, output_phase, feedback_phase]
+        ));
+    }
+
+    #[test]
+    fn multiple_one_sided_regular_repeats_are_sparse_at_scale() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let width = 1_000_000;
+        let mut graph = DependencyGraph::new();
+        let mut node = |id| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(0, width).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: 0,
+                    packed_length: width,
+                }],
+                regular_transfer: false,
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let first = node(0);
+        let second = node(1);
+        graph[first].regular_transfer = true;
+        graph[second].regular_transfer = true;
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        let mut first_carrier = edge(4);
+        first_carrier.carrier = true;
+        let mut second_carrier = edge(6);
+        second_carrier.carrier = true;
+        graph.add_edge(first, first, first_carrier);
+        graph.add_edge(second, second, second_carrier);
+        graph.add_edge(first, second, edge(0));
+        graph.add_edge(second, first, edge(1));
+
+        assert!(!has_compatible_cycle(&graph, &[first, second]));
+    }
+
+    #[test]
+    fn node_potentials_expose_a_one_sided_cycle_hidden_by_mixed_raw_edges() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let width = 1_000_000;
+        let mut graph = DependencyGraph::new();
+        let mut node = |id| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(0, width).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: 0,
+                    packed_length: width,
+                }],
+                regular_transfer: false,
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let first = node(0);
+        let second = node(1);
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        graph.add_edge(first, second, edge(-1));
+        graph.add_edge(second, first, edge(2));
+
+        let nodes = HashSet::from_iter([first, second]);
+        assert!(dependency_offsets_fit_acyclic_orthant(&graph, &nodes));
+        assert!(!has_compatible_cycle(&graph, &[first, second]));
+    }
+
+    #[test]
+    fn an_internal_regular_repeat_cannot_walk_past_a_singleton_return_guard() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let width = 1_000_000;
+        let mut graph = DependencyGraph::new();
+        let mut node = |id, start, length| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(start, length).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: start,
+                    packed_length: length,
+                }],
+                regular_transfer: false,
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let first = node(0, 0, width);
+        let second = node(1, 0, width);
+        let return_guard = node(2, 1, 1);
+        graph[first].regular_transfer = true;
+        graph[second].regular_transfer = true;
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        let mut first_carrier = edge(4);
+        first_carrier.carrier = true;
+        let mut second_carrier = edge(6);
+        second_carrier.carrier = true;
+        graph.add_edge(first, first, first_carrier);
+        graph.add_edge(second, second, second_carrier);
+        graph.add_edge(first, second, edge(0));
+        graph.add_edge(second, return_guard, edge(0));
+        graph.add_edge(return_guard, first, edge(-1));
+
+        assert!(!has_compatible_cycle(
+            &graph,
+            &[first, second, return_guard]
+        ));
+    }
+
+    #[test]
+    fn commuting_regular_repeats_use_residue_classes_at_scale() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let width = 1_000_000;
+        let mut graph = DependencyGraph::new();
+        let mut node = |id, start, length| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(start, length).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: start,
+                    packed_length: length,
+                }],
+                regular_transfer: false,
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let first = node(0, 0, width);
+        let second = node(1, 0, width);
+        let return_guard = node(2, width - 4, 1);
+        graph[first].regular_transfer = true;
+        graph[second].regular_transfer = true;
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        let mut first_carrier = edge(4);
+        first_carrier.carrier = true;
+        let mut second_carrier = edge(6);
+        second_carrier.carrier = true;
+        graph.add_edge(first, first, first_carrier);
+        graph.add_edge(second, second, second_carrier);
+        graph.add_edge(first, second, edge(0));
+        graph.add_edge(second, return_guard, edge(0));
+        graph.add_edge(return_guard, first, edge(-((width - 5) as isize)));
+
+        // The return maps the singleton guard to position 1. Reaching the
+        // guard from position 1 would require 4m + 6n = 999_995, which has no
+        // solution because the left side is even.
+        assert!(!has_compatible_cycle(
+            &graph,
+            &[first, second, return_guard]
+        ));
+    }
+
+    #[test]
+    fn commuting_regular_repeats_accept_translated_equal_domains() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let width = 1_000_000;
+        let shift = 10;
+        let mut graph = DependencyGraph::new();
+        let mut node = |id, start, length| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(start, length).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: start,
+                    packed_length: length,
+                }],
+                regular_transfer: false,
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let first = node(0, 0, width);
+        let second = node(1, shift, width);
+        let return_position = shift + width - 4;
+        let return_guard = node(2, return_position, 1);
+        graph[first].regular_transfer = true;
+        graph[second].regular_transfer = true;
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        let mut first_carrier = edge(4);
+        first_carrier.carrier = true;
+        let mut second_carrier = edge(6);
+        second_carrier.carrier = true;
+        graph.add_edge(first, first, first_carrier);
+        graph.add_edge(second, second, second_carrier);
+        graph.add_edge(first, second, edge(shift as isize));
+        graph.add_edge(second, return_guard, edge(0));
+        graph.add_edge(return_guard, first, edge(-((return_position - 1) as isize)));
+
+        assert!(!has_compatible_cycle(
+            &graph,
+            &[first, second, return_guard]
+        ));
+    }
+
+    #[test]
     fn opposing_cycle_displacements_with_disjoint_guards_do_not_close() {
         let array = ArraySpan {
             start: 0,
@@ -1139,6 +1842,7 @@ mod tests {
                     packed_start: start,
                     packed_length: length,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -1189,6 +1893,7 @@ mod tests {
                     packed_start: start,
                     packed_length: length,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -1238,6 +1943,7 @@ mod tests {
                     packed_start: start,
                     packed_length: length,
                 }],
+                regular_transfer: false,
                 diagnostic: Some((id, array, 0)),
             })
         };
@@ -1384,6 +2090,7 @@ mod tests {
                             })
                             .into_iter()
                             .collect(),
+                        regular_transfer: false,
                         diagnostic: Some((id, array, 0)),
                     })
                 })
@@ -1419,6 +2126,7 @@ mod tests {
                             condition: arm.map_or_else(PathCondition::default, |arm| {
                                 PathCondition::default().with_choice(branch, arm)
                             }),
+                            carrier: false,
                         },
                     );
                 }
@@ -1526,6 +2234,7 @@ mod tests {
                             packed_start: domain.2,
                             packed_length: domain.3,
                         }],
+                        regular_transfer: false,
                         diagnostic: Some((id, array, 0)),
                     })
                 })
@@ -1561,6 +2270,7 @@ mod tests {
                             condition: arm.map_or_else(PathCondition::default, |arm| {
                                 PathCondition::default().with_choice(branch, arm)
                             }),
+                            carrier: false,
                         },
                     );
                 }

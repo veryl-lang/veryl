@@ -636,14 +636,17 @@ impl<'a> ModuleGraphBuilder<'a> {
                     ensure_node(&mut self.graph, &mut self.node_map, self.bit_part, *key)
                 }
                 DependencyDagNode::External(_) => None,
-                DependencyDagNode::Internal => Some(self.graph.add_node(GraphNode {
-                    // Internal nodes carry no variable identity. The region is
-                    // only a coordinate carrier; exact edge relations retain
-                    // the positional semantics.
-                    region: internal_region,
-                    domains: analysis.graph.domains[index].clone(),
-                    diagnostic: None,
-                })),
+                DependencyDagNode::Internal => {
+                    Some(self.graph.add_node(GraphNode {
+                        // Internal nodes carry no variable identity. The region is
+                        // only a coordinate carrier; exact edge relations retain
+                        // the positional semantics.
+                        region: internal_region,
+                        domains: analysis.graph.domains[index].clone(),
+                        regular_transfer: false,
+                        diagnostic: None,
+                    }))
+                }
             })
             .collect::<Vec<_>>();
 
@@ -662,6 +665,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                         packed: edge.relation.packed,
                     },
                     condition: edge.condition,
+                    carrier: false,
                 },
             );
         }
@@ -783,6 +787,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                             GraphDependency {
                                 kind: BitDependency::WHOLE,
                                 condition: source.condition.clone(),
+                                carrier: false,
                             },
                         );
                     }
@@ -864,6 +869,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                             node: graph.add_node(GraphNode {
                                 region: node.region,
                                 domains: node.domains.clone(),
+                                regular_transfer: node.regular_transfer,
                                 diagnostic: None,
                             }),
                             offset: Some((0, 0)),
@@ -1382,6 +1388,7 @@ fn add_resolved_dependency_edges(
                 GraphDependency {
                     kind,
                     condition: edge_condition,
+                    carrier: false,
                 },
             );
         }
