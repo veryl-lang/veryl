@@ -28,7 +28,7 @@ use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
     AssignDestination, Component, Declaration, Expression, Factor, FunctionCall, InstDeclaration,
-    Ir, Module, Op, Statement, SystemFunctionKind, VarSelect, Variable,
+    Ir, Module, Op, Signature, Statement, SystemFunctionKind, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::Graph;
@@ -36,7 +36,6 @@ use daggy::petgraph::algo::tarjan_scc;
 use daggy::petgraph::graph::NodeIndex;
 use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
-use veryl_parser::resource_table::StrId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct SummaryRegion {
@@ -100,82 +99,51 @@ struct ModuleCombSummary {
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
     let mut errors = Vec::new();
-    let mut summaries: HashMap<StrId, ModuleCombSummary> = HashMap::default();
+    let mut summaries: HashMap<Signature, ModuleCombSummary> = HashMap::default();
 
-    let order = topo_order_modules(ir);
-
-    for &idx in &order {
-        if let Component::Module(module) = &ir.components[idx] {
-            // Unevaluable generic parameters do not have a stable procedure.
-            if module.suppress_unassigned {
-                continue;
-            }
-            let (graph, bit_part) = build_module_graph(module, &summaries);
-            check_graph(module, &graph, &mut errors);
-            let summary = compute_module_summary(module, &graph, &bit_part);
-            summaries.insert(module.name, summary);
-        }
+    for module in module_postorder(ir) {
+        let (graph, bit_part) = build_module_graph(module, &summaries);
+        check_graph(module, &graph, &mut errors);
+        let summary = compute_module_summary(module, &graph, &bit_part);
+        summaries.insert(module.signature.clone(), summary);
     }
 
     errors
 }
 
-/// Children before parents. Falls back to input order on cycle
-/// (`infinite_recursion` is reported separately).
-fn topo_order_modules(ir: &Ir) -> Vec<usize> {
-    let mut name_to_idx: HashMap<StrId, usize> = HashMap::default();
-    for (i, c) in ir.components.iter().enumerate() {
-        if let Component::Module(m) = c {
-            name_to_idx.insert(m.name, i);
+/// Actual instantiated specializations in children-before-parents order.
+/// Unevaluable generic templates are not stable bodies and therefore do not
+/// claim the same signature as a concrete default specialization.
+fn module_postorder(ir: &Ir) -> Vec<&Module> {
+    fn visit<'a>(
+        module: &'a Module,
+        visited: &mut HashSet<Signature>,
+        active: &mut HashSet<Signature>,
+        order: &mut Vec<&'a Module>,
+    ) {
+        if module.suppress_unassigned
+            || visited.contains(&module.signature)
+            || !active.insert(module.signature.clone())
+        {
+            return;
         }
-    }
-
-    let n = ir.components.len();
-    let mut deps: Vec<HashSet<usize>> = vec![HashSet::default(); n];
-    let mut rev_deps: Vec<HashSet<usize>> = vec![HashSet::default(); n];
-
-    for (i, c) in ir.components.iter().enumerate() {
-        if let Component::Module(m) = c {
-            for inst in walk_insts(m) {
-                if let Component::Module(child) = inst.component.as_ref()
-                    && let Some(&child_idx) = name_to_idx.get(&child.name)
-                    && child_idx != i
-                {
-                    deps[i].insert(child_idx);
-                    rev_deps[child_idx].insert(i);
-                }
+        for inst in walk_insts(module) {
+            if let Component::Module(child) = inst.component.as_ref() {
+                visit(child, visited, active, order);
             }
         }
+        active.remove(&module.signature);
+        visited.insert(module.signature.clone());
+        order.push(module);
     }
 
-    let mut indeg: Vec<usize> = deps.iter().map(|s| s.len()).collect();
-    let mut q: VecDeque<usize> = VecDeque::new();
-    for (i, _) in indeg.iter().enumerate().take(n) {
-        if matches!(ir.components.get(i), Some(Component::Module(_))) && indeg[i] == 0 {
-            q.push_back(i);
+    let mut visited = HashSet::default();
+    let mut active = HashSet::default();
+    let mut order = Vec::new();
+    for component in &ir.components {
+        if let Component::Module(module) = component {
+            visit(module, &mut visited, &mut active, &mut order);
         }
-    }
-    let mut order: Vec<usize> = Vec::new();
-    while let Some(i) = q.pop_front() {
-        order.push(i);
-        for &p in &rev_deps[i] {
-            indeg[p] -= 1;
-            if indeg[p] == 0 {
-                q.push_back(p);
-            }
-        }
-    }
-    if order.len()
-        != ir
-            .components
-            .iter()
-            .filter(|c| matches!(c, Component::Module(_)))
-            .count()
-    {
-        // Cycle in module graph -- emit imprecise reports anyway.
-        return (0..n)
-            .filter(|i| matches!(ir.components.get(*i), Some(Component::Module(_))))
-            .collect();
     }
     order
 }
@@ -345,7 +313,7 @@ fn propagate_packed_endpoints(
 
 fn build_bit_partition(
     module: &Module,
-    summaries: &HashMap<StrId, ModuleCombSummary>,
+    summaries: &HashMap<Signature, ModuleCombSummary>,
     ctx: &mut Context,
 ) -> BitPartition {
     let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
@@ -401,7 +369,7 @@ fn build_bit_partition(
 
 fn collect_instance_summary_spans(
     module: &Module,
-    summaries: &HashMap<StrId, ModuleCombSummary>,
+    summaries: &HashMap<Signature, ModuleCombSummary>,
     accesses: &mut HashMap<IdxKey, Vec<PackedSpan>>,
     ctx: &mut Context,
 ) {
@@ -409,7 +377,7 @@ fn collect_instance_summary_spans(
         let Component::Module(child) = inst.component.as_ref() else {
             continue;
         };
-        let Some(summary) = summaries.get(&child.name) else {
+        let Some(summary) = summaries.get(&child.signature) else {
             continue;
         };
         for (source, destinations) in &summary.feedthrough {
@@ -1039,7 +1007,7 @@ fn eval_dst_span(
 
 fn build_module_graph(
     module: &Module,
-    summaries: &HashMap<StrId, ModuleCombSummary>,
+    summaries: &HashMap<Signature, ModuleCombSummary>,
 ) -> (Graph<NodeKey, BitDependency>, BitPartition) {
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
@@ -1075,7 +1043,7 @@ fn build_module_graph(
     for inst in walk_insts(module) {
         match inst.component.as_ref() {
             Component::Module(child) => {
-                let Some(summary) = summaries.get(&child.name) else {
+                let Some(summary) = summaries.get(&child.signature) else {
                     continue;
                 };
                 add_inst_feedthrough_edges(

@@ -652,7 +652,6 @@ fn comb_loop_preserves_instance_repeat_positions_an_instance_repeat_actual_detec
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_distinguishes_generic_module_specializations_an_enabled_generic_module_specialization_retains_its_feedthrough()
  {
     assert_comb_loop(
@@ -690,7 +689,6 @@ fn comb_loop_distinguishes_generic_module_specializations_an_enabled_generic_mod
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_distinguishes_generic_module_specializations_a_disabled_generic_module_specialization_does_not_inherit_feedthrough()
  {
     assert_comb_loop(

@@ -344,7 +344,6 @@ fn specialized_interface_code(width: u32) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; enabled generic interface feedthrough"]
 fn comb_loop_generic_interface_enabled_specialization_retains_feedthrough() {
     assert_interface_comb_loop(&specialized_interface_code(1), true);
 }
