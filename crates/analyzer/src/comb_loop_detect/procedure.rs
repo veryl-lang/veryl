@@ -242,9 +242,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .ssa
                 .root_sources(version)
                 .into_iter()
-                .filter_map(|source| {
-                    source.call_frame.is_none().then_some(source.node)
-                })
+                .filter_map(|source| source.call_frame.is_none().then_some(source.node))
                 .filter(|source| {
                     formal_ids.contains(&source.0) || this.is_module_scope_key(*source)
                 })
@@ -281,7 +279,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let writes = destinations
             .into_iter()
             .map(|destination| {
-                let version = this.ssa.read(destination);
+                let version = this.read_key(destination);
                 (destination, visible_sources(&this, version))
             })
             .collect();
@@ -1147,7 +1145,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let mut sources = self.map_summary_sources(call, summary, sources);
             sources.extend_from_slice(controls);
             let version = self.ssa.definition(sources);
-            self.ssa.bind(*destination, version);
+            self.bind_key(*destination, version);
             self.written.insert(*destination);
         }
 
@@ -1160,15 +1158,26 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .map(|destination| self.destination_width(destination))
                 .collect();
             if widths.iter().all(Option::is_some) {
+                let formal_versions = self.current_key_versions_for_id(formal);
                 let total_width = widths.iter().flatten().sum();
                 let mut offset = total_width;
                 for (destination, width) in destinations.iter().zip(widths) {
                     let width = width.expect("checked above");
                     offset -= width;
-                    self.write_formal_output(destination, formal, offset, total_width, controls);
+                    self.write_formal_output(
+                        destination,
+                        &formal_versions,
+                        offset,
+                        total_width,
+                        controls,
+                    );
                 }
             } else {
-                let sources = self.current_versions_for_id(formal);
+                let sources = self
+                    .current_key_versions_for_id(formal)
+                    .into_iter()
+                    .map(|(_, version)| version)
+                    .collect::<Vec<_>>();
                 for destination in destinations {
                     self.write_destination(destination, &sources, controls);
                 }
@@ -1205,7 +1214,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut versions = Vec::new();
         for source in sources {
             if self.is_module_scope_key(*source) {
-                versions.push(self.ssa.read(*source));
+                versions.push(self.read_key(*source));
                 continue;
             }
             let actual = summary.arg_map.iter().find_map(|(path, formal)| {
