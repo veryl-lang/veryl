@@ -1342,7 +1342,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn merge_flow_states(&mut self, states: &[FlowState]) {
         self.ssa.merge(states.iter().map(|state| &state.state));
         self.path_condition =
-            PathCondition::intersection(states.iter().map(|state| &state.condition));
+            PathCondition::disjoin_all(states.iter().map(|state| &state.condition));
     }
 
     fn is_return_assignment(&self, destinations: &[AssignDestination]) -> bool {
@@ -1477,7 +1477,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         self.ssa.merge(&continuation);
         if has_continue {
-            self.path_condition = PathCondition::intersection(&continuation_conditions);
+            self.path_condition = PathCondition::disjoin_all(&continuation_conditions);
             FlowResult {
                 flow: ProcedureFlow::Continue,
                 continuation_controls,

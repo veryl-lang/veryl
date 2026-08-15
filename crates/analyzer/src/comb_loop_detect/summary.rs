@@ -112,7 +112,7 @@ pub(super) fn compute_module_summary(
                 continue;
             }
             for edge in graph.edges(node) {
-                let Some(condition) = condition.union_if_compatible(&edge.weight().condition)
+                let Some(condition) = condition.conjoin_if_compatible(&edge.weight().condition)
                 else {
                     continue;
                 };

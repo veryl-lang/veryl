@@ -1,4 +1,35 @@
 //! Exact symbolic relations between an anchor position and the current node.
+//!
+//! # Correctness
+//!
+//! For an axis range `I`, let `L(k, I) = {(x, x + k) | x in I}` and
+//! `U(I, J) = I x J`; an absent range denotes all integer positions.
+//! `Linked` and `Unlinked` represent `L` and `U` respectively. Relational
+//! composition stays in these two forms:
+//!
+//! ```text
+//! L(a, I); L(b, J) = L(a + b, I intersect (J - a))
+//! L(a, I); U(J, K) = U(I intersect (J - a), K)
+//! U(I, J); L(b, K) = U(I, (J intersect K) + b)
+//! U(I, J); U(K, L) = U(I, L), if J intersects K
+//! ```
+//!
+//! These are the four cases in `compose_axis`. `extend_axis` is the same
+//! composition specialized to one dependency edge, with its result restricted
+//! to the destination domain. Array and packed relations form a Cartesian
+//! product, and composition distributes over the union of `RelationPiece`s.
+//! Consequently, induction over a path proves that `PositionRelationSet`
+//! contains exactly the reachable `(anchor, current)` position pairs.
+//!
+//! `axis_intersects_identity` is exactly the test for an `L` or `U` relation
+//! to contain `(x, x)`. A successful `piecewise_covers` test implies semantic
+//! set inclusion; the converse is not required for pruning. Normalization
+//! removes only duplicates or pieces covered by that implication, so it
+//! preserves the represented relation.
+//!
+//! Domain endpoints and every intermediate translation, negation, sum, and
+//! repeated product are required to be representable in `isize`; composition
+//! fails the construction invariant instead of weakening overflow to WHOLE.
 
 use super::FeasiblePosition;
 use crate::comb_loop_detect::model::BitDependency;
@@ -122,7 +153,7 @@ impl PositionRelationSet {
         self.pieces.is_empty()
     }
 
-    pub(super) fn contains(&self, other: &Self) -> bool {
+    pub(super) fn piecewise_covers(&self, other: &Self) -> bool {
         other.pieces.iter().all(|inner| {
             self.pieces
                 .iter()
@@ -394,15 +425,22 @@ fn extend_axis(
 ) -> Option<AxisRelation> {
     match (relation, dependency) {
         (AxisRelation::Linked { offset, start }, Some(next)) => {
-            let offset = offset.checked_add(next)?;
-            let allowed = translate_range(destination, offset.checked_neg()?)?;
+            let offset = offset
+                .checked_add(next)
+                .expect("composed position offset must fit in isize");
+            let allowed = translate_range(
+                destination,
+                offset
+                    .checked_neg()
+                    .expect("reversed position offset must fit in isize"),
+            );
             Some(AxisRelation::Linked {
                 offset,
                 start: intersect_range(start, allowed)?,
             })
         }
         (AxisRelation::Unlinked { start, current }, Some(offset)) => {
-            let current = translate_range(current, offset)?;
+            let current = translate_range(current, offset);
             Some(AxisRelation::Unlinked {
                 start,
                 current: intersect_range(current, destination)?,
@@ -428,9 +466,16 @@ fn compose_axis(left: AxisRelation, right: AxisRelation) -> Option<AxisRelation>
                 start: right_start,
             },
         ) => {
-            let right_start = translate_range(right_start, left_offset.checked_neg()?)?;
+            let right_start = translate_range(
+                right_start,
+                left_offset
+                    .checked_neg()
+                    .expect("reversed position offset must fit in isize"),
+            );
             Some(AxisRelation::Linked {
-                offset: left_offset.checked_add(right_offset)?,
+                offset: left_offset
+                    .checked_add(right_offset)
+                    .expect("composed position offset must fit in isize"),
                 start: intersect_range(left_start, right_start)?,
             })
         }
@@ -444,7 +489,12 @@ fn compose_axis(left: AxisRelation, right: AxisRelation) -> Option<AxisRelation>
                 current,
             },
         ) => {
-            let right_start = translate_range(right_start, offset.checked_neg()?)?;
+            let right_start = translate_range(
+                right_start,
+                offset
+                    .checked_neg()
+                    .expect("reversed position offset must fit in isize"),
+            );
             Some(AxisRelation::Unlinked {
                 start: intersect_range(left_start, right_start)?,
                 current,
@@ -463,7 +513,7 @@ fn compose_axis(left: AxisRelation, right: AxisRelation) -> Option<AxisRelation>
             let middle = intersect_range(left_current, right_start)?;
             Some(AxisRelation::Unlinked {
                 start,
-                current: translate_range(middle, offset)?,
+                current: translate_range(middle, offset),
             })
         }
         (
@@ -526,24 +576,30 @@ fn axis_contains_relation(outer: AxisRelation, inner: AxisRelation) -> bool {
             AxisRelation::Linked { offset, start },
         ) => {
             range_contains(outer_start, start)
-                && translate_range(start, offset)
-                    .is_some_and(|current| range_contains(outer_current, current))
+                && range_contains(outer_current, translate_range(start, offset))
         }
         (AxisRelation::Linked { .. }, AxisRelation::Unlinked { .. }) => false,
     }
 }
 
 fn finite_range(start: usize, length: usize) -> Option<AxisRange> {
-    let start = isize::try_from(start).ok()?;
-    let end = start.checked_add_unsigned(length)?;
+    let start = isize::try_from(start).expect("position domain start must fit in isize");
+    let end = start
+        .checked_add_unsigned(length)
+        .expect("position domain end must fit in isize");
     (start < end).then_some(Some((start, end)))
 }
 
-fn translate_range(range: AxisRange, offset: isize) -> Option<AxisRange> {
-    match range {
-        None => Some(None),
-        Some((start, end)) => Some(Some((start.checked_add(offset)?, end.checked_add(offset)?))),
-    }
+fn translate_range(range: AxisRange, offset: isize) -> AxisRange {
+    range.map(|(start, end)| {
+        (
+            start
+                .checked_add(offset)
+                .expect("translated range start must fit in isize"),
+            end.checked_add(offset)
+                .expect("translated range end must fit in isize"),
+        )
+    })
 }
 
 fn intersect_range(left: AxisRange, right: AxisRange) -> Option<AxisRange> {

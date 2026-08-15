@@ -185,7 +185,9 @@ impl PathCondition {
         }
     }
 
-    pub(super) fn intersection<'a>(conditions: impl IntoIterator<Item = &'a Self>) -> Self {
+    /// Joins alternative paths into the least Cartesian condition that covers
+    /// every input condition.
+    pub(super) fn disjoin_all<'a>(conditions: impl IntoIterator<Item = &'a Self>) -> Self {
         let mut conditions = conditions.into_iter();
         let Some(first) = conditions.next() else {
             return Self::default();
@@ -197,7 +199,7 @@ impl PathCondition {
         combined
     }
 
-    pub(super) fn union_if_compatible(&self, other: &Self) -> Option<Self> {
+    pub(super) fn conjoin_if_compatible(&self, other: &Self) -> Option<Self> {
         let mut constraints = Vec::with_capacity(self.constraints.len() + other.constraints.len());
         let mut left = self.constraints.iter().peekable();
         let mut right = other.constraints.iter().peekable();
@@ -239,7 +241,9 @@ impl PathCondition {
         })
     }
 
-    pub(super) fn is_subset_of(&self, other: &Self) -> bool {
+    /// Returns true when every branch valuation admitted by `other` is also
+    /// admitted by `self`.
+    pub(super) fn covers(&self, other: &Self) -> bool {
         self.constraints.iter().all(|constraint| {
             other
                 .constraints
@@ -279,6 +283,7 @@ impl PathCondition {
         }
     }
 
+    /// Returns the least Cartesian condition covering either input.
     pub(super) fn disjoin(&self, other: &Self) -> Self {
         let mut constraints = Vec::new();
         for constraint in self.constraints.iter() {
@@ -364,8 +369,16 @@ impl PositionRelation {
 
     pub(super) fn reversed(self) -> Self {
         Self {
-            array: self.array.and_then(isize::checked_neg),
-            packed: self.packed.and_then(isize::checked_neg),
+            array: self.array.map(|offset| {
+                offset
+                    .checked_neg()
+                    .expect("reversed array position offset must fit in isize")
+            }),
+            packed: self.packed.map(|offset| {
+                offset
+                    .checked_neg()
+                    .expect("reversed packed position offset must fit in isize")
+            }),
         }
     }
 
@@ -381,7 +394,13 @@ impl PositionRelation {
 }
 
 fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
-    left?.checked_add(right?)
+    match (left, right) {
+        (Some(left), Some(right)) => Some(
+            left.checked_add(right)
+                .expect("composed position offset must fit in isize"),
+        ),
+        _ => None,
+    }
 }
 
 fn reachable_versions(
@@ -1031,7 +1050,7 @@ where
                     sources,
                     condition: definition_condition,
                 } => {
-                    let Some(condition) = condition.union_if_compatible(definition_condition)
+                    let Some(condition) = condition.conjoin_if_compatible(definition_condition)
                     else {
                         continue;
                     };
@@ -1054,7 +1073,7 @@ where
                         dependency_dag_external_sources(graph, *root)
                     {
                         let imported_condition = imported_condition.remapped(branches);
-                        let Some(condition) = condition.union_if_compatible(&imported_condition)
+                        let Some(condition) = condition.conjoin_if_compatible(&imported_condition)
                         else {
                             continue;
                         };
@@ -1111,7 +1130,7 @@ where
             continue;
         }
         for edge in incoming.get(&node).into_iter().flatten() {
-            let Some(next_condition) = condition.union_if_compatible(&edge.condition) else {
+            let Some(next_condition) = condition.conjoin_if_compatible(&edge.condition) else {
                 continue;
             };
             let next = (edge.source, relation.compose(edge.relation));
@@ -1225,7 +1244,7 @@ fn merge_source_summaries<K>(
             prefix.map_or(relation, |prefix| prefix.compose(relation)),
         );
         let condition = if let Some(guard) = guard {
-            let Some(condition) = condition.union_if_compatible(guard) else {
+            let Some(condition) = condition.conjoin_if_compatible(guard) else {
                 continue;
             };
             condition
@@ -1463,7 +1482,7 @@ mod tests {
         let true_path = PathCondition::default().with_choice(branch, 0);
         let false_path = PathCondition::default().with_choice(branch, 1);
 
-        assert!(true_path.union_if_compatible(&false_path).is_none());
+        assert!(true_path.conjoin_if_compatible(&false_path).is_none());
     }
 
     #[test]
@@ -1472,10 +1491,10 @@ mod tests {
         let second = PathCondition::default().with_choice(BranchId::new(1, 1, 2), 1);
 
         let combined = first
-            .union_if_compatible(&second)
+            .conjoin_if_compatible(&second)
             .expect("distinct branches can execute on the same path");
-        assert!(first.is_subset_of(&combined));
-        assert!(second.is_subset_of(&combined));
+        assert!(first.covers(&combined));
+        assert!(second.covers(&combined));
     }
 
     #[test]
@@ -1485,7 +1504,7 @@ mod tests {
         let upper = PathCondition::default().with_choice_range(branch, 500_000, 1_000_001);
 
         assert_eq!(lower.disjoin(&upper), PathCondition::default());
-        assert!(lower.union_if_compatible(&upper).is_none());
+        assert!(lower.conjoin_if_compatible(&upper).is_none());
     }
 
     #[test]

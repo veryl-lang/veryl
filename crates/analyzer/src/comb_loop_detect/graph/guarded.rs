@@ -1,10 +1,42 @@
 //! Guarded composition of non-zero positional cycles.
+//!
+//! # Correctness
+//!
+//! Every `GuardedCycle` is a first-return walk at one anchor. A sequence of
+//! them is a closed positional walk exactly when their conditions have a
+//! common branch valuation and their composed relation intersects identity.
+//!
+//! For exact translations, relation composition adds the two-dimensional
+//! displacement while `compose_feasible_positions` computes exactly the
+//! anchor positions for which the concatenation exists. If non-zero integer
+//! vectors have a non-negative sum of zero, a support-minimal such sum in two
+//! dimensions uses either an opposing pair or three vectors surrounding the
+//! origin. Therefore `compatible_cycle_displacements_cancel` can safely reject
+//! the exact-only case when it finds neither. The cyclic order of any closed
+//! word also lies in one strongly connected component of the feasible
+//! relation-to-relation transition graph, so components without a cancelling
+//! displacement set are safely rejected. The pair and triple paths construct
+//! feasible repetitions directly; the fallback worklist retains the exact
+//! accumulated displacement, feasible positions, and condition. Hence it finds
+//! every remaining feasible zero-displacement word.
+//!
+//! A closed word containing a non-translation relation can be rotated at its
+//! concrete intermediate position to start with that relation. Thus
+//! `guarded_relations_close` loses nothing by seeding only non-translations and
+//! appending every first-return relation thereafter. Relational composition is
+//! exact, and discarding a state only when a weaker condition carries a
+//! superset relation is safe by monotonicity of composition. The specialized
+//! repeated-translation checks only return after constructing a feasible
+//! composition that intersects identity, so they are witness-preserving
+//! accelerators rather than additional approximations.
 
 use super::relation::PositionRelationSet;
-use super::{FeasiblePosition, dependency_may_return_to_same_position, intersect_axis};
+use super::{FeasiblePosition, intersect_axis};
 use crate::comb_loop_detect::model::BitDependency;
 use crate::comb_loop_detect::ssa::PathCondition;
 use crate::{HashMap, HashSet};
+use daggy::petgraph::Graph;
+use daggy::petgraph::algo::tarjan_scc;
 use std::collections::VecDeque;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -36,7 +68,7 @@ pub(super) fn guarded_cycle_displacements_cancel(cycles: &HashSet<GuardedCycle>)
         for translation in &translations {
             if cycle
                 .condition
-                .union_if_compatible(&translation.condition)
+                .conjoin_if_compatible(&translation.condition)
                 .is_some()
                 && translation.dependency.exact_offset().is_some_and(|offset| {
                     cycle
@@ -72,7 +104,7 @@ fn guarded_relations_close(cycles: &HashSet<GuardedCycle>) -> bool {
     }
     while let Some((relation, condition)) = queue.pop_front() {
         for cycle in &cycles {
-            let Some(next_condition) = condition.union_if_compatible(&cycle.condition) else {
+            let Some(next_condition) = condition.conjoin_if_compatible(&cycle.condition) else {
                 continue;
             };
             let next_relation = relation.then(&cycle.relation);
@@ -97,13 +129,13 @@ fn insert_guarded_relation(
     if reached
         .iter()
         .any(|(existing_relation, existing_condition)| {
-            existing_relation.contains(&relation) && existing_condition.is_subset_of(&condition)
+            existing_relation.piecewise_covers(&relation) && existing_condition.covers(&condition)
         })
     {
         return;
     }
     reached.retain(|(existing_relation, existing_condition)| {
-        !relation.contains(existing_relation) || !condition.is_subset_of(existing_condition)
+        !relation.piecewise_covers(existing_relation) || !condition.covers(existing_condition)
     });
     reached.push((relation.clone(), condition.clone()));
     queue.push_back((relation, condition));
@@ -117,66 +149,104 @@ struct GuardedTranslation {
 }
 
 fn guarded_translations_cancel(cycles: &[GuardedTranslation]) -> bool {
-    // Displacement geometry is a cheap necessary test. It is deliberately
-    // not sufficient: cycles whose guards cannot be connected must not be
-    // reported merely because their vectors add to zero.
-    let displacements = cycles
-        .iter()
-        .map(|cycle| (cycle.dependency, cycle.condition.clone()))
-        .collect();
-    if !compatible_cycle_displacements_cancel(&displacements) {
-        return false;
-    }
-
-    let cycles = cycles.iter().collect::<Vec<_>>();
-    // Large regular walks, such as +1 repeated 999_999 times followed by one
-    // -999_999 wrap, are checked from their GCD-derived repetition counts and
-    // interval endpoints. Runtime is independent of the declared width.
-    if guarded_opposing_pair_closes(&cycles) || guarded_three_cycle_closes(&cycles) {
-        return true;
-    }
-    // The remaining irregular cases retain the exact cumulative translation.
-    // A state is reusable only when its branch condition and valid starting
-    // positions cover the new state as well.
-    let mut reached: HashMap<BitDependency, Vec<(PathCondition, Vec<FeasiblePosition>)>> =
-        HashMap::default();
-    let mut queue = VecDeque::new();
-    for cycle in &cycles {
-        insert_guarded_walk(
-            &mut reached,
-            &mut queue,
-            cycle.dependency,
-            cycle.condition.clone(),
-            cycle.feasible.clone(),
-        );
-    }
-
-    while let Some((dependency, condition, feasible)) = queue.pop_front() {
+    for cycles in guarded_transition_components_that_can_cancel(cycles) {
+        // Large regular walks, such as +1 repeated 999_999 times followed by
+        // one -999_999 wrap, are checked from their GCD-derived repetition
+        // counts and interval endpoints. Runtime is independent of the
+        // declared width.
+        if guarded_opposing_pair_closes(&cycles) || guarded_three_cycle_closes(&cycles) {
+            return true;
+        }
+        // The remaining irregular cases retain the exact cumulative
+        // translation. A state is reusable only when its branch condition and
+        // valid starting positions cover the new state as well.
+        let mut reached: HashMap<BitDependency, Vec<(PathCondition, Vec<FeasiblePosition>)>> =
+            HashMap::default();
+        let mut queue = VecDeque::new();
         for cycle in &cycles {
-            let Some(next_condition) = condition.union_if_compatible(&cycle.condition) else {
-                continue;
-            };
-            let next_dependency = dependency.compose(cycle.dependency);
-            let Some(offset) = dependency.exact_offset() else {
-                return true;
-            };
-            let next_feasible = compose_feasible_positions(&feasible, offset, &cycle.feasible);
-            if next_feasible.is_empty() {
-                continue;
-            }
-            if dependency_may_return_to_same_position(next_dependency) {
-                return true;
-            }
             insert_guarded_walk(
                 &mut reached,
                 &mut queue,
-                next_dependency,
-                next_condition,
-                next_feasible,
+                cycle.dependency,
+                cycle.condition.clone(),
+                cycle.feasible.clone(),
             );
+        }
+
+        while let Some((dependency, condition, feasible)) = queue.pop_front() {
+            for cycle in &cycles {
+                let Some(next_condition) = condition.conjoin_if_compatible(&cycle.condition) else {
+                    continue;
+                };
+                let offset = dependency
+                    .exact_offset()
+                    .expect("an exact guarded walk must retain its displacement");
+                let next_feasible = compose_feasible_positions(&feasible, offset, &cycle.feasible);
+                if next_feasible.is_empty() {
+                    continue;
+                }
+                let next_dependency = dependency.compose(cycle.dependency);
+                if next_dependency == BitDependency::identity() {
+                    return true;
+                }
+                insert_guarded_walk(
+                    &mut reached,
+                    &mut queue,
+                    next_dependency,
+                    next_condition,
+                    next_feasible,
+                );
+            }
         }
     }
     false
+}
+
+/// A closed word induces a directed cycle between the first-return relations
+/// it uses: every relation must be able to hand its output position to the next
+/// one. Its displacement vectors must therefore cancel inside one strongly
+/// connected component of this coarse transition graph. Rejecting components
+/// that cannot cancel avoids enumerating a declared width when opposing
+/// translations are separated by a positional gap.
+fn guarded_transition_components_that_can_cancel(
+    cycles: &[GuardedTranslation],
+) -> Vec<Vec<&GuardedTranslation>> {
+    let mut transitions = Graph::<usize, ()>::new();
+    let nodes = (0..cycles.len())
+        .map(|cycle| transitions.add_node(cycle))
+        .collect::<Vec<_>>();
+    for (left_index, left) in cycles.iter().enumerate() {
+        let offset = left
+            .dependency
+            .exact_offset()
+            .expect("guarded translations must retain exact offsets");
+        for (right_index, right) in cycles.iter().enumerate() {
+            if left
+                .condition
+                .conjoin_if_compatible(&right.condition)
+                .is_none()
+                || compose_feasible_positions(&left.feasible, offset, &right.feasible).is_empty()
+            {
+                continue;
+            }
+            transitions.add_edge(nodes[left_index], nodes[right_index], ());
+        }
+    }
+
+    tarjan_scc(&transitions)
+        .into_iter()
+        .filter_map(|component| {
+            let cycles = component
+                .into_iter()
+                .map(|node| &cycles[transitions[node]])
+                .collect::<Vec<_>>();
+            let displacements = cycles
+                .iter()
+                .map(|cycle| (cycle.dependency, cycle.condition.clone()))
+                .collect();
+            compatible_cycle_displacements_cancel(&displacements).then_some(cycles)
+        })
+        .collect()
 }
 
 fn guarded_opposing_pair_closes(cycles: &[&GuardedTranslation]) -> bool {
@@ -184,7 +254,7 @@ fn guarded_opposing_pair_closes(cycles: &[&GuardedTranslation]) -> bool {
         for right in (left + 1)..cycles.len() {
             if cycles[left]
                 .condition
-                .union_if_compatible(&cycles[right].condition)
+                .conjoin_if_compatible(&cycles[right].condition)
                 .is_none()
             {
                 continue;
@@ -215,9 +285,7 @@ fn guarded_opposing_pair_closes(cycles: &[&GuardedTranslation]) -> bool {
             let Some(right_walk) = repeat_guarded_cycle(cycles[right], right_count) else {
                 continue;
             };
-            debug_assert!(dependency_may_return_to_same_position(
-                left_walk.0.compose(right_walk.0)
-            ));
+            debug_assert_eq!(left_walk.0.compose(right_walk.0), BitDependency::identity());
             if !compose_feasible_positions(
                 &left_walk.1,
                 left_walk
@@ -257,13 +325,13 @@ fn guarded_three_cycle_closes(cycles: &[&GuardedTranslation]) -> bool {
         for second in (first + 1)..cycles.len() {
             let Some(condition) = cycles[first]
                 .condition
-                .union_if_compatible(&cycles[second].condition)
+                .conjoin_if_compatible(&cycles[second].condition)
             else {
                 continue;
             };
             for third in (second + 1)..cycles.len() {
                 if condition
-                    .union_if_compatible(&cycles[third].condition)
+                    .conjoin_if_compatible(&cycles[third].condition)
                     .is_none()
                 {
                     continue;
@@ -313,7 +381,7 @@ fn guarded_three_cycle_closes(cycles: &[&GuardedTranslation]) -> bool {
                     else {
                         continue;
                     };
-                    if dependency_may_return_to_same_position(combined.0) {
+                    if combined.0 == BitDependency::identity() {
                         return true;
                     }
                 }
@@ -416,14 +484,14 @@ fn insert_guarded_walk(
     if states
         .iter()
         .any(|(existing_condition, existing_feasible)| {
-            existing_condition.is_subset_of(&condition)
+            existing_condition.covers(&condition)
                 && feasible_positions_contain(existing_feasible, &feasible)
         })
     {
         return;
     }
     states.retain(|(existing_condition, existing_feasible)| {
-        !condition.is_subset_of(existing_condition)
+        !condition.covers(existing_condition)
             || !feasible_positions_contain(&feasible, existing_feasible)
     });
     states.push((condition.clone(), feasible.clone()));
@@ -438,12 +506,8 @@ fn compose_feasible_positions(
     let mut result = Vec::new();
     for &current in current {
         for &next in next {
-            let Some(next_array) = translate_axis_to_initial(next.array, current_offset.0) else {
-                continue;
-            };
-            let Some(next_packed) = translate_axis_to_initial(next.packed, current_offset.1) else {
-                continue;
-            };
+            let next_array = translate_axis_to_initial(next.array, current_offset.0);
+            let next_packed = translate_axis_to_initial(next.packed, current_offset.1);
             let Some(array) = intersect_axis(current.array, next_array) else {
                 continue;
             };
@@ -461,11 +525,16 @@ fn compose_feasible_positions(
 fn translate_axis_to_initial(
     range: Option<(isize, isize)>,
     offset: isize,
-) -> Option<Option<(isize, isize)>> {
-    match range {
-        None => Some(None),
-        Some((start, end)) => Some(Some((start.checked_sub(offset)?, end.checked_sub(offset)?))),
-    }
+) -> Option<(isize, isize)> {
+    range.map(|(start, end)| {
+        (
+            start
+                .checked_sub(offset)
+                .expect("translated guard start must fit in isize"),
+            end.checked_sub(offset)
+                .expect("translated guard end must fit in isize"),
+        )
+    })
 }
 
 fn feasible_positions_contain(outer: &[FeasiblePosition], inner: &[FeasiblePosition]) -> bool {
@@ -500,14 +569,14 @@ pub(super) fn compatible_cycle_displacements_cancel(
 
     for left in 0..exact.len() {
         for right in (left + 1)..exact.len() {
-            let Some(condition) = exact[left].1.union_if_compatible(exact[right].1) else {
+            let Some(condition) = exact[left].1.conjoin_if_compatible(exact[right].1) else {
                 continue;
             };
             if opposite_collinear(exact[left].0, exact[right].0) {
                 return true;
             }
             for third in (right + 1)..exact.len() {
-                if condition.union_if_compatible(exact[third].1).is_some()
+                if condition.conjoin_if_compatible(exact[third].1).is_some()
                     && origin_is_in_positive_cone(exact[left].0, exact[right].0, exact[third].0)
                 {
                     return true;

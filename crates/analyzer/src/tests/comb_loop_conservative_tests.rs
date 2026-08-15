@@ -4,7 +4,13 @@
 //! loop is not mistaken for an accidental regression. The accepted classes
 //! are:
 //! - algebraic identities and cancellation;
+//! - two-state operator semantics whose bit influence is narrower than an
+//!   identity or whole-value dependency;
+//! - constant arithmetic, masks, and predicates that make result bits
+//!   independent of structurally present operands;
 //! - equivalent results behind data-dependent control flow;
+//! - runtime shifts and selectors whose reachable source sets are not one
+//!   fixed positional offset;
 //! - correlations between separately written or instantiated predicates;
 //! - runtime indices below one longest static prefix, including affine offsets,
 //!   range-disjoint indices, and static suffix dimensions below a dynamic one;
@@ -18,12 +24,15 @@
 use super::*;
 
 fn assert_intentional_false_positive(case: &str, code: &str) {
+    let complete = comb_loop_analysis_is_complete(code);
     let errors = analyze(code);
     assert!(
-        errors
-            .iter()
-            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
-        "{case}: this loop-free case is intentionally diagnosed: {errors:?}"
+        complete
+            && !errors.is_empty()
+            && errors
+                .iter()
+                .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{case}: expected complete analysis and only combinational-loop diagnostics: {errors:?}"
     );
 }
 
@@ -35,9 +44,11 @@ fn duplicate_xor_operands_remain_structural_inputs() {
         "the detector does not prove x ^ x = 0",
         r#"
         module Top (
-            o: output logic,
+            o: output bit,
         ) {
-            assign o = o ^ o;
+            var value: bit;
+            assign o = value ^ value;
+            assign value = o;
         }
         "#,
     );
@@ -49,9 +60,11 @@ fn identical_ternary_arms_retain_structural_control_dependence() {
         "the detector does not eliminate an identical-arm conditional",
         r#"
         module Top (
-            o: output logic,
+            o: output bit,
         ) {
-            assign o = if o ? 1'b0 : 1'b0;
+            var condition: bit;
+            assign o = if condition ? 1'b0 : 1'b0;
+            assign condition = o;
         }
         "#,
     );
@@ -63,38 +76,390 @@ fn identical_function_branches_retain_structural_control_dependence() {
         "the detector does not prove a function result independent of its condition",
         r#"
         module Top (
-            o: output logic,
+            o: output bit,
         ) {
-            function choose (condition: input logic) -> logic {
+            function choose (condition: input bit) -> bit {
                 if condition {
                     return 0;
                 } else {
                     return 0;
                 }
             }
-            assign o = choose(o);
+            var condition: bit;
+            assign o = choose(condition);
+            assign condition = o;
         }
         "#,
     );
 }
 
 #[test]
-fn boolean_cancellation_inside_a_function_does_not_remove_its_input_dependency() {
+fn a_constant_and_mask_inside_a_function_does_not_remove_the_masked_input_bit() {
     assert_intentional_false_positive(
-        "the detector does not prove x & 0 = 0",
+        "the detector does not remove an input bit annihilated by an AND mask",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            function low (x: input bit<8>) -> bit {
+                var tmp: bit<8>;
+                tmp = x & 8'b11111110;
+                return tmp[0];
+            }
+            var value: bit<8>;
+            assign o = low(value);
+            assign value[0] = o;
+            assign value[7:1] = 0;
+        }
+        "#,
+    );
+}
+
+// These arithmetic cases are definite false positives for two-state `bit`
+// operands. The corresponding `logic` cases are left unclassified: that
+// depends on whether the detector follows SystemVerilog four-state expression
+// semantics or the synthesized two-state circuit.
+
+#[test]
+fn addition_does_not_propagate_a_high_input_bit_to_the_low_result_bit() {
+    assert_intentional_false_positive(
+        "the low sum bit depends only on the low bits of the operands",
+        r#"
+        module Top (
+            rhs: input  bit<8>,
+            o  : output bit,
+        ) {
+            var value: bit<8>;
+            var sum  : bit<8>;
+            assign sum = value + rhs;
+            assign value[7] = sum[0];
+            assign value[6:0] = 0;
+            assign o = sum[0];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn subtraction_does_not_propagate_a_high_input_bit_to_the_low_result_bit() {
+    assert_intentional_false_positive(
+        "the low difference bit depends only on the low bits of the operands",
+        r#"
+        module Top (
+            rhs: input  bit<8>,
+            o  : output bit,
+        ) {
+            var value     : bit<8>;
+            var difference: bit<8>;
+            assign difference = value - rhs;
+            assign value[7] = difference[0];
+            assign value[6:0] = 0;
+            assign o = difference[0];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn negation_does_not_propagate_a_high_input_bit_to_the_low_result_bit() {
+    assert_intentional_false_positive(
+        "the low two's-complement bit depends only on the low input bit",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var value  : bit<8>;
+            var negated: bit<8>;
+            assign negated = -value;
+            assign value[7] = negated[0];
+            assign value[6:0] = 0;
+            assign o = negated[0];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn multiplication_does_not_propagate_a_high_input_bit_to_the_low_result_bit() {
+    assert_intentional_false_positive(
+        "the low product bit depends only on the low bits of the operands",
+        r#"
+        module Top (
+            rhs: input  bit<8>,
+            o  : output bit,
+        ) {
+            var value  : bit<8>;
+            var product: bit<8>;
+            assign product = value * rhs;
+            assign value[7] = product[0];
+            assign value[6:0] = 0;
+            assign o = product[0];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn an_even_constant_multiplier_has_fixed_zero_trailing_bits() {
+    assert_intentional_false_positive(
+        "multiplication by twelve makes the low two result bits constant zero",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var value  : bit<8>;
+            var product: bit<8>;
+            assign product = value * 8'd12;
+            assign value[0] = product[1];
+            assign value[7:1] = 0;
+            assign o = product[1];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn the_second_bit_of_a_two_state_square_is_always_zero() {
+    assert_intentional_false_positive(
+        "a square is zero or one modulo four and therefore never sets bit one",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var value : bit<8>;
+            var square: bit<8>;
+            assign square = value * value;
+            assign value[0] = square[1];
+            assign value[7:1] = 0;
+            assign o = square[1];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn unsigned_division_by_a_power_of_two_discards_low_dividend_bits() {
+    assert_intentional_false_positive(
+        "unsigned division by eight is a right shift and discards the low three bits",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var value   : bit<8>;
+            var quotient: bit<8>;
+            assign quotient = value / 8'd8;
+            assign value[0] = quotient[0];
+            assign value[7:1] = 0;
+            assign o = quotient[0];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn unsigned_remainder_by_a_power_of_two_ignores_high_dividend_bits() {
+    assert_intentional_false_positive(
+        "remainder by eight retains only the low three dividend bits",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var value    : bit<8>;
+            var remainder: bit<8>;
+            assign remainder = value % 8'd8;
+            assign value[7] = remainder[0];
+            assign value[6:0] = 0;
+            assign o = remainder[0];
+        }
+        "#,
+    );
+}
+
+// Constants can eliminate individual data or predicate dependencies even when
+// an operand remains structurally present in the expression.
+
+#[test]
+fn a_constant_or_mask_does_not_retain_the_forced_input_bit() {
+    assert_intentional_false_positive(
+        "an OR-mask one makes the corresponding result bit independent of the input",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var value : bit<8>;
+            var masked: bit<8>;
+            assign masked = value | 8'b00000001;
+            assign value[0] = masked[0];
+            assign value[7:1] = 0;
+            assign o = masked[0];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn a_false_right_operand_annihilates_a_logical_and_result() {
+    assert_intentional_false_positive(
+        "a side-effect-free value AND false is independent of the value",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var value: bit;
+            assign o = value && 1'b0;
+            assign value = o;
+        }
+        "#,
+    );
+}
+
+#[test]
+fn a_zero_bit_annihilates_an_and_reduction() {
+    assert_intentional_false_positive(
+        "an AND reduction containing zero is independent of its other operand bits",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var value: bit;
+            assign o = &{value, 1'b0};
+            assign value = o;
+        }
+        "#,
+    );
+}
+
+#[test]
+fn an_aligned_unsigned_threshold_comparison_ignores_low_operand_bits() {
+    assert_intentional_false_positive(
+        "an eight-bit value is below 128 exactly when its high bit is zero",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var value: bit<8>;
+            var less : bit;
+            assign less = value <: 8'd128;
+            assign value[0] = less;
+            assign value[7:1] = 0;
+            assign o = less;
+        }
+        "#,
+    );
+}
+
+#[test]
+fn a_signed_comparison_with_zero_ignores_non_sign_bits() {
+    assert_intentional_false_positive(
+        "a signed value is below zero exactly when its sign bit is one",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var value   : bit<8>;
+            var negative: bit;
+            assign negative = $signed(value) <: 0;
+            assign value[0] = negative;
+            assign value[7:1] = 0;
+            assign o = negative;
+        }
+        "#,
+    );
+}
+
+#[test]
+fn wildcard_comparison_ignores_signal_bits_masked_by_the_pattern() {
+    assert_intentional_false_positive(
+        "X bits in a constant wildcard pattern do not inspect the corresponding signal bits",
         r#"
         module Top (
             o: output logic,
         ) {
-            function low (x: input logic<8>) -> logic {
-                var tmp: logic<8>;
-                tmp = x & 8'b00000000;
-                return tmp[0];
-            }
             var value: logic<8>;
-            assign o = low(value);
-            assign value[0] = o;
+            var equal: logic;
+            assign equal = value ==? 8'bxxxx0000;
+            assign value[7] = equal;
+            assign value[6:0] = 0;
+            assign o = equal;
+        }
+        "#,
+    );
+}
+
+// Runtime mappings are conservatively widened when their reachable bit range
+// cannot be represented by one fixed positional offset.
+
+#[test]
+fn a_dynamic_left_shift_cannot_move_a_high_input_bit_to_the_low_result_bit() {
+    assert_intentional_false_positive(
+        "a left shift selects a lower source bit or zero for the low result bit",
+        r#"
+        module Top (
+            amount: input  bit<3>,
+            o     : output bit,
+        ) {
+            var value  : bit<8>;
+            var shifted: bit<8>;
+            assign shifted = value << amount;
+            assign value[7] = shifted[0];
+            assign value[6:0] = 0;
+            assign o = shifted[0];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn a_dynamic_right_shift_cannot_move_a_low_input_bit_to_the_high_result_bit() {
+    assert_intentional_false_positive(
+        "a right shift selects a higher source bit or zero for the high result bit",
+        r#"
+        module Top (
+            amount: input  bit<3>,
+            o     : output bit,
+        ) {
+            var value  : bit<8>;
+            var shifted: bit<8>;
+            assign shifted = value >> amount;
+            assign value[0] = shifted[7];
             assign value[7:1] = 0;
+            assign o = shifted[7];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn a_ternary_condition_does_not_affect_a_result_bit_shared_by_both_arms() {
+    assert_intentional_false_positive(
+        "the low result bit is zero in both arms even though the complete arm values differ",
+        r#"
+        module Top (
+            o: output bit,
+        ) {
+            var select: bit;
+            var value : bit<2>;
+            assign value = if select ? 2'b10 : 2'b00;
+            assign select = value[0];
+            assign o = value[0];
+        }
+        "#,
+    );
+}
+
+#[test]
+fn a_one_bit_dynamic_selector_cannot_reach_the_high_vector_bits() {
+    assert_intentional_false_positive(
+        "a one-bit index reaches only vector bits zero and one",
+        r#"
+        module Top (
+            index: input  bit,
+            o    : output bit,
+        ) {
+            var value: bit<4>;
+            assign o = value[index];
+            assign value[3] = o;
+            assign value[2:0] = 0;
         }
         "#,
     );
@@ -108,20 +473,14 @@ fn separate_complementary_conditionals_are_not_correlated() {
         "separately written predicates are not proven mutually exclusive",
         r#"
         module Top (
-            sel: input  logic,
-            o  : output logic,
+            sel: input  bit,
+            o  : output bit,
         ) {
-            var a: logic;
-            var b: logic;
-            always_comb {
-                if sel {
-                    a = b;
-                }
-                if !sel {
-                    b = a;
-                }
-                o = a | b;
-            }
+            var a: bit;
+            var b: bit;
+            assign a = if sel ? b : 0;
+            assign b = if !sel ? a : 0;
+            assign o = a | b;
         }
         "#,
     );
@@ -226,7 +585,6 @@ fn correlated_dynamic_bounds_create_an_intentional_false_positive() {
             }
         }
     "#;
-    assert!(comb_loop_analysis_is_complete(code));
     assert_intentional_false_positive(
         "correlated runtime bounds invent a multi-iteration path",
         code,

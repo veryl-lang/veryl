@@ -4,7 +4,9 @@ mod guarded;
 mod relation;
 
 use super::model::{BitDependency, SummaryRegion};
-use super::region::{BitPartition, NodeKey, translate_position};
+#[cfg(test)]
+use super::region::translate_position;
+use super::region::{BitPartition, NodeKey};
 use super::ssa::{PathCondition, PositionDomain};
 use crate::ir::{Module, VarId};
 use crate::{AnalyzerError, HashMap, HashSet};
@@ -166,16 +168,35 @@ fn spans_overlap_with_offset(
     destination_length: usize,
     offset: isize,
 ) -> bool {
-    let Some(source_start) = translate_position(source_start, offset) else {
-        return false;
-    };
     let Some(source_end) = source_start.checked_add(source_length) else {
         return false;
     };
     let Some(destination_end) = destination_start.checked_add(destination_length) else {
         return false;
     };
-    source_start < destination_end && destination_start < source_end
+    if offset >= 0 {
+        let offset = offset.unsigned_abs();
+        let (Some(source_start), Some(source_end)) = (
+            source_start.checked_add(offset),
+            source_end.checked_add(offset),
+        ) else {
+            return false;
+        };
+        source_start < destination_end && destination_start < source_end
+    } else {
+        // `source + offset` overlaps `destination` iff `source` overlaps
+        // `destination - offset`. Shift the destination in the non-negative
+        // direction so a valid source suffix is not lost when source_start +
+        // offset would be negative.
+        let offset = offset.unsigned_abs();
+        let (Some(destination_start), Some(destination_end)) = (
+            destination_start.checked_add(offset),
+            destination_end.checked_add(offset),
+        ) else {
+            return false;
+        };
+        source_start < destination_end && destination_start < source_end
+    }
 }
 
 pub(super) fn check_graph(
@@ -229,6 +250,51 @@ fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool {
     !daggy::petgraph::algo::is_cyclic_directed(&induced)
 }
 
+// Correctness argument for the graph-relative cycle decision:
+//
+// Interpret a graph state as `(node, array_position, packed_position)`. An edge
+// with `Some(k)` maps a coordinate to `coordinate + k`; `None` relates every
+// source coordinate to every coordinate in the destination domain. Interpret a
+// `PathCondition` as its stored Cartesian set of branch choices. Correlations
+// discarded before graph construction are deliberately not reintroduced here.
+//
+// For a fixed anchor, each stack state denotes one real path that has not
+// revisited the anchor: its condition is the conjunction of the edge
+// conditions, and its `PositionRelationSet` is exactly the relation from the
+// anchor position to the current position. This holds initially by `identity`
+// and is preserved by `then_dependency`. Reverse reachability removes no path
+// that can return to the anchor. If an existing state has a superset relation
+// under a weaker condition, every continuation of the new state is also a
+// continuation of the existing state: relation composition is monotone and
+// every valuation admitted by the new condition is admitted by the existing
+// one. The dominance pruning is therefore lossless. The identity-edge search
+// is the same invariant specialized to zero translations.
+//
+// Once an anchor occurrence is fixed, cutting a closed walk at every later
+// occurrence of that anchor uniquely decomposes it into first-return walks.
+// The search records every such relation, or a real relation/condition state
+// that covers it as above. Conversely, compatible recorded relations whose
+// composition intersects identity concatenate to a real closed walk. The
+// guarded-composition argument in `guarded` proves that it finds exactly such
+// sequences. Trying every node as anchor therefore proves that this function
+// returns true exactly when the SCC contains a branch-compatible closed walk
+// that returns to the same array and packed position.
+//
+// Termination assumes the builder invariant asserted by
+// `unconstrained_subgraph_is_acyclic` in debug builds. An empty-domain-only
+// path has bounded length, so every repeatable path visits a finite domain. An exact
+// first-return relation cannot contain a `None` dependency: once an axis is
+// `Unlinked`, later composition never links it again. Its finite-domain visit
+// therefore restricts its starting positions to finite ranges. In any feasible
+// exact word, the cumulative displacement is the difference between positions
+// in its first and last finite guards, so only finitely many displacements and
+// interval endpoints are reachable. A mixed word can be rotated to begin with
+// an `Unlinked` relation; its endpoints come only from finite domain boundaries
+// and those finite exact displacements. Thus only finitely many normalized
+// relation states are reachable. Branches and arms are finite as well, and a
+// dominated state is never queued again. Every endpoint and intermediate
+// offset operation is a construction invariant required to be representable
+// in `isize`; overflow is not interpreted as a dependency relation.
 fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
     let nodes: HashSet<_> = scc.iter().copied().collect();
     if has_zero_dependency_cycle(graph, scc, &nodes) {
@@ -253,7 +319,8 @@ fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
                 if !returnable.contains(&next) {
                     continue;
                 }
-                let Some(next_condition) = condition.union_if_compatible(&edge.weight().condition)
+                let Some(next_condition) =
+                    condition.conjoin_if_compatible(&edge.weight().condition)
                 else {
                     continue;
                 };
@@ -279,15 +346,15 @@ fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
                 if states
                     .iter()
                     .any(|(existing_relation, existing_condition)| {
-                        existing_relation.contains(&next_relation)
-                            && existing_condition.is_subset_of(&next_condition)
+                        existing_relation.piecewise_covers(&next_relation)
+                            && existing_condition.covers(&next_condition)
                     })
                 {
                     continue;
                 }
                 states.retain(|(existing_relation, existing_condition)| {
-                    !next_relation.contains(existing_relation)
-                        || !next_condition.is_subset_of(existing_condition)
+                    !next_relation.piecewise_covers(existing_relation)
+                        || !next_condition.covers(existing_condition)
                 });
                 states.push((next_relation.clone(), next_condition.clone()));
                 stack.push((next, next_condition, next_relation));
@@ -366,7 +433,8 @@ fn has_zero_dependency_cycle(
                 if !nodes.contains(&next) {
                     continue;
                 }
-                let Some(next_condition) = condition.union_if_compatible(&edge.weight().condition)
+                let Some(next_condition) =
+                    condition.conjoin_if_compatible(&edge.weight().condition)
                 else {
                     continue;
                 };
@@ -383,12 +451,12 @@ fn has_zero_dependency_cycle(
                 }
                 let states = reached.entry(next).or_default();
                 if states.iter().any(|(existing, existing_feasible)| {
-                    existing.is_subset_of(&next_condition) && *existing_feasible == feasible
+                    existing.covers(&next_condition) && *existing_feasible == feasible
                 }) {
                     continue;
                 }
                 states.retain(|(existing, existing_feasible)| {
-                    !next_condition.is_subset_of(existing) || *existing_feasible != feasible
+                    !next_condition.covers(existing) || *existing_feasible != feasible
                 });
                 states.push((next_condition.clone(), feasible.clone()));
                 stack.push((next, next_condition, feasible));
@@ -467,8 +535,13 @@ fn inverse_translated_axis(
     let Some(offset) = offset else {
         return Some(None);
     };
-    let start = isize::try_from(start).ok()?.checked_sub(offset)?;
-    let end = start.checked_add_unsigned(length)?;
+    let start = isize::try_from(start)
+        .expect("position domain start must fit in isize")
+        .checked_sub(offset)
+        .expect("translated position start must fit in isize");
+    let end = start
+        .checked_add_unsigned(length)
+        .expect("translated position end must fit in isize");
     (start < end).then_some(Some((start, end)))
 }
 
@@ -483,11 +556,6 @@ fn intersect_axis(
             (range.0 < range.1).then_some(Some(range))
         }
     }
-}
-
-fn dependency_may_return_to_same_position(dependency: BitDependency) -> bool {
-    dependency.array.is_none_or(|offset| offset == 0)
-        && dependency.packed.is_none_or(|offset| offset == 0)
 }
 
 fn dependency_is_identity(dependency: BitDependency) -> bool {
@@ -580,6 +648,33 @@ mod tests {
             graph.edge_weights().next().unwrap().condition,
             PathCondition::default()
         );
+    }
+
+    #[test]
+    fn negative_offset_can_map_a_source_suffix_into_the_destination() {
+        let source = test_node(
+            0,
+            ArraySpan {
+                start: 0,
+                length: 8,
+            },
+        );
+        let destination = test_node(
+            1,
+            ArraySpan {
+                start: 0,
+                length: 4,
+            },
+        );
+
+        assert!(node_regions_overlap_with_dependency(
+            &source,
+            &destination,
+            BitDependency {
+                array: Some(-4),
+                packed: Some(-4),
+            },
+        ));
     }
 
     #[test]
@@ -1060,6 +1155,56 @@ mod tests {
         // The +1 walk is feasible only from anchor[0], and the -1 walk only
         // from anchor[2]. Both finish at anchor[1], where the other walk is
         // disabled, so their displacements cannot be concatenated.
+        graph.add_edge(anchor, plus_guard, edge(1));
+        graph.add_edge(plus_guard, anchor, edge(0));
+        graph.add_edge(anchor, minus_guard, edge(-1));
+        graph.add_edge(minus_guard, anchor, edge(0));
+
+        assert!(!has_compatible_cycle(
+            &graph,
+            &[anchor, plus_guard, minus_guard]
+        ));
+    }
+
+    #[test]
+    fn opposing_displacements_separated_by_a_gap_are_sparse_at_scale() {
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let width = 1_000_000;
+        let middle = width / 2;
+        let mut graph = DependencyGraph::new();
+        let mut node = |id, start, length| {
+            let id = VarId::from_raw(id);
+            graph.add_node(GraphNode {
+                region: SummaryRegion {
+                    id,
+                    array,
+                    packed: PackedSpan::new(0, width).unwrap(),
+                },
+                domains: vec![PositionDomain {
+                    array_start: 0,
+                    array_length: 1,
+                    packed_start: start,
+                    packed_length: length,
+                }],
+                diagnostic: Some((id, array, 0)),
+            })
+        };
+        let anchor = node(0, 0, width);
+        let plus_guard = node(1, 1, middle);
+        let minus_guard = node(2, middle, width - middle - 1);
+        let edge = |packed| {
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            })
+        };
+
+        // +1 starts below `middle`; -1 starts above it. Both can finish at
+        // `middle`, where neither relation can start, so no word can switch
+        // from one displacement direction to the other.
         graph.add_edge(anchor, plus_guard, edge(1));
         graph.add_edge(plus_guard, anchor, edge(0));
         graph.add_edge(anchor, minus_guard, edge(-1));

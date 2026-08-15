@@ -1316,8 +1316,8 @@ fn add_resolved_dependency_edges(
     for source in &sources.nodes {
         for destination in &destinations.nodes {
             let Some(edge_condition) = condition
-                .union_if_compatible(&source.condition)
-                .and_then(|condition| condition.union_if_compatible(&destination.condition))
+                .conjoin_if_compatible(&source.condition)
+                .and_then(|condition| condition.conjoin_if_compatible(&destination.condition))
             else {
                 continue;
             };
@@ -1327,15 +1327,17 @@ fn add_resolved_dependency_edges(
             ) = (source.offset, destination.offset)
             {
                 BitDependency {
-                    array: dependency.array.and_then(|array| {
+                    array: dependency.array.map(|array| {
                         array
-                            .checked_add(destination_array)?
-                            .checked_sub(source_array)
+                            .checked_add(destination_array)
+                            .and_then(|offset| offset.checked_sub(source_array))
+                            .expect("mapped array dependency offset must fit in isize")
                     }),
-                    packed: dependency.packed.and_then(|packed| {
+                    packed: dependency.packed.map(|packed| {
                         packed
-                            .checked_add(destination_packed)?
-                            .checked_sub(source_packed)
+                            .checked_add(destination_packed)
+                            .and_then(|offset| offset.checked_sub(source_packed))
+                            .expect("mapped packed dependency offset must fit in isize")
                     }),
                 }
             } else {

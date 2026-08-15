@@ -43,15 +43,19 @@ impl BitDependency {
 
     pub(super) fn compose(self, next: Self) -> Self {
         Self {
-            array: self
-                .array
-                .zip(next.array)
-                .and_then(|(left, right)| left.checked_add(right)),
-            packed: self
-                .packed
-                .zip(next.packed)
-                .and_then(|(left, right)| left.checked_add(right)),
+            array: compose_axis(self.array, next.array),
+            packed: compose_axis(self.packed, next.packed),
         }
+    }
+}
+
+fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(
+            left.checked_add(right)
+                .expect("composed dependency offset must fit in isize"),
+        ),
+        _ => None,
     }
 }
 
