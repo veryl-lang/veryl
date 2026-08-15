@@ -1021,7 +1021,6 @@ fn comb_loop_structural_dependency_semantics_observer_only_duplicate_reads_do_no
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; inner break does not exit outer loop"]
 fn comb_loop_nested_break_exits_only_inner_loop_before_dominating_overwrite() {
     assert_comb_loop(
         "an inner break does not skip the outer loop's dominating overwrite",

@@ -1080,7 +1080,7 @@ pub enum CasePattern {
 
 impl CasePattern {
     /// `None` when either side is non-const.
-    fn matches(&self, target: &Value, context: &mut Context) -> Option<bool> {
+    pub(crate) fn matches(&self, target: &Value, context: &mut Context) -> Option<bool> {
         let target_n = target.to_usize()?;
         match self {
             CasePattern::Eq(e) => {
