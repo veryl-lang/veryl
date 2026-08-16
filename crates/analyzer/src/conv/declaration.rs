@@ -1281,14 +1281,6 @@ fn conv_function(
         }
         let effect = RuntimeFunctionEffect {
             external_write: proeprty.has_side_effect_in(&c.config.defines),
-            external_writes: proeprty
-                .external_write_paths(&c.config.defines)
-                .into_iter()
-                .map(|path| crate::conv::context::ExternalWriteOrigin {
-                    path: path.to_string(),
-                    token: path.range,
-                })
-                .collect(),
             formal_writes: proeprty.written_output_names(&c.config.defines),
         };
         c.begin_function_effect(path.clone(), output_ids, effect);

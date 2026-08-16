@@ -3,6 +3,8 @@ use crate::symbol::{Direction, FunctionProperty, FunctionWrite, Symbol, SymbolId
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use crate::{HashMap, HashSet, scope};
+use veryl_parser::resource_table::StrId;
+use veryl_parser::token_range::TokenRange;
 
 pub fn resolve_function(list: &[Symbol]) {
     for symbol in list {
@@ -44,13 +46,13 @@ fn resolve_constantable(symbol: &Symbol, visited: &mut Vec<SymbolId>) -> bool {
 
 #[derive(Clone, Default, PartialEq, Eq)]
 struct Effect {
-    external_writes: HashSet<FunctionWrite>,
+    external_writes: HashSet<DefineContext>,
     formal_writes: HashSet<FunctionWrite>,
 }
 
 enum WriteTarget {
     None,
-    External(GenericSymbolPath),
+    External,
     Formal(GenericSymbolPath),
 }
 
@@ -79,11 +81,9 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
                         SymbolKind::ModportVariableMember(member)
                             if matches!(member.direction, Direction::Output | Direction::Inout) =>
                         {
-                            WriteTarget::External(path.clone())
+                            WriteTarget::External
                         }
-                        _ if matches!(port.direction, Direction::Inout) => {
-                            WriteTarget::External(path.clone())
-                        }
+                        _ if matches!(port.direction, Direction::Inout) => WriteTarget::External,
                         _ => WriteTarget::None,
                     }
                 }
@@ -96,7 +96,7 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
             &root.found.kind,
             SymbolKind::Port(_) | SymbolKind::Variable(_)
         ) {
-            return WriteTarget::External(path.clone());
+            return WriteTarget::External;
         }
         let Ok(target) = symbol_table::resolve(path) else {
             return WriteTarget::None;
@@ -106,7 +106,7 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
             | SymbolKind::Variable(_)
             | SymbolKind::ModportVariableMember(_)
             | SymbolKind::StructMember(_)
-            | SymbolKind::UnionMember(_) => WriteTarget::External(path.clone()),
+            | SymbolKind::UnionMember(_) => WriteTarget::External,
             _ => WriteTarget::None,
         }
     }
@@ -132,11 +132,8 @@ fn path_define_context(path: &GenericSymbolPath) -> DefineContext {
 fn add_target(effect: &mut Effect, target: WriteTarget, define_context: DefineContext) {
     match target {
         WriteTarget::None => {}
-        WriteTarget::External(path) => {
-            effect.external_writes.insert(FunctionWrite {
-                path,
-                define_context,
-            });
+        WriteTarget::External => {
+            effect.external_writes.insert(define_context);
         }
         WriteTarget::Formal(path) => {
             effect.formal_writes.insert(FunctionWrite {
@@ -145,6 +142,105 @@ fn add_target(effect: &mut Effect, target: WriteTarget, define_context: DefineCo
             });
         }
     }
+}
+
+/// Finds one active external write for a diagnostic without retaining write
+/// provenance in every function effect summary.
+pub fn find_external_write<F>(
+    symbol: &Symbol,
+    defines: &HashSet<StrId>,
+    mut resolve_path: F,
+) -> Option<TokenRange>
+where
+    F: FnMut(GenericSymbolPath) -> GenericSymbolPath,
+{
+    fn visit<F>(
+        symbol: &Symbol,
+        defines: &HashSet<StrId>,
+        resolve_path: &mut F,
+        visited: &mut HashSet<SymbolId>,
+    ) -> Option<TokenRange>
+    where
+        F: FnMut(GenericSymbolPath) -> GenericSymbolPath,
+    {
+        if !visited.insert(symbol.id) {
+            return None;
+        }
+        let SymbolKind::Function(func) = &symbol.kind else {
+            return None;
+        };
+        let namespace = symbol.inner_namespace();
+
+        for path in &func.write_paths {
+            if !path_define_context(path).is_active(defines) {
+                continue;
+            }
+            let resolved = resolve_path(path.clone());
+            if matches!(classify_write(&resolved, &namespace), WriteTarget::External) {
+                return Some(path.range);
+            }
+        }
+
+        for call in &func.call_sites {
+            if !path_define_context(&call.callee).is_active(defines) {
+                continue;
+            }
+            let callee_path = resolve_path(call.callee.clone());
+            let Some(callee) = called_function(&callee_path) else {
+                continue;
+            };
+
+            if let Some(write) = visit(&callee, defines, resolve_path, visited) {
+                return Some(write);
+            }
+
+            let SymbolKind::Function(callee_func) = &callee.kind else {
+                continue;
+            };
+            for formal_write in callee_func.written_output_paths(defines) {
+                let Some(formal_name) = formal_write.paths.first().map(|x| x.base.text) else {
+                    continue;
+                };
+                let Some((formal_index, _)) = callee_func
+                    .ports
+                    .iter()
+                    .enumerate()
+                    .find(|(_, port)| port.token.token.text == formal_name)
+                else {
+                    continue;
+                };
+                let argument = call
+                    .arguments
+                    .iter()
+                    .find(|argument| argument.name == Some(formal_name))
+                    .or_else(|| {
+                        call.arguments
+                            .iter()
+                            .all(|argument| argument.name.is_none())
+                            .then(|| call.arguments.get(formal_index))
+                            .flatten()
+                    });
+                let Some(argument) = argument else {
+                    continue;
+                };
+
+                for actual in &argument.targets {
+                    let mut mapped = actual.clone();
+                    mapped
+                        .paths
+                        .extend(formal_write.paths.iter().skip(1).cloned());
+                    let resolved = resolve_path(mapped);
+                    if matches!(classify_write(&resolved, &namespace), WriteTarget::External) {
+                        return Some(actual.range);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    visit(symbol, defines, &mut resolve_path, &mut HashSet::default())
 }
 
 fn resolve_side_effects(list: &[Symbol]) {
@@ -185,12 +281,9 @@ fn resolve_side_effects(list: &[Symbol]) {
                     continue;
                 };
                 let call_context = path_define_context(&call.callee);
-                for external_write in &callee_effect.external_writes {
-                    if let Some(context) = call_context.conjoin(&external_write.define_context) {
-                        effect.external_writes.insert(FunctionWrite {
-                            path: external_write.path.clone(),
-                            define_context: context,
-                        });
+                for callee_context in &callee_effect.external_writes {
+                    if let Some(context) = call_context.conjoin(callee_context) {
+                        effect.external_writes.insert(context);
                     }
                 }
 
@@ -250,15 +343,9 @@ fn resolve_side_effects(list: &[Symbol]) {
             unreachable!();
         };
         func.has_side_effect = !effect.external_writes.is_empty();
-        func.conditional_effects.side_effect_contexts = effect
-            .external_writes
-            .iter()
-            .map(|write| write.define_context.clone())
-            .collect();
+        func.conditional_effects.side_effect_contexts =
+            effect.external_writes.into_iter().collect();
         func.conditional_effects.side_effect_contexts.sort();
-        func.conditional_effects.side_effect_contexts.dedup();
-        func.conditional_effects.external_writes = effect.external_writes.into_iter().collect();
-        func.conditional_effects.external_writes.sort();
         func.formal_writes = effect
             .formal_writes
             .iter()

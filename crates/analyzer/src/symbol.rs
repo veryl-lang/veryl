@@ -2608,8 +2608,6 @@ pub struct FunctionProperty {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConditionalFunctionEffects {
     pub side_effect_contexts: Vec<DefineContext>,
-    #[serde(default)]
-    pub external_writes: Vec<FunctionWrite>,
     pub formal_write_contexts: Vec<FunctionWrite>,
 }
 
@@ -2647,8 +2645,8 @@ impl FunctionProperty {
         }
     }
 
-    pub fn written_output_names(&self, defines: &HashSet<StrId>) -> HashSet<StrId> {
-        let writes = if self.conditional_effects.formal_write_contexts.is_empty() {
+    pub fn written_output_paths(&self, defines: &HashSet<StrId>) -> Vec<&GenericSymbolPath> {
+        if self.conditional_effects.formal_write_contexts.is_empty() {
             self.formal_writes.iter().collect::<Vec<_>>()
         } else {
             self.conditional_effects
@@ -2657,20 +2655,13 @@ impl FunctionProperty {
                 .filter(|x| x.define_context.is_active(defines))
                 .map(|x| &x.path)
                 .collect()
-        };
-
-        writes
-            .into_iter()
-            .filter_map(|path| path.paths.first().map(|x| x.base.text))
-            .collect()
+        }
     }
 
-    pub fn external_write_paths(&self, defines: &HashSet<StrId>) -> Vec<&GenericSymbolPath> {
-        self.conditional_effects
-            .external_writes
-            .iter()
-            .filter(|write| write.define_context.is_active(defines))
-            .map(|write| &write.path)
+    pub fn written_output_names(&self, defines: &HashSet<StrId>) -> HashSet<StrId> {
+        self.written_output_paths(defines)
+            .into_iter()
+            .filter_map(|path| path.paths.first().map(|x| x.base.text))
             .collect()
     }
 }

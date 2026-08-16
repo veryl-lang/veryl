@@ -30,16 +30,9 @@ pub struct Config {
     pub defines: HashSet<StrId>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct ExternalWriteOrigin {
-    pub path: String,
-    pub token: TokenRange,
-}
-
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RuntimeFunctionEffect {
     pub external_write: bool,
-    pub external_writes: HashSet<ExternalWriteOrigin>,
     pub formal_writes: HashSet<StrId>,
 }
 
@@ -276,7 +269,6 @@ impl Context {
         };
         let caller_outputs = frame.outputs.clone();
         let mut external_write = effect.external_write;
-        let mut external_writes = effect.external_writes.clone();
         let mut formal_writes = HashSet::default();
 
         for (formal, destinations) in outputs {
@@ -298,17 +290,12 @@ impl Context {
                     })
                 {
                     external_write = true;
-                    external_writes.insert(ExternalWriteOrigin {
-                        path: destination.path.to_string(),
-                        token: destination.token,
-                    });
                 }
             }
         }
 
         if let Some(frame) = self.function_effect_stack.last_mut() {
             frame.effect.external_write |= external_write;
-            frame.effect.external_writes.extend(external_writes);
             frame.effect.formal_writes.extend(formal_writes);
         }
     }
