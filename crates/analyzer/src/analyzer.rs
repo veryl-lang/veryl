@@ -190,12 +190,14 @@ impl Analyzer {
 
         symbol_table::apply_import();
         symbol_table::resolve_user_defined();
-        symbol_table::resolve_function();
         ret.append(&mut symbol_table::resolve_interfaces());
         ret.append(&mut symbol_table::resolve_enum());
         ret.append(&mut symbol_table::apply_bind());
         ret.append(&mut symbol_table::apply_msb());
         ret.append(&mut symbol_table::apply_connect());
+        // Function effects for diamond connections depend on the linked
+        // modports and validated connection pairs produced above.
+        symbol_table::resolve_function();
         generic_inference_table::resolve_pending();
         ret.append(&mut reference_table::apply());
         ret.append(&mut type_dag::apply());

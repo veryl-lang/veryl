@@ -19507,6 +19507,80 @@ fn diamond_connect_in_function_is_scheduler_side_effect() {
             .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
         "{errors:?}"
     );
+
+    // An expression on the RHS is read, not written. With no writable member
+    // on the LHS, it must not become an external write merely because it is an
+    // HDL object declared outside the function.
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport monitor {
+            data: input,
+        }
+    }
+    module ModuleA (
+        clk   : input clock,
+        source: input logic,
+    ) {
+        #[allow(unassign_variable)]
+        inst bus: Bus;
+        function observe (arg: modport Bus::monitor) {
+            arg <> source;
+        }
+        always_ff (clk) {
+            observe(bus);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+
+    // Output members that have no matching input member on the other operand
+    // do not expand into assignments either.
+    let code = r#"
+    interface Bus {
+        var produced: logic;
+        var consumed: logic;
+        modport producer {
+            produced: output,
+        }
+        modport consumer {
+            consumed: input,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(unassign_variable)]
+        inst producer_if: Bus;
+        #[allow(unassign_variable)]
+        inst consumer_if: Bus;
+        #[allow(unassign_variable)]
+        function wire_bus (
+            lhs: modport Bus::producer,
+            rhs: modport Bus::consumer,
+        ) {
+            lhs <> rhs;
+        }
+        always_ff (clk) {
+            wire_bus(producer_if, consumer_if);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
 }
 
 #[test]

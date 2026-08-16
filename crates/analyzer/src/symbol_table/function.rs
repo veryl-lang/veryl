@@ -1,3 +1,4 @@
+use crate::connect_operation_table;
 use crate::conv::Context;
 use crate::ir::Signature;
 use crate::namespace::{DefineContext, Namespace};
@@ -61,29 +62,24 @@ enum WriteTarget {
     Formal(GenericSymbolPath),
 }
 
-fn modport_has_output(port: &crate::symbol::PortProperty) -> bool {
-    let Some(r#type) = port.r#type.get_user_defined() else {
-        return false;
+fn classify_connect(path: &GenericSymbolPath) -> Option<WriteTarget> {
+    let operation = connect_operation_table::get(&path.range.beg)?;
+    let has_write = if let Some((ports, _)) = operation.get_ports_with_expression() {
+        !ports.is_empty()
+    } else {
+        !operation.get_connection_pairs().is_empty()
     };
-    let Ok(modport) = symbol_table::resolve(&r#type.path) else {
-        return false;
-    };
-    let SymbolKind::Modport(modport) = &modport.found.kind else {
-        return false;
-    };
-
-    modport.members.iter().any(|member| {
-        symbol_table::get(*member).is_some_and(|member| {
-            matches!(
-                member.kind,
-                SymbolKind::ModportVariableMember(ref member)
-                    if matches!(member.direction, Direction::Output | Direction::Inout)
-            )
-        })
+    Some(if has_write {
+        WriteTarget::External
+    } else {
+        WriteTarget::None
     })
 }
 
 fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarget {
+    if let Some(target) = classify_connect(path) {
+        return target;
+    }
     let Some(_) = path.paths.first() else {
         return WriteTarget::None;
     };
@@ -107,12 +103,6 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
                     match &target.found.kind {
                         SymbolKind::ModportVariableMember(member)
                             if matches!(member.direction, Direction::Output | Direction::Inout) =>
-                        {
-                            WriteTarget::External
-                        }
-                        SymbolKind::Port(_)
-                            if matches!(port.direction, Direction::Modport)
-                                && modport_has_output(port) =>
                         {
                             WriteTarget::External
                         }

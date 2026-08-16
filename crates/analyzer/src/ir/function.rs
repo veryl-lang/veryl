@@ -253,7 +253,9 @@ impl FunctionCall {
         for output in self.outputs.values() {
             for dst in output {
                 if let Some(index) = dst.index.eval_value(context) {
-                    let variable = context.get_variable_info(dst.id).unwrap();
+                    let Some(variable) = context.get_variable_info(dst.id) else {
+                        continue;
+                    };
                     if let Some((beg, end)) =
                         dst.select.eval_value(context, &variable.r#type, false)
                     {
