@@ -2592,7 +2592,27 @@ pub struct FunctionProperty {
     pub ret: Option<Type>,
     pub reference_paths: Vec<GenericSymbolPath>,
     pub constantable: Option<bool>,
+    #[serde(default)]
+    pub write_paths: Vec<GenericSymbolPath>,
+    #[serde(default)]
+    pub call_sites: Vec<FunctionCallSite>,
+    #[serde(default)]
+    pub has_side_effect: bool,
+    #[serde(default)]
+    pub formal_writes: Vec<GenericSymbolPath>,
     pub definition: Option<DefinitionId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionCallSite {
+    pub callee: GenericSymbolPath,
+    pub arguments: Vec<FunctionCallArgument>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionCallArgument {
+    pub name: Option<StrId>,
+    pub targets: Vec<GenericSymbolPath>,
 }
 
 impl FunctionProperty {

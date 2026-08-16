@@ -16,12 +16,13 @@ use crate::symbol::Type as SymType;
 use crate::symbol::{
     Affiliation, AliasInterfaceProperty, AliasModuleProperty, AliasPackageProperty, ConnectTarget,
     ConnectTargetIdentifier, DocComment, DocCommentLine, EnumMemberProperty, EnumMemberValue,
-    EnumProperty, FunctionProperty, GenericBoundKind, GenericConstProperty,
-    GenericParameterProperty, InstanceProperty, InterfaceProperty, ModportFunctionMemberProperty,
-    ModportProperty, ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter,
-    ParameterKind, ParameterProperty, Port, PortProperty, StructMemberProperty, StructProperty,
-    Symbol, SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty, TypeKind,
-    TypeModifierKind, UnionMemberProperty, UnionProperty, VariableProperty,
+    EnumProperty, FunctionCallArgument, FunctionCallSite, FunctionProperty, GenericBoundKind,
+    GenericConstProperty, GenericParameterProperty, InstanceProperty, InterfaceProperty,
+    ModportFunctionMemberProperty, ModportProperty, ModportVariableMemberProperty, ModuleProperty,
+    PackageProperty, Parameter, ParameterKind, ParameterProperty, Port, PortProperty,
+    StructMemberProperty, StructProperty, Symbol, SymbolId, SymbolKind, TestProperty, TestType,
+    TypeDefProperty, TypeKind, TypeModifierKind, UnionMemberProperty, UnionProperty,
+    VariableProperty,
 };
 use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamespace, SymbolPathNamespace};
 use crate::symbol_table;
@@ -39,7 +40,80 @@ use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenSource};
-use veryl_parser::veryl_walker::{Handler, HandlerPoint};
+use veryl_parser::veryl_walker::{Handler, HandlerPoint, VerylWalker};
+
+#[derive(Default)]
+struct AssignmentTargetHandler {
+    point: HandlerPoint,
+    select_depth: usize,
+    targets: Vec<GenericSymbolPath>,
+}
+
+impl Handler for AssignmentTargetHandler {
+    fn set_point(&mut self, point: HandlerPoint) {
+        self.point = point;
+    }
+}
+
+impl VerylGrammarTrait for AssignmentTargetHandler {
+    fn select(&mut self, _arg: &Select) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.select_depth += 1,
+            HandlerPoint::After => self.select_depth -= 1,
+        }
+        Ok(())
+    }
+
+    fn expression_identifier(&mut self, arg: &ExpressionIdentifier) -> Result<(), ParolError> {
+        if matches!(self.point, HandlerPoint::Before) && self.select_depth == 0 {
+            self.targets.push(arg.into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct AssignmentTargetWalker {
+    handler: AssignmentTargetHandler,
+}
+
+impl VerylWalker for AssignmentTargetWalker {
+    fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
+        Some(vec![&mut self.handler])
+    }
+}
+
+fn assignment_targets(expression: &Expression) -> Vec<GenericSymbolPath> {
+    let mut walker = AssignmentTargetWalker::default();
+    walker.expression(expression);
+    walker.handler.targets
+}
+
+fn function_call_site(callee: GenericSymbolPath, call: &FunctionCall) -> FunctionCallSite {
+    let mut arguments = Vec::new();
+    if let Some(list) = &call.function_call_opt {
+        let items: Vec<&ArgumentItem> = list.argument_list.as_ref().into();
+        for item in items {
+            if let Some(named) = &item.argument_item_opt {
+                let name = item
+                    .argument_expression
+                    .expression
+                    .unwrap_identifier()
+                    .map(|x| x.identifier().token.text);
+                arguments.push(FunctionCallArgument {
+                    name,
+                    targets: assignment_targets(named.expression.as_ref()),
+                });
+            } else {
+                arguments.push(FunctionCallArgument {
+                    name: None,
+                    targets: assignment_targets(item.argument_expression.expression.as_ref()),
+                });
+            }
+        }
+    }
+    FunctionCallSite { callee, arguments }
+}
 
 #[derive(Default)]
 struct GenericContext {
@@ -89,6 +163,8 @@ pub struct CreateSymbolTable {
     parameters: Vec<Vec<Parameter>>,
     ports: Vec<Vec<Port>>,
     reference_paths: Vec<Vec<GenericSymbolPath>>,
+    write_paths: Vec<Vec<GenericSymbolPath>>,
+    call_sites: Vec<Vec<FunctionCallSite>>,
     needs_default_generic_argument: bool,
     generic_context: GenericContext,
     default_clock: Option<SymbolId>,
@@ -702,6 +778,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 {
                     let path: GenericSymbolPath = arg.expression_identifier.as_ref().into();
                     self.reference_functions.push(path.clone());
+                    if let Some(call_sites) = self.call_sites.last_mut() {
+                        call_sites.push(function_call_site(path.clone(), &fc.function_call));
+                    }
 
                     let has_generic_args = path
                         .paths
@@ -850,6 +929,14 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.identifier_factor_names
                     .push(*arg.expression_identifier.clone());
 
+                if matches!(
+                    arg.identifier_statement_group.as_ref(),
+                    IdentifierStatementGroup::Assignment(_)
+                ) && let Some(paths) = self.write_paths.last_mut()
+                {
+                    paths.push(arg.expression_identifier.as_ref().into());
+                }
+
                 if let IdentifierStatementGroup::Assignment(x) =
                     arg.identifier_statement_group.as_ref()
                     && let AssignmentGroup::DiamondOperator(_) =
@@ -866,6 +953,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 {
                     let path: GenericSymbolPath = arg.expression_identifier.as_ref().into();
                     self.reference_functions.push(path.clone());
+                    if let Some(call_sites) = self.call_sites.last_mut() {
+                        call_sites.push(function_call_site(path.clone(), &fc.function_call));
+                    }
 
                     // Register generic-argument inference for a function called
                     // as a discarded-result statement (e.g. `f(x);` in
@@ -1810,6 +1900,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.generic_context.push();
                 self.ports.push(Vec::new());
                 self.reference_paths.push(Vec::new());
+                self.write_paths.push(Vec::new());
+                self.call_sites.push(Vec::new());
                 self.affiliation.push(Affiliation::Function);
                 self.push_type_dag_cand();
             }
@@ -1820,6 +1912,8 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 let (generic_parameters, generic_consts) = self.generic_context.pop();
                 let ports: Vec<_> = self.ports.pop().unwrap();
                 let reference_paths: Vec<_> = self.reference_paths.pop().unwrap();
+                let write_paths: Vec<_> = self.write_paths.pop().unwrap();
+                let call_sites: Vec<_> = self.call_sites.pop().unwrap();
 
                 let ret = arg
                     .function_declaration_opt1
@@ -1856,6 +1950,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     ret,
                     reference_paths,
                     constantable: None,
+                    write_paths,
+                    call_sites,
+                    has_side_effect: false,
+                    formal_writes: vec![],
                     definition: Some(definition),
                 };
 
@@ -2538,6 +2636,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     ret,
                     reference_paths: vec![],
                     constantable: None,
+                    write_paths: vec![],
+                    call_sites: vec![],
+                    has_side_effect: false,
+                    formal_writes: vec![],
                     definition: Some(definition),
                 };
 

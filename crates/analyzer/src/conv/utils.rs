@@ -4011,6 +4011,29 @@ pub fn function_call(
     let mut sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
     sig.normalize();
 
+    let written_outputs: HashSet<_> = symbol_table::get(sig.symbol)
+        .and_then(|symbol| match symbol.kind {
+            SymbolKind::Function(func) => Some(
+                func.formal_writes
+                    .iter()
+                    .filter_map(|path| path.paths.first().map(|x| x.base.text))
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    if context.is_affiliated(Affiliation::AlwaysFf)
+        && let Some(symbol) = symbol_table::get(sig.symbol)
+        && let SymbolKind::Function(func) = &symbol.kind
+        && func.has_side_effect
+    {
+        context.insert_error(AnalyzerError::side_effect_function_call_in_always_ff(
+            &symbol.token.text.to_string(),
+            &token,
+        ));
+    }
+
     // same signature re-entered => true infinite recursion
     if context.function_call_stack.contains(&sig) {
         context.insert_error(AnalyzerError::infinite_recursion(&token));
@@ -4058,6 +4081,25 @@ pub fn function_call(
     let ret = context.block(|c| {
         let func = get_function(c, &path, token)?;
         let (mut inputs, outputs) = args.to_function_args(c, &func, token)?;
+
+        if c.is_affiliated(Affiliation::AlwaysFf) {
+            for (formal, dsts) in &outputs {
+                if !formal
+                    .0
+                    .first()
+                    .is_some_and(|name| written_outputs.contains(name))
+                {
+                    continue;
+                }
+                for dst in dsts {
+                    if c.get_variable_info(dst.id)
+                        .is_some_and(|variable| variable.affiliation != Affiliation::AlwaysFf)
+                    {
+                        c.insert_error(AnalyzerError::function_output_in_always_ff(&dst.token));
+                    }
+                }
+            }
+        }
 
         let mut comptime = func.r#type.clone();
         comptime.token = token;

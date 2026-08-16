@@ -18959,3 +18959,318 @@ fn orphan_else_across_scopes() {
         "{errors:?}"
     );
 }
+#[test]
+fn side_effect_function_call_in_always_ff() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function update () {
+            q = 1;
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn transitive_side_effect_function_call_in_always_ff() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function write_q () {
+            q = 1;
+        }
+        function update () {
+            write_q();
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn function_local_write_has_no_scheduler_side_effect() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+    ) {
+        function calculate () {
+            var tmp: logic;
+            tmp = 1;
+            $display("%b", tmp);
+        }
+        always_ff (clk) {
+            calculate();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn function_output_in_always_ff_requires_process_local_variable() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function calculate (result: output logic) {
+            result = 1;
+        }
+        always_ff (clk) {
+            calculate(q);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function calculate (result: output logic) {
+            result = 1;
+        }
+        always_ff (clk) {
+            var tmp: logic;
+            calculate(tmp);
+            q = tmp;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+
+    // An output declaration is only a capability. Without an actual write in
+    // the function body it has no scheduler-visible effect.
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function inspect (result: output logic) {
+        }
+        always_ff (clk) {
+            inspect(q);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn function_output_write_propagates_through_wrappers() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function inner (result: output logic) {
+            result = 1;
+        }
+        function hidden_write () {
+            inner(q);
+        }
+        always_ff (clk) {
+            hidden_write();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function inner (result: output logic) {
+            result = 1;
+        }
+        function forward (result: output logic) {
+            inner(result);
+        }
+        always_ff (clk) {
+            forward(q);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn modport_effect_requires_an_actual_member_write() {
+    fn has_side_effect(code: &str, name: &str) -> bool {
+        use crate::symbol::SymbolKind;
+        use veryl_parser::veryl_grammar_trait::FunctionDeclaration;
+        use veryl_parser::veryl_walker::VerylWalker;
+
+        symbol_table::clear();
+        attribute_table::clear();
+        doc_comment_table::clear();
+        let metadata = Metadata::create_default("prj").unwrap();
+        let parser = Parser::parse(code, &"").unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        assert!(analyzer.analyze_pass1("prj", &parser.veryl).is_empty());
+        assert!(Analyzer::analyze_post_pass1().is_empty());
+
+        #[derive(Default)]
+        struct Functions(Vec<FunctionDeclaration>);
+        impl VerylWalker for Functions {
+            fn function_declaration(&mut self, arg: &FunctionDeclaration) {
+                self.0.push(arg.clone());
+            }
+        }
+
+        let mut functions = Functions::default();
+        functions.veryl(&parser.veryl);
+        let function = functions
+            .0
+            .iter()
+            .find(|x| x.identifier.text().to_string() == name)
+            .unwrap();
+        let symbol = symbol_table::resolve(function.identifier.as_ref()).unwrap();
+        let SymbolKind::Function(function) = &symbol.found.kind else {
+            unreachable!();
+        };
+        function.has_side_effect
+    }
+
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport master {
+            data: output,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+        bus: modport Bus::master,
+    ) {
+        function observe (arg: modport Bus::master) {
+            var tmp: logic;
+            tmp = arg.data;
+        }
+        always_ff (clk) {
+            observe(bus);
+        }
+    }
+    "#;
+
+    assert!(!has_side_effect(code, "observe"));
+
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport master {
+            data: output,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+        bus: modport Bus::master,
+    ) {
+        function update (arg: modport Bus::master) {
+            arg.data = 1;
+        }
+        always_ff (clk) {
+            update(bus);
+        }
+    }
+    "#;
+
+    assert!(has_side_effect(code, "update"));
+}
+
+#[test]
+fn side_effect_survives_repeated_post_pass1() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function update () {
+            q = 1;
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}

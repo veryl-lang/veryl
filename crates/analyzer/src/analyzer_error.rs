@@ -77,6 +77,39 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(side_effect_function_call_in_always_ff),
+        help("move the write into always_ff or call a function without external writes"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error(
+        "function \"{identifier}\" writes an object outside the function and can't be called in always_ff"
+    )]
+    SideEffectFunctionCallInAlwaysFf {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("side-effecting function call")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(function_output_in_always_ff),
+        help("connect function outputs to variables declared inside this always_ff block"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("function output in always_ff must be connected to a process-local variable")]
+    FunctionOutputInAlwaysFf {
+        #[source_code]
+        input: MultiSources,
+        #[label("not a process-local variable")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(combinational_loop),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2039,6 +2072,8 @@ impl AnalyzerError {
             AnalyzerError::AmbiguousIdentifier { input, .. } => input,
             AnalyzerError::AnonymousIdentifierUsage { input, .. } => input,
             AnalyzerError::CallNonFunction { input, .. } => input,
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { input, .. } => input,
+            AnalyzerError::FunctionOutputInAlwaysFf { input, .. } => input,
             AnalyzerError::CombinationalLoop { input, .. } => input,
             AnalyzerError::CyclicTypeDependency { input, .. } => input,
             AnalyzerError::DuplicateArgument { input, .. } => input,
@@ -2156,6 +2191,8 @@ impl AnalyzerError {
             AnalyzerError::AmbiguousIdentifier { token_source, .. } => *token_source,
             AnalyzerError::AnonymousIdentifierUsage { token_source, .. } => *token_source,
             AnalyzerError::CallNonFunction { token_source, .. } => *token_source,
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { token_source, .. } => *token_source,
+            AnalyzerError::FunctionOutputInAlwaysFf { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
             AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
             AnalyzerError::DuplicateArgument { token_source, .. } => *token_source,
@@ -2297,6 +2334,21 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             inst_context: vec![],
+            token_source: token.source(),
+        }
+    }
+    pub fn side_effect_function_call_in_always_ff(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::SideEffectFunctionCallInAlwaysFf {
+            identifier: identifier.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn function_output_in_always_ff(token: &TokenRange) -> Self {
+        AnalyzerError::FunctionOutputInAlwaysFf {
+            input: source(token),
+            error_location: token.into(),
             token_source: token.source(),
         }
     }

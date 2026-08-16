@@ -106,6 +106,10 @@ fn insert_method(
         ret,
         reference_paths: vec![],
         constantable: None,
+        write_paths: vec![],
+        call_sites: vec![],
+        has_side_effect: false,
+        formal_writes: vec![],
         definition: None,
     };
     let func_symbol = Symbol::new(
