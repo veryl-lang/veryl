@@ -155,30 +155,56 @@ pub fn find_external_write<F>(
 where
     F: FnMut(GenericSymbolPath) -> GenericSymbolPath,
 {
+    #[derive(Default)]
+    struct WriteOrigins {
+        external: Option<TokenRange>,
+        formal: Vec<(GenericSymbolPath, TokenRange)>,
+    }
+
     fn visit<F>(
         symbol: &Symbol,
         defines: &HashSet<StrId>,
         resolve_path: &mut F,
-        visited: &mut HashSet<SymbolId>,
-    ) -> Option<TokenRange>
+        visiting: &mut HashSet<SymbolId>,
+    ) -> WriteOrigins
     where
         F: FnMut(GenericSymbolPath) -> GenericSymbolPath,
     {
-        if !visited.insert(symbol.id) {
-            return None;
+        if !visiting.insert(symbol.id) {
+            return WriteOrigins::default();
         }
+        let ret = collect(symbol, defines, resolve_path, visiting);
+        visiting.remove(&symbol.id);
+        ret
+    }
+
+    fn collect<F>(
+        symbol: &Symbol,
+        defines: &HashSet<StrId>,
+        resolve_path: &mut F,
+        visiting: &mut HashSet<SymbolId>,
+    ) -> WriteOrigins
+    where
+        F: FnMut(GenericSymbolPath) -> GenericSymbolPath,
+    {
         let SymbolKind::Function(func) = &symbol.kind else {
-            return None;
+            return WriteOrigins::default();
         };
         let namespace = symbol.inner_namespace();
+        let mut ret = WriteOrigins::default();
 
         for path in &func.write_paths {
             if !path_define_context(path).is_active(defines) {
                 continue;
             }
             let resolved = resolve_path(path.clone());
-            if matches!(classify_write(&resolved, &namespace), WriteTarget::External) {
-                return Some(path.range);
+            match classify_write(&resolved, &namespace) {
+                WriteTarget::External => {
+                    ret.external = Some(path.range);
+                    return ret;
+                }
+                WriteTarget::Formal(formal) => ret.formal.push((formal, path.range)),
+                WriteTarget::None => {}
             }
         }
 
@@ -191,14 +217,16 @@ where
                 continue;
             };
 
-            if let Some(write) = visit(&callee, defines, resolve_path, visited) {
-                return Some(write);
+            let callee_origins = visit(&callee, defines, resolve_path, visiting);
+            if let Some(write) = callee_origins.external {
+                ret.external = Some(write);
+                return ret;
             }
 
             let SymbolKind::Function(callee_func) = &callee.kind else {
                 continue;
             };
-            for formal_write in callee_func.written_output_paths(defines) {
+            for (formal_write, origin) in callee_origins.formal {
                 let Some(formal_name) = formal_write.paths.first().map(|x| x.base.text) else {
                     continue;
                 };
@@ -231,17 +259,22 @@ where
                         .paths
                         .extend(formal_write.paths.iter().skip(1).cloned());
                     let resolved = resolve_path(mapped);
-                    if matches!(classify_write(&resolved, &namespace), WriteTarget::External) {
-                        return Some(actual.range);
+                    match classify_write(&resolved, &namespace) {
+                        WriteTarget::External => {
+                            ret.external = Some(origin);
+                            return ret;
+                        }
+                        WriteTarget::Formal(formal) => ret.formal.push((formal, origin)),
+                        WriteTarget::None => {}
                     }
                 }
             }
         }
 
-        None
+        ret
     }
 
-    visit(symbol, defines, &mut resolve_path, &mut HashSet::default())
+    visit(symbol, defines, &mut resolve_path, &mut HashSet::default()).external
 }
 
 fn resolve_side_effects(list: &[Symbol]) {

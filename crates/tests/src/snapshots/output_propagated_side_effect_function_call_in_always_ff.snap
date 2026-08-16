@@ -1,0 +1,22 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+side_effect_function_call_in_always_ff (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#side_effect_function_call_in_always_ff)
+
+  × function "hidden_write" can't be called in always_ff because it may write an HDL object declared outside the function
+    ╭─[../../testcases/error/output_propagated_side_effect_function_call_in_always_ff.veryl:16:9]
+ 15 │     always_ff (clk) {
+ 16 │         hidden_write();
+    ·         ───────┬───────
+    ·                ╰── called from always_ff
+ 17 │     }
+    ╰────
+   ╭─[../../testcases/error/output_propagated_side_effect_function_call_in_always_ff.veryl:8:9]
+ 7 │     ) {
+ 8 │         result = 1;
+   ·         ───┬──
+   ·            ╰── external write occurs here
+ 9 │     }
+   ╰────
+  help: move the external write into this always_ff, or use an output argument connected to a variable declared inside it
