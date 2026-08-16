@@ -56,10 +56,33 @@ struct Effect {
     formal_writes: HashSet<FunctionWrite>,
 }
 
-enum WriteTarget {
-    None,
-    External,
-    Formal(GenericSymbolPath),
+#[derive(Default)]
+struct WriteTarget {
+    external: bool,
+    formal: Option<GenericSymbolPath>,
+}
+
+impl WriteTarget {
+    fn external() -> Self {
+        Self {
+            external: true,
+            formal: None,
+        }
+    }
+
+    fn formal(path: GenericSymbolPath) -> Self {
+        Self {
+            external: false,
+            formal: Some(path),
+        }
+    }
+
+    fn external_formal(path: GenericSymbolPath) -> Self {
+        Self {
+            external: true,
+            formal: Some(path),
+        }
+    }
 }
 
 fn classify_connect(path: &GenericSymbolPath) -> Option<WriteTarget> {
@@ -70,9 +93,9 @@ fn classify_connect(path: &GenericSymbolPath) -> Option<WriteTarget> {
         !operation.get_connection_pairs().is_empty()
     };
     Some(if has_write {
-        WriteTarget::External
+        WriteTarget::external()
     } else {
-        WriteTarget::None
+        WriteTarget::default()
     })
 }
 
@@ -81,48 +104,50 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
         return target;
     }
     let Some(_) = path.paths.first() else {
-        return WriteTarget::None;
+        return WriteTarget::default();
     };
     let mut root_path = path.clone();
     root_path.paths.truncate(1);
     let Ok(root) = symbol_table::resolve(&root_path) else {
-        return WriteTarget::None;
+        return WriteTarget::default();
     };
 
     if root.found.namespace.included(namespace) {
         match &root.found.kind {
-            SymbolKind::Variable(_) => WriteTarget::None,
+            SymbolKind::Variable(_) => WriteTarget::default(),
             SymbolKind::Port(port) => match port.direction {
-                Direction::Output => WriteTarget::Formal(path.clone()),
+                Direction::Output => WriteTarget::formal(path.clone()),
                 // A modport/inout actual is necessarily external to the process;
                 // only an actual LHS reaching here is treated as a write.
                 Direction::Modport | Direction::Inout => {
                     let Ok(target) = symbol_table::resolve(path) else {
-                        return WriteTarget::None;
+                        return WriteTarget::default();
                     };
                     match &target.found.kind {
                         SymbolKind::ModportVariableMember(member)
                             if matches!(member.direction, Direction::Output | Direction::Inout) =>
                         {
-                            WriteTarget::External
+                            WriteTarget::external_formal(path.clone())
                         }
-                        _ if matches!(port.direction, Direction::Inout) => WriteTarget::External,
-                        _ => WriteTarget::None,
+                        _ if matches!(port.direction, Direction::Inout) => {
+                            WriteTarget::external_formal(path.clone())
+                        }
+                        _ => WriteTarget::default(),
                     }
                 }
-                _ => WriteTarget::None,
+                _ => WriteTarget::default(),
             },
-            _ => WriteTarget::None,
+            _ => WriteTarget::default(),
         }
     } else {
         if matches!(
             &root.found.kind,
             SymbolKind::Port(_) | SymbolKind::Variable(_)
         ) {
-            return WriteTarget::External;
+            return WriteTarget::external();
         }
         let Ok(target) = symbol_table::resolve(path) else {
-            return WriteTarget::None;
+            return WriteTarget::default();
         };
         match target.found.kind {
             SymbolKind::Port(_)
@@ -130,8 +155,8 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
             | SymbolKind::ModportVariableMember(_)
             | SymbolKind::StructMember(_)
             | SymbolKind::UnionMember(_)
-            | SymbolKind::SystemVerilog => WriteTarget::External,
-            _ => WriteTarget::None,
+            | SymbolKind::SystemVerilog => WriteTarget::external(),
+            _ => WriteTarget::default(),
         }
     }
 }
@@ -154,24 +179,24 @@ fn path_define_context(path: &GenericSymbolPath) -> DefineContext {
 }
 
 fn add_target(effect: &mut Effect, target: WriteTarget, define_context: DefineContext) {
-    match target {
-        WriteTarget::None => {}
-        WriteTarget::External => {
-            effect.external_writes.insert(define_context);
-        }
-        WriteTarget::Formal(path) => {
-            effect.formal_writes.insert(FunctionWrite {
-                path,
-                define_context,
-            });
-        }
+    if target.external {
+        effect.external_writes.insert(define_context.clone());
+    }
+    if let Some(path) = target.formal {
+        effect.formal_writes.insert(FunctionWrite {
+            path,
+            define_context,
+        });
     }
 }
 
 /// Reclassifies direct writes after applying the active generic specialization.
 /// The fixed-point summary cannot classify a generic instance parameter until
 /// its actual instance is known at a call site.
-pub fn specialized_direct_effect(symbol: &Symbol, context: &Context) -> (bool, HashSet<StrId>) {
+pub fn specialized_direct_effect(
+    symbol: &Symbol,
+    context: &Context,
+) -> (bool, HashSet<GenericSymbolPath>) {
     let SymbolKind::Function(func) = &symbol.kind else {
         return (false, HashSet::default());
     };
@@ -184,14 +209,10 @@ pub fn specialized_direct_effect(symbol: &Symbol, context: &Context) -> (bool, H
             continue;
         }
         let resolved = context.resolve_path(path.clone());
-        match classify_write(&resolved, &namespace) {
-            WriteTarget::None => {}
-            WriteTarget::External => external_write = true,
-            WriteTarget::Formal(path) => {
-                if let Some(name) = path.paths.first().map(|x| x.base.text) {
-                    formal_writes.insert(name);
-                }
-            }
+        let target = classify_write(&resolved, &namespace);
+        external_write |= target.external;
+        if let Some(path) = target.formal {
+            formal_writes.insert(path);
         }
     }
 
@@ -290,22 +311,22 @@ pub fn find_external_write(
                 continue;
             }
             let resolved = context.resolve_path(path.clone());
-            match classify_write(&resolved, &namespace) {
-                WriteTarget::External => {
-                    ret.external = Some(WriteOrigin {
-                        write: path.range,
-                        calls: Vec::new(),
-                    });
-                    return ret;
-                }
-                WriteTarget::Formal(formal) => ret.formal.push((
+            let target = classify_write(&resolved, &namespace);
+            if target.external {
+                ret.external = Some(WriteOrigin {
+                    write: path.range,
+                    calls: Vec::new(),
+                });
+                return ret;
+            }
+            if let Some(formal) = target.formal {
+                ret.formal.push((
                     formal,
                     WriteOrigin {
                         write: path.range,
                         calls: Vec::new(),
                     },
-                )),
-                WriteTarget::None => {}
+                ));
             }
         }
 
@@ -380,13 +401,13 @@ pub fn find_external_write(
                         .paths
                         .extend(formal_write.paths.iter().skip(1).cloned());
                     let resolved = context.resolve_path(mapped);
-                    match classify_write(&resolved, &namespace) {
-                        WriteTarget::External => {
-                            ret.external = Some(origin.clone());
-                            return ret;
-                        }
-                        WriteTarget::Formal(formal) => ret.formal.push((formal, origin.clone())),
-                        WriteTarget::None => {}
+                    let target = classify_write(&resolved, &namespace);
+                    if target.external {
+                        ret.external = Some(origin.clone());
+                        return ret;
+                    }
+                    if let Some(formal) = target.formal {
+                        ret.formal.push((formal, origin.clone()));
                     }
                 }
             }

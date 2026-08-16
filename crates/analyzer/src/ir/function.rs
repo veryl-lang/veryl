@@ -6,11 +6,11 @@ use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
     AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, Signature, Statement,
-    ValueVariant, VarId, VarIndex, VarPath, VarPathSelect, VarSelect,
+    ValueVariant, VarId, VarIndex, VarPath, VarPathSelect,
 };
 use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind};
 use crate::value::{Value, ValueBigUint};
-use crate::{AnalyzerError, HashMap, ir_error};
+use crate::{AnalyzerError, HashMap, HashSet, ir_error};
 use indent::indent_all_by;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
@@ -171,10 +171,22 @@ pub struct FunctionCall {
     pub index: Option<Vec<usize>>,
     pub comptime: Comptime,
     pub inputs: CallArgs<Expression>,
+    /// All output argument bindings, including formals that the function body
+    /// never writes. These are retained to preserve the source-level call.
     pub outputs: CallArgs<Vec<AssignDestination>>,
+    /// Formal paths that may actually be written by this specialization.
+    pub(crate) written_output_paths: HashSet<VarPath>,
 }
 
 impl FunctionCall {
+    pub fn written_outputs(&self) -> impl Iterator<Item = &(VarPath, Vec<AssignDestination>)> {
+        self.outputs.iter().filter(|(path, _)| {
+            self.written_output_paths
+                .iter()
+                .any(|written| written.0.starts_with(&path.0))
+        })
+    }
+
     pub fn eval_type(&mut self, context: &mut Context) {
         self.comptime.is_const = self.eval_comptime_flag(context);
     }
@@ -250,7 +262,7 @@ impl FunctionCall {
         for expr in self.inputs.values() {
             expr.eval_assign(context, assign_table, assign_context);
         }
-        for output in self.outputs.values() {
+        for (_, output) in self.written_outputs() {
             for dst in output {
                 if let Some(index) = dst.index.eval_value(context) {
                     let Some(variable) = context.get_variable_info(dst.id) else {
@@ -292,7 +304,7 @@ impl FunctionCall {
         for input in self.inputs.values() {
             input.gather_ff(context, table, decl, assign_target, from_ff);
         }
-        for dsts in self.outputs.values() {
+        for (_, dsts) in self.written_outputs() {
             for dst in dsts {
                 dst.gather_ff(context, table, decl);
             }
@@ -300,7 +312,7 @@ impl FunctionCall {
     }
 
     pub fn gather_ff_comb_assign(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
-        for dsts in self.outputs.values() {
+        for (_, dsts) in self.written_outputs() {
             for dst in dsts {
                 dst.gather_ff_comb_assign(context, table, decl);
             }
@@ -329,7 +341,7 @@ impl FunctionCall {
         }
 
         // function with side-effect through output ports is not const
-        if !self.outputs.is_empty() {
+        if !self.written_output_paths.is_empty() {
             is_const = false;
         }
 
@@ -522,7 +534,12 @@ impl Arguments {
         };
 
         for (arg, mut expr, dst) in connections {
-            if arg.members.len() == 1 {
+            if arg.members.len() == 1
+                && !matches!(
+                    &arg.comptime.r#type.kind,
+                    crate::ir::TypeKind::Modport(_, _)
+                )
+            {
                 let (path, _, direction) = &arg.members[0];
                 match direction {
                     Direction::Input => {
@@ -562,28 +579,26 @@ impl Arguments {
             } else {
                 let expr_comptime = expr.eval_comptime(context, None);
                 let expr_token = expr_comptime.token;
-                let expr_members = expr_comptime
-                    .r#type
-                    .expand_interface(context, &dst[0].0, expr_token)?;
 
                 check_compatibility(context, &arg.comptime.r#type, expr_comptime, &expr_token);
 
-                for (x, y) in arg.members.iter().zip(expr_members.iter()) {
+                let actual = &dst[0];
+                for x in &arg.members {
                     let arg_path = x.0.clone();
                     let direction = x.2;
-                    let expr_path = y.0.clone();
+                    let mut expr_path = actual.0.clone();
+                    expr_path.0.extend_from_slice(&arg_path.0[1..]);
+                    let actual_member = VarPathSelect(expr_path, actual.1.clone(), expr_token);
 
                     match direction {
                         Direction::Input => {
-                            let expr = VarPathSelect(expr_path, VarSelect::default(), expr_token);
-                            let expr = expr.to_expression(context);
+                            let expr = actual_member.to_expression(context);
                             if let Some(expr) = expr {
                                 inputs.push((arg_path, expr));
                             }
                         }
                         Direction::Output => {
-                            let dst = VarPathSelect(expr_path, VarSelect::default(), expr_token);
-                            let dst = dst.to_assign_destination(context, false);
+                            let dst = actual_member.to_assign_destination(context, false);
                             if let Some(dst) = dst {
                                 outputs.push((arg_path, vec![dst]));
                             }

@@ -14,7 +14,7 @@ use crate::conv::checker::import::check_import;
 use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
-use crate::conv::context::RuntimeFunctionEffect;
+use crate::conv::context::{FunctionOutputBinding, RuntimeFunctionEffect};
 use crate::conv::utils::{
     TypePosition, assign_rhs_context_type, check_assign_clock_domain, eval_array_range_assign,
     eval_assign_statement, eval_clock, eval_const_assign, eval_expr, eval_factor_symbol,
@@ -1270,12 +1270,20 @@ fn conv_function(
             let Some(port) = symbol_table::get(port.symbol) else {
                 continue;
             };
-            if !matches!(port.kind, SymbolKind::Port(ref x) if x.direction == Direction::Output) {
+            let SymbolKind::Port(port) = &port.kind else {
                 continue;
-            }
-            for (path, _, _) in &arg.members {
+            };
+            for (path, _, direction) in &arg.members {
+                if !matches!(direction, Direction::Output | Direction::Inout) {
+                    continue;
+                }
                 if let Some(id) = arg_map.get(path) {
-                    output_ids.insert(*id, arg.name);
+                    output_ids.insert(
+                        *id,
+                        FunctionOutputBinding {
+                            scheduler_external: port.direction != Direction::Output,
+                        },
+                    );
                 }
             }
         }
@@ -1283,10 +1291,18 @@ fn conv_function(
             symbol_table::specialized_direct_effect(symbol, c);
         let mut effect = RuntimeFunctionEffect {
             external_write: proeprty.has_side_effect_in(&c.config.defines),
-            formal_writes: proeprty.written_output_names(&c.config.defines),
+            written_outputs: proeprty
+                .written_output_paths(&c.config.defines)
+                .into_iter()
+                .filter_map(|path| path.to_var_path())
+                .collect(),
         };
         effect.external_write |= specialized_external_write;
-        effect.formal_writes.extend(specialized_formal_writes);
+        effect.written_outputs.extend(
+            specialized_formal_writes
+                .into_iter()
+                .filter_map(|path| path.to_var_path()),
+        );
         c.begin_function_effect(path.clone(), output_ids, effect);
 
         let body = if let Some(block) = statement_block {

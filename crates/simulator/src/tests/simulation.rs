@@ -4234,6 +4234,43 @@ fn function_call_void() {
 }
 
 #[test]
+fn unwritten_function_output_is_not_copied_out() {
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        b: output logic<32>,
+    ) {
+        #[allow(unassign_variable)]
+        function inspect (
+            unused: output logic<32>,
+        ) {
+        }
+
+        always_comb {
+            b = a;
+            inspect(b);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new(7, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::new(7, 32, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
 fn function_call_with_output() {
     let code = r#"
     module Top (

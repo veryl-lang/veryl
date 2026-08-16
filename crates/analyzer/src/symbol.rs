@@ -2659,13 +2659,6 @@ impl FunctionProperty {
                 .collect()
         }
     }
-
-    pub fn written_output_names(&self, defines: &HashSet<StrId>) -> HashSet<StrId> {
-        self.written_output_paths(defines)
-            .into_iter()
-            .filter_map(|path| path.paths.first().map(|x| x.base.text))
-            .collect()
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

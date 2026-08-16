@@ -506,7 +506,7 @@ fn collect_statement_spans(
                 for input in call.inputs.values() {
                     collect_expr_spans(input, out, ctx);
                 }
-                for outputs in call.outputs.values() {
+                for (_, outputs) in call.written_outputs() {
                     for destination in outputs {
                         for (index, packed) in dst_writes(destination, ctx) {
                             out.entry((destination.id, index)).or_default().push(packed);
@@ -734,7 +734,7 @@ fn collect_call_transfers(
         collect_expression_transfers(actual, span, formal, span, ctx, transfers);
     }
 
-    for (path, destinations) in &call.outputs {
+    for (path, destinations) in call.written_outputs() {
         let Some(&formal) = body.arg_map.get(path) else {
             continue;
         };

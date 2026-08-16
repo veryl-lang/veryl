@@ -128,7 +128,7 @@ fn count_writes_one(
             return count_writes_seq(&f.body, ctx);
         }
         Statement::FunctionCall(call) => {
-            for outputs in call.outputs.values() {
+            for (_, outputs) in call.written_outputs() {
                 for dst in outputs {
                     add_dst_write(dst, ctx, &mut result);
                 }
@@ -211,7 +211,7 @@ fn collect_dyn_one(stmt: &air::Statement, out: &mut HashSet<VarId>) {
             }
         }
         Statement::FunctionCall(call) => {
-            for outputs in call.outputs.values() {
+            for (_, outputs) in call.written_outputs() {
                 for dst in outputs {
                     check_dyn_dst(dst, out);
                 }

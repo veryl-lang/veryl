@@ -33,13 +33,29 @@ pub struct Config {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RuntimeFunctionEffect {
     pub external_write: bool,
-    pub formal_writes: HashSet<StrId>,
+    pub written_outputs: HashSet<VarPath>,
+}
+
+impl RuntimeFunctionEffect {
+    pub fn written_paths_for<'a>(
+        &'a self,
+        formal: &'a VarPath,
+    ) -> impl Iterator<Item = &'a VarPath> {
+        self.written_outputs
+            .iter()
+            .filter(move |path| path.0.starts_with(&formal.0))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FunctionOutputBinding {
+    pub scheduler_external: bool,
 }
 
 #[derive(Clone, Debug)]
 struct FunctionEffectFrame {
     path: FuncPath,
-    outputs: HashMap<VarId, StrId>,
+    outputs: HashMap<VarId, FunctionOutputBinding>,
     effect: RuntimeFunctionEffect,
 }
 
@@ -239,7 +255,7 @@ impl Context {
     pub(crate) fn begin_function_effect(
         &mut self,
         path: FuncPath,
-        outputs: HashMap<VarId, StrId>,
+        outputs: HashMap<VarId, FunctionOutputBinding>,
         effect: RuntimeFunctionEffect,
     ) {
         self.function_effect_stack.push(FunctionEffectFrame {
@@ -269,34 +285,30 @@ impl Context {
         };
         let caller_outputs = frame.outputs.clone();
         let mut external_write = effect.external_write;
-        let mut formal_writes = HashSet::default();
+        let mut written_outputs = HashSet::default();
 
         for (formal, destinations) in outputs {
-            if !formal
-                .0
-                .first()
-                .is_some_and(|name| effect.formal_writes.contains(name))
-            {
-                continue;
-            }
-            for destination in destinations {
-                if let Some(name) = caller_outputs.get(&destination.id) {
-                    formal_writes.insert(*name);
-                } else if self
-                    .get_variable_info(destination.id)
-                    .is_none_or(|variable| {
-                        variable.affiliation != Affiliation::Function
-                            || matches!(variable.kind, VarKind::Output | VarKind::Inout)
-                    })
-                {
-                    external_write = true;
+            for written in effect.written_paths_for(formal) {
+                let suffix = &written.0[formal.0.len()..];
+                for destination in destinations {
+                    if let Some(output) = caller_outputs.get(&destination.id) {
+                        let mut mapped = destination.path.clone();
+                        mapped.0.extend_from_slice(suffix);
+                        written_outputs.insert(mapped);
+                        external_write |= output.scheduler_external;
+                    } else if self
+                        .get_variable_info(destination.id)
+                        .is_none_or(|variable| variable.affiliation != Affiliation::Function)
+                    {
+                        external_write = true;
+                    }
                 }
             }
         }
 
         if let Some(frame) = self.function_effect_stack.last_mut() {
             frame.effect.external_write |= external_write;
-            frame.effect.formal_writes.extend(formal_writes);
+            frame.effect.written_outputs.extend(written_outputs);
         }
     }
 
@@ -313,15 +325,16 @@ impl Context {
         fn visit(
             context: &Context,
             statements: &[Statement],
-            caller_outputs: &HashMap<VarId, StrId>,
+            caller_outputs: &HashMap<VarId, FunctionOutputBinding>,
             effect: &mut RuntimeFunctionEffect,
         ) {
             for statement in statements {
                 match statement {
                     Statement::Assign(assign) => {
                         for destination in &assign.dst {
-                            if let Some(name) = caller_outputs.get(&destination.id) {
-                                effect.formal_writes.insert(*name);
+                            if let Some(output) = caller_outputs.get(&destination.id) {
+                                effect.written_outputs.insert(destination.path.clone());
+                                effect.external_write |= output.scheduler_external;
                             } else if context.get_variable_info(destination.id).is_none_or(
                                 |variable| {
                                     variable.affiliation != Affiliation::Function
@@ -362,7 +375,7 @@ impl Context {
         visit(self, statements, &caller_outputs, &mut effect);
         if let Some(frame) = self.function_effect_stack.last_mut() {
             frame.effect.external_write |= effect.external_write;
-            frame.effect.formal_writes.extend(effect.formal_writes);
+            frame.effect.written_outputs.extend(effect.written_outputs);
         }
     }
 

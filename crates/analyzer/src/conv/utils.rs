@@ -4045,14 +4045,20 @@ pub fn function_call(
             .and_then(|symbol| match &symbol.kind {
                 SymbolKind::Function(func) => Some(RuntimeFunctionEffect {
                     external_write: func.has_side_effect_in(&c.config.defines),
-                    formal_writes: func.written_output_names(&c.config.defines),
+                    written_outputs: func
+                        .written_output_paths(&c.config.defines)
+                        .into_iter()
+                        .filter_map(|path| path.to_var_path())
+                        .collect(),
                 }),
                 _ => None,
             })
             .unwrap_or_default();
         if let Some(runtime_effect) = c.function_effect(&path) {
             effect.external_write |= runtime_effect.external_write;
-            effect.formal_writes.extend(runtime_effect.formal_writes);
+            effect
+                .written_outputs
+                .extend(runtime_effect.written_outputs);
         }
         c.record_function_call_effect(&effect, &outputs);
 
@@ -4079,18 +4085,23 @@ pub fn function_call(
                 let Some(formal_name) = formal.0.first() else {
                     continue;
                 };
-                if !effect.formal_writes.contains(formal_name) {
+                if effect.written_paths_for(formal).next().is_none() {
                     continue;
                 }
                 let output = resource_table::get_str_value(*formal_name).unwrap_or_default();
-                let declaration = symbol.as_ref().and_then(|symbol| match &symbol.kind {
-                    SymbolKind::Function(function) => function
-                        .ports
-                        .iter()
-                        .find(|port| port.token.token.text == *formal_name)
-                        .map(|port| TokenRange::from(&port.token.token)),
+                let output_port = symbol.as_ref().and_then(|symbol| match &symbol.kind {
+                    SymbolKind::Function(function) => function.ports.iter().find(|port| {
+                        port.token.token.text == *formal_name
+                            && symbol_table::get(port.symbol).is_some_and(|symbol| {
+                                matches!(symbol.kind, SymbolKind::Port(ref port) if port.direction == symbol::Direction::Output)
+                            })
+                    }),
                     _ => None,
                 });
+                let Some(output_port) = output_port else {
+                    continue;
+                };
+                let declaration = TokenRange::from(&output_port.token.token);
                 for dst in dsts {
                     if c.get_variable_info(dst.id)
                         .is_some_and(|variable| variable.affiliation != Affiliation::AlwaysFf)
@@ -4100,7 +4111,7 @@ pub fn function_call(
                             &output,
                             &dst.path.to_string(),
                             &dst.token,
-                            declaration.as_ref(),
+                            Some(&declaration),
                         ));
                     }
                 }
@@ -4132,6 +4143,7 @@ pub fn function_call(
             comptime,
             inputs,
             outputs,
+            written_output_paths: effect.written_outputs,
         })
     });
 

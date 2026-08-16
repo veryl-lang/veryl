@@ -744,7 +744,7 @@ impl<'a> ProcedureAnalysis<'a> {
             for input in call.inputs.values() {
                 sources.extend(self.eval_expr(input));
             }
-            for outputs in call.outputs.values() {
+            for (_, outputs) in call.written_outputs() {
                 for destination in outputs {
                     self.write_destination(destination, &sources, controls);
                 }
@@ -792,7 +792,7 @@ impl<'a> ProcedureAnalysis<'a> {
         self.call_caches.pop();
 
         let mut formal_outputs = HashMap::default();
-        for (path, _) in &call.outputs {
+        for (path, _) in call.written_outputs() {
             let Some(&formal) = body.arg_map.get(path) else {
                 continue;
             };
@@ -807,7 +807,7 @@ impl<'a> ProcedureAnalysis<'a> {
 
         assert_eq!(self.call_frames.pop(), Some(call_frame));
 
-        for (path, destinations) in &call.outputs {
+        for (path, destinations) in call.written_outputs() {
             let Some(&formal) = body.arg_map.get(path) else {
                 continue;
             };

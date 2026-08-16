@@ -19143,6 +19143,7 @@ fn function_output_in_always_ff_requires_process_local_variable() {
         }
         always_ff (clk) {
             inspect(q);
+            q = 1;
         }
     }
     "#;
@@ -19152,6 +19153,12 @@ fn function_output_in_always_ff_requires_process_local_variable() {
         !errors
             .iter()
             .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MultipleAssignment { .. })),
+        "an unwritten output must not count as an assignment: {errors:?}"
     );
 }
 
@@ -19388,6 +19395,72 @@ fn modport_effect_requires_an_actual_member_write() {
     "#;
 
     assert!(has_side_effect(code, "update"));
+}
+
+#[test]
+fn modport_function_write_reaches_assignment_analysis() {
+    let written = r#"
+    interface Bus {
+        var ready: logic;
+        var data: logic;
+        var valid: logic;
+        modport master {
+            data: output,
+            valid: output,
+        }
+    }
+    module ModuleA {
+        inst bus: Bus;
+        function write_data (arg: modport Bus::master) {
+            arg.data = 1;
+        }
+        function update (arg: modport Bus::master) {
+            write_data(arg);
+        }
+        always_comb {
+            update(bus);
+        }
+    }
+    "#;
+
+    let errors = analyze(written);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "bus.data")),
+        "a written modport member must remain a function-call write: {errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "bus.valid")),
+        "an unwritten member of the same modport must not count as assigned: {errors:?}"
+    );
+
+    let unwritten = r#"
+    interface Bus {
+        var data: logic;
+        modport master {
+            data: output,
+        }
+    }
+    module ModuleA {
+        inst bus: Bus;
+        function inspect (arg: modport Bus::master) {
+        }
+        always_comb {
+            inspect(bus);
+        }
+    }
+    "#;
+
+    let errors = analyze(unwritten);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { .. })),
+        "an unwritten modport member must not count as assigned: {errors:?}"
+    );
 }
 
 #[test]
