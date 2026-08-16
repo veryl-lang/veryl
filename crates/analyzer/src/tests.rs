@@ -19010,6 +19010,31 @@ fn side_effect_function_call_in_always_ff() {
 }
 
 #[test]
+fn systemverilog_hierarchical_write_is_scheduler_side_effect() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+    ) {
+        inst u: $sv::IF;
+        function update () {
+            u.a = 1;
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn transitive_side_effect_function_call_in_always_ff() {
     let code = r#"
     module ModuleA (
@@ -19234,12 +19259,10 @@ fn external_write_trace_terminates_on_recursive_call_graph() {
     let symbol = symbol_table::resolve(first.identifier.as_ref()).unwrap();
     assert!(matches!(symbol.found.kind, SymbolKind::Function(_)));
 
-    let trace = symbol_table::find_external_write(
-        symbol.found.as_ref(),
-        &crate::HashSet::default(),
-        |path| path,
-    )
-    .expect("the search should continue after cutting the first -> second -> first cycle");
+    let signature = crate::ir::Signature::new(symbol.found.id);
+    let mut context = Context::default();
+    let trace = symbol_table::find_external_write(symbol.found.as_ref(), &signature, &mut context)
+        .expect("the search should continue after cutting the first -> second -> first cycle");
 
     assert_eq!(trace.calls.len(), 2);
     assert_eq!(trace.calls[0].beg.line, 9); // first -> second
@@ -19625,4 +19648,46 @@ fn proto_function_effect_propagates_through_generic_wrapper() {
             .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. })),
         "{errors:?}"
     );
+}
+
+#[test]
+fn nested_generic_function_effect_trace_uses_callee_specialization() {
+    let code = r#"
+    proto package ProtoPkg {
+        function update (result: output logic);
+    }
+    package Pkg for ProtoPkg {
+        function update (result: output logic) {
+            result = 1;
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function inner::<PKG: ProtoPkg> (result: output logic) {
+            PKG::update(result);
+        }
+        function outer () {
+            inner::<Pkg>(q);
+        }
+        always_ff (clk) {
+            outer();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let Some((call_stack, external_writes)) = errors.iter().find_map(|error| match error {
+        AnalyzerError::SideEffectFunctionCallInAlwaysFf {
+            call_stack,
+            external_writes,
+            ..
+        } => Some((call_stack, external_writes)),
+        _ => None,
+    }) else {
+        panic!("expected side-effect diagnostic: {errors:?}");
+    };
+    assert_eq!(call_stack.len(), 2, "{errors:?}");
+    assert_eq!(external_writes.len(), 1, "{errors:?}");
 }

@@ -4082,10 +4082,7 @@ pub fn function_call(
             && let Some(symbol) = &symbol
         {
             let definition = TokenRange::from(&symbol.token);
-            let external_write =
-                symbol_table::find_external_write(symbol, &c.config.defines, |path| {
-                    c.resolve_path(path)
-                });
+            let external_write = symbol_table::find_external_write(symbol, &sig, c);
             let (calls, external_writes) = external_write
                 .map(|trace| (trace.calls, vec![trace.write]))
                 .unwrap_or_default();

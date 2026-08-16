@@ -1,3 +1,5 @@
+use crate::conv::Context;
+use crate::ir::Signature;
 use crate::namespace::{DefineContext, Namespace};
 use crate::symbol::{Direction, FunctionProperty, FunctionWrite, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::GenericSymbolPath;
@@ -107,7 +109,8 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
             | SymbolKind::Variable(_)
             | SymbolKind::ModportVariableMember(_)
             | SymbolKind::StructMember(_)
-            | SymbolKind::UnionMember(_) => WriteTarget::External,
+            | SymbolKind::UnionMember(_)
+            | SymbolKind::SystemVerilog => WriteTarget::External,
             _ => WriteTarget::None,
         }
     }
@@ -152,14 +155,11 @@ pub struct ExternalWriteTrace {
     pub calls: Vec<TokenRange>,
 }
 
-pub fn find_external_write<F>(
+pub fn find_external_write(
     symbol: &Symbol,
-    defines: &HashSet<StrId>,
-    mut resolve_path: F,
-) -> Option<ExternalWriteTrace>
-where
-    F: FnMut(GenericSymbolPath) -> GenericSymbolPath,
-{
+    signature: &Signature,
+    context: &mut Context,
+) -> Option<ExternalWriteTrace> {
     #[derive(Clone, Default)]
     struct WriteOrigin {
         write: TokenRange,
@@ -173,36 +173,35 @@ where
         formal: Vec<(GenericSymbolPath, WriteOrigin)>,
     }
 
-    fn visit<F>(
+    fn visit(
         symbol: &Symbol,
+        signature: &Signature,
         defines: &HashSet<StrId>,
-        resolve_path: &mut F,
-        visiting: &mut HashSet<SymbolId>,
-    ) -> WriteOrigins
-    where
-        F: FnMut(GenericSymbolPath) -> GenericSymbolPath,
-    {
+        context: &mut Context,
+        visiting: &mut HashSet<Signature>,
+        depth: usize,
+        depth_limit: usize,
+    ) -> WriteOrigins {
         // Effect summaries are computed to a fixed point below. This search
         // only reconstructs one source-level witness for the diagnostic, so a
         // recursive edge can be cut while the caller continues with its other
         // call sites.
-        if !visiting.insert(symbol.id) {
+        if depth > depth_limit || !visiting.insert(signature.clone()) {
             return WriteOrigins::default();
         }
-        let ret = collect(symbol, defines, resolve_path, visiting);
-        visiting.remove(&symbol.id);
+        let ret = collect(symbol, defines, context, visiting, depth, depth_limit);
+        visiting.remove(signature);
         ret
     }
 
-    fn collect<F>(
+    fn collect(
         symbol: &Symbol,
         defines: &HashSet<StrId>,
-        resolve_path: &mut F,
-        visiting: &mut HashSet<SymbolId>,
-    ) -> WriteOrigins
-    where
-        F: FnMut(GenericSymbolPath) -> GenericSymbolPath,
-    {
+        context: &mut Context,
+        visiting: &mut HashSet<Signature>,
+        depth: usize,
+        depth_limit: usize,
+    ) -> WriteOrigins {
         let SymbolKind::Function(func) = &symbol.kind else {
             return WriteOrigins::default();
         };
@@ -213,7 +212,7 @@ where
             if !path_define_context(path).is_active(defines) {
                 continue;
             }
-            let resolved = resolve_path(path.clone());
+            let resolved = context.resolve_path(path.clone());
             match classify_write(&resolved, &namespace) {
                 WriteTarget::External => {
                     ret.external = Some(WriteOrigin {
@@ -237,12 +236,30 @@ where
             if !path_define_context(&call.callee).is_active(defines) {
                 continue;
             }
-            let callee_path = resolve_path(call.callee.clone());
-            let Some(callee) = called_function(&callee_path) else {
+            let Some(mut callee_signature) = Signature::from_path(context, call.callee.clone())
+            else {
                 continue;
             };
+            callee_signature.normalize();
+            let Some(callee) = symbol_table::get(callee_signature.symbol) else {
+                continue;
+            };
+            if !matches!(&callee.kind, SymbolKind::Function(func) if !func.is_proto) {
+                continue;
+            }
 
-            let callee_origins = visit(&callee, defines, resolve_path, visiting);
+            let generic_map = callee_signature.to_generic_map();
+            context.push_generic_map(generic_map);
+            let callee_origins = visit(
+                &callee,
+                &callee_signature,
+                defines,
+                context,
+                visiting,
+                depth + 1,
+                depth_limit,
+            );
+            context.pop_generic_map();
             if let Some(mut origin) = callee_origins.external {
                 origin.calls.push(call.range);
                 ret.external = Some(origin);
@@ -285,7 +302,7 @@ where
                     mapped
                         .paths
                         .extend(formal_write.paths.iter().skip(1).cloned());
-                    let resolved = resolve_path(mapped);
+                    let resolved = context.resolve_path(mapped);
                     match classify_write(&resolved, &namespace) {
                         WriteTarget::External => {
                             ret.external = Some(origin.clone());
@@ -301,15 +318,25 @@ where
         ret
     }
 
-    visit(symbol, defines, &mut resolve_path, &mut HashSet::default())
-        .external
-        .map(|mut origin| {
-            origin.calls.reverse();
-            ExternalWriteTrace {
-                write: origin.write,
-                calls: origin.calls,
-            }
-        })
+    let defines = context.config.defines.clone();
+    let depth_limit = context.config.function_instance_depth_limit;
+    visit(
+        symbol,
+        signature,
+        &defines,
+        context,
+        &mut HashSet::default(),
+        0,
+        depth_limit,
+    )
+    .external
+    .map(|mut origin| {
+        origin.calls.reverse();
+        ExternalWriteTrace {
+            write: origin.write,
+            calls: origin.calls,
+        }
+    })
 }
 
 fn resolve_side_effects(list: &[Symbol]) {
