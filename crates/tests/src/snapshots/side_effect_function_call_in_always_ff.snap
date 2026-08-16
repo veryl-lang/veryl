@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+side_effect_function_call_in_always_ff (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#side_effect_function_call_in_always_ff)
+
+  × function "update" writes an object outside the function and can't be called in always_ff
+    ╭─[../../testcases/error/side_effect_function_call_in_always_ff.veryl:10:9]
+  9 │     always_ff (clk) {
+ 10 │         update();
+    ·         ────┬────
+    ·             ╰── side-effecting function call
+ 11 │     }
+    ╰────
+  help: move the write into always_ff or call a function without external writes
