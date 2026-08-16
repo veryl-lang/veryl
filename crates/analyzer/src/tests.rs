@@ -12669,6 +12669,36 @@ fn clock_domain_function_call() {
         "{errors:?}"
     );
 
+    // An unwritten output argument performs no copy-out, so its destination
+    // does not participate in the call's clock-domain check.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic,
+        o_b    : output 'b logic,
+    ) {
+        var t: 'b logic;
+        function Inspect (
+            x: input  logic,
+            y: output logic,
+        ) {
+        }
+        always_comb {
+            Inspect(i_a, t);
+            t = 0;
+        }
+        assign o_b = t;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
     // Same-domain calls stay accepted.
     let code = r#"
     module ModuleA (

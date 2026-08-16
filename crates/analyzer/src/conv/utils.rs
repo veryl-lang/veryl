@@ -4118,6 +4118,8 @@ pub fn function_call(
             }
         }
 
+        outputs.retain(|formal| effect.written_paths_for(formal).next().is_some());
+
         let mut comptime = func.r#type.clone();
         comptime.token = token;
 
@@ -4136,8 +4138,6 @@ pub fn function_call(
                 check_clock_domain(c, &dst_comptime, &comptime, &token.beg);
             }
         }
-
-        outputs.retain(|formal| effect.written_paths_for(formal).next().is_some());
 
         Ok(ir::FunctionCall {
             id: func.id,
