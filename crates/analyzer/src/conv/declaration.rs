@@ -14,6 +14,7 @@ use crate::conv::checker::import::check_import;
 use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
+use crate::conv::context::RuntimeFunctionEffect;
 use crate::conv::utils::{
     TypePosition, assign_rhs_context_type, check_assign_clock_domain, eval_array_range_assign,
     eval_assign_statement, eval_clock, eval_const_assign, eval_expr, eval_factor_symbol,
@@ -1264,6 +1265,26 @@ fn conv_function(
             }
         }
 
+        let mut output_ids = HashMap::default();
+        for (arg, port) in args.iter().zip(&proeprty.ports) {
+            let Some(port) = symbol_table::get(port.symbol) else {
+                continue;
+            };
+            if !matches!(port.kind, SymbolKind::Port(ref x) if x.direction == Direction::Output) {
+                continue;
+            }
+            for (path, _, _) in &arg.members {
+                if let Some(id) = arg_map.get(path) {
+                    output_ids.insert(*id, arg.name);
+                }
+            }
+        }
+        let effect = RuntimeFunctionEffect {
+            external_write: proeprty.has_side_effect_in(&c.config.defines),
+            formal_writes: proeprty.written_output_names(&c.config.defines),
+        };
+        c.begin_function_effect(path.clone(), output_ids, effect);
+
         let body = if let Some(block) = statement_block {
             let disable_const_opt = c.disalbe_const_opt;
             c.disalbe_const_opt = true;
@@ -1274,6 +1295,7 @@ fn conv_function(
             let statements: IrResult<ir::StatementBlock> = Conv::conv(c, block);
             c.in_tb_block = in_tb_block;
             c.disalbe_const_opt = disable_const_opt;
+            c.finish_function_effect();
 
             vec![ir::FunctionBody {
                 ret: ret_id,
@@ -1281,6 +1303,7 @@ fn conv_function(
                 statements: statements?.0,
             }]
         } else {
+            c.finish_function_effect();
             vec![]
         };
 

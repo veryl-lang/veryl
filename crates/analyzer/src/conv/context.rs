@@ -30,6 +30,19 @@ pub struct Config {
     pub defines: HashSet<StrId>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RuntimeFunctionEffect {
+    pub external_write: bool,
+    pub formal_writes: HashSet<StrId>,
+}
+
+#[derive(Clone, Debug)]
+struct FunctionEffectFrame {
+    path: FuncPath,
+    outputs: HashMap<VarId, StrId>,
+    effect: RuntimeFunctionEffect,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -77,6 +90,8 @@ pub struct Context {
     /// complete via `set_instance_history`, which functions never call, so it
     /// would stay wedged as "active" forever.
     pub function_call_stack: Vec<Signature>,
+    function_effects: HashMap<FuncPath, RuntimeFunctionEffect>,
+    function_effect_stack: Vec<FunctionEffectFrame>,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
@@ -163,6 +178,11 @@ impl Context {
             &mut tgt.comptime_for_overflow,
         );
         std::mem::swap(&mut self.function_call_stack, &mut tgt.function_call_stack);
+        std::mem::swap(&mut self.function_effects, &mut tgt.function_effects);
+        std::mem::swap(
+            &mut self.function_effect_stack,
+            &mut tgt.function_effect_stack,
+        );
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
@@ -214,6 +234,70 @@ impl Context {
 
     pub fn get_variable_info(&self, id: VarId) -> Option<VariableInfo> {
         self.variables.get(&id).map(VariableInfo::new)
+    }
+
+    pub(crate) fn begin_function_effect(
+        &mut self,
+        path: FuncPath,
+        outputs: HashMap<VarId, StrId>,
+        effect: RuntimeFunctionEffect,
+    ) {
+        self.function_effect_stack.push(FunctionEffectFrame {
+            path,
+            outputs,
+            effect,
+        });
+    }
+
+    pub(crate) fn finish_function_effect(&mut self) {
+        if let Some(frame) = self.function_effect_stack.pop() {
+            self.function_effects.insert(frame.path, frame.effect);
+        }
+    }
+
+    pub(crate) fn function_effect(&self, path: &FuncPath) -> Option<RuntimeFunctionEffect> {
+        self.function_effects.get(path).cloned()
+    }
+
+    pub(crate) fn record_function_call_effect(
+        &mut self,
+        effect: &RuntimeFunctionEffect,
+        outputs: &[(VarPath, Vec<crate::ir::AssignDestination>)],
+    ) {
+        let Some(frame) = self.function_effect_stack.last() else {
+            return;
+        };
+        let caller_outputs = frame.outputs.clone();
+        let mut external_write = effect.external_write;
+        let mut formal_writes = HashSet::default();
+
+        for (formal, destinations) in outputs {
+            if !formal
+                .0
+                .first()
+                .is_some_and(|name| effect.formal_writes.contains(name))
+            {
+                continue;
+            }
+            for destination in destinations {
+                if let Some(name) = caller_outputs.get(&destination.id) {
+                    formal_writes.insert(*name);
+                } else if self
+                    .get_variable_info(destination.id)
+                    .is_none_or(|variable| {
+                        variable.affiliation != Affiliation::Function
+                            || matches!(variable.kind, VarKind::Output | VarKind::Inout)
+                    })
+                {
+                    external_write = true;
+                }
+            }
+        }
+
+        if let Some(frame) = self.function_effect_stack.last_mut() {
+            frame.effect.external_write |= external_write;
+            frame.effect.formal_writes.extend(formal_writes);
+        }
     }
 
     pub fn resolve_path(&self, mut path: GenericSymbolPath) -> GenericSymbolPath {

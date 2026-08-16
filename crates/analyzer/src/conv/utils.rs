@@ -5,6 +5,7 @@ use crate::analyzer_error::{
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_refereence;
+use crate::conv::context::RuntimeFunctionEffect;
 use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
@@ -4011,29 +4012,6 @@ pub fn function_call(
     let mut sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
     sig.normalize();
 
-    let written_outputs: HashSet<_> = symbol_table::get(sig.symbol)
-        .and_then(|symbol| match symbol.kind {
-            SymbolKind::Function(func) => Some(
-                func.formal_writes
-                    .iter()
-                    .filter_map(|path| path.paths.first().map(|x| x.base.text))
-                    .collect(),
-            ),
-            _ => None,
-        })
-        .unwrap_or_default();
-
-    if context.is_affiliated(Affiliation::AlwaysFf)
-        && let Some(symbol) = symbol_table::get(sig.symbol)
-        && let SymbolKind::Function(func) = &symbol.kind
-        && func.has_side_effect
-    {
-        context.insert_error(AnalyzerError::side_effect_function_call_in_always_ff(
-            &symbol.token.text.to_string(),
-            &token,
-        ));
-    }
-
     // same signature re-entered => true infinite recursion
     if context.function_call_stack.contains(&sig) {
         context.insert_error(AnalyzerError::infinite_recursion(&token));
@@ -4082,12 +4060,39 @@ pub fn function_call(
         let func = get_function(c, &path, token)?;
         let (mut inputs, outputs) = args.to_function_args(c, &func, token)?;
 
+        let symbol = symbol_table::get(sig.symbol);
+        let mut effect = symbol
+            .as_ref()
+            .and_then(|symbol| match &symbol.kind {
+                SymbolKind::Function(func) => Some(RuntimeFunctionEffect {
+                    external_write: func.has_side_effect_in(&c.config.defines),
+                    formal_writes: func.written_output_names(&c.config.defines),
+                }),
+                _ => None,
+            })
+            .unwrap_or_default();
+        if let Some(runtime_effect) = c.function_effect(&path) {
+            effect.external_write |= runtime_effect.external_write;
+            effect.formal_writes.extend(runtime_effect.formal_writes);
+        }
+        c.record_function_call_effect(&effect, &outputs);
+
+        if c.is_affiliated(Affiliation::AlwaysFf)
+            && effect.external_write
+            && let Some(symbol) = &symbol
+        {
+            c.insert_error(AnalyzerError::side_effect_function_call_in_always_ff(
+                &symbol.token.text.to_string(),
+                &token,
+            ));
+        }
+
         if c.is_affiliated(Affiliation::AlwaysFf) {
             for (formal, dsts) in &outputs {
                 if !formal
                     .0
                     .first()
-                    .is_some_and(|name| written_outputs.contains(name))
+                    .is_some_and(|name| effect.formal_writes.contains(name))
                 {
                     continue;
                 }

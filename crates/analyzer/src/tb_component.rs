@@ -110,6 +110,7 @@ fn insert_method(
         call_sites: vec![],
         has_side_effect: false,
         formal_writes: vec![],
+        conditional_effects: Box::default(),
         definition: None,
     };
     let func_symbol = Symbol::new(

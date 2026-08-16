@@ -1,5 +1,4 @@
 use crate::BigUint;
-use crate::HashMap;
 use crate::attribute::EnumEncodingItem;
 use crate::conv::Context;
 use crate::conv::utils::{TypePosition, eval_generic_expr, eval_size, eval_type};
@@ -14,6 +13,7 @@ use crate::symbol_path::{
 };
 use crate::symbol_table;
 use crate::value::Value;
+use crate::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::fmt;
@@ -2600,7 +2600,21 @@ pub struct FunctionProperty {
     pub has_side_effect: bool,
     #[serde(default)]
     pub formal_writes: Vec<GenericSymbolPath>,
+    #[serde(default)]
+    pub conditional_effects: Box<ConditionalFunctionEffects>,
     pub definition: Option<DefinitionId>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ConditionalFunctionEffects {
+    pub side_effect_contexts: Vec<DefineContext>,
+    pub formal_write_contexts: Vec<FunctionWrite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct FunctionWrite {
+    pub path: GenericSymbolPath,
+    pub define_context: DefineContext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2618,6 +2632,35 @@ pub struct FunctionCallArgument {
 impl FunctionProperty {
     pub fn is_global(&self) -> bool {
         self.affiliation == Affiliation::ProjectNamespace
+    }
+
+    pub fn has_side_effect_in(&self, defines: &HashSet<StrId>) -> bool {
+        if self.conditional_effects.side_effect_contexts.is_empty() {
+            self.has_side_effect
+        } else {
+            self.conditional_effects
+                .side_effect_contexts
+                .iter()
+                .any(|x| x.is_active(defines))
+        }
+    }
+
+    pub fn written_output_names(&self, defines: &HashSet<StrId>) -> HashSet<StrId> {
+        let writes = if self.conditional_effects.formal_write_contexts.is_empty() {
+            self.formal_writes.iter().collect::<Vec<_>>()
+        } else {
+            self.conditional_effects
+                .formal_write_contexts
+                .iter()
+                .filter(|x| x.define_context.is_active(defines))
+                .map(|x| &x.path)
+                .collect()
+        };
+
+        writes
+            .into_iter()
+            .filter_map(|path| path.paths.first().map(|x| x.base.text))
+            .collect()
     }
 }
 

@@ -1,8 +1,8 @@
-use crate::namespace::Namespace;
-use crate::symbol::{Direction, FunctionProperty, Symbol, SymbolId, SymbolKind};
+use crate::namespace::{DefineContext, Namespace};
+use crate::symbol::{Direction, FunctionProperty, FunctionWrite, Symbol, SymbolId, SymbolKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
-use crate::{HashMap, HashSet};
+use crate::{HashMap, HashSet, scope};
 
 pub fn resolve_function(list: &[Symbol]) {
     for symbol in list {
@@ -44,8 +44,8 @@ fn resolve_constantable(symbol: &Symbol, visited: &mut Vec<SymbolId>) -> bool {
 
 #[derive(Clone, Default, PartialEq, Eq)]
 struct Effect {
-    external_write: bool,
-    formal_writes: HashSet<GenericSymbolPath>,
+    external_writes: HashSet<DefineContext>,
+    formal_writes: HashSet<FunctionWrite>,
 }
 
 enum WriteTarget {
@@ -119,12 +119,25 @@ fn called_function(path: &GenericSymbolPath) -> Option<Symbol> {
     }
 }
 
-fn add_target(effect: &mut Effect, target: WriteTarget) {
+fn path_define_context(path: &GenericSymbolPath) -> DefineContext {
+    path.paths
+        .first()
+        .and_then(|x| scope::token_scope(x.base.id))
+        .map(|(_, x)| x)
+        .unwrap_or_default()
+}
+
+fn add_target(effect: &mut Effect, target: WriteTarget, define_context: DefineContext) {
     match target {
         WriteTarget::None => {}
-        WriteTarget::External => effect.external_write = true,
+        WriteTarget::External => {
+            effect.external_writes.insert(define_context);
+        }
         WriteTarget::Formal(path) => {
-            effect.formal_writes.insert(path);
+            effect.formal_writes.insert(FunctionWrite {
+                path,
+                define_context,
+            });
         }
     }
 }
@@ -139,7 +152,11 @@ fn resolve_side_effects(list: &[Symbol]) {
         let namespace = symbol.inner_namespace();
         let mut effect = Effect::default();
         for path in &func.write_paths {
-            add_target(&mut effect, classify_write(path, &namespace));
+            add_target(
+                &mut effect,
+                classify_write(path, &namespace),
+                path_define_context(path),
+            );
         }
         direct.insert(symbol.id, effect);
     }
@@ -162,13 +179,22 @@ fn resolve_side_effects(list: &[Symbol]) {
                 let Some(callee_effect) = effects.get(&callee.id) else {
                     continue;
                 };
-                effect.external_write |= callee_effect.external_write;
+                let call_context = path_define_context(&call.callee);
+                for callee_context in &callee_effect.external_writes {
+                    if let Some(context) = call_context.conjoin(callee_context) {
+                        effect.external_writes.insert(context);
+                    }
+                }
 
                 let SymbolKind::Function(callee_func) = &callee.kind else {
                     continue;
                 };
                 for formal_write in &callee_effect.formal_writes {
-                    let Some(formal_name) = formal_write.paths.first().map(|x| x.base.text) else {
+                    let Some(context) = call_context.conjoin(&formal_write.define_context) else {
+                        continue;
+                    };
+                    let Some(formal_name) = formal_write.path.paths.first().map(|x| x.base.text)
+                    else {
                         continue;
                     };
                     let Some((formal_index, _)) = callee_func
@@ -198,8 +224,8 @@ fn resolve_side_effects(list: &[Symbol]) {
                         let mut mapped = actual.clone();
                         mapped
                             .paths
-                            .extend(formal_write.paths.iter().skip(1).cloned());
-                        add_target(effect, classify_write(&mapped, &namespace));
+                            .extend(formal_write.path.paths.iter().skip(1).cloned());
+                        add_target(effect, classify_write(&mapped, &namespace), context.clone());
                     }
                 }
             }
@@ -215,9 +241,19 @@ fn resolve_side_effects(list: &[Symbol]) {
         let SymbolKind::Function(func) = &mut symbol.kind else {
             unreachable!();
         };
-        func.has_side_effect = effect.external_write;
-        func.formal_writes = effect.formal_writes.into_iter().collect();
+        func.has_side_effect = !effect.external_writes.is_empty();
+        func.conditional_effects.side_effect_contexts =
+            effect.external_writes.into_iter().collect();
+        func.conditional_effects.side_effect_contexts.sort();
+        func.formal_writes = effect
+            .formal_writes
+            .iter()
+            .map(|x| x.path.clone())
+            .collect();
         func.formal_writes.sort();
+        func.formal_writes.dedup();
+        func.conditional_effects.formal_write_contexts = effect.formal_writes.into_iter().collect();
+        func.conditional_effects.formal_write_contexts.sort();
         symbol_table::update(symbol);
     }
 }

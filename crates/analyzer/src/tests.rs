@@ -6,6 +6,7 @@ use std::thread;
 use veryl_metadata::{Lint, Metadata, ProjectProperty};
 use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
+use veryl_parser::resource_table;
 
 mod comb_loop_diagnostic_tests;
 
@@ -37,6 +38,31 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    let mut errors = vec![];
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+    dbg!(&errors);
+    errors
+}
+
+#[track_caller]
+fn analyze_with_defines(code: &str, defines: &[&str]) -> Vec<AnalyzerError> {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    context.config.defines = defines
+        .iter()
+        .map(|x| resource_table::insert_str(x))
+        .collect();
     let mut ir = Ir::default();
 
     let mut errors = vec![];
@@ -19322,5 +19348,179 @@ fn concatenation_assignment_contributes_function_effects() {
         errors
             .iter()
             .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn inactive_function_writes_do_not_contribute_effects() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function update () {
+            #[ifdef(FEATURE)]
+            q = 1;
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_defines(code, &[]);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let errors = analyze_with_defines(code, &["FEATURE"]);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function write_q () {
+            q = 1;
+        }
+        function update () {
+            #[ifdef(FEATURE)]
+            write_q();
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_defines(code, &[]);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let errors = analyze_with_defines(code, &["FEATURE"]);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function update (result: output logic) {
+            #[ifdef(FEATURE)]
+            result = 1;
+        }
+        always_ff (clk) {
+            update(q);
+        }
+    }
+    "#;
+
+    let errors = analyze_with_defines(code, &[]);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+
+    let errors = analyze_with_defines(code, &["FEATURE"]);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn proto_function_effect_propagates_through_generic_wrapper() {
+    let code = r#"
+    proto package ProtoPkg {
+        function update (result: output logic);
+    }
+    package Pkg for ProtoPkg {
+        function update (result: output logic) {
+            result = 1;
+        }
+    }
+    module Generic::<PKG: ProtoPkg> (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function forward () {
+            PKG::update(q);
+        }
+        always_ff (clk) {
+            forward();
+        }
+    }
+    module Top (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        inst u: Generic::<Pkg> (
+            clk: clk,
+            q  : q,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    proto package ProtoPkg {
+        function update (result: output logic);
+    }
+    package Pkg for ProtoPkg {
+        function update (result: output logic) {
+            result = 1;
+        }
+    }
+    module Generic::<PKG: ProtoPkg> (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function forward (result: output logic) {
+            PKG::update(result);
+        }
+        always_ff (clk) {
+            forward(q);
+        }
+    }
+    module Top (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        inst u: Generic::<Pkg> (
+            clk: clk,
+            q  : q,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. })),
+        "{errors:?}"
     );
 }
