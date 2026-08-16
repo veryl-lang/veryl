@@ -19274,3 +19274,53 @@ fn side_effect_survives_repeated_post_pass1() {
             .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
     );
 }
+
+#[test]
+fn concatenation_assignment_contributes_function_effects() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+        r  : output logic,
+    ) {
+        function update () {
+            {q, r} = 2'b11;
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+        r  : output logic,
+    ) {
+        function update (
+            a: output logic,
+            b: output logic,
+        ) {
+            {a, b} = 2'b11;
+        }
+        always_ff (clk) {
+            update(q, r);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+}

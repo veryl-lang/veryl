@@ -1892,6 +1892,23 @@ impl VerylGrammarTrait for CreateSymbolTable {
         Ok(())
     }
 
+    fn concatenation_assignment(
+        &mut self,
+        arg: &ConcatenationAssignment,
+    ) -> Result<(), ParolError> {
+        if matches!(self.point, HandlerPoint::Before)
+            && let Some(paths) = self.write_paths.last_mut()
+        {
+            let items: Vec<_> = arg.assign_concatenation_list.as_ref().into();
+            paths.extend(
+                items
+                    .into_iter()
+                    .map(|item| item.hierarchical_identifier.as_ref().into()),
+            );
+        }
+        Ok(())
+    }
+
     fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<(), ParolError> {
         let name = arg.identifier.text();
         match self.point {
