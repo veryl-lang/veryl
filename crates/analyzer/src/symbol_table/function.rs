@@ -37,6 +37,7 @@ fn resolve_constantable(symbol: &Symbol, visited: &mut Vec<SymbolId>) -> bool {
 
     let constantable = is_constantable_function(func, symbol.id, &namespace, visited);
     func.constantable = Some(constantable);
+    func.reference_paths.clear();
     symbol_table::update(symbol);
 
     visited.pop();
