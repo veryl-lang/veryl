@@ -3580,6 +3580,22 @@ fn incompat_proto() {
 fn mismatch_type() {
     let code = r#"
     module ModuleA {
+        union UnionA {
+            a: logic<16>,
+            b: logic<16>,
+        }
+        var c: UnionA;
+        always_comb {
+            c = UnionA'{a: 16'h5a5a, b: 16'h1234};
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::MismatchType { .. }));
+
+    let code = r#"
+    module ModuleA {
         const a: u32 = 1;
         inst u: a;
     }
@@ -11669,6 +11685,40 @@ fn out_of_range_select_in_dead_branch() {
 }
 
 #[test]
+fn invalid_size_type() {
+    // https://github.com/veryl-lang/veryl/issues/3162
+    for decl in [
+        "var _a: logic<u32>;",
+        "var _a: logic<bit>;",
+        "var _a: logic<8>[u32];",
+    ] {
+        let code = format!("module ModuleA {{ {decl} }}");
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|x| matches!(x, AnalyzerError::InvalidSizeType { .. })),
+            "`{decl}` should be rejected: {errors:?}"
+        );
+    }
+
+    for decl in [
+        "const W: u32 = $bits(u32); var _a: logic<W>;",
+        "type T = logic<4>; var _a: logic<$bits(T)>;",
+        "var _a: logic<8>[2];",
+    ] {
+        let code = format!("module ModuleA {{ {decl} }}");
+        let errors = analyze(&code);
+        assert!(
+            !errors
+                .iter()
+                .any(|x| matches!(x, AnalyzerError::InvalidSizeType { .. })),
+            "`{decl}` should be accepted: {errors:?}"
+        );
+    }
+}
+
+#[test]
 fn invalid_select() {
     let code = r#"
     module ModuleA {
@@ -12723,6 +12773,65 @@ fn clock_domain_select_index() {
         var t: 'b logic;
         assign t   = i_dat[i_sel];
         assign o_b = t & i_dat[0];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn clock_domain_inst_port_unpacked_array_slice() {
+    // Regression: the slice evaluated to `Unknown`, which carries no clock
+    // domain, so the crossing went unreported.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock     ,
+        i_clk_b: input  'b clock     ,
+        i_a    : input  'a logic<8>[4],
+        o_b    : output 'b logic<8>  ,
+    ) {
+        inst u: ModuleB (
+            i_d: i_a[0+:2],
+            o_q: o_b      ,
+        );
+    }
+    module ModuleB (
+        i_d: input  logic<8>[2],
+        o_q: output logic<8>   ,
+    ) {
+        assign o_q = i_d[0] | i_d[1];
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Same-domain slice stays accepted.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock     ,
+        i_a    : input  'a logic<8>[4],
+        o_a    : output 'a logic<8>  ,
+    ) {
+        inst u: ModuleB (
+            i_d: i_a[0+:2],
+            o_q: o_a      ,
+        );
+    }
+    module ModuleB (
+        i_d: input  logic<8>[2],
+        o_q: output logic<8>   ,
+    ) {
+        assign o_q = i_d[0] | i_d[1];
     }
     "#;
     let errors = analyze(code);
@@ -14502,6 +14611,29 @@ fn generic_inference_failed() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::GenericInferenceFailed { .. }))
     );
+}
+
+#[test]
+fn generic_inference_from_module_port() {
+    // Generic arguments should be inferred from module ports just like
+    // from local variables.
+    // https://github.com/veryl-lang/veryl/issues/3117
+    let code = r#"
+    module ModuleA (
+        value: input logic<8>,
+    ) {
+        function FuncId::<T: u32> (
+            x: input logic<T>,
+        ) -> logic<T> {
+            return x;
+        }
+
+        let _r: logic<8> = FuncId(value);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

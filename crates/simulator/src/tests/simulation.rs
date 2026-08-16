@@ -1187,23 +1187,6 @@ fn aot_native_validate_config() -> Config {
     }
 }
 
-/// Assert that the AOT-C backend covered a construct natively rather than
-/// bailing to Cranelift.
-///
-/// The incremental settle deliberately turns whole-module AOT-C off
-/// (`aot_size_ok = !incr_on` in `ir/module.rs`), so under `VERYL_INCR=1` there
-/// is no whole-comb/whole-event artifact to claim coverage of and the question
-/// is not applicable.  The value assertions each of these tests makes after the
-/// coverage check still run in both configurations — only the claim about which
-/// backend produced the values is skipped.  Coverage therefore stays enforced
-/// in the default configuration, which is the one the library ships.
-fn assert_aot_c_native(covered: bool, what: &str) {
-    if crate::ir::incremental::enabled() {
-        return;
-    }
-    assert!(covered, "{what}");
-}
-
 #[test]
 fn wide_256_aot_native_comb() {
     // G1: a wide (>128-bit) comb module must be covered NATIVELY by the AOT-C
@@ -1228,7 +1211,7 @@ fn wide_256_aot_native_comb() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert_aot_c_native(
+    assert!(
         ir.whole_comb.is_some(),
         "wide comb module must be AOT-C-native (whole_comb=Some), not bailed to Cranelift",
     );
@@ -1318,7 +1301,7 @@ fn wide_256_aot_native_ff() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert_aot_c_native(
+    assert!(
         !ir.whole_events.is_empty(),
         "wide FF module must be AOT-C-native (whole_events non-empty)",
     );
@@ -1353,7 +1336,7 @@ fn wide_128_ff_validate_pool_agnostic() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert_aot_c_native(
+    assert!(
         !ir.whole_events.is_empty(),
         "128-bit FF must be AOT-C-native",
     );
@@ -1394,7 +1377,7 @@ fn probe_r4_wide_dynsel_store() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert_aot_c_native(
+    assert!(
         ir.whole_comb.is_some(),
         "wide dynsel-store comb must be AOT-C-native",
     );
@@ -1437,7 +1420,7 @@ fn probe_r4_wide_assign_dynamic() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert_aot_c_native(
+    assert!(
         !ir.whole_events.is_empty(),
         "wide AssignDynamic event must be AOT-C-native",
     );
@@ -1477,7 +1460,7 @@ fn probe_r4_shift_left_128() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert_aot_c_native(
+    assert!(
         ir.whole_comb.is_some(),
         "128-bit shift comb must be AOT-C-native",
     );
@@ -1514,7 +1497,7 @@ fn probe_r4_wide_src_rhs_select() {
     "#;
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
-    assert_aot_c_native(
+    assert!(
         ir.whole_comb.is_some(),
         "wide-src rhs_select comb must be AOT-C-native",
     );
@@ -2607,6 +2590,113 @@ fn inst_array_input_port_shorthand() {
 }
 
 #[test]
+fn inst_unpacked_array_slice_output_port() {
+    // The distinct BASE per instance catches a wrong element-to-element mapping.
+    let code = r#"
+    module Top (
+        o_flat: output logic<32>,
+    ) {
+        var all: logic<8> [4];
+
+        for n in 0..2 :g_leaf {
+            inst u: Leaf #(
+                BASE: 16 * n,
+            ) (
+                o_q: all[2 * n+:2],
+            );
+        }
+
+        assign o_flat = {all[3], all[2], all[1], all[0]};
+    }
+
+    module Leaf #(
+        param BASE: logic<8> = 0,
+    ) (
+        o_q: output logic<8> [2],
+    ) {
+        assign o_q[0] = BASE + 1;
+        assign o_q[1] = BASE + 2;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            sim.get("o_flat").unwrap(),
+            Value::new(0x1211_0201, 32, false)
+        );
+    }
+}
+
+#[test]
+fn inst_unpacked_array_slice_input_port() {
+    // The analyzer used to emit `Unknown` for a slice on the read side.
+    let code = r#"
+    module Top (
+        o_flat: output logic<16>,
+        o_one : output logic<8> ,
+    ) {
+        var all: logic<8> [4];
+        var sum: logic<8> [2];
+
+        assign all[0] = 8'h01;
+        assign all[1] = 8'h02;
+        assign all[2] = 8'h10;
+        assign all[3] = 8'h20;
+
+        for n in 0..2 :g_leaf {
+            inst u: Leaf (
+                i_d: all[2 * n+:2],
+                o_s: sum[n]       ,
+            );
+        }
+
+        assign o_flat = {sum[1], sum[0]};
+
+        // A one-element array port is an array too, so its slice expands.
+        inst v: One (
+            i_d: all[3+:1],
+            o_s: o_one    ,
+        );
+    }
+
+    module Leaf (
+        i_d: input  logic<8> [2],
+        o_s: output logic<8>    ,
+    ) {
+        assign o_s = i_d[0] + i_d[1];
+    }
+
+    module One (
+        i_d: input  logic<8> [1],
+        o_s: output logic<8>    ,
+    ) {
+        assign o_s = i_d[0];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+
+        let mut sim = Simulator::new(ir, None);
+
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o_flat").unwrap(), Value::new(0x3003, 16, false));
+        assert_eq!(sim.get("o_one").unwrap(), Value::new(0x20, 8, false));
+    }
+}
+
+#[test]
 fn inst_ff() {
     let code = r#"
     module Top (
@@ -3542,6 +3632,90 @@ fn signed_cast_same_width() {
     }
 }
 
+#[test]
+fn signed_concat_sign_extends_at_store() {
+    // https://github.com/veryl-lang/veryl/issues/3199
+    let code = r#"
+    module Top (
+        a: input  logic<32>       ,
+        b: output signed logic<32>,
+        c: output logic<32>       ,
+    ) {
+        always_comb {
+            b = ($signed({a[msb] repeat 3, a[msb:8]}) as 32);
+            c = {a[msb] repeat 3, a[msb:8]};
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("32'h8000_0000").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            format!("{:x}", sim.get("b").unwrap()),
+            "32'hff800000",
+            "config={config:?}"
+        );
+        // A bare concatenation stays unsigned per the LRM, so it zero-extends.
+        assert_eq!(
+            format!("{:x}", sim.get("c").unwrap()),
+            "32'h07800000",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn signed_concat_sign_extends_when_wide() {
+    // Same as above across the I128 (65..=128) and pointer (>128) width
+    // regimes, which take separate concat and store paths.
+    let code = r#"
+    module Top (
+        a: input  logic<64>        ,
+        b: output signed logic<128>,
+        c: output signed logic<256>,
+    ) {
+        always_comb {
+            b = ($signed({a[msb] repeat 4, a}) as 128);
+            c = ($signed({a[msb] repeat 8, a, a}) as 256);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("64'h8000_0000_0000_0000").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // 68-bit {1111, a} sign-extended to 128: 65 ones, then 63 zeros.
+        let expect_b = format!("128'h{}8{}", "f".repeat(16), "0".repeat(15));
+        assert_eq!(
+            format!("{:x}", sim.get("b").unwrap()),
+            expect_b,
+            "config={config:?}"
+        );
+
+        // 136-bit {8 ones, a, a} sign-extended to 256: 129 ones, then the
+        // remainder of the two `a` copies.
+        let expect_c = format!(
+            "256'h{}8{}8{}",
+            "f".repeat(32),
+            "0".repeat(15),
+            "0".repeat(15)
+        );
+        assert_eq!(
+            format!("{:x}", sim.get("c").unwrap()),
+            expect_c,
+            "config={config:?}"
+        );
+    }
+}
+
 // Regression: `$signed(a) / $signed(b)` and `%` must (a) produce a
 // signed result and (b) survive the cranelift SIGFPE cases (y == 0 and
 // signed i64::MIN / -1) consistently between interpreter and JIT.
@@ -4297,6 +4471,34 @@ fn parse_hex_content_comments_and_underscores() {
 }
 
 #[test]
+fn parse_hex_content_drops_a_word_wider_than_the_payload() {
+    let content = "1 00000000000000ff 100000000000000000 2";
+    let values = parse_hex_content(content, 64);
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0].payload_u64(), 0x1);
+    assert_eq!(values[1].payload_u64(), 0xff);
+    assert_eq!(values[2].payload_u64(), 0x2);
+}
+
+#[test]
+fn parse_hex_content_drops_a_word_with_a_stray_character() {
+    let content = "11 2g2 __ 33";
+    let values = parse_hex_content(content, 16);
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].payload_u64(), 0x11);
+    assert_eq!(values[1].payload_u64(), 0x33);
+}
+
+#[test]
+fn parse_hex_content_skips_an_address_directive() {
+    let content = "11 @0004 22";
+    let values = parse_hex_content(content, 8);
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].payload_u64(), 0x11);
+    assert_eq!(values[1].payload_u64(), 0x22);
+}
+
+#[test]
 fn readmemh_basic() {
     let dir = std::env::temp_dir();
     let hex_path = dir.join("veryl_test_readmemh.hex");
@@ -4331,6 +4533,46 @@ fn readmemh_basic() {
         assert!(dump.contains("mem[1] = 8'h14"));
         assert!(dump.contains("mem[2] = 8'h1e"));
         assert!(dump.contains("mem[3] = 8'h28"));
+    }
+
+    let _ = std::fs::remove_file(&hex_path);
+}
+
+#[test]
+fn readmemh_address_directive_moves_the_load_position() {
+    let dir = std::env::temp_dir();
+    let hex_path = dir.join("veryl_test_readmemh_at.hex");
+    std::fs::write(&hex_path, "0A 14\n@0004\n1E 28\n").unwrap();
+    let hex_path_str = hex_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+    ) {{
+        var mem: logic<8> [6];
+        initial {{
+            $readmemh("{}", mem);
+        }}
+    }}
+    "#,
+        hex_path_str
+    );
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(&code, &config);
+
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+
+        let dump = sim.ir.dump_variables();
+        println!("{}", dump);
+
+        assert!(dump.contains("mem[0] = 8'h0a"));
+        assert!(dump.contains("mem[1] = 8'h14"));
+        assert!(dump.contains("mem[4] = 8'h1e"));
+        assert!(dump.contains("mem[5] = 8'h28"));
     }
 
     let _ = std::fs::remove_file(&hex_path);
@@ -4744,6 +4986,288 @@ fn array_literal_ff() {
 }
 
 #[test]
+fn const_array_whole_assign() {
+    let code = r#"
+    package pk {
+        type st = logic<8> [4];
+        const TBL: st = '{8'd1, 8'd2, 8'd3, 8'd4};
+    }
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        c0: output logic<8>,
+        c3: output logic<8>,
+        f0: output logic<8>,
+        f3: output logic<8>,
+    ) {
+        var c: pk::st;
+        var f: pk::st;
+        always_comb {
+            c = pk::TBL;
+        }
+        always_ff {
+            if_reset {
+                f = '{0, 0, 0, 0};
+            } else {
+                f = pk::TBL;
+            }
+        }
+        assign c0 = c[0];
+        assign c3 = c[3];
+        assign f0 = f[0];
+        assign f3 = f[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        assert_eq!(sim.get("c0").unwrap(), Value::new(1, 8, false));
+        assert_eq!(sim.get("c3").unwrap(), Value::new(4, 8, false));
+        assert_eq!(sim.get("f0").unwrap(), Value::new(0, 8, false));
+
+        sim.step(&clk);
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("f0").unwrap(), Value::new(1, 8, false));
+        assert_eq!(sim.get("f3").unwrap(), Value::new(4, 8, false));
+    }
+}
+
+#[test]
+fn const_array_whole_assign_multi_dim() {
+    // Element order must follow the same row-major flattening the analyzer
+    // uses to fold `TBL[i][j]`.
+    let code = r#"
+    package pk {
+        type st = logic<8> [2, 3];
+        const TBL: st = '{'{8'd1, 8'd2, 8'd3}, '{8'd4, 8'd5, 8'd6}};
+    }
+    module Top (
+        o01: output logic<8>,
+        o10: output logic<8>,
+        o12: output logic<8>,
+    ) {
+        var s: pk::st;
+        always_comb {
+            s = pk::TBL;
+        }
+        assign o01 = s[0][1];
+        assign o10 = s[1][0];
+        assign o12 = s[1][2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("o01").unwrap(), Value::new(2, 8, false));
+        assert_eq!(sim.get("o10").unwrap(), Value::new(4, 8, false));
+        assert_eq!(sim.get("o12").unwrap(), Value::new(6, 8, false));
+    }
+}
+
+#[test]
+fn const_array_as_operand() {
+    // A single-element array must take the same paths as a wider one.
+    let code = r#"
+    package pk {
+        type st = logic<8> [4];
+        const TBL: st = '{8'd1, 8'd2, 8'd3, 8'd4};
+        type one = logic<8> [1];
+        const ONE: one = '{8'd7};
+    }
+    module Sub (
+        i: input  logic<8> [4],
+        j: input  logic<8> [1],
+        o: output logic<8>,
+    ) {
+        assign o = i[2] + j[0];
+    }
+    module Top (
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        function f (a: input logic<8> [4], b: input logic<8> [1]) -> logic<8> {
+            return a[1] + a[3] + b[0];
+        }
+        function g () -> pk::st {
+            return pk::TBL;
+        }
+        var s: pk::st;
+        inst u: Sub (i: pk::TBL, j: pk::ONE, o: o0);
+        assign o1 = f(pk::TBL, pk::ONE);
+        always_comb {
+            s = g();
+        }
+        assign o2 = s[2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("o0").unwrap(), Value::new(10, 8, false));
+        assert_eq!(sim.get("o1").unwrap(), Value::new(13, 8, false));
+        assert_eq!(sim.get("o2").unwrap(), Value::new(3, 8, false));
+    }
+}
+
+#[test]
+fn const_array_in_initial() {
+    let code = r#"
+    package pk {
+        type st = logic<8> [4];
+        const TBL: st = '{8'd1, 8'd2, 8'd3, 8'd4};
+    }
+    #[test(t_const_array)]
+    module t_const_array {
+        var s: pk::st;
+        initial {
+            s = pk::TBL;
+            $assert(s[0] == 8'd1, "first element");
+            $assert(s[3] == 8'd4, "last element");
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "t_const_array")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+#[test]
+fn sub_array_assign() {
+    // The index prefix can be on either side of the assignment.
+    let code = r#"
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        a:   output logic<8>,
+        b:   output logic<8>,
+        c:   output logic<8>,
+        d:   output logic<8>,
+    ) {
+        var t: logic<8> [3];
+        var u: logic<8> [2, 3];
+        var p: logic<8> [2, 3];
+        var q: logic<8> [3];
+        var r: logic<8> [2, 3];
+        var f: logic<8> [2, 3];
+
+        assign t = '{8'd1, 8'd2, 8'd3};
+        assign u = '{'{8'd4, 8'd5, 8'd6}, '{8'd7, 8'd8, 8'd9}};
+
+        always_comb {
+            p[0] = t;
+            p[1] = u[1];
+            q    = u[0];
+            r[0] = u[1];
+            r[1] = u[0];
+        }
+        always_ff {
+            if_reset {
+                f[0] = '{8'd0, 8'd0, 8'd0};
+                f[1] = '{8'd0, 8'd0, 8'd0};
+            } else {
+                f[0] = t;
+                f[1] = u[1];
+            }
+        }
+        assign a = p[0][2];
+        assign b = p[1][0];
+        assign c = q[1];
+        assign d = f[1][2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        assert_eq!(sim.get("a").unwrap(), Value::new(3, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(7, 8, false));
+        assert_eq!(sim.get("c").unwrap(), Value::new(5, 8, false));
+        assert_eq!(sim.get("d").unwrap(), Value::new(0, 8, false));
+
+        sim.step(&clk);
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("d").unwrap(), Value::new(9, 8, false));
+    }
+}
+
+#[test]
+fn sub_array_assign_const_and_call() {
+    let code = r#"
+    package pk {
+        type sub = logic<8> [4];
+        const TBL: sub = '{8'd1, 8'd2, 8'd3, 8'd4};
+    }
+    module Top (
+        a: output logic<8>,
+        b: output logic<8>,
+        c: output logic<8>,
+    ) {
+        function f () -> pk::sub {
+            return '{8'd5, 8'd6, 8'd7, 8'd8};
+        }
+        var s: logic<8> [2, 3, 4];
+        var v: logic<8> [2, 4];
+        always_comb {
+            for i in 0..2 {
+                for j in 0..3 {
+                    s[i][j] = pk::TBL;
+                }
+            }
+            v[0] = pk::TBL;
+            v[1] = f();
+        }
+        assign a = s[1][2][3];
+        assign b = v[0][1];
+        assign c = v[1][3];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("a").unwrap(), Value::new(4, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(2, 8, false));
+        assert_eq!(sim.get("c").unwrap(), Value::new(8, 8, false));
+    }
+}
+
+#[test]
 fn struct_constructor() {
     let code = r#"
     module Top (
@@ -4773,6 +5297,61 @@ fn struct_constructor() {
 
         // Struct is packed MSB-first: {hi, lo} = {0xAB, 0xCD} = 0xABCD
         assert_eq!(sim.get("c").unwrap(), Value::new(0xABCD, 16, false));
+    }
+}
+
+#[test]
+fn struct_constructor_unsized_member_in_array() {
+    // The interpreter and the AOT-C backend used to read a shifted value here;
+    // the JIT did not -- hence every config.
+    let code = r#"
+    module Top (
+        zero:       output logic<16>,
+        trunc:      output logic<16>,
+        signed_neg: output logic<20>,
+        fill:       output logic<16>,
+        every:      output logic<16>,
+    ) {
+        struct T { a: logic<8>, b: logic<8> }
+        struct S { a: logic<8>, b: signed logic<12> }
+
+        var v: T [2];
+        var t: T [2];
+        var g: S [2];
+        var f: T [2];
+        var n: T [2];
+
+        always_comb {
+            v = '{T'{a: 8'h5a, b: 0},   T'{a: 0, b: 0}};
+            t = '{T'{a: 8'h5a, b: 300}, T'{a: 0, b: 0}};
+            g = '{S'{a: 8'h5a, b: -1},  S'{a: 0, b: 0}};
+            f = '{T'{a: 8'h5a, b: '1},  T'{a: 0, b: 0}};
+            n = '{T'{a: 1, b: 2},       T'{a: 3, b: 4}};
+        }
+
+        assign zero       = v[0];
+        assign trunc      = t[0];
+        assign signed_neg = g[0];
+        assign fill       = f[0];
+        assign every      = n[1];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("zero").unwrap(), Value::new(0x5a00, 16, false));
+        assert_eq!(sim.get("trunc").unwrap(), Value::new(0x5a2c, 16, false));
+        assert_eq!(
+            sim.get("signed_neg").unwrap(),
+            Value::new(0x5afff, 20, false)
+        );
+        assert_eq!(sim.get("fill").unwrap(), Value::new(0x5aff, 16, false));
+        assert_eq!(sim.get("every").unwrap(), Value::new(0x0304, 16, false));
     }
 }
 
@@ -4959,6 +5538,48 @@ fn array_dynamic_index_write_comb() {
         sim.step(&Event::Clock(VarId::SYNTHETIC));
 
         assert_eq!(sim.get("o").unwrap(), Value::new(77, 8, false));
+    }
+}
+
+#[test]
+fn array_dynamic_index_prefix_write() {
+    // A dynamic prefix completed to full depth, directly or by array-literal
+    // expansion.
+    let code = r#"
+    module Top (
+        idx: input  logic<1>,
+        a:   output logic<8>,
+        b:   output logic<8>,
+    ) {
+        var p: logic<8> [2, 3];
+        var q: logic<8> [2, 3];
+
+        always_comb {
+            p = '{'{8'd0, 8'd0, 8'd0}, '{8'd0, 8'd0, 8'd0}};
+            p[idx][2] = 8'd7;
+            q = '{'{8'd0, 8'd0, 8'd0}, '{8'd0, 8'd0, 8'd0}};
+            q[idx] = '{8'd1, 8'd2, 8'd3};
+        }
+        assign a = p[1][2];
+        assign b = q[1][2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("idx", Value::new(0, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("a").unwrap(), Value::new(0, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0, 8, false));
+
+        sim.set("idx", Value::new(1, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("a").unwrap(), Value::new(7, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(3, 8, false));
     }
 }
 
@@ -11235,14 +11856,13 @@ fn for_loop_blocking_write_same_var() {
         sim.step(&clk);
 
         let v = sim.get("cnt").unwrap();
-        // Default ff_opt path stores c as comb (blocking chain → 4).
-        // --disable-ff-opt forces c to dual-slot FF (NBA → 1).
-        let expected_payload = if config.disable_ff_opt { 1 } else { 4 };
-        let expected = Value::new(expected_payload, 8, false);
+        // The unrolled loop writes `c` four times, so it stays a register and
+        // every iteration reads the pre-edge value — the emitted `c <= ...`
+        // keeps only the last write.
+        let expected = Value::new(1, 8, false);
         assert_eq!(
             v, expected,
-            "config={:?}: expected cnt = {} after 1 clock",
-            config, expected_payload,
+            "config={config:?}: expected cnt = 1 after 1 clock"
         );
     }
 }
@@ -15543,7 +16163,7 @@ fn wide_signed_compare_asymmetric_width_aot_c() {
     let config = aot_native_validate_config();
     for (a, b, egt, elt) in cases {
         let ir = analyze(code, &config);
-        assert_aot_c_native(
+        assert!(
             ir.whole_comb.is_some(),
             "wide signed compare must be AOT-C-native to exercise vw_scmp_asym",
         );
@@ -20462,5 +21082,169 @@ fn whole_array_assign_from_array_returning_function() {
             TestResult::Pass,
             "config: {config:?}"
         );
+    }
+}
+
+#[test]
+fn ff_partial_write_read_of_another_slice_sees_the_old_value() {
+    // Regression: `ff_opt` demoted a register to comb whenever every reference
+    // inside its own always_ff assigned the same element, however many times
+    // that element was written. A statement then observed a write an earlier
+    // statement had made, diverging from the emitted SystemVerilog.
+    let code = r#"
+    module Flat (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var s: logic<32>;
+        always_ff {
+            if_reset {
+                s = 32'h04030201;
+            } else {
+                s[7:0]   = s[7:0] + 1;
+                s[15:8]  = s[15:8] + s[7:0];
+                // A slice written from a lower one must also read pre-edge.
+                s[31:24] = s[23:16];
+            }
+        }
+    }
+
+    module Packed (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var s: logic<4, 8>;
+        always_ff {
+            if_reset {
+                for i in 0..4 {
+                    s[i] = (i + 1) as 8;
+                }
+            } else {
+                for i in 0..4 {
+                    s[i] = s[i] + s[(i + 1) % 4];
+                }
+            }
+        }
+    }
+
+    // Branch arms are mutually exclusive, so an up/down counter still writes
+    // its element once and keeps the comb form.
+    module Branchy (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        up   : input  logic,
+    ) {
+        var s: logic<8>;
+        always_ff {
+            if_reset {
+                s = 0;
+            } else {
+                if up {
+                    s = s + 1;
+                } else {
+                    s = s - 1;
+                }
+            }
+        }
+    }
+
+    module Unpacked (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var s: logic<8> [4];
+        always_ff {
+            if_reset {
+                for i in 0..4 {
+                    s[i] = (i + 1) as 8;
+                }
+            } else {
+                for i in 0..4 {
+                    s[i] = s[i] + s[(i + 1) % 4];
+                }
+            }
+        }
+    }
+
+    #[test(nba)]
+    module nba {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var up: logic;
+
+        inst f: Flat     (i_clk: clk, i_rst: rst);
+        inst y: Branchy  (i_clk: clk, i_rst: rst, up: up);
+        inst p: Packed   (i_clk: clk, i_rst: rst);
+        inst u: Unpacked (i_clk: clk, i_rst: rst);
+
+        initial {
+            up = 1;
+            rst.assert();
+            clk.next();
+
+            $assert(y.s == 8'h01, "an exclusive branch pair is still one write");
+
+            // Every right-hand side reads the value the register held before
+            // the clock edge: 01 -> 02, 02 + old 01 -> 03, 04 -> old 03.
+            $assert(f.s[7:0] == 8'h02, "own slice");
+            $assert(f.s[15:8] == 8'h03, "lower slice must be the old value");
+            $assert(f.s[31:24] == 8'h03, "shifted slice");
+
+            // A packed array is one register, so its elements behave the same
+            // way; the unpacked array is the reference.
+            for i in 0..4 {
+                $assert(p.s[i] == u.s[i], "packed and unpacked must agree");
+            }
+            $assert(u.s[3] == 8'h05, "wrap-around lane reads the old lane 0");
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "nba")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+#[test]
+fn union_member_forms() {
+    // The forms the union-constructor rejection must leave working.
+    let code = r#"
+    module Top (
+        a: output logic<16>,
+        b: output logic<16>,
+    ) {
+        struct S { x: logic<8>, y: logic<8> }
+        union U { w: logic<16>, s: S }
+        struct W { uu: U }
+
+        var u: U;
+        var v: W;
+
+        always_comb {
+            u.w = 16'h5a5a;
+            v   = W'{uu: S'{x: 8'h11, y: 8'h22}};
+        }
+        assign a = u;
+        assign b = v;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        println!("{}", sim.ir.dump_variables());
+        assert_eq!(sim.get("a").unwrap(), Value::new(0x5a5a, 16, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0x1122, 16, false));
     }
 }

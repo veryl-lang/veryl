@@ -1,6 +1,9 @@
 use crate::BigUint;
 use crate::HashMap;
+use crate::conv::Context;
 use crate::ir::VarId;
+use crate::ir::declaration::Declaration;
+use crate::ir::write_count::{UnsafeSelfReads, unsafe_self_reads};
 
 /// LHS of an assignment: `(VarId, array element index, bit-mask)`.
 /// `None` array index = dynamic. Empty bit-mask = unavailable (consumers
@@ -21,15 +24,17 @@ pub struct FfTableEntry {
 }
 
 impl FfTableEntry {
-    fn update_is_ff(&mut self, self_key: (VarId, usize)) {
+    fn update_is_ff(&mut self, self_key: (VarId, usize), unsafe_reads: &UnsafeSelfReads) {
         if let Some(assigned_decl) = self.assigned {
+            let readable = !unsafe_reads.contains(&(assigned_decl, self_key.0, self_key.1));
             // FF classification rules (strict NBA semantics):
             // - A variable may be treated as comb (ff_opt) only if no always_ff
             //   block reads it (cross-block NBA races would be violated).
             // - always_comb / continuous assigns re-evaluate after NBA in SV,
             //   so they correctly see new FF values; ff_opt is safe for them.
-            // - Within the same always_ff (assigned_decl), self-reference is
-            //   safe; but cross-variable assignments must see old values.
+            // - Within the same always_ff (assigned_decl), a self-reference
+            //   is safe while it still reads what the block started with
+            //   (see `write_count`); every other read must see old values.
             self.is_ff = self
                 .refered
                 .iter()
@@ -45,10 +50,10 @@ impl FfTableEntry {
                             if *target_id != self_key.0 {
                                 return true;
                             }
-                            // Same VarId: compare array index.
-                            // None index (dynamic) is conservative → FF.
+                            // A dynamic index is conservative → FF.
                             match target_idx {
-                                Some(idx) => *idx != self_key.1,
+                                Some(idx) if *idx == self_key.1 => !readable,
+                                Some(_) => true,
                                 None => true,
                             }
                         }
@@ -65,10 +70,17 @@ pub struct FfTable {
 }
 
 impl FfTable {
-    pub fn update_is_ff(&mut self) {
+    /// `decls` must be the declarations this table was gathered from: what
+    /// they write before a self-reference reads decides whether it needs the
+    /// register.
+    pub fn update_is_ff(&mut self, decls: &[Declaration], context: &mut Context) {
+        let unsafe_reads = unsafe_self_reads(decls, context);
         let keys: Vec<_> = self.table.keys().cloned().collect();
         for key in keys {
-            self.table.get_mut(&key).unwrap().update_is_ff(key);
+            self.table
+                .get_mut(&key)
+                .unwrap()
+                .update_is_ff(key, &unsafe_reads);
         }
     }
 
@@ -116,7 +128,9 @@ impl FfTable {
     pub fn insert_assigned(&mut self, id: VarId, index: usize, decl: usize) {
         self.table
             .entry((id, index))
-            .and_modify(|x| x.assigned = Some(decl))
+            .and_modify(|x| {
+                x.assigned = Some(decl);
+            })
             .or_insert(FfTableEntry {
                 assigned: Some(decl),
                 refered: vec![],

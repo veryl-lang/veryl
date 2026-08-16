@@ -414,6 +414,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_size_type),
+        help("use `$bits` to get the bit width of a type (e.g. `logic<$bits(u32)>`)"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("a type can't be used as a width or an array size")]
+    InvalidSizeType {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_unsized_literal),
         help("give the literal an explicit width (e.g. `1'b0`)"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1149,7 +1164,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(generic_inference_failed),
-        help("provide explicit generic arguments like `{identifier}::<…>(…)`, or pass an argument whose width can be determined from a variable declaration"),
+        help("provide explicit generic arguments like `{identifier}::<…>(…)`, or pass an argument whose width can be determined from a variable, port or parameter declaration"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("failed to infer generic arguments for `{identifier}`")]
@@ -2065,6 +2080,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidRangeAssign { input, .. } => input,
             AnalyzerError::InvalidReset { input, .. } => input,
             AnalyzerError::InvalidSelect { input, .. } => input,
+            AnalyzerError::InvalidSizeType { input, .. } => input,
             AnalyzerError::InvalidStatement { input, .. } => input,
             AnalyzerError::InvalidTbUsage { input, .. } => input,
             AnalyzerError::InvalidTest { input, .. } => input,
@@ -2177,6 +2193,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidRange { token_source, .. } => *token_source,
             AnalyzerError::InvalidReset { token_source, .. } => *token_source,
             AnalyzerError::InvalidSelect { token_source, .. } => *token_source,
+            AnalyzerError::InvalidSizeType { token_source, .. } => *token_source,
             AnalyzerError::InvalidRangeAssign { token_source, .. } => *token_source,
             AnalyzerError::NonConstantSelectWidth { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
@@ -2621,6 +2638,13 @@ impl AnalyzerError {
             input,
             error_location: token.into(),
             inst_context,
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_size_type(token: &TokenRange) -> Self {
+        AnalyzerError::InvalidSizeType {
+            input: source(token),
+            error_location: token.into(),
             token_source: token.source(),
         }
     }
@@ -3618,9 +3642,10 @@ pub enum MismatchTypeKind {
         actual: usize,
     },
     ConnectMultipleExpression,
-    NonStructUnionType {
+    NonStructType {
         actual: String,
     },
+    UnionConstructor,
 }
 
 impl fmt::Display for MismatchTypeKind {
@@ -3655,11 +3680,14 @@ impl fmt::Display for MismatchTypeKind {
             MismatchTypeKind::ConnectMultipleExpression => {
                 "connect requires a single expression, but multiple expressions are provided".fmt(f)
             }
-            MismatchTypeKind::NonStructUnionType { actual } => {
+            MismatchTypeKind::NonStructType { actual } => {
                 write!(
                     f,
-                    "struct constructor is expected to \"struct or union\", but it is \"{actual}\""
+                    "struct constructor is expected to \"struct\", but it is \"{actual}\""
                 )
+            }
+            MismatchTypeKind::UnionConstructor => {
+                "a union holds one member at a time, so it has no constructor; assign to a member instead".fmt(f)
             }
         }
     }

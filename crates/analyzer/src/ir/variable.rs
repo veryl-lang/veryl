@@ -227,8 +227,63 @@ impl VarPathSelect {
             .collect()
     }
 
-    /// Whether this LHS is an array *range* select (e.g. `o[0+:2]`). Only a plain
-    /// `=` expands such a slice; other contexts (op-assign) must reject it.
+    /// Read-side counterpart of [`Self::to_assign_destinations`]: an array
+    /// *range* select (`arr[0+:2]`) has no single-value form, so it expands to
+    /// one expression per element. Any other path yields one expression.
+    pub fn to_expressions(self, context: &mut Context) -> Vec<Expression> {
+        let (path, select, token) = self.clone().into();
+
+        let Some((id, base_comptime)) = context.find_path(&path) else {
+            return self.to_expression(context).into_iter().collect();
+        };
+
+        // The expansion below does not model a part_select's width remap
+        // (`to_base_select`), so member paths stay on the single-expression path.
+        let (array_select, width_select) = select.split(base_comptime.r#type.array.dims());
+        if base_comptime.part_select.is_some()
+            || !array_select.is_range()
+            || !array_select.is_const_with_range()
+        {
+            return self.to_expression(context).into_iter().collect();
+        }
+
+        let Some((beg, end)) = array_select.eval_value(context, &base_comptime.r#type, true) else {
+            return self.to_expression(context).into_iter().collect();
+        };
+
+        let mut comptime = base_comptime.clone();
+        comptime.r#type.array.drain(0..array_select.dimension());
+        comptime.is_const &= width_select.is_const();
+        comptime.token = token;
+
+        // `beg..=end` are flat element indices; collapse to outer indices.
+        let d = array_select.dimension();
+        let full_shape = base_comptime.r#type.array.clone();
+        let outer_dims: Vec<Option<usize>> = full_shape.iter().take(d).copied().collect();
+        let outer_shape = ShapeRef::new(&outer_dims);
+        let inner_total = full_shape
+            .iter()
+            .skip(d)
+            .map(|x| x.unwrap_or(1))
+            .product::<usize>()
+            .max(1);
+
+        (beg / inner_total..=end / inner_total)
+            .map(|i| {
+                let src = Factor::Variable(
+                    id,
+                    VarIndex::from_index(i, outer_shape),
+                    width_select.clone(),
+                    comptime.clone(),
+                );
+                Expression::Term(Box::new(src))
+            })
+            .collect()
+    }
+
+    /// Whether this path is an array *range* select (e.g. `o[0+:2]`). As an LHS
+    /// only a plain `=` expands such a slice; other contexts (op-assign) must
+    /// reject it.
     pub fn is_array_range(&self, context: &Context) -> bool {
         let (path, select, _) = self.clone().into();
         let Some((_, mut comptime)) = context.find_path(&path) else {

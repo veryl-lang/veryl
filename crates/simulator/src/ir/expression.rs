@@ -7,6 +7,7 @@ use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
 use num_bigint::BigUint;
 use num_traits::One;
+use std::cmp::Ordering;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::{MaskCache, ValueU64};
 use veryl_parser::resource_table::StrId;
@@ -54,6 +55,8 @@ pub enum Expression {
     },
     Concatenation {
         elements: Vec<(Box<Expression>, usize, usize)>, // (expr, repeat, elem_width)
+        /// Result signedness, so a `$signed({..})` sign-extends at a wider store.
+        signed: bool,
     },
     Ternary {
         cond: Box<Expression>,
@@ -142,7 +145,7 @@ impl Expression {
                 let y = y.eval(mask_cache);
                 op.eval_value_binary(&x, &y, expr_context.width, expr_context.signed, mask_cache)
             }
-            Expression::Concatenation { elements } => {
+            Expression::Concatenation { elements, signed } => {
                 let mut ret = Value::new(0, 0, false);
                 for (expr, repeat, _elem_width) in elements {
                     let val = expr.eval(mask_cache);
@@ -150,6 +153,7 @@ impl Expression {
                         ret = ret.concat(&val);
                     }
                 }
+                ret.set_signed(*signed);
                 ret
             }
             Expression::Ternary {
@@ -259,7 +263,7 @@ impl Expression {
                 x.gather_variable(inputs, outputs);
                 y.gather_variable(inputs, outputs);
             }
-            Expression::Concatenation { elements } => {
+            Expression::Concatenation { elements, .. } => {
                 for (expr, _, _) in elements {
                     expr.gather_variable(inputs, outputs);
                 }
@@ -369,9 +373,8 @@ impl ProtoExpression {
     /// element, not the post-select width).  The span travels with the read
     /// because meta-less storage (inlined-function and version-split
     /// temps) cannot be sized by a variable-meta lookup later — an 8-byte
-    /// fallback there silently under-covers a wide temp's readers in the
-    /// incremental plan.  Dynamic array reads expand to every element
-    /// (full coverage), range-unknown.
+    /// fallback there silently under-covers a wide temp.  Dynamic array
+    /// reads expand to every element (full coverage), range-unknown.
     pub fn gather_reads_expanded_ranged(&self, out: &mut Vec<RangedRead>) {
         match self {
             ProtoExpression::HierVariable(_) => {
@@ -426,16 +429,12 @@ impl ProtoExpression {
                 if let Some(dyn_sel) = dynamic_select {
                     dyn_sel.index_expr.gather_reads_expanded_ranged(out);
                 }
-                // A whole-array read above the plan's per-entry expansion cap
-                // collapses to one whole-span dep: the plan downgrades any
-                // entry carrying such a span to always_run before per-element
-                // precision is ever consumed, while the expansion itself is
-                // GBs of resident deps on an SoC (a multi-M-element DRAM read
-                // is captured per chunk AND per sub-group).  The union only
-                // widens (stride padding gaps), never narrows, so coverage
-                // stays safe.
+                // Past the cap, per-element precision buys nothing while
+                // the expansion costs GBs of resident entries on an SoC (a
+                // multi-M-element DRAM read).  The whole-span union only
+                // widens (stride padding gaps), so coverage stays safe.
                 let span = (*stride as usize).saturating_mul(*num_elements);
-                if *stride > 0 && span > crate::ir::incremental::read_expand_cap_bytes() {
+                if *stride > 0 && span > READ_EXPAND_CAP_BYTES {
                     out.push((*base_offset, None, span));
                 } else {
                     for i in 0..*num_elements {
@@ -666,6 +665,9 @@ pub struct DynamicBitSelect {
 /// One read gathered by `gather_reads_expanded_ranged`:
 /// `(offset, static bit range when known, native byte span of the read)`.
 pub type RangedRead = (VarOffset, Option<(usize, usize)>, usize);
+
+/// Read-expansion cap for `gather_reads_expanded_ranged`.
+const READ_EXPAND_CAP_BYTES: usize = (1 << 20) * 8;
 
 #[derive(Clone, Debug, Hash)]
 pub enum ProtoExpression {
@@ -1233,6 +1235,13 @@ impl ProtoExpression {
                 ..
             } => (*width, expr_context.signed),
             ProtoExpression::Value { value, width, .. } => (*width, value.signed()),
+            // A concatenation is unsigned per the LRM, but `$signed({..})` marks
+            // it signed and it reaches the store at its natural width too.
+            ProtoExpression::Concatenation {
+                width,
+                expr_context,
+                ..
+            } => (*width, expr_context.signed),
             _ => return None,
         };
         (signed && width > 0 && width < dst_width).then_some(width)
@@ -1383,7 +1392,11 @@ impl ProtoExpression {
                         expr_context: *expr_context,
                     }
                 }
-                ProtoExpression::Concatenation { elements, .. } => {
+                ProtoExpression::Concatenation {
+                    elements,
+                    expr_context,
+                    ..
+                } => {
                     let elements = elements
                         .iter()
                         .map(|(expr, repeat, elem_width)| {
@@ -1397,7 +1410,10 @@ impl ProtoExpression {
                             (Box::new(expr), *repeat, *elem_width)
                         })
                         .collect();
-                    Expression::Concatenation { elements }
+                    Expression::Concatenation {
+                        elements,
+                        signed: expr_context.signed,
+                    }
                 }
                 ProtoExpression::Ternary {
                     cond,
@@ -1510,6 +1526,25 @@ impl ProtoExpression {
     }
 }
 
+/// Non-`Value` expressions already carry the width the analyzer resolved.
+fn fit_literal_width(expr: &mut ProtoExpression, width: usize) {
+    let ProtoExpression::Value {
+        value,
+        width: value_width,
+        expr_context,
+    } = expr
+    else {
+        return;
+    };
+    match value.width().cmp(&width) {
+        Ordering::Less => *value = value.expand(width, value.signed()).into_owned(),
+        Ordering::Greater => value.trunc(width),
+        Ordering::Equal => {}
+    }
+    *value_width = width;
+    expr_context.width = width;
+}
+
 /// Build a ProtoExpression computing the linear index from a multi-dimensional VarIndex.
 /// Equivalent to calc_index_expr but produces ProtoExpression directly with correct widths.
 pub fn build_linear_index_expr(
@@ -1531,13 +1566,12 @@ pub fn build_linear_index_expr(
         });
     }
 
-    assert_eq!(
-        index.0.len(),
-        array.dims(),
-        "index dimension mismatch: {} != {}",
-        index.0.len(),
-        array.dims()
-    );
+    // A partial index (`s[i]` against `logic<8> [2, 3]`) leaves a sub-array,
+    // which has no single element to offset to.
+    if index.0.len() != array.dims() {
+        let token = index.0.first().map(|x| x.token_range()).unwrap_or_default();
+        return Err(SimulatorError::unsupported_description(&token));
+    }
 
     let mut ret: Option<ProtoExpression> = None;
     let mut base: usize = 1;
@@ -2394,8 +2428,12 @@ impl Conv<&air::Expression> for ProtoExpression {
 
                 let mut elements = Vec::new();
                 for ((_name, expr), member_type) in members.iter().zip(struct_members.iter()) {
-                    let converted: ProtoExpression = Conv::conv(context, expr)?;
+                    let mut converted: ProtoExpression = Conv::conv(context, expr)?;
                     let elem_width = member_type.width().unwrap();
+                    // An unsized literal is 32 bits, and the concatenation
+                    // joins elements at their value width, not `elem_width`.
+                    fit_literal_width(&mut converted, elem_width);
+                    debug_assert_eq!(converted.width(), elem_width);
                     elements.push((Box::new(converted), 1, elem_width));
                 }
 

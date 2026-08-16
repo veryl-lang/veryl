@@ -31,6 +31,62 @@ use veryl_parser::token_range::TokenRange;
 /// Per-statement dependency: (input offsets, output offsets).
 pub type StmtDep = (Vec<VarOffset>, Vec<VarOffset>);
 
+/// The analyzer folds a const array to one value per element, which has no
+/// single-width expression form -- every array destination copies it
+/// element-wise instead.
+fn const_array_operand(expr: &air::Expression) -> Option<(&air::Comptime, &[Value])> {
+    let air::Expression::Term(factor) = expr else {
+        return None;
+    };
+    let air::Factor::Value(comptime) = factor.as_ref() else {
+        return None;
+    };
+    match &comptime.value {
+        ValueVariant::NumericArray(values) => Some((comptime, values)),
+        _ => None,
+    }
+}
+
+/// Array shape an operand still has after its index prefix -- `s[0]` against
+/// `logic<8> [2, 3]` leaves `[3]`. `None` when there is no element list to
+/// expand over: a scalar, or a prefix that isn't constant.
+fn remaining_array_shape(
+    context: &mut Context,
+    id: &air::VarId,
+    index: &air::VarIndex,
+) -> Option<air::Shape> {
+    let shape = &context.scope().variable_meta.get(id)?.r#type.array;
+    let dim = index.dimension();
+    if dim >= shape.dims() || !index.is_const() {
+        return None;
+    }
+    Some(air::Shape::new(shape.as_slice()[dim..].to_vec()))
+}
+
+/// `None` on a shape mismatch, leaving the caller's generic path to report it.
+pub(crate) fn const_array_element_exprs(
+    expr: &air::Expression,
+    elements: usize,
+) -> Option<Vec<ProtoExpression>> {
+    let (comptime, values) = const_array_operand(expr)?;
+    if values.len() != elements {
+        return None;
+    }
+    let width = comptime.r#type.total_width()?;
+    let expr_context: ExpressionContext = (&comptime.expr_context).into();
+
+    Some(
+        values
+            .iter()
+            .map(|value| ProtoExpression::Value {
+                value: value.clone(),
+                width,
+                expr_context,
+            })
+            .collect(),
+    )
+}
+
 #[derive(Clone)]
 pub enum ProtoStatementBlock {
     Interpreted(Vec<ProtoStatement>),
@@ -82,6 +138,15 @@ pub struct ReadmemhElement {
     pub next_offset: Option<isize>,
 }
 
+/// A `@` directive in a `$readmemh` file moves the load position.
+enum HexItem {
+    Address(u64),
+    Word(AnalyzerValue),
+}
+
+/// (current, next, native_bytes, use_4state) for one `$readmemh` word.
+type ReadmemhSlot = (*mut u8, Option<*mut u8>, usize, bool);
+
 #[derive(Clone)]
 pub enum SystemFunctionCall {
     Display {
@@ -94,8 +159,8 @@ pub enum SystemFunctionCall {
     },
     Readmemh {
         filename: String,
-        /// (current_ptr, next_ptr, native_bytes, use_4state)
-        elements: Vec<(*mut u8, Option<*mut u8>, usize, bool)>,
+        /// Shared because building the testbench program clones the statement.
+        elements: Arc<[ReadmemhSlot]>,
         width: usize,
     },
     Assert {
@@ -717,15 +782,28 @@ impl SystemFunctionCall {
                 elements,
                 width,
             } => {
-                let values = parse_hex_file(filename, *width);
-                let count = values.len().min(elements.len());
-                for i in 0..count {
-                    let (current, next, nb, use_4state) = elements[i];
-                    unsafe { write_native_value(current, nb, use_4state, &values[i]) };
+                let content = read_hex_file(filename);
+                let mut i = 0usize;
+                for_each_hex_item(&content, *width, |item| {
+                    let value = match item {
+                        HexItem::Address(a) => {
+                            // An address too large for the host is past the end
+                            // of any memory, so let the next word stop the load.
+                            i = usize::try_from(a).unwrap_or(usize::MAX);
+                            return true;
+                        }
+                        HexItem::Word(v) => v,
+                    };
+                    let Some(&(current, next, nb, use_4state)) = elements.get(i) else {
+                        return false;
+                    };
+                    unsafe { write_native_value(current, nb, use_4state, &value) };
                     if let Some(next) = next {
-                        unsafe { write_native_value(next, nb, use_4state, &values[i]) };
+                        unsafe { write_native_value(next, nb, use_4state, &value) };
                     }
-                }
+                    i += 1;
+                    true
+                });
             }
             SystemFunctionCall::Assert {
                 kind,
@@ -1963,7 +2041,7 @@ impl ProtoStatement {
                         width,
                     } => {
                         let nb = calc_native_bytes(*width);
-                        let resolved: Vec<_> = elements
+                        let resolved: Arc<[_]> = elements
                             .iter()
                             .map(|elem| {
                                 let current = if elem.current.is_ff() {
@@ -3352,36 +3430,29 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
     fn conv(context: &mut Context, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         let in_initial = context.in_initial;
 
-        // Whole-array assignment (`assign out = arr;`): analyzer emits dst
-        // with empty index but non-empty array shape, which the single-stmt
-        // conv path can't address. Expand to N element-wise assigns.
+        // Array-shaped assignment (`assign out = arr;`, `s[0] = arr;`), which
+        // the single-stmt conv path below can't address.
         if src.dst.len() == 1 {
             let dst0 = &src.dst[0];
-            if dst0.index.dimension() == 0 {
-                let dst_array = {
-                    let scope = context.scope();
-                    scope
-                        .variable_meta
-                        .get(&dst0.id)
-                        .map(|m| m.r#type.array.clone())
-                };
-                if let Some(arr_shape) = dst_array.clone()
-                    && !arr_shape.is_empty()
-                    && let air::Expression::Term(factor) = &src.expr
-                    && let air::Factor::Variable(_, vidx, _, _) = factor.as_ref()
-                    && vidx.dimension() == 0
+            if let Some(dst_shape) = remaining_array_shape(context, &dst0.id, &dst0.index) {
+                let total: usize = dst_shape.iter().map(|d| d.unwrap_or(1)).product();
+
+                if let air::Expression::Term(factor) = &src.expr
+                    && let air::Factor::Variable(rhs_id, rhs_index, _, _) = factor.as_ref()
+                    && let Some(rhs_shape) = remaining_array_shape(context, rhs_id, rhs_index)
+                    && rhs_shape.iter().map(|d| d.unwrap_or(1)).product::<usize>() == total
                 {
-                    let total: usize = arr_shape.iter().map(|d| d.unwrap_or(1)).product();
                     let mut result = Vec::with_capacity(total);
                     for i in 0..total {
-                        let elem_idx = air::VarIndex::from_index(i, &arr_shape);
                         let mut new_dst = dst0.clone();
-                        new_dst.index = elem_idx.clone();
+                        new_dst
+                            .index
+                            .append(&air::VarIndex::from_index(i, &dst_shape));
                         let mut new_expr = src.expr.clone();
                         if let air::Expression::Term(ref mut fbox) = new_expr
-                            && let air::Factor::Variable(_, vidx2, _, _) = fbox.as_mut()
+                            && let air::Factor::Variable(_, vidx, _, _) = fbox.as_mut()
                         {
-                            *vidx2 = elem_idx;
+                            vidx.append(&air::VarIndex::from_index(i, &rhs_shape));
                         }
                         let element_assign = air::AssignStatement {
                             dst: vec![new_dst],
@@ -3398,34 +3469,81 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     return Ok(result);
                 }
 
-                // Same destination shape with an array-returning call on the
-                // RHS (`state = round(state);`). Inlined once: re-converting
-                // the call per element would inline the body N times.
-                if let Some(arr_shape) = dst_array
-                    && !arr_shape.is_empty()
-                    && dst0.select.is_empty()
+                // A const array on the RHS (`s = pk::TBL;`).
+                if dst0.select.is_empty()
+                    && let Some((comptime, values)) = const_array_operand(&src.expr)
+                {
+                    if values.len() != total {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    }
+                    let mut element_comptime = comptime.clone();
+                    element_comptime.r#type.array.clear();
+
+                    let mut result = Vec::with_capacity(total);
+                    for (i, value) in values.iter().enumerate() {
+                        let mut new_dst = dst0.clone();
+                        new_dst
+                            .index
+                            .append(&air::VarIndex::from_index(i, &dst_shape));
+                        let mut element_comptime = element_comptime.clone();
+                        element_comptime.value = ValueVariant::Numeric(value.clone());
+                        let element_assign = air::AssignStatement {
+                            dst: vec![new_dst],
+                            width: src.width,
+                            expr: air::Expression::Term(Box::new(air::Factor::Value(
+                                element_comptime,
+                            ))),
+                            token: src.token,
+                        };
+                        let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
+                        result.push(ProtoStatement::Assign(proto));
+                    }
+                    if in_initial {
+                        append_ff_next_copies(&mut result);
+                    }
+                    return Ok(result);
+                }
+
+                // An array-returning call on the RHS (`state = round(state);`).
+                // Inlined once: re-converting the call per element would
+                // inline the body N times.
+                if dst0.select.is_empty()
                     && let air::Expression::Term(factor) = &src.expr
                     && let air::Factor::FunctionCall(call) = factor.as_ref()
                 {
                     let ret_offsets = inline_function_call(context, call)?;
-                    let total: usize = arr_shape.iter().map(|d| d.unwrap_or(1)).product();
                     let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
                     let ret_width = call
                         .comptime
                         .r#type
                         .total_width()
                         .ok_or_else(|| SimulatorError::unsupported_description(&src.token))?;
-                    let (elements, dst_width) = {
+                    let (elements, dst_width, dims) = {
                         let scope = context.scope();
                         let meta = scope.variable_meta.get(&dst0.id).unwrap();
-                        (meta.elements.clone(), meta.width)
+                        (
+                            meta.elements.clone(),
+                            meta.width,
+                            meta.r#type.array.as_slice().to_vec(),
+                        )
                     };
-                    if ret_offsets.len() != total || elements.len() != total {
+                    // An empty index prefix resolves to 0, so a bare dst needs
+                    // no special case here.
+                    let base = dst0
+                        .index
+                        .eval_value(&mut context.scope().analyzer_context)
+                        .and_then(|v| partial_index_base(&dims, &v, total, elements.len()));
+                    let Some(base) = base else {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    };
+                    if ret_offsets.len() != total {
                         return Err(SimulatorError::unsupported_description(&src.token));
                     }
 
                     let mut result = Vec::with_capacity(total);
-                    for (element, ret_offset) in elements.iter().zip(ret_offsets) {
+                    for (element, ret_offset) in
+                        elements[base..base + total].iter().zip(ret_offsets)
+                    {
                         let current_offset = element.current_offset();
                         let dst = if element.is_ff() {
                             if in_initial {
@@ -4170,6 +4288,25 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                 continue;
             }
 
+            // Array argument fed by a const array (`f(pk::TBL)`).
+            if let Some(arg_meta) = arg_meta_clone.as_ref()
+                && let Some(exprs) = const_array_element_exprs(expr, arg_meta.elements.len())
+            {
+                for (arg_element, expr) in arg_meta.elements.iter().zip(exprs) {
+                    result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: arg_element.current,
+                        dst_width: arg_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: 0, // not FF
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
+
             // Array argument fed by a bare or constant partial-index
             // variable (`arr` or `arr[0]`): copy per-element. The generic
             // path treats the argument as a scalar and panics at
@@ -4311,23 +4448,35 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
     }
 }
 
-fn parse_hex_file(filename: &str, width: usize) -> Vec<AnalyzerValue> {
-    let content = match std::fs::read_to_string(filename) {
-        Ok(c) => c,
-        Err(e) => {
-            log::warn!("$readmemh: failed to read '{}': {}", filename, e);
-            return vec![];
-        }
-    };
-    parse_hex_content(&content, width)
+fn read_hex_file(filename: &str) -> Vec<u8> {
+    let content = std::fs::read(filename).unwrap_or_else(|e| {
+        log::warn!("$readmemh: failed to read '{filename}': {e}");
+        Vec::new()
+    });
+    // Otherwise every word drops and the image loads empty in silence.
+    if std::str::from_utf8(&content).is_err() {
+        log::warn!("$readmemh: '{filename}' is not text");
+    }
+    content
 }
 
 pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
     let bytes = content.as_bytes();
     let mut result: Vec<AnalyzerValue> = Vec::with_capacity(bytes.len() / 4 + 1);
-    let mut i = 0usize;
+    for_each_hex_item(bytes, width, |item| {
+        if let HexItem::Word(v) = item {
+            result.push(v);
+        }
+        true
+    });
+    result
+}
+
+/// `sink` returns false to stop early.  A token carrying a character outside
+/// `[0-9a-fA-F_]`, or a value past 64 bits, is dropped.
+fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -> bool) {
     let len = bytes.len();
-    let mut digits: Vec<u8> = Vec::with_capacity(32);
+    let mut i = 0usize;
 
     while i < len {
         let c = bytes[i];
@@ -4355,42 +4504,45 @@ pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
                 continue;
             }
         }
-        let start = i;
-        while i < len {
-            let c = bytes[i];
-            if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
-                break;
-            }
-            if c == b'/' && i + 1 < len && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') {
-                break;
-            }
+        let is_address = bytes[i] == b'@';
+        if is_address {
             i += 1;
         }
-        if start == i {
-            continue;
-        }
-        let tok = &bytes[start..i];
-        let parsed = if tok.contains(&b'_') {
-            digits.clear();
-            for &b in tok {
-                if b != b'_' {
-                    digits.push(b);
+        let mut acc = 0u64;
+        let mut digits = 0usize;
+        let mut ok = true;
+        while i < len {
+            let c = bytes[i];
+            let d = match c {
+                b'0'..=b'9' => c - b'0',
+                b'a'..=b'f' => c - b'a' + 10,
+                b'A'..=b'F' => c - b'A' + 10,
+                b' ' | b'\t' | b'\n' | b'\r' => break,
+                b'/' if i + 1 < len && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') => break,
+                b'_' => {
+                    i += 1;
+                    continue;
                 }
+                _ => {
+                    ok = false;
+                    i += 1;
+                    continue;
+                }
+            };
+            ok &= acc >> 60 == 0;
+            acc = (acc << 4) | d as u64;
+            digits += 1;
+            i += 1;
+        }
+        if ok && digits > 0 {
+            let item = if is_address {
+                HexItem::Address(acc)
+            } else {
+                HexItem::Word(AnalyzerValue::new(acc, width, false))
+            };
+            if !sink(item) {
+                return;
             }
-            if digits.is_empty() {
-                continue;
-            }
-            std::str::from_utf8(&digits)
-                .ok()
-                .and_then(|s| u64::from_str_radix(s, 16).ok())
-        } else {
-            std::str::from_utf8(tok)
-                .ok()
-                .and_then(|s| u64::from_str_radix(s, 16).ok())
-        };
-        if let Some(val) = parsed {
-            result.push(AnalyzerValue::new(val, width, false));
         }
     }
-    result
 }

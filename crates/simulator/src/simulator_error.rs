@@ -50,6 +50,25 @@ pub enum SimulatorError {
         token_source: TokenSource,
     },
 
+    #[diagnostic(
+        severity(Error),
+        code(undetermined_width),
+        help(
+            "this is usually a width derived from an external SystemVerilog item (`$sv::`), whose value the simulator can't see"
+        )
+    )]
+    #[error("width of {subject} can't be determined by the simulator")]
+    UndeterminedWidth {
+        /// Carries its own quotes; a variable with no user-facing name
+        /// substitutes a phrase instead.
+        subject: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("this width is not a compile-time constant for the simulator")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
     #[diagnostic(severity(Error), code(unsupported_description))]
     #[error("unsupported description")]
     UnsupportedDescription {
@@ -128,6 +147,22 @@ impl SimulatorError {
             input,
             error_location: (*token).into(),
             token_source: token.beg.source,
+        }
+    }
+
+    pub fn undetermined_width(subject: &str, token: &TokenRange) -> Self {
+        let source = token.beg.source;
+        let input = MultiSources {
+            sources: vec![Source {
+                path: source.to_string(),
+                text: source.get_text(),
+            }],
+        };
+        SimulatorError::UndeterminedWidth {
+            subject: subject.to_string(),
+            input,
+            error_location: (*token).into(),
+            token_source: source,
         }
     }
 

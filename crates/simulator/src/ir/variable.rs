@@ -1,3 +1,4 @@
+use crate::simulator_error::SimulatorError;
 use crate::{HashMap, HashSet};
 use std::fmt;
 use veryl_analyzer::ir as air;
@@ -315,6 +316,17 @@ impl VariableMeta {
 /// (not including the start offset).
 /// Iterates variables sorted by VarId so the iteration order is deterministic
 /// and matches the buffer allocation order in `fill_buffers`.
+/// A const lifted out of a package gets a synthesized `__const_…` path, which
+/// means nothing to a reader. `__` is reserved, so no source name collides.
+fn report_subject(v: &air::Variable) -> String {
+    let path = v.path.to_string();
+    if path.starts_with("__const_") {
+        "this constant".to_string()
+    } else {
+        format!("\"{path}\"")
+    }
+}
+
 pub fn create_variable_meta(
     src: &HashMap<VarId, air::Variable>,
     ff_table: &air::FfTable,
@@ -323,7 +335,7 @@ pub fn create_variable_meta(
     use_4state: bool,
     ff_start_bytes: isize,
     comb_start_bytes: isize,
-) -> Option<(HashMap<VarId, VariableMeta>, usize, usize)> {
+) -> Result<(HashMap<VarId, VariableMeta>, usize, usize), SimulatorError> {
     let mut ff_pos: isize = ff_start_bytes;
     let mut comb_pos: isize = comb_start_bytes;
 
@@ -349,7 +361,13 @@ pub fn create_variable_meta(
         {
             continue;
         }
-        let width = v.r#type.total_width()?;
+        // In practice a `$sv::` constant, whose value lives in external
+        // SystemVerilog. Reported here because only this loop knows which
+        // variable carries the width.
+        let width = v
+            .r#type
+            .total_width()
+            .ok_or_else(|| SimulatorError::undetermined_width(&report_subject(v), &v.token))?;
 
         // Analyzer collapses all-same initial arrays down to a single
         // template value (eval_variable), so derive the real array length
@@ -487,7 +505,7 @@ pub fn create_variable_meta(
         }
     }
 
-    Some((
+    Ok((
         variables,
         (ff_pos - ff_start_bytes) as usize,
         (comb_pos - comb_start_bytes) as usize,
