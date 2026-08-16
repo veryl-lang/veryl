@@ -44,13 +44,13 @@ fn resolve_constantable(symbol: &Symbol, visited: &mut Vec<SymbolId>) -> bool {
 
 #[derive(Clone, Default, PartialEq, Eq)]
 struct Effect {
-    external_writes: HashSet<DefineContext>,
+    external_writes: HashSet<FunctionWrite>,
     formal_writes: HashSet<FunctionWrite>,
 }
 
 enum WriteTarget {
     None,
-    External,
+    External(GenericSymbolPath),
     Formal(GenericSymbolPath),
 }
 
@@ -79,9 +79,11 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
                         SymbolKind::ModportVariableMember(member)
                             if matches!(member.direction, Direction::Output | Direction::Inout) =>
                         {
-                            WriteTarget::External
+                            WriteTarget::External(path.clone())
                         }
-                        _ if matches!(port.direction, Direction::Inout) => WriteTarget::External,
+                        _ if matches!(port.direction, Direction::Inout) => {
+                            WriteTarget::External(path.clone())
+                        }
                         _ => WriteTarget::None,
                     }
                 }
@@ -94,7 +96,7 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
             &root.found.kind,
             SymbolKind::Port(_) | SymbolKind::Variable(_)
         ) {
-            return WriteTarget::External;
+            return WriteTarget::External(path.clone());
         }
         let Ok(target) = symbol_table::resolve(path) else {
             return WriteTarget::None;
@@ -104,7 +106,7 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
             | SymbolKind::Variable(_)
             | SymbolKind::ModportVariableMember(_)
             | SymbolKind::StructMember(_)
-            | SymbolKind::UnionMember(_) => WriteTarget::External,
+            | SymbolKind::UnionMember(_) => WriteTarget::External(path.clone()),
             _ => WriteTarget::None,
         }
     }
@@ -130,8 +132,11 @@ fn path_define_context(path: &GenericSymbolPath) -> DefineContext {
 fn add_target(effect: &mut Effect, target: WriteTarget, define_context: DefineContext) {
     match target {
         WriteTarget::None => {}
-        WriteTarget::External => {
-            effect.external_writes.insert(define_context);
+        WriteTarget::External(path) => {
+            effect.external_writes.insert(FunctionWrite {
+                path,
+                define_context,
+            });
         }
         WriteTarget::Formal(path) => {
             effect.formal_writes.insert(FunctionWrite {
@@ -180,9 +185,12 @@ fn resolve_side_effects(list: &[Symbol]) {
                     continue;
                 };
                 let call_context = path_define_context(&call.callee);
-                for callee_context in &callee_effect.external_writes {
-                    if let Some(context) = call_context.conjoin(callee_context) {
-                        effect.external_writes.insert(context);
+                for external_write in &callee_effect.external_writes {
+                    if let Some(context) = call_context.conjoin(&external_write.define_context) {
+                        effect.external_writes.insert(FunctionWrite {
+                            path: external_write.path.clone(),
+                            define_context: context,
+                        });
                     }
                 }
 
@@ -242,9 +250,15 @@ fn resolve_side_effects(list: &[Symbol]) {
             unreachable!();
         };
         func.has_side_effect = !effect.external_writes.is_empty();
-        func.conditional_effects.side_effect_contexts =
-            effect.external_writes.into_iter().collect();
+        func.conditional_effects.side_effect_contexts = effect
+            .external_writes
+            .iter()
+            .map(|write| write.define_context.clone())
+            .collect();
         func.conditional_effects.side_effect_contexts.sort();
+        func.conditional_effects.side_effect_contexts.dedup();
+        func.conditional_effects.external_writes = effect.external_writes.into_iter().collect();
+        func.conditional_effects.external_writes.sort();
         func.formal_writes = effect
             .formal_writes
             .iter()

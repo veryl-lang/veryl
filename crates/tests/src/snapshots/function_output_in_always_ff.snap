@@ -4,12 +4,19 @@ expression: out
 ---
 function_output_in_always_ff (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#function_output_in_always_ff)
 
-  × function output in always_ff must be connected to a process-local variable
+  × output "result" of function "calculate" can't write "q" directly from always_ff
     ╭─[../../testcases/error/function_output_in_always_ff.veryl:12:19]
  11 │     always_ff (clk) {
  12 │         calculate(q);
     ·                   ┬
-    ·                   ╰── not a process-local variable
+    ·                   ╰── "q" is declared outside this always_ff
  13 │     }
     ╰────
-  help: connect function outputs to variables declared inside this always_ff block
+   ╭─[../../testcases/error/function_output_in_always_ff.veryl:6:9]
+ 5 │     function calculate (
+ 6 │         result: output logic,
+   ·         ───┬──
+   ·            ╰── "result" is declared as an output here
+ 7 │     ) {
+   ╰────
+  help: connect "result" to a variable declared inside this always_ff, then assign that variable to "q"

@@ -5,7 +5,7 @@ use crate::analyzer_error::{
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_refereence;
-use crate::conv::context::RuntimeFunctionEffect;
+use crate::conv::context::{ExternalWriteOrigin, RuntimeFunctionEffect};
 use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
@@ -4066,6 +4066,14 @@ pub fn function_call(
             .and_then(|symbol| match &symbol.kind {
                 SymbolKind::Function(func) => Some(RuntimeFunctionEffect {
                     external_write: func.has_side_effect_in(&c.config.defines),
+                    external_writes: func
+                        .external_write_paths(&c.config.defines)
+                        .into_iter()
+                        .map(|path| ExternalWriteOrigin {
+                            path: path.to_string(),
+                            token: path.range,
+                        })
+                        .collect(),
                     formal_writes: func.written_output_names(&c.config.defines),
                 }),
                 _ => None,
@@ -4073,6 +4081,9 @@ pub fn function_call(
             .unwrap_or_default();
         if let Some(runtime_effect) = c.function_effect(&path) {
             effect.external_write |= runtime_effect.external_write;
+            effect
+                .external_writes
+                .extend(runtime_effect.external_writes);
             effect.formal_writes.extend(runtime_effect.formal_writes);
         }
         c.record_function_call_effect(&effect, &outputs);
@@ -4081,26 +4092,48 @@ pub fn function_call(
             && effect.external_write
             && let Some(symbol) = &symbol
         {
+            let definition = TokenRange::from(&symbol.token);
+            let mut external_writes = effect.external_writes.iter().collect::<Vec<_>>();
+            external_writes.sort_by_key(|write| write.token);
             c.insert_error(AnalyzerError::side_effect_function_call_in_always_ff(
                 &symbol.token.text.to_string(),
                 &token,
+                &definition,
+                &external_writes
+                    .into_iter()
+                    .map(|write| write.token)
+                    .collect::<Vec<_>>(),
             ));
         }
 
         if c.is_affiliated(Affiliation::AlwaysFf) {
             for (formal, dsts) in &outputs {
-                if !formal
-                    .0
-                    .first()
-                    .is_some_and(|name| effect.formal_writes.contains(name))
-                {
+                let Some(formal_name) = formal.0.first() else {
+                    continue;
+                };
+                if !effect.formal_writes.contains(formal_name) {
                     continue;
                 }
+                let output = resource_table::get_str_value(*formal_name).unwrap_or_default();
+                let declaration = symbol.as_ref().and_then(|symbol| match &symbol.kind {
+                    SymbolKind::Function(function) => function
+                        .ports
+                        .iter()
+                        .find(|port| port.token.token.text == *formal_name)
+                        .map(|port| TokenRange::from(&port.token.token)),
+                    _ => None,
+                });
                 for dst in dsts {
                     if c.get_variable_info(dst.id)
                         .is_some_and(|variable| variable.affiliation != Affiliation::AlwaysFf)
                     {
-                        c.insert_error(AnalyzerError::function_output_in_always_ff(&dst.token));
+                        c.insert_error(AnalyzerError::function_output_in_always_ff(
+                            &func.name.to_string(),
+                            &output,
+                            &dst.path.to_string(),
+                            &dst.token,
+                            declaration.as_ref(),
+                        ));
                     }
                 }
             }

@@ -2608,6 +2608,8 @@ pub struct FunctionProperty {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConditionalFunctionEffects {
     pub side_effect_contexts: Vec<DefineContext>,
+    #[serde(default)]
+    pub external_writes: Vec<FunctionWrite>,
     pub formal_write_contexts: Vec<FunctionWrite>,
 }
 
@@ -2660,6 +2662,15 @@ impl FunctionProperty {
         writes
             .into_iter()
             .filter_map(|path| path.paths.first().map(|x| x.base.text))
+            .collect()
+    }
+
+    pub fn external_write_paths(&self, defines: &HashSet<StrId>) -> Vec<&GenericSymbolPath> {
+        self.conditional_effects
+            .external_writes
+            .iter()
+            .filter(|write| write.define_context.is_active(defines))
+            .map(|write| &write.path)
             .collect()
     }
 }

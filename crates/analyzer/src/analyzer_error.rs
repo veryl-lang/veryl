@@ -78,33 +78,44 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(side_effect_function_call_in_always_ff),
-        help("move the write into always_ff or call a function without external writes"),
+        help("move the external write into this always_ff, or use an output argument connected to a variable declared inside it"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error(
-        "function \"{identifier}\" writes an object outside the function and can't be called in always_ff"
+        "function \"{identifier}\" can't be called in always_ff because it may write an HDL object declared outside the function"
     )]
     SideEffectFunctionCallInAlwaysFf {
         identifier: String,
         #[source_code]
         input: MultiSources,
-        #[label("side-effecting function call")]
+        #[label("called from always_ff")]
         error_location: SourceSpan,
+        #[label(collection, "external write occurs here")]
+        external_writes: Vec<SourceSpan>,
+        #[label(collection, "function declared here")]
+        function_definition: Vec<SourceSpan>,
         token_source: TokenSource,
     },
 
     #[diagnostic(
         severity(Error),
         code(function_output_in_always_ff),
-        help("connect function outputs to variables declared inside this always_ff block"),
+        help("connect \"{output}\" to a variable declared inside this always_ff, then assign that variable to \"{destination}\""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
-    #[error("function output in always_ff must be connected to a process-local variable")]
+    #[error(
+        "output \"{output}\" of function \"{function}\" can't write \"{destination}\" directly from always_ff"
+    )]
     FunctionOutputInAlwaysFf {
+        function: String,
+        output: String,
+        destination: String,
         #[source_code]
         input: MultiSources,
-        #[label("not a process-local variable")]
+        #[label("\"{destination}\" is declared outside this always_ff")]
         error_location: SourceSpan,
+        #[label(collection, "\"{output}\" is declared as an output here")]
+        output_declaration: Vec<SourceSpan>,
         token_source: TokenSource,
     },
 
@@ -2337,18 +2348,48 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
-    pub fn side_effect_function_call_in_always_ff(identifier: &str, token: &TokenRange) -> Self {
+    pub fn side_effect_function_call_in_always_ff(
+        identifier: &str,
+        token: &TokenRange,
+        definition: &TokenRange,
+        writes: &[TokenRange],
+    ) -> Self {
+        let context = if writes.is_empty() {
+            std::slice::from_ref(definition)
+        } else {
+            writes
+        };
+        let (input, context_spans) = source_with_context(token, context);
+        let (external_writes, function_definition) = if writes.is_empty() {
+            (vec![], context_spans)
+        } else {
+            (context_spans, vec![])
+        };
         AnalyzerError::SideEffectFunctionCallInAlwaysFf {
             identifier: identifier.to_string(),
-            input: source(token),
+            input,
             error_location: token.into(),
+            external_writes,
+            function_definition,
             token_source: token.source(),
         }
     }
-    pub fn function_output_in_always_ff(token: &TokenRange) -> Self {
+    pub fn function_output_in_always_ff(
+        function: &str,
+        output: &str,
+        destination: &str,
+        token: &TokenRange,
+        declaration: Option<&TokenRange>,
+    ) -> Self {
+        let declarations = declaration.into_iter().copied().collect::<Vec<_>>();
+        let (input, output_declaration) = source_with_context(token, &declarations);
         AnalyzerError::FunctionOutputInAlwaysFf {
-            input: source(token),
+            function: function.to_string(),
+            output: output.to_string(),
+            destination: destination.to_string(),
+            input,
             error_location: token.into(),
+            output_declaration,
             token_source: token.source(),
         }
     }
