@@ -3,8 +3,8 @@ use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
 use crate::ir::{
     Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function, Interface,
-    IrResult, ShapeRef, Signature, Type, VarId, VarIndex, VarKind, VarPath, VarSelect, Variable,
-    VariableInfo,
+    IrResult, ShapeRef, Signature, Statement, Type, VarId, VarIndex, VarKind, VarPath, VarSelect,
+    Variable, VariableInfo,
 };
 use crate::namespace::Namespace;
 use crate::scope;
@@ -297,6 +297,72 @@ impl Context {
         if let Some(frame) = self.function_effect_stack.last_mut() {
             frame.effect.external_write |= external_write;
             frame.effect.formal_writes.extend(formal_writes);
+        }
+    }
+
+    pub(crate) fn record_function_statement_writes(&mut self, statements: &[Statement]) {
+        let Some(caller_outputs) = self
+            .function_effect_stack
+            .last()
+            .map(|frame| frame.outputs.clone())
+        else {
+            return;
+        };
+        let mut effect = RuntimeFunctionEffect::default();
+
+        fn visit(
+            context: &Context,
+            statements: &[Statement],
+            caller_outputs: &HashMap<VarId, StrId>,
+            effect: &mut RuntimeFunctionEffect,
+        ) {
+            for statement in statements {
+                match statement {
+                    Statement::Assign(assign) => {
+                        for destination in &assign.dst {
+                            if let Some(name) = caller_outputs.get(&destination.id) {
+                                effect.formal_writes.insert(*name);
+                            } else if context.get_variable_info(destination.id).is_none_or(
+                                |variable| {
+                                    variable.affiliation != Affiliation::Function
+                                        || matches!(variable.kind, VarKind::Output | VarKind::Inout)
+                                },
+                            ) {
+                                effect.external_write = true;
+                            }
+                        }
+                    }
+                    Statement::If(statement) => {
+                        visit(context, &statement.true_side, caller_outputs, effect);
+                        visit(context, &statement.false_side, caller_outputs, effect);
+                    }
+                    Statement::IfReset(statement) => {
+                        visit(context, &statement.true_side, caller_outputs, effect);
+                        visit(context, &statement.false_side, caller_outputs, effect);
+                    }
+                    Statement::Case(statement) => {
+                        for arm in &statement.arms {
+                            visit(context, &arm.body, caller_outputs, effect);
+                        }
+                        visit(context, &statement.default, caller_outputs, effect);
+                    }
+                    Statement::For(statement) => {
+                        visit(context, &statement.body, caller_outputs, effect);
+                    }
+                    Statement::SystemFunctionCall(_)
+                    | Statement::FunctionCall(_)
+                    | Statement::TbMethodCall(_)
+                    | Statement::Break
+                    | Statement::Unsupported(_)
+                    | Statement::Null => {}
+                }
+            }
+        }
+
+        visit(self, statements, &caller_outputs, &mut effect);
+        if let Some(frame) = self.function_effect_stack.last_mut() {
+            frame.effect.external_write |= effect.external_write;
+            frame.effect.formal_writes.extend(effect.formal_writes);
         }
     }
 

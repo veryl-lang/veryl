@@ -19391,6 +19391,125 @@ fn modport_effect_requires_an_actual_member_write() {
 }
 
 #[test]
+fn generic_instance_direct_write_is_scheduler_side_effect() {
+    let code = r#"
+    interface Bus {
+        var data: logic;
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(unassign_variable)]
+        inst bus: Bus;
+        function update::<IF: inst Bus> () {
+            IF.data = 1;
+        }
+        always_ff (clk) {
+            update::<bus>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let Some((external_writes, function_definition)) =
+        errors.iter().find_map(|error| match error {
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf {
+                external_writes,
+                function_definition,
+                ..
+            } => Some((external_writes, function_definition)),
+            _ => None,
+        })
+    else {
+        panic!("expected side-effect diagnostic: {errors:?}");
+    };
+    assert_eq!(external_writes.len(), 1, "{errors:?}");
+    assert!(function_definition.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn diamond_connect_in_function_is_scheduler_side_effect() {
+    let code = r#"
+    interface Bus {
+        var ready: logic;
+        var valid: logic;
+        modport master {
+            ready: input,
+            valid: output,
+        }
+        modport slave {
+            ready: output,
+            valid: input,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(unassign_variable)]
+        inst a: Bus;
+        #[allow(unassign_variable)]
+        inst b: Bus;
+        function wire_bus (
+            master: modport Bus::master,
+            slave : modport Bus::slave,
+        ) {
+            master <> slave;
+        }
+        always_ff (clk) {
+            wire_bus(a, b);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let Some((external_writes, function_definition)) =
+        errors.iter().find_map(|error| match error {
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf {
+                external_writes,
+                function_definition,
+                ..
+            } => Some((external_writes, function_definition)),
+            _ => None,
+        })
+    else {
+        panic!("expected side-effect diagnostic: {errors:?}");
+    };
+    assert_eq!(external_writes.len(), 1, "{errors:?}");
+    assert!(function_definition.is_empty(), "{errors:?}");
+
+    // A diamond connection only contributes an effect when expansion creates
+    // an actual write. An all-input modport connected to a constant is a no-op.
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport monitor {
+            data: input,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(unassign_variable)]
+        inst bus: Bus;
+        function observe (arg: modport Bus::monitor) {
+            arg <> 0;
+        }
+        always_ff (clk) {
+            observe(bus);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn side_effect_survives_repeated_post_pass1() {
     let code = r#"
     module ModuleA (

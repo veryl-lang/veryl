@@ -947,6 +947,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     && let AssignmentGroup::DiamondOperator(_) =
                         x.assignment.assignment_group.as_ref()
                 {
+                    if let Some(paths) = self.write_paths.last_mut() {
+                        paths.extend(assignment_targets(x.assignment.expression.as_ref()));
+                    }
                     let connect = SymConnect::Statement(
                         arg.expression_identifier.as_ref().clone(),
                         x.assignment.expression.as_ref().clone(),

@@ -1279,10 +1279,14 @@ fn conv_function(
                 }
             }
         }
-        let effect = RuntimeFunctionEffect {
+        let (specialized_external_write, specialized_formal_writes) =
+            symbol_table::specialized_direct_effect(symbol, c);
+        let mut effect = RuntimeFunctionEffect {
             external_write: proeprty.has_side_effect_in(&c.config.defines),
             formal_writes: proeprty.written_output_names(&c.config.defines),
         };
+        effect.external_write |= specialized_external_write;
+        effect.formal_writes.extend(specialized_formal_writes);
         c.begin_function_effect(path.clone(), output_ids, effect);
 
         let body = if let Some(block) = statement_block {
@@ -1295,12 +1299,20 @@ fn conv_function(
             let statements: IrResult<ir::StatementBlock> = Conv::conv(c, block);
             c.in_tb_block = in_tb_block;
             c.disalbe_const_opt = disable_const_opt;
+            let statements = match statements {
+                Ok(statements) => statements,
+                Err(error) => {
+                    c.finish_function_effect();
+                    return Err(error);
+                }
+            };
+            c.record_function_statement_writes(&statements.0);
             c.finish_function_effect();
 
             vec![ir::FunctionBody {
                 ret: ret_id,
                 arg_map,
-                statements: statements?.0,
+                statements: statements.0,
             }]
         } else {
             c.finish_function_effect();

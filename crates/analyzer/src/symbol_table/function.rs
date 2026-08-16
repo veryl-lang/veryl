@@ -61,6 +61,28 @@ enum WriteTarget {
     Formal(GenericSymbolPath),
 }
 
+fn modport_has_output(port: &crate::symbol::PortProperty) -> bool {
+    let Some(r#type) = port.r#type.get_user_defined() else {
+        return false;
+    };
+    let Ok(modport) = symbol_table::resolve(&r#type.path) else {
+        return false;
+    };
+    let SymbolKind::Modport(modport) = &modport.found.kind else {
+        return false;
+    };
+
+    modport.members.iter().any(|member| {
+        symbol_table::get(*member).is_some_and(|member| {
+            matches!(
+                member.kind,
+                SymbolKind::ModportVariableMember(ref member)
+                    if matches!(member.direction, Direction::Output | Direction::Inout)
+            )
+        })
+    })
+}
+
 fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarget {
     let Some(_) = path.paths.first() else {
         return WriteTarget::None;
@@ -85,6 +107,12 @@ fn classify_write(path: &GenericSymbolPath, namespace: &Namespace) -> WriteTarge
                     match &target.found.kind {
                         SymbolKind::ModportVariableMember(member)
                             if matches!(member.direction, Direction::Output | Direction::Inout) =>
+                        {
+                            WriteTarget::External
+                        }
+                        SymbolKind::Port(_)
+                            if matches!(port.direction, Direction::Modport)
+                                && modport_has_output(port) =>
                         {
                             WriteTarget::External
                         }
@@ -148,6 +176,36 @@ fn add_target(effect: &mut Effect, target: WriteTarget, define_context: DefineCo
             });
         }
     }
+}
+
+/// Reclassifies direct writes after applying the active generic specialization.
+/// The fixed-point summary cannot classify a generic instance parameter until
+/// its actual instance is known at a call site.
+pub fn specialized_direct_effect(symbol: &Symbol, context: &Context) -> (bool, HashSet<StrId>) {
+    let SymbolKind::Function(func) = &symbol.kind else {
+        return (false, HashSet::default());
+    };
+    let namespace = symbol.inner_namespace();
+    let mut external_write = false;
+    let mut formal_writes = HashSet::default();
+
+    for path in &func.write_paths {
+        if !path_define_context(path).is_active(&context.config.defines) {
+            continue;
+        }
+        let resolved = context.resolve_path(path.clone());
+        match classify_write(&resolved, &namespace) {
+            WriteTarget::None => {}
+            WriteTarget::External => external_write = true,
+            WriteTarget::Formal(path) => {
+                if let Some(name) = path.paths.first().map(|x| x.base.text) {
+                    formal_writes.insert(name);
+                }
+            }
+        }
+    }
+
+    (external_write, formal_writes)
 }
 
 /// Finds one active external write for a diagnostic without retaining write
