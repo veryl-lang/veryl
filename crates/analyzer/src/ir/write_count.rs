@@ -137,7 +137,7 @@ fn walk_one(
         Statement::FunctionCall(x) => {
             // The body is opaque here, so an output may read back bits a
             // write has already reached.
-            for (_, outputs) in x.written_outputs() {
+            for outputs in x.outputs.values() {
                 let mut dsts: Vec<((VarId, usize), Mask)> = Vec::new();
                 for dst in outputs {
                     add_dst(dst, context, &mut dsts);
@@ -210,7 +210,7 @@ fn collect_writes(
             Statement::Case(x) => collect_writes(&x.lower_to_nested_if(), context, out),
             Statement::For(x) => collect_writes(&x.body, context, out),
             Statement::FunctionCall(x) => {
-                for (_, outputs) in x.written_outputs() {
+                for outputs in x.outputs.values() {
                     for dst in outputs {
                         add_dst(dst, context, out);
                     }

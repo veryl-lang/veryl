@@ -10,7 +10,7 @@ use crate::ir::{
 };
 use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind};
 use crate::value::{Value, ValueBigUint};
-use crate::{AnalyzerError, HashMap, HashSet, ir_error};
+use crate::{AnalyzerError, HashMap, ir_error};
 use indent::indent_all_by;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
@@ -171,22 +171,11 @@ pub struct FunctionCall {
     pub index: Option<Vec<usize>>,
     pub comptime: Comptime,
     pub inputs: CallArgs<Expression>,
-    /// All output argument bindings, including formals that the function body
-    /// never writes. These are retained to preserve the source-level call.
+    /// Output bindings that may actually be written by this specialization.
     pub outputs: CallArgs<Vec<AssignDestination>>,
-    /// Formal paths that may actually be written by this specialization.
-    pub(crate) written_output_paths: HashSet<VarPath>,
 }
 
 impl FunctionCall {
-    pub fn written_outputs(&self) -> impl Iterator<Item = &(VarPath, Vec<AssignDestination>)> {
-        self.outputs.iter().filter(|(path, _)| {
-            self.written_output_paths
-                .iter()
-                .any(|written| written.0.starts_with(&path.0))
-        })
-    }
-
     pub fn eval_type(&mut self, context: &mut Context) {
         self.comptime.is_const = self.eval_comptime_flag(context);
     }
@@ -262,7 +251,7 @@ impl FunctionCall {
         for expr in self.inputs.values() {
             expr.eval_assign(context, assign_table, assign_context);
         }
-        for (_, output) in self.written_outputs() {
+        for output in self.outputs.values() {
             for dst in output {
                 if let Some(index) = dst.index.eval_value(context) {
                     let Some(variable) = context.get_variable_info(dst.id) else {
@@ -304,7 +293,7 @@ impl FunctionCall {
         for input in self.inputs.values() {
             input.gather_ff(context, table, decl, assign_target, from_ff);
         }
-        for (_, dsts) in self.written_outputs() {
+        for dsts in self.outputs.values() {
             for dst in dsts {
                 dst.gather_ff(context, table, decl);
             }
@@ -312,7 +301,7 @@ impl FunctionCall {
     }
 
     pub fn gather_ff_comb_assign(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
-        for (_, dsts) in self.written_outputs() {
+        for dsts in self.outputs.values() {
             for dst in dsts {
                 dst.gather_ff_comb_assign(context, table, decl);
             }
@@ -341,7 +330,7 @@ impl FunctionCall {
         }
 
         // function with side-effect through output ports is not const
-        if !self.written_output_paths.is_empty() {
+        if !self.outputs.is_empty() {
             is_const = false;
         }
 
@@ -408,6 +397,10 @@ impl<T> CallArgs<T> {
 
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.0.iter_mut().map(|(_, v)| v)
+    }
+
+    pub(crate) fn retain(&mut self, mut f: impl FnMut(&VarPath) -> bool) {
+        self.0.retain(|(path, _)| f(path));
     }
 }
 

@@ -4406,7 +4406,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             result.extend(stmts);
         }
 
-        for (var_path, destinations) in src.written_outputs() {
+        for (var_path, destinations) in &src.outputs {
             let arg_var_id = body.arg_map.get(var_path).unwrap();
             let scope = context.scope();
             let arg_meta = scope.variable_meta.get(arg_var_id).unwrap();

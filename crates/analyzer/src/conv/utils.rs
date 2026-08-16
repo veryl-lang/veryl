@@ -4037,7 +4037,7 @@ pub fn function_call(
 
     let ret = context.block(|c| {
         let func = get_function(c, &path, token)?;
-        let (mut inputs, outputs) = args.to_function_args(c, &func, token)?;
+        let (mut inputs, mut outputs) = args.to_function_args(c, &func, token)?;
 
         let symbol = symbol_table::get(sig.symbol);
         let mut effect = symbol
@@ -4137,13 +4137,14 @@ pub fn function_call(
             }
         }
 
+        outputs.retain(|formal| effect.written_paths_for(formal).next().is_some());
+
         Ok(ir::FunctionCall {
             id: func.id,
             index,
             comptime,
             inputs,
             outputs,
-            written_output_paths: effect.written_outputs,
         })
     });
 
