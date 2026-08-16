@@ -4007,9 +4007,8 @@ pub fn function_call(
 
     check_generic_refereence(context, &generic_path);
 
-    let mut parent_path = generic_path.clone();
-    parent_path.paths.pop();
-    let mut sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
+    let mut sig =
+        Signature::from_path(context, generic_path.clone()).ok_or_else(|| ir_error!(token))?;
     sig.normalize();
 
     // same signature re-entered => true infinite recursion
@@ -4031,27 +4030,7 @@ pub fn function_call(
         sig: sig.clone(),
     };
 
-    let mut map = sig.to_generic_map();
-
-    if !parent_path.is_empty()
-        && let Ok(symbol) = symbol_table::resolve(&parent_path)
-    {
-        match &symbol.found.kind {
-            SymbolKind::Instance(x) => {
-                let mut parent_map = x.type_name.to_generic_maps();
-                parent_map.append(&mut map);
-                map = parent_map;
-            }
-            SymbolKind::Port(x) => {
-                if let Some(x) = x.r#type.get_user_defined() {
-                    let mut parent_map = x.path.to_generic_maps();
-                    parent_map.append(&mut map);
-                    map = parent_map;
-                }
-            }
-            _ => (),
-        }
-    }
+    let map = symbol_table::function_call_generic_maps(&sig, &generic_path);
 
     context.push_generic_map(map);
     context.function_call_stack.push(sig.clone());

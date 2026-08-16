@@ -1,7 +1,9 @@
 use crate::conv::Context;
 use crate::ir::Signature;
 use crate::namespace::{DefineContext, Namespace};
-use crate::symbol::{Direction, FunctionProperty, FunctionWrite, Symbol, SymbolId, SymbolKind};
+use crate::symbol::{
+    Direction, FunctionProperty, FunctionWrite, GenericMap, Symbol, SymbolId, SymbolKind,
+};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
 use crate::{HashMap, HashSet, scope};
@@ -155,6 +157,33 @@ pub struct ExternalWriteTrace {
     pub calls: Vec<TokenRange>,
 }
 
+pub fn function_call_generic_maps(
+    signature: &Signature,
+    callee: &GenericSymbolPath,
+) -> Vec<GenericMap> {
+    let mut maps = signature.to_generic_map();
+    let mut parent = callee.clone();
+    parent.paths.pop();
+
+    if !parent.is_empty()
+        && let Ok(symbol) = symbol_table::resolve(&parent)
+    {
+        let mut parent_maps = match &symbol.found.kind {
+            SymbolKind::Instance(instance) => instance.type_name.to_generic_maps(),
+            SymbolKind::Port(port) => port
+                .r#type
+                .get_user_defined()
+                .map(|ty| ty.path.to_generic_maps())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        parent_maps.append(&mut maps);
+        maps = parent_maps;
+    }
+
+    maps
+}
+
 pub fn find_external_write(
     symbol: &Symbol,
     signature: &Signature,
@@ -248,7 +277,7 @@ pub fn find_external_write(
                 continue;
             }
 
-            let generic_map = callee_signature.to_generic_map();
+            let generic_map = function_call_generic_maps(&callee_signature, &call.callee);
             context.push_generic_map(generic_map);
             let callee_origins = visit(
                 &callee,

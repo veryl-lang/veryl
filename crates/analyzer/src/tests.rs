@@ -19691,3 +19691,48 @@ fn nested_generic_function_effect_trace_uses_callee_specialization() {
     assert_eq!(call_stack.len(), 2, "{errors:?}");
     assert_eq!(external_writes.len(), 1, "{errors:?}");
 }
+
+#[test]
+fn nested_generic_interface_effect_trace_uses_parent_specialization() {
+    let code = r#"
+    proto package ProtoPkg {
+        function update (result: output logic);
+    }
+    package Pkg for ProtoPkg {
+        function update (result: output logic) {
+            result = 1;
+        }
+    }
+    interface Bus::<PKG: ProtoPkg> {
+        var data: logic;
+        function update () {
+            PKG::update(data);
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        inst bus: Bus::<Pkg>;
+        function outer () {
+            bus.update();
+        }
+        always_ff (clk) {
+            outer();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let Some((call_stack, external_writes)) = errors.iter().find_map(|error| match error {
+        AnalyzerError::SideEffectFunctionCallInAlwaysFf {
+            call_stack,
+            external_writes,
+            ..
+        } => Some((call_stack, external_writes)),
+        _ => None,
+    }) else {
+        panic!("expected side-effect diagnostic: {errors:?}");
+    };
+    assert_eq!(call_stack.len(), 2, "{errors:?}");
+    assert_eq!(external_writes.len(), 1, "{errors:?}");
+}

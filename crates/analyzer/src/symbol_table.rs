@@ -20,7 +20,7 @@ use crate::tb_component;
 use crate::wavedrom::{self, DocTestTarget};
 use crate::{AnalyzerError, HashMap, HashSet, SVec};
 use connect::check_connect;
-pub(crate) use function::find_external_write;
+pub(crate) use function::{find_external_write, function_call_generic_maps};
 use log::trace;
 use msb::check_msb;
 use serde::{Deserialize, Serialize};
