@@ -147,18 +147,30 @@ fn add_target(effect: &mut Effect, target: WriteTarget, define_context: DefineCo
 
 /// Finds one active external write for a diagnostic without retaining write
 /// provenance in every function effect summary.
+pub struct ExternalWriteTrace {
+    pub write: TokenRange,
+    pub calls: Vec<TokenRange>,
+}
+
 pub fn find_external_write<F>(
     symbol: &Symbol,
     defines: &HashSet<StrId>,
     mut resolve_path: F,
-) -> Option<TokenRange>
+) -> Option<ExternalWriteTrace>
 where
     F: FnMut(GenericSymbolPath) -> GenericSymbolPath,
 {
+    #[derive(Clone, Default)]
+    struct WriteOrigin {
+        write: TokenRange,
+        // Collected while unwinding, from the innermost call outwards.
+        calls: Vec<TokenRange>,
+    }
+
     #[derive(Default)]
     struct WriteOrigins {
-        external: Option<TokenRange>,
-        formal: Vec<(GenericSymbolPath, TokenRange)>,
+        external: Option<WriteOrigin>,
+        formal: Vec<(GenericSymbolPath, WriteOrigin)>,
     }
 
     fn visit<F>(
@@ -170,6 +182,10 @@ where
     where
         F: FnMut(GenericSymbolPath) -> GenericSymbolPath,
     {
+        // Effect summaries are computed to a fixed point below. This search
+        // only reconstructs one source-level witness for the diagnostic, so a
+        // recursive edge can be cut while the caller continues with its other
+        // call sites.
         if !visiting.insert(symbol.id) {
             return WriteOrigins::default();
         }
@@ -200,10 +216,19 @@ where
             let resolved = resolve_path(path.clone());
             match classify_write(&resolved, &namespace) {
                 WriteTarget::External => {
-                    ret.external = Some(path.range);
+                    ret.external = Some(WriteOrigin {
+                        write: path.range,
+                        calls: Vec::new(),
+                    });
                     return ret;
                 }
-                WriteTarget::Formal(formal) => ret.formal.push((formal, path.range)),
+                WriteTarget::Formal(formal) => ret.formal.push((
+                    formal,
+                    WriteOrigin {
+                        write: path.range,
+                        calls: Vec::new(),
+                    },
+                )),
                 WriteTarget::None => {}
             }
         }
@@ -218,15 +243,16 @@ where
             };
 
             let callee_origins = visit(&callee, defines, resolve_path, visiting);
-            if let Some(write) = callee_origins.external {
-                ret.external = Some(write);
+            if let Some(mut origin) = callee_origins.external {
+                origin.calls.push(call.range);
+                ret.external = Some(origin);
                 return ret;
             }
 
             let SymbolKind::Function(callee_func) = &callee.kind else {
                 continue;
             };
-            for (formal_write, origin) in callee_origins.formal {
+            for (formal_write, mut origin) in callee_origins.formal {
                 let Some(formal_name) = formal_write.paths.first().map(|x| x.base.text) else {
                     continue;
                 };
@@ -252,6 +278,7 @@ where
                 let Some(argument) = argument else {
                     continue;
                 };
+                origin.calls.push(call.range);
 
                 for actual in &argument.targets {
                     let mut mapped = actual.clone();
@@ -261,10 +288,10 @@ where
                     let resolved = resolve_path(mapped);
                     match classify_write(&resolved, &namespace) {
                         WriteTarget::External => {
-                            ret.external = Some(origin);
+                            ret.external = Some(origin.clone());
                             return ret;
                         }
-                        WriteTarget::Formal(formal) => ret.formal.push((formal, origin)),
+                        WriteTarget::Formal(formal) => ret.formal.push((formal, origin.clone())),
                         WriteTarget::None => {}
                     }
                 }
@@ -274,7 +301,15 @@ where
         ret
     }
 
-    visit(symbol, defines, &mut resolve_path, &mut HashSet::default()).external
+    visit(symbol, defines, &mut resolve_path, &mut HashSet::default())
+        .external
+        .map(|mut origin| {
+            origin.calls.reverse();
+            ExternalWriteTrace {
+                write: origin.write,
+                calls: origin.calls,
+            }
+        })
 }
 
 fn resolve_side_effects(list: &[Symbol]) {

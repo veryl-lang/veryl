@@ -90,6 +90,8 @@ pub enum AnalyzerError {
         input: MultiSources,
         #[label("called from always_ff")]
         error_location: SourceSpan,
+        #[label(collection, "called from here")]
+        call_stack: Vec<SourceSpan>,
         #[label(collection, "external write occurs here")]
         external_writes: Vec<SourceSpan>,
         #[label(collection, "function declared here")]
@@ -2352,23 +2354,27 @@ impl AnalyzerError {
         identifier: &str,
         token: &TokenRange,
         definition: &TokenRange,
+        calls: &[TokenRange],
         writes: &[TokenRange],
     ) -> Self {
-        let context = if writes.is_empty() {
-            std::slice::from_ref(definition)
+        let (input, call_stack, external_writes, function_definition) = if writes.is_empty() {
+            let (input, function_definition) =
+                source_with_context(token, std::slice::from_ref(definition));
+            (input, vec![], vec![], function_definition)
         } else {
-            writes
-        };
-        let (input, context_spans) = source_with_context(token, context);
-        let (external_writes, function_definition) = if writes.is_empty() {
-            (vec![], context_spans)
-        } else {
-            (context_spans, vec![])
+            // `source_with_context` reverses its context so diagnostics render
+            // from the always_ff call through the call stack to the write.
+            let mut context = writes.iter().rev().copied().collect::<Vec<_>>();
+            context.extend(calls.iter().rev().copied());
+            let (input, context_spans) = source_with_context(token, &context);
+            let (call_stack, external_writes) = context_spans.split_at(calls.len());
+            (input, call_stack.to_vec(), external_writes.to_vec(), vec![])
         };
         AnalyzerError::SideEffectFunctionCallInAlwaysFf {
             identifier: identifier.to_string(),
             input,
             error_location: token.into(),
+            call_stack,
             external_writes,
             function_definition,
             token_source: token.source(),

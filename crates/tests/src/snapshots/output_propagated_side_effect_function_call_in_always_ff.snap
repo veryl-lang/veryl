@@ -12,6 +12,13 @@ side_effect_function_call_in_always_ff (https://doc.veryl-lang.org/book/07_appen
     ·                ╰── called from always_ff
  17 │     }
     ╰────
+    ╭─[../../testcases/error/output_propagated_side_effect_function_call_in_always_ff.veryl:12:9]
+ 11 │     function hidden_write () {
+ 12 │         inner(q);
+    ·         ────┬───
+    ·             ╰── called from here
+ 13 │     }
+    ╰────
    ╭─[../../testcases/error/output_propagated_side_effect_function_call_in_always_ff.veryl:8:9]
  7 │     ) {
  8 │         result = 1;

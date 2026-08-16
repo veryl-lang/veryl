@@ -90,6 +90,7 @@ fn assignment_targets(expression: &Expression) -> Vec<GenericSymbolPath> {
 }
 
 fn function_call_site(callee: GenericSymbolPath, call: &FunctionCall) -> FunctionCallSite {
+    let range = TokenRange::from_range(&callee.range, &TokenRange::from(call));
     let mut arguments = Vec::new();
     if let Some(list) = &call.function_call_opt {
         let items: Vec<&ArgumentItem> = list.argument_list.as_ref().into();
@@ -112,7 +113,11 @@ fn function_call_site(callee: GenericSymbolPath, call: &FunctionCall) -> Functio
             }
         }
     }
-    FunctionCallSite { callee, arguments }
+    FunctionCallSite {
+        callee,
+        arguments,
+        range,
+    }
 }
 
 #[derive(Default)]

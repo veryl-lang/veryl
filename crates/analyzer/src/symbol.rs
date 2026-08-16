@@ -2621,6 +2621,8 @@ pub struct FunctionWrite {
 pub struct FunctionCallSite {
     pub callee: GenericSymbolPath,
     pub arguments: Vec<FunctionCallArgument>,
+    #[serde(default)]
+    pub range: TokenRange,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

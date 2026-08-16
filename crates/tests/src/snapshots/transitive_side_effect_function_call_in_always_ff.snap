@@ -5,12 +5,26 @@ expression: out
 side_effect_function_call_in_always_ff (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#side_effect_function_call_in_always_ff)
 
   × function "update" can't be called in always_ff because it may write an HDL object declared outside the function
-    ╭─[../../testcases/error/transitive_side_effect_function_call_in_always_ff.veryl:14:9]
- 13 │     always_ff (clk) {
- 14 │         update();
+    ╭─[../../testcases/error/transitive_side_effect_function_call_in_always_ff.veryl:18:9]
+ 17 │     always_ff (clk) {
+ 18 │         update();
     ·         ────┬────
     ·             ╰── called from always_ff
+ 19 │     }
+    ╰────
+    ╭─[../../testcases/error/transitive_side_effect_function_call_in_always_ff.veryl:14:9]
+ 13 │     function update () {
+ 14 │         apply();
+    ·         ───┬───
+    ·            ╰── called from here
  15 │     }
+    ╰────
+    ╭─[../../testcases/error/transitive_side_effect_function_call_in_always_ff.veryl:10:9]
+  9 │     function apply () {
+ 10 │         write_q();
+    ·         ────┬────
+    ·             ╰── called from here
+ 11 │     }
     ╰────
    ╭─[../../testcases/error/transitive_side_effect_function_call_in_always_ff.veryl:6:9]
  5 │     function write_q () {

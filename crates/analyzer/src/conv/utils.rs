@@ -4086,11 +4086,14 @@ pub fn function_call(
                 symbol_table::find_external_write(symbol, &c.config.defines, |path| {
                     c.resolve_path(path)
                 });
-            let external_writes = external_write.into_iter().collect::<Vec<_>>();
+            let (calls, external_writes) = external_write
+                .map(|trace| (trace.calls, vec![trace.write]))
+                .unwrap_or_default();
             c.insert_error(AnalyzerError::side_effect_function_call_in_always_ff(
                 &symbol.token.text.to_string(),
                 &token,
                 &definition,
+                &calls,
                 &external_writes,
             ));
         }

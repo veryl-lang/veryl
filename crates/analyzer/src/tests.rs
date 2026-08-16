@@ -19182,6 +19182,108 @@ fn function_output_write_propagates_through_wrappers() {
 }
 
 #[test]
+fn external_write_trace_terminates_on_recursive_call_graph() {
+    use crate::symbol::SymbolKind;
+    use veryl_parser::veryl_grammar_trait::FunctionDeclaration;
+    use veryl_parser::veryl_walker::VerylWalker;
+
+    let code = r#"
+    module ModuleA (
+        q: output logic,
+    ) {
+        function write_q () {
+            q = 1;
+        }
+        function first () {
+            second();
+        }
+        function second () {
+            first();
+            write_q();
+        }
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    assert!(analyzer.analyze_pass1("prj", &parser.veryl).is_empty());
+
+    // Mutual recursion is rejected separately as a cyclic type dependency,
+    // but diagnostic provenance must still terminate if it inspects the graph.
+    let _ = Analyzer::analyze_post_pass1();
+
+    #[derive(Default)]
+    struct Functions(Vec<FunctionDeclaration>);
+    impl VerylWalker for Functions {
+        fn function_declaration(&mut self, arg: &FunctionDeclaration) {
+            self.0.push(arg.clone());
+        }
+    }
+
+    let mut functions = Functions::default();
+    functions.veryl(&parser.veryl);
+    let first = functions
+        .0
+        .iter()
+        .find(|x| x.identifier.text().to_string() == "first")
+        .unwrap();
+    let symbol = symbol_table::resolve(first.identifier.as_ref()).unwrap();
+    assert!(matches!(symbol.found.kind, SymbolKind::Function(_)));
+
+    let trace = symbol_table::find_external_write(
+        symbol.found.as_ref(),
+        &crate::HashSet::default(),
+        |path| path,
+    )
+    .expect("the search should continue after cutting the first -> second -> first cycle");
+
+    assert_eq!(trace.calls.len(), 2);
+    assert_eq!(trace.calls[0].beg.line, 9); // first -> second
+    assert_eq!(trace.calls[1].beg.line, 13); // second -> write_q
+    assert_eq!(trace.write.beg.line, 6); // q = 1
+}
+
+#[test]
+fn finite_generic_recursion_reports_side_effect_without_recursing_forever() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function recurse::<N: u32> () {
+            gen M: u32 = N - 1;
+            if N == 1 {
+                q = 1;
+            } else {
+                recurse::<M>();
+            }
+        }
+        always_ff (clk) {
+            recurse::<2>();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_large_stack(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InfiniteRecursion { .. })),
+        "finite generic recursion must remain finite: {errors:?}"
+    );
+}
+
+#[test]
 fn modport_effect_requires_an_actual_member_write() {
     fn has_side_effect(code: &str, name: &str) -> bool {
         use crate::symbol::SymbolKind;
