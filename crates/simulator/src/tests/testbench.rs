@@ -3069,14 +3069,16 @@ fn tb_dirty_filter_skips_private_writes() {
             Err(_) => continue,
         };
         drop(ir);
-        // The three sampling assignments write only testbench-private
-        // variables, so all three must be proved private.  The count is not
-        // exact: the leading initialisers may be fused into one compiled
-        // statement, which the filter does not model and leaves dirty.
+        // The sampling assignments write only testbench-private variables, so
+        // the filter must prove them.
         let clean_before = tb_clean_count(code, &config, "test_sample").expect("analyzes");
+        // A JIT build compiles the three into one chunk, which the filter
+        // proves clean from the chunk's own write set — one clean statement
+        // covering the same three writes.
+        let least = if config.use_jit { 1 } else { 3 };
         assert!(
-            clean_before >= 3,
-            "the three sampling writes must be proved private, got {clean_before} \
+            clean_before >= least,
+            "the sampling writes must be proved private, got {clean_before} \
              (jit={}, 4state={})",
             config.use_jit,
             config.use_4state,
@@ -3172,6 +3174,98 @@ fn tb_dirty_span_table_coalesces_array_elements() {
              (jit={}, 4state={})",
             config.use_jit,
             config.use_4state,
+        );
+    }
+}
+
+/// The runner settles comb before every testbench statement, so a run of them
+/// may only be compiled into one chunk when nothing in it writes what the
+/// design reads: otherwise the statements after the write would keep reading
+/// the pre-settle value.
+#[test]
+fn tb_chunk_does_not_outrun_the_settle() {
+    let scalar = r#"
+    module Dut (
+        d: input  logic<32>,
+        q: output logic<32>,
+    ) {
+        assign q = d * 3 + 1;
+    }
+    #[test(test_drive_then_sample)]
+    module test_drive_then_sample {
+        inst clk: $tb::clock_gen;
+        var d: logic<32>;
+        var q: logic<32>;
+        var s: logic<32>;
+        inst x: Dut (d: d, q: q);
+        initial {
+            d = 0;
+            for i in 0..4 {
+                d = i;
+                // Reads `q`, which `d` drives — so this may not join `d`'s
+                // chunk, or it would sample the previous iteration's value.
+                s = q;
+                $assert(s == i * 3 + 1, "sampled a stale design output");
+                clk.next(1);
+            }
+            $finish();
+        }
+    }
+    "#;
+    // The same hazard through an array the design indexes at runtime, where
+    // the write names one element rather than the whole variable.
+    let array = r#"
+    module ArrayDut (
+        idx: input  logic<2>,
+        mem: input  logic<4, 32>,
+        q:   output logic<32>,
+    ) {
+        assign q = mem[idx];
+    }
+    #[test(test_drive_then_sample)]
+    module test_drive_then_sample {
+        inst clk: $tb::clock_gen;
+        var mem: logic<4, 32>;
+        var idx: logic<2>;
+        var q: logic<32>;
+        var s: logic<32>;
+        inst x: ArrayDut (idx: idx, mem: mem, q: q);
+        initial {
+            mem = '0;
+            idx = 1;
+            for i in 0..4 {
+                mem[1] = i;
+                s = q;
+                $assert(s == i, "sampled a stale design output");
+                clk.next(1);
+            }
+            $finish();
+        }
+    }
+    "#;
+
+    for (code, config) in [scalar, array]
+        .into_iter()
+        .flat_map(|c| Config::all().into_iter().map(move |cfg| (c, cfg)))
+    {
+        let ir = match analyze_top(code, &config, "test_drive_then_sample") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let mut sim = Simulator::new(ir, None);
+        let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+        let clock_periods = build_clock_periods(&sim.ir.event_statements);
+        let stmts = sim
+            .ir
+            .event_statements
+            .get(&Event::Initial)
+            .unwrap()
+            .clone();
+        let tb = convert_initial_to_testbench(&stmts, &event_map, &clock_periods, 3);
+        assert_eq!(
+            run_testbench(&mut sim, &tb),
+            TestResult::Pass,
+            "config={config:?}"
         );
     }
 }

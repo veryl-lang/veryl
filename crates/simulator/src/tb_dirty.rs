@@ -300,8 +300,26 @@ fn is_clean_stmt(stmt: &Statement, spans: &SpanTable) -> bool {
         }
         Statement::SequentialBlock(body) => body.iter().all(|s| is_clean_stmt(s, spans)),
         Statement::Break => true,
-        // Compiled chunks, system calls ($display can be clean but $readmemh
-        // writes memory) and $tb method calls are not modelled here.
+        // A compiled testbench-body chunk carries its write set; every write
+        // stays inside one variable, so probing each destination's containing
+        // span (len 1) applies the same per-variable verdict as `Assign`.
+        Statement::Compiled(c) => match &c.outputs {
+            Some(outs) => outs.iter().all(|o| {
+                let raw = o.raw();
+                if raw < 0 {
+                    return false;
+                }
+                let base = if o.is_ff() {
+                    spans.ff_base
+                } else {
+                    spans.comb_base
+                };
+                !spans.write_may_reach_comb((base + raw as usize) as *mut u8, 1)
+            }),
+            None => false,
+        },
+        // System calls ($display can be clean but $readmemh writes memory)
+        // and $tb method calls are not modelled here.
         _ => false,
     }
 }
