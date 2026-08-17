@@ -1277,7 +1277,23 @@ impl Simulator {
             cr_wide_count,
         );
 
-        if aot_bytes != cr_bytes {
+        // Backends may log different byte SETS for one committed effect: a
+        // full-width select RMW (Cranelift) re-logs untouched bytes with
+        // their old values, while a range-exact slice writer (AOT-C) logs
+        // only the slice.  Commit overlays entries onto existing storage, so
+        // compare the POST-COMMIT state rather than the logged sets.
+        let eff = |m: &HashMap<u32, u8>, off: u32| {
+            m.get(&off)
+                .copied()
+                .or_else(|| ff_snap.get(off as usize).copied())
+        };
+        let mut offs: BTreeSet<u32> = Default::default();
+        offs.extend(aot_bytes.keys());
+        offs.extend(cr_bytes.keys());
+        if offs
+            .iter()
+            .any(|&off| eff(&aot_bytes, off) != eff(&cr_bytes, off))
+        {
             eprintln!(
                 "[aot_event_validate] DIVERGENCE module={} event={:?}: committed-FF bytes differ (aot {} bytes, cranelift {} bytes)",
                 self.ir.name,
@@ -1285,12 +1301,9 @@ impl Simulator {
                 aot_bytes.len(),
                 cr_bytes.len(),
             );
-            let mut offs: BTreeSet<u32> = Default::default();
-            offs.extend(aot_bytes.keys());
-            offs.extend(cr_bytes.keys());
             for off in offs {
-                let a = aot_bytes.get(&off);
-                let c = cr_bytes.get(&off);
+                let a = eff(&aot_bytes, off);
+                let c = eff(&cr_bytes, off);
                 if a != c {
                     eprintln!("  byte off={off:#x}: aot={a:?} cranelift={c:?}");
                 }

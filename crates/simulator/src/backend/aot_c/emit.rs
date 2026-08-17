@@ -3407,10 +3407,31 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
 /// Event-path WIDE FF write (static dst, `dst_width > 64`): materialize the
 /// masked RHS into a scratch and push it through the 64-byte WriteLogWideEntry
 /// pool (≤56-byte payload chunks).  Covers 65-128 bit (scalar promoted) and
-/// >128 bit (helper-table value).  Select / dynamic_select / rhs_select wide
-/// > FFs stay on Cranelift (the module bails).  2-state only.
+/// `>128` bit (helper-table value).  A static slice covering whole words
+/// reduces to the full-width form at a shifted offset: the commit is a plain
+/// byte-range copy, so a byte-exact subrange needs no read-modify-write
+/// against uncommitted state.  Other select / dynamic_select / rhs_select
+/// wide FFs stay on Cranelift (the module bails).  2-state only.
 fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
-    if a.select.is_some() || a.dynamic_select.is_some() || a.rhs_select.is_some() {
+    if let Some(ds) = &a.dynamic_select
+        && a.select.is_none()
+        && a.rhs_select.is_none()
+        && let Some(s) = emit_event_ff_assign_wide_dynsel(a, ds)
+    {
+        return Some(s);
+    }
+    let aligned_slice = match a.select {
+        None => Some(None),
+        Some((hi, lo)) => {
+            let nbits = hi.checked_sub(lo).and_then(|d| d.checked_add(1));
+            match nbits {
+                Some(n) if lo % 64 == 0 && n % 64 == 0 && n > 64 => Some(Some((lo, n))),
+                _ => None,
+            }
+        }
+    };
+    let (Some(slice), false, None) = (aligned_slice, a.dynamic_select.is_some(), &a.rhs_select)
+    else {
         ev_diag(&format!(
             "wide FF: select={:?} dynsel={} rhssel={:?} width={}",
             a.select,
@@ -3419,7 +3440,11 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
             a.dst_width
         ));
         return None;
-    }
+    };
+    let (byte_off, eff_width) = match slice {
+        Some((lo, n)) => ((lo / 8) as isize, n),
+        None => (0, a.dst_width),
+    };
     let dst_raw = match a.dst {
         VarOffset::Ff(o) => o,
         VarOffset::Comb(_) => return None,
@@ -3429,7 +3454,8 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
         return None;
     }
     let packed = dst_raw == cur_off;
-    let nb = native_bytes(a.dst_width);
+    let (dst_raw, cur_off) = (dst_raw + byte_off, cur_off + byte_off);
+    let nb = native_bytes(eff_width);
     let nw = wide_words(nb);
     let mut pre = String::new();
     // Build the RHS to `nb` bytes, then copy into a fresh scratch and mask it
@@ -3441,7 +3467,7 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
         "uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
          vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
         src = r.addr,
-        p = wpack(nb, a.dst_width),
+        p = wpack(nb, eff_width),
     ));
     // Dual-slot FF: mirror the narrow path by writing the next physical slot
     // directly (vestigial — ff_commit applies the log — but kept for parity).
@@ -3454,6 +3480,61 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
         )
     };
     let push = emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), &format!("{cur_off:#x}"), nb);
+    Some(format!("{{ {pre}{store}{push} }}"))
+}
+
+/// Runtime whole-element write into a packed wide FF (`ff[idx] <= v` on an
+/// array whose element spans whole words — a `+:` part-select on a flat
+/// register instead strides by one bit and is declined below).  Same
+/// byte-exact reduction as above, at a runtime offset.  The index clamps to
+/// the last element, mirroring `AssignStatement::eval_step`.
+fn emit_event_ff_assign_wide_dynsel(
+    a: &ProtoAssignStatement,
+    ds: &crate::ir::ProtoDynamicBitSelect,
+) -> Option<String> {
+    let ew = ds.elem_width;
+    let ne = ds.num_elements;
+    if ew < 64 || !ew.is_multiple_of(64) || ds.window != ew || ne == 0 {
+        return None;
+    }
+    let dst_raw = match a.dst {
+        VarOffset::Ff(o) => o,
+        VarOffset::Comb(_) => return None,
+    };
+    let cur_off = a.dst_ff_current_offset;
+    if cur_off < 0 || dst_raw < 0 {
+        return None;
+    }
+    let packed = dst_raw == cur_off;
+    let nb = ew / 8;
+    let nw = wide_words(nb);
+    let mut pre = String::new();
+    let idx = emit_expr(&ds.index_expr)?;
+    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+    let d = next_wide_tmp();
+    pre.push_str(&format!(
+        "uint64_t _di{d} = (uint64_t)({idx}); \
+         if (_di{d} > {max}ull) _di{d} = {max}ull; \
+         uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
+         vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
+        max = ne - 1,
+        src = r.addr,
+        p = wpack(nb, ew),
+    ));
+    let store = if packed {
+        String::new()
+    } else {
+        format!(
+            "vw_copy((uint8_t*)(ff_values + {dst:#x}) + _di{d} * {nb}u, \
+             (const uint8_t*)_w{d}, {nb}u); ",
+            dst = dst_raw,
+        )
+    };
+    let push = emit_wide_log_chunks(
+        &format!("(uint8_t*)_w{d}"),
+        &format!("({cur_off:#x}u + (unsigned)(_di{d} * {nb}u))"),
+        nb,
+    );
     Some(format!("{{ {pre}{store}{push} }}"))
 }
 
