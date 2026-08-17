@@ -21248,3 +21248,97 @@ fn union_member_forms() {
         assert_eq!(sim.get("b").unwrap(), Value::new(0x1122, 16, false));
     }
 }
+
+/// The packed `b` the fold must produce: `b[0]` is 0, `b[i]` is `i - 1`.
+const FUSED_LANES: u64 = 0xedcba98765432100;
+
+#[test]
+fn fused_struct_write_const_wider_than_expr() {
+    // The version-split fusion folds these writes into one RHS, making each
+    // unrolled `i - 1` an operand of a 4-bit BitAnd.  Its comptime value
+    // carries the whole struct's width rather than its own 32-bit type, and
+    // cranelift built the constant from that — an I128 operand in an I64 slot.
+    // `a` is read back so a fold that corrupts the untouched half fails too.
+    let code = r#"
+    module Top (
+        o: output logic<64>,
+        p: output logic<64>,
+    ) {
+        struct cfg_t {
+            a: logic<64>   ,
+            b: logic<16, 4>,
+        }
+        var cfg: cfg_t;
+
+        always_comb {
+            cfg.a    = 64'd7;
+            cfg.b[0] = 4'd0;
+            for i in 1..16 {
+                cfg.b[i] = i - 1;
+            }
+        }
+        assign o = cfg.b;
+        assign p = cfg.a;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(FUSED_LANES, 64, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("p").unwrap(),
+            Value::new(7, 64, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn fused_wide_struct_write_const_wider_than_expr() {
+    // Same fold past the 128-bit pointer threshold: the store runs through the
+    // wide statement path while its operands are still built narrow.
+    let code = r#"
+    module Top (
+        o: output logic<64>,
+        p: output logic<64>,
+    ) {
+        struct cfg_t {
+            a: logic<256>  ,
+            b: logic<16, 4>,
+        }
+        var cfg: cfg_t;
+
+        always_comb {
+            cfg.a    = 256'd7;
+            cfg.b[0] = 4'd0;
+            for i in 1..16 {
+                cfg.b[i] = i - 1;
+            }
+        }
+        assign o = cfg.b;
+        assign p = cfg.a[63:0];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(FUSED_LANES, 64, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("p").unwrap(),
+            Value::new(7, 64, false),
+            "config={config:?}"
+        );
+    }
+}
