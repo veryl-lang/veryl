@@ -11,17 +11,18 @@ pub function select_vector::<N: p32, T: type> (
 ) -> T {
     const DEPTH: u32 = $clog2(N);
 
-    var current_n: u32     ;
-    var current_s: logic<N>;
-    var current_d: T    <N>;
-    var next_n   : u32     ;
-    var next_s   : logic<N>;
-    var next_d   : T    <N>;
+    var next_n: u32     ;
+    var next_s: logic<N>;
+    var next_d: T    <N>;
 
     next_n = N;
     next_s = sel;
     next_d = data;
     for _i in 0..DEPTH {
+        var current_n: u32     ;
+        var current_s: logic<N>;
+        var current_d: T    <N>;
+
         current_n = next_n;
         current_s = next_s;
         current_d = next_d;
@@ -55,10 +56,8 @@ pub function select_onehot::<N: p32, T: type> (
 ) -> T {
     const DEPTH: u32 = $clog2(N);
 
-    var current_n: u32   ;
-    var current_d: T  <N>;
-    var next_n   : u32   ;
-    var next_d   : T  <N>;
+    var next_n: u32   ;
+    var next_d: T  <N>;
 
     next_n = N;
     for i in 0..N {
@@ -70,6 +69,9 @@ pub function select_onehot::<N: p32, T: type> (
     }
 
     for _i in 0..DEPTH {
+        var current_n: u32   ;
+        var current_d: T  <N>;
+
         current_n = next_n;
         current_d = next_d;
 
