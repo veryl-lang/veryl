@@ -65,6 +65,8 @@ pub struct Ir {
     pub ff_values: Box<[u8]>,
     pub comb_values: Box<[u8]>,
     pub use_4state: bool,
+    /// See `Config::abstract_reset_active_high`.
+    pub abstract_reset_active_high: bool,
     pub module_variables: ModuleVariables,
     pub event_statements: HashMap<Event, Vec<Statement>>,
     /// Unified comb statements: all port connections, child comb, and internal
@@ -164,6 +166,7 @@ impl Ir {
             ff_values: module.ff_values,
             comb_values: module.comb_values,
             use_4state: config.use_4state,
+            abstract_reset_active_high: config.abstract_reset_active_high,
             module_variables: module.module_variables,
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
@@ -200,6 +203,68 @@ impl Ir {
         ir.install_write_log_ptr();
         ir.backend_diag();
         ir
+    }
+
+    /// True when the reset net `id` asserts LOW.  The polarity-agnostic
+    /// `reset` type carries none of its own, so a declaration on the ports the
+    /// net reaches decides — their `if_reset` blocks were lowered against it —
+    /// and `[build] reset_type` is the fallback when none does.
+    pub fn reset_active_low(&self, id: &VarId) -> bool {
+        let var = self.module_variables.variables.get(id);
+        match var.map(|x| &x.r#type.kind) {
+            Some(air::TypeKind::ResetAsyncHigh) | Some(air::TypeKind::ResetSyncHigh) => false,
+            Some(air::TypeKind::ResetAsyncLow) | Some(air::TypeKind::ResetSyncLow) => true,
+            _ => var
+                .and_then(|v| self.declared_reset_polarity(v))
+                .unwrap_or(!self.abstract_reset_active_high),
+        }
+    }
+
+    /// The polarity declared for the net `var` denotes, found through the
+    /// storage it shares with connected ports.  `None` when nothing declares
+    /// one or the declarations disagree — neither leaves a level to pick.
+    fn declared_reset_polarity(&self, var: &Variable) -> Option<bool> {
+        let &ptr = var.current_values.first()?;
+        let mut found: Option<bool> = None;
+        let mut stack = vec![&self.module_variables];
+        while let Some(vars) = stack.pop() {
+            for other in vars.variables.values() {
+                if other.current_values.first() != Some(&ptr) {
+                    continue;
+                }
+                let active_low = match other.r#type.kind {
+                    air::TypeKind::ResetAsyncHigh | air::TypeKind::ResetSyncHigh => false,
+                    air::TypeKind::ResetAsyncLow | air::TypeKind::ResetSyncLow => true,
+                    _ => continue,
+                };
+                match found {
+                    None => found = Some(active_low),
+                    Some(prev) if prev != active_low => return None,
+                    Some(_) => {}
+                }
+            }
+            for child in &vars.children {
+                stack.push(child);
+            }
+        }
+        found
+    }
+
+    /// Reset-typed ports of the top module — the nets an external driver
+    /// supplies.  Sorted by path so a caller picking one is deterministic.
+    pub fn reset_ports(&self) -> Vec<VarId> {
+        let mut ports: Vec<(&VarPath, &VarId)> = self
+            .ports
+            .iter()
+            .filter(|(_, id)| {
+                self.module_variables
+                    .variables
+                    .get(*id)
+                    .is_some_and(|x| x.r#type.is_reset())
+            })
+            .collect();
+        ports.sort_by(|a, b| a.0.cmp(b.0));
+        ports.into_iter().map(|(_, id)| *id).collect()
     }
 
     /// `VERYL_BACKEND_DIAG=1`: report per-event/comb jit vs interpreter counts
@@ -668,6 +733,12 @@ pub fn build_ir_cached(
 #[derive(Clone, Debug, Default)]
 pub struct Config {
     pub use_4state: bool,
+    /// Polarity the polarity-agnostic `reset` type falls back to, from the
+    /// project's `[build] reset_type`.  Declared types carry their own and
+    /// ignore this.  Default false = active low, as `ResetType` defaults.
+    pub abstract_reset_active_high: bool,
+    /// Whether that fallback is SYNCHRONOUS.  Default false = asynchronous.
+    pub abstract_reset_sync: bool,
     pub use_jit: bool,
     pub dump_cranelift: bool,
     pub dump_asm: bool,

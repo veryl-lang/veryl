@@ -17,6 +17,11 @@ pub struct ScopeContext {
     pub variable_meta: HashMap<VarId, VariableMeta>,
     pub analyzer_context: veryl_analyzer::conv::Context,
     pub ff_table: air::FfTable,
+    /// `(active low, synchronous)` a polarity-agnostic `reset` net of this
+    /// module takes from the instance ports it is wired to.  `None` when
+    /// those ports disagree; absent when none of them declares a polarity,
+    /// which leaves the project's `reset_type` to decide.
+    pub inst_reset_kind: HashMap<VarId, Option<(bool, bool)>>,
     /// Lazily-built reverse index `comb byte offset -> owning VarId` for
     /// variables affiliated with a function body.  Used to relocate the
     /// inlined-function storage per call-site (see the `FunctionCall`

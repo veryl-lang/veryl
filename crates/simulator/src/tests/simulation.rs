@@ -462,7 +462,7 @@ fn simple_ff() {
 
         println!("{}", sim.ir.dump_variables());
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         println!("{}", sim.ir.dump_variables());
 
@@ -517,7 +517,7 @@ fn ff_to_ff() {
 
         println!("{}", sim.ir.dump_variables());
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         println!("{}", sim.ir.dump_variables());
 
@@ -565,7 +565,7 @@ fn ff_statement_after_if_reset() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..5 {
             sim.step(&clk);
         }
@@ -615,8 +615,9 @@ fn ff_reset_fill_literal_field_wise() {
         let ir = analyze(code, &config);
         let mut sim = Simulator::new(ir, None);
 
+        let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         assert_eq!(
             sim.get("o_a").unwrap(),
@@ -804,8 +805,9 @@ fn ff_reset_fill_literal_full_width() {
         let ir = analyze(code, &config);
         let mut sim = Simulator::new(ir, None);
 
+        let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         assert_eq!(
             sim.get("x").unwrap(),
@@ -845,7 +847,7 @@ fn short_bit() {
 
         println!("{}", sim.ir.dump_variables());
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         println!("{}", sim.ir.dump_variables());
 
@@ -888,7 +890,7 @@ fn long_bit_128() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         sim.step(&clk);
         sim.step(&clk);
@@ -927,7 +929,7 @@ fn long_bit_over_128() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         sim.step(&clk);
         sim.step(&clk);
@@ -2341,7 +2343,7 @@ fn wide_256_array_for_generate() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
         sim.step(&clk);
         sim.step(&clk);
@@ -2631,7 +2633,7 @@ fn inst_array_input_port() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // After 3 clock cycles: arr[0]=3, arr[1]=6, c=9
         for _ in 0..3 {
@@ -2689,7 +2691,7 @@ fn inst_array_input_port_shorthand() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // After 2 clock cycles: i_x[0]=20, i_x[1]=40, c=60
         for _ in 0..2 {
@@ -2847,7 +2849,7 @@ fn inst_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         for _ in 0..50 {
             sim.step(&clk);
@@ -2906,7 +2908,7 @@ fn inst_comb_and_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // After reset: out=0, comb_out=0+1=1
         assert_eq!(sim.get("out").unwrap(), Value::new(0, 32, false));
@@ -3909,7 +3911,7 @@ fn narrow_width_add_carry_out_masked() {
         let rst = sim.get_reset("rst").unwrap();
 
         sim.set("i_inc", Value::new(1, 1, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Drive 8 cycles; idx must wrap cleanly 0,1,2,3,0,1,2,3.
         let expected = [1u64, 2, 3, 0, 1, 2, 3, 0];
@@ -4341,7 +4343,7 @@ fn function_call_in_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         sim.set("a", Value::new(41, 32, false));
         sim.step(&clk);
@@ -5084,7 +5086,7 @@ fn array_literal_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         assert_eq!(sim.get("o0").unwrap(), Value::new(0, 8, false));
         assert_eq!(sim.get("o1").unwrap(), Value::new(0, 8, false));
 
@@ -5138,7 +5140,7 @@ fn const_array_whole_assign() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         assert_eq!(sim.get("c0").unwrap(), Value::new(1, 8, false));
         assert_eq!(sim.get("c3").unwrap(), Value::new(4, 8, false));
         assert_eq!(sim.get("f0").unwrap(), Value::new(0, 8, false));
@@ -5321,7 +5323,7 @@ fn sub_array_assign() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         assert_eq!(sim.get("a").unwrap(), Value::new(3, 8, false));
         assert_eq!(sim.get("b").unwrap(), Value::new(7, 8, false));
         assert_eq!(sim.get("c").unwrap(), Value::new(5, 8, false));
@@ -5501,7 +5503,7 @@ fn struct_constructor_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         assert_eq!(sim.get("o").unwrap(), Value::new(0x0000, 16, false));
 
         sim.set("a", Value::new(0xAB, 8, false));
@@ -5581,7 +5583,7 @@ fn array_dynamic_index_write_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Write 42 to arr[2]
         sim.set("idx", Value::new(2, 2, false));
@@ -6111,7 +6113,7 @@ fn inst_array_output_port() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         assert_eq!(sim.get("out0").unwrap(), Value::new(0, 8, false));
         assert_eq!(sim.get("out1").unwrap(), Value::new(0, 8, false));
 
@@ -6485,7 +6487,7 @@ fn inst_split_comb_ff_counter() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         assert_eq!(sim.get("cnt").unwrap(), Value::new(0, 32, false));
 
         for _ in 0..10 {
@@ -6556,7 +6558,7 @@ fn merged_comb_output_to_sibling_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         assert_eq!(sim.get("result").unwrap(), Value::new(0, 32, false));
 
         // After 1 clock: child cnt=0 (reset value), child comb=100
@@ -6640,7 +6642,7 @@ fn merged_comb_output_multi_level() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // After 10 clocks: inner cnt=9, middle o_val=1009
         // Parent result latches the previous cycle's middle output.
@@ -6730,7 +6732,7 @@ fn merged_comb_output_write_to_parent_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // cnt increments: 0, 1, 2, 3, 4, ...
         // o_wen is true only when cnt==3 (cycle 4)
@@ -6802,7 +6804,7 @@ fn optimize_comb_no_cascade_inline() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Run enough cycles for values to stabilize. The key assertion
         // is that result is non-zero (not stuck at 0 from reset).
@@ -6896,7 +6898,7 @@ fn optimize_comb_no_cascade_inline_multi_level() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         for _ in 0..5 {
             sim.step(&clk);
@@ -6950,7 +6952,7 @@ fn u64_add_no_overflow_panic() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         // a = 0xFFFFFFFFFFFFFFFF, out = a + 1 = 0 (wrapping)
         let out = sim.get("out").unwrap();
         assert_eq!(out, Value::new(0, 64, false));
@@ -7050,7 +7052,7 @@ fn child_comb_eq_comparison() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         for _ in 0..10 {
             sim.step(&clk);
@@ -7156,7 +7158,7 @@ fn branch_flush_consistency() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         for _ in 0..10 {
             sim.step(&clk);
@@ -7348,7 +7350,7 @@ fn deep_forwarding_and_branch() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         for _ in 0..10 {
             sim.step(&clk);
@@ -7440,7 +7442,7 @@ fn post_comb_sibling_dependency() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..5 {
             sim.step(&clk);
         }
@@ -7525,7 +7527,7 @@ fn post_comb_child_to_parent_comb_chain() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..5 {
             sim.step(&clk);
         }
@@ -7612,7 +7614,7 @@ fn analyze_dep_self_ref_not_loop() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // sel cycles: 0, 1, 2, 3, 0, 1, ...
         // val: sel=0 → 10, sel=1 → 11, sel=2 → 12, sel=3 → 10
@@ -7694,7 +7696,7 @@ fn analyze_dep_self_ref_in_child_module() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         sim.step(&clk); // cnt=0 → decoded=100
         assert_eq!(sim.get("result").unwrap(), Value::new(100, 32, false));
@@ -7773,7 +7775,7 @@ fn jit_timing_pipeline_register() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let mut values = vec![];
         for _ in 0..8 {
@@ -7862,7 +7864,7 @@ fn jit_timing_conditional_ff_stall() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let mut values = vec![];
         for _ in 0..8 {
@@ -7975,7 +7977,7 @@ fn jit_timing_multi_stage_pipeline() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let mut values = vec![];
         for _ in 0..10 {
@@ -8065,7 +8067,7 @@ fn jit_timing_pipeline_flush() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let mut values = vec![];
         for _ in 0..8 {
@@ -8167,7 +8169,7 @@ fn jit_timing_cross_child_forwarding() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let mut values = vec![];
         for _ in 0..8 {
@@ -8271,8 +8273,8 @@ fn child_output_to_var_passthrough() {
         let clk_i = sim_i.get_clock("clk").unwrap();
         let rst_i = sim_i.get_reset("rst").unwrap();
 
-        sim_d.step(&rst_d);
-        sim_i.step(&rst_i);
+        sim_d.step_reset(&clk_d, &rst_d);
+        sim_i.step_reset(&clk_i, &rst_i);
 
         for cycle in 0..10u64 {
             let input = Value::new(cycle * 10, 32, false);
@@ -8423,7 +8425,7 @@ fn child_output_var_comb_feedback() {
         let clk_d = sim_d.get_clock("clk").unwrap();
         let rst_d = sim_d.get_reset("rst").unwrap();
 
-        sim_d.step(&rst_d);
+        sim_d.step_reset(&clk_d, &rst_d);
 
         // Simulate external memory: read addr, provide data
         for _ in 0..5 {
@@ -8443,7 +8445,7 @@ fn child_output_var_comb_feedback() {
         let clk_i = sim_i.get_clock("clk").unwrap();
         let rst_i = sim_i.get_reset("rst").unwrap();
 
-        sim_i.step(&rst_i);
+        sim_i.step_reset(&clk_i, &rst_i);
 
         for _ in 0..5 {
             sim_i.set("i_data", Value::new(42, 32, false));
@@ -8656,7 +8658,7 @@ fn three_level_var_port_redirect() {
         let clk_d = sim_d.get_clock("clk").unwrap();
         let rst_d = sim_d.get_reset("rst").unwrap();
 
-        sim_d.step(&rst_d);
+        sim_d.step_reset(&clk_d, &rst_d);
         for _ in 0..10 {
             sim_d.step(&clk_d);
         }
@@ -8667,7 +8669,7 @@ fn three_level_var_port_redirect() {
         let clk_i = sim_i.get_clock("clk").unwrap();
         let rst_i = sim_i.get_reset("rst").unwrap();
 
-        sim_i.step(&rst_i);
+        sim_i.step_reset(&clk_i, &rst_i);
         for _ in 0..20 {
             sim_i.step(&clk_i);
         }
@@ -8869,7 +8871,7 @@ fn pipeline_var_redirect_store_load() {
         let mut sim_d = Simulator::new(ir_d, None);
         let clk_d = sim_d.get_clock("clk").unwrap();
         let rst_d = sim_d.get_reset("rst").unwrap();
-        sim_d.step(&rst_d);
+        sim_d.step_reset(&clk_d, &rst_d);
         for _ in 0..20 {
             sim_d.step(&clk_d);
         }
@@ -8879,7 +8881,7 @@ fn pipeline_var_redirect_store_load() {
         let mut sim_i = Simulator::new(ir_i, None);
         let clk_i = sim_i.get_clock("clk").unwrap();
         let rst_i = sim_i.get_reset("rst").unwrap();
-        sim_i.step(&rst_i);
+        sim_i.step_reset(&clk_i, &rst_i);
         for _ in 0..20 {
             sim_i.step(&clk_i);
         }
@@ -8947,7 +8949,7 @@ fn child_output_var_mux() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // sel=0: should get child_out = i_val + 1 (from previous cycle)
         sim.set("i_val", Value::new(10, 32, false));
@@ -9250,7 +9252,7 @@ fn four_level_var_redirect_wdata() {
         let mut sim_d = Simulator::new(ir_d, None);
         let clk_d = sim_d.get_clock("clk").unwrap();
         let rst_d = sim_d.get_reset("rst").unwrap();
-        sim_d.step(&rst_d);
+        sim_d.step_reset(&clk_d, &rst_d);
         for _ in 0..20 {
             sim_d.step(&clk_d);
         }
@@ -9260,7 +9262,7 @@ fn four_level_var_redirect_wdata() {
         let mut sim_i = Simulator::new(ir_i, None);
         let clk_i = sim_i.get_clock("clk").unwrap();
         let rst_i = sim_i.get_reset("rst").unwrap();
-        sim_i.step(&rst_i);
+        sim_i.step_reset(&clk_i, &rst_i);
         for _ in 0..20 {
             sim_i.step(&clk_i);
         }
@@ -9371,8 +9373,8 @@ fn passthrough_with_unused_ff() {
         let clk_b = sim_b.get_clock("clk").unwrap();
         let rst_b = sim_b.get_reset("rst").unwrap();
 
-        sim_a.step(&rst_a);
-        sim_b.step(&rst_b);
+        sim_a.step_reset(&clk_a, &rst_a);
+        sim_b.step_reset(&clk_b, &rst_b);
 
         for cycle in 0..10 {
             sim_a.step(&clk_a);
@@ -9508,7 +9510,7 @@ fn store_load_through_passthrough_with_ff() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         // NBA causes 1-cycle delay for FF outputs through comb chains;
         // allow extra cycles for the state machine to complete.
         for _ in 0..20 {
@@ -9641,7 +9643,7 @@ fn store_load_comb_mem_through_passthrough_with_ff() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         // NBA causes 1-cycle delay for FF outputs through comb chains;
         // allow extra cycles for the state machine to complete.
         for _ in 0..20 {
@@ -9729,7 +9731,7 @@ fn readonly_cache_fill() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..15 {
             sim.step(&clk);
         }
@@ -9763,7 +9765,7 @@ fn ff_comb_let_basic() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..5 {
             sim.step(&clk);
         }
@@ -9871,7 +9873,7 @@ fn readonly_cache_fill_with_tags() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..30 {
             sim.step(&clk);
         }
@@ -9986,7 +9988,7 @@ fn readonly_cache_fill_3level() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..30 {
             sim.step(&clk);
         }
@@ -10049,7 +10051,7 @@ fn bit_select_ternary_wide_var() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..10 {
             sim.step(&clk);
         }
@@ -10130,7 +10132,7 @@ fn bit_select_child_output() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..10 {
             sim.step(&clk);
         }
@@ -10259,7 +10261,7 @@ fn cache_halfword_select_with_stall() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..40 {
             sim.step(&clk);
         }
@@ -10377,7 +10379,7 @@ fn halfword_select_with_expander_child() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..20 {
             sim.step(&clk);
         }
@@ -10463,7 +10465,7 @@ fn dcache_write_through_hierarchy() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Write 42 to addr 0x00 (data_idx=0)
         sim.set("i_cmd", Value::new(1, 3, false));
@@ -10675,7 +10677,7 @@ fn nonff_dynamic_array_deep_hierarchy() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // addr layout: i_addr[6:3]=index(4bit), i_addr[2:0]=000 (byte aligned)
         // For cache index 4, offset 0: addr = (4<<6)|(0<<3) = 0x100 → i_addr bits[6:0] = 0b1000000 = 0x40
@@ -10794,7 +10796,7 @@ fn child_always_comb_bit_select_64() {
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Test: i_a = +5.0 (bit63=0), i_b = -5.0 (bit63=1)
         sim.set("i_op", Value::new(1, 1, false));
@@ -10867,7 +10869,7 @@ fn dcache_write_through_pattern() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Write 42 to index 0
         sim.set("i_addr", Value::new(0, 7, false));
@@ -11006,7 +11008,7 @@ fn dynamic_array_two_read_ports() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Write 0xAA to reg[1]
         sim.set("i_wd_addr", Value::new(1, 5, false));
@@ -11139,7 +11141,7 @@ fn dynamic_array_three_level_hierarchy() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..20u32 {
             sim.step(&clk);
         }
@@ -11215,7 +11217,7 @@ fn within_level_comb_chain_through_parent_wire() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // After reset+step: cnt went 0→1 (ff_swap), get() settles with cnt=1
         // o_val = 1+10 = 11, result = 11+100 = 111
@@ -11312,7 +11314,7 @@ fn within_level_stall_propagation() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // After reset+step: cnt went 0→3 (i_req=!stall_wire; at reset
         // stall_wire=0 so i_req=1, cnt transitions 0→3).
@@ -11444,7 +11446,7 @@ fn sibling_comb_does_not_break_forwarding() {
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
 
         // Write-first: writing 77 and reading same register → must see 77
@@ -11513,7 +11515,7 @@ fn pipeline_stall_release_ordering() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Cycle 1: feed 10, no stall → s1=10, s2=100 (0+100)
         sim.set("i_data", Value::new(10, 8, false));
@@ -11625,7 +11627,7 @@ fn intermediate_variable_dependency_level() {
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
 
         // cnt=1, mid=1+10=11, result=11+100=111
@@ -11963,7 +11965,7 @@ fn for_loop_blocking_write_same_var() {
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
 
         let v = sim.get("cnt").unwrap();
@@ -12018,7 +12020,7 @@ fn lhs_concatenation_in_always_ff() {
 
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.set("x", Value::new(0xABCD_E123, 32, false));
         sim.step(&clk);
 
@@ -12839,7 +12841,7 @@ fn ir_drop_order_safety() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
         // Explicitly drop — should not panic
         drop(sim);
@@ -13263,7 +13265,7 @@ fn ff_4state_xz_propagation() {
     let clk = sim.get_clock("clk").unwrap();
     let rst = sim.get_reset("rst").unwrap();
 
-    sim.step(&rst);
+    sim.step_reset(&clk, &rst);
     let b = sim.get("out").unwrap();
     assert_eq!(b.payload_u64(), 0, "b should be 0 after reset");
     assert!(!b.is_xz(), "b should not have X/Z after reset");
@@ -13820,7 +13822,7 @@ fn dynamic_elem_select_const_range_write() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let mut exp: u64 = 0;
         for (idx, v) in [(0u64, 0x5u64), (2, 0xA), (3, 0xF), (1, 0x9)] {
@@ -13906,7 +13908,7 @@ fn dynamic_part_select_write() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let mut exp: u64 = 0;
         for (i, v) in [(4u64, 0x5u64), (0, 0xA), (7, 0x3), (2, 0xC)] {
@@ -14477,7 +14479,7 @@ fn find_max_with_self_reference_in_comb() {
 
         sim.set("i_set", Value::new(0, 8, false));
         sim.set("i_clear", Value::new(0, 1, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
 
         // Latch vec[3] = 1 (prio[3] is the only nonzero priority).
@@ -15639,7 +15641,7 @@ fn dynamic_index_struct_field_read_ff() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Write 0xDEADBEEF to arr[3].
         sim.set("i_wr_en", Value::new(1, 1, false));
@@ -15720,7 +15722,7 @@ fn whole_array_assign() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Write distinct values into each slot of `arr`.  Each cycle
         // also triggers a fresh whole-array assign `o = arr`.
@@ -15835,7 +15837,7 @@ fn local_var_in_always_ff_is_not_register() {
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         assert_eq!(sim.get("o_x").unwrap(), Value::new(0, 1, false));
 
         sim.step(&clk);
@@ -16497,7 +16499,7 @@ fn wide_dynamic_part_select_write() {
             let mut sim = Simulator::new(ir, None);
             let clk = sim.get_clock("clk").unwrap();
             let rst = sim.get_reset("rst").unwrap();
-            sim.step(&rst);
+            sim.step_reset(&clk, &rst);
             sim.set("v", Value::from_u128(v, 0, 130, false));
             sim.set("i", Value::new(i, 3, false));
             sim.step(&clk);
@@ -17167,7 +17169,7 @@ fn write_log_grows_on_runtime_loop_narrow() {
         let rst = sim.get_reset("i_rst").unwrap();
 
         sim.set("i_n", Value::new(6000, 16, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
         // The last loop iteration's entry must survive the pool overflow.
         assert_eq!(
@@ -17209,7 +17211,7 @@ fn write_log_grows_on_runtime_loop_wide() {
         let rst = sim.get_reset("i_rst").unwrap();
 
         sim.set("i_n", Value::new(200, 8, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
         assert_eq!(
             sim.get("o_v").unwrap().payload_u128(),
@@ -17249,7 +17251,7 @@ fn write_log_reserve_on_const_loop_narrow() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
         assert_eq!(
             sim.get("o_v").unwrap(),
@@ -17287,7 +17289,7 @@ fn write_log_reserve_on_const_loop_wide() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
         assert_eq!(
             sim.get("o_v").unwrap().payload_u128(),
@@ -17956,7 +17958,7 @@ fn false_comb_cycle_with_split_drivers() {
         let rst = sim.get_reset("i_rst").unwrap();
         sim.set("i_en", Value::new(1, 1, false));
         sim.set("i_addr", Value::new(2, 2, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.step(&clk);
         assert_eq!(
             sim.get("o_upd").unwrap(),
@@ -18610,7 +18612,7 @@ fn wide_ff_dynamic_bit_select_write() {
 
         sim.set("i_idx", Value::new(0, 3, false));
         sim.set("i_d", Value::new(0, 10, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Write a distinct value into each lane.
         for lane in 0..8u64 {
@@ -18812,7 +18814,7 @@ fn head_pointer_circular_buffer_pipeline() {
 
         sim.set("i_valid", Value::new(0, 1, false));
         sim.set("i_data", Value::new(0, 16, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let getu = |sim: &mut Simulator, name: &str| -> u64 {
             match sim.get(name).unwrap() {
@@ -18897,7 +18899,7 @@ fn gated_clock_vs_master_if_equivalence() {
         let rst = sim.get_reset("i_rst").unwrap();
         sim.set("i_en", Value::new(0, 1, false));
         sim.set("i_data", Value::new(0, 8, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let getu = |sim: &mut Simulator, name: &str| -> u64 {
             match sim.get(name).unwrap() {
@@ -19081,7 +19083,7 @@ fn head_pointer_circular_buffer_packed_struct_subwrite() {
         sim.set("i_valid", Value::new(0, 1, false));
         sim.set("i_d", Value::new(0, 11, false));
         sim.set("i_e", Value::new(0, 11, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let getu = |sim: &mut Simulator, name: &str| -> u64 {
             match sim.get(name).unwrap() {
@@ -19184,7 +19186,7 @@ fn generate_loop_per_instance_id_phase_gated_register() {
         sim.set("i_phase", Value::new(0, 2, false));
         sim.set("i_we", Value::new(0, 1, false));
         sim.set("i_data", Value::new(0, 16, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let getu = |sim: &mut Simulator, name: &str| -> u64 {
             match sim.get(name).unwrap() {
@@ -19308,7 +19310,7 @@ fn en_gated_locrange_shift_coldstart_alignment() {
         let rst = sim.get_reset("i_rst").unwrap();
         sim.set("i_valid", Value::new(0, 1, false));
         sim.set("i_loc", Value::new(0, 1, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let getu = |sim: &mut Simulator, name: &str| -> u64 {
             match sim.get(name).unwrap() {
@@ -19421,7 +19423,7 @@ fn en_gated_locrange_shift_master_vs_gated_clock() {
         let rst = sim.get_reset("i_rst").unwrap();
         sim.set("i_en", Value::new(1, 1, false));
         sim.set("i_loc", Value::new(0, 1, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         let getu = |sim: &mut Simulator, name: &str| -> u64 {
             match sim.get(name).unwrap() {
@@ -19525,7 +19527,7 @@ fn bug8_mixed_comb_ff_array_shift() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
         sim.set("i_loc", Value::new(0, 1, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         let getu = |sim: &mut Simulator, n: &str| -> u64 {
             match sim.get(n).unwrap() {
                 Value::U64(v) => v.payload,
@@ -19882,7 +19884,7 @@ fn multi_rmw_dynamic_index_composes_and_read_is_old() {
         let rst = sim.get_reset("i_rst").unwrap();
 
         sim.set("i_idx", Value::new(0, 2, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for n in 1..=5u8 {
             sim.step(&clk);
             // Both partial writes compose: low byte = n, high byte = 2n.
@@ -19953,7 +19955,7 @@ fn array_read_during_write_is_read_old() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         // After reset: mem[0]=0, rdata=0.
         for n in 1..=5u8 {
             sim.step(&clk);
@@ -20024,7 +20026,7 @@ fn array_rmw_write_before_read_is_read_old() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for n in 1..=5u8 {
             sim.step(&clk);
             assert_eq!(sim.get("o_mem0").unwrap(), Value::new(n as u64, 8, false));
@@ -20082,7 +20084,7 @@ fn array_dynamic_index_read_during_write_is_read_old() {
         let rst = sim.get_reset("i_rst").unwrap();
 
         sim.set("i_idx", Value::new(0, 2, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for n in 1..=5u8 {
             sim.step(&clk);
             assert_eq!(sim.get("o_memval").unwrap(), Value::new(n as u64, 8, false));
@@ -20143,7 +20145,7 @@ fn wide_array_dynamic_index_read_during_write_is_read_old() {
         let rst = sim.get_reset("i_rst").unwrap();
 
         sim.set("i_idx", Value::new(0, 2, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for n in 1..=5u8 {
             sim.step(&clk);
             assert_eq!(sim.get("o_mlo").unwrap(), Value::new(n as u64, 64, false));
@@ -20199,7 +20201,7 @@ fn scalar_read_during_write_is_read_old() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for n in 1..=5u8 {
             sim.step(&clk);
             assert_eq!(sim.get("o_val").unwrap(), Value::new(n as u64, 8, false));
@@ -20352,7 +20354,7 @@ fn bare_signed_rhs_sign_extends_at_ff_store() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         sim.set("c", Value::new(0xfb, 8, true));
         sim.step(&clk);
         assert_eq!(
@@ -20712,7 +20714,7 @@ fn op_assign_struct_member_reads_member() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
         let rst = sim.get_reset("rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..3 {
             sim.step(&clk);
         }

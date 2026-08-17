@@ -36,7 +36,7 @@ fn gated_clock_basic() {
         let rst = sim.get_reset("i_rst").unwrap();
 
         sim.set("i_en", Value::new(0, 1, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         for _ in 0..5 {
             sim.step(&clk);
@@ -101,7 +101,7 @@ fn gated_clock_chain() {
 
         sim.set("i_en1", Value::new(0, 1, false));
         sim.set("i_en2", Value::new(0, 1, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         sim.set("i_en1", Value::new(1, 1, false));
         sim.set("i_en2", Value::new(0, 1, false));
@@ -154,7 +154,7 @@ fn gated_clock_mux() {
         let rst = sim.get_reset("i_rst").unwrap();
 
         sim.set("i_sel", Value::new(1, 1, false));
-        sim.step(&rst);
+        sim.step_reset(&a, &rst);
 
         for _ in 0..3 {
             sim.step(&a);
@@ -207,7 +207,7 @@ fn ff_derived_divider() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         assert_eq!(sim.get("o_cnt").unwrap(), Value::new(0, 8, false));
 
         for _ in 0..10 {
@@ -251,7 +251,7 @@ fn ff_copy_clock() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..8 {
             sim.step(&clk);
         }
@@ -297,7 +297,7 @@ fn ff_derived_divider_chain() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..16 {
             sim.step(&clk);
         }
@@ -344,7 +344,7 @@ fn constant_derived_clock_no_edge() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..5 {
             sim.step(&clk);
         }
@@ -485,7 +485,7 @@ fn gated_clock_via_submodule_output() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         for _ in 0..10 {
             sim.step(&clk);
@@ -555,7 +555,7 @@ fn nested_gated_clock_fires() {
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
         sim.set("i_en", Value::new(1, 1, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..6 {
             sim.step(&clk);
         }
@@ -622,7 +622,7 @@ fn gated_clock_pre_commit_consistency() {
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
         for _ in 0..10 {
             sim.step(&clk);
         }
@@ -688,7 +688,7 @@ fn packed_struct_array_dynamic_field_ff() {
         sim.set("i_vsr", Value::new(0, 8, false));
         sim.set("i_widx", Value::new(0, 3, false));
         sim.set("i_ridx", Value::new(0, 3, false));
-        sim.step(&rst);
+        sim.step_reset(&clk, &rst);
 
         // Round-robin write a distinct (sr, vsr) into each of the 8 elements.
         for t in 0..8u64 {

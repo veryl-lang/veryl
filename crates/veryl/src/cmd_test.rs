@@ -318,6 +318,14 @@ impl CmdTest {
                 .or(metadata.test.seed)
                 .unwrap_or_else(random_seed),
             use_4state: self.opt.four_state || metadata.test.four_state,
+            abstract_reset_active_high: matches!(
+                metadata.build.reset_type,
+                veryl_metadata::ResetType::AsyncHigh | veryl_metadata::ResetType::SyncHigh
+            ),
+            abstract_reset_sync: matches!(
+                metadata.build.reset_type,
+                veryl_metadata::ResetType::SyncHigh | veryl_metadata::ResetType::SyncLow
+            ),
             ..Config::default()
         };
         config.apply_env();
@@ -1226,13 +1234,22 @@ fn run_doc_test(
         })
         .unwrap_or_else(fallback_clock);
 
-    // Resolve reset event
-    let reset_event = sim
-        .ir
-        .event_statements
-        .keys()
-        .find(|e| matches!(e, veryl_simulator::ir::Event::Reset(_)))
-        .cloned();
+    // The scenario drives the reset like any other input; the event only
+    // names the net to hold asserted for the implicit startup reset.
+    let reset_event = scenario
+        .signals
+        .iter()
+        .filter(|s| s.kind == SignalKind::Input)
+        .find_map(|s| {
+            sim.get_reset(&s.name)
+                .or_else(|| sim.get_reset(&format!("i_{}", s.name)))
+        })
+        .or_else(|| {
+            sim.ir
+                .reset_ports()
+                .first()
+                .map(|id| veryl_simulator::ir::Event::Reset(*id))
+        });
 
     remap_signal_names(&mut scenario, ports);
 

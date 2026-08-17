@@ -1055,14 +1055,16 @@ fn testbench_vcd_clock_reset_waveform() {
             config.use_jit,
             config.use_4state,
         );
+        // `reset` resolves to the project default, active LOW, so the
+        // dumped net reads 0 while asserted and 1 once released.
         assert!(
-            rst_values[0].1,
-            "reset should be asserted initially (jit={}, 4state={})",
+            !rst_values[0].1,
+            "reset should be asserted (low) initially (jit={}, 4state={})",
             config.use_jit, config.use_4state,
         );
         assert!(
-            !rst_values.last().unwrap().1,
-            "reset should be deasserted after reset phase (jit={}, 4state={})",
+            rst_values.last().unwrap().1,
+            "reset should be deasserted (high) after reset phase (jit={}, 4state={})",
             config.use_jit,
             config.use_4state,
         );
@@ -1198,15 +1200,16 @@ fn testbench_fst_clock_reset_waveform() {
             config.use_jit,
             config.use_4state,
         );
+        // `reset` resolves to the project default, active LOW.
         assert_eq!(
-            rst_values[0].1, 1,
-            "reset should be asserted initially in FST (jit={}, 4state={})",
+            rst_values[0].1, 0,
+            "reset should be asserted (low) initially in FST (jit={}, 4state={})",
             config.use_jit, config.use_4state,
         );
         assert_eq!(
             rst_values.last().unwrap().1,
-            0,
-            "reset should be deasserted after reset phase in FST (jit={}, 4state={})",
+            1,
+            "reset should be deasserted (high) after reset phase in FST (jit={}, 4state={})",
             config.use_jit,
             config.use_4state,
         );
@@ -1537,14 +1540,16 @@ fn testbench_vcd_comb_only_clock_reset() {
             config.use_jit,
             config.use_4state,
         );
+        // `reset` resolves to the project default, active LOW, so the
+        // dumped net reads 0 while asserted and 1 once released.
         assert!(
-            rst_values[0].1,
-            "reset should be asserted initially (jit={}, 4state={})",
+            !rst_values[0].1,
+            "reset should be asserted (low) initially (jit={}, 4state={})",
             config.use_jit, config.use_4state,
         );
         assert!(
-            !rst_values.last().unwrap().1,
-            "reset should be deasserted after reset phase (jit={}, 4state={})",
+            rst_values.last().unwrap().1,
+            "reset should be deasserted (high) after reset phase (jit={}, 4state={})",
             config.use_jit,
             config.use_4state,
         );
@@ -1612,6 +1617,177 @@ fn tb_dual_clock() {
             result.unwrap(),
             TestResult::Pass,
             "tb_dual_clock failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+/// A reset produced by `assign`, by a cast, or from a flop (a release
+/// synchroniser) has no assertion event of its own, and must still reach
+/// `if_reset` through the level test at the clock edge.
+#[test]
+fn tb_derived_reset_fires_if_reset() {
+    let code = r#"
+    module DerivedReset (
+        clk    : input  clock    ,
+        pad_rst: input  logic    ,
+        marker : output logic<8> ,
+        fanout : output logic<8> ,
+    ) {
+        // reset produced by a cast from data
+        let async_rst: reset_async_low = (pad_rst & 1'b1) as reset_async_low;
+        var m: logic<8>;
+        always_ff (clk, async_rst) {
+            if_reset { m = 8'hEE; } else { m = 8'h11; }
+        }
+        assign marker = m;
+
+        // second hop: a reset-typed net produced from a flop
+        var derived_rst: reset_async_low;
+        assign derived_rst = m[0];
+        var f: logic<8>;
+        always_ff (clk, derived_rst) {
+            if_reset { f = 8'hAA; } else { f = 8'h22; }
+        }
+        assign fanout = f;
+    }
+
+    #[test(test_derived_reset)]
+    module test_derived_reset {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk: clk);
+
+        var marker: logic<8>;
+        var fanout: logic<8>;
+        inst dut: DerivedReset (
+            clk: clk, pad_rst: rst, marker: marker, fanout: fanout,
+        );
+
+        // control: the same block reset straight from the generator
+        var direct: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { direct = 8'hEE; } else { direct = 8'h11; }
+        }
+
+        initial {
+            rst.assert(4);
+            $assert(marker == 8'hEE);
+            $assert(fanout == 8'hAA);
+            $assert(direct == 8'hEE);
+            clk.next(3);
+            $assert(marker == 8'h11);
+            $assert(fanout == 8'h22);
+            $assert(direct == 8'h11);
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_derived_reset");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_derived_reset_fires_if_reset failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+/// The generator drives a LEVEL: the net is readable as data, and a block
+/// whose own reset is deasserted keeps taking clock edges through the
+/// assertion window, as it does in SystemVerilog.
+#[test]
+fn tb_reset_is_a_level_not_an_event() {
+    let code = r#"
+    module Counter (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        en : input  logic   ,
+        q  : output logic<8>,
+    ) {
+        var cnt: logic<8>;
+        always_ff (clk, rst) {
+            if_reset {
+                cnt = 0;
+            } else {
+                if en {
+                    cnt = cnt + 1;
+                }
+            }
+        }
+        assign q = cnt;
+    }
+
+    module OtherReset (
+        clk    : input  clock   ,
+        rst_src: input  logic   ,
+        q      : output logic<8>,
+    ) {
+        let r: reset_async_low = rst_src as reset_async_low;
+        var cnt: logic<8>;
+        always_ff (clk, r) {
+            if_reset { cnt = 0; } else { cnt = cnt + 1; }
+        }
+        assign q = cnt;
+    }
+
+    #[test(test_reset_level)]
+    module test_reset_level {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk: clk);
+
+        // the generator's net read as DATA on a logic port
+        var q_data: logic<8>;
+        inst c: Counter (clk: clk, rst: rst, en: rst, q: q_data);
+
+        // a second reset, unrelated to the generator and driven by the tb
+        var other  : logic;
+        var q_other: logic<8>;
+        inst u: OtherReset (clk: clk, rst_src: other, q: q_other);
+
+        initial {
+            other = 1'b0;              // hold the unrelated reset asserted
+            clk.next(2);
+            $assert(q_other == 8'd0);
+            other = 1'b1;              // release it
+            clk.next(3);
+            $assert(q_other == 8'd3);
+
+            rst.assert(4);
+            // the unrelated reset stays deasserted, so its block takes the
+            // clock branch on every edge of the assertion window
+            $assert(q_other == 8'd7);
+            $assert(q_data == 8'd0);
+            clk.next(3);
+            // the released generator net reads 1 as data
+            $assert(q_other == 8'd10);
+            $assert(q_data == 8'd3);
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_reset_level");
+        let ir = match ir {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_reset_is_a_level_not_an_event failed (jit={}, 4state={})",
             config.use_jit,
             config.use_4state,
         );
@@ -2674,5 +2850,116 @@ fn if_in_initial_cond_hoist_temp_4state() {
         let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
         let result = run_testbench(&mut sim, &tb_stmts);
         assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
+/// The design declares `reset_sync_high` while the project's `reset_type` is
+/// left at its default (async low), so the generator must drive the level the
+/// DECLARATION asks for; the opposite one holds the design in reset all run.
+#[test]
+fn tb_reset_gen_follows_the_declared_polarity() {
+    let code = r#"
+    module SyncHighDut (
+        clk: input  clock          ,
+        rst: input  reset_sync_high,
+        cnt: output logic<32>      ,
+    ) {
+        var c: logic<32>;
+        always_ff {
+            if_reset { c = 0; }
+            else { c = c + 1; }
+        }
+        assign cnt = c;
+    }
+    #[test(test_rst_pol)]
+    module test_rst_pol {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen ( clk );
+        var cnt: logic<32>;
+        inst x: SyncHighDut (clk: clk, rst: rst, cnt: cnt);
+        initial {
+            rst.assert(4);
+            clk.next(10);
+            $assert(cnt == 10, "design never left reset: testbench drove the wrong level");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        // The default (active low) is the opposite of the declaration.
+        let ir = match analyze_top(code, &config, "test_rst_pol") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_reset_gen_follows_the_declared_polarity failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+/// The same net seen through the polarity-agnostic `reset` type: a testbench's
+/// own `always_ff` must resolve the polarity from the ports the net drives, or
+/// it runs opposite to the design — counting through the assertion window and
+/// then frozen at its reset value once reset is released.
+#[test]
+fn tb_own_block_follows_the_net_it_drives() {
+    let code = r#"
+    module SyncHighDut (
+        clk: input  clock          ,
+        rst: input  reset_sync_high,
+        cnt: output logic<32>      ,
+    ) {
+        var c: logic<32>;
+        always_ff {
+            if_reset { c = 0; }
+            else { c = c + 1; }
+        }
+        assign cnt = c;
+    }
+    #[test(test_tb_block)]
+    module test_tb_block {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen ( clk );
+        var cnt: logic<32>;
+        var own: logic<32>;
+        always_ff (clk, rst) {
+            if_reset { own = 0; }
+            else { own = own + 1; }
+        }
+        inst x: SyncHighDut (clk: clk, rst: rst, cnt: cnt);
+        initial {
+            rst.assert(4);
+            $assert(own == 0, "testbench block counted through the assertion window");
+            clk.next(10);
+            $assert(own == 10, "testbench block stayed in reset after release");
+            $assert(cnt == 10, "design never left reset");
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        // The default (active low) is the opposite of the declaration, so the
+        // two resolutions disagree unless the block follows the net.
+        let ir = match analyze_top(code, &config, "test_tb_block") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_own_block_follows_the_net_it_drives failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
     }
 }

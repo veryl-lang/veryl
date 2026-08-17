@@ -2885,6 +2885,7 @@ impl Conv<&air::Module> for ProtoModule {
             variable_meta: variable_meta.clone(),
             analyzer_context,
             ff_table: ff_table.clone(),
+            inst_reset_kind: collect_inst_reset_kinds(declarations),
             func_offset_index: None,
         };
         context.scope_contexts.push(scope);
@@ -3781,6 +3782,87 @@ fn collect_max_writes_one(stmt: &ProtoStatement) -> HashMap<u32, u32> {
         _ => {}
     }
     result
+}
+
+/// `(active low, synchronous)` per module-local net, from the instance ports
+/// it is wired to.  `None` records a wire whose ports disagree, which no
+/// single level satisfies.
+pub(crate) fn collect_inst_reset_kinds(
+    declarations: &[air::Declaration],
+) -> HashMap<air::VarId, Option<(bool, bool)>> {
+    let mut out: HashMap<air::VarId, Option<(bool, bool)>> = HashMap::default();
+    for decl in declarations {
+        let air::Declaration::Inst(inst) = decl else {
+            continue;
+        };
+        let air::Component::Module(child) = inst.component.as_ref() else {
+            continue;
+        };
+        for (port_id, expr) in inst
+            .inputs
+            .iter()
+            .filter_map(|x| x.single().map(|e| (x.id, e)))
+        {
+            let Some(kind) = child
+                .variables
+                .get(&port_id)
+                .and_then(|v| declared_reset_kind(&v.r#type.kind))
+            else {
+                continue;
+            };
+            let air::Expression::Term(factor) = expr else {
+                continue;
+            };
+            let air::Factor::Variable(net, idx, sel, _) = factor.as_ref() else {
+                continue;
+            };
+            if !idx.0.is_empty() || !sel.is_empty() {
+                continue;
+            }
+            record(&mut out, *net, kind);
+        }
+        // A reset the child DRIVES (a release synchroniser) decides it too.
+        for output in &inst.outputs {
+            let Some(kind) = child
+                .variables
+                .get(&output.id)
+                .and_then(|v| declared_reset_kind(&v.r#type.kind))
+            else {
+                continue;
+            };
+            for dst in &output.dst {
+                if dst.index.0.is_empty() && dst.select.is_empty() {
+                    record(&mut out, dst.id, kind);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn record(
+    out: &mut HashMap<air::VarId, Option<(bool, bool)>>,
+    net: air::VarId,
+    kind: (bool, bool),
+) {
+    out.entry(net)
+        .and_modify(|e| {
+            if *e != Some(kind) {
+                *e = None;
+            }
+        })
+        .or_insert(Some(kind));
+}
+
+/// `(active low, synchronous)` of a declared reset type.
+fn declared_reset_kind(kind: &air::TypeKind) -> Option<(bool, bool)> {
+    match kind {
+        air::TypeKind::ResetAsyncLow => Some((true, false)),
+        air::TypeKind::ResetAsyncHigh => Some((false, false)),
+        air::TypeKind::ResetSyncLow => Some((true, true)),
+        air::TypeKind::ResetSyncHigh => Some((false, true)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
