@@ -137,6 +137,9 @@ pub struct Ir {
     pub component_file_base: Option<PathBuf>,
     /// See `Module::rtl_driven`.
     pub rtl_driven: HashSet<VarId>,
+    /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
+    /// comb-dirty filter (`tb_dirty::TbDirtyFilter`).
+    pub comb_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
     /// See `Module::fused_comb_offsets` (diagnostic; consumed by the
     /// dual-run checker to skip storage the fusion pass retired).
     pub fused_comb_offsets: Vec<isize>,
@@ -193,6 +196,7 @@ impl Ir {
             component_file_base: config.component_file_base.clone(),
             rtl_driven: module.rtl_driven,
             fused_comb_offsets: module.fused_comb_offsets,
+            comb_touched_offsets: module.comb_touched_offsets,
             whole_comb_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
             const_cone_done: Default::default(),

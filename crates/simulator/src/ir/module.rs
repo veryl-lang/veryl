@@ -84,6 +84,11 @@ pub struct Module {
     /// (`VERYL_COMB_FUSION`): their storage is never written, so raw-buffer
     /// comparisons (the dual-run checker) must skip them.  Diagnostic only.
     pub fused_comb_offsets: Vec<isize>,
+    /// Superset of every variable offset the comb list can touch
+    /// (`collect_comb_touched_offsets`).  `Arc` so instantiating a `Module`
+    /// per test does not deep-clone the whole set.  The testbench uses it to
+    /// decide which of its own statements really invalidate the comb.
+    pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
 }
 
 pub struct ProtoModule {
@@ -122,6 +127,8 @@ pub struct ProtoModule {
     pub rtl_driven: crate::HashSet<air::VarId>,
     /// See `Module::fused_comb_offsets`.
     pub fused_comb_offsets: Vec<isize>,
+    /// See `Module::comb_touched_offsets`.
+    pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
 }
 
 fn create_buffers(
@@ -392,6 +399,7 @@ impl ProtoModule {
                 .collect(),
             rtl_driven: self.rtl_driven.clone(),
             fused_comb_offsets: self.fused_comb_offsets.clone(),
+            comb_touched_offsets: Arc::clone(&self.comb_touched_offsets),
         }
     }
 
@@ -3731,6 +3739,7 @@ impl Conv<&air::Module> for ProtoModule {
             external_components: all_external_components,
             rtl_driven,
             fused_comb_offsets: cached.fused_offsets.clone(),
+            comb_touched_offsets: Arc::new(collect_comb_touched_offsets(&pre_jit_stmts)),
         })
     }
 }
@@ -3954,6 +3963,69 @@ fn merge_reset_dispatch(
         out.push(stmt);
     }
     *stmts = out;
+}
+
+/// Every variable offset the settled comb list can touch, as a SUPERSET.
+///
+/// Consumed by the testbench's comb-dirty filter: a testbench statement that
+/// writes nothing in here cannot change what the next comb evaluation reads,
+/// so it does not have to invalidate the comb.
+///
+/// This deliberately does NOT reuse `ProtoStatement::gather_variable_offsets`
+/// at block level. That one is tuned for dependency analysis and drops a
+/// `CompiledBlock`'s FF offsets, which it is right to drop there and wrong to
+/// drop here. So the walk is done here, unioning inputs and outputs alike —
+/// over-approximating costs only a missed optimization, under-approximating
+/// would silently skip a required settle, leaving a stale comb value to be
+/// read as settled.
+pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<VarOffset> {
+    fn walk(stmts: &[ProtoStatement], acc: &mut HashSet<VarOffset>) {
+        let mut ins: Vec<VarOffset> = Vec::new();
+        let mut outs: Vec<VarOffset> = Vec::new();
+        for s in stmts {
+            match s {
+                ProtoStatement::SequentialBlock(body) => walk(body, acc),
+                ProtoStatement::If(x) => {
+                    if let Some(cond) = &x.cond {
+                        cond.gather_variable_offsets(&mut ins);
+                    }
+                    walk(&x.true_side, acc);
+                    walk(&x.false_side, acc);
+                }
+                ProtoStatement::Case(x) => {
+                    for arm in &x.arms {
+                        arm.cond.gather_variable_offsets(&mut ins);
+                        walk(&arm.body, acc);
+                    }
+                    walk(&x.default, acc);
+                }
+                ProtoStatement::For(x) => {
+                    // Written on every pass, so it belongs in the set even
+                    // when the body does not read it.
+                    acc.insert(x.var_offset);
+                    for e in x.range.dynamic_bounds() {
+                        e.gather_variable_offsets(&mut ins);
+                    }
+                    walk(&x.body, acc);
+                }
+                ProtoStatement::CompiledBlock(x) => {
+                    acc.extend(x.input_offsets.iter().copied());
+                    acc.extend(x.output_offsets.iter().copied());
+                    for (dep_ins, dep_outs) in &x.stmt_deps {
+                        acc.extend(dep_ins.iter().copied());
+                        acc.extend(dep_outs.iter().copied());
+                    }
+                    walk(&x.original_stmts, acc);
+                }
+                other => other.gather_variable_offsets(&mut ins, &mut outs),
+            }
+            acc.extend(ins.drain(..));
+            acc.extend(outs.drain(..));
+        }
+    }
+    let mut acc = HashSet::default();
+    walk(stmts, &mut acc);
+    acc
 }
 
 #[cfg(test)]

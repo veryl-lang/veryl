@@ -560,6 +560,9 @@ pub fn run_native_testbench_capped(
         .ok_or_else(|| SimulatorError::no_initial_block(&module_name, &token))?;
 
     let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
+    // Statements that write only testbench-private state do not have to
+    // re-settle the design; see `tb_dirty`.
+    sim.tb_dirty = crate::tb_dirty::TbDirtyFilter::build(&sim.ir, &tb_stmts);
     let result = run_testbench(&mut sim, &tb_stmts);
 
     #[cfg(feature = "profile")]
@@ -634,7 +637,11 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
         TestbenchStatement::Stmt(s) => {
             sim.ensure_comb_updated();
             let flow = s.eval_step(&mut sim.mask_cache);
-            sim.mark_comb_dirty();
+            // A statement that writes only testbench-private variables cannot
+            // change a comb input, so the next read does not need a settle.
+            if !sim.tb_dirty.is_clean(s) {
+                sim.mark_comb_dirty();
+            }
             if flow == ControlFlow::Break {
                 ExecResult::Break
             } else {

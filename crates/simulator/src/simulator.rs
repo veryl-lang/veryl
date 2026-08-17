@@ -46,6 +46,9 @@ pub struct Simulator {
     pub mask_cache: MaskCache,
     comb_dirty: bool,
     pub profile: SimProfile,
+    /// Which testbench statements are known not to invalidate the comb.
+    /// Empty (the default) settles after every testbench statement.
+    pub(crate) tb_dirty: crate::tb_dirty::TbDirtyFilter,
     last_event: Option<Event>,
     last_event_stmts: *const Vec<Statement>,
     /// Whole-event AOT-C handle for `last_event`, cached alongside
@@ -148,6 +151,7 @@ impl Simulator {
             mask_cache: MaskCache::default(),
             comb_dirty: true,
             profile: Default::default(),
+            tb_dirty: Default::default(),
             last_event: None,
             last_event_stmts: std::ptr::null(),
             last_whole_event: None,
