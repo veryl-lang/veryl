@@ -143,6 +143,15 @@ static inline void vw_lshr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t 
     uint64_t lo = si<n ? VW_RD(a,si) : 0;
     uint64_t hi = si+1<n ? VW_RD(a,si+1) : 0;
     VW_WR(d,i, bs==0 ? lo : (lo>>bs)|(hi<<(64-bs))); } }
+/* The low dnb bytes of (a >> amount), where a holds anb bytes: a wide
+   bit-select needs only its own result window, not the whole shifted
+   source. */
+static inline void vw_lshr_win(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t dnb,uint32_t anb){
+  unsigned dn=dnb/8, an=anb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
+  for(unsigned i=0;i<dn;i++){ unsigned si=i+ws;
+    uint64_t lo = si<an ? VW_RD(a,si) : 0;
+    uint64_t hi = si+1<an ? VW_RD(a,si+1) : 0;
+    VW_WR(d,i, bs==0 ? lo : (lo>>bs)|(hi<<(64-bs))); } }
 static inline void vw_ashr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t packed){
   uint32_t nb=packed&0xFFFF, width=packed>>16; if(nb==0||width==0) return;
   unsigned n=nb/8; unsigned sw=(width-1)/64, sb=(width-1)%64;
@@ -868,16 +877,17 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                 let idx = emit_expr(&dyn_sel.index_expr)?;
                 let max_idx = dyn_sel.num_elements - 1;
                 let src_nb = native_bytes(*var_full_width);
-                let src_nw = wide_words(src_nb);
+                let res_nb = native_bytes(dyn_sel.window);
+                let res_nw = wide_words(res_nb);
                 let t = next_wide_tmp();
                 pre.push_str(&format!(
-                    "uint64_t _w{t}[{src_nw}]; \
+                    "uint64_t _w{t}[{res_nw}]; \
                      {{ uint64_t _di_raw = (uint64_t)({idx}); \
                         uint64_t _di = _di_raw < {max_idx}ull ? _di_raw : {max_idx}ull; \
-                        vw_lshr((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), _di * {ew}ull, {src_nb}u); }} \
+                        vw_lshr_win((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), _di * {ew}ull, {res_nb}u, {src_nb}u); }} \
                      vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {mask}u); ",
                     ew = dyn_sel.elem_width,
-                    mask = wpack(src_nb, dyn_sel.window),
+                    mask = wpack(res_nb, dyn_sel.window),
                 ));
                 return Some(WideRef {
                     addr: format!("((uint8_t*)_w{t})"),
@@ -896,14 +906,14 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                     return None;
                 }
                 let src_nb = native_bytes(*var_full_width);
-                let src_nw = wide_words(src_nb);
                 let res_nb = native_bytes(nbits);
+                let res_nw = wide_words(res_nb);
                 let t = next_wide_tmp();
                 pre.push_str(&format!(
-                    "uint64_t _w{t}[{src_nw}]; \
-                     vw_lshr((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), {lo}ull, {src_nb}u); \
+                    "uint64_t _w{t}[{res_nw}]; \
+                     vw_lshr_win((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), {lo}ull, {res_nb}u, {src_nb}u); \
                      vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {mask}u); ",
-                    mask = wpack(src_nb, nbits),
+                    mask = wpack(res_nb, nbits),
                 ));
                 return Some(WideRef {
                     addr: format!("((uint8_t*)_w{t})"),
@@ -9331,6 +9341,148 @@ mod tests {
                 u64::from_le_bytes(comb[144..152].try_into().unwrap()),
                 want64
             );
+        }
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_wide_select_reads_above_128_bits() {
+        // Reads whose RESULT exceeds 128 bits, from a 576-bit source: a
+        // static select spanning words 2..5, one whose top window has no
+        // successor word to funnel in, and a dynamic 192-bit element.
+        if !cc_available() {
+            eprintln!("emit_wide_select_reads_above_128_bits: cc unavailable, skipping");
+            return;
+        }
+        use crate::ir::ProtoDynamicBitSelect;
+        // Reference extraction, bit by bit: independent of the shift the
+        // emitted helper performs.
+        fn slice_bits(src: &[u64; 9], lo: usize, nbits: usize) -> Vec<u8> {
+            let mut out = vec![0u8; nbits.div_ceil(64) * 8];
+            for i in 0..nbits {
+                let bit = lo + i;
+                if bit < 576 && (src[bit / 64] >> (bit % 64)) & 1 == 1 {
+                    out[i / 8] |= 1 << (i % 8);
+                }
+            }
+            out
+        }
+        let sel_read = |hi: usize, lo: usize| ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0),
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            width: hi - lo + 1,
+            var_full_width: 576,
+            expr_context: ctx(hi - lo + 1, false),
+        };
+        let dyn_read = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0),
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(var_expr(VarOffset::Comb(72), 32)),
+                elem_width: 192,
+                window: 192,
+                num_elements: 3,
+            }),
+            width: 192,
+            var_full_width: 576,
+            expr_context: ctx(192, false),
+        };
+        let mk_assign = |dst: isize, dw: usize, e: ProtoExpression| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(dst),
+                dst_width: dw,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: e,
+                dst_ff_current_offset: 0,
+                token: dummy_token(),
+            })
+        };
+        // Two windowed reads as operands of a wider op: each is promoted from
+        // its own 192-bit window, not from the 576-bit source.
+        let xor256 = ProtoExpression::Binary {
+            x: Box::new(sel_read(330, 139)),
+            op: Op::BitXor,
+            y: Box::new(sel_read(521, 330)),
+            width: 256,
+            expr_context: ctx(256, false),
+        };
+        // src576 at comb[0..72], index at comb[72..76], the results at
+        // comb[80..104], [104..128], [128..152], [152..176] and [176..208].
+        let src = emit_function(&[
+            mk_assign(80, 192, sel_read(330, 139)),
+            mk_assign(104, 160, sel_read(559, 400)),
+            mk_assign(128, 192, dyn_read),
+            // Reaching past the source reads zeros, not its neighbours.
+            mk_assign(152, 192, sel_read(640, 449)),
+            mk_assign(176, 256, xor256),
+        ])
+        .expect(">128-bit select reads must stay AOT-covered");
+        assert!(
+            src.contains("vw_lshr_win((uint8_t*)_w"),
+            "the read is windowed to its result: {src}"
+        );
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_wsr_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "emit_wide_select_reads_above_128_bits")
+        else {
+            return;
+        };
+        let words: [u64; 9] = [
+            0x0123_4567_89AB_CDEF,
+            0xFEDC_BA98_7654_3210,
+            0xAAAA_5555_CCCC_3333,
+            0xDEAD_BEEF_0BAD_F00D,
+            0x1122_3344_5566_7788,
+            0x99AA_BBCC_DDEE_FF00,
+            0xF00D_FACE_CAFE_BEEF,
+            0x0102_0304_0506_0708,
+            0x8090_A0B0_C0D0_E0F0,
+        ];
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 208];
+        for (i, w) in words.iter().enumerate() {
+            comb[i * 8..i * 8 + 8].copy_from_slice(&w.to_le_bytes());
+        }
+        let mut log = vec![0u64; 16];
+        // Index 3 is out of range and clamps to the last element.
+        for (idx, elem) in [(0u32, 0usize), (1, 1), (2, 2), (3, 2)] {
+            comb[72..76].copy_from_slice(&idx.to_le_bytes());
+            unsafe {
+                (module.func)(
+                    ff.as_mut_ptr(),
+                    comb.as_mut_ptr(),
+                    log.as_mut_ptr() as *mut u8,
+                    0,
+                );
+            }
+            assert_eq!(
+                &comb[80..104],
+                &slice_bits(&words, 139, 192)[..],
+                "[330:139]"
+            );
+            assert_eq!(
+                &comb[104..128],
+                &slice_bits(&words, 400, 160)[..],
+                "[559:400]"
+            );
+            assert_eq!(
+                &comb[128..152],
+                &slice_bits(&words, elem * 192, 192)[..],
+                "element {idx}"
+            );
+            assert_eq!(
+                &comb[152..176],
+                &slice_bits(&words, 449, 192)[..],
+                "[640:449]"
+            );
+            let (x, y) = (slice_bits(&words, 139, 192), slice_bits(&words, 330, 192));
+            let mut want = [0u8; 32];
+            for (i, w) in want.iter_mut().enumerate().take(24) {
+                *w = x[i] ^ y[i];
+            }
+            assert_eq!(&comb[176..208], &want[..], "[330:139] ^ [521:330]");
         }
         let _ = fs::remove_dir_all(&tmp);
     }
