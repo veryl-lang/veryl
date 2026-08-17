@@ -520,8 +520,20 @@ fn jit_chunk_size() -> usize {
 }
 
 /// Per-event JIT path: load_cache CSE enabled, no nested CompiledBlocks
-/// expected.
+/// expected.  `VERYL_EVENT_CHUNK_SIZE=N` is diagnostic: splitting here gives
+/// each chunk its own perf-map entry, attributing event-side samples per
+/// module, and leaves the comb side's chunking alone.
 fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
+    let event_split: Option<usize> = std::env::var("VERYL_EVENT_CHUNK_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    if let Some(n) = event_split.filter(|&n| n > 0 && n < proto.len()) {
+        let mut blocks = Vec::new();
+        for piece in proto.chunks(n) {
+            blocks.extend(build_chunked_via_registry(context, piece.to_vec(), false).0);
+        }
+        return ProtoStatements(blocks);
+    }
     build_chunked_via_registry(context, proto, /* contains_compiled_block= */ false)
 }
 

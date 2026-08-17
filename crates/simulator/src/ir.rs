@@ -206,6 +206,9 @@ impl Ir {
         // inline log pushes without a TLS lookup.
         ir.install_write_log_ptr();
         ir.backend_diag();
+        if env::var("VERYL_DUMP_VARMAP").ok().as_deref() == Some("1") {
+            ir.dump_varmap();
+        }
         ir
     }
 
@@ -269,6 +272,47 @@ impl Ir {
             .collect();
         ports.sort_by(|a, b| a.0.cmp(b.0));
         ports.into_iter().map(|(_, id)| *id).collect()
+    }
+
+    /// `VERYL_DUMP_VARMAP=1`: every variable element's storage offset with its
+    /// hierarchical path — the table an emitted-code offset is joined against
+    /// to name the signal behind it.
+    fn dump_varmap(&self) {
+        // Millions of lines on a large design, and stderr is unbuffered: hold
+        // one buffer for the whole dump.
+        use std::io::Write;
+        let stderr = std::io::stderr();
+        let mut out = std::io::BufWriter::new(stderr.lock());
+        let comb_base = self.comb_values.as_ptr() as usize;
+        let comb_end = comb_base + self.comb_values.len();
+        let ff_base = self.ff_values.as_ptr() as usize;
+        let ff_end = ff_base + self.ff_values.len();
+        let mut stack = vec![(String::new(), &self.module_variables)];
+        while let Some((prefix, m)) = stack.pop() {
+            let here = if prefix.is_empty() {
+                m.name.to_string()
+            } else {
+                format!("{prefix}.{}", m.name)
+            };
+            for var in m.variables.values() {
+                for (i, &p) in var.current_values.iter().enumerate() {
+                    let p = p as usize;
+                    let (kind, off) = if (comb_base..comb_end).contains(&p) {
+                        ("comb", p - comb_base)
+                    } else if (ff_base..ff_end).contains(&p) {
+                        ("ff", p - ff_base)
+                    } else {
+                        continue; // external component storage
+                    };
+                    let _ = writeln!(
+                        out,
+                        "[varmap] {kind} {off:#x} w={} {here}.{}[{i}]",
+                        var.width, var.path
+                    );
+                }
+            }
+            stack.extend(m.children.iter().map(|c| (here.clone(), c)));
+        }
     }
 
     /// `VERYL_BACKEND_DIAG=1`: report per-event/comb jit vs interpreter counts
