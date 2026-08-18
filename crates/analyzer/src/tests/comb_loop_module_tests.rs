@@ -18,17 +18,6 @@ macro_rules! comb_loop_case {
     };
 }
 
-macro_rules! comb_loop_case_ignored {
-    ($name:ident, $reason:literal, $case:literal, $code:expr, $expected:expr) => {
-        #[test]
-        #[ignore = $reason]
-        fn $name() {
-            let code = $code;
-            assert_comb_loop($case, code.as_ref(), $expected);
-        }
-    };
-}
-
 fn whole_unpacked_instance_code(output_index: usize) -> String {
     format!(
         r#"
@@ -129,9 +118,8 @@ fn periodic_repeat_two_level_code(bit: usize) -> String {
     )
 }
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_instance_repeat_retains_matching_phase_at_scale,
-    "comb-loop migration: false negative; module feedthrough and instance mapping",
     "instance repeat retains matching phase feedback",
     periodic_repeat_code(true, 200_000, 123_456, 0),
     true
@@ -144,9 +132,8 @@ comb_loop_case!(
     false
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_periodic_phase_survives_two_module_summaries,
-    "comb-loop migration: false negative; module feedthrough and instance mapping",
     "a periodic phase survives two module summaries",
     periodic_repeat_two_level_code(0),
     true
@@ -279,7 +266,6 @@ fn comb_loop_dynamic_region_survives_module_summary() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_preserves_module_summary_positions_a_vector_identity_module_preserves_disjoint_bit_positions()
  {
     assert_comb_loop(
@@ -340,7 +326,108 @@ fn comb_loop_preserves_module_summary_positions_a_vector_identity_module_retains
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
+fn comb_loop_module_summary_preserves_multidimensional_array_elements() {
+    assert_comb_loop(
+        "a multidimensional identity keeps distinct elements independent",
+        r#"
+        module Child (
+            i: input  logic<2> [2, 3],
+            o: output logic<2> [2, 3],
+        ) {
+            assign o = i;
+        }
+        module Top (o: output logic) {
+            var child_i: logic<2> [2, 3];
+            var child_o: logic<2> [2, 3];
+            inst u: Child (i: child_i, o: child_o);
+            assign child_i[0][1][0] = child_o[1][1][0];
+            assign child_i[0][1][1] = 0;
+            assign o = child_o[0][0][0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_module_summary_detects_multidimensional_same_element_feedback() {
+    assert_comb_loop(
+        "a multidimensional identity retains the same element and bit",
+        r#"
+        module Child (
+            i: input  logic<2> [2, 3],
+            o: output logic<2> [2, 3],
+        ) {
+            assign o = i;
+        }
+        module Top (o: output logic) {
+            var child_i: logic<2> [2, 3];
+            var child_o: logic<2> [2, 3];
+            inst u: Child (i: child_i, o: child_o);
+            assign child_i[0][1][0] = child_o[0][1][0];
+            assign child_i[0][1][1] = 0;
+            assign o = child_o[0][0][0];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_module_summary_preserves_packed_struct_members() {
+    assert_comb_loop(
+        "a packed struct identity keeps distinct members independent",
+        r#"
+        package Types {
+            struct Pair { low: logic, high: logic, }
+        }
+        module Child (
+            i: input  Types::Pair,
+            o: output Types::Pair,
+        ) {
+            assign o = i;
+        }
+        module Top (o: output logic) {
+            var child_i: Types::Pair;
+            var child_o: Types::Pair;
+            inst u: Child (i: child_i, o: child_o);
+            assign child_i.low = child_o.high;
+            assign child_i.high = 0;
+            assign o = child_o.low;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_module_summary_detects_packed_struct_member_feedback() {
+    assert_comb_loop(
+        "a packed struct identity retains the same member",
+        r#"
+        package Types {
+            struct Pair { low: logic, high: logic, }
+        }
+        module Child (
+            i: input  Types::Pair,
+            o: output Types::Pair,
+        ) {
+            assign o = i;
+        }
+        module Top (o: output logic) {
+            var child_i: Types::Pair;
+            var child_o: Types::Pair;
+            inst u: Child (i: child_i, o: child_o);
+            assign child_i.low = child_o.low;
+            assign child_i.high = 0;
+            assign o = child_o.low;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_instance_output_address_contributes_dependency() {
     // Why this case exists: idx selects the instance output destination and
     // is itself read from one candidate destination. This is the same address
@@ -373,7 +460,6 @@ fn comb_loop_instance_output_address_contributes_dependency() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_instance_input_selector_side_effect_is_recorded() {
     // Why this case exists: an otherwise plain instance actual still evaluates
     // the expressions in its selectors. Skipping the observer for mem[touch(o)]
@@ -406,7 +492,6 @@ fn comb_loop_instance_input_selector_side_effect_is_recorded() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_instance_output_selector_side_effect_is_recorded() {
     // Why this case exists: an output connection evaluates the selector in its
     // destination. The observer must retain touch(o)'s module-scope write even
@@ -441,7 +526,42 @@ fn comb_loop_instance_output_selector_side_effect_is_recorded() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
+fn comb_loop_instance_output_selector_without_a_return_path_is_feed_forward() {
+    // The selector controls the output destination and its function writes x,
+    // but neither dependency returns to the selector. Recording both effects
+    // must not manufacture a cycle.
+    assert_comb_loop(
+        "an independent instance output selector remains feed-forward",
+        r#"
+        module Source (
+            o: output logic,
+        ) {
+            assign o = 0;
+        }
+        module Top (
+            index: input  logic,
+            seed : input  logic,
+            o    : output logic,
+        ) {
+            var bus: logic<2>;
+            var x  : logic;
+            function touch (
+                a: input logic,
+            ) -> logic {
+                x = a;
+                return index;
+            }
+            inst u: Source (
+                o: bus[touch(seed)],
+            );
+            assign o = x;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
 fn comb_loop_preserves_instance_shift_positions_an_instance_actual_left_shift_keeps_its_inserted_bit_loop_free()
  {
     assert_comb_loop(
@@ -503,7 +623,6 @@ fn comb_loop_preserves_instance_shift_positions_an_instance_actual_left_shift_de
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_preserves_instance_repeat_positions_an_instance_repeat_actual_keeps_an_unrelated_operand_loop_free()
  {
     assert_comb_loop(
@@ -566,7 +685,6 @@ fn comb_loop_preserves_instance_repeat_positions_an_instance_repeat_actual_detec
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_distinguishes_generic_module_specializations_an_enabled_generic_module_specialization_retains_its_feedthrough()
  {
     assert_comb_loop(
@@ -604,7 +722,6 @@ fn comb_loop_distinguishes_generic_module_specializations_an_enabled_generic_mod
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_distinguishes_generic_module_specializations_a_disabled_generic_module_specialization_does_not_inherit_feedthrough()
  {
     assert_comb_loop(
@@ -667,7 +784,6 @@ fn instance_logical_actual_code(expression: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; dead logical-and instance RHS"]
 fn comb_loop_false_logical_and_instance_actual_drops_rhs() {
     assert_comb_loop(
         "a false logical-and instance actual drops its dead RHS",
@@ -677,7 +793,6 @@ fn comb_loop_false_logical_and_instance_actual_drops_rhs() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; dead logical-or instance RHS"]
 fn comb_loop_true_logical_or_instance_actual_drops_rhs() {
     assert_comb_loop(
         "a true logical-or instance actual drops its dead RHS",
@@ -705,7 +820,6 @@ fn comb_loop_false_logical_or_instance_actual_retains_rhs() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_preserves_ternary_positions_across_boundaries_an_instance_ternary_actual_keeps_a_disjoint_bit_loop_free()
  {
     assert_comb_loop(
@@ -799,7 +913,6 @@ fn comb_loop_preserves_unpacked_port_element_positions_an_unpacked_array_module_
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; module feedthrough and instance mapping"]
 fn comb_loop_preserves_unpacked_port_element_positions_an_unpacked_array_module_port_detects_same_element_feedback()
  {
     assert_comb_loop(
@@ -831,7 +944,6 @@ fn comb_loop_preserves_unpacked_port_element_positions_an_unpacked_array_module_
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_module_boundary_region_mapping_a_child_port_summary_must_not_turn_bit_disjoint_feedthrough_into_a_loop()
  {
     assert_comb_loop(
@@ -936,7 +1048,6 @@ fn comb_loop_module_boundary_region_mapping_a_top_input_to_output_path_has_no_in
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_module_boundary_region_mapping_bit_precision_survives_two_module_boundaries() {
     assert_comb_loop(
         "bit precision survives two module boundaries",
@@ -1019,7 +1130,6 @@ fn comb_loop_module_boundary_region_mapping_a_real_loop_survives_two_region_pres
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_module_boundary_region_mapping_a_concatenated_instance_input_preserves_its_low_bit_source()
  {
     assert_comb_loop(
@@ -1168,7 +1278,6 @@ fn comb_loop_instance_summary_region_mapping_is_reused() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_module_formal_high_bit_ignores_short_unsigned_actual() {
     assert_comb_loop(
         "a module formal high bit does not read an unsigned short actual",
@@ -1186,7 +1295,6 @@ fn comb_loop_module_formal_high_bit_ignores_short_unsigned_actual() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_unaligned_unpacked_instance_element_zero_is_disjoint() {
     assert_unaligned_unpacked_instance_input(0, false);
 }
@@ -1194,4 +1302,162 @@ fn comb_loop_unaligned_unpacked_instance_element_zero_is_disjoint() {
 #[test]
 fn comb_loop_unaligned_unpacked_instance_element_one_retains_feedback() {
     assert_unaligned_unpacked_instance_input(1, true);
+}
+
+#[test]
+fn many_comb_declarations_build_the_module_context_once() {
+    const COUNT: usize = 256;
+    let variables = (0..COUNT)
+        .map(|index| format!("var value_{index}: logic;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let assignments = (0..COUNT)
+        .map(|index| format!("assign value_{index} = 0;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::comb_loop_detect::reset_module_context_entries();
+    assert_comb_loop(
+        "independent declarations reuse immutable module metadata",
+        &format!(
+            r#"
+            module Top (o: output logic) {{
+                {variables}
+                {assignments}
+                assign o = value_0;
+            }}
+            "#,
+        ),
+        false,
+    );
+    assert!(
+        crate::comb_loop_detect::module_context_entries() <= COUNT + 4,
+        "module variable/function maps must not be cloned per declaration",
+    );
+}
+
+#[test]
+fn comb_loop_module_summary_preserves_if_expression_arm_exclusivity() {
+    assert_comb_loop(
+        "a child summary must not combine mutually exclusive expression arms",
+        r#"
+        module Conditional (
+            i  : input  logic<2>,
+            sel: input  logic,
+            o  : output logic<2>,
+        ) {
+            assign o = if sel ? {i[0], 1'b0} : {1'b0, i[1]};
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var state: logic<2>;
+            inst conditional: Conditional (
+                i  : state,
+                sel: sel,
+                o  : state,
+            );
+            assign o = |state;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_module_summary_retains_feedback_reachable_in_one_expression_arm() {
+    assert_comb_loop(
+        "a child summary retains feedback reachable in one expression arm",
+        r#"
+        module Conditional (
+            i  : input  logic,
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            assign o = if sel ? i : 1'b0;
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var state: logic;
+            inst conditional: Conditional (
+                i  : state,
+                sel: sel,
+                o  : state,
+            );
+            assign o = state;
+        }
+        "#,
+        true,
+    );
+}
+
+fn shifted_recurrence_module_code(feedback_output: usize, feedback_input: usize) -> String {
+    let clears = (0..4)
+        .filter(|index| *index != feedback_input)
+        .map(|index| format!("assign child_i[{index}] = 0;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        r#"
+        module ShiftClosure (
+            i: input  logic<4>,
+            o: output logic<4>,
+        ) {{
+            var x: logic<4>;
+            assign x = (x << 1) | i;
+            assign o = x;
+        }}
+        module Top (o: output logic) {{
+            var child_i: logic<4>;
+            var child_o: logic<4>;
+            inst u: ShiftClosure (i: child_i, o: child_o);
+            assign child_i[{feedback_input}] = child_o[{feedback_output}];
+            {clears}
+            assign o = child_o[0];
+        }}
+        "#,
+    )
+}
+
+#[test]
+fn comb_loop_module_summary_shift_closure_terminates_without_wraparound() {
+    assert_comb_loop(
+        "a truncated left-shift recurrence does not wrap its high input to its low output",
+        &shifted_recurrence_module_code(0, 3),
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_module_summary_shift_closure_retains_reachable_feedback() {
+    assert_comb_loop(
+        "a left-shift recurrence retains transitive low-to-high feedthrough",
+        &shifted_recurrence_module_code(3, 0),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_wide_module_summary_shift_closure_is_sparse() {
+    assert_comb_loop(
+        "a wide truncated-shift recurrence must not enumerate its declared width",
+        r#"
+        module ShiftClosure (
+            i: input  logic<1000000>,
+            o: output logic<1000000>,
+        ) {
+            var x: logic<1000000>;
+            assign x = (x << 1) | i;
+            assign o = x;
+        }
+        module Top (o: output logic) {
+            var child_o: logic<1000000>;
+            inst u: ShiftClosure (i: 0, o: child_o);
+            assign o = child_o[0];
+        }
+        "#,
+        false,
+    );
 }

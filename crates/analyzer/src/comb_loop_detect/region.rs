@@ -2,6 +2,20 @@ use crate::HashMap;
 use crate::conv::Context;
 use crate::ir::{AssignDestination, Type, VarId, VarIndex, VarSelect};
 
+pub(super) fn signed_difference(destination: usize, source: usize) -> Option<isize> {
+    isize::try_from(destination)
+        .ok()?
+        .checked_sub(isize::try_from(source).ok()?)
+}
+
+pub(super) fn translate_position(position: usize, offset: isize) -> Option<usize> {
+    if offset >= 0 {
+        position.checked_add(offset.unsigned_abs())
+    } else {
+        position.checked_sub(offset.unsigned_abs())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct ArraySpan {
     pub(super) start: usize,
@@ -21,6 +35,21 @@ impl ArraySpan {
             return false;
         };
         self.start < right_end && other.start < left_end
+    }
+
+    pub(super) fn intersection(self, other: Self) -> Option<Self> {
+        let start = self.start.max(other.start);
+        let end = self.end()?.min(other.end()?);
+        let length = end.checked_sub(start)?;
+        (length != 0).then_some(Self { start, length })
+    }
+
+    pub(super) fn translated(self, from: usize, to: usize) -> Option<Self> {
+        let start = self.start.checked_sub(from)?.checked_add(to)?;
+        (self.length != 0 && start.checked_add(self.length).is_some()).then_some(Self {
+            start,
+            length: self.length,
+        })
     }
 }
 

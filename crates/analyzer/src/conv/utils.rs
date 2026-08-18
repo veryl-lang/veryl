@@ -3369,6 +3369,7 @@ pub fn get_component(
                 let component: IrResult<ir::Module> = Conv::conv(c, (x, header_only));
                 match component {
                     Ok(mut component) => {
+                        component.signature = sig.clone();
                         if !c.config.retain_component_body {
                             component.functions.clear();
                             component.declarations.clear();
@@ -3418,6 +3419,7 @@ pub fn get_component(
                 let component: IrResult<ir::Module> = Conv::conv(c, x);
                 match component {
                     Ok(mut component) => {
+                        component.signature = sig.clone();
                         if !c.config.retain_component_body {
                             component.functions.clear();
                             component.declarations.clear();
@@ -3591,6 +3593,11 @@ pub fn get_return_str() -> StrId {
     resource_table::insert_str("return")
 }
 
+pub struct PortConnects {
+    pub connects: Vec<(VarPath, Vec<VarPathSelect>, ir::Expression)>,
+    pub interface_binding: Option<VarPathSelect>,
+}
+
 pub fn get_port_connects(
     context: &mut Context,
     component: &ir::Module,
@@ -3598,8 +3605,9 @@ pub fn get_port_connects(
     port_path: &VarPath,
     port_type: &ir::Type,
     token: TokenRange,
-) -> IrResult<Vec<(VarPath, Vec<VarPathSelect>, ir::Expression)>> {
+) -> IrResult<PortConnects> {
     let mut ret = vec![];
+    let mut interface_binding = None;
 
     if let ir::TypeKind::Modport(_, _) = &port_type.kind {
         if let Some(x) = &port.inst_port_item_opt {
@@ -3614,6 +3622,7 @@ pub fn get_port_connects(
         } else {
             (port_path.clone(), VarSelect::default())
         };
+        interface_binding = Some(VarPathSelect(dst_path.clone(), dst_select.clone(), token));
 
         let members = port_type.expand_modport(context, &dst_path, token)?;
         for member in members {
@@ -3691,7 +3700,10 @@ pub fn get_port_connects(
         ret.push((port_path.clone(), dst, expr));
     }
 
-    Ok(ret)
+    Ok(PortConnects {
+        connects: ret,
+        interface_binding,
+    })
 }
 
 /// Expands an unpacked-array slice connection (`i: arr[2*n+:2]`) into one
