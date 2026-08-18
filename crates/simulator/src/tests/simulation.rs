@@ -675,6 +675,44 @@ const WIDE_SIGNED_LITERAL_CODE: &str = r#"
     }
     "#;
 
+/// A field straddling a 64-bit word boundary must survive the store
+/// coalescing that rewrites a group of field stores into one store per word.
+/// Only top-level continuous assigns form such a group — the same fields
+/// inside an `always_comb` stay one block and never reach the pass.
+#[test]
+fn word_straddling_field_store_keeps_its_value() {
+    let code = r#"
+    module Top (
+        a: input  logic<60>,
+        b: input  logic<10>,
+        c: input  logic<26>,
+        o: output logic<96>,
+    ) {
+        assign o[59:0]  = a;
+        assign o[69:60] = b;
+        assign o[95:70] = c;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let (a, b, c) = (0x0ab_cdef_0123_4567u64, 0x2a5u64, 0x3d5_a1fu64);
+    let expected = BigUint::from(a) | (BigUint::from(b) << 60u32) | (BigUint::from(c) << 70u32);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(a, 60, false));
+        sim.set("b", Value::new(b, 10, false));
+        sim.set("c", Value::new(c, 26, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new_biguint(expected.clone(), 96, false),
+            "config={config:?}"
+        );
+    }
+}
+
 #[test]
 fn wide_signed_literal_store_sign_extends() {
     // Holds with and without the build-time sizing: what the store produces

@@ -661,12 +661,15 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
                 w: a.dst_width,
                 bad: false,
             });
-            // A field straddling a word boundary has no single word to land
-            // in, so it disqualifies the group (see `word_coalesce_enabled`).
+            // A field STRADDLING a word boundary is fine — the assembly
+            // below clips it into a per-word part.  The `< 64` bound is what
+            // keeps every part narrower than a word, so `canonical_wrap`
+            // always masks it (it returns the expression bare at 64), which is
+            // what stops a dirty RHS from leaking past the part's own width.
             let word_ok = a.dst_width <= 64
                 || (word_coalesce_enabled()
                     && a.select
-                        .is_some_and(|(hi, lo)| hi.max(lo) / 64 == hi.min(lo) / 64));
+                        .is_some_and(|(hi, lo)| hi.max(lo) - hi.min(lo) < 64));
             if a.select.is_some()
                 && a.dynamic_select.is_none()
                 && a.rhs_select.is_none()
@@ -816,8 +819,18 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
         };
         // Fusing one field would reproduce that same field store, and a word
         // no field touches keeps its value by not being stored at all.
+        //
+        // With a straddling field in the group the per-word membership is no
+        // longer free to choose: a field must fuse in EVERY word it touches
+        // or in none (its store is deleted whole), so take all touched words.
+        let has_straddler = g.w > 64 && ranges.iter().any(|&(lo, hi, _)| lo / 64 != hi / 64);
         let slices: Vec<(usize, usize)> = if g.w <= 64 {
             vec![(g.w - 1, 0)]
+        } else if has_straddler {
+            (0..g.w.div_ceil(64))
+                .map(|word| (((word + 1) * 64).min(g.w) - 1, word * 64))
+                .filter(|&(whi, wlo)| ranges.iter().any(|&(lo, hi, _)| lo <= whi && hi >= wlo))
+                .collect()
         } else {
             (0..g.w.div_ceil(64))
                 .map(|word| (((word + 1) * 64).min(g.w) - 1, word * 64))
@@ -845,28 +858,68 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
             for &(lo, hi, i) in ranges
                 .iter()
                 .rev()
-                .filter(|&&(lo, _, _)| lo >= slo && lo <= shi)
+                .filter(|&&(lo, hi, _)| lo <= shi && hi >= slo)
             {
-                if hi + 1 < cursor {
-                    elements.push(old_bits(cursor - 1, hi + 1));
+                // A straddler contributes one part per word it touches.
+                let phi = hi.min(shi);
+                let plo = lo.max(slo);
+                if phi + 1 < cursor {
+                    elements.push(old_bits(cursor - 1, phi + 1));
                 }
                 let ProtoStatement::Assign(a) = &mut stmts[i] else {
                     unreachable!()
                 };
-                let expr = std::mem::replace(
-                    &mut a.expr,
-                    ProtoExpression::Value {
-                        value: Value::new(0, 1, false),
-                        width: 1,
-                        expr_context: ExpressionContext {
+                // A straddler's RHS is consumed by two slices — clone it and
+                // leave the (deleted) statement's expression in place.
+                let straddles = lo / 64 != hi / 64;
+                let expr = if straddles {
+                    a.expr.clone()
+                } else {
+                    std::mem::replace(
+                        &mut a.expr,
+                        ProtoExpression::Value {
+                            value: Value::new(0, 1, false),
                             width: 1,
-                            signed: false,
+                            expr_context: ExpressionContext {
+                                width: 1,
+                                signed: false,
+                            },
                         },
-                    },
-                );
+                    )
+                };
                 let ew = hi - lo + 1;
-                elements.push((Box::new(canonical_wrap(expr, ew)), 1, ew));
-                cursor = lo;
+                let pw = phi - plo + 1;
+                let elem = if plo == lo && phi == hi {
+                    canonical_wrap(expr, ew)
+                } else {
+                    // Part of a straddling field: `(expr >> (plo-lo)) & mask(pw)`.
+                    // `(plo-lo) + pw <= ew`, so bits of a dirty RHS at or above
+                    // `ew` never pass the mask — the part stays canonical.
+                    let shifted = if plo > lo {
+                        ProtoExpression::Binary {
+                            x: Box::new(expr),
+                            op: Op::LogicShiftR,
+                            y: Box::new(ProtoExpression::Value {
+                                value: Value::new((plo - lo) as u64, 32, false),
+                                width: 32,
+                                expr_context: ExpressionContext {
+                                    width: 32,
+                                    signed: false,
+                                },
+                            }),
+                            width: ew,
+                            expr_context: ExpressionContext {
+                                width: ew,
+                                signed: false,
+                            },
+                        }
+                    } else {
+                        expr
+                    };
+                    canonical_wrap(shifted, pw)
+                };
+                elements.push((Box::new(elem), 1, pw));
+                cursor = plo;
             }
             if cursor > slo {
                 elements.push(old_bits(cursor - 1, slo));
@@ -1990,6 +2043,101 @@ mod tests {
                 (Some((129, 128)), 2),
             ]
         );
+    }
+
+    #[test]
+    fn coalesce_stores_a_word_holding_only_a_straddler() {
+        // `[95:60]` is the only field reaching word 1.  A per-word membership
+        // rule keyed on where fields START would never store that word, while
+        // the field's own store is deleted — leaving [95:64] undriven.
+        let stmts = vec![
+            assign_sel(0x0, 96, 59, 0, var(0x100, 60)),
+            assign_sel(0x0, 96, 95, 60, var(0x108, 36)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 1);
+        let mut words: Vec<Option<(usize, usize)>> = out
+            .iter()
+            .map(|s| match s {
+                ProtoStatement::Assign(a) => a.select,
+                _ => panic!("expected an Assign"),
+            })
+            .collect();
+        words.sort();
+        assert_eq!(
+            words,
+            vec![Some((63, 0)), Some((95, 64))],
+            "both words the straddler touches must be stored"
+        );
+    }
+
+    #[test]
+    fn coalesce_splits_a_word_straddling_field() {
+        // [69:60] crosses the word boundary: its low 4 bits belong to word 0
+        // and its high 6 bits to word 1.  The group fuses into one store per
+        // word, with the straddler clipped into a shifted part on each side.
+        let stmts = vec![
+            assign_sel(0x0, 96, 59, 0, var(0x100, 60)),
+            assign_sel(0x0, 96, 69, 60, var(0x108, 10)),
+            assign_sel(0x0, 96, 95, 70, var(0x110, 26)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 1);
+        assert_eq!(out.len(), 2, "one store per word, all field stores gone");
+        type StoreShape = (Option<(usize, usize)>, Vec<usize>);
+        let mut seen: Vec<StoreShape> = out
+            .iter()
+            .map(|s| {
+                let ProtoStatement::Assign(a) = s else {
+                    panic!("expected an Assign")
+                };
+                let ProtoExpression::Concatenation { elements, .. } = &a.expr else {
+                    panic!("expected a concatenation")
+                };
+                assert_eq!(a.dst_width, 96);
+                (a.select, elements.iter().map(|(_, _, w)| *w).collect())
+            })
+            .collect();
+        seen.sort();
+        assert_eq!(
+            seen,
+            vec![
+                // word 0: straddler bits [63:60] then the [59:0] field
+                (Some((63, 0)), vec![4, 60]),
+                // word 1: the [95:70] field then straddler bits [69:64]
+                (Some((95, 64)), vec![26, 6]),
+            ]
+        );
+        // The high part must read the straddler's RHS shifted right by 4.
+        let word1 = out
+            .iter()
+            .find_map(|s| match s {
+                ProtoStatement::Assign(a) if a.select == Some((95, 64)) => Some(a),
+                _ => None,
+            })
+            .unwrap();
+        let ProtoExpression::Concatenation { elements, .. } = &word1.expr else {
+            unreachable!()
+        };
+        // elements[1] is `(rhs >> 4) & 0x3f`
+        let ProtoExpression::Binary {
+            op: Op::BitAnd, x, ..
+        } = elements[1].0.as_ref()
+        else {
+            panic!("straddler part must be masked")
+        };
+        let ProtoExpression::Binary {
+            op: Op::LogicShiftR,
+            y,
+            ..
+        } = x.as_ref()
+        else {
+            panic!("straddler high part must be shifted")
+        };
+        let ProtoExpression::Value { value, .. } = y.as_ref() else {
+            panic!("shift amount must be a constant")
+        };
+        assert_eq!(value.to_usize(), Some(4));
     }
 
     #[test]
