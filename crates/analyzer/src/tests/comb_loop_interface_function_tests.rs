@@ -60,7 +60,6 @@ fn imported_interface_read_code(top_assignments: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; imported interface function member read"]
 fn comb_loop_imported_interface_read_detects_member_feedback() {
     assert_interface_function_comb_loop(
         &imported_interface_read_code("assign bus.observed = observed; assign bus.unrelated = 0;"),
@@ -110,7 +109,6 @@ fn imported_interface_write_code(writer_input: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; imported interface function member write"]
 fn comb_loop_imported_interface_write_detects_member_feedback() {
     assert_interface_function_comb_loop(&imported_interface_write_code("bus.written"), true);
 }
@@ -996,7 +994,6 @@ fn comb_loop_modport_array_function_formal_is_rejected_before_comb_loop_analysis
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; modport formal interface function transfer"]
 fn comb_loop_modport_formal_get_to_put_detects_feedback() {
     let code = format!(
         r#"
@@ -1200,7 +1197,6 @@ fn comb_loop_false_positive_imported_interface_function_widens_output_region() {
 }
 
 #[test]
-#[ignore = "requires imported modport function effects"]
 fn comb_loop_imported_interface_function_retains_matching_output_region_feedback() {
     assert_interface_function_comb_loop(
         r#"
