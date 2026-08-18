@@ -3,8 +3,8 @@
 
 
 module veryl_testcase_Module25A
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
     import veryl_sample4___bar_pkg__32::*;
     import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C__veryl_testcase___Package25__2_C::*;
 (
@@ -36,8 +36,8 @@ module veryl_testcase_Module25A
 endmodule
 
 module veryl_testcase___Module25B____Package25__1
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
     import veryl_testcase___Package25__1::*;
 (
     veryl_sample4___qux_if__veryl_testcase___Package25__1_S.mp if3,
@@ -63,15 +63,15 @@ module veryl_testcase___Module25B____Package25__1
 endmodule
 
 module veryl_testcase___Module25C____Package25__1_C;
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
     veryl_sample4___quu_module__veryl_testcase___Package25__1_C u5 ();
 endmodule
 
 
 module veryl_testcase_Module25D;
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
     veryl_sample4___qux_if__veryl_testcase___Package25__1_S qux_if     ();
     always_comb qux_if.qux = 0;
     veryl_testcase___Module25B____Package25__1 u6 (
@@ -84,15 +84,15 @@ module veryl_testcase_Module25D;
 endmodule
 
 module veryl_testcase_Module25E;
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
     localparam int unsigned QUX_0 = veryl_sample4_qux_pkg::QUX_0;
     localparam int unsigned QUX_1 = veryl_sample5_qux_pkg::QUX_1;
 endmodule
 
 module veryl_testcase_Module25F
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
 #(
     parameter int unsigned WIDTH = 8
 ) (
@@ -114,8 +114,8 @@ module veryl_testcase_Module25F
 endmodule
 
 module veryl_testcase_Module25G;
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
     import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C__veryl_testcase___Package25__2_C::BAZ_0;
     import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C__veryl_testcase___Package25__2_C::BAZ_1;
 
@@ -138,8 +138,8 @@ module veryl_testcase_Module25G;
 endmodule
 
 package veryl_testcase_Pacakge25H;
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
 
 
 
@@ -147,8 +147,8 @@ package veryl_testcase_Pacakge25H;
 endpackage
 
 module veryl_testcase_Module25I;
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
 
 
 
@@ -162,8 +162,8 @@ module veryl_testcase_Module25I;
 endmodule
 
 module veryl_testcase_Module25J;
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
 
 
 
@@ -181,8 +181,8 @@ endmodule
 
 module veryl_testcase_Module25K;
     // the reverse: guarded import, unguarded reference
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
 
     `ifdef DEFINE_A
 
@@ -202,25 +202,25 @@ endmodule
 
 
 module veryl_testcase_Module25L;
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
     localparam int unsigned QUX_0 = veryl_sample4_qux_pkg::QUX_0;
     localparam int unsigned QUX_1 = veryl_sample4_qux_pkg::QUX_1;
 endmodule
 
 module veryl_testcase_Module25M;
     // Module-scope import of a package namespace.
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
-    import veryl_sample4_qux_pkg;
+
+
+
 
     localparam int unsigned QUX_0 = veryl_sample4_qux_pkg::QUX_0;
 endmodule
 
 module veryl_testcase_Module25N;
     // A generic package is imported as-is and instantiated at the use site.
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
+
+
     localparam int unsigned BAR = veryl_sample4___bar_pkg__32::BAR;
 endmodule
 
@@ -228,9 +228,9 @@ endmodule
 // https://github.com/veryl-lang/veryl/issues/1588
 
 module veryl_testcase_Module25O
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
-    import veryl_sample4_qux_if;
+
+
+
 (
     veryl_sample4___qux_if__veryl_testcase___Package25__1_S.mp ifp
 );
@@ -243,10 +243,10 @@ endmodule
 
 module veryl_testcase_Module25P;
     // Modules are imported as-is and instantiated at the use site.
-    import veryl_sample4_qux_pkg;
-    import veryl_sample4_bar_pkg;
-    import veryl_sample4_foo_module;
-    import veryl_sample4_bar_module;
+
+
+
+
 
 
     veryl_sample4___foo_module__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR                              u0 ();

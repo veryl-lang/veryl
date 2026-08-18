@@ -235,8 +235,11 @@ fn enum_list_has_conditional_attribute(list: &EnumList) -> bool {
 }
 
 // SV `import` only accepts `package::symbol` or `package::*`, so suppress
-// imports whose target is an enum (wildcard), an enum member or an alias
-// outside a package — emitting them would produce invalid SystemVerilog.
+// imports whose target is an enum (wildcard), an enum member, an alias
+// outside a package, or a bare component (package/module/interface or their
+// instances) — emitting them would produce invalid SystemVerilog. A bare
+// component import is also unnecessary because references through it are
+// emitted as fully qualified paths.
 fn should_skip_import(arg: &ScopedIdentifier, import_members: bool) -> bool {
     let Ok(symbol) = symbol_table::resolve(arg) else {
         return false;
@@ -250,7 +253,11 @@ fn should_skip_import(arg: &ScopedIdentifier, import_members: bool) -> bool {
             .is_none_or(|grandparent| !grandparent.is_package(true)),
         SymbolKind::AliasModule(_)
         | SymbolKind::AliasInterface(_)
-        | SymbolKind::AliasPackage(_) => !import_members,
+        | SymbolKind::AliasPackage(_)
+        | SymbolKind::Package(_)
+        | SymbolKind::Module(_)
+        | SymbolKind::Interface(_)
+        | SymbolKind::GenericInstance(_) => !import_members,
         _ => false,
     }
 }

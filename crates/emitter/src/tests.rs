@@ -3683,6 +3683,84 @@ endmodule
     assert_eq!(ret, expect);
 }
 
+#[test]
+fn bare_component_import_suppressed() {
+    // SystemVerilog `import` only accepts `package::*` or `package::item`; a
+    // bare component import (package/module/interface or a generic instance)
+    // is invalid SV, and unnecessary because references through it are
+    // emitted as fully qualified paths.
+    let code = r#"
+package PkgA {
+    const A: u32 = 1;
+    struct S {
+        x: logic<A>,
+    }
+}
+package PkgG::<W: u32> {
+    const C: u32 = W;
+}
+interface IfA {
+    var v: logic<8>;
+}
+module ModA {
+    var _y: logic<8>;
+    assign _y = 0;
+}
+module top {
+    import PkgA;
+    import PkgG;
+    import IfA;
+    import ModA;
+    inst u0: IfA;
+    inst u1: ModA;
+    var s: PkgA::S;
+    const X: u32 = PkgG::<8>::C;
+    assign u0.v = 0;
+    assign s.x = PkgA::A;
+}
+"#;
+
+    let expect = r#"package prj_PkgA;
+    localparam int unsigned A = 1;
+    typedef struct packed {
+        logic [A-1:0] x;
+    } S;
+endpackage
+package prj___PkgG__8;
+    localparam int unsigned C = 8;
+endpackage
+interface prj_IfA;
+    logic [8-1:0] v;
+endinterface
+module prj_ModA;
+    logic [8-1:0] _y;
+    always_comb _y = 0;
+endmodule
+module prj_top;
+
+
+
+
+
+
+
+
+    prj_IfA      u0   ();
+    prj_ModA     u1   ();
+    prj_PkgA::S  s   ;
+    localparam int unsigned X    = prj___PkgG__8::C;
+    always_comb u0.v = 0;
+    always_comb s.x  = prj_PkgA::A;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
 #[track_caller]
 fn emit_with_default(code: &str) -> String {
     let metadata = Metadata::create_default("prj").unwrap();
