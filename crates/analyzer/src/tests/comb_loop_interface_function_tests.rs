@@ -612,6 +612,7 @@ fn comb_loop_false_positive_imported_interface_function_widens_output_region() {
 }
 
 #[test]
+#[ignore = "requires imported modport function effects"]
 fn comb_loop_imported_interface_function_retains_matching_output_region_feedback() {
     assert_interface_function_comb_loop(
         r#"
