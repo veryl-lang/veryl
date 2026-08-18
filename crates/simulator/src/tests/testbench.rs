@@ -2963,3 +2963,215 @@ fn tb_own_block_follows_the_net_it_drives() {
         );
     }
 }
+
+/// A testbench write that DRIVES the design must still invalidate the comb:
+/// classify `d` clean and the second iteration reads a stale `q`.
+#[test]
+fn tb_dirty_filter_settles_driving_writes() {
+    let code = r#"
+    module DriveDut (
+        d: input  logic<32>,
+        q: output logic<32>,
+    ) {
+        assign q = d * 3 + 1;
+    }
+    #[test(test_drive)]
+    module test_drive {
+        inst clk: $tb::clock_gen;
+        var d: logic<32>;
+        var q: logic<32>;
+        inst x: DriveDut (d: d, q: q);
+        initial {
+            for i in 0..4 {
+                d = i;
+                $assert(q == i * 3 + 1, "stale comb: testbench write was not settled");
+            }
+            clk.next(1);
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_drive") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        // Negative control: `d` drives the design and `$assert` is a system
+        // call, so nothing in this testbench may be classified clean.
+        assert_eq!(
+            tb_clean_count(code, &config, "test_drive"),
+            Some(0),
+            "a driving testbench must have no clean statement (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_dirty_filter_settles_driving_writes failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+/// The other side of the same filter: a testbench that only SAMPLES the design
+/// into private variables must not re-settle per statement.
+#[test]
+fn tb_dirty_filter_skips_private_writes() {
+    let code = r#"
+    module SampleDut (
+        clk: input clock,
+        rst: input reset,
+        q  : output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+        assign q = cnt;
+    }
+    #[test(test_sample)]
+    module test_sample {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen ( clk );
+        var q: logic<32>;
+        var a: logic<32>;
+        var b: logic<32>;
+        var c: logic<32>;
+        inst x: SampleDut (clk: clk, rst: rst, q: q);
+        initial {
+            a = 0;
+            b = 0;
+            c = 0;
+            rst.assert(2);
+            for _i in 0..4 {
+                a = q;
+                b = q;
+                c = q;
+                $assert(a == b, "sampled copies disagree");
+                $assert(b == c, "sampled copies disagree");
+                clk.next(1);
+            }
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_sample") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        drop(ir);
+        // The three sampling assignments write only testbench-private
+        // variables, so all three must be proved private.  The count is not
+        // exact: the leading initialisers may be fused into one compiled
+        // statement, which the filter does not model and leaves dirty.
+        let clean_before = tb_clean_count(code, &config, "test_sample").expect("analyzes");
+        assert!(
+            clean_before >= 3,
+            "the three sampling writes must be proved private, got {clean_before} \
+             (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        let ir = match analyze_top(code, &config, "test_sample") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name);
+        assert_eq!(
+            result.unwrap(),
+            TestResult::Pass,
+            "tb_dirty_filter_skips_private_writes failed (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+/// How many testbench statements the settle filter proves private, or `None`
+/// when the design does not analyze under `config`.
+#[track_caller]
+fn tb_clean_count(code: &str, config: &Config, top: &str) -> Option<usize> {
+    let ir = analyze_top(code, config, top).ok()?;
+    let sim = Simulator::new(ir, None);
+    let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+    let clock_periods = build_clock_periods(&sim.ir.event_statements);
+    let initial_stmts = sim
+        .ir
+        .event_statements
+        .get(&crate::ir::Event::Initial)
+        .expect("initial block");
+    let tb = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
+    Some(crate::tb_dirty::TbDirtyFilter::build(&sim.ir, &tb).clean_count())
+}
+
+/// The span table behind that filter must describe an unpacked array as one
+/// run, not one span per element: per-element spans are correct but make the
+/// table (and the sort over it) scale with total memory depth, which only a
+/// design with deep memories exposes.
+#[test]
+fn tb_dirty_span_table_coalesces_array_elements() {
+    const ELEMS: usize = 4096;
+    let code = r#"
+    module MemDut (
+        clk : input  clock,
+        rst : input  reset,
+        addr: input  logic<12>,
+        q   : output logic<32>,
+    ) {
+        var mem: logic<32> [4096];
+        var rd : logic<32>;
+        always_ff {
+            if_reset { rd = 0; }
+            else { rd = mem[addr]; }
+        }
+        assign q = rd;
+    }
+    #[test(test_mem)]
+    module test_mem {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen ( clk );
+        var addr: logic<12>;
+        var q   : logic<32>;
+        var seen: logic<32>;
+        inst x: MemDut (clk: clk, rst: rst, addr: addr, q: q);
+        initial {
+            addr = 0;
+            seen = 0;
+            rst.assert(2);
+            for _i in 0..4 {
+                seen = q;
+                clk.next(1);
+            }
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_mem") {
+            Ok(ir) => ir,
+            Err(_) => continue,
+        };
+        let (ff, comb) = crate::tb_dirty::TbDirtyFilter::span_counts(&ir);
+        // A coalesced table is a handful of runs; a bound near ELEMS would
+        // also pass a table that only half-coalesced.
+        assert!(
+            ff + comb < 64,
+            "array not coalesced: {ff} ff + {comb} comb spans for {ELEMS} elements \
+             (jit={}, 4state={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
