@@ -3629,10 +3629,10 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
         }
 
         let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
-        // Expand an unsized fill literal (`{a, b} = '1`) to the concat
-        // width before the windows slice it; a width-0 sentinel sliced by
-        // a window reads as zero.
-        size_fill_literal_rhs(&mut expr, None, None, src.width.unwrap());
+        // Size before the windows slice the RHS: a width-0 sentinel would
+        // slice as zero, and an unsized signed literal would leave the high
+        // windows reading zero instead of sign bits.
+        size_literal_rhs(&mut expr, None, None, src.width.unwrap());
 
         let mut result = Vec::new();
         let mut remaining = src.width.unwrap();
@@ -3856,16 +3856,21 @@ fn append_ff_next_copies(stmts: &mut Vec<ProtoStatement>) {
     stmts.extend(extras);
 }
 
-/// Size an unsized all-bit fill literal (`'0`/`'1`/`'x`/`'z`) on an
-/// assignment RHS to the destination width.
+/// Size a literal assignment RHS to the width its context evaluates it at.
 ///
-/// The analyzer leaves these literals unsized (`width` 0) and lets the
-/// assignment context resolve the width; the interpret path fills them
-/// lazily at `assign`/`trunc` time.  The JIT backends (Cranelift / AOT-C)
-/// materialize the value eagerly, so an unsized sentinel would be filled to
-/// width 0 — all zeros — silently dropping the value (e.g. `f.a = '1` reads
-/// back 0).  Expanding here keeps every backend consistent.
-pub(crate) fn size_fill_literal_rhs(
+/// The analyzer leaves an all-bit fill (`'0`/`'1`/`'x`/`'z`) unsized
+/// (`width` 0) and lets the assignment context resolve it; the interpret
+/// path fills it lazily at `assign`/`trunc` time.  The JIT backends
+/// (Cranelift / AOT-C) materialize the value eagerly, so an unsized
+/// sentinel would be filled to width 0 — all zeros — silently dropping the
+/// value (e.g. `f.a = '1` reads back 0).
+///
+/// A signed literal is sized but still sign-extends at the store
+/// (`ProtoExpression::store_sign_extend_from` keys on the expression's
+/// `width`, not on the constant the analyzer evaluated).  Sizing it here
+/// leaves the store nothing to do: a store path that cannot sign-extend
+/// falls back to the interpreter, taking its enclosing statement with it.
+pub(crate) fn size_literal_rhs(
     expr: &mut ProtoExpression,
     select: Option<(usize, usize)>,
     dyn_window: Option<usize>,
@@ -3879,11 +3884,6 @@ pub(crate) fn size_fill_literal_rhs(
     else {
         return;
     };
-    // Only the unsized fill sentinels have width 0; sized literals
-    // (`1'b1`, `8'hff`, …) already carry their width.
-    if value.width() != 0 {
-        return;
-    }
     // Target is the number of bits actually written: the dynamic-select
     // window or the static bit-select width for a partial write, else the
     // full destination width.
@@ -3893,7 +3893,20 @@ pub(crate) fn size_fill_literal_rhs(
     if target == 0 {
         return;
     }
-    *value = value.expand(target, false).into_owned();
+    // A fill sentinel is the only literal without a width of its own.  For a
+    // signed one the analyzer's evaluated constant can be wider than `width`;
+    // requiring the payload between the two makes `expand` start from the
+    // same sign bit the store would have.  A partial write is left alone: its
+    // store extends to `dst_width`, not to the written window.
+    let sentinel = value.width() == 0;
+    let sign_extend = value.signed()
+        && *width < target
+        && (*width..=target).contains(&value.width())
+        && target == dst_width;
+    if !sentinel && !sign_extend {
+        return;
+    }
+    *value = value.expand(target, sign_extend).into_owned();
     *width = target;
     expr_context.width = target;
 }
@@ -3976,7 +3989,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             };
 
             let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
-            size_fill_literal_rhs(
+            size_literal_rhs(
                 &mut expr,
                 select,
                 dynamic_select.as_ref().map(|d| d.window),
@@ -4016,7 +4029,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
 
             let index_proto = build_linear_index_expr(context, &array_shape, &dst.index)?;
             let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
-            size_fill_literal_rhs(
+            size_literal_rhs(
                 &mut expr,
                 select,
                 dynamic_select.as_ref().map(|d| d.window),
@@ -4116,7 +4129,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
         };
 
         let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
-        size_fill_literal_rhs(
+        size_literal_rhs(
             &mut expr,
             select,
             dynamic_select.as_ref().map(|d| d.window),
@@ -4272,7 +4285,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                         )
                     };
                     let mut proto_expr: ProtoExpression = Conv::conv(context, &array_expr.expr)?;
-                    size_fill_literal_rhs(&mut proto_expr, select, None, arg_meta.width);
+                    size_literal_rhs(&mut proto_expr, select, None, arg_meta.width);
                     let arg_element = &arg_meta.elements[arg_index];
                     result.push(ProtoStatement::Assign(ProtoAssignStatement {
                         dst: arg_element.current,
@@ -4369,9 +4382,8 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             let scope = context.scope();
             let meta = scope.variable_meta.get(arg_var_id).unwrap();
             let element = &meta.elements[0];
-            // Size an unsized all-bit literal (`'1` etc.) to the parameter
-            // width — there is no assignment statement here to do it.
-            size_fill_literal_rhs(&mut proto_expr, None, None, meta.width);
+            // No assignment statement here to size the literal.
+            size_literal_rhs(&mut proto_expr, None, None, meta.width);
             result.push(ProtoStatement::Assign(ProtoAssignStatement {
                 dst: element.current,
                 dst_width: meta.width,

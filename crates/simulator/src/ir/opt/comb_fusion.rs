@@ -1226,10 +1226,10 @@ pub fn inline_single_readers(
                     && a.dst_width <= 64
                     && a.expr.width() > 0
                     && a.expr.width() <= 64
-                    // The store sign-extends this shape (a bare signed leaf
-                    // narrower than the destination); the substituted
-                    // expression would be used unextended.
-                    && a.expr.store_sign_extend_from(a.dst_width).is_none() =>
+                    // Inlining retires an unsigned variable load, so a signed
+                    // leaf put in its place would be sign-extended by a wider
+                    // reader.
+                    && !a.expr.is_signed_store_leaf() =>
             {
                 match a.dst {
                     VarOffset::Comb(o) => {
@@ -1266,7 +1266,7 @@ pub fn inline_single_readers(
                         && a.dst_width <= 64
                         && a.expr.width() > 0
                         && a.expr.width() <= 64
-                        && a.expr.store_sign_extend_from(a.dst_width).is_none()
+                        && !a.expr.is_signed_store_leaf()
                         && (externals.contains(&o) || opaque_read.contains(&o)));
                 if !counted_elsewhere {
                     veto_shape += 1;
@@ -1276,7 +1276,7 @@ pub fn inline_single_readers(
                         vs_rhs_sel += 1;
                     } else if a.dst_width > 64 || a.expr.width() > 64 {
                         vs_wide += 1;
-                    } else if a.expr.store_sign_extend_from(a.dst_width).is_some() {
+                    } else if a.expr.is_signed_store_leaf() {
                         vs_sext += 1;
                     } else if let VarOffset::Comb(o) = a.dst {
                         match reads.get(&o) {

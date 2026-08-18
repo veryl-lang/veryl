@@ -579,7 +579,7 @@ fn ff_statement_after_if_reset() {
 fn ff_reset_fill_literal_field_wise() {
     // Regression: a `'1` fill literal assigned to a struct field (bit-select
     // write) in an `if_reset` block read back 0 on the JIT backends while
-    // interpret stayed correct.  See `size_fill_literal_rhs`.
+    // interpret stayed correct.  See `size_literal_rhs`.
     let code = r#"
     module Top (
         clk: input  clock,
@@ -634,6 +634,117 @@ fn ff_reset_fill_literal_field_wise() {
             "{config:?}"
         );
     }
+}
+
+/// `p`/`n` cover a signed literal filling a destination above 128 bits,
+/// `sel` a partial write, `hi`/`lo` a destructure whose windows slice it.
+/// `-3` rather than `-1` wherever possible: `-1` is a fixed point of sign
+/// extension, so it cannot tell one source bit from another.
+const WIDE_SIGNED_LITERAL_CODE: &str = r#"
+    module Top (
+        clk  : input  clock,
+        rst  : input  reset,
+        o_p  : output logic<256>,
+        o_n  : output logic<256>,
+        o_sel: output logic<256>,
+        o_hi : output logic<128>,
+        o_lo : output logic<128>,
+    ) {
+        var p  : logic<256>;
+        var n  : logic<256>;
+        var sel: logic<256>;
+        var hi : logic<128>;
+        var lo : logic<128>;
+        always_ff {
+            if_reset {
+                p         = 1;
+                n         = -3;
+                sel       = 0;
+                sel[63:0] = -3;
+                {hi, lo}  = -3;
+            }
+        }
+        always_comb {
+            o_p   = p;
+            o_n   = n;
+            o_sel = sel;
+            o_hi  = hi;
+            o_lo  = lo;
+        }
+    }
+    "#;
+
+#[test]
+fn wide_signed_literal_store_sign_extends() {
+    // Holds with and without the build-time sizing: what the store produces
+    // must not depend on who performed the extension.
+    use num_bigint::BigUint;
+
+    let ones = |bits: u32| (BigUint::from(1u32) << bits) - 1u32;
+    // -3 sign-extended to `bits`.
+    let minus3 = |bits: u32| ones(bits) ^ BigUint::from(2u32);
+    let expected = [
+        ("o_p", BigUint::from(1u32), 256),
+        ("o_n", minus3(256), 256),
+        ("o_sel", minus3(64), 256),
+        // The destructure slices the 256-bit extension MSB-first, so only
+        // the low half carries the literal's own bits.
+        ("o_hi", ones(128), 128),
+        ("o_lo", minus3(128), 128),
+    ];
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(WIDE_SIGNED_LITERAL_CODE, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step(&rst);
+
+        for (name, value, width) in &expected {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new_biguint(value.clone(), *width, false),
+                "{name} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_signed_literal_store_needs_no_run_time_extension() {
+    // What the sizing is for: a full-width store leaves no extension for a
+    // backend to redo, while a partial one keeps its own.
+    use crate::ir::Statement;
+
+    fn run_time_extensions(stmts: &[Statement], partial: bool) -> usize {
+        stmts
+            .iter()
+            .map(|s| match s {
+                Statement::Assign(a) => {
+                    usize::from(a.rhs_sign_extend && a.select.is_some() == partial)
+                }
+                Statement::If(x) => {
+                    run_time_extensions(&x.true_side, partial)
+                        + run_time_extensions(&x.false_side, partial)
+                }
+                Statement::SequentialBlock(x) => run_time_extensions(x, partial),
+                _ => 0,
+            })
+            .sum()
+    }
+
+    let ir = analyze(WIDE_SIGNED_LITERAL_CODE, &Config::default());
+    let reset = ir
+        .event_statements
+        .iter()
+        .find(|(event, _)| matches!(event, Event::Reset(_)))
+        .expect("reset event")
+        .1;
+
+    assert_eq!(run_time_extensions(reset, false), 0, "full-width stores");
+    assert_eq!(run_time_extensions(reset, true), 1, "partial write");
 }
 
 #[test]
@@ -20323,6 +20434,37 @@ fn bare_signed_rhs_sign_extends_at_dynamic_store() {
         assert_eq!(
             sim.get("o").unwrap(),
             Value::new(0xffff_fffb, 32, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn signed_leaf_is_not_inlined_into_a_wider_reader() {
+    // `x` is unsigned, so the 128-bit store zero-extends the load it reads.
+    // Inlining `x`'s RHS into that store instead puts a signed leaf under a
+    // wider store, which sign-extends it.
+    let code = r#"
+    module Top (
+        i: input  signed logic<64>,
+        o: output logic<128>      ,
+    ) {
+        let x: logic<64> = i;
+        assign o = x;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let ones64 = (BigUint::from(1u32) << 64u32) - 1u32;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i", Value::new_biguint(ones64.clone(), 64, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new_biguint(ones64.clone(), 128, false),
             "config={config:?}"
         );
     }
