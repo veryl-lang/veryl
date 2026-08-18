@@ -239,6 +239,29 @@ fn comb_loop_external_interface_get_to_put_detects_same_receiver_feedback() {
 }
 
 #[test]
+#[ignore = "comb-loop follow-up: false negative; disjoint interface member writes require positional procedure SSA"]
+fn comb_loop_external_interface_disjoint_followup_write_preserves_same_bit_feedback() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var value: logic[2];
+            function get0 () -> logic { return value[0]; }
+            function put0 (next: input logic) { value[0] = next; }
+            function put1 (next: input logic) { value[1] = next; }
+        }
+        module Top {
+            inst bus: Bus;
+            always_comb {
+                bus.put0(bus.get0());
+                bus.put1(0);
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_external_interface_get_to_put_detects_cross_receiver_feedback() {
     let code = format!(
         r#"

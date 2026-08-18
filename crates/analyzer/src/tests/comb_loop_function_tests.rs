@@ -394,6 +394,29 @@ fn comb_loop_instance_actual_function_side_effect_is_recorded() {
 }
 
 #[test]
+#[ignore = "comb-loop follow-up: false negative; multiple captured writes require constrained dependency import"]
+fn comb_loop_instance_actual_preserves_dependencies_between_captured_writes() {
+    assert_comb_loop(
+        "an instance actual preserves dependencies between captured writes",
+        r#"
+        module Sink (i: input logic) {}
+        module Top {
+            var q: logic;
+            var p: logic;
+            function f (a: input logic) -> logic {
+                p = q;
+                q = a;
+                return 0;
+            }
+            inst u: Sink (i: f(0));
+            always_comb { q = p; }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_instance_actual_evaluates_an_unused_function_argument_once() {
     assert_comb_loop(
         "an unused outer argument retains its evaluated function side effect",
