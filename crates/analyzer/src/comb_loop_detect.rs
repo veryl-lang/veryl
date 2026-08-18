@@ -986,10 +986,8 @@ fn build_module_graph(
             continue;
         };
         let analysis = procedure::analyze(
-            module,
             &bit_part,
             &comb.statements,
-            declaration_index,
             declaration_index + 1,
             &mut builder.procedure_context,
             &mut builder.function_summaries,
