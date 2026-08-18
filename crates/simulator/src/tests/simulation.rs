@@ -20329,6 +20329,37 @@ fn bare_signed_rhs_sign_extends_at_dynamic_store() {
 }
 
 #[test]
+fn signed_leaf_is_not_inlined_into_a_wider_reader() {
+    // `x` is unsigned, so the 128-bit store zero-extends the load it reads.
+    // Inlining `x`'s RHS into that store instead puts a signed leaf under a
+    // wider store, which sign-extends it.
+    let code = r#"
+    module Top (
+        i: input  signed logic<64>,
+        o: output logic<128>      ,
+    ) {
+        let x: logic<64> = i;
+        assign o = x;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let ones64 = (BigUint::from(1u32) << 64u32) - 1u32;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i", Value::new_biguint(ones64.clone(), 64, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new_biguint(ones64.clone(), 128, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn binary_xnor_result_masked() {
     // ~(x^y) sets every bit above the width even for clean operands, but
     // is_clean_to_width claimed binary XNOR of clean operands clean and the

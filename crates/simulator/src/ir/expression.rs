@@ -1213,13 +1213,12 @@ impl ProtoExpression {
         }
     }
 
-    /// SystemVerilog evaluates an assignment RHS at the destination width, so
-    /// a bare narrower signed RHS sign-extends at the store; operators already
-    /// extend to the context width, so only leaf reads/literals reach the store
-    /// at natural width. Bit/part-selects are unsigned per the LRM, so selected
-    /// leaves are exempt. All backends must key their store paths on this identically.
-    pub fn store_sign_extend_from(&self, dst_width: usize) -> Option<usize> {
-        let (width, signed) = match self {
+    /// The leaf a store sees, as `(width, signed)`.  Operators already extend
+    /// to the context width, so only leaf reads/literals reach a store at
+    /// their natural width; bit/part-selects are unsigned per the LRM, so
+    /// selected leaves are exempt.
+    fn store_leaf(&self) -> Option<(usize, bool)> {
+        match self {
             ProtoExpression::Variable {
                 width,
                 select: None,
@@ -1233,18 +1232,32 @@ impl ProtoExpression {
                 dynamic_select: None,
                 expr_context,
                 ..
-            } => (*width, expr_context.signed),
-            ProtoExpression::Value { value, width, .. } => (*width, value.signed()),
+            } => Some((*width, expr_context.signed)),
+            ProtoExpression::Value { value, width, .. } => Some((*width, value.signed())),
             // A concatenation is unsigned per the LRM, but `$signed({..})` marks
             // it signed and it reaches the store at its natural width too.
             ProtoExpression::Concatenation {
                 width,
                 expr_context,
                 ..
-            } => (*width, expr_context.signed),
-            _ => return None,
-        };
+            } => Some((*width, expr_context.signed)),
+            _ => None,
+        }
+    }
+
+    /// SystemVerilog evaluates an assignment RHS at the destination width, so
+    /// a bare narrower signed RHS sign-extends at the store.  All backends
+    /// must key their store paths on this identically.
+    pub fn store_sign_extend_from(&self, dst_width: usize) -> Option<usize> {
+        let (width, signed) = self.store_leaf()?;
         (signed && width > 0 && width < dst_width).then_some(width)
+    }
+
+    /// Whether the store's sign extension applies at any wider destination.
+    /// Such an expression is bound to the width it was stored at: moved to a
+    /// wider one it would be re-signed.
+    pub fn is_signed_store_leaf(&self) -> bool {
+        matches!(self.store_leaf(), Some((width, true)) if width > 0)
     }
 
     /// # Safety
