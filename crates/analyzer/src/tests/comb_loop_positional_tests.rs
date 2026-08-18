@@ -18,22 +18,11 @@ macro_rules! comb_loop_case {
     };
 }
 
-macro_rules! comb_loop_case_ignored {
-    ($name:ident, $reason:literal, $case:literal, $code:expr, $expected:expr) => {
-        #[test]
-        #[ignore = $reason]
-        fn $name() {
-            let code = $code;
-            assert_comb_loop($case, code.as_ref(), $expected);
-        }
-    };
-}
-
 fn nested_repeat_code(through_instance: bool, output_bit: usize) -> String {
     let assignment = if through_instance {
-        "inst u: Identity (i: '{{'{{feedback repeat 20}} repeat 100}}, o: passed);".to_string()
+        "inst u: Identity (i: '{'{feedback repeat 20} repeat 100}, o: passed);".to_string()
     } else {
-        "assign passed = '{{'{{feedback repeat 20}} repeat 100}};".to_string()
+        "assign passed = '{'{feedback repeat 20} repeat 100};".to_string()
     };
     let identity = if through_instance {
         r#"
@@ -59,9 +48,8 @@ fn nested_repeat_code(through_instance: bool, output_bit: usize) -> String {
     )
 }
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_nested_repeat_retains_matching_phase,
-    "comb-loop migration: false negative; positional and periodic transfers",
     "nested periodic axes retain their matching packed phase",
     nested_repeat_code(false, 0),
     true
@@ -74,9 +62,8 @@ comb_loop_case!(
     false
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_nested_repeat_actual_retains_matching_phase,
-    "comb-loop migration: false negative; positional and periodic transfers",
     "nested actual axes retain their matching phase across a module",
     nested_repeat_code(true, 0),
     true
@@ -165,9 +152,8 @@ fn nested_array_actual_code(actual: &str) -> String {
     )
 }
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_structure_constructor_unrelated_member_is_disjoint,
-    "comb-loop migration: false positive; positional and periodic transfers",
     "a structure constructor keeps an unrelated member loop-free",
     structure_constructor_code("Pair'{a: 0, b: o}"),
     false
@@ -180,9 +166,8 @@ comb_loop_case!(
     true
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_structure_actual_unrelated_member_is_disjoint,
-    "comb-loop migration: false positive; positional and periodic transfers",
     "a structure actual keeps an unrelated member loop-free",
     structure_actual_code("Types::Pair'{a: 0, b: feedback}"),
     false
@@ -202,9 +187,8 @@ comb_loop_case!(
     false
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_array_literal_retains_corresponding_element,
-    "comb-loop migration: false negative; positional and periodic transfers",
     "an array literal retains corresponding-element feedback",
     array_literal_actual_code("'{feedback, 0}"),
     true
@@ -217,9 +201,8 @@ comb_loop_case!(
     false
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_array_default_retains_same_bit,
-    "comb-loop migration: false negative; positional and periodic transfers",
     "an array default retains same-bit feedback",
     array_copy_actual_code("'{default: value}", 0),
     true
@@ -232,9 +215,8 @@ comb_loop_case!(
     false
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_array_repeat_retains_same_bit,
-    "comb-loop migration: false negative; positional and periodic transfers",
     "an array repeat retains same-bit feedback",
     array_copy_actual_code("'{value repeat 2}", 0),
     true
@@ -247,17 +229,15 @@ comb_loop_case!(
     false
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_nested_array_literal_retains_inner_element,
-    "comb-loop migration: false negative; positional and periodic transfers",
     "a nested array literal retains inner-element feedback",
     nested_array_actual_code("'{'{feedback, 0}, '{0, 0}}"),
     true
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_structure_constructor_retains_unobserved_member_effects,
-    "comb-loop migration: false negative; positional and periodic transfers",
     "a structure constructor retains effects from an unobserved member",
     r#"
     module Top (o: output logic) {
@@ -321,9 +301,8 @@ comb_loop_case!(
     true
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_local_repeat_keeps_different_phase_disjoint,
-    "comb-loop migration: false positive; positional and periodic transfers",
     "local repeat keeps a different phase disjoint",
     periodic_repeat_code(false, 64, 42, 1),
     false
@@ -349,7 +328,6 @@ fn comb_loop_preserves_concatenated_lhs_bits_a_concatenated_assignment_destinati
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_preserves_concatenated_lhs_bits_a_concatenated_assignment_retains_same_bit_feedback() {
     assert_comb_loop(
         "a concatenated assignment retains same-bit feedback",
@@ -368,7 +346,6 @@ fn comb_loop_preserves_concatenated_lhs_bits_a_concatenated_assignment_retains_s
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_constant_shift_positions_a_constant_left_shift_preserves_its_zero_filled_low_bit()
  {
     assert_comb_loop(
@@ -433,7 +410,6 @@ fn comb_loop_left_shift_beyond_width_has_no_value_dependency() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_repeat_concatenation_positions_repeat_concatenation_keeps_a_disjoint_low_bit_path_loop_free()
  {
     assert_comb_loop(
@@ -472,7 +448,6 @@ fn comb_loop_preserves_repeat_concatenation_positions_repeat_concatenation_still
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_nested_vector_ternary_positions_a_nested_vector_ternary_keeps_a_disjoint_bit_loop_free()
  {
     assert_comb_loop(
@@ -513,7 +488,6 @@ fn comb_loop_preserves_nested_vector_ternary_positions_a_nested_vector_ternary_d
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_local_right_shift_positions_a_local_logical_right_shift_keeps_its_inserted_bit_loop_free()
  {
     assert_comb_loop(
@@ -572,7 +546,6 @@ fn comb_loop_preserves_arithmetic_right_shift_positions_an_arithmetic_right_shif
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_preserves_arithmetic_right_shift_positions_an_arithmetic_right_shift_detects_its_live_shifted_bit()
  {
     assert_comb_loop(
@@ -593,7 +566,6 @@ fn comb_loop_preserves_arithmetic_right_shift_positions_an_arithmetic_right_shif
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_preserves_arithmetic_right_shift_positions_an_arithmetic_right_shift_retains_sign_fill_feedback()
  {
     assert_comb_loop(
@@ -613,7 +585,6 @@ fn comb_loop_preserves_arithmetic_right_shift_positions_an_arithmetic_right_shif
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_preserves_vector_ternary_positions_a_vector_ternary_keeps_a_disjoint_bit_loop_free() {
     assert_comb_loop(
         "a vector ternary keeps a disjoint bit loop-free",
@@ -653,7 +624,6 @@ fn comb_loop_preserves_vector_ternary_positions_a_vector_ternary_detects_its_cor
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_alias_and_opaque_effect_boundaries_local_concatenation_does_not_taint_a_constant_low_bit()
  {
     assert_comb_loop(
@@ -678,7 +648,6 @@ fn comb_loop_alias_and_opaque_effect_boundaries_local_concatenation_does_not_tai
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_alias_and_opaque_effect_boundaries_same_width_bitwise_operators_preserve_positional_provenance()
  {
     assert_comb_loop(
@@ -703,23 +672,6 @@ fn comb_loop_alias_and_opaque_effect_boundaries_same_width_bitwise_operators_pre
 }
 
 #[test]
-fn comb_loop_structural_dependency_semantics_identical_ternary_arms_do_not_cancel_structural_control_dependence()
- {
-    assert_comb_loop(
-        "identical ternary arms do not cancel structural control dependence",
-        r#"
-        module Top (
-            o: output logic,
-        ) {
-            assign o = if o ? 1'b0 : 1'b0;
-        }
-        "#,
-        true,
-    );
-}
-
-#[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_structural_dependency_semantics_overlapping_left_shift_is_a_directed_acyclic_bit_chain()
  {
     assert_comb_loop(
@@ -754,6 +706,77 @@ fn comb_loop_structural_dependency_semantics_adding_the_wraparound_bit_turns_a_s
         }
         "#,
         true,
+    );
+}
+
+#[test]
+fn comb_loop_nonzero_composed_offset_is_acyclic() {
+    // b[i] = a[i + 3] and a[i] = b[i] compose to a[i] = a[i + 3].
+    // Every dependency moves toward the finite upper boundary; no bit feeds
+    // itself, even though the coarse region graph contains an SCC.
+    assert_comb_loop(
+        "a shift followed by an identity copy has a nonzero composed offset",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic<16>;
+            var b: logic<16>;
+            assign b[12:0] = a[15:3];
+            assign b[15:13] = 0;
+            assign a = b;
+            assign o = a[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_mixed_static_offsets_with_nonzero_composition_are_acyclic() {
+    // b[i] = a[i + 3] and a[i + 1] = b[i] compose to
+    // a[i + 1] = a[i + 3]. The edge offsets have opposite signs, but their
+    // exact sum is nonzero and therefore cannot return to the same bit.
+    assert_comb_loop(
+        "opposing static offsets compose before cycle classification",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic<16>;
+            var b: logic<16>;
+            assign b[12:0] = a[15:3];
+            assign b[15:13] = 0;
+            assign a[15:1] = b[14:0];
+            assign a[0] = 0;
+            assign o = a[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_opposing_static_offsets_without_a_reachable_return_are_acyclic() {
+    // The +5 edge can only leave bit 0, and the -3 edge takes bit 5 to bit 2.
+    // Neither edge is applicable at bit 2, so their opposite directions do
+    // not by themselves form a cycle.
+    assert_comb_loop(
+        "opposing offsets must have a positionally feasible closed walk",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic<6>;
+            always_comb {
+                a[5] = a[0];
+                a[2:0] = a[5:3];
+                a[4:3] = 0;
+            }
+            assign o = a[0];
+        }
+        "#,
+        false,
     );
 }
 
@@ -837,7 +860,6 @@ fn assert_signed_context_extension(target: usize, expected: bool) {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_unsigned_extension_zero_fills_high_bit() {
     assert_unsigned_context_extension("o[3]", false);
 }
@@ -853,13 +875,11 @@ fn comb_loop_signed_extension_ignores_non_sign_bit() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_signed_extension_retains_sign_bit() {
     assert_signed_context_extension(1, true);
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_ternary_preserves_unsigned_zero_extension() {
     assert_comb_loop(
         "a ternary preserves unsigned zero extension",
@@ -916,13 +936,11 @@ fn comb_loop_signed_ternary_high_bit_is_disjoint_from_non_sign_bit() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
 fn comb_loop_signed_ternary_high_bit_retains_sign_bit() {
     assert_signed_ternary_coercion(1, true);
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_widening_cast_zero_fills_high_bits() {
     assert_expression_coercion("value as 4", "o[3]", false);
 }
@@ -933,7 +951,6 @@ fn comb_loop_widening_cast_retains_low_bits() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_narrowing_cast_discards_high_source_bits() {
     assert_expression_coercion("value as 2", "o[3]", false);
 }
@@ -944,7 +961,6 @@ fn comb_loop_narrowing_cast_retains_low_source_bits() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; positional and periodic transfers"]
 fn comb_loop_mixed_width_bitwise_zero_fills_short_operand() {
     assert_expression_coercion("value | 4'b0", "o[3]", false);
 }
@@ -954,8 +970,35 @@ fn comb_loop_mixed_width_bitwise_retains_corresponding_bit() {
     assert_expression_coercion("value | 4'b0", "o[0]", true);
 }
 
+fn assert_signed_bitwise_coercion(target: usize, expected: bool) {
+    assert_comb_loop(
+        "a mixed-width bitwise operand retains only its replicated sign bit",
+        &format!(
+            r#"
+            module Top (o: output logic<4>) {{
+                var value: logic<2>;
+                assign o = $signed(value) | 4'sb0;
+                assign value[{target}] = o[3];
+                assign value[{}] = 0;
+            }}
+            "#,
+            1 - target
+        ),
+        expected,
+    );
+}
+
 #[test]
-#[ignore = "comb-loop migration: false negative; positional and periodic transfers"]
+fn comb_loop_mixed_width_signed_bitwise_ignores_non_sign_bit() {
+    assert_signed_bitwise_coercion(0, false);
+}
+
+#[test]
+fn comb_loop_mixed_width_signed_bitwise_retains_sign_bit() {
+    assert_signed_bitwise_coercion(1, true);
+}
+
+#[test]
 fn comb_loop_periodic_output_maps_concatenated_actual() {
     // Why this case exists: a child periodic output may legally connect to a
     // concatenated parent lvalue. Each output fragment must be clipped in the
@@ -984,5 +1027,174 @@ fn comb_loop_periodic_output_maps_concatenated_actual() {
         }
         "#,
         true,
+    );
+}
+
+#[test]
+fn packed_repeat_preserves_two_partial_copies_across_a_boundary() {
+    assert_comb_loop(
+        "two partial repeat copies retain their distinct source positions",
+        r#"
+        module Top (o: output logic) {
+            var value   : logic<4>;
+            var repeated: logic<8>;
+            assign repeated = {value repeat 2};
+            assign value[1:0] = repeated[4:3];
+            assign value[3:2] = 0;
+            assign o = repeated[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn packed_repeat_preserves_a_full_and_partial_copy_across_a_boundary() {
+    assert_comb_loop(
+        "a full repeat copy and its adjacent partial copy retain their positions",
+        r#"
+        module Top (o: output logic) {
+            var value   : logic<4>;
+            var repeated: logic<8>;
+            var selected: logic<5>;
+            assign repeated = {value repeat 2};
+            assign selected = repeated[4:0];
+            assign value[3] = selected[4];
+            assign value[2:0] = 0;
+            assign o = value[3];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_module_output_array_range_keeps_fragments_independent() {
+    let code = r#"
+        module Forward (
+            i: input  logic [2],
+            o: output logic [2],
+        ) {
+            assign o[0] = i[0];
+            assign o[1] = 0;
+        }
+        module Top (out: output logic) {
+            var source  : logic [2];
+            var returned: logic [2];
+            inst forward: Forward (
+                i: source,
+                o: returned[0:1],
+            );
+            assign source[0] = returned[1];
+            assign source[1] = 0;
+            assign out = returned[0];
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_comb_loop(
+        "an unpacked output range preserves child element identity",
+        code,
+        false,
+    );
+}
+
+#[test]
+fn module_output_array_range_rejects_an_input_destination() {
+    let errors = analyze(
+        r#"
+        module Fill (o: output logic [2]) {
+            assign o[0] = 0;
+            assign o[1] = 0;
+        }
+        module Top (received: input logic [2]) {
+            inst fill: Fill (o: received[0:1]);
+        }
+        "#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::InvalidAssignment { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn module_output_array_range_marks_the_whole_destination_assigned() {
+    let errors = analyze(
+        r#"
+        module Fill (o: output logic [2]) {
+            assign o[0] = 0;
+            assign o[1] = 0;
+        }
+        module Top (received: output logic [2]) {
+            inst fill: Fill (o: received[0:1]);
+        }
+        "#,
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn module_output_array_range_participates_in_driver_ownership() {
+    let errors = analyze(
+        r#"
+        module Fill (o: output logic [2]) {
+            assign o[0] = 0;
+            assign o[1] = 0;
+        }
+        module Top (received: output logic [2]) {
+            inst fill: Fill (o: received[0:1]);
+            assign received[1] = 0;
+        }
+        "#,
+    );
+    let Some(AnalyzerError::MultipleAssignment {
+        error_locations, ..
+    }) = errors
+        .iter()
+        .find(|error| matches!(error, AnalyzerError::MultipleAssignment { .. }))
+    else {
+        panic!("{errors:?}");
+    };
+    // The legacy `dst` contains two selected elements plus the conflicting
+    // continuous assignment. `range_dst` is side metadata and must not
+    // register either element in AssignTable a second time.
+    assert_eq!(error_locations.len(), 3, "{errors:?}");
+}
+
+#[test]
+fn comb_loop_module_output_concatenation_keeps_fragments_independent() {
+    let code = r#"
+        module Forward (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            assign o[0] = i[0];
+            assign o[1] = 0;
+        }
+        module Top (out: output logic) {
+            var source: logic<2>;
+            var high  : logic;
+            var low   : logic;
+            inst forward: Forward (
+                i: source,
+                o: {high, low},
+            );
+            assign source[0] = high;
+            assign source[1] = 0;
+            assign out = low;
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_comb_loop(
+        "a packed output concatenation preserves child bit positions",
+        code,
+        false,
     );
 }

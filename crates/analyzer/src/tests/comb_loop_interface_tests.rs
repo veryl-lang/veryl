@@ -101,7 +101,6 @@ fn comb_loop_modport_ff_output_breaks_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; disjoint bits through modport feedthrough"]
 fn comb_loop_modport_feedthrough_keeps_disjoint_bits_independent() {
     let code = modport_feedthrough_code("assign bus.response[0] = bus.request[0];");
     let code = code.replace(
@@ -288,7 +287,6 @@ fn modport_array_code(top_assignments: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; same interface array element feedback"]
 fn comb_loop_modport_array_detects_same_element_feedback() {
     assert_interface_comb_loop(
         &modport_array_code("assign bus[0].request = bus[0].response; assign bus[1].request = 0;"),
@@ -305,7 +303,6 @@ fn comb_loop_modport_array_keeps_one_way_cross_element_flow_loop_free() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; cross-element interface array feedback"]
 fn comb_loop_modport_array_detects_cross_element_feedback() {
     assert_interface_comb_loop(
         &modport_array_code(
@@ -313,6 +310,241 @@ fn comb_loop_modport_array_detects_cross_element_feedback() {
         ),
         true,
     );
+}
+
+fn modport_array_range_code(top_assignments: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var request : logic;
+            var response: logic;
+            modport target {{
+                request : input,
+                response: output,
+            }}
+        }}
+        module Targets (
+            bus: modport Bus::target[2],
+        ) {{
+            assign bus[0].response = bus[0].request;
+            assign bus[1].response = bus[1].request;
+        }}
+        module Top {{
+            inst bus: Bus[2];
+            inst targets: Targets (
+                bus: bus[0:1],
+            );
+            {top_assignments}
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_modport_array_range_detects_selected_element_feedback() {
+    let code = modport_array_range_code(
+        "assign bus[0].request = 0; assign bus[1].request = bus[1].response;",
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_modport_array_range_keeps_selected_elements_independent() {
+    let code = modport_array_range_code(
+        "assign bus[0].request = bus[1].response; assign bus[1].request = 0;",
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_comb_loop(&code, false);
+}
+
+fn modport_array_nonzero_range_code(top_assignments: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var request : logic;
+            var response: logic;
+            modport target {{
+                request : input,
+                response: output,
+            }}
+        }}
+        module Targets (
+            bus: modport Bus::target[2],
+        ) {{
+            assign bus[0].response = bus[0].request;
+            assign bus[1].response = bus[1].request;
+        }}
+        module Top {{
+            inst bus: Bus[4];
+            inst targets: Targets (
+                bus: bus[1:2],
+            );
+            assign bus[0].request = 0;
+            assign bus[0].response = 0;
+            assign bus[3].request = 0;
+            assign bus[3].response = 0;
+            {top_assignments}
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_modport_array_nonzero_range_maps_second_selected_element() {
+    let code = modport_array_nonzero_range_code(
+        "assign bus[1].request = 0; assign bus[2].request = bus[2].response;",
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_modport_array_nonzero_range_keeps_selected_elements_independent() {
+    let code = modport_array_nonzero_range_code(
+        "assign bus[1].request = bus[2].response; assign bus[2].request = 0;",
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_comb_loop(&code, false);
+}
+
+fn modport_array_multidimensional_range_code(top_assignments: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var request : logic;
+            var response: logic;
+            modport target {{
+                request : input,
+                response: output,
+            }}
+        }}
+        module Targets (
+            bus: modport Bus::target[2],
+        ) {{
+            assign bus[0].response = bus[0].request;
+            assign bus[1].response = bus[1].request;
+        }}
+        module Top {{
+            inst bus: Bus[1, 4];
+            inst targets: Targets (
+                bus: bus[0][1:2],
+            );
+            assign bus[0][0].request = 0;
+            assign bus[0][0].response = 0;
+            assign bus[0][3].request = 0;
+            assign bus[0][3].response = 0;
+            {top_assignments}
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_modport_multidimensional_range_maps_second_selected_element() {
+    let code = modport_array_multidimensional_range_code(
+        "assign bus[0][1].request = 0; assign bus[0][2].request = bus[0][2].response;",
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_modport_multidimensional_range_keeps_selected_elements_independent() {
+    let code = modport_array_multidimensional_range_code(
+        "assign bus[0][1].request = bus[0][2].response; assign bus[0][2].request = 0;",
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_comb_loop(&code, false);
+}
+
+fn module_input_range_code(top_assignments: &str) -> String {
+    format!(
+        r#"
+        module Pass (
+            source: input  logic [2],
+            sink  : output logic [2],
+        ) {{
+            assign sink[0] = source[0];
+            assign sink[1] = source[1];
+        }}
+        module Top {{
+            var source: logic [4];
+            var sink  : logic [2];
+            inst pass: Pass (
+                source: source[1:2],
+                sink  : sink,
+            );
+            assign source[0] = 0;
+            assign source[3] = 0;
+            {top_assignments}
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_module_input_nonzero_range_maps_every_selected_element() {
+    let code = module_input_range_code("assign source[1] = 0; assign source[2] = sink[1];");
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_module_input_nonzero_range_keeps_elements_independent() {
+    let code = module_input_range_code("assign source[1] = sink[1]; assign source[2] = 0;");
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_comb_loop(&code, false);
+}
+
+#[test]
+fn comb_loop_module_input_multidimensional_range_preserves_flat_position() {
+    let code = r#"
+        module Pass (
+            source: input  logic [2],
+            sink  : output logic [2],
+        ) {
+            assign sink[0] = source[0];
+            assign sink[1] = source[1];
+        }
+        module Top {
+            var source: logic [1, 4];
+            var sink  : logic [2];
+            inst pass: Pass (
+                source: source[0][1:2],
+                sink  : sink,
+            );
+            assign source[0][0] = 0;
+            assign source[0][1] = 0;
+            assign source[0][2] = sink[1];
+            assign source[0][3] = 0;
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_interface_comb_loop(code, true);
+}
+
+#[test]
+fn comb_loop_module_input_large_range_stays_sparse() {
+    let code = r#"
+        module Pass (
+            source: input  logic [1000000],
+            sink  : output logic,
+        ) {
+            assign sink = source[999999];
+        }
+        module Top {
+            var source: logic [1000000];
+            var sink  : logic;
+            inst pass: Pass (
+                source: source[0:999999],
+                sink  : sink,
+            );
+            assign source[999999] = sink;
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_interface_comb_loop(code, true);
 }
 
 fn specialized_interface_code(width: u32) -> String {
@@ -347,7 +579,6 @@ fn specialized_interface_code(width: u32) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; enabled generic interface feedthrough"]
 fn comb_loop_generic_interface_enabled_specialization_retains_feedthrough() {
     assert_interface_comb_loop(&specialized_interface_code(1), true);
 }
@@ -446,7 +677,6 @@ fn comb_loop_procedural_modport_connect_detects_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural modport connect killed by later overrides"]
 fn comb_loop_procedural_modport_connect_overrides_kill_feedback() {
     assert_interface_comb_loop(
         &procedural_modport_connect_code(

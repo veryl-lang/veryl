@@ -34,8 +34,83 @@ pub struct PartSelectPath {
     pub part_select: Vec<PartSelect>,
 }
 
+/// Contiguous base-variable storage identified by the member path and the
+/// constant coordinates before an access's first dynamic coordinate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MemberSelectDomain {
+    pub high: usize,
+    pub low: usize,
+}
+
 impl PartSelectPath {
     pub fn to_base_select(&self, context: &mut Context, select: &VarSelect) -> Option<VarSelect> {
+        self.to_base_select_with_domain(context, select)
+            .map(|(select, _)| select)
+    }
+
+    pub(crate) fn to_base_select_with_domain(
+        &self,
+        context: &mut Context,
+        select: &VarSelect,
+    ) -> Option<(VarSelect, Option<MemberSelectDomain>)> {
+        let rebased = self.to_base_select_inner(context, select)?;
+        let domain = self.longest_static_domain(context, select);
+        Some((rebased, domain))
+    }
+
+    /// Return the base-coordinate span denoted by the constant coordinates
+    /// before the first dynamic coordinate. When the dynamic coordinate is in
+    /// an outer packed aggregate, truncate the member path there: descendants
+    /// cannot narrow the region until that coordinate is known.
+    fn longest_static_domain(
+        &self,
+        context: &mut Context,
+        select: &VarSelect,
+    ) -> Option<MemberSelectDomain> {
+        if select.is_const_with_range() {
+            return None;
+        }
+
+        // A range consumes its final expression as the bound in the current
+        // dimension. A dynamic range therefore retains only the coordinates
+        // of the dimensions outside it.
+        let coordinate_len = select
+            .0
+            .len()
+            .checked_sub(usize::from(select.1.is_some()))?;
+        let coordinates = &select.0[..coordinate_len];
+        let prefix_len = coordinates
+            .iter()
+            .take_while(|expression| expression.comptime().is_const)
+            .count();
+
+        let mut consumed_dims = 0;
+        let mut containing_part = None;
+        for (part, r#type) in std::iter::once(&self.base)
+            .chain(self.part_select.iter().map(|part| &part.r#type))
+            .enumerate()
+        {
+            consumed_dims += r#type.width.dims();
+            if prefix_len < consumed_dims {
+                containing_part = Some(part);
+                break;
+            }
+        }
+
+        let containing_part = containing_part?;
+        let prefix_path = Self {
+            base: self.base.clone(),
+            path: self.path.clone(),
+            part_select: self.part_select[..containing_part].to_vec(),
+        };
+        let prefix_select = VarSelect(coordinates[..prefix_len].to_vec(), None);
+        let (high, low) = prefix_path
+            .to_base_select_inner(context, &prefix_select)?
+            .eval_value(context, &self.base, false)?;
+        Some(MemberSelectDomain { high, low })
+    }
+
+    fn to_base_select_inner(&self, context: &mut Context, select: &VarSelect) -> Option<VarSelect> {
         let mut pos_width: Option<(Expression, usize, Option<usize>)> = None;
 
         let (range_select, range_op_width) = if let Some((op, end)) = &select.1 {
@@ -310,6 +385,9 @@ pub struct Comptime {
     pub is_const: bool,
     pub is_global: bool,
     pub part_select: Option<PartSelectPath>,
+    /// Packed base-variable domain retained from the member path and the
+    /// constant coordinates before this access's first dynamic coordinate.
+    pub member_select_domain: Option<MemberSelectDomain>,
     pub clock_domain: ClockDomain,
     pub expr_context: ExpressionContext,
     pub evaluated: bool,

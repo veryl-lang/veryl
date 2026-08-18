@@ -503,7 +503,6 @@ fn comb_loop_core_semantics_and_region_regressions_false_positive_cycle_through_
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; observer-only evaluation is not a value edge"]
 fn comb_loop_statement_order_and_observer_semantics_an_observer_inside_a_writer_process_does_not_create_a_signal_value_edge()
  {
     // An observer inside a writer process does not create a signal-value edge.
@@ -582,7 +581,6 @@ fn comb_loop_ordered_module_scope_reassignments_are_feed_forward() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; entry-value dependency closes a real loop"]
 fn comb_loop_statement_order_and_observer_semantics_the_converse_is_real_after_x_0_consumes_the_entry_value_of_x_1_the()
  {
     // The converse is real: after x[0] consumes the entry value of x[1], the
@@ -635,7 +633,6 @@ fn comb_loop_dynamic_select_is_confined_to_static_prefix() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; procedural reaching definitions"]
 fn comb_loop_dynamic_write_is_a_weak_update_a_dynamic_store_cannot_kill_every_candidate_definition()
 {
     assert_comb_loop(
@@ -710,7 +707,6 @@ fn comb_loop_false_logical_and_suppresses_rhs_side_effect() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; live logical-and RHS side effect"]
 fn comb_loop_true_logical_and_retains_rhs_side_effect() {
     assert_comb_loop(
         "a true logical-and LHS retains RHS function side effects",
@@ -729,7 +725,6 @@ fn comb_loop_true_logical_or_suppresses_rhs_side_effect() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; live logical-or RHS side effect"]
 fn comb_loop_false_logical_or_retains_rhs_side_effect() {
     assert_comb_loop(
         "a false logical-or LHS retains RHS function side effects",
@@ -783,7 +778,6 @@ fn comb_loop_statement_order_and_control_flow_regressions_opposite_directions_on
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural reaching definitions"]
 fn comb_loop_statement_order_and_control_flow_regressions_observer_in_a_writer_with_a_multi_stage_assign_chain()
  {
     assert_comb_loop(
@@ -923,7 +917,6 @@ fn comb_loop_structural_dependency_semantics_dynamic_data_write_without_an_old_v
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; procedural reaching definitions"]
 fn comb_loop_structural_dependency_semantics_a_value_controlling_its_own_dynamic_write_address_closes_a_loop()
  {
     assert_comb_loop(
@@ -947,17 +940,248 @@ fn comb_loop_structural_dependency_semantics_a_value_controlling_its_own_dynamic
 }
 
 #[test]
-fn comb_loop_structural_dependency_semantics_duplicate_xor_operands_remain_structural_inputs() {
+fn comb_loop_mutually_exclusive_reverse_dependencies_are_not_simultaneous_feedback() {
     assert_comb_loop(
-        "duplicate xor operands remain structural inputs",
+        "opposing dependencies on mutually exclusive branches do not form a realizable loop",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                if sel {
+                    a = b;
+                } else {
+                    b = a;
+                }
+                o = a | b;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_break_path_does_not_reach_the_opposing_dependency_after_the_loop_exit() {
+    assert_comb_loop(
+        "a dependency before break is exclusive with the reverse dependency after it",
+        r#"
+        module Top (
+            stop: input  logic,
+            o   : output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for _index in 0..1 {
+                    if stop {
+                        a = b;
+                        break;
+                    }
+                    b = a;
+                }
+                o = a | b;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_break_exit_preserves_feedback_killed_only_on_the_continuing_path() {
+    assert_comb_loop(
+        "a write after a conditional break must not kill the break exit's dependency",
+        r#"
+        module Top (
+            stop: input  logic,
+            o   : output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for _index in 0..1 {
+                    if stop {
+                        a = b;
+                        break;
+                    }
+                    a = 0;
+                }
+                b = a;
+                o = b;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_false_negative_break_condition_controls_a_following_write() {
+    // The loop reduces to value = stop ? 0 : 1 while stop = value. The break
+    // condition therefore closes a real control-dependency loop.
+    assert_comb_loop(
+        "a break condition controls whether the following assignment executes",
         r#"
         module Top (
             o: output logic,
         ) {
-            assign o = o ^ o;
+            var stop: logic;
+            var value: logic;
+            assign stop = value;
+            always_comb {
+                value = 0;
+                for _index in 0..1 {
+                    if stop {
+                        break;
+                    }
+                    value = 1;
+                }
+                o = value;
+            }
         }
         "#,
         true,
+    );
+}
+
+#[test]
+fn comb_loop_break_condition_does_not_control_write_after_loop_exit() {
+    assert_comb_loop(
+        "all break and fallthrough paths execute a write after the loop",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var stop : logic;
+            var value: logic;
+            assign stop = value;
+            always_comb {
+                value = 0;
+                for _index in 0..1 {
+                    if stop {
+                        break;
+                    }
+                }
+                value = 1;
+                o = value;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_branches_in_separate_processes_are_not_mutually_exclusive() {
+    assert_comb_loop(
+        "branch identities are local to their procedural process",
+        r#"
+        module Top (
+            left : input  logic,
+            right: input  logic,
+            o    : output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                if left {
+                    a = b;
+                } else {
+                    a = 0;
+                }
+            }
+            always_comb {
+                if right {
+                    b = 0;
+                } else {
+                    b = a;
+                }
+            }
+            always_comb {
+                o = a | b;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_feedback_within_one_branch_is_detected() {
+    assert_comb_loop(
+        "a realizable loop within one branch remains a loop",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                if sel {
+                    a = b;
+                    b = a;
+                } else {
+                    a = 0;
+                    b = 0;
+                }
+                o = a | b;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_mutually_exclusive_case_arms_do_not_form_feedback() {
+    assert_comb_loop(
+        "opposing dependencies in distinct case arms cannot execute together",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                case sel {
+                    1'b0: a = b;
+                    default: b = a;
+                }
+                o = a | b;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_opposing_shifts_in_mutually_exclusive_arms_are_acyclic() {
+    assert_comb_loop(
+        "opposing positional dependencies cannot combine across exclusive arms",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic<8>,
+        ) {
+            var value: logic<8>;
+            always_comb {
+                if sel {
+                    value = value << 1;
+                } else {
+                    value = value >> 1;
+                }
+                o = value;
+            }
+        }
+        "#,
+        false,
     );
 }
 
@@ -981,7 +1205,6 @@ fn comb_loop_structural_dependency_semantics_read_before_write_across_disjoint_n
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural reaching definitions"]
 fn comb_loop_structural_dependency_semantics_complete_overwrite_after_a_rotate_shaped_dead_store_kills_the_loop()
  {
     assert_comb_loop(
@@ -1021,7 +1244,6 @@ fn comb_loop_structural_dependency_semantics_observer_only_duplicate_reads_do_no
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; inner break does not exit outer loop"]
 fn comb_loop_nested_break_exits_only_inner_loop_before_dominating_overwrite() {
     assert_comb_loop(
         "an inner break does not skip the outer loop's dominating overwrite",
@@ -1198,5 +1420,272 @@ fn comb_loop_if_assignment_to_array_is_feed_forward_array_loop_is_reported() {
             .iter()
             .any(|e| matches!(e, AnalyzerError::CombinationalLoop { .. })),
         "a real array comb loop must still be detected: {errors:?}"
+    );
+}
+
+#[test]
+fn comb_loop_if_expression_arms_are_mutually_exclusive() {
+    // `sel` chooses exactly one direction. The opposite edges cannot coexist:
+    // true gives state[1] <- state[0], while false gives state[0] <- state[1].
+    assert_comb_loop(
+        "opposing dependencies in one if expression cannot execute together",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var state: logic<2>;
+            always_comb {
+                state = if sel ? {state[0], 1'b0} : {1'b0, state[1]};
+                o = |state;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_case_expression_arms_are_mutually_exclusive() {
+    // A case expression selects one arm, so neither selected equation contains
+    // a cycle even though the two alternatives use opposite directions.
+    assert_comb_loop(
+        "opposing dependencies in one case expression cannot execute together",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var state: logic<2>;
+            always_comb {
+                state = case sel {
+                    1'b0   : {state[0], 1'b0},
+                    default: {1'b0, state[1]},
+                };
+                o = |state;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_switch_expression_arms_are_mutually_exclusive() {
+    // A switch expression uses only its first matching arm. No execution can
+    // combine the left-arm and right-arm dependencies into a cycle.
+    assert_comb_loop(
+        "opposing dependencies in one switch expression cannot execute together",
+        r#"
+        module Top (
+            left : input  logic,
+            right: input  logic,
+            o    : output logic,
+        ) {
+            var state: logic<2>;
+            always_comb {
+                state = switch {
+                    left   : {state[0], 1'b0},
+                    right  : {1'b0, state[1]},
+                    default: 2'b00,
+                };
+                o = |state;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_if_expression_function_side_effects_remain_arm_exclusive() {
+    assert_comb_loop(
+        "captured writes in opposite expression arms cannot execute together",
+        r#"
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            var a    : logic;
+            var b    : logic;
+            var dummy: logic;
+            function write_a (value: input logic) -> logic {
+                a = value;
+                return 1'b0;
+            }
+            function write_b (value: input logic) -> logic {
+                b = value;
+                return 1'b0;
+            }
+            always_comb {
+                dummy = if sel ? write_a(b) : write_b(a);
+                o = a | b | dummy;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_false_negative_runtime_short_circuit_write_kills_disabled_feedback() {
+    assert_comb_loop(
+        "a conditionally skipped function write cannot kill a realizable loop",
+        r#"
+        module Top (
+            enable: input  logic,
+            o     : output logic,
+        ) {
+            var a    : logic;
+            var b    : logic;
+            var dummy: logic;
+            function clear_a () -> logic {
+                a = 1'b0;
+                return 1'b0;
+            }
+            always_comb {
+                a = b;
+                dummy = enable && clear_a();
+                b = a;
+                o = a | b | dummy;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn concatenated_assignment_snapshots_all_rhs_bits_before_writing_false_positive() {
+    assert_comb_loop(
+        "a later concatenated destination reads the pre-assignment value",
+        r#"
+        module Top (o: output bit) {
+            var a       : bit;
+            var b       : bit;
+            var feedback: bit;
+            assign feedback = b;
+            always_comb {
+                a = 0;
+                b = feedback;
+                {a, b} = {b, a};
+                a = 0;
+                o = b;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn concatenated_assignment_snapshots_all_rhs_bits_before_writing_false_negative() {
+    assert_comb_loop(
+        "a later concatenated destination retains its pre-assignment feedback source",
+        r#"
+        module Top (o: output bit) {
+            var a       : bit;
+            var b       : bit;
+            var feedback: bit;
+            assign feedback = b;
+            always_comb {
+                a = feedback;
+                b = 0;
+                {a, b} = {1'b0, a};
+                a = b;
+                o = a;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn truncated_rhs_still_executes_side_effects_from_discarded_bits() {
+    assert_comb_loop(
+        "requested-bit projection does not suppress a discarded expression effect",
+        r#"
+        module Top (o: output bit) {
+            var state: bit;
+            var dummy: bit;
+            function touch (value: input bit) -> bit {
+                state = value;
+                return 0;
+            }
+            always_comb {
+                dummy = {touch(o), 1'b0} as 1;
+                o = state;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn truncated_rhs_effect_from_a_discarded_bit_can_kill_feedback() {
+    assert_comb_loop(
+        "requested-bit projection executes a discarded expression overwrite",
+        r#"
+        module Top (o: output bit) {
+            var state: bit;
+            var dummy: bit;
+            function clear_state () -> bit {
+                state = 0;
+                return 0;
+            }
+            always_comb {
+                state = o;
+                dummy = {clear_state(), 1'b0} as 1;
+                o = state;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+fn runtime_logical_condition_side_effect_code(operator: &str) -> String {
+    format!(
+        r#"
+        module Top (enable: input bit, o: output bit) {{
+            var a   : bit;
+            var b   : bit;
+            var sink: bit;
+            function clear_a () -> bit {{
+                a = 0;
+                return 0;
+            }}
+            always_comb {{
+                a = b;
+                if enable {operator} clear_a() {{
+                    sink = 0;
+                }} else {{
+                    sink = 0;
+                }}
+                b = a;
+                o = b;
+            }}
+        }}
+        "#
+    )
+}
+
+#[test]
+fn runtime_logical_and_condition_merges_the_skipped_rhs_effect() {
+    assert_comb_loop(
+        "a runtime logical-and condition retains the skipped RHS state",
+        &runtime_logical_condition_side_effect_code("&&"),
+        true,
+    );
+}
+
+#[test]
+fn runtime_logical_or_condition_merges_the_skipped_rhs_effect() {
+    assert_comb_loop(
+        "a runtime logical-or condition retains the skipped RHS state",
+        &runtime_logical_condition_side_effect_code("||"),
+        true,
     );
 }

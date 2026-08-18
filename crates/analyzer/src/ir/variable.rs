@@ -1,13 +1,14 @@
-use crate::BigUint;
 use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
 use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::utils::eval_width_select;
 use crate::ir::{
-    AssignDestination, Comptime, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind,
+    AssignDestination, Comptime, Expression, Factor, MemberSelectDomain, Op, Shape, ShapeRef, Type,
+    TypeKind,
 };
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
+use crate::{BigUint, HashMap, HashSet};
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
@@ -94,7 +95,10 @@ impl VarPathSelect {
             }
 
             let width_select = if let Some(part_select) = &comptime.part_select {
-                part_select.to_base_select(context, &width_select)?
+                let (select, domain) =
+                    part_select.to_base_select_with_domain(context, &width_select)?;
+                comptime.member_select_domain = domain;
+                select
             } else {
                 eval_width_select(context, &path, &comptime.r#type, width_select)?
             };
@@ -308,7 +312,10 @@ impl VarPathSelect {
             }
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
             let width_select = if let Some(part_select) = &comptime.part_select {
-                part_select.to_base_select(context, &width_select)?
+                let (select, domain) =
+                    part_select.to_base_select_with_domain(context, &width_select)?;
+                comptime.member_select_domain = domain;
+                select
             } else {
                 width_select
             };
@@ -580,12 +587,39 @@ pub struct VarSelect(pub Vec<Expression>, pub Option<(VarSelectOp, Expression)>)
 
 impl VarSelect {
     pub fn set_index(&mut self, index: &VarIndex) {
+        for expression in &mut self.0 {
+            expression.set_index(index);
+        }
+
+        if let Some((_, expression)) = &mut self.1 {
+            expression.set_index(index);
+        }
+    }
+
+    pub(crate) fn set_index_with_receiver(
+        &mut self,
+        index: &VarIndex,
+        receiver_prefixes: &HashMap<VarId, usize>,
+    ) {
         for x in &mut self.0 {
-            x.set_index(index);
+            x.set_index_with_receiver(index, receiver_prefixes);
         }
 
         if let Some((_, x)) = &mut self.1 {
-            x.set_index(index);
+            x.set_index_with_receiver(index, receiver_prefixes);
+        }
+    }
+
+    pub(crate) fn prepend_call_receiver(
+        &mut self,
+        dims: usize,
+        receiver_functions: &HashSet<VarId>,
+    ) {
+        for expression in &mut self.0 {
+            expression.prepend_call_receiver(dims, receiver_functions);
+        }
+        if let Some((_, expression)) = &mut self.1 {
+            expression.prepend_call_receiver(dims, receiver_functions);
         }
     }
 
@@ -633,6 +667,48 @@ impl VarSelect {
     /// to be constant — a dynamic bound can't expand to fixed element indices.
     pub fn is_const_with_range(&self) -> bool {
         self.is_const() && self.1.as_ref().is_none_or(|(_, e)| e.comptime().is_const)
+    }
+
+    /// Return the packed base-variable range which this access may touch.
+    ///
+    /// Constant accesses retain their exact range. A dynamic coordinate keeps
+    /// only the constant outer-coordinate prefix, and a rebased member access
+    /// is additionally confined to the domain retained by `PartSelectPath`.
+    pub(crate) fn conservative_packed_range(
+        &self,
+        context: &mut Context,
+        r#type: &Type,
+        member_domain: Option<MemberSelectDomain>,
+    ) -> Option<(usize, usize)> {
+        let coordinate_range = if self.is_const_with_range() {
+            self.eval_value(context, r#type, false)
+        } else {
+            // The final expression of a range is its starting position, not
+            // an outer packed coordinate. It cannot narrow a dynamic range.
+            let coordinate_len = self.0.len().saturating_sub(usize::from(self.1.is_some()));
+            let coordinates = &self.0[..coordinate_len];
+            let prefix_len = coordinates
+                .iter()
+                .take_while(|expression| expression.comptime().is_const)
+                .count();
+            let prefix = VarSelect(coordinates[..prefix_len].to_vec(), None);
+            prefix.eval_value(context, r#type, false).or_else(|| {
+                r#type
+                    .total_width()
+                    .and_then(|width| width.checked_sub(1).map(|high| (high, 0)))
+            })
+        };
+        let member_range = member_domain.map(|domain| (domain.high, domain.low));
+
+        match (coordinate_range, member_range) {
+            (Some((coordinate_high, coordinate_low)), Some((member_high, member_low))) => {
+                let high = coordinate_high.min(member_high);
+                let low = coordinate_low.max(member_low);
+                (high >= low).then_some((high, low))
+            }
+            (Some(range), None) | (None, Some(range)) => Some(range),
+            (None, None) => None,
+        }
     }
 
     pub fn to_index(self) -> VarIndex {
@@ -799,6 +875,28 @@ impl VarSelect {
         r#type: &Type,
         is_array: bool,
     ) -> Option<(usize, usize)> {
+        self.eval_value_inner(context, r#type, is_array, true)
+    }
+
+    /// Evaluate a constant selection to storage coordinates without applying
+    /// `evaluate_size_limit`. This is for consumers that retain the result as a
+    /// symbolic span and therefore do not allocate or iterate over its length.
+    pub(crate) fn eval_value_unbounded(
+        &self,
+        context: &mut Context,
+        r#type: &Type,
+        is_array: bool,
+    ) -> Option<(usize, usize)> {
+        self.eval_value_inner(context, r#type, is_array, false)
+    }
+
+    fn eval_value_inner(
+        &self,
+        context: &mut Context,
+        r#type: &Type,
+        is_array: bool,
+        check_size: bool,
+    ) -> Option<(usize, usize)> {
         if self.0.is_empty() {
             let total_width: usize = if is_array {
                 r#type.total_array()?
@@ -868,9 +966,12 @@ impl VarSelect {
             }
         }
 
-        let token = self.token_range();
-        let beg = context.check_size(beg, token)?;
-        let end = context.check_size(end, token)?;
+        if check_size {
+            let token = self.token_range();
+            let beg = context.check_size(beg, token)?;
+            let end = context.check_size(end, token)?;
+            return Some((beg, end));
+        }
 
         Some((beg, end))
     }
@@ -993,8 +1094,31 @@ impl Variable {
     }
 
     pub fn get_value(&self, index: &[usize]) -> Option<&Value> {
-        let index = self.r#type.array.calc_index(index)?;
-        self.value.get(index)
+        let index = self.checked_value_index(index)?;
+        if self.value.len() == 1 {
+            self.value.first()
+        } else {
+            self.value.get(index)
+        }
+    }
+
+    fn checked_value_index(&self, index: &[usize]) -> Option<usize> {
+        let shape = &self.r#type.array;
+        if shape.is_empty() {
+            return index.is_empty().then_some(0);
+        }
+        if shape.dims() == 1 && shape[0] == Some(1) && index.is_empty() {
+            return Some(0);
+        }
+        if index.len() != shape.dims()
+            || index
+                .iter()
+                .zip(shape.iter())
+                .any(|(index, length)| length.is_some_and(|length| *index >= length))
+        {
+            return None;
+        }
+        shape.calc_index(index)
     }
 
     pub fn set_value(
@@ -1003,7 +1127,7 @@ impl Variable {
         mut value: Value,
         range: Option<(usize, usize)>,
     ) -> bool {
-        let Some(index) = self.r#type.array.calc_index(index) else {
+        let Some(index) = self.checked_value_index(index) else {
             return false;
         };
         if let Some(total_width) = self.total_width() {
@@ -1015,6 +1139,21 @@ impl Variable {
                 value.expand(total_width, true).into_owned()
             };
 
+            if self.value.len() == 1
+                && let Some(total) = self.r#type.total_array()
+                && total > 1
+            {
+                if self.assigned.len() == total {
+                    self.value.resize(total, self.value[0].clone());
+                } else {
+                    // A write makes a large uniform template non-uniform. The
+                    // legacy AIR cannot represent that without materializing
+                    // the full array, so invalidate the compile-time value
+                    // instead of retaining a stale constant.
+                    self.value.clear();
+                    return false;
+                }
+            }
             if let Some(x) = self.value.get_mut(index) {
                 if let Some((beg, end)) = range {
                     x.assign(value, beg, end);
@@ -1078,6 +1217,56 @@ impl Variable {
             self.r#type.prepend_array(array);
         }
     }
+
+    pub(crate) fn prepend_array_with_limit(&mut self, array: &ShapeRef, array_limit: usize) {
+        if array.is_empty() {
+            return;
+        }
+
+        if let (Some(prepend_total), Some(member_total)) =
+            (array.total(), self.r#type.array.total())
+        {
+            let combined_total = prepend_total.checked_mul(member_total);
+            if combined_total.is_some_and(|total| total <= array_limit) {
+                // Keep the historical AIR contract for ordinary arrays: every
+                // non-uniform logical element is present in `value`. A
+                // single-value uniform template remains a single value.
+                if self.value.len() > 1 {
+                    let member_values = self.value.clone();
+                    self.value = Vec::with_capacity(combined_total.unwrap_or(0));
+                    for _ in 0..prepend_total {
+                        self.value.extend(member_values.iter().cloned());
+                    }
+                }
+            } else if self.value.len() > 1 {
+                // The legacy AIR represents only a full value vector or one
+                // uniform template. A non-uniform array that is too large to
+                // materialize is therefore not compile-time representable.
+                self.value.clear();
+                if matches!(self.kind, VarKind::Const | VarKind::Param) {
+                    self.value.push(Value::new_x(
+                        self.r#type.total_width().unwrap_or(1),
+                        self.r#type.signed,
+                    ));
+                }
+            }
+
+            if combined_total.is_none_or(|total| total > array_limit) {
+                self.assigned.clear();
+            } else {
+                let assigned = self.assigned.clone();
+                for _ in 0..prepend_total.saturating_sub(1) {
+                    self.assigned.extend(assigned.iter().cloned());
+                }
+            }
+        } else {
+            // Unknown shapes cannot translate flat mutation coordinates.
+            // Their compile-time value is already indeterminate; retain only
+            // the reusable base pattern and discard coordinate-specific state.
+            self.assigned.clear();
+        }
+        self.r#type.prepend_array(array);
+    }
 }
 
 impl fmt::Display for Variable {
@@ -1085,15 +1274,15 @@ impl fmt::Display for Variable {
         let mut ret = String::new();
 
         // adjust type format
-        let mut r#type = self.r#type.clone();
-        if r#type.width().as_shape_ref() == ShapeRef::new(&[Some(1)]) {
-            r#type.clear_width();
+        let mut element_type = self.r#type.clone();
+        if element_type.width().as_shape_ref() == ShapeRef::new(&[Some(1)]) {
+            element_type.clear_width();
         }
-        r#type.array.clear();
+        element_type.array.clear();
 
-        // Template form (`value.len() == 1 && total_array > 1`) means every
-        // element shares value[0]; otherwise treat value.len() as the
-        // effective element count.
+        // Preserve the historical IR display: only a single-value template is
+        // expanded to the declared array shape. A multi-value vector is shown
+        // exactly as stored.
         let type_len = self.r#type.total_array();
         let is_template = self.value.len() == 1 && matches!(type_len, Some(n) if n > 1);
         let display_len = if is_template {
@@ -1105,8 +1294,10 @@ impl fmt::Display for Variable {
         for i in 0..display_len {
             let value = if is_template {
                 &self.value[0]
+            } else if let Some(value) = self.value.get(i) {
+                value
             } else {
-                &self.value[i]
+                continue;
             };
             if is_array {
                 ret.push_str(&format!(
@@ -1116,7 +1307,7 @@ impl fmt::Display for Variable {
             } else {
                 ret.push_str(&format!("{} {}({}): ", self.kind, self.id, self.path));
             }
-            ret.push_str(&format!("{}", r#type));
+            ret.push_str(&format!("{}", element_type));
 
             ret.push_str(&format!(" = {:x};\n", value));
         }
@@ -1174,6 +1365,113 @@ mod tests {
         }
 
         ret
+    }
+
+    fn unknown_expression() -> Expression {
+        Expression::Term(Box::new(Factor::Unknown(Comptime::create_unknown(
+            TokenRange::default(),
+        ))))
+    }
+
+    #[test]
+    fn prepended_large_uniform_array_keeps_its_template() {
+        let mut r#type = Type::new(TypeKind::Logic);
+        r#type.array = Shape::new(vec![Some(1)]);
+        let token = TokenRange::default();
+        let mut variable = Variable::new(
+            VarId::default(),
+            VarPath::new(resource_table::insert_str("value")),
+            VarKind::Variable,
+            r#type,
+            vec![Value::new(0, 1, false)],
+            Affiliation::Interface,
+            &token,
+            128,
+        );
+
+        variable.prepend_array_with_limit(&Shape::new(vec![Some(1_000_000)]), 128);
+        assert_eq!(variable.value.len(), 1);
+        assert!(variable.assigned.is_empty());
+        assert_eq!(
+            variable.get_value(&[999_999, 0]).unwrap().to_usize(),
+            Some(0)
+        );
+
+        assert!(!variable.set_value(&[999_999, 0], Value::new(1, 1, false), None));
+        assert!(variable.value.is_empty());
+        assert!(variable.get_value(&[999_999, 0]).is_none());
+    }
+
+    #[test]
+    fn bounded_uniform_array_materializes_before_a_partial_write() {
+        let mut r#type = Type::new(TypeKind::Logic);
+        r#type.array = Shape::new(vec![Some(2)]);
+        let token = TokenRange::default();
+        let mut variable = Variable::new(
+            VarId::default(),
+            VarPath::new(resource_table::insert_str("value")),
+            VarKind::Variable,
+            r#type,
+            vec![Value::new(0, 1, false)],
+            Affiliation::Interface,
+            &token,
+            128,
+        );
+
+        assert!(variable.set_value(&[1], Value::new(1, 1, false), None));
+        assert_eq!(variable.value.len(), 2);
+        assert_eq!(variable.get_value(&[0]).unwrap().to_usize(), Some(0));
+        assert_eq!(variable.get_value(&[1]).unwrap().to_usize(), Some(1));
+    }
+
+    #[test]
+    fn compact_values_reject_out_of_range_coordinates() {
+        let mut r#type = Type::new(TypeKind::Logic);
+        r#type.array = Shape::new(vec![Some(2), Some(2)]);
+        let token = TokenRange::default();
+        let mut variable = Variable::new(
+            VarId::default(),
+            VarPath::new(resource_table::insert_str("value")),
+            VarKind::Variable,
+            r#type,
+            vec![
+                Value::new(0, 1, false),
+                Value::new(1, 1, false),
+                Value::new(0, 1, false),
+                Value::new(1, 1, false),
+            ],
+            Affiliation::Interface,
+            &token,
+            128,
+        );
+
+        assert!(variable.get_value(&[0, 2]).is_none());
+        assert!(variable.get_value(&[2, 0]).is_none());
+        assert!(!variable.set_value(&[2, 0], Value::new(1, 1, false), None));
+    }
+
+    #[test]
+    fn conservative_packed_range_intersects_dynamic_prefix_with_member_domain() {
+        let mut context = Context::default();
+        let mut r#type = Type::new(TypeKind::Logic);
+        r#type.set_concrete_width(Shape::new(vec![Some(2), Some(4)]));
+
+        let select = VarSelect(
+            vec![
+                Expression::create_value(Value::new(1, 32, false), TokenRange::default()),
+                unknown_expression(),
+            ],
+            None,
+        );
+
+        assert_eq!(
+            select.conservative_packed_range(
+                &mut context,
+                &r#type,
+                Some(MemberSelectDomain { high: 6, low: 5 }),
+            ),
+            Some((6, 5))
+        );
     }
 
     #[test]

@@ -1,5 +1,73 @@
 use super::*;
 
+#[test]
+fn comb_loop_false_negative_early_return_controls_a_later_captured_write() {
+    // update(stop) leaves value at zero on the return path and writes one on
+    // the continuation path. Since stop = value, the captured write is in a
+    // real control-dependency loop even though the function result is constant.
+    let errors = analyze(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var stop : logic;
+            var value: logic;
+            var dummy: logic;
+            function update (condition: input logic) -> logic {
+                value = 0;
+                if condition {
+                    return 0;
+                }
+                value = 1;
+                return 0;
+            }
+            assign stop = value;
+            always_comb {
+                dummy = update(stop);
+                o = value | dummy;
+            }
+        }
+        "#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "an early return condition controls the captured final value: {errors:#?}"
+    );
+}
+
+#[test]
+fn comb_loop_condition_with_two_continuing_function_arms_does_not_control_later_write() {
+    assert_comb_loop(
+        "a condition does not control continuation when both function arms continue",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var condition: logic;
+            var value    : logic;
+            var dummy    : logic;
+            function update (select: input logic) -> logic {
+                value = 0;
+                if select {
+                    dummy = 0;
+                } else {
+                    dummy = 1;
+                }
+                value = 1;
+                return dummy;
+            }
+            assign condition = value;
+            always_comb {
+                o = update(condition);
+            }
+        }
+        "#,
+        false,
+    );
+}
+
 fn assert_comb_loop(case: &str, code: &str, expected: bool) {
     let errors = analyze(code);
     let actual = errors
@@ -34,17 +102,6 @@ macro_rules! comb_loop_case {
     };
 }
 
-macro_rules! comb_loop_case_ignored {
-    ($name:ident, $reason:literal, $case:literal, $code:expr, $expected:expr) => {
-        #[test]
-        #[ignore = $reason]
-        fn $name() {
-            let code = $code;
-            assert_comb_loop($case, code.as_ref(), $expected);
-        }
-    };
-}
-
 fn unaligned_instance_function_actual_code(actual: &str) -> String {
     format!(
         r#"
@@ -61,9 +118,8 @@ fn unaligned_instance_function_actual_code(actual: &str) -> String {
     )
 }
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_instance_actual_function_retains_module_capture,
-    "comb-loop migration: false negative; function effects and summaries",
     "an instance actual function retains a module-scope capture",
     r#"
     module Child (i: input logic, o: output logic) { assign o = i; }
@@ -104,9 +160,8 @@ comb_loop_case!(
     false
 );
 
-comb_loop_case_ignored!(
+comb_loop_case!(
     comb_loop_unaligned_function_return_retains_used_actual,
-    "comb-loop migration: false negative; function effects and summaries",
     "an unaligned function return retains its used actual",
     unaligned_instance_function_actual_code("only_a(feedback, 0)"),
     true
@@ -137,7 +192,6 @@ fn comb_loop_core_semantics_and_region_regressions_function_call_caller_side_fee
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; unused function actual is not a return dependency"]
 fn comb_loop_statement_order_and_observer_semantics_function_summaries_come_from_the_specialized_body_merely_evaluating_an()
  {
     // Function summaries come from the specialized body. Merely evaluating an
@@ -166,7 +220,6 @@ fn comb_loop_statement_order_and_observer_semantics_function_summaries_come_from
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_function_global_read_contributes_value_dependency_a_called_function_retains_a_captured_module_scope_read()
  {
     assert_comb_loop(
@@ -218,7 +271,6 @@ fn comb_loop_function_global_read_contributes_value_dependency_a_captured_functi
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_function_global_write_contributes_procedural_effect_a_called_function_retains_a_captured_module_scope_write()
  {
     assert_comb_loop(
@@ -322,7 +374,6 @@ fn comb_loop_preserves_vector_function_return_bits_a_vector_function_return_reta
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_function_write_without_value_dependency_is_recorded() {
     // Why this case exists: clear_x writes x even though the written value has
     // no signal dependency. That write kills LiveOnEntry before o reads x;
@@ -349,7 +400,6 @@ fn comb_loop_function_write_without_value_dependency_is_recorded() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_observer_function_side_effect_is_recorded() {
     // Why this case exists: IEEE 1800-2023 11.3.5 preserves side effects of
     // evaluated expressions. touch(o) is evaluated as a display argument, and
@@ -380,7 +430,6 @@ fn comb_loop_observer_function_side_effect_is_recorded() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_instance_actual_function_side_effect_is_recorded() {
     // Why this case exists: IEEE 1800-2023 4.9.6 models an input connection as
     // an implicit continuous assignment. Its actual expression is evaluated
@@ -403,6 +452,61 @@ fn comb_loop_instance_actual_function_side_effect_is_recorded() {
             }
             inst u: Sink (
                 i: touch(o),
+            );
+            assign o = x;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_instance_actual_preserves_dependencies_between_captured_writes() {
+    assert_comb_loop(
+        "an instance actual preserves dependencies between captured writes",
+        r#"
+        module Sink (i: input logic) {}
+        module Top {
+            var q: logic;
+            var p: logic;
+            function f (a: input logic) -> logic {
+                p = q;
+                q = a;
+                return 0;
+            }
+            inst u: Sink (i: f(0));
+            always_comb { q = p; }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_instance_actual_evaluates_an_unused_function_argument_once() {
+    assert_comb_loop(
+        "an unused outer argument retains its evaluated function side effect",
+        r#"
+        module Sink (
+            i: input logic,
+        ) {}
+        module Top (
+            o: output logic,
+        ) {
+            var x: logic;
+            function touch (
+                a: input logic,
+            ) -> logic {
+                x = a;
+                return 0;
+            }
+            function ignore (
+                unused: input logic,
+            ) -> logic {
+                return 0;
+            }
+            inst u: Sink (
+                i: ignore(touch(o)),
             );
             assign o = x;
         }
@@ -768,6 +872,75 @@ fn comb_loop_distinguishes_generic_function_specializations() {
 }
 
 #[test]
+fn function_summary_shift_fanout_stays_structural() {
+    const DEPTH: usize = 14;
+    const WIDTH: usize = 1 << DEPTH;
+    let mut functions =
+        format!("function f0 (x: input logic<{WIDTH}>) -> logic<{WIDTH}> {{ return x; }}\n");
+    for depth in 1..=DEPTH {
+        let previous = depth - 1;
+        let shift = 1usize << previous;
+        functions.push_str(&format!(
+            "function f{depth} (x: input logic<{WIDTH}>) -> logic<{WIDTH}> {{ return f{previous}(x) | (f{previous}(x) << {shift}); }}\n"
+        ));
+    }
+    let code = format!(
+        "module Top (i: input logic<{WIDTH}>, o: output logic<{WIDTH}>) {{ {functions} assign o = f{DEPTH}(i); }}"
+    );
+    crate::comb_loop_detect::reset_function_evaluation_count();
+    assert!(
+        analyze(&code)
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. }))
+    );
+    assert!(crate::comb_loop_detect::function_summary_graph_node_count() < 100);
+}
+
+#[test]
+fn function_summary_rejects_a_cycle_whose_intermediate_shift_is_out_of_range() {
+    assert_comb_loop(
+        "opposite offsets do not form a loop when the intermediate value is outside the vector",
+        r#"
+        module Top (o: output logic) {
+            function left (x: input logic<2>) -> logic<2> { return x << 1; }
+            function right (x: input logic<2>) -> logic<2> { return x >> 1; }
+            var a: logic<2>;
+            var b: logic<2>;
+            var c: logic<2>;
+            assign a = left(b);
+            assign c = right(a);
+            assign b[1] = c[1];
+            assign b[0] = 0;
+            assign o = a[0] | b[0] | c[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn function_summary_retains_a_cycle_with_feasible_intermediate_shifts() {
+    assert_comb_loop(
+        "opposite offsets retain the low-bit path that stays inside the vector",
+        r#"
+        module Top (o: output logic) {
+            function left (x: input logic<2>) -> logic<2> { return x << 1; }
+            function right (x: input logic<2>) -> logic<2> { return x >> 1; }
+            var a: logic<2>;
+            var b: logic<2>;
+            var c: logic<2>;
+            assign a = left(b);
+            assign c = right(a);
+            assign b[0] = c[0];
+            assign b[1] = 0;
+            assign o = a[0] | b[0] | c[0];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_short_circuits_instance_actual_side_effects_a_constant_dead_instance_actual_branch_has_no_function_side_effect()
  {
     assert_comb_loop(
@@ -797,7 +970,6 @@ fn comb_loop_short_circuits_instance_actual_side_effects_a_constant_dead_instanc
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_short_circuits_instance_actual_side_effects_a_constant_taken_instance_actual_branch_retains_its_function_side_effect()
  {
     assert_comb_loop(
@@ -827,7 +999,6 @@ fn comb_loop_short_circuits_instance_actual_side_effects_a_constant_taken_instan
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_preserves_ternary_positions_across_boundaries_a_function_ternary_actual_keeps_a_disjoint_bit_loop_free()
  {
     assert_comb_loop(
@@ -902,7 +1073,6 @@ fn comb_loop_preserves_unpacked_function_actual_positions_an_unpacked_function_a
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_preserves_unpacked_function_actual_positions_an_unpacked_function_actual_detects_same_element_feedback()
  {
     assert_comb_loop(
@@ -927,7 +1097,6 @@ fn comb_loop_preserves_unpacked_function_actual_positions_an_unpacked_function_a
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_preserves_function_actual_shift_positions_a_function_actual_left_shift_keeps_its_inserted_bit_loop_free()
  {
     assert_comb_loop(
@@ -1004,7 +1173,6 @@ fn comb_loop_preserves_function_concat_output_positions_a_concatenated_function_
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_preserves_function_concat_output_positions_a_concatenated_function_output_detects_its_corresponding_bit_loop()
  {
     assert_comb_loop(
@@ -1167,7 +1335,6 @@ fn comb_loop_region_and_function_mapping_regressions_both_branch_arms_define_the
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_region_and_function_mapping_regressions_function_local_copy_retains_bit_precision_at_the_return()
  {
     assert_comb_loop(
@@ -1218,7 +1385,6 @@ fn comb_loop_region_and_function_mapping_regressions_function_branch_condition_i
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_region_and_function_mapping_regressions_function_branch_ignores_a_bit_absent_from_value_and_control_flow()
  {
     assert_comb_loop(
@@ -1246,7 +1412,6 @@ fn comb_loop_region_and_function_mapping_regressions_function_branch_ignores_a_b
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; function effects and summaries"]
 fn comb_loop_region_and_function_mapping_regressions_function_output_writeback_participates_in_procedural_order()
  {
     assert_comb_loop(
@@ -1384,7 +1549,6 @@ fn comb_loop_region_and_function_mapping_regressions_dynamic_same_object_aliasin
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_alias_and_opaque_effect_boundaries_function_bit_select_must_not_taint_a_disjoint_actual_bit()
  {
     assert_comb_loop(
@@ -1430,7 +1594,6 @@ fn comb_loop_alias_and_opaque_effect_boundaries_function_bit_select_must_retain_
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_alias_and_opaque_effect_boundaries_function_bit_select_through_concatenation_ignores_high_operands()
  {
     assert_comb_loop(
@@ -1472,7 +1635,6 @@ fn comb_loop_alias_and_opaque_effect_boundaries_function_bit_select_through_conc
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_alias_and_opaque_effect_boundaries_function_bit_select_through_an_actual_slice_uses_its_low_bit()
  {
     assert_comb_loop(
@@ -1535,29 +1697,6 @@ fn comb_loop_alias_and_opaque_effect_boundaries_function_region_crossing_a_conca
             assign high[0] = o[1];
             assign high[3:1] = 0;
             assign low = 0;
-        }
-        "#,
-        true,
-    );
-}
-
-#[test]
-fn comb_loop_structural_dependency_semantics_identical_function_branches_retain_structural_condition_dependence()
- {
-    assert_comb_loop(
-        "identical function branches retain structural condition dependence",
-        r#"
-        module Top (
-            o: output logic,
-        ) {
-            function choose (condition: input logic) -> logic {
-                if condition {
-                    return 0;
-                } else {
-                    return 0;
-                }
-            }
-            assign o = choose(o);
         }
         "#,
         true,
@@ -1677,6 +1816,7 @@ fn comb_loop_function_summary_fanout_is_memoized() {
             previous = depth - 1,
         ));
     }
+    crate::comb_loop_detect::reset_function_evaluation_count();
     let errors = analyze(&format!(
         r#"
         module Top (
@@ -1692,10 +1832,51 @@ fn comb_loop_function_summary_fanout_is_memoized() {
         errors.is_empty(),
         "acyclic function fanout is valid: {errors:#?}"
     );
+    assert_eq!(crate::comb_loop_detect::function_evaluation_count(), 29);
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; unreachable code after function return"]
+fn function_summaries_reuse_module_metadata() {
+    const COUNT: usize = 16;
+    let padding = (0..COUNT)
+        .map(|index| format!("var padding_{index}: logic;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut functions = String::new();
+    let mut calls = String::new();
+    for index in 0..COUNT {
+        functions.push_str(&format!(
+            "function function_{index} (value: input logic) -> logic {{ return value; }}\n"
+        ));
+        calls.push_str(&format!("padding_{index} = function_{index}(seed);\n"));
+    }
+    let code = format!(
+        r#"
+        module Top (seed: input logic, o: output logic) {{
+            {padding}
+            {functions}
+            always_comb {{
+                {calls}
+                o = padding_0;
+            }}
+        }}
+        "#
+    );
+
+    crate::comb_loop_detect::reset_module_context_entries();
+    let errors = analyze(&code);
+    assert!(
+        errors.is_empty(),
+        "independent calls are acyclic: {errors:#?}"
+    );
+    assert!(
+        crate::comb_loop_detect::module_context_entries() <= COUNT * 6 + 4,
+        "function summaries must share their module metadata: {}",
+        crate::comb_loop_detect::module_context_entries(),
+    );
+}
+
+#[test]
 fn comb_loop_early_return_excludes_unreachable_function_dependency() {
     assert_comb_loop(
         "a return makes the following function dependency unreachable",
@@ -1711,6 +1892,62 @@ fn comb_loop_early_return_excludes_unreachable_function_dependency() {
             }
             var feedback: logic;
             assign o = choose(feedback);
+            assign feedback = o;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_early_branch_return_preserves_its_reachable_dependency() {
+    assert_comb_loop(
+        "an early branch return remains an alternative to the fallback return",
+        r#"
+        module Top (
+            select: input  logic,
+            o     : output logic,
+        ) {
+            function choose (
+                select  : input logic,
+                feedback: input logic,
+            ) -> logic {
+                if select {
+                    return feedback;
+                }
+                return 0;
+            }
+            var feedback: logic;
+            assign o = choose(select, feedback);
+            assign feedback = o;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_all_branch_returns_exclude_following_dependency() {
+    assert_comb_loop(
+        "no path reaches a statement after both branches return",
+        r#"
+        module Top (
+            select: input  logic,
+            o     : output logic,
+        ) {
+            function choose (
+                select  : input logic,
+                feedback: input logic,
+            ) -> logic {
+                if select {
+                    return 0;
+                } else {
+                    return 0;
+                }
+                return feedback;
+            }
+            var feedback: logic;
+            assign o = choose(select, feedback);
             assign feedback = o;
         }
         "#,
@@ -1747,7 +1984,6 @@ fn comb_loop_branch_returns_preserve_reachable_function_dependency() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; function effects and summaries"]
 fn comb_loop_function_formal_high_bit_ignores_short_unsigned_actual() {
     assert_comb_loop(
         "a function formal high bit does not read an unsigned short actual",
@@ -1761,5 +1997,244 @@ fn comb_loop_function_formal_high_bit_ignores_short_unsigned_actual() {
         }
         "#,
         false,
+    );
+}
+
+#[test]
+fn comb_loop_function_if_expression_arms_are_mutually_exclusive() {
+    // Each function invocation selects one feed-forward equation. Flattening
+    // both result alternatives into one source set invents the reverse edge.
+    assert_comb_loop(
+        "a function summary must not combine mutually exclusive expression arms",
+        r#"
+        module Identity (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            assign o = i;
+        }
+        module Top (
+            sel: input  logic,
+            o  : output logic,
+        ) {
+            function choose (
+                state: input logic<2>,
+                sel  : input logic,
+            ) -> logic<2> {
+                return if sel ? {state[0], 1'b0} : {1'b0, state[1]};
+            }
+            var state: logic<2>;
+            inst passthrough: Identity (
+                i: choose(state, sel),
+                o: state,
+            );
+            assign o = |state;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_function_onehot_runtime_input_detects_feedback() {
+    // `$onehot(value)` is synthesized from the runtime value. Therefore the
+    // two assignments form value -> o -> value feedback through the function.
+    assert_comb_loop(
+        "a runtime system function in a user function carries its input dependency",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function exactly_one (
+                value: input logic<2>,
+            ) -> logic {
+                return $onehot(value);
+            }
+            var value: logic<2>;
+            assign o = exactly_one(value);
+            assign value[0] = o;
+            assign value[1] = 1'b0;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn function_summary_snapshots_actuals_in_source_order_false_negative() {
+    assert_comb_loop(
+        "a later actual side effect cannot replace an earlier captured value",
+        r#"
+        module Top (o: output bit) {
+            var x       : bit;
+            var y       : bit;
+            var feedback: bit;
+            function clear_x () -> bit {
+                x = 0;
+                return 0;
+            }
+            function first (
+                value  : input bit,
+                ignored: input bit,
+            ) -> bit {
+                return value;
+            }
+            assign feedback = x;
+            always_comb {
+                x = feedback;
+                y = first(x, clear_x());
+                x = y;
+                o = x;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn function_summary_snapshots_actuals_in_source_order_false_positive() {
+    assert_comb_loop(
+        "a later actual side effect cannot taint an earlier captured value",
+        r#"
+        module Top (
+            i: input  bit,
+            o: output bit,
+        ) {
+            var x       : bit;
+            var y       : bit;
+            var feedback: bit;
+            function write_x (value: input bit) -> bit {
+                x = value;
+                return 0;
+            }
+            function first (
+                value  : input bit,
+                ignored: input bit,
+            ) -> bit {
+                return value;
+            }
+            assign feedback = y;
+            always_comb {
+                x = i;
+                y = first(x, write_x(feedback));
+                x = 0;
+                o = y;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn expression_snapshot_preserves_nested_function_return_dependencies() {
+    assert_comb_loop(
+        "an effects pass cannot discard a nested call used by the cached return value",
+        r#"
+        module Top (o: output bit) {
+            function inner (value: input bit) -> bit {
+                return value;
+            }
+            function outer (value: input bit) -> bit {
+                return inner(value);
+            }
+            always_comb {
+                o = outer(o);
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn repeated_calls_reuse_the_function_write_footprint() {
+    const WIDTH: usize = 128;
+    let writes = (0..WIDTH)
+        .map(|bit| format!("state[{bit}] = 0;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let calls = (0..WIDTH)
+        .map(|_| "clear();")
+        .collect::<Vec<_>>()
+        .join("\n");
+    let code = format!(
+        r#"
+        module Top (o: output logic) {{
+            var state: logic<{WIDTH}>;
+            function clear () {{
+                {writes}
+            }}
+            always_comb {{
+                {calls}
+            }}
+            assign o = |state;
+        }}
+        "#
+    );
+
+    crate::comb_loop_detect::reset_function_evaluation_count();
+    let errors = analyze(&code);
+    assert!(
+        errors.is_empty(),
+        "repeated constant writes are acyclic: {errors:#?}"
+    );
+    let visits = crate::comb_loop_detect::write_footprint_statement_visits();
+    assert!(
+        visits <= WIDTH * 4 + 8,
+        "a shared function body must be walked once, not once per call site: {visits}"
+    );
+}
+
+#[test]
+fn recursive_function_summary_contexts_clone_only_referenced_metadata() {
+    const COUNT: usize = 16;
+    let padding = (0..COUNT)
+        .map(|index| format!("var padding_{index}: logic;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let padding_assignments = (0..COUNT)
+        .map(|index| format!("padding_{index} = seed;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let padding_uses = (0..COUNT)
+        .map(|index| format!("padding_{index}"))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let mut functions = String::new();
+    for index in (0..COUNT).rev() {
+        let value = if index + 1 == COUNT {
+            "value".to_owned()
+        } else {
+            format!("function_{}(value)", index + 1)
+        };
+        functions.push_str(&format!(
+            "function function_{index} (value: input logic) -> logic {{ return {value}; }}\n"
+        ));
+    }
+    let code = format!(
+        r#"
+        module Top (seed: input logic, o: output logic) {{
+            {padding}
+            {functions}
+            always_comb {{
+                {padding_assignments}
+                o = function_0(seed) | {padding_uses};
+            }}
+        }}
+        "#
+    );
+
+    crate::comb_loop_detect::reset_module_context_entries();
+    let errors = analyze(&code);
+    assert!(
+        errors.is_empty(),
+        "the function chain is acyclic: {errors:#?}"
+    );
+    assert!(
+        crate::comb_loop_detect::module_context_entries() <= COUNT * 12,
+        "each summary depth must clone only its local metadata: {}",
+        crate::comb_loop_detect::module_context_entries(),
     );
 }

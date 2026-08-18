@@ -1655,21 +1655,13 @@ fn interface_array() {
   var var5[0](u.b): logic = 1'hx;
   var var5[1](u.b): logic = 1'hx;
   var var8(a): logic<4> = 4'hx;
-  var var10[0](u.FuncA.return): logic = 1'hx;
-  var var10[1](u.FuncA.return): logic = 1'hx;
-  var var12[0](if_a.FuncA.return): logic = 1'hx;
-  var var12[1](if_a.FuncA.return): logic = 1'hx;
-  func var9[0](u.FuncA) -> var10 {
-    var10[32'h00000000] = var4[32'h00000000];
+  var var10(u.FuncA.return): logic = 1'hx;
+  var var12(if_a.FuncA.return): logic = 1'hx;
+  func var9[*](u.FuncA) -> var10 {
+    var10 = var4;
   }
-  func var9[1](u.FuncA) -> var10 {
-    var10[32'h00000001] = var4[32'h00000001];
-  }
-  func var11[0](if_a.FuncA) -> var12 {
-    var12[32'h00000000] = var0[32'h00000000];
-  }
-  func var11[1](if_a.FuncA) -> var12 {
-    var12[32'h00000001] = var0[32'h00000001];
+  func var11[*](if_a.FuncA) -> var12 {
+    var12 = var0;
   }
 
   comb {
@@ -1677,10 +1669,10 @@ fn interface_array() {
     var4[32'sh00000001] = var0[32'sh00000001];
     var1[32'sh00000000] = var5[32'sh00000000];
     var1[32'sh00000001] = var5[32'sh00000001];
-    var8[32'sh00000000] = var9[0]();
-    var8[32'sh00000001] = var9[1]();
-    var8[32'sh00000002] = var11[0]();
-    var8[32'sh00000003] = var11[1]();
+    var8[32'sh00000000] = var9[32'sh00000000]();
+    var8[32'sh00000001] = var9[32'sh00000001]();
+    var8[32'sh00000002] = var11[32'sh00000000]();
+    var8[32'sh00000003] = var11[32'sh00000001]();
   }
 }
 "#;
@@ -2010,6 +2002,55 @@ module ModuleB {
 
       comb {
         var1 = '0;
+      }
+    }
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
+fn instance_array_range_keeps_legacy_ir_rendering() {
+    let code = r#"
+    module Fill (o: output logic [2]) {
+        assign o[0] = 0;
+        assign o[1] = 0;
+    }
+    module Top {
+        var received: logic [2];
+        inst fill: Fill (o: received[0:1]);
+    }
+    "#;
+
+    let exp = r#"module Fill {
+  output var0[0](o): logic = 1'hx;
+  output var0[1](o): logic = 1'hx;
+
+  comb {
+    var0[32'sh00000000] = 32'sh00000000;
+  }
+  comb {
+    var0[32'sh00000001] = 32'sh00000000;
+  }
+}
+module Top {
+  var var0[0](received): logic = 1'hx;
+  var var0[1](received): logic = 1'hx;
+
+  inst fill (
+    var0 -> {var0[32'h00000000], var0[32'h00000001]};
+  ) {
+    module Fill {
+      output var0[0](o): logic = 1'hx;
+      output var0[1](o): logic = 1'hx;
+
+      comb {
+        var0[32'sh00000000] = 32'sh00000000;
+      }
+      comb {
+        var0[32'sh00000001] = 32'sh00000000;
       }
     }
   }
