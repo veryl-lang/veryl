@@ -6,6 +6,7 @@ use veryl_analyzer::{Analyzer, Context};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 use veryl_simulator::ir as sir;
+use veryl_simulator::ir::{Event, VarId};
 use veryl_simulator::{Config, Simulator};
 
 fn build_ir(code: &str, top: &str, config: &Config) -> sir::Ir {
@@ -63,7 +64,29 @@ pub unsafe extern "C" fn cosim_step_reset(handle: NonNull<Simulator>, name: *con
     let name = name.to_str().unwrap();
 
     let reset = sim.get_reset(name).unwrap();
-    sim.step(&reset);
+    // A reset step is a clock edge taken with the net asserted.  The DPI entry
+    // names only the reset, so EVERY clock takes one such edge: a synchronous
+    // `if_reset` is reached by its own domain's edge and by no other.
+    let mut clocks: Vec<VarId> = sim
+        .ir
+        .event_statements
+        .keys()
+        .filter_map(|e| match e {
+            Event::Clock(id) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    clocks.sort_unstable();
+    if let Some(id) = reset.var_id() {
+        sim.set_reset_level(&id, true);
+    }
+    for (i, clock) in clocks.iter().enumerate() {
+        // The assertion edge is the reset's own event, not one clock's.
+        sim.step_in_reset(&Event::Clock(*clock), &reset, i == 0);
+    }
+    if let Some(id) = reset.var_id() {
+        sim.set_reset_level(&id, false);
+    }
 }
 
 #[unsafe(no_mangle)]

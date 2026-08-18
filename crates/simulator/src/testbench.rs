@@ -698,18 +698,20 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             high_time,
             low_time,
         } => {
-            // Step reset event for `duration` cycles.
-            // In this simulator, Event::Reset represents a clock edge
-            // with reset asserted (executes the if_reset branch of always_ff).
+            // Hold the net asserted and take `duration` ordinary clock edges:
+            // the rest of the design keeps clocking through the window, as it
+            // does in SystemVerilog, and a reset derived from that net reaches
+            // its own `if_reset` too.
             let has_dump = sim.dump.is_some();
-            if has_dump && let Some(id) = reset.var_id() {
-                sim.set_var_by_id(&id, Value::new(1, 1, false));
+            let reset_id = reset.var_id();
+            if let Some(id) = &reset_id {
+                sim.set_reset_level(id, true);
             }
-            for _ in 0..*duration {
+            for i in 0..*duration {
                 if has_dump && let Some(id) = clock.var_id() {
                     sim.set_var_by_id(&id, Value::new(1, 1, false));
                 }
-                sim.step(reset);
+                sim.step_in_reset(clock, reset, i == 0);
                 sim.time += high_time;
                 if has_dump {
                     if let Some(id) = clock.var_id() {
@@ -719,8 +721,8 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                 }
                 sim.time += low_time;
             }
-            if has_dump && let Some(id) = reset.var_id() {
-                sim.set_var_by_id(&id, Value::new(0, 1, false));
+            if let Some(id) = &reset_id {
+                sim.set_reset_level(id, false);
             }
             ExecResult::Continue
         }

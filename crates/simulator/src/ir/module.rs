@@ -17,12 +17,12 @@ use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
 use crate::ir::site_table::{SiteInfo, SiteKind, SiteTable};
 use crate::ir::variable::{
-    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, align_up_64, create_variable_meta,
-    ff_cacheline_pad_enabled, value_size, write_native_value,
+    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableMeta, align_up_64,
+    create_variable_meta, ff_cacheline_pad_enabled, value_size, write_native_value,
 };
 use crate::ir::{
-    CompiledBatchStmt, Event, ProtoDeclaration, ProtoStatement, ProtoStatementBlock,
-    ProtoStatements, Statement, VarId, VarPath,
+    CompiledBatchStmt, Event, ProtoDeclaration, ProtoExpression, ProtoIfStatement, ProtoStatement,
+    ProtoStatementBlock, ProtoStatements, Statement, VarId, VarPath,
 };
 use crate::simulator_error::SimulatorError;
 use crate::{HashMap, HashSet};
@@ -2885,6 +2885,7 @@ impl Conv<&air::Module> for ProtoModule {
             variable_meta: variable_meta.clone(),
             analyzer_context,
             ff_table: ff_table.clone(),
+            inst_reset_kind: collect_inst_reset_kinds(declarations),
             func_offset_index: None,
         };
         context.scope_contexts.push(scope);
@@ -3468,6 +3469,26 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
 
+        // Fuse the per-block `if_reset` dispatches of one reset net, so a
+        // module's clock event pays one test instead of one per `always_ff`.
+        {
+            let mut reset_offsets: crate::HashSet<VarOffset> = crate::HashSet::default();
+            collect_reset_offsets(&variable_meta, &mut reset_offsets);
+            for child in &all_child_modules {
+                collect_reset_offsets_recursive(child, &mut reset_offsets);
+            }
+            if !reset_offsets.is_empty() {
+                // Clock events only: a testbench `initial` may assign a
+                // reset-typed variable, making the condition mutable between
+                // two dispatches.  `always_ff` cannot (`invalid_clock_assignment`).
+                for (event, stmts) in all_event_statements.iter_mut() {
+                    if matches!(event, Event::Clock(_)) {
+                        merge_reset_dispatch(stmts, &reset_offsets);
+                    }
+                }
+            }
+        }
+
         // AOT-C event path: compile each event's FF-next + write-log to C,
         // keyed by Event.  `prepare_event` returns None on any uncovered stmt,
         // so the map holds only fully-emittable events; the rest stay on
@@ -3781,6 +3802,158 @@ fn collect_max_writes_one(stmt: &ProtoStatement) -> HashMap<u32, u32> {
         _ => {}
     }
     result
+}
+
+/// `(active low, synchronous)` per module-local net, from the instance ports
+/// it is wired to.  `None` records a wire whose ports disagree, which no
+/// single level satisfies.
+pub(crate) fn collect_inst_reset_kinds(
+    declarations: &[air::Declaration],
+) -> HashMap<air::VarId, Option<(bool, bool)>> {
+    let mut out: HashMap<air::VarId, Option<(bool, bool)>> = HashMap::default();
+    for decl in declarations {
+        let air::Declaration::Inst(inst) = decl else {
+            continue;
+        };
+        let air::Component::Module(child) = inst.component.as_ref() else {
+            continue;
+        };
+        for (port_id, expr) in inst
+            .inputs
+            .iter()
+            .filter_map(|x| x.single().map(|e| (x.id, e)))
+        {
+            let Some(kind) = child
+                .variables
+                .get(&port_id)
+                .and_then(|v| declared_reset_kind(&v.r#type.kind))
+            else {
+                continue;
+            };
+            let air::Expression::Term(factor) = expr else {
+                continue;
+            };
+            let air::Factor::Variable(net, idx, sel, _) = factor.as_ref() else {
+                continue;
+            };
+            if !idx.0.is_empty() || !sel.is_empty() {
+                continue;
+            }
+            record(&mut out, *net, kind);
+        }
+        // A reset the child DRIVES (a release synchroniser) decides it too.
+        for output in &inst.outputs {
+            let Some(kind) = child
+                .variables
+                .get(&output.id)
+                .and_then(|v| declared_reset_kind(&v.r#type.kind))
+            else {
+                continue;
+            };
+            for dst in &output.dst {
+                if dst.index.0.is_empty() && dst.select.is_empty() {
+                    record(&mut out, dst.id, kind);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn record(
+    out: &mut HashMap<air::VarId, Option<(bool, bool)>>,
+    net: air::VarId,
+    kind: (bool, bool),
+) {
+    out.entry(net)
+        .and_modify(|e| {
+            if *e != Some(kind) {
+                *e = None;
+            }
+        })
+        .or_insert(Some(kind));
+}
+
+/// `(active low, synchronous)` of a declared reset type.
+fn declared_reset_kind(kind: &air::TypeKind) -> Option<(bool, bool)> {
+    match kind {
+        air::TypeKind::ResetAsyncLow => Some((true, false)),
+        air::TypeKind::ResetAsyncHigh => Some((false, false)),
+        air::TypeKind::ResetSyncLow => Some((true, true)),
+        air::TypeKind::ResetSyncHigh => Some((false, true)),
+        _ => None,
+    }
+}
+
+/// Offsets of the reset-typed variables in one module's meta.
+fn collect_reset_offsets(
+    variable_meta: &HashMap<VarId, VariableMeta>,
+    out: &mut crate::HashSet<VarOffset>,
+) {
+    for meta in variable_meta.values() {
+        if !meta.r#type.is_reset() {
+            continue;
+        }
+        for elem in &meta.elements {
+            out.insert(elem.current);
+        }
+    }
+}
+
+fn collect_reset_offsets_recursive(m: &ModuleVariableMeta, out: &mut crate::HashSet<VarOffset>) {
+    collect_reset_offsets(&m.variable_meta, out);
+    for child in &m.children {
+        collect_reset_offsets_recursive(child, out);
+    }
+}
+
+/// The reset net an `if_reset` dispatch tests, or `None` for any other `if`.
+fn reset_dispatch_key(
+    x: &ProtoIfStatement,
+    reset_offsets: &crate::HashSet<VarOffset>,
+) -> Option<(VarOffset, Option<(usize, usize)>)> {
+    match x.cond.as_ref()? {
+        ProtoExpression::Variable {
+            var_offset,
+            select,
+            dynamic_select: None,
+            ..
+        } if reset_offsets.contains(var_offset) => Some((*var_offset, *select)),
+        _ => None,
+    }
+}
+
+/// Fuse adjacent `if_reset` dispatches on the same reset net.
+///
+/// Sound because the analyzer rejects an `always_ff` that writes a reset-typed
+/// variable, so nothing a clock event evaluates can change the condition
+/// between two dispatches.  Only ADJACENT ones fuse, so nothing is reordered.
+fn merge_reset_dispatch(
+    stmts: &mut Vec<ProtoStatement>,
+    reset_offsets: &crate::HashSet<VarOffset>,
+) {
+    let mut out: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
+    let mut last_key: Option<(VarOffset, Option<(usize, usize)>)> = None;
+    for stmt in stmts.drain(..) {
+        let key = match &stmt {
+            ProtoStatement::If(x) => reset_dispatch_key(x, reset_offsets),
+            _ => None,
+        };
+        if key.is_some()
+            && key == last_key
+            && let Some(ProtoStatement::If(prev)) = out.last_mut()
+        {
+            let ProtoStatement::If(cur) = stmt else {
+                unreachable!("key is Some only for If")
+            };
+            prev.true_side.extend(cur.true_side);
+            prev.false_side.extend(cur.false_side);
+            continue;
+        }
+        last_key = key;
+        out.push(stmt);
+    }
+    *stmts = out;
 }
 
 #[cfg(test)]
