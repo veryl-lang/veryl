@@ -13,8 +13,8 @@ use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, Factor, ForBound,
-    ForRange, ForStatement, FunctionCall, IfStatement, MemberSelectDomain, Module, Op, Statement,
-    SystemFunctionCall, SystemFunctionKind, TbMethod, VarIndex, VarPath, VarSelect,
+    ForRange, ForStatement, FunctionCall, IfStatement, Module, Op, Statement, SystemFunctionCall,
+    SystemFunctionKind, TbMethod, VarIndex, VarPath, VarSelect,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
@@ -374,7 +374,7 @@ impl ProcedureContext {
         self.ctx = Some(ctx);
     }
 
-    fn prepare_summary(&mut self, module: &Module, id: VarId, receiver_index: &VarIndex) {
+    fn prepare_summary(&mut self, module: &Module, id: VarId, index: Option<&[usize]>) {
         debug_assert!(self.summary_scratch);
         let ctx = self.ctx.as_mut().expect("summary context is available");
         debug_assert!(ctx.variables.is_empty());
@@ -383,7 +383,7 @@ impl ProcedureContext {
         let Some(function) = module.functions.get(&id) else {
             return;
         };
-        let Some(body) = function.get_function_for_index(receiver_index) else {
+        let Some(body) = function.get_function(index.unwrap_or_default()) else {
             return;
         };
         let mut ids = body.arg_map.values().copied().collect::<HashSet<_>>();
@@ -594,7 +594,6 @@ fn collect_summary_expression_variables(
 }
 
 fn collect_summary_call_variables(module: &Module, call: &FunctionCall, ids: &mut HashSet<VarId>) {
-    collect_summary_index_variables(module, &call.receiver_index, ids);
     for input in call.inputs.values() {
         collect_summary_expression_variables(module, input, ids);
     }
@@ -606,7 +605,7 @@ fn collect_summary_call_variables(module: &Module, call: &FunctionCall, ids: &mu
     if let Some(body) = module
         .functions
         .get(&call.id)
-        .and_then(|function| function.get_function_for_index(&call.receiver_index))
+        .and_then(|function| function.get_function(call.index.as_deref().unwrap_or_default()))
     {
         ids.extend(body.arg_map.values().copied());
         ids.extend(body.ret);
@@ -717,7 +716,7 @@ impl<'a> FunctionSummaries<'a> {
             .contexts
             .pop()
             .unwrap_or_else(|| ProcedureContext::new_summary(Rc::clone(&self.module_scope_ids)));
-        context.prepare_summary(self.module, call.id, &call.receiver_index);
+        context.prepare_summary(self.module, call.id, call.index.as_deref());
         // Function IR is immutable during dependency analysis. Move the one
         // module-wide map down the suspended call chain instead of cloning it
         // into every recursive scratch context, then restore it before the
@@ -1033,6 +1032,7 @@ struct ProcedureAnalysis<'a, 's> {
     next_branch: usize,
     status: AnalysisStatus,
     summaries: Option<&'s mut FunctionSummaries<'a>>,
+    causal_write_keys: Vec<NodeKey>,
 }
 
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
@@ -1060,6 +1060,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             next_branch: 0,
             status: AnalysisStatus::Complete,
             summaries: None,
+            causal_write_keys: Vec::new(),
         }
     }
 
@@ -1390,6 +1391,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         keys
     }
 
+    #[allow(dead_code)]
     fn statement_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
         let mut keys = HashSet::default();
         let mut visited = HashSet::default();
@@ -1399,6 +1401,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         keys
     }
 
+    #[allow(dead_code)]
     fn function_call_write_footprint(&mut self, call: &FunctionCall) -> Vec<NodeKey> {
         let mut keys = HashSet::default();
         let mut visited = HashSet::default();
@@ -1579,9 +1582,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         keys: &mut HashSet<NodeKey>,
         visited: &mut HashSet<FunctionSummaryKey>,
     ) {
-        for expression in &call.receiver_index.0 {
-            self.collect_expression_write_footprint(expression, keys, visited);
-        }
         for actual in call.inputs.values() {
             self.collect_expression_write_footprint(actual, keys, visited);
         }
@@ -1602,7 +1602,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .module
             .functions
             .get(&call.id)
-            .and_then(|function| function.get_function_for_index(&call.receiver_index))
+            .and_then(|function| function.get_function(call.index.as_deref().unwrap_or_default()))
             .map(|body| body.statements)
         else {
             visited.remove(&summary_key);
@@ -1610,14 +1610,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         };
         self.collect_statement_write_footprint(&statements, keys, visited);
         // The actual expressions and output destinations above remain
-        // call-site-specific and are always visited. A plain function body,
-        // or a receiver body selected by a concrete index, is identical for
-        // every later call in this footprint traversal; retaining its key
-        // avoids walking an N-statement body at N call sites. Dynamic receiver
-        // bodies embed the call-site selector and therefore remain uncached.
-        if call.index.is_none() && !call.receiver_index.0.is_empty() {
-            visited.remove(&summary_key);
-        }
+        // call-site-specific and are always visited. The selected function
+        // body is identical for every later call with the same summary key,
+        // so retaining it avoids walking an N-statement body at N call sites.
     }
 
     fn collect_system_call_write_footprint(
@@ -1656,16 +1651,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
+    #[allow(dead_code)]
     fn opaque_value(&mut self) -> VersionId {
         self.status = self.status.max(AnalysisStatus::Partial);
         self.ssa.definition(Vec::new())
     }
 
+    #[allow(dead_code)]
     fn opaque_kill_keys(&mut self, keys: Vec<NodeKey>, weak: bool) {
         self.status = self.status.max(AnalysisStatus::Partial);
         self.bind_opaque_keys(keys, weak);
     }
 
+    #[allow(dead_code)]
     fn bind_opaque_keys(&mut self, keys: Vec<NodeKey>, weak: bool) {
         for key in keys {
             let opaque = self.ssa.definition(Vec::new());
@@ -1673,10 +1671,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
+    #[allow(dead_code)]
     fn opaque_causal_boundary(&mut self) {
         self.opaque_kill_keys(self.causal_write_keys.clone(), false);
     }
 
+    #[allow(dead_code)]
     fn opaque_function_call_boundary(&mut self, call: &FunctionCall) {
         for input in call.inputs.values() {
             self.eval_expr(input);
