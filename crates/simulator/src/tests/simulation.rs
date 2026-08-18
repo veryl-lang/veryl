@@ -21819,3 +21819,118 @@ fn wide_ff_writes_that_do_not_fill_whole_words() {
         }
     }
 }
+
+/// A child module whose comb chain is long enough to clear the cone-gate
+/// thresholds, plus a Rust reference for its output.  Every temp but the last
+/// two has two readers, so single-reader inlining cannot collapse the chain
+/// into one statement and shrink the cone below `MIN_CONE_STMTS`.
+fn cone_gate_chain_design(n: usize) -> (String, impl Fn(u64) -> u64) {
+    let decls: String = (0..n)
+        .map(|i| format!("        var t{i}: logic<16>;\n"))
+        .collect();
+    // One `assign` per link: a single `always_comb` holding the whole chain
+    // would lower to ONE statement and the cone would never clear its floor.
+    let mut chain =
+        String::from("        assign t0 = a + 16'd1;\n        assign t1 = a ^ 16'd3;\n");
+    for i in 2..n {
+        let op = if i.is_multiple_of(2) { "+" } else { "^" };
+        chain.push_str(&format!(
+            "        assign t{i} = t{} {op} t{};\n",
+            i - 2,
+            i - 1
+        ));
+    }
+    let code = format!(
+        r#"
+    module Top (
+        sel: input  logic<16>,
+        o:   output logic<16>,
+    ) {{
+        inst u: ConeSub (
+            a: sel,
+            y: o,
+        );
+    }}
+
+    module ConeSub (
+        a: input  logic<16>,
+        y: output logic<16>,
+    ) {{
+{decls}
+{chain}
+        assign y = t{} + t{};
+    }}
+    "#,
+        n - 1,
+        n - 2
+    );
+    let expect = move |a: u64| -> u64 {
+        let m = 0xffffu64;
+        let mut t = vec![0u64; n];
+        t[0] = (a + 1) & m;
+        t[1] = (a ^ 3) & m;
+        for i in 2..n {
+            t[i] = if i.is_multiple_of(2) {
+                (t[i - 2] + t[i - 1]) & m
+            } else {
+                t[i - 2] ^ t[i - 1]
+            };
+        }
+        (t[n - 1] + t[n - 2]) & m
+    };
+    (code, expect)
+}
+
+#[test]
+fn cone_gate_skips_only_when_the_result_is_unchanged() {
+    // Holding `sel` still lets the segment prime, converge and then skip;
+    // changing it must make the very next settle recompute.  The sweep
+    // alternates runs of repeats with changes and checks the output after
+    // EVERY step, so a skip that outruns its inputs shows up immediately.
+    let (code, expect) = cone_gate_chain_design(400);
+    let mut armed = 0;
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        // A 4-state JIT build reaches the pass with the whole comb already
+        // wrapped in one compiled block, which no cone can span; everywhere
+        // else the gate must arm, or the run below proves nothing.
+        let can_arm = !(config.use_4state && config.use_jit);
+        assert_eq!(
+            !ir.cone_segments.is_empty(),
+            can_arm,
+            "gate armed unexpectedly or not at all (config={config:?})"
+        );
+        armed += usize::from(can_arm);
+        let mut sim = Simulator::new(ir, None);
+        for (sel, repeats) in [(0u64, 4), (1, 1), (1, 6), (0xbeef, 3), (0, 1), (0xbeef, 2)] {
+            sim.set("sel", Value::new(sel, 16, false));
+            for rep in 0..repeats {
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("o").unwrap().payload_u64(),
+                    expect(sel),
+                    "sel={sel:#x} rep={rep} config={config:?}"
+                );
+            }
+        }
+        if config.use_4state {
+            // `Value::new_x` leaves the payload at zero and raises only the
+            // X/Z mask, so a compare set covering the value bytes alone sees
+            // no change here and skips a segment whose input just went X.
+            // Settle twice first: the chain only reaches its fixpoint on the
+            // second run, and a segment that has not converged never skips,
+            // which would hide what the flip below is meant to catch.
+            sim.set("sel", Value::new(0, 16, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert!(!sim.get("o").unwrap().is_xz(), "config={config:?}");
+            sim.set("sel", Value::new_x(16, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert!(
+                sim.get("o").unwrap().is_xz(),
+                "the X driven onto `sel` must reach `o` (config={config:?})"
+            );
+        }
+    }
+    assert!(armed >= 4, "too few configs exercised the gate: {armed}");
+}

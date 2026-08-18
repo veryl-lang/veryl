@@ -140,6 +140,11 @@ pub struct Ir {
     /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
     /// comb-dirty filter (`tb_dirty::TbDirtyFilter`).
     pub comb_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
+    /// Cone-gate segments over `comb_statements`; empty when ungated.
+    /// Runtime shadows live in `cone_gate_state`.
+    pub cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment>,
+    /// Lazily initialised per-segment shadows + auto-off counters.
+    pub cone_gate_state: std::cell::RefCell<Option<crate::ir::opt::cone_gate::ConeGateState>>,
     /// See `Module::fused_comb_offsets` (diagnostic; consumed by the
     /// dual-run checker to skip storage the fusion pass retired).
     pub fused_comb_offsets: Vec<isize>,
@@ -197,6 +202,8 @@ impl Ir {
             rtl_driven: module.rtl_driven,
             fused_comb_offsets: module.fused_comb_offsets,
             comb_touched_offsets: module.comb_touched_offsets,
+            cone_segments: module.cone_segments,
+            cone_gate_state: std::cell::RefCell::new(None),
             whole_comb_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
             const_cone_done: Default::default(),
@@ -571,13 +578,144 @@ impl Ir {
         #[cfg(feature = "profile")]
         let start = std::time::Instant::now();
 
-        for x in &self.comb_statements {
-            dispatch_stmt_fast(x, mask_cache);
+        if self.cone_segments.is_empty() {
+            for x in &self.comb_statements {
+                dispatch_stmt_fast(x, mask_cache);
+            }
+        } else {
+            self.eval_comb_cone_gated(mask_cache);
         }
 
         #[cfg(feature = "profile")]
         {
             profile.eval_comb_full_ns += start.elapsed().as_nanos() as u64;
+        }
+    }
+
+    /// Settle pass with cone-gate segments: at each gated range, one compare
+    /// of its external inputs against the shadow of its last run decides
+    /// whether the whole range can be skipped (its outputs still hold the
+    /// fixpoint of those same inputs).  See `opt::cone_gate`.
+    fn eval_comb_cone_gated(&self, mask_cache: &mut MaskCache) {
+        // `VERYL_CONE_GATE_CHECK=1`: run every would-be-skipped segment
+        // anyway and panic on the first output byte the skip would have got
+        // wrong.  Debug instrument, quadratic in buffer size.
+        static CHECK: OnceLock<bool> = OnceLock::new();
+        let check = *CHECK.get_or_init(|| env::var("VERYL_CONE_GATE_CHECK").as_deref() == Ok("1"));
+        let mut slot = self.cone_gate_state.borrow_mut();
+        let state = slot.get_or_insert_with(|| {
+            crate::ir::opt::cone_gate::ConeGateState::new(self.cone_segments.len())
+        });
+        // `VERYL_CONE_GATE_DIAG=1`: periodic segment-dispatch statistics.
+        static DIAG: OnceLock<bool> = OnceLock::new();
+        let diag = *DIAG.get_or_init(|| env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1"));
+        if diag {
+            let total = state.skipped + state.ran;
+            if total >= state.next_report {
+                state.next_report = total + (1 << 18);
+                eprintln!(
+                    "[cone_gate] segment dispatches: skipped {:.1}% ({} of {})",
+                    100.0 * state.skipped as f64 / total as f64,
+                    state.skipped,
+                    total,
+                );
+                // Every 8th report, the per-segment table.
+                if total >= (1 << 21) && (total >> 18).is_multiple_of(8) {
+                    for (si, &(sk, rn)) in state.per_seg.iter().enumerate() {
+                        if let Some(seg) = self.cone_segments.get(si) {
+                            eprintln!(
+                                "[cone_gate]   seg{si} [{}..{}) sk={sk} rn={rn} ({:.1}%) {}",
+                                seg.lo,
+                                seg.hi,
+                                100.0 * sk as f64 / (sk + rn).max(1) as f64,
+                                seg.cone,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let n = self.comb_statements.len();
+        let mut i = 0usize;
+        let mut si = 0usize;
+        while i < n {
+            if let Some(seg) = self.cone_segments.get(si)
+                && seg.lo == i
+            {
+                if state.check_clean(si, seg, &self.ff_values, &self.comb_values) {
+                    if check {
+                        // Oracle: a real run starts from the PRE-replay
+                        // state (its inputs just compared clean), so run
+                        // from that state and require the result to match
+                        // what skip+replay produced.  Re-running on the
+                        // post-replay buffer instead would feed post-run
+                        // values into read-before-write chains and flag
+                        // sound skips spuriously.  Diff only the FINAL
+                        // state: mid-segment transients (an init store
+                        // whose conditional companion overwrites it later
+                        // in the segment) are not errors.
+                        let pre = self.comb_values.to_vec();
+                        if !seg.replay.is_empty() {
+                            // SAFETY: the comb buffer outlives the settle
+                            // and the spans were bounds-checked at plan
+                            // time.
+                            unsafe {
+                                state.replay(si, seg, self.comb_values.as_ptr() as *mut u8);
+                            }
+                        }
+                        let before = self.comb_values.to_vec();
+                        // SAFETY: same buffer, same length.
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                pre.as_ptr(),
+                                self.comb_values.as_ptr() as *mut u8,
+                                pre.len(),
+                            );
+                        }
+                        for x in &self.comb_statements[i..seg.hi] {
+                            dispatch_stmt_fast(x, mask_cache);
+                        }
+                        for (o, (a, b)) in before.iter().zip(self.comb_values.iter()).enumerate() {
+                            if a != b {
+                                panic!(
+                                    "[cone_gate] WRONG SKIP seg {si} [{}..{}) {}: comb {:#x} \
+                                     {:#04x} -> {:#04x}\n  compare={:x?}\n  compare_pre={:x?}\n  \
+                                     replay={:x?}\n  backedge={:x?}",
+                                    seg.lo,
+                                    seg.hi,
+                                    seg.cone,
+                                    o,
+                                    a,
+                                    b,
+                                    seg.compare,
+                                    seg.compare_pre,
+                                    seg.replay,
+                                    seg.backedge,
+                                );
+                            }
+                        }
+                    } else if !seg.replay.is_empty() {
+                        // SAFETY: the comb buffer outlives the settle and
+                        // the spans were bounds-checked at plan time.
+                        unsafe {
+                            state.replay(si, seg, self.comb_values.as_ptr() as *mut u8);
+                        }
+                    }
+                    i = seg.hi;
+                    si += 1;
+                    continue;
+                }
+                state.before_run(si, seg, &self.comb_values);
+                for x in &self.comb_statements[i..seg.hi] {
+                    dispatch_stmt_fast(x, mask_cache);
+                }
+                state.refresh(si, seg, &self.ff_values, &self.comb_values);
+                i = seg.hi;
+                si += 1;
+                continue;
+            }
+            dispatch_stmt_fast(&self.comb_statements[i], mask_cache);
+            i += 1;
         }
     }
 

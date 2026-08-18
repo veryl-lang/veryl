@@ -63,6 +63,10 @@ pub struct CombPipeline {
     /// match implies the same layout, so the same reservation reproduces it
     /// exactly (the instance-reuse path does the same with `comb_size`).
     pub vsplit_temp_bytes: usize,
+    /// Cone-gate segments: block ranges refer to
+    /// `comb_statements` and compare ranges are FINAL (post-relayout) comb
+    /// offsets, so a cache hit reuses them verbatim.  Empty when ungated.
+    pub cone_segments: Arc<Vec<crate::ir::opt::cone_gate::ConeSegment>>,
 }
 
 enum Slot {

@@ -6,6 +6,7 @@
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod comb_fusion;
+pub(crate) mod cone_gate;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dead_var_dce;
 #[cfg(not(target_family = "wasm"))]
