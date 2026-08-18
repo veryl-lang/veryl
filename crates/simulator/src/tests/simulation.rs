@@ -21621,3 +21621,201 @@ fn decoder_chain_compressed_to_a_selector_table() {
         }
     }
 }
+
+/// `Config::all()` plus a validating config, which needs `disable_ff_opt`:
+/// it compares committed FF bytes, so the registers have to stay registers.
+fn wide_ff_event_configs() -> Vec<Config> {
+    let mut configs = Config::all();
+    if crate::backend::aot_c::cc_available() {
+        configs.push(Config {
+            disable_ff_opt: true,
+            ..aot_native_validate_config()
+        });
+    }
+    configs
+}
+
+#[test]
+fn wide_ff_word_aligned_slice_and_element_writes() {
+    // Both writes reduce to a full-width write at a shifted offset, so the
+    // risk is a wrong offset silently clobbering a neighbour — hence the
+    // read-back of every element once all of them are written.  The index is
+    // one bit wider than the element count to drive the clamp.
+    let code = r#"
+    module Top (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        i_idx: input  logic<3>,
+        i_d:   input  logic<128>,
+        i_e:   input  logic<128>,
+        o_hi:  output logic<128>,
+        o_lo:  output logic<128>,
+        o_el:  output logic<128>,
+    ) {
+        var q: logic<256>;
+        var r: logic<4, 128>; // 4 x 128-bit elements
+        always_ff {
+            if_reset {
+                q = '0;
+                r = '0;
+            } else {
+                q[255:128] = i_d;
+                q[127:0]   = i_e;
+                r[i_idx]   = i_d;
+            }
+        }
+        assign o_hi = q[255:128];
+        assign o_lo = q[127:0];
+        assign o_el = r[i_idx];
+    }
+    "#;
+
+    let elem = |i: u64| -> u128 { 0x1111_2222_3333_4444_5555_6666_7777_0000u128 + i as u128 };
+    let lo_val = |i: u64| -> u128 { 0x0102_0304_0506_0708_090A_0B0C_0D0E_0F10u128 + i as u128 };
+    // An out-of-range index clamps to the last element.
+    let mut expected = [0u128; 4];
+    for i in 0..8u64 {
+        expected[i.min(3) as usize] = elem(i);
+    }
+
+    for config in wide_ff_event_configs() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_idx", Value::new(0, 3, false));
+        sim.set("i_d", Value::from_u128(0, 0, 128, false));
+        sim.set("i_e", Value::from_u128(0, 0, 128, false));
+        sim.step_reset(&clk, &rst);
+
+        for i in 0..8u64 {
+            sim.set("i_idx", Value::new(i, 3, false));
+            sim.set("i_d", Value::from_u128(elem(i), 0, 128, false));
+            sim.set("i_e", Value::from_u128(lo_val(i), 0, 128, false));
+            sim.step(&clk);
+            for (name, want) in [("o_hi", elem(i)), ("o_lo", lo_val(i)), ("o_el", elem(i))] {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::from_u128(want, 0, 128, false),
+                    "{name} i={i} config={config:?}"
+                );
+            }
+        }
+        for (k, &want) in expected.iter().enumerate() {
+            sim.set("i_idx", Value::new(k as u64, 3, false));
+            assert_eq!(
+                sim.get("o_el").unwrap(),
+                Value::from_u128(want, 0, 128, false),
+                "o_el element {k} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_ff_writes_that_do_not_fill_whole_words() {
+    // The same two shapes, but touching a range that is not a whole number
+    // of words: each must keep taking the read-modify-write path, since the
+    // aligned one would round the write up to whole words and spill into the
+    // neighbouring bits.  Each lives in its own module — one uncovered
+    // statement takes the whole module off the AOT event path, which would
+    // mask the other's condition.
+    let cases = [
+        (
+            "unaligned slice",
+            r#"
+    module Top (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        i_idx: input  logic<3>,
+        i_d:   input  logic<128>,
+        i_e:   input  logic<128>,
+        o_a:   output logic<104>,
+        o_b:   output logic<96>,
+    ) {
+        var q: logic<256>;
+        var s: logic<200>;
+        always_ff {
+            if_reset {
+                q = '0;
+                s = '0;
+            } else {
+                q[255:128] = i_d;
+                q[127:0]   = i_e;
+                s[199:96]  = i_d[103:0];
+                s[95:0]    = i_e[95:0];
+            }
+        }
+        assign o_a = s[199:96];
+        assign o_b = s[95:0];
+    }
+    "#,
+        ),
+        (
+            "sub-word elements",
+            r#"
+    module Top (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        i_idx: input  logic<3>,
+        i_d:   input  logic<128>,
+        i_e:   input  logic<128>,
+        o_a:   output logic<72>,
+        o_b:   output logic<96>,
+    ) {
+        var q: logic<256>;
+        var t: logic<4, 72>;
+        var u: logic<96>;
+        always_ff {
+            if_reset {
+                q = '0;
+                t = '0;
+                u = '0;
+            } else {
+                q[255:128] = i_d;
+                q[127:0]   = i_e;
+                t[i_idx]   = i_d[71:0];
+                u          = i_e[95:0];
+            }
+        }
+        assign o_a = t[i_idx];
+        assign o_b = u;
+    }
+    "#,
+        ),
+    ];
+
+    let elem = |i: u64| -> u128 { 0x1111_2222_3333_4444_5555_6666_7777_0000u128 + i as u128 };
+    let lo_val = |i: u64| -> u128 { 0x0102_0304_0506_0708_090A_0B0C_0D0E_0F10u128 + i as u128 };
+
+    for (what, code) in cases {
+        for config in wide_ff_event_configs() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("i_clk").unwrap();
+            let rst = sim.get_reset("i_rst").unwrap();
+            let wa = if what == "unaligned slice" { 104 } else { 72 };
+            sim.set("i_idx", Value::new(0, 3, false));
+            sim.set("i_d", Value::from_u128(0, 0, 128, false));
+            sim.set("i_e", Value::from_u128(0, 0, 128, false));
+            sim.step_reset(&clk, &rst);
+
+            for i in 0..4u64 {
+                sim.set("i_idx", Value::new(i, 3, false));
+                sim.set("i_d", Value::from_u128(elem(i), 0, 128, false));
+                sim.set("i_e", Value::from_u128(lo_val(i), 0, 128, false));
+                sim.step(&clk);
+                assert_eq!(
+                    sim.get("o_a").unwrap(),
+                    Value::from_u128(elem(i) & ((1u128 << wa) - 1), 0, wa, false),
+                    "{what} o_a i={i} config={config:?}"
+                );
+                assert_eq!(
+                    sim.get("o_b").unwrap(),
+                    Value::from_u128(lo_val(i) & ((1u128 << 96) - 1), 0, 96, false),
+                    "{what} o_b i={i} config={config:?}"
+                );
+            }
+        }
+    }
+}
