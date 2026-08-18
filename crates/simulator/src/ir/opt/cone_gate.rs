@@ -305,10 +305,10 @@ impl ConeGateState {
     }
 }
 
-/// Opt-in via `VERYL_CONE_GATE=1` until the default flip.
+/// Default-on; `VERYL_CONE_GATE=0` opts out.
 pub fn enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("VERYL_CONE_GATE").as_deref() == Ok("1"))
+    *ON.get_or_init(|| std::env::var("VERYL_CONE_GATE").as_deref() != Ok("0"))
 }
 
 pub(crate) fn diag() -> bool {
