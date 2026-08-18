@@ -16,6 +16,8 @@ use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
 use crate::ir::site_table::{SiteInfo, SiteKind, SiteTable};
+#[cfg(not(target_family = "wasm"))]
+use crate::ir::statement::CompiledBlockStatement;
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableMeta, align_up_64,
     create_variable_meta, ff_cacheline_pad_enabled, value_size, write_native_value,
@@ -535,6 +537,178 @@ fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements
         return ProtoStatements(blocks);
     }
     build_chunked_via_registry(context, proto, /* contains_compiled_block= */ false)
+}
+
+/// Offsets a testbench-body chunk may write: those of the testbench's own
+/// variables that the design's comb does not read.  A comb-touched element
+/// disqualifies its whole variable, which is the granularity `tb_dirty`'s
+/// spans use; this test has to be at least as strict as that filter, since
+/// the filter only gets to judge the chunk once it exists.
+#[cfg(not(target_family = "wasm"))]
+fn tb_private_offsets(
+    variable_meta: &HashMap<VarId, VariableMeta>,
+    comb_touched: &HashSet<VarOffset>,
+) -> HashSet<VarOffset> {
+    let mut private = HashSet::default();
+    for meta in variable_meta.values() {
+        let offsets: Vec<VarOffset> = meta
+            .elements
+            .iter()
+            .flat_map(|e| {
+                let next = e.is_ff().then_some(VarOffset::Ff(e.next_offset));
+                std::iter::once(e.current).chain(next)
+            })
+            .collect();
+        if !offsets.iter().any(|o| comb_touched.contains(o)) {
+            private.extend(offsets);
+        }
+    }
+    private
+}
+
+/// A statement a testbench-body chunk may contain: buildable by the chunk
+/// backends, writes comb storage only (an FF write would push the write log,
+/// whose pointer testbench statements do not carry), and free of control the
+/// testbench runner must interpret (`$tb` method calls advance simulation,
+/// system calls buffer output, `break` exits the testbench loop).
+///
+/// It must also write nothing the design's comb reads.  The runner settles
+/// comb before EVERY testbench statement and a chunk collapses those into one
+/// settle ahead of the run, so a write the design can see would leave a later
+/// statement in the same run reading a stale comb value.
+#[cfg(not(target_family = "wasm"))]
+fn tb_chunkable(s: &ProtoStatement, private: &HashSet<VarOffset>) -> bool {
+    fn pure(s: &ProtoStatement) -> bool {
+        match s {
+            ProtoStatement::Assign(a) => !a.dst.is_ff(),
+            ProtoStatement::AssignDynamic(a) => !a.dst_base.is_ff(),
+            ProtoStatement::If(x) => x.true_side.iter().all(pure) && x.false_side.iter().all(pure),
+            ProtoStatement::Case(c) => {
+                c.arms.iter().all(|a| a.body.iter().all(pure)) && c.default.iter().all(pure)
+            }
+            ProtoStatement::For(f) => !f.var_offset.is_ff() && f.body.iter().all(pure),
+            ProtoStatement::SequentialBlock(b) => b.iter().all(pure),
+            _ => false,
+        }
+    }
+    if !pure(s) || !s.can_build_binary() {
+        return false;
+    }
+    let (mut ins, mut outs) = (Vec::new(), Vec::new());
+    s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+    outs.iter().all(|o| private.contains(o))
+}
+
+/// Testbench-body pre-chunking (`Event::Initial` only).  A `#[test]` module's
+/// initial block is a control skeleton — a cycle loop around `$tb` clock
+/// calls — whose bodies the testbench runner walks statement-by-statement
+/// through the interpreter EVERY cycle.  The skeleton cannot compile, but
+/// maximal runs of plain statements inside its `for`/`if` bodies can: each
+/// run becomes one `CompiledBlock` (executed as a single native dispatch),
+/// with its write set recorded so `tb_dirty` can still classify it
+/// comb-clean.  Non-chunkable control statements keep their shape and are
+/// descended into.
+#[cfg(not(target_family = "wasm"))]
+fn precompile_tb_bodies(
+    context: &mut Context,
+    stmts: Vec<ProtoStatement>,
+    private: &HashSet<VarOffset>,
+) -> Vec<ProtoStatement> {
+    fn descend(
+        context: &mut Context,
+        s: ProtoStatement,
+        private: &HashSet<VarOffset>,
+    ) -> ProtoStatement {
+        match s {
+            ProtoStatement::For(mut f) => {
+                f.body = walk(context, std::mem::take(&mut f.body), private);
+                ProtoStatement::For(f)
+            }
+            ProtoStatement::If(mut x) => {
+                x.true_side = walk(context, std::mem::take(&mut x.true_side), private);
+                x.false_side = walk(context, std::mem::take(&mut x.false_side), private);
+                ProtoStatement::If(x)
+            }
+            ProtoStatement::Case(mut c) => {
+                for arm in &mut c.arms {
+                    arm.body = walk(context, std::mem::take(&mut arm.body), private);
+                }
+                c.default = walk(context, std::mem::take(&mut c.default), private);
+                ProtoStatement::Case(c)
+            }
+            ProtoStatement::SequentialBlock(b) => {
+                ProtoStatement::SequentialBlock(walk(context, b, private))
+            }
+            other => other,
+        }
+    }
+    fn flush(context: &mut Context, run: &mut Vec<ProtoStatement>, out: &mut Vec<ProtoStatement>) {
+        if run.is_empty() {
+            return;
+        }
+        // A lone plain assign interprets about as fast as it dispatches.
+        if run.len() == 1 && matches!(run[0], ProtoStatement::Assign(_)) {
+            out.append(run);
+            return;
+        }
+        let originals = std::mem::take(run);
+        let (mut inputs, mut outputs) = (Vec::new(), Vec::new());
+        for s in &originals {
+            s.gather_variable_offsets_expanded(&mut inputs, &mut outputs);
+        }
+        for v in [&mut inputs, &mut outputs] {
+            v.sort_unstable_by_key(|o: &VarOffset| (o.is_ff(), o.raw()));
+            v.dedup();
+        }
+        // A dynamic write into a large array expands to one output per
+        // element; such runs are not worth a chunk's bookkeeping.
+        if outputs.len() > 4096 {
+            out.extend(originals);
+            return;
+        }
+        let blocks = build_chunked_via_registry(context, originals.clone(), false);
+        for block in blocks.0 {
+            match block {
+                ProtoStatementBlock::Compiled(artifact) => {
+                    out.push(ProtoStatement::CompiledBlock(CompiledBlockStatement {
+                        artifact,
+                        ff_delta_bytes: 0,
+                        comb_delta_bytes: 0,
+                        input_offsets: inputs.clone(),
+                        output_offsets: outputs.clone(),
+                        ff_canonical_offsets: Vec::new(),
+                        stmt_deps: Vec::new(),
+                        original_stmts: originals.clone(),
+                    }));
+                }
+                ProtoStatementBlock::Interpreted(stmts) => out.extend(stmts),
+            }
+        }
+    }
+    fn walk(
+        context: &mut Context,
+        body: Vec<ProtoStatement>,
+        private: &HashSet<VarOffset>,
+    ) -> Vec<ProtoStatement> {
+        let mut out = Vec::new();
+        let mut run: Vec<ProtoStatement> = Vec::new();
+        for s in body {
+            if tb_chunkable(&s, private) {
+                run.push(s);
+            } else {
+                flush(context, &mut run, &mut out);
+                out.push(descend(context, s, private));
+            }
+        }
+        flush(context, &mut run, &mut out);
+        out
+    }
+    // Top level stays with `try_jit` (its runs already chunk); only the
+    // bodies of the interpreted control skeleton need this pass.
+    stmts
+        .into_iter()
+        .map(|s| descend(context, s, private))
+        .collect()
 }
 
 /// Unified-comb JIT path: nested CompiledBlocks may mutate comb storage
@@ -3557,9 +3731,22 @@ impl Conv<&air::Module> for ProtoModule {
         // NBA semantics: reads come from current, writes go to next, then
         // ff_commit copies next → current. Source order must be preserved
         // for sequential writes to the same variable.
+        let comb_touched_offsets = Arc::new(collect_comb_touched_offsets(&pre_jit_stmts));
+        // No chunk backend on wasm, so the pre-chunking below would be an
+        // identity transform.
+        #[cfg(not(target_family = "wasm"))]
+        let tb_private = tb_private_offsets(&variable_meta, &comb_touched_offsets);
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
-            .map(|(event, stmts)| (event, try_jit(context, stmts)))
+            .map(|(event, stmts)| {
+                #[cfg(not(target_family = "wasm"))]
+                let stmts = if event == Event::Initial {
+                    precompile_tb_bodies(context, stmts, &tb_private)
+                } else {
+                    stmts
+                };
+                (event, try_jit(context, stmts))
+            })
             .collect();
 
         // Collect derived clocks + input-clock offsets BEFORE
@@ -3751,7 +3938,7 @@ impl Conv<&air::Module> for ProtoModule {
             external_components: all_external_components,
             rtl_driven,
             fused_comb_offsets: cached.fused_offsets.clone(),
-            comb_touched_offsets: Arc::new(collect_comb_touched_offsets(&pre_jit_stmts)),
+            comb_touched_offsets,
         })
     }
 }
