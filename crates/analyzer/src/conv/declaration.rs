@@ -1597,6 +1597,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
             ir::Component::Module(component) => {
                 let mut inputs = vec![];
                 let mut outputs = vec![];
+                let mut interface_bindings = vec![];
                 if let Some(x) = &value.component_instantiation_opt2
                     && let Some(x) = &x.inst_port.inst_port_opt
                 {
@@ -1620,10 +1621,32 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                                 continue;
                             };
 
+                            if let Some(actual) = connects.interface_binding {
+                                for (child, child_variable) in &component.interface_members {
+                                    if !child_variable.path.starts_with(&path.0) {
+                                        continue;
+                                    }
+                                    let mut parent_path = actual.0.clone();
+                                    parent_path.append(&child_variable.path.0[path.0.len()..]);
+                                    let Some((parent, comptime)) = context.find_path(&parent_path)
+                                    else {
+                                        continue;
+                                    };
+                                    let (array_select, width_select) =
+                                        actual.1.clone().split(comptime.r#type.array.dims());
+                                    interface_bindings.push(ir::InstInterfaceBinding {
+                                        child: *child,
+                                        parent,
+                                        index: array_select.to_index(),
+                                        select: width_select,
+                                    });
+                                }
+                            }
+
                             let dst_comptime =
                                 Comptime::from_type(dst_type.clone(), *clock_domain, token);
 
-                            for (path, dst, expr) in connects {
+                            for (path, dst, expr) in connects.connects {
                                 if let Some(id) = component.ports.get(&path)
                                     && let Some(variable) = component.variables.get(id)
                                 {
@@ -1678,6 +1701,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                     hierarchy: context.current_hierarchy().to_vec(),
                     inputs,
                     outputs,
+                    interface_bindings,
                     component: component_arc,
                     token,
                 })))
@@ -1797,6 +1821,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                     hierarchy: context.current_hierarchy().to_vec(),
                     inputs: vec![],
                     outputs: vec![],
+                    interface_bindings: vec![],
                     component,
                     token,
                 })))
