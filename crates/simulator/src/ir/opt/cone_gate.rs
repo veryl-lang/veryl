@@ -36,6 +36,34 @@ use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::{ModuleVariableMeta, VarOffset, VariableMeta, value_size};
 use veryl_analyzer::ir::VarId;
 
+/// FF-buffer ownership, held per uniformly strided RUN of elements rather
+/// than per element: memory arrays make the element count grow with the
+/// modelled depth while the array count does not.
+pub struct FfOwner {
+    /// `(start, stride, count, bytes)`, sorted by `start` and disjoint.  The
+    /// run covers `[start, start + count * stride)`, of which each element
+    /// occupies the first `bytes`.
+    runs: Vec<(usize, usize, usize, usize)>,
+}
+
+impl FfOwner {
+    /// The element span covering `x`.  `None` also when `x` lands in the
+    /// padding a stride wider than the element leaves behind each one.
+    fn span(&self, x: usize) -> Option<(usize, usize)> {
+        let i = self
+            .runs
+            .partition_point(|&(s, ..)| s <= x)
+            .checked_sub(1)?;
+        let (s, stride, count, bytes) = self.runs[i];
+        let k = (x - s) / stride;
+        if k >= count {
+            return None;
+        }
+        let start = s + k * stride;
+        (x < start + bytes).then_some((start, start + bytes))
+    }
+}
+
 /// Node tables of the module-instance tree plus storage-ownership intervals,
 /// prepared by the caller (`ProtoModule::conv`) from `ModuleVariableMeta`.
 pub struct ConeGateInputs {
@@ -45,8 +73,7 @@ pub struct ConeGateInputs {
     pub node_path: Vec<String>,
     /// Sorted disjoint-start `(start, end, node)` comb-buffer intervals.
     pub comb_owner: Vec<(usize, usize, u32)>,
-    /// Sorted disjoint-start `(start, end, node)` FF-buffer intervals.
-    pub ff_owner: Vec<(usize, usize, u32)>,
+    pub ff_owner: FfOwner,
     /// Merged comb byte ranges any event statement can write.
     pub event_written_comb: Vec<(usize, usize)>,
 }
@@ -329,10 +356,9 @@ const MIN_CONE_STMTS: usize = 300;
 const CLUSTER_MIN_STMTS: usize = 5_000;
 
 /// Sort ownership intervals into the exact `sort_unstable()` (lexicographic
-/// tuple) order.  The vectors hold one entry per variable ELEMENT — tens of
-/// millions on RAM-heavy designs — where a comparison sort's N·log N was a
-/// top elaboration cost.  LSD radix over the `start` field (stable byte
-/// passes, high passes skipped when every key shares that byte) is O(N);
+/// tuple) order.  One entry per comb ELEMENT is enough for a comparison
+/// sort's N·log N to show up in elaboration.  LSD radix over the `start` field (stable
+/// byte passes, high passes skipped when every key shares that byte) is O(N);
 /// only runs of EQUAL starts (storage aliases, a handful) then need their
 /// `(end, id)` tie broken by a comparison sort to make the order exact and
 /// deterministic regardless of the source hash-map iteration order.
@@ -391,6 +417,32 @@ fn radix_sort_intervals(v: &mut [(usize, usize, u32)]) {
     }
 }
 
+/// Fold `(offset, bytes)` elements into maximal ascending, uniformly strided,
+/// equal-width runs, so an array laid out that way collapses to one entry.
+/// Anything that breaks the pattern just starts a new run, so the result
+/// covers every element exactly once whatever the layout.
+fn fold_ff_runs(elems: &[(usize, usize)], out: &mut Vec<(usize, usize, usize, usize)>) {
+    let mut i = 0;
+    while i < elems.len() {
+        let (start, bytes) = elems[i];
+        // Two elements decide the stride; a lone one strides by its own width
+        // so the run covers exactly it.
+        let stride = match elems.get(i + 1) {
+            Some(&(next, nb)) if nb == bytes && next > start => next - start,
+            _ => bytes,
+        };
+        let mut count = 1;
+        while let Some(&(off, nb)) = elems.get(i + count) {
+            if nb != bytes || off != start + count * stride {
+                break;
+            }
+            count += 1;
+        }
+        out.push((start, stride, count, bytes));
+        i += count;
+    }
+}
+
 /// Assemble the node tables from the pre-instantiation variable-meta tree.
 /// `event_written` holds every comb offset the event statements can write
 /// (element-expanded); the covering variable spans join each segment's
@@ -405,12 +457,15 @@ pub fn build_inputs(
     let mut node_parent: Vec<u32> = vec![u32::MAX];
     let mut node_path: Vec<String> = vec![top_name.to_string()];
     let mut comb_owner: Vec<(usize, usize, u32)> = Vec::new();
-    let mut ff_owner: Vec<(usize, usize, u32)> = Vec::new();
+    let mut ff_runs: Vec<(usize, usize, usize, usize)> = Vec::new();
+    let mut ff_elems: Vec<(usize, usize)> = Vec::new();
     let add_vars = |vars: &HashMap<VarId, VariableMeta>,
                     id: u32,
                     comb_owner: &mut Vec<(usize, usize, u32)>,
-                    ff_owner: &mut Vec<(usize, usize, u32)>| {
+                    ff_runs: &mut Vec<(usize, usize, usize, usize)>,
+                    ff_elems: &mut Vec<(usize, usize)>| {
         for vm in vars.values() {
+            ff_elems.clear();
             for el in &vm.elements {
                 let off = el.current.raw();
                 if off < 0 {
@@ -422,14 +477,15 @@ pub fn build_inputs(
                 // it.
                 let (off, nb) = (off as usize, value_size(el.native_bytes, use_4state));
                 if el.current.is_ff() {
-                    ff_owner.push((off, off + nb, id));
+                    ff_elems.push((off, nb));
                 } else {
                     comb_owner.push((off, off + nb, id));
                 }
             }
+            fold_ff_runs(ff_elems, ff_runs);
         }
     };
-    add_vars(top_vars, 0, &mut comb_owner, &mut ff_owner);
+    add_vars(top_vars, 0, &mut comb_owner, &mut ff_runs, &mut ff_elems);
     let mut stack: Vec<(u32, &ModuleVariableMeta)> = Vec::new();
     for c in children {
         stack.push((0, c));
@@ -438,13 +494,26 @@ pub fn build_inputs(
         let id = node_parent.len() as u32;
         node_parent.push(pid);
         node_path.push(format!("{}.{}", node_path[pid as usize], m.name));
-        add_vars(&m.variable_meta, id, &mut comb_owner, &mut ff_owner);
+        add_vars(
+            &m.variable_meta,
+            id,
+            &mut comb_owner,
+            &mut ff_runs,
+            &mut ff_elems,
+        );
         for c in &m.children {
             stack.push((id, c));
         }
     }
     radix_sort_intervals(&mut comb_owner);
-    radix_sort_intervals(&mut ff_owner);
+    ff_runs.sort_unstable();
+    ff_runs.dedup();
+    debug_assert!(
+        ff_runs
+            .windows(2)
+            .all(|w| w[0].0 + w[0].1 * w[0].2 <= w[1].0),
+        "FF runs overlap"
+    );
     let mut event_written_comb: Vec<(usize, usize)> = Vec::new();
     for &off in event_written {
         if off < 0 {
@@ -464,7 +533,7 @@ pub fn build_inputs(
         node_parent,
         node_path,
         comb_owner,
-        ff_owner,
+        ff_owner: FfOwner { runs: ff_runs },
         event_written_comb,
     }
 }
@@ -654,8 +723,8 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
                     Some((s0, e0, _)) => info.in_comb.push((s0, e0)),
                     None => info.unbounded = true,
                 },
-                VarOffset::Ff(x) if *x >= 0 => match span_in(&inputs.ff_owner, *x as usize) {
-                    Some((s0, e0, _)) => info.in_ff.push((s0, e0)),
+                VarOffset::Ff(x) if *x >= 0 => match inputs.ff_owner.span(*x as usize) {
+                    Some((s0, e0)) => info.in_ff.push((s0, e0)),
                     None => info.unbounded = true,
                 },
                 _ => info.unbounded = true,
@@ -1197,6 +1266,64 @@ mod tests {
             vec![(5, 10), (20, 25)]
         );
         assert_eq!(intersect_ranges(&[(0, 10)], &[(10, 20)]), vec![]);
+    }
+
+    #[test]
+    fn ff_runs_fold_only_what_keeps_the_pattern() {
+        let fold = |e: &[(usize, usize)]| {
+            let mut v = Vec::new();
+            fold_ff_runs(e, &mut v);
+            v
+        };
+        // A plain array: one run.
+        assert_eq!(
+            fold(&[(0, 8), (8, 8), (16, 8), (24, 8)]),
+            vec![(0, 8, 4, 8)]
+        );
+        // A gap breaks the stride, so the tail starts its own run.
+        assert_eq!(
+            fold(&[(0, 8), (8, 8), (64, 8), (72, 8)]),
+            vec![(0, 8, 2, 8), (64, 8, 2, 8)]
+        );
+        // So does a width change, and a lone element covers just itself.
+        assert_eq!(fold(&[(0, 8), (8, 4)]), vec![(0, 8, 1, 8), (8, 4, 1, 4)]);
+        // Unpacked FFs stride by twice the element, leaving padding behind
+        // each; the run must record the stride, not the width.
+        assert_eq!(fold(&[(0, 8), (16, 8), (32, 8)]), vec![(0, 16, 3, 8)]);
+        // A descending pair cannot be a run.
+        assert_eq!(fold(&[(16, 8), (0, 8)]), vec![(16, 8, 1, 8), (0, 8, 1, 8)]);
+        assert!(fold(&[]).is_empty());
+        // Every element is covered exactly once, whatever the shape.
+        let elems = [(0, 8), (8, 8), (24, 8), (32, 8), (33, 1)];
+        let covered: usize = fold(&elems).iter().map(|&(_, _, c, _)| c).sum();
+        assert_eq!(covered, elems.len());
+    }
+
+    #[test]
+    fn ff_owner_resolves_a_run_back_to_its_element() {
+        // One 4-element array of 8-byte elements, then a lone 16-byte one.
+        let o = FfOwner {
+            runs: vec![(64, 8, 4, 8), (128, 16, 1, 16)],
+        };
+        assert_eq!(o.span(64), Some((64, 72)));
+        assert_eq!(o.span(71), Some((64, 72)));
+        assert_eq!(o.span(72), Some((72, 80)));
+        assert_eq!(o.span(88), Some((88, 96)));
+        assert_eq!(o.span(128), Some((128, 144)));
+        // Past the last element of a run, and before the first run.
+        assert_eq!(o.span(96), None);
+        assert_eq!(o.span(63), None);
+        assert_eq!(o.span(144), None);
+        // Padding between elements belongs to none of them.
+        let padded = FfOwner {
+            runs: vec![(0, 16, 3, 8)],
+        };
+        assert_eq!(padded.span(0), Some((0, 8)));
+        assert_eq!(padded.span(7), Some((0, 8)));
+        assert_eq!(padded.span(8), None);
+        assert_eq!(padded.span(15), None);
+        assert_eq!(padded.span(16), Some((16, 24)));
+        assert_eq!(padded.span(47), None);
     }
 
     #[test]
