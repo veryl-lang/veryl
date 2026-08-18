@@ -239,7 +239,6 @@ fn comb_loop_external_interface_get_to_put_detects_same_receiver_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop follow-up: false negative; disjoint interface member writes require positional procedure SSA"]
 fn comb_loop_external_interface_disjoint_followup_write_preserves_same_bit_feedback() {
     assert_interface_function_comb_loop(
         r#"
