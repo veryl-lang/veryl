@@ -118,55 +118,78 @@ impl SpanTable {
             }
         };
 
+        // The touched set is sized by what the design's comb reads, the element
+        // count by how deep its memories are, so the per-variable verdict comes
+        // from a range query over the sorted set rather than a probe per
+        // element.
+        let (mut touched_ff, mut touched_comb) = (Vec::new(), Vec::new());
+        for o in ir.comb_touched_offsets.iter() {
+            match o {
+                VarOffset::Ff(x) if *x >= 0 => touched_ff.push(*x as usize),
+                VarOffset::Comb(x) if *x >= 0 => touched_comb.push(*x as usize),
+                _ => {}
+            }
+        }
+        touched_ff.sort_unstable();
+        touched_comb.sort_unstable();
+        let any_in = |set: &[usize], lo: usize, hi: usize| -> bool {
+            lo < hi && set.partition_point(|&x| x < lo) < set.partition_point(|&x| x < hi)
+        };
+
         let mut ff: Vec<Span> = Vec::new();
         let mut comb: Vec<Span> = Vec::new();
         let mut stack = vec![&ir.module_variables];
         while let Some(vars) = stack.pop() {
             for var in vars.variables.values() {
-                // Variable granularity: one element being read is taken to
-                // mean the whole variable is, which keeps a base+last array
-                // dependency (how a dynamic access is recorded) from leaving
-                // its middle elements looking untouched.
-                let touched = var
-                    .current_values
-                    .iter()
-                    .chain(var.next_values.iter())
-                    .any(|&ptr| {
-                        let p = ptr as usize;
-                        if (ff_base..ff_end).contains(&p) {
-                            ir.comb_touched_offsets
-                                .contains(&VarOffset::Ff((p - ff_base) as isize))
-                        } else if (comb_base..comb_end).contains(&p) {
-                            ir.comb_touched_offsets
-                                .contains(&VarOffset::Comb((p - comb_base) as isize))
-                        } else {
-                            false
-                        }
-                    });
                 // An unpacked array lays its elements out consecutively and
                 // shares one `touched` verdict, so the elements are appended
                 // as one run rather than one span each.  Any break in the run
                 // (a gap, or a jump back) just starts a new one, which the
-                // sort below puts back in order.
+                // sort below puts back in order.  Runs stop at the variable
+                // boundary; `disjoint_cover` rejoins them.
                 let len = stride(var.native_bytes);
+                let (ff_from, comb_from) = (ff.len(), comb.len());
+                // The variable's extent per buffer, for the range query.
+                let (mut ff_lo, mut ff_hi) = (usize::MAX, 0usize);
+                let (mut comb_lo, mut comb_hi) = (usize::MAX, 0usize);
                 for &ptr in var.current_values.iter().chain(var.next_values.iter()) {
                     let p = ptr as usize;
-                    let (spans, start) = if (ff_base..ff_end).contains(&p) {
-                        (&mut ff, p - ff_base)
+                    let (spans, from, start, lo, hi) = if (ff_base..ff_end).contains(&p) {
+                        (&mut ff, ff_from, p - ff_base, &mut ff_lo, &mut ff_hi)
                     } else if (comb_base..comb_end).contains(&p) {
-                        (&mut comb, p - comb_base)
+                        (
+                            &mut comb,
+                            comb_from,
+                            p - comb_base,
+                            &mut comb_lo,
+                            &mut comb_hi,
+                        )
                     } else {
                         continue;
                     };
-                    match spans.last_mut() {
-                        Some(run) if run.end == start && run.touched == touched => {
-                            run.end = start + len;
-                        }
+                    *lo = (*lo).min(start);
+                    *hi = (*hi).max(start + len);
+                    match spans[from..].last_mut() {
+                        Some(run) if run.end == start => run.end = start + len,
                         _ => spans.push(Span {
                             start,
                             end: start + len,
-                            touched,
+                            touched: false,
                         }),
+                    }
+                }
+                // Variable granularity: one element being read is taken to
+                // mean the whole variable is, which keeps a base+last array
+                // dependency (how a dynamic access is recorded) from leaving
+                // its middle elements looking untouched.  Reading the extent
+                // rather than the elements can only over-report (a foreign
+                // touched offset inside the extent), which costs reach, never
+                // soundness.
+                let touched =
+                    any_in(&touched_ff, ff_lo, ff_hi) || any_in(&touched_comb, comb_lo, comb_hi);
+                if touched {
+                    for s in ff[ff_from..].iter_mut().chain(comb[comb_from..].iter_mut()) {
+                        s.touched = true;
                     }
                 }
             }
@@ -231,6 +254,12 @@ fn disjoint_cover(mut spans: Vec<Span>) -> Vec<Span> {
             Some(prev) if s.start < prev.end => {
                 prev.end = prev.end.max(s.end);
                 prev.touched |= s.touched;
+            }
+            // Runs are cut at variable boundaries while building; rejoin the
+            // ones that abut and agree, so the table stays proportional to the
+            // storage layout rather than to the variable count.
+            Some(prev) if s.start == prev.end && prev.touched == s.touched => {
+                prev.end = s.end;
             }
             _ => out.push(s),
         }
@@ -358,6 +387,23 @@ mod tests {
 
     /// Adjacent spans describe different variables, so they keep their own
     /// verdicts — only a real overlap merges.
+    #[test]
+    fn adjacent_spans_that_agree_are_rejoined() {
+        // Abutting pieces of one storage region arrive separately and must
+        // come back out as one span.
+        let span = |start, end, touched| Span {
+            start,
+            end,
+            touched,
+        };
+        let cover = disjoint_cover(vec![span(8, 16, false), span(0, 8, false)]);
+        assert_eq!(cover.len(), 1);
+        assert_eq!((cover[0].start, cover[0].end), (0, 16));
+        // A gap still separates them.
+        let cover = disjoint_cover(vec![span(0, 8, true), span(16, 24, true)]);
+        assert_eq!(cover.len(), 2);
+    }
+
     #[test]
     fn adjacent_spans_keep_their_own_verdicts() {
         let cover = disjoint_cover(vec![
