@@ -461,7 +461,6 @@ fn comb_loop_instance_actual_function_side_effect_is_recorded() {
 }
 
 #[test]
-#[ignore = "comb-loop follow-up: false negative; multiple captured writes require constrained dependency import"]
 fn comb_loop_instance_actual_preserves_dependencies_between_captured_writes() {
     assert_comb_loop(
         "an instance actual preserves dependencies between captured writes",
