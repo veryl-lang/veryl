@@ -21524,3 +21524,100 @@ fn fused_wide_struct_write_const_wider_than_expr() {
         );
     }
 }
+
+#[test]
+fn decoder_chain_compressed_to_a_selector_table() {
+    // The chain becomes a table indexed by the selector, so every selector
+    // value is its own entry and the sweep below is exhaustive.  The four
+    // outputs cover the shapes the rewrite distinguishes: an index table
+    // over six values, a 1-bit and a 2-bit table holding values directly,
+    // and one with a non-constant arm.  The masked first arm overlaps later
+    // exact arms, which must keep winning.
+    let code = r#"
+    module Top (
+        sel:  input  logic<6>,
+        bit0: input  logic,
+        o4:   output logic<4>,
+        o1:   output logic,
+        o2:   output logic<2>,
+        ox:   output logic<4>,
+    ) {
+        always_comb {
+            o4 = 4'd0;
+            o1 = 1'b0;
+            o2 = 2'd0;
+            ox = 4'd0;
+            if (sel & 6'h30) == 6'h10 { o4 = 4'd5; o1 = 1'b1; o2 = 2'd2; ox = 4'd6; }
+            if sel == 6'd1  { o4 = 4'd1; o1 = 1'b1; o2 = 2'd1; ox = 4'd7; }
+            if sel == 6'd3  { o4 = 4'd2; o1 = 1'b1; o2 = 2'd2; ox = {3'b0, bit0}; }
+            if sel == 6'd5  { o4 = 4'd3; o1 = 1'b0; o2 = 2'd3; ox = 4'd7; }
+            if sel == 6'd8  { o4 = 4'd4; o1 = 1'b1; o2 = 2'd1; ox = 4'd9; }
+            if sel == 6'd13 { o4 = 4'd1; o1 = 1'b1; o2 = 2'd2; ox = 4'd9; }
+            if sel == 6'd21 { o4 = 4'd2; o1 = 1'b0; o2 = 2'd3; ox = {3'b0, bit0}; }
+            if sel == 6'd34 { o4 = 4'd3; o1 = 1'b1; o2 = 2'd1; ox = 4'd7; }
+            if sel == 6'd41 { o4 = 4'd4; o1 = 1'b1; o2 = 2'd2; ox = 4'd9; }
+            if sel == 6'd55 { o4 = 4'd1; o1 = 1'b0; o2 = 2'd3; ox = 4'd7; }
+            if sel == 6'd62 { o4 = 4'd2; o1 = 1'b1; o2 = 2'd1; ox = {3'b0, bit0}; }
+        }
+    }
+    "#;
+
+    // The reference: the same writes, in source order.
+    let expect = |sel: u64, bit0: u64| -> [u64; 4] {
+        let mut o = [0u64; 4];
+        if sel & 0x30 == 0x10 {
+            o = [5, 1, 2, 6];
+        }
+        if sel == 1 {
+            o = [1, 1, 1, 7];
+        }
+        if sel == 3 {
+            o = [2, 1, 2, bit0];
+        }
+        if sel == 5 {
+            o = [3, 0, 3, 7];
+        }
+        if sel == 8 {
+            o = [4, 1, 1, 9];
+        }
+        if sel == 13 {
+            o = [1, 1, 2, 9];
+        }
+        if sel == 21 {
+            o = [2, 0, 3, bit0];
+        }
+        if sel == 34 {
+            o = [3, 1, 1, 7];
+        }
+        if sel == 41 {
+            o = [4, 1, 2, 9];
+        }
+        if sel == 55 {
+            o = [1, 0, 3, 7];
+        }
+        if sel == 62 {
+            o = [2, 1, 1, bit0];
+        }
+        o
+    };
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for bit0 in 0..2u64 {
+            sim.set("bit0", Value::new(bit0, 1, false));
+            for sel in 0..64u64 {
+                sim.set("sel", Value::new(sel, 6, false));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                let want = expect(sel, bit0);
+                for (name, want) in ["o4", "o1", "o2", "ox"].iter().zip(want) {
+                    assert_eq!(
+                        sim.get(name).unwrap().payload_u64(),
+                        want,
+                        "{name} sel={sel} bit0={bit0} config={config:?}"
+                    );
+                }
+            }
+        }
+    }
+}
