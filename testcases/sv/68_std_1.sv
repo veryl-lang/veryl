@@ -61,17 +61,18 @@ module veryl_testcase_Module68C
         input var T     [N-1:0] data
     ) ;
         localparam int unsigned DEPTH = $clog2(N);
-        int unsigned         current_n;
-        logic        [N-1:0] current_s;
-        T            [N-1:0] current_d;
-        int unsigned         next_n   ;
-        logic        [N-1:0] next_s   ;
-        T            [N-1:0] next_d   ;
+        int unsigned         next_n;
+        logic        [N-1:0] next_s;
+        T            [N-1:0] next_d;
 
         next_n = N;
         next_s = sel;
         next_d = data;
         for (int _i = 0; _i < DEPTH; _i++) begin
+            int unsigned         current_n;
+            logic        [N-1:0] current_s;
+            T            [N-1:0] current_d;
+
             current_n = next_n;
             current_s = next_s;
             current_d = next_d;
@@ -103,10 +104,8 @@ module veryl_testcase_Module68C
         input var T     [N-1:0] data
     ) ;
         localparam int unsigned DEPTH = $clog2(N);
-        int unsigned         current_n;
-        T            [N-1:0] current_d;
-        int unsigned         next_n   ;
-        T            [N-1:0] next_d   ;
+        int unsigned         next_n;
+        T            [N-1:0] next_d;
 
         next_n = N;
         for (int i = 0; i < N; i++) begin
@@ -118,6 +117,9 @@ module veryl_testcase_Module68C
         end
 
         for (int _i = 0; _i < DEPTH; _i++) begin
+            int unsigned         current_n;
+            T            [N-1:0] current_d;
+
             current_n = next_n;
             current_d = next_d;
 
@@ -175,17 +177,18 @@ module veryl_testcase_Module68D
         input var logic [N-1:0] data
     ) ;
         localparam int unsigned DEPTH = $clog2(N);
-        int unsigned         current_n;
-        logic        [N-1:0] current_s;
-        logic        [N-1:0] current_d;
-        int unsigned         next_n   ;
-        logic        [N-1:0] next_s   ;
-        logic        [N-1:0] next_d   ;
+        int unsigned         next_n;
+        logic        [N-1:0] next_s;
+        logic        [N-1:0] next_d;
 
         next_n = N;
         next_s = sel;
         next_d = data;
         for (int _i = 0; _i < DEPTH; _i++) begin
+            int unsigned         current_n;
+            logic        [N-1:0] current_s;
+            logic        [N-1:0] current_d;
+
             current_n = next_n;
             current_s = next_s;
             current_d = next_d;
@@ -217,10 +220,8 @@ module veryl_testcase_Module68D
         input var logic [N-1:0] data
     ) ;
         localparam int unsigned DEPTH = $clog2(N);
-        int unsigned         current_n;
-        logic        [N-1:0] current_d;
-        int unsigned         next_n   ;
-        logic        [N-1:0] next_d   ;
+        int unsigned         next_n;
+        logic        [N-1:0] next_d;
 
         next_n = N;
         for (int i = 0; i < N; i++) begin
@@ -232,6 +233,9 @@ module veryl_testcase_Module68D
         end
 
         for (int _i = 0; _i < DEPTH; _i++) begin
+            int unsigned         current_n;
+            logic        [N-1:0] current_d;
+
             current_n = next_n;
             current_d = next_d;
 

@@ -10,7 +10,7 @@ use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::statement::{
-    ProtoAssignStatement, const_array_element_exprs, msb_first_window, size_fill_literal_rhs,
+    ProtoAssignStatement, const_array_element_exprs, msb_first_window, size_literal_rhs,
 };
 use crate::ir::variable::{
     ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
@@ -1227,7 +1227,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
                 for (child_element, expr) in child_meta.elements.iter().zip(&input.exprs) {
                     let mut proto_expr: ProtoExpression = Conv::conv(context, expr)?;
-                    size_fill_literal_rhs(&mut proto_expr, None, None, child_meta.width);
+                    size_literal_rhs(&mut proto_expr, None, None, child_meta.width);
                     all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                         dst: child_element.current,
                         dst_width: child_meta.width,
@@ -1318,9 +1318,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
 
             let mut proto_expr: ProtoExpression = Conv::conv(context, input_expr)?;
-            // Size an unsized all-bit literal (`'1` etc.) to the port
-            // width — there is no assignment statement here to do it.
-            size_fill_literal_rhs(&mut proto_expr, None, None, child_meta.width);
+            // No assignment statement here to size the literal.
+            size_literal_rhs(&mut proto_expr, None, None, child_meta.width);
             let element = &child_meta.elements[0];
             all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                 dst: element.current,
