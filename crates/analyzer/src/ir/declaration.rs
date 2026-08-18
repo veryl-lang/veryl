@@ -363,6 +363,14 @@ impl fmt::Display for InstOutput {
 }
 
 #[derive(Clone)]
+pub struct InstInterfaceBinding {
+    pub child: VarId,
+    pub parent: VarId,
+    pub index: VarIndex,
+    pub select: VarSelect,
+}
+
+#[derive(Clone)]
 pub struct InstDeclaration {
     pub name: StrId,
     /// Generate-block prefix addressing this instance, e.g. `["g_leaf[0]"]`;
@@ -371,6 +379,10 @@ pub struct InstDeclaration {
     pub hierarchy: Vec<StrId>,
     pub inputs: Vec<InstInput>,
     pub outputs: Vec<InstOutput>,
+    /// Bindings for interface members captured by imported modport functions.
+    /// These members do not appear in `inputs` or `outputs` because the
+    /// modport exposes the function rather than the underlying signal.
+    pub interface_bindings: Vec<InstInterfaceBinding>,
     /// `Arc`-shared: without it, repeated instantiations of the same generic
     /// module each deep-clone the `Component`, blowing pass2 memory.
     pub component: Arc<Component>,

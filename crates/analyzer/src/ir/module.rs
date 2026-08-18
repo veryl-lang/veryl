@@ -27,6 +27,10 @@ pub struct Module {
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
+    /// Interface members visible through a modport only because an imported
+    /// function captures them. They have paths and IDs for dependency
+    /// analysis, but are not ordinary module variables or signal ports.
+    pub interface_members: HashMap<VarId, Variable>,
     pub declarations: Vec<Declaration>,
     pub suppress_unassigned: bool,
     /// Per-declaration `AssignTable.refernced` snapshot, captured at the end
