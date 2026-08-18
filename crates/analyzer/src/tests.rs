@@ -1895,6 +1895,53 @@ fn invalid_import() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    // A generic component must be imported as its definition, not as an
+    // instantiated instance.
+    let code = r#"
+    package PkgG::<W: u32> {
+        const C: u32 = W;
+    }
+    module ModG::<W: u32> {
+        var _y: logic<W>;
+        assign _y = 0;
+    }
+    interface IfG::<W: u32> {
+        var _x: logic<W>;
+    }
+    module ModuleG {
+        import prj::PkgG::<8>;
+        import prj::ModG::<8>;
+        import prj::IfG::<8>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|e| matches!(e, AnalyzerError::InvalidImport { .. }))
+            .count(),
+        3,
+        "{errors:?}"
+    );
+
+    // Wildcard import of an instance and member imports through an
+    // instance remain valid.
+    let code = r#"
+    package PkgG::<W: u32> {
+        const C: u32 = W;
+    }
+    module ModuleH {
+        import prj::PkgG::<8>::*;
+        import prj::PkgG::<8>::C;
+        const X: u32 = C;
+        const Y: u32 = C;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
     let code = r#"
     package a_pkg::<a: u32> {
         const A: u32 = a;
