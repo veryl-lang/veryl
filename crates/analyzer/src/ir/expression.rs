@@ -1,4 +1,4 @@
-use crate::AnalyzerError;
+use crate::analyzer_error::ExceedLimitKind;
 use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::ir::assign_table::{AssignContext, AssignTable};
@@ -10,6 +10,7 @@ use crate::ir::{
 };
 use crate::symbol::{ClockDomain, Symbol, SymbolKind};
 use crate::value::{Value, ValueBigUint};
+use crate::{AnalyzerError, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 use veryl_parser::resource_table::StrId;
@@ -29,6 +30,22 @@ pub enum Expression {
     Concatenation(Vec<(Expression, Option<Expression>)>, Box<Comptime>),
     ArrayLiteral(Vec<ArrayLiteralItem>, Box<Comptime>),
     StructConstructor(Box<Type>, Vec<(StrId, Expression)>, Box<Comptime>),
+}
+
+fn check_materialized_size(
+    context: &mut Context,
+    size: Option<usize>,
+    token: TokenRange,
+) -> Option<usize> {
+    let Some(size) = size else {
+        context.insert_error(AnalyzerError::exceed_limit(
+            ExceedLimitKind::EvaluateSize,
+            usize::MAX,
+            &token,
+        ));
+        return None;
+    };
+    context.check_size(size, token)
 }
 
 impl Expression {
@@ -486,10 +503,12 @@ impl Expression {
             Expression::Concatenation(x, _) => {
                 let mut ret = Value::new(0, 0, false);
                 for (exp, rep) in x.iter() {
+                    let token = rep
+                        .as_ref()
+                        .map_or_else(|| exp.token_range(), |rep| rep.token_range());
                     let exp = exp.eval_value(context)?;
 
                     let rep = if let Some(rep) = rep {
-                        let token = rep.token_range();
                         let rep = rep.eval_value(context)?;
                         let rep = rep.to_usize()?;
                         context.check_size(rep, token)?
@@ -497,9 +516,14 @@ impl Expression {
                         1
                     };
 
-                    for _ in 0..rep {
-                        ret = ret.concat(&exp);
-                    }
+                    let repeated_width =
+                        check_materialized_size(context, exp.width().checked_mul(rep), token)?;
+                    check_materialized_size(
+                        context,
+                        ret.width().checked_add(repeated_width),
+                        token,
+                    )?;
+                    ret = ret.concat(&exp.repeat(rep));
                 }
                 Some(ret)
             }
@@ -665,6 +689,75 @@ impl Expression {
             }
             // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
             Expression::ArrayLiteral(_, _) => (),
+        }
+    }
+
+    pub(crate) fn set_index_with_receiver(
+        &mut self,
+        index: &VarIndex,
+        receiver_prefixes: &HashMap<VarId, usize>,
+    ) {
+        match self {
+            Expression::Term(x) => x.set_index_with_receiver(index, receiver_prefixes),
+            Expression::Unary(_, x, _) => x.set_index_with_receiver(index, receiver_prefixes),
+            Expression::Binary(x, _, y, _) => {
+                x.set_index_with_receiver(index, receiver_prefixes);
+                y.set_index_with_receiver(index, receiver_prefixes);
+            }
+            Expression::Ternary(x, y, z, _) => {
+                x.set_index_with_receiver(index, receiver_prefixes);
+                y.set_index_with_receiver(index, receiver_prefixes);
+                z.set_index_with_receiver(index, receiver_prefixes);
+            }
+            Expression::Concatenation(x, _) => {
+                for (x, y) in x {
+                    x.set_index_with_receiver(index, receiver_prefixes);
+                    if let Some(y) = y {
+                        y.set_index_with_receiver(index, receiver_prefixes);
+                    }
+                }
+            }
+            Expression::StructConstructor(_, exprs, _) => {
+                for (_, expr) in exprs {
+                    expr.set_index_with_receiver(index, receiver_prefixes);
+                }
+            }
+            // ArrayLiteral doesn't require evaluation because it is expanded in conv phase
+            Expression::ArrayLiteral(_, _) => (),
+        }
+    }
+
+    pub(crate) fn prepend_call_receiver(
+        &mut self,
+        dims: usize,
+        receiver_functions: &HashSet<VarId>,
+    ) {
+        match self {
+            Expression::Term(x) => x.prepend_call_receiver(dims, receiver_functions),
+            Expression::Unary(_, x, _) => x.prepend_call_receiver(dims, receiver_functions),
+            Expression::Binary(x, _, y, _) => {
+                x.prepend_call_receiver(dims, receiver_functions);
+                y.prepend_call_receiver(dims, receiver_functions);
+            }
+            Expression::Ternary(x, y, z, _) => {
+                x.prepend_call_receiver(dims, receiver_functions);
+                y.prepend_call_receiver(dims, receiver_functions);
+                z.prepend_call_receiver(dims, receiver_functions);
+            }
+            Expression::Concatenation(items, _) => {
+                for (item, repeat) in items {
+                    item.prepend_call_receiver(dims, receiver_functions);
+                    if let Some(repeat) = repeat {
+                        repeat.prepend_call_receiver(dims, receiver_functions);
+                    }
+                }
+            }
+            Expression::StructConstructor(_, members, _) => {
+                for (_, expression) in members {
+                    expression.prepend_call_receiver(dims, receiver_functions);
+                }
+            }
+            Expression::ArrayLiteral(_, _) => {}
         }
     }
 
@@ -963,7 +1056,7 @@ impl Factor {
         assign_context: AssignContext,
     ) {
         match self {
-            Factor::Variable(id, index, select, _) => {
+            Factor::Variable(id, index, select, comptime) => {
                 // `insert_reference` bails out on arrays over `array_limit`;
                 // short-circuit to avoid cloning the full Variable (value
                 // vec scales with array size).
@@ -977,7 +1070,11 @@ impl Factor {
                 }
                 if let Some(index) = index.eval_value(context)
                     && let Some(variable) = context.variables.get(id).cloned()
-                    && let Some((beg, end)) = select.eval_value(context, &variable.r#type, false)
+                    && let Some((beg, end)) = select.conservative_packed_range(
+                        context,
+                        &variable.r#type,
+                        comptime.member_select_domain,
+                    )
                 {
                     let mask = ValueBigUint::gen_mask_range(beg, end);
                     assign_table.insert_reference(&variable, index, mask);
@@ -1002,17 +1099,16 @@ impl Factor {
         from_ff: bool,
     ) {
         match self {
-            Factor::Variable(id, index, select, _) => {
+            Factor::Variable(id, index, select, comptime) => {
                 if let Some(variable) = context.get_variable_info(*id) {
-                    let src_read_mask = if let Some((beg, end)) =
-                        select.eval_value(context, &variable.r#type, false)
-                    {
-                        ValueBigUint::gen_mask_range(beg, end)
-                    } else if let Some(width) = variable.total_width() {
-                        ValueBigUint::gen_mask(width)
-                    } else {
-                        crate::BigUint::default()
-                    };
+                    let src_read_mask = select
+                        .conservative_packed_range(
+                            context,
+                            &variable.r#type,
+                            comptime.member_select_domain,
+                        )
+                        .map(|(beg, end)| ValueBigUint::gen_mask_range(beg, end))
+                        .unwrap_or_default();
                     if let Some(index) = index.eval_value(context) {
                         if let Some(index) = variable.r#type.array.calc_index(&index) {
                             table.insert_refered(
@@ -1047,13 +1143,65 @@ impl Factor {
 
     pub fn set_index(&mut self, index: &VarIndex) {
         match self {
-            Factor::Variable(_, i, _, _) => {
-                *i = index.clone();
+            Factor::Variable(_, variable_index, _, _) => {
+                *variable_index = index.clone();
             }
             Factor::FunctionCall(x) => {
                 x.set_index(index);
             }
             _ => (),
+        }
+    }
+
+    pub(crate) fn set_index_with_receiver(
+        &mut self,
+        index: &VarIndex,
+        receiver_prefixes: &HashMap<VarId, usize>,
+    ) {
+        match self {
+            Factor::Variable(id, variable_index, select, _) => {
+                for expression in &mut variable_index.0 {
+                    expression.set_index_with_receiver(index, receiver_prefixes);
+                }
+                select.set_index_with_receiver(index, receiver_prefixes);
+                if let Some(dims) = receiver_prefixes.get(id)
+                    && let Some(prefix) = index.0.get(..*dims)
+                {
+                    variable_index.add_prelude(&VarIndex(prefix.to_vec()));
+                }
+            }
+            Factor::FunctionCall(x) => {
+                x.set_index_with_receiver(index, receiver_prefixes);
+            }
+            Factor::SystemFunctionCall(x) => {
+                x.set_index_with_receiver(index, receiver_prefixes);
+            }
+            _ => (),
+        }
+    }
+
+    pub(crate) fn prepend_call_receiver(
+        &mut self,
+        dims: usize,
+        receiver_functions: &HashSet<VarId>,
+    ) {
+        match self {
+            Factor::Variable(_, index, select, _) => {
+                for expression in &mut index.0 {
+                    expression.prepend_call_receiver(dims, receiver_functions);
+                }
+                select.prepend_call_receiver(dims, receiver_functions);
+            }
+            Factor::FunctionCall(call) => {
+                call.prepend_receiver_axes(dims, receiver_functions);
+            }
+            Factor::SystemFunctionCall(call) => {
+                call.prepend_call_receiver(dims, receiver_functions);
+            }
+            Factor::HierVariable(_)
+            | Factor::Value(_)
+            | Factor::Anonymous(_)
+            | Factor::Unknown(_) => {}
         }
     }
 
@@ -1208,6 +1356,42 @@ mod tests {
             .get_value()
             .unwrap()
             .clone()
+    }
+
+    #[test]
+    fn materialized_size_overflow_reports_the_existing_evaluation_limit() {
+        let mut context = Context::default();
+        context.config.evaluate_size_limit = usize::MAX;
+
+        assert!(
+            check_materialized_size(
+                &mut context,
+                usize::MAX.checked_mul(2),
+                TokenRange::default()
+            )
+            .is_none()
+        );
+        assert!(matches!(
+            context.drain_errors().as_slice(),
+            [AnalyzerError::ExceedLimit { .. }]
+        ));
+    }
+
+    #[test]
+    fn repeat_checks_the_materialized_width_not_only_the_count() {
+        let mut context = Context::default();
+        context.config.evaluate_size_limit = 64;
+        let expression = parse_expression("{9'b101010101 repeat 8}");
+        let mut expression: Expression = Conv::conv(&mut context, &expression).unwrap();
+
+        expression.eval_comptime(&mut context, None);
+
+        assert!(
+            context
+                .drain_errors()
+                .iter()
+                .any(|error| matches!(error, AnalyzerError::ExceedLimit { .. }))
+        );
     }
 
     #[test]

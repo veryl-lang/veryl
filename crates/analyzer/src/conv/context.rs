@@ -50,10 +50,12 @@ pub struct Context {
     pub var_id: VarId,
     pub var_paths: HashMap<VarPath, (VarId, Comptime)>,
     pub func_paths: HashMap<FuncPath, VarId>,
-    /// Symbols whose function bodies are mid-conversion. Carried (via `inherit`)
-    /// across the fresh per-call contexts that mutual recursion creates, so
-    /// re-entry is detected and the IR conversion doesn't overflow.
+    /// Symbols whose function bodies are mid-conversion. Retained for public
+    /// API compatibility; conversion itself uses the specialization-aware
+    /// paths below.
     pub converting_funcs: Vec<SymbolId>,
+    /// Specialized function paths whose bodies are mid-conversion.
+    pub(crate) converting_func_paths: Vec<FuncPath>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,
@@ -118,6 +120,9 @@ pub struct Context {
     pub tb_reset_cycles: HashMap<StrId, Expression>,
     pub tb_clock_period: HashMap<StrId, Expression>,
     pub tb_reset_clock: HashMap<StrId, StrId>,
+    /// Sparse rollback state used by analyses that reuse this otherwise-large
+    /// context across independent procedures. Empty during normal conversion.
+    analysis_transactions: Vec<AnalysisTransaction>,
     hierarchy: Vec<StrId>,
     hierarchical_variables: Vec<Vec<VarPath>>,
     hierarchical_functions: Vec<Vec<FuncPath>>,
@@ -134,7 +139,66 @@ pub struct Context {
     project_name: Option<String>,
 }
 
+struct AnalysisTransaction {
+    variables: HashMap<VarId, Variable>,
+    comptime_for_overflow: Option<TokenRange>,
+    disable_const_opt: bool,
+    function_eval_depth: usize,
+    function_eval_overflow: Option<(TokenRange, usize)>,
+    function_call_stack: Vec<Signature>,
+    errors: Vec<AnalyzerError>,
+}
+
 impl Context {
+    pub(crate) fn begin_analysis_transaction(&mut self) {
+        self.analysis_transactions.push(AnalysisTransaction {
+            variables: HashMap::default(),
+            comptime_for_overflow: self.comptime_for_overflow,
+            disable_const_opt: self.disalbe_const_opt,
+            function_eval_depth: self.function_eval_depth,
+            function_eval_overflow: self.function_eval_overflow.take(),
+            function_call_stack: std::mem::take(&mut self.function_call_stack),
+            errors: std::mem::take(&mut self.errors),
+        });
+        self.function_eval_depth = 0;
+        self.comptime_for_overflow = None;
+    }
+
+    pub(crate) fn rollback_analysis_transaction(&mut self) {
+        let transaction = self
+            .analysis_transactions
+            .pop()
+            .expect("analysis transaction is active");
+        for (id, variable) in transaction.variables {
+            self.variables.insert(id, variable);
+        }
+        self.comptime_for_overflow = transaction.comptime_for_overflow;
+        self.disalbe_const_opt = transaction.disable_const_opt;
+        self.function_eval_depth = transaction.function_eval_depth;
+        self.function_eval_overflow = transaction.function_eval_overflow;
+        self.function_call_stack = transaction.function_call_stack;
+        self.errors = transaction.errors;
+    }
+
+    /// Get a variable for mutation while remembering its prior value in the
+    /// innermost reusable-analysis transaction. Outside such an analysis this
+    /// is identical to `variables.get_mut`.
+    pub(crate) fn variable_mut(&mut self, id: &VarId) -> Option<&mut Variable> {
+        if self
+            .analysis_transactions
+            .last()
+            .is_some_and(|transaction| !transaction.variables.contains_key(id))
+        {
+            let previous = self.variables.get(id)?.clone();
+            self.analysis_transactions
+                .last_mut()
+                .expect("checked above")
+                .variables
+                .insert(*id, previous);
+        }
+        self.variables.get_mut(id)
+    }
+
     /// Run `f` with `cond` on the statement-condition stack (popped before
     /// `?` can skip it).
     pub fn with_condition_domain<T>(
@@ -164,6 +228,10 @@ impl Context {
         );
         std::mem::swap(&mut self.function_call_stack, &mut tgt.function_call_stack);
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
+        std::mem::swap(
+            &mut self.converting_func_paths,
+            &mut tgt.converting_func_paths,
+        );
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
         self.disalbe_const_opt = tgt.disalbe_const_opt;
@@ -344,13 +412,15 @@ impl Context {
         for (id, mut function) in context.functions.drain() {
             if !array.is_empty() {
                 let total_array = array.total();
-                let func_body = function.functions.remove(0);
-                if let Some(total_array) = total_array {
-                    for i in 0..total_array {
-                        let var_index = VarIndex::from_index(i, array);
-                        let mut func_body = func_body.clone();
-                        func_body.set_index(&var_index);
-                        function.functions.push(func_body);
+                if let Some(function_body) = function.functions.first().cloned() {
+                    function.functions.clear();
+                    if let Some(total_array) = total_array {
+                        for i in 0..total_array {
+                            let index = VarIndex::from_index(i, array);
+                            let mut body = function_body.clone();
+                            body.set_index(&index);
+                            function.functions.push(body);
+                        }
                     }
                 }
             }
@@ -362,7 +432,84 @@ impl Context {
         }
     }
 
+    pub(crate) fn extract_function_with_receiver(
+        &mut self,
+        context: &mut Context,
+        base: &VarPath,
+        array: &ShapeRef,
+        relative_variables: &HashSet<VarId>,
+        root_function: Option<VarId>,
+    ) {
+        // Receiver-relative storage is identified when paths are imported from
+        // the receiver namespace. Affiliation cannot distinguish a modport
+        // formal member from an ordinary scalar function formal.
+        let receiver_variables = relative_variables.clone();
+        // Only the requested receiver method and nested receiver methods whose
+        // storage is below that receiver acquire this receiver axis. A global
+        // receiver or a modport-array formal may be converted in the same
+        // local context, but its storage ids do not belong to `base`.
+        let mut receiver_functions = context
+            .functions
+            .values()
+            .filter(|function| {
+                function.receiver_relative
+                    && function
+                        .receiver_variables
+                        .iter()
+                        .any(|id| relative_variables.contains(id))
+            })
+            .map(|function| function.id)
+            .collect::<HashSet<_>>();
+        if let Some(root_function) = root_function {
+            receiver_functions.insert(root_function);
+        }
+        for (id, mut variable) in context.variables.drain() {
+            variable.path.add_prelude(&base.0);
+            if receiver_variables.contains(&id) {
+                variable.prepend_array_with_limit(array, self.config.evaluate_array_limit);
+            }
+            self.variables.insert(id, variable);
+        }
+
+        for (mut path, id) in context.func_paths.drain() {
+            if !path.path.starts_with(&base.0) {
+                path.path.add_prelude(&base.0);
+            }
+            self.func_paths.insert(path, id);
+        }
+
+        for (id, mut function) in context.functions.drain() {
+            if receiver_functions.contains(&id) {
+                let function_receiver_variables = if Some(id) == root_function {
+                    receiver_variables.clone()
+                } else {
+                    function
+                        .receiver_variables
+                        .intersection(relative_variables)
+                        .copied()
+                        .collect()
+                };
+                function.prepend_receiver(array, &function_receiver_variables, &receiver_functions);
+            }
+
+            if !function.path.path.starts_with(&base.0) {
+                function.path.path.add_prelude(&base.0);
+            }
+            self.functions.insert(id, function);
+        }
+    }
+
     pub fn extract_var_paths(&mut self, context: &Context, base: &VarPath, array: &ShapeRef) {
+        self.extract_var_paths_with_receiver(context, base, array);
+    }
+
+    pub(crate) fn extract_var_paths_with_receiver(
+        &mut self,
+        context: &Context,
+        base: &VarPath,
+        array: &ShapeRef,
+    ) -> HashSet<VarId> {
+        let mut relative_variables = HashSet::default();
         for (path, (id, comptime)) in &context.var_paths {
             if path.starts_with(&base.0) {
                 let mut path = path.clone();
@@ -373,9 +520,11 @@ impl Context {
                         comptime.r#type.array.remove(0);
                     }
                     self.var_paths.insert(path, (*id, comptime));
+                    relative_variables.insert(*id);
                 }
             }
         }
+        relative_variables
     }
 
     pub fn extract_interface_member(
@@ -411,7 +560,7 @@ impl Context {
                 }
             }
 
-            variable.prepend_array(array);
+            variable.prepend_array_with_limit(array, self.config.evaluate_array_limit);
 
             // override token, affiliation to interface instance
             variable.token = token;
@@ -727,5 +876,60 @@ impl Context {
 
     pub fn drain_errors(&mut self) -> Vec<AnalyzerError> {
         self.errors.drain(..).collect()
+    }
+}
+
+#[cfg(test)]
+mod analysis_transaction_tests {
+    use super::*;
+    use crate::value::Value;
+
+    fn test_variable(id: VarId, value: u64) -> Variable {
+        Variable::new(
+            id,
+            VarPath::default(),
+            VarKind::Variable,
+            Type::default(),
+            vec![Value::new(value, 1, false)],
+            Affiliation::Module,
+            &TokenRange::default(),
+            1,
+        )
+    }
+
+    fn value(context: &Context, id: VarId) -> &Value {
+        &context.variables[&id].value[0]
+    }
+
+    #[test]
+    fn nested_analysis_transactions_restore_each_snapshot() {
+        let id = VarId::from_raw(1);
+        let mut context = Context::default();
+        context.variables.insert(id, test_variable(id, 0));
+
+        context.begin_analysis_transaction();
+        context.variable_mut(&id).unwrap().value[0] = Value::new(1, 1, false);
+        context.begin_analysis_transaction();
+        context.variable_mut(&id).unwrap().value[0] = Value::new(0, 1, false);
+
+        context.rollback_analysis_transaction();
+        assert_eq!(value(&context, id), &Value::new(1, 1, false));
+        context.rollback_analysis_transaction();
+        assert_eq!(value(&context, id), &Value::new(0, 1, false));
+    }
+
+    #[test]
+    fn reused_analysis_transactions_do_not_leak_variable_state() {
+        let id = VarId::from_raw(1);
+        let mut context = Context::default();
+        context.variables.insert(id, test_variable(id, 0));
+
+        for _ in 0..2 {
+            context.begin_analysis_transaction();
+            assert_eq!(value(&context, id), &Value::new(0, 1, false));
+            context.variable_mut(&id).unwrap().value[0] = Value::new(1, 1, false);
+            context.rollback_analysis_transaction();
+        }
+        assert_eq!(value(&context, id), &Value::new(0, 1, false));
     }
 }

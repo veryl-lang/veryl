@@ -3,12 +3,12 @@ use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::FfTable;
 use crate::ir::{
-    AssignDestination, Comptime, Expression, IrResult, Shape, Type, TypeKind, ValueVariant,
-    VarPathSelect,
+    AssignDestination, Comptime, Expression, IrResult, Shape, Type, TypeKind, ValueVariant, VarId,
+    VarIndex, VarPathSelect,
 };
 use crate::symbol::Affiliation;
 use crate::value::Value;
-use crate::{AnalyzerError, BigUint, ir_error};
+use crate::{AnalyzerError, BigUint, HashMap, HashSet, ir_error};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -486,6 +486,78 @@ impl fmt::Display for SystemFunctionCall {
 }
 
 impl SystemFunctionCall {
+    pub(crate) fn set_index_with_receiver(
+        &mut self,
+        index: &VarIndex,
+        receiver_prefixes: &HashMap<VarId, usize>,
+    ) {
+        let set_input = |input: &mut Input| {
+            input.0.set_index_with_receiver(index, receiver_prefixes);
+        };
+        match &mut self.kind {
+            SystemFunctionKind::Bits(input)
+            | SystemFunctionKind::Size(input)
+            | SystemFunctionKind::Clog2(input)
+            | SystemFunctionKind::Onehot(input)
+            | SystemFunctionKind::Signed(input)
+            | SystemFunctionKind::Unsigned(input) => set_input(input),
+            SystemFunctionKind::Readmemh(input, output) => {
+                set_input(input);
+                for destination in &mut output.0 {
+                    destination.set_index_with_receiver(index, receiver_prefixes);
+                }
+            }
+            SystemFunctionKind::Display(inputs) | SystemFunctionKind::Write(inputs) => {
+                for input in inputs {
+                    set_input(input);
+                }
+            }
+            SystemFunctionKind::Assert { cond, args, .. } => {
+                set_input(cond);
+                for input in args {
+                    set_input(input);
+                }
+            }
+            SystemFunctionKind::Finish => {}
+        }
+    }
+
+    pub(crate) fn prepend_call_receiver(
+        &mut self,
+        dims: usize,
+        receiver_functions: &HashSet<VarId>,
+    ) {
+        let visit_input = |input: &mut Input| {
+            input.0.prepend_call_receiver(dims, receiver_functions);
+        };
+        match &mut self.kind {
+            SystemFunctionKind::Bits(input)
+            | SystemFunctionKind::Size(input)
+            | SystemFunctionKind::Clog2(input)
+            | SystemFunctionKind::Onehot(input)
+            | SystemFunctionKind::Signed(input)
+            | SystemFunctionKind::Unsigned(input) => visit_input(input),
+            SystemFunctionKind::Readmemh(input, output) => {
+                visit_input(input);
+                for destination in &mut output.0 {
+                    destination.prepend_call_receiver(dims, receiver_functions);
+                }
+            }
+            SystemFunctionKind::Display(inputs) | SystemFunctionKind::Write(inputs) => {
+                for input in inputs {
+                    visit_input(input);
+                }
+            }
+            SystemFunctionKind::Assert { cond, args, .. } => {
+                visit_input(cond);
+                for input in args {
+                    visit_input(input);
+                }
+            }
+            SystemFunctionKind::Finish => {}
+        }
+    }
+
     pub fn gather_ff(
         &self,
         context: &mut Context,

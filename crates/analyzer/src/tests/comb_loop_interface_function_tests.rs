@@ -9,7 +9,6 @@ fn assert_interface_function_comb_loop(code: &str, expected: bool) {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; interface function member read"]
 fn comb_loop_interface_function_read_detects_member_feedback() {
     assert_interface_function_comb_loop(
         r#"
@@ -174,7 +173,6 @@ fn connected_interface_function_code(top_declarations: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; connected sink getter feeds its source"]
 fn comb_loop_connect_detects_interface_function_member_read_feedback() {
     assert_interface_function_comb_loop(
         &connected_interface_function_code(
@@ -199,7 +197,6 @@ fn comb_loop_connect_keeps_interface_function_member_read_one_way() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; connected sink setter feeds its source"]
 fn comb_loop_connect_detects_interface_function_member_write_feedback() {
     assert_interface_function_comb_loop(
         &connected_interface_function_code(
@@ -226,7 +223,6 @@ fn comb_loop_connect_keeps_interface_function_member_write_one_way() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; same receiver interface get-to-put feedback"]
 fn comb_loop_external_interface_get_to_put_detects_same_receiver_feedback() {
     let code = format!(
         r#"
@@ -243,7 +239,28 @@ fn comb_loop_external_interface_get_to_put_detects_same_receiver_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; cross-receiver interface function feedback"]
+fn comb_loop_external_interface_disjoint_followup_write_preserves_same_bit_feedback() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var value: logic[2];
+            function get0 () -> logic { return value[0]; }
+            function put0 (next: input logic) { value[0] = next; }
+            function put1 (next: input logic) { value[1] = next; }
+        }
+        module Top {
+            inst bus: Bus;
+            always_comb {
+                bus.put0(bus.get0());
+                bus.put1(0);
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_external_interface_get_to_put_detects_cross_receiver_feedback() {
     let code = format!(
         r#"
@@ -296,7 +313,6 @@ fn comb_loop_external_interface_read_preserves_receiver_identity() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; same interface function array element feedback"]
 fn comb_loop_interface_function_array_detects_same_element_feedback() {
     let code = format!(
         r#"
@@ -331,7 +347,6 @@ fn comb_loop_interface_function_array_keeps_one_way_elements_loop_free() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; cross-element interface function array feedback"]
 fn comb_loop_interface_function_array_detects_cross_element_feedback() {
     let code = format!(
         r#"
@@ -349,7 +364,178 @@ fn comb_loop_interface_function_array_detects_cross_element_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; interface function captured read in control flow"]
+fn comb_loop_large_interface_function_array_specializes_only_the_called_receiver() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top {{
+            inst bus: Bus[1000000];
+            always_comb {{
+                bus[999999].put(bus[999999].get());
+            }}
+        }}
+        "#
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn interface_array_const_function_reads_the_selected_receiver_return() {
+    let code = r#"
+        interface Bus {
+            function one () -> u32 {
+                return 1;
+            }
+        }
+        module Top (o: output logic) {
+            inst bus: Bus[2];
+            const SECOND: u32 = bus[1].one();
+            if SECOND == 1 :g_ok {
+                assign o = 0;
+            } else {
+                assign o = o;
+            }
+        }
+    "#;
+    assert_interface_function_comb_loop(code, false);
+}
+
+#[test]
+fn interface_array_const_function_returns_remain_receiver_independent() {
+    let code = r#"
+        interface Bus {
+            function copy (value: input u32) -> u32 {
+                return value;
+            }
+        }
+        module Top (o: output logic) {
+            inst bus: Bus[2];
+            const FIRST : u32 = bus[0].copy(3);
+            const SECOND: u32 = bus[1].copy(5);
+            if FIRST == 3 && SECOND == 5 :g_ok {
+                assign o = 0;
+            } else {
+                assign o = o;
+            }
+        }
+    "#;
+    assert_interface_function_comb_loop(code, false);
+}
+
+fn interface_array_member_function_code(body: &str, statements: &str) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var data: logic [2];
+            {body}
+        }}
+        module Top (o: output logic) {{
+            inst bus: Bus [1];
+            {statements}
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_interface_array_function_read_keeps_member_elements_independent() {
+    let code = interface_array_member_function_code(
+        "function read_second () -> logic { return data[1]; }",
+        r#"
+        assign bus[0].data[0] = o;
+        assign bus[0].data[1] = 0;
+        assign o = bus[0].read_second();
+        "#,
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, false);
+}
+
+#[test]
+fn comb_loop_interface_array_function_write_preserves_other_member_feedback() {
+    let code = interface_array_member_function_code(
+        "function clear_second () { data[1] = 0; }",
+        r#"
+        always_comb {
+            bus[0].data[0] = o;
+            bus[0].clear_second();
+        }
+        assign o = bus[0].data[0];
+        "#,
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_interface_array_function_keeps_scalar_formal_receiver_independent() {
+    let code = interface_array_member_function_code(
+        "function gated_second (enable: input logic) -> logic { return data[1] & enable; }",
+        r#"
+        assign bus[0].data[0] = o;
+        assign bus[0].data[1] = 0;
+        assign o = bus[0].gated_second(1);
+        "#,
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, false);
+}
+
+#[test]
+fn comb_loop_interface_array_nested_function_preserves_receiver() {
+    let code = r#"
+        interface Bus {
+            var data: logic [2];
+            function read_second () -> logic {
+                return data[1];
+            }
+            function forward_second () -> logic {
+                return read_second();
+            }
+        }
+        module Top (o: output logic) {
+            inst bus: Bus [2];
+            assign bus[0].data[0] = 0;
+            assign bus[0].data[1] = 0;
+            assign bus[1].data[0] = 0;
+            assign bus[1].data[1] = o;
+            assign o = bus[1].forward_second();
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_interface_function_comb_loop(code, true);
+}
+
+#[test]
+fn comb_loop_interface_array_nested_output_actual_clears_selected_member() {
+    let code = r#"
+        interface Bus {
+            var data: logic [2];
+            function clear (value: output logic) {
+                value = 0;
+            }
+            function clear_second () {
+                clear(data[1]);
+            }
+        }
+        module Top (o: output logic) {
+            inst bus: Bus [2];
+            always_comb {
+                bus[0].data[0] = 0;
+                bus[0].data[1] = 0;
+                bus[1].data[0] = 0;
+                bus[1].data[1] = o;
+                bus[1].clear_second();
+            }
+            assign o = bus[1].data[1];
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_interface_function_comb_loop(code, false);
+}
+
+#[test]
 fn comb_loop_external_interface_function_control_detects_member_feedback() {
     let code = format!(
         r#"
@@ -370,7 +556,53 @@ fn comb_loop_external_interface_function_control_detects_member_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; interface function captured read in instance actual"]
+fn comb_loop_system_function_argument_preserves_interface_receiver_identity() {
+    let interface = r#"
+        interface Bus {
+            var source     : logic;
+            var destination: logic;
+            function transfer () -> logic {
+                destination = source;
+                return destination;
+            }
+        }
+    "#;
+    let one_way = format!(
+        r#"
+        {interface}
+        module Top {{
+            inst bus: Bus [2];
+            always_comb {{
+                $display("value=%d", bus[0].transfer());
+                bus[1].source = bus[1].destination;
+            }}
+            assign bus[0].source      = 0;
+            assign bus[1].destination = 0;
+        }}
+        "#
+    );
+    assert!(comb_loop_analysis_is_complete(&one_way));
+    assert_interface_function_comb_loop(&one_way, false);
+
+    let feedback = format!(
+        r#"
+        {interface}
+        module Top {{
+            inst bus: Bus [2];
+            always_comb {{
+                $display("value=%d", bus[0].transfer());
+            }}
+            assign bus[0].source      = bus[0].destination;
+            assign bus[1].source      = 0;
+            assign bus[1].destination = 0;
+        }}
+        "#
+    );
+    assert!(comb_loop_analysis_is_complete(&feedback));
+    assert_interface_function_comb_loop(&feedback, true);
+}
+
+#[test]
 fn comb_loop_external_interface_function_instance_actual_detects_feedback() {
     let code = format!(
         r#"
@@ -391,6 +623,376 @@ fn comb_loop_external_interface_function_instance_actual_detects_feedback() {
         "#
     );
     assert_interface_function_comb_loop(&code, true);
+}
+
+fn nested_interface_receiver_code(assignments: &str) -> String {
+    format!(
+        r#"
+        interface Inner {{
+            var value: logic;
+            function get () -> logic {{
+                return value;
+            }}
+        }}
+        interface Outer {{
+            inst inner: Inner[4];
+            function read_last () -> logic {{
+                return inner[3].get();
+            }}
+            function write_last (next: input logic) {{
+                inner[3].value = next;
+            }}
+            function write_first (next: input logic) {{
+                inner[0].value = next;
+            }}
+        }}
+        module Top (o: output logic) {{
+            inst outer: Outer[2];
+            {assignments}
+            assign o = outer[0].read_last();
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_nested_interface_method_composes_outer_and_inner_receivers() {
+    let code = nested_interface_receiver_code(
+        r#"
+        always_comb {
+            outer[0].write_last(o);
+            outer[0].write_first(0);
+            outer[1].write_last(0);
+        }
+        "#,
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_nested_interface_method_keeps_outer_and_inner_receivers_disjoint() {
+    let code = nested_interface_receiver_code(
+        r#"
+        always_comb {
+            outer[0].write_last(0);
+            outer[0].write_first(o);
+            outer[1].write_last(o);
+        }
+        "#,
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, false);
+}
+
+fn nested_scalar_interface_receiver_code(assignments: &str) -> String {
+    format!(
+        r#"
+        interface Inner {{
+            var value: logic;
+            function get () -> logic {{
+                return value;
+            }}
+        }}
+        interface Outer {{
+            inst inner: Inner;
+            function read () -> logic {{
+                return inner.get();
+            }}
+            function write (next: input logic) {{
+                inner.value = next;
+            }}
+        }}
+        module Top (o: output logic) {{
+            inst outer: Outer[2];
+            {assignments}
+            assign o = outer[0].read();
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_nested_scalar_interface_method_inherits_outer_receiver() {
+    let code = nested_scalar_interface_receiver_code(
+        r#"
+        always_comb {
+            outer[0].write(o);
+            outer[1].write(0);
+        }
+        "#,
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_nested_scalar_interface_method_keeps_outer_receivers_disjoint() {
+    let code = nested_scalar_interface_receiver_code(
+        r#"
+        always_comb {
+            outer[0].write(0);
+            outer[1].write(o);
+        }
+        "#,
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, false);
+}
+
+fn nested_dynamic_interface_receiver_code(select_assignments: &str) -> String {
+    format!(
+        r#"
+        interface Inner {{
+            var value: logic;
+            function get () -> logic {{
+                return value;
+            }}
+        }}
+        interface Outer {{
+            var select: u32;
+            inst inner: Inner[2];
+            function read () -> logic {{
+                return inner[select].get();
+            }}
+            function write_first (next: input logic) {{
+                inner[0].value = next;
+            }}
+            function write_last (next: input logic) {{
+                inner[1].value = next;
+            }}
+        }}
+        module Top (o: output logic) {{
+            inst outer: Outer[2];
+            always_comb {{
+                outer[0].write_first(0);
+                outer[0].write_last(1);
+                outer[1].write_first(0);
+                outer[1].write_last(1);
+            }}
+            {select_assignments}
+            assign o = outer[0].read();
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_nested_dynamic_receiver_uses_the_selected_outer_receiver() {
+    let code = nested_dynamic_interface_receiver_code(
+        "assign outer[0].select = o as u32; assign outer[1].select = 0;",
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_nested_dynamic_receiver_does_not_read_another_outer_receiver() {
+    let code = nested_dynamic_interface_receiver_code(
+        "assign outer[0].select = 0; assign outer[1].select = o as u32;",
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, false);
+}
+
+fn interface_method_global_helper_code(assignments: &str) -> String {
+    format!(
+        r#"
+        package Helpers {{
+            function pass (value: input logic) -> logic {{
+                return value;
+            }}
+        }}
+        interface Outer {{
+            var value: logic;
+            function read () -> logic {{
+                return Helpers::pass(value);
+            }}
+        }}
+        module Top (o: output logic) {{
+            inst outer: Outer[2];
+            {assignments}
+            assign o = outer[0].read();
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_interface_method_global_helper_preserves_owned_member_feedback() {
+    let code = interface_method_global_helper_code(
+        "assign outer[0].value = o; assign outer[1].value = 0;",
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_interface_method_does_not_prefix_global_helper_formals() {
+    let code = interface_method_global_helper_code(
+        "assign outer[0].value = 0; assign outer[1].value = o;",
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, false);
+}
+
+#[test]
+fn comb_loop_dynamic_interface_receiver_conservatively_detects_possible_feedback() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top (
+            index: input  u32,
+            o    : output logic,
+        ) {{
+            inst bus: Bus[2];
+            assign bus[0].value = 0;
+            assign bus[1].value = o;
+            assign o = bus[index].get();
+        }}
+        "#
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_dynamic_interface_receiver_keeps_one_way_read_loop_free() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top (
+            index: input  u32,
+            o    : output logic,
+        ) {{
+            inst bus: Bus[2];
+            assign bus[0].value = 0;
+            assign bus[1].value = 1;
+            assign o = bus[index].get();
+        }}
+        "#
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, false);
+}
+
+#[test]
+fn comb_loop_dynamic_interface_receiver_preserves_selector_dependency() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top (o: output logic) {{
+            var index: u32;
+            inst bus: Bus[2];
+            assign bus[0].value = 0;
+            assign bus[1].value = 1;
+            assign index = o;
+            assign o = bus[index].get();
+        }}
+        "#
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_second_dynamic_receiver_keeps_its_selector_dependency() {
+    let code = r#"
+        interface Bus {
+            var value: logic;
+            function get () -> logic {
+                return value;
+            }
+        }
+        module Top (
+            external: input  u32,
+            o       : output logic,
+        ) {
+            var feedback: u32;
+            inst bus: Bus[2];
+            assign bus[0].value = 0;
+            assign bus[1].value = 1;
+            assign feedback = o as u32;
+            assign o = bus[external].get() | bus[feedback].get();
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_interface_function_comb_loop(code, true);
+}
+
+#[test]
+fn comb_loop_dynamic_receiver_summary_does_not_import_another_call_sites_selector() {
+    let code = r#"
+        interface Bus {
+            var value: logic;
+            function get () -> logic {
+                return value;
+            }
+        }
+        module Top (
+            external: input  u32,
+            o       : output logic,
+        ) {
+            var feedback: u32;
+            var ignored: logic;
+            inst bus: Bus[2];
+            assign bus[0].value = 0;
+            assign bus[1].value = 1;
+            assign feedback = o as u32;
+            assign ignored = bus[feedback].get();
+            assign o = bus[external].get();
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_interface_function_comb_loop(code, false);
+}
+
+#[test]
+fn comb_loop_large_dynamic_interface_receiver_stays_sparse() {
+    let code = format!(
+        r#"
+        {EXTERNAL_INTERFACE_API}
+        module Top (
+            index: input  u32,
+            o    : output logic,
+        ) {{
+            inst bus: Bus[1000000];
+            assign bus[999999].value = o;
+            assign o = bus[index].get();
+        }}
+        "#
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+    assert_interface_function_comb_loop(&code, true);
+}
+
+#[test]
+fn comb_loop_modport_array_function_formal_is_rejected_before_comb_loop_analysis() {
+    let code = r#"
+        interface Bus {
+            var value: logic;
+            function get () -> logic {
+                return value;
+            }
+            modport reader {
+                get: import,
+            }
+        }
+        module Top {
+            function read_last (
+                source: modport Bus::reader [4],
+            ) -> logic {
+                return source[3].get();
+            }
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnexpandableModport { .. })),
+        "modport-array function formals must be rejected before comb-loop analysis: {errors:#?}"
+    );
 }
 
 #[test]
@@ -422,7 +1024,6 @@ fn comb_loop_modport_formal_get_to_put_detects_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; interface function captured read through output"]
 fn comb_loop_interface_function_output_detects_captured_member_feedback() {
     assert_interface_function_comb_loop(
         r#"
@@ -485,7 +1086,6 @@ fn comb_loop_uncalled_interface_function_adds_no_member_dependency() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; inherited interface function member read"]
 fn comb_loop_mixed_interface_function_detects_inherited_member_feedback() {
     assert_interface_function_comb_loop(
         r#"
@@ -508,7 +1108,6 @@ fn comb_loop_mixed_interface_function_detects_inherited_member_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; nested interface function member read"]
 fn comb_loop_nested_interface_function_detects_transitive_member_read() {
     assert_interface_function_comb_loop(
         r#"
@@ -552,7 +1151,6 @@ fn specialized_interface_function_code(enabled: bool) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; enabled interface function specialization read"]
 fn comb_loop_enabled_interface_function_specialization_reads_member() {
     assert_interface_function_comb_loop(&specialized_interface_function_code(true), true);
 }
@@ -560,4 +1158,83 @@ fn comb_loop_enabled_interface_function_specialization_reads_member() {
 #[test]
 fn comb_loop_disabled_interface_function_specialization_ignores_member() {
     assert_interface_function_comb_loop(&specialized_interface_function_code(false), false);
+}
+
+#[test]
+fn comb_loop_false_positive_imported_interface_function_widens_output_region() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var a: logic;
+            var b: logic;
+            function choose (sel: input logic) -> logic<2> {
+                return if sel ? {a, 1'b0} : {1'b0, b};
+            }
+            modport monitor {
+                choose: import,
+            }
+        }
+        module Observer (
+            bus: modport Bus::monitor,
+            sel: input  logic,
+            o  : output logic<2>,
+        ) {
+            assign o = bus.choose(sel);
+        }
+        module Top (
+            sel: input logic,
+        ) {
+            inst bus: Bus;
+            var passed: logic<2>;
+            inst observer: Observer (
+                bus: bus,
+                sel: sel,
+                o  : passed,
+            );
+            assign bus.b = passed[1];
+            assign bus.a = passed[0];
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "requires imported modport function effects"]
+fn comb_loop_imported_interface_function_retains_matching_output_region_feedback() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var a: logic;
+            var b: logic;
+            function choose (sel: input logic) -> logic<2> {
+                return if sel ? {a, 1'b0} : {1'b0, b};
+            }
+            modport monitor {
+                choose: import,
+            }
+        }
+        module Observer (
+            bus: modport Bus::monitor,
+            sel: input  logic,
+            o  : output logic<2>,
+        ) {
+            assign o = bus.choose(sel);
+        }
+        module Top (
+            sel: input logic,
+        ) {
+            inst bus: Bus;
+            var passed: logic<2>;
+            inst observer: Observer (
+                bus: bus,
+                sel: sel,
+                o  : passed,
+            );
+            assign bus.a = passed[1];
+            assign bus.b = 1'b0;
+        }
+        "#,
+        true,
+    );
 }
