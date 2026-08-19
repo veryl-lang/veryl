@@ -34,7 +34,9 @@
 use crate::HashMap;
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::statement::ProtoStatement;
-use crate::ir::variable::{ModuleVariableMeta, VarOffset, VariableMeta, value_size};
+use crate::ir::variable::{
+    ModuleVariableMeta, VarOffset, VariableElement, VariableMeta, value_size,
+};
 use veryl_analyzer::ir::VarId;
 
 /// FF-buffer ownership, held per uniformly strided RUN of elements rather
@@ -346,7 +348,7 @@ pub(crate) fn diag() -> bool {
 
 /// Total gated compare bytes cap: bounds the worst-case (always-dirty)
 /// per-settle overhead regardless of how many cones qualify.
-const MAX_TOTAL_COMPARE: usize = 256 << 10;
+pub(crate) const MAX_TOTAL_COMPARE: usize = 256 << 10;
 /// A segment smaller than this is not worth its dispatch branch.
 const MIN_SEGMENT_STMTS: usize = 64;
 /// A subtree carrying fewer statements than this is not worth a cone of its
@@ -444,6 +446,26 @@ fn fold_ff_runs(elems: &[(usize, usize)], out: &mut Vec<(usize, usize, usize, us
     }
 }
 
+/// The comb bytes one variable contributes, and the range they span.
+///
+/// The bytes are what a compare set would have to cover.  The span is what
+/// [`BigArrayFold`] weighs, and `plan` reads offsets through that fold, so a
+/// variable the fold collapses has to collapse here too.
+fn comb_extent(elements: &[VariableElement], use_4state: bool) -> (usize, usize) {
+    let (mut bytes, mut lo, mut hi) = (0usize, usize::MAX, 0usize);
+    for el in elements {
+        let off = el.current.raw();
+        if el.current.is_ff() || off < 0 {
+            continue;
+        }
+        let (off, nb) = (off as usize, value_size(el.native_bytes, use_4state));
+        bytes += nb;
+        lo = lo.min(off);
+        hi = hi.max(off + nb);
+    }
+    (bytes, hi.saturating_sub(lo))
+}
+
 /// Assemble the node tables from the pre-instantiation variable-meta tree.
 /// `event_written` holds every comb offset the event statements can write
 /// (element-expanded); the covering variable spans join each segment's
@@ -467,6 +489,16 @@ pub fn build_inputs(
                     ff_elems: &mut Vec<(usize, usize)>| {
         for vm in vars.values() {
             ff_elems.clear();
+            // A variable past `MAX_TOTAL_COMPARE` can never join a compare set
+            // — that constant caps the sum over every gated segment — so
+            // per-element owners cost a span, a sort key and a writer list each
+            // for a precision no segment can spend.  One span keeps the lookup
+            // exact and makes the table a function of the design's variables
+            // rather than its array lengths.
+            let (comb_bytes, comb_span_bytes) = comb_extent(&vm.elements, use_4state);
+            let fold_var = comb_bytes > MAX_TOTAL_COMPARE
+                || comb_span_bytes > crate::ir::big_array::FOLD_SPAN_BYTES;
+            let mut comb_span: Option<(usize, usize)> = None;
             for el in &vm.elements {
                 let off = el.current.raw();
                 if off < 0 {
@@ -479,9 +511,17 @@ pub fn build_inputs(
                 let (off, nb) = (off as usize, value_size(el.native_bytes, use_4state));
                 if el.current.is_ff() {
                     ff_elems.push((off, nb));
+                } else if fold_var {
+                    comb_span = Some(match comb_span {
+                        None => (off, off + nb),
+                        Some((s, e)) => (s.min(off), e.max(off + nb)),
+                    });
                 } else {
                     comb_owner.push((off, off + nb, id));
                 }
+            }
+            if let Some((s, e)) = comb_span {
+                comb_owner.push((s, e, id));
             }
             fold_ff_runs(ff_elems, ff_runs);
         }
@@ -694,12 +734,15 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
     let mut poisoned: Vec<bool> = vec![false; inputs.node_parent.len()];
     let mut ins: Vec<VarOffset> = Vec::new();
     let mut outs: Vec<VarOffset> = Vec::new();
-    // Segment membership and the compare sets are keyed on unfolded offsets.
-    let unfolded = BigArrayFold::default();
+    // Membership and the compare sets are keyed on owner spans, and a folded
+    // array owns exactly one — `build_inputs` collapses whatever this fold
+    // does.  Expanding its elements would resolve that same span once per
+    // element, before `merge_ranges` collapsed them back into it.
+    let fold = BigArrayFold::from_statements(stmts.iter());
     for s in stmts {
         ins.clear();
         outs.clear();
-        s.gather_variable_offsets_expanded(&unfolded, &mut ins, &mut outs);
+        s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
         let mut info = StmtInfo {
             node: root,
             in_comb: Vec::new(),
@@ -1300,6 +1343,51 @@ mod tests {
         let elems = [(0, 8), (8, 8), (24, 8), (32, 8), (33, 1)];
         let covered: usize = fold(&elems).iter().map(|&(_, _, c, _)| c).sum();
         assert_eq!(covered, elems.len());
+    }
+
+    #[test]
+    fn comb_extent_measures_the_compare_set_and_the_fold() {
+        let el = |nb: usize, off: VarOffset| VariableElement {
+            native_bytes: nb,
+            current: off,
+            next_offset: 0,
+        };
+        // FF elements gate through `FfOwner`, and a negative offset is not
+        // storage at all; neither joins a comb compare set.
+        let mixed = [
+            el(8, VarOffset::Comb(0)),
+            el(8, VarOffset::Ff(0)),
+            el(8, VarOffset::Comb(-1)),
+            el(4, VarOffset::Comb(64)),
+        ];
+        assert_eq!(comb_extent(&mixed, false), (12, 68));
+        // 4-state doubles every element: the X/Z half has to be compared too.
+        assert_eq!(comb_extent(&mixed, true), (24, 72));
+        // The budget decides the fold, so an array just over it folds and one
+        // just under it does not.
+        let arr = |n: usize| -> Vec<VariableElement> {
+            (0..n)
+                .map(|i| el(8, VarOffset::Comb((i * 8) as isize)))
+                .collect()
+        };
+        let just_over = arr(MAX_TOTAL_COMPARE / 8 + 1);
+        let just_under = arr(MAX_TOTAL_COMPARE / 8);
+        assert!(comb_extent(&just_over, false).0 > MAX_TOTAL_COMPARE);
+        assert!(comb_extent(&just_under, false).0 <= MAX_TOTAL_COMPARE);
+        // A padded array can span past the fold's threshold while its elements
+        // stay under the budget; those spans have to collapse anyway, because
+        // `plan` reads such an array folded.
+        let padded: Vec<VariableElement> = (0..64)
+            .map(|i| {
+                el(
+                    8,
+                    VarOffset::Comb((i * crate::ir::big_array::FOLD_SPAN_BYTES / 32) as isize),
+                )
+            })
+            .collect();
+        let (bytes, span) = comb_extent(&padded, false);
+        assert!(bytes <= MAX_TOTAL_COMPARE);
+        assert!(span > crate::ir::big_array::FOLD_SPAN_BYTES);
     }
 
     #[test]

@@ -951,6 +951,10 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
 /// CompiledBlock without original statements, a tb-method call whose
 /// return destination is an unresolved `VarId`) — the caller must not
 /// arm the split then.
+/// Narrowest storage an element can occupy, turning an element count into a
+/// lower bound on the bytes the cone gate's fold weighs.
+const MIN_ELEMENT_BYTES: usize = 4;
+
 fn collect_event_written_comb(
     events: &HashMap<Event, Vec<ProtoStatement>>,
 ) -> Option<HashSet<isize>> {
@@ -965,8 +969,19 @@ fn collect_event_written_comb(
             }
             ProtoStatement::AssignDynamic(a) => {
                 if !a.dst_base.is_ff() && a.dst_stride != 0 {
-                    for k in 0..a.dst_num_elements {
-                        out.insert(a.dst_base.raw() + a.dst_stride * k as isize);
+                    // Past the compare budget the run owns one folded span, so
+                    // its ends reach what the interior would; below it each
+                    // element owns a span and has to be named.  The fold weighs
+                    // elements, not the range they stride over.
+                    let least_bytes = a.dst_num_elements * MIN_ELEMENT_BYTES;
+                    if least_bytes > cone_gate::MAX_TOTAL_COMPARE {
+                        let last = a.dst_num_elements.saturating_sub(1) as isize;
+                        out.insert(a.dst_base.raw());
+                        out.insert(a.dst_base.raw() + a.dst_stride * last);
+                    } else {
+                        for k in 0..a.dst_num_elements {
+                            out.insert(a.dst_base.raw() + a.dst_stride * k as isize);
+                        }
                     }
                 }
                 true
@@ -1002,11 +1017,24 @@ fn collect_event_written_comb(
                 f.body.iter().all(|s| walk(s, out))
             }
             ProtoStatement::SystemFunctionCall(c) => {
-                // Readmemh writes are boundable: one offset per element.
+                // Readmemh writes are boundable: one offset per element, or
+                // just the ends once the image owns a folded span (see
+                // `AssignDynamic` above).
                 if let crate::ir::ProtoSystemFunctionCall::Readmemh { elements, .. } = c {
-                    for e in elements {
-                        if !e.current.is_ff() {
-                            out.insert(e.current.raw());
+                    let comb = || elements.iter().filter(|e| !e.current.is_ff());
+                    // The elements carry no width, so bound the fold's measure
+                    // by the narrowest element there is.
+                    let least_bytes = comb().count() * MIN_ELEMENT_BYTES;
+                    let lo = comb().map(|e| e.current.raw()).min();
+                    let hi = comb().map(|e| e.current.raw()).max();
+                    if let (Some(lo), Some(hi)) = (lo, hi) {
+                        if least_bytes > cone_gate::MAX_TOTAL_COMPARE {
+                            out.insert(lo);
+                            out.insert(hi);
+                        } else {
+                            for e in comb() {
+                                out.insert(e.current.raw());
+                            }
                         }
                     }
                 }
