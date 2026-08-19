@@ -444,6 +444,16 @@ fn fold_ff_runs(elems: &[(usize, usize)], out: &mut Vec<(usize, usize, usize, us
     }
 }
 
+/// The comb bytes one variable contributes, which is what a segment's compare
+/// set would have to cover to gate on it.
+fn comb_footprint(vm: &VariableMeta, use_4state: bool) -> usize {
+    vm.elements
+        .iter()
+        .filter(|el| !el.current.is_ff() && el.current.raw() >= 0)
+        .map(|el| value_size(el.native_bytes, use_4state))
+        .sum()
+}
+
 /// Assemble the node tables from the pre-instantiation variable-meta tree.
 /// `event_written` holds every comb offset the event statements can write
 /// (element-expanded); the covering variable spans join each segment's
@@ -467,6 +477,15 @@ pub fn build_inputs(
                     ff_elems: &mut Vec<(usize, usize)>| {
         for vm in vars.values() {
             ff_elems.clear();
+            // A variable whose own comb bytes exceed `MAX_TOTAL_COMPARE` can
+            // never join a compare set — that constant caps the sum over every
+            // gated segment — so resolving its owner per element buys a
+            // precision no segment can spend, while costing a span, a sort key
+            // and a writer list per element.  One span for the whole variable
+            // keeps the owner lookup exact and makes the table a function of
+            // the design's variables instead of its array lengths.
+            let fold_var = comb_footprint(vm, use_4state) > MAX_TOTAL_COMPARE;
+            let mut comb_span: Option<(usize, usize)> = None;
             for el in &vm.elements {
                 let off = el.current.raw();
                 if off < 0 {
@@ -479,9 +498,17 @@ pub fn build_inputs(
                 let (off, nb) = (off as usize, value_size(el.native_bytes, use_4state));
                 if el.current.is_ff() {
                     ff_elems.push((off, nb));
+                } else if fold_var {
+                    comb_span = Some(match comb_span {
+                        None => (off, off + nb),
+                        Some((s, e)) => (s.min(off), e.max(off + nb)),
+                    });
                 } else {
                     comb_owner.push((off, off + nb, id));
                 }
+            }
+            if let Some((s, e)) = comb_span {
+                comb_owner.push((s, e, id));
             }
             fold_ff_runs(ff_elems, ff_runs);
         }
