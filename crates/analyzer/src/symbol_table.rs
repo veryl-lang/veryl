@@ -1654,7 +1654,9 @@ impl SymbolTable {
             return;
         }
 
-        if let Some(prj) = scope::project_of(scope)
+        // A head reached through an import binding is declared in the exporting
+        // project, not in the one the path is written in.
+        if let Some(prj) = scope::project_of(symbol.found.scope)
             && let Some(project_symbol) = self.find_project_symbol(prj)
         {
             let project_path = GenericSymbol {

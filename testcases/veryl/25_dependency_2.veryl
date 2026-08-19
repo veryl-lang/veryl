@@ -197,3 +197,24 @@ module Module25P {
     inst u0: foo_module::<foopkg>;
     inst u1: bar_module::<foopkg, barpkg>;
 }
+
+// An imported component keeps its declaring project as a generic argument.
+import veryl_sample4::foo_pkg;
+
+module Module25Q {
+    inst u: veryl_sample4::qux_if::<foo_pkg::<1>::Foo>;
+    assign u.qux.foo = 0;
+}
+
+module Module25R {
+    // The argument's project differs from both the use site and the base
+    // component's project.
+    inst u: veryl_sample5::qux_if::<foo_pkg::<2>::Foo>;
+    assign u.qux.foo = 0;
+}
+
+module Module25S {
+    // Both spellings instantiate the same component.
+    inst u0: veryl_sample4::foo_module::<foo_pkg::<3>>;
+    inst u1: veryl_sample4::foo_module::<veryl_sample4::foo_pkg::<3>>;
+}
