@@ -18,9 +18,9 @@ use crate::conv::utils::{
     TypePosition, assign_rhs_context_type, check_assign_clock_domain, eval_array_range_assign,
     eval_assign_statement, eval_clock, eval_const_assign, eval_expr, eval_factor_symbol,
     eval_factor_symbol_external, eval_generate_for_range, eval_reset, eval_size, eval_type,
-    eval_variable, expand_connect, expand_connect_const, get_component, get_overridden_params,
-    get_port_connects, get_return_str, insert_port_connect, try_infer_decl_type,
-    try_infer_var_assign, var_path_to_assign_destination,
+    eval_variable, expand_connect, expand_connect_const, expand_input_connect, get_component,
+    get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
+    try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::definition_table::{self, Definition};
@@ -1623,28 +1623,41 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             let dst_comptime =
                                 Comptime::from_type(dst_type.clone(), *clock_domain, token);
 
-                            for (path, dst, mut expr) in connects {
+                            for (path, dst, expr) in connects {
                                 if let Some(id) = component.ports.get(&path)
                                     && let Some(variable) = component.variables.get(id)
                                 {
-                                    let expr_comptime = expr.eval_comptime(context, None);
+                                    // Expand before the check: unexpanded, a
+                                    // slice evaluates to `Unknown`, which
+                                    // carries no clock domain.
+                                    let mut exprs =
+                                        expand_input_connect(context, variable, &dst, expr);
 
-                                    if let Some(x) =
-                                        clock_domain_table.get(&dst_comptime.clock_domain)
-                                    {
-                                        check_clock_domain(context, x, expr_comptime, &token.beg);
-                                    } else {
-                                        clock_domain_table.insert(
-                                            dst_comptime.clock_domain,
-                                            expr_comptime.clone(),
-                                        );
+                                    for expr in exprs.iter_mut() {
+                                        let expr_comptime = expr.eval_comptime(context, None);
+
+                                        if let Some(x) =
+                                            clock_domain_table.get(&dst_comptime.clock_domain)
+                                        {
+                                            check_clock_domain(
+                                                context,
+                                                x,
+                                                expr_comptime,
+                                                &token.beg,
+                                            );
+                                        } else {
+                                            clock_domain_table.insert(
+                                                dst_comptime.clock_domain,
+                                                expr_comptime.clone(),
+                                            );
+                                        }
                                     }
 
                                     insert_port_connect(
                                         context,
                                         variable,
                                         dst,
-                                        expr,
+                                        exprs,
                                         &mut inputs,
                                         &mut outputs,
                                     );

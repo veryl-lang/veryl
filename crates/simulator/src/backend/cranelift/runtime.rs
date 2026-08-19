@@ -437,20 +437,53 @@ fn chunk_shape(stmts: &[ProtoStatement]) -> (usize, usize) {
     (count, max_w)
 }
 
+/// Anchor for the perf-map name: the chunk's first assignment destination, or
+/// None for a chunk whose statements carry no plain destination.
+fn first_dst(stmts: &[ProtoStatement]) -> Option<VarOffset> {
+    for s in stmts {
+        let d = match s {
+            ProtoStatement::Assign(a) => Some(a.dst),
+            ProtoStatement::AssignDynamic(a) => Some(a.dst_base),
+            ProtoStatement::If(x) => first_dst(&x.true_side).or_else(|| first_dst(&x.false_side)),
+            ProtoStatement::Case(c) => c
+                .arms
+                .iter()
+                .find_map(|arm| first_dst(&arm.body))
+                .or_else(|| first_dst(&c.default)),
+            ProtoStatement::For(f) => first_dst(&f.body),
+            ProtoStatement::SequentialBlock(b) => first_dst(b),
+            _ => None,
+        };
+        if d.is_some() {
+            return d;
+        }
+    }
+    None
+}
+
 /// Append a `/tmp/perf-<pid>.map` entry so `perf` can symbolize this JIT'd chunk
 /// (which otherwise samples as an anonymous-mmap address). Gated by
-/// `VERYL_JIT_PERFMAP=1`; the name encodes the chunk's shape so the report groups
-/// hot chunks by statement count and max width. Best-effort — a failed diagnostic
-/// write never aborts a compile.
+/// `VERYL_JIT_PERFMAP=1`. The destination offset in the name joins to a
+/// `VERYL_DUMP_VARMAP` line, which attributes the samples to a module; the
+/// serial keeps identically shaped chunks from sharing one symbol.
+/// Best-effort — a failed diagnostic write never aborts a compile.
 fn emit_jit_perfmap(addr: *const u8, size: usize, proto: &[ProtoStatement]) {
     use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     static ENABLED: OnceLock<bool> = OnceLock::new();
     if !*ENABLED.get_or_init(|| std::env::var("VERYL_JIT_PERFMAP").as_deref() == Ok("1")) {
         return;
     }
+    static SERIAL: AtomicUsize = AtomicUsize::new(0);
+    let serial = SERIAL.fetch_add(1, Ordering::Relaxed);
     let (count, max_w) = chunk_shape(proto);
+    let anchor = match first_dst(proto) {
+        Some(VarOffset::Ff(o)) => format!("_ff{o:x}"),
+        Some(VarOffset::Comb(o)) => format!("_cb{o:x}"),
+        None => String::new(),
+    };
     let line = format!(
-        "{:x} {:x} veryl_comb_{count}s_w{max_w}\n",
+        "{:x} {:x} veryl_jit_c{serial}_{count}s_w{max_w}{anchor}\n",
         addr as usize, size
     );
     if let Ok(mut f) = std::fs::OpenOptions::new()

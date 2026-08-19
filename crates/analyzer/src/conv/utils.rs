@@ -531,6 +531,11 @@ pub fn eval_size(
     allow_inferable_size: bool,
 ) -> IrResult<(Comptime, Option<usize>)> {
     let (comptime, expr) = eval_expr(context, None, expr, allow_inferable_size)?;
+    if comptime.r#type.is_type() {
+        let token = expr.token_range();
+        context.insert_error(AnalyzerError::invalid_size_type(&token));
+        return Err(ir_error!(token));
+    }
     if let Ok(x) = comptime.get_value() {
         let value = x.to_usize().unwrap_or(0);
         let value = context.check_size(value, expr.token_range());
@@ -2031,11 +2036,21 @@ pub fn eval_struct_constructor(
 
         let members = match &r#type.kind {
             ir::TypeKind::Struct(x) => &x.members,
-            ir::TypeKind::Union(x) => &x.members,
             ir::TypeKind::SystemVerilog => &vec![],
+            // A union stores one member at a time, so a pattern naming its
+            // members has no value to build. SystemVerilog leaves the case to
+            // the tool -- implementations disagree on which forms are legal
+            // and on what they mean -- so emitting one is not portable.
+            ir::TypeKind::Union(_) => {
+                context.insert_error(AnalyzerError::mismatch_type(
+                    MismatchTypeKind::UnionConstructor,
+                    &token,
+                ));
+                return Err(ir_error!(token));
+            }
             _ => {
                 context.insert_error(AnalyzerError::mismatch_type(
-                    MismatchTypeKind::NonStructUnionType {
+                    MismatchTypeKind::NonStructType {
                         actual: r#type.kind.to_string(),
                     },
                     &token,
@@ -2082,9 +2097,15 @@ pub fn eval_struct_constructor(
 /// A member path whose first segment is a module instance: a hierarchical
 /// testbench reference (`dut.u_core.pc`) or one of its misuse forms.
 enum HierReference {
-    /// Instance-name path, variable path within the target module, and the
-    /// variable's type.
-    Resolved(Vec<StrId>, VarPath, Box<ir::Type>),
+    Resolved {
+        /// Instance names from the referencing module down to the target.
+        inst_path: Vec<StrId>,
+        var_path: VarPath,
+        r#type: Box<ir::Type>,
+        /// A struct/union member named by trailing segments, read as a bit
+        /// range of the whole variable.
+        part_select: Option<Box<PartSelectPath>>,
+    },
     UnknownMember {
         owner: String,
         member: StrId,
@@ -2116,11 +2137,36 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
             // (multi-segment for interface-flattened members) ...
             let var_path = VarPath::from_slice(&segs[i..]);
             if let Some(variable) = module.variables.values().find(|v| v.path == var_path) {
-                return HierReference::Resolved(
+                return HierReference::Resolved {
                     inst_path,
                     var_path,
-                    Box::new(variable.r#type.clone()),
-                );
+                    r#type: Box::new(variable.r#type.clone()),
+                    part_select: None,
+                };
+            }
+
+            // ... or a struct/union member of one. A struct is a single
+            // variable, so the member resolves against its type, not the
+            // variable list. Longest prefix wins: an interface flattens into
+            // multi-segment variable paths.
+            let holder = module
+                .variables
+                .values()
+                .filter(|v| v.path.0.len() < var_path.0.len() && var_path.0.starts_with(&v.path.0))
+                .max_by_key(|v| v.path.0.len());
+            if let Some(variable) = holder
+                && let Some(part_select) = variable
+                    .r#type
+                    .expand_struct_union(&variable.path, &[], None)
+                    .into_iter()
+                    .find(|x| x.path == var_path)
+            {
+                return HierReference::Resolved {
+                    inst_path,
+                    var_path: variable.path.clone(),
+                    r#type: Box::new(variable.r#type.clone()),
+                    part_select: Some(Box::new(part_select)),
+                };
             }
 
             // ... or descend into the child instance whose qualified path
@@ -2133,15 +2179,19 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
                 Some((&inst.component, consumed))
             });
             let Some((child, consumed)) = child else {
+                // Name the struct, not the instance, when a variable path
+                // matched but its trailing member did not.
+                let (owner_tail, member) = match holder {
+                    Some(v) => (v.path.0.as_slice(), segs[i + v.path.0.len()]),
+                    None => (&[][..], segs[i]),
+                };
                 let owner = inst_path
                     .iter()
+                    .chain(owner_tail)
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()
                     .join(".");
-                return HierReference::UnknownMember {
-                    owner,
-                    member: segs[i],
-                };
+                return HierReference::UnknownMember { owner, member };
             };
             inst_path.extend_from_slice(&segs[i..i + consumed]);
             component = child.as_ref();
@@ -2298,7 +2348,13 @@ fn eval_factor_path_inner(
                 Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
             }
         }
-    } else if let HierReference::Resolved(inst_path, var_path, r#type) = hier {
+    } else if let HierReference::Resolved {
+        inst_path,
+        var_path,
+        r#type,
+        part_select,
+    } = hier
+    {
         if !context.in_tb_block {
             context.insert_error(AnalyzerError::invisible_identifier(
                 &path.0[1].to_string(),
@@ -2311,8 +2367,12 @@ fn eval_factor_path_inner(
 
         let (array_select, width_select) = select.split(comptime.r#type.array.dims());
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
-        let width_select = eval_width_select(context, &var_path, &comptime.r#type, width_select)
-            .ok_or_else(|| ir_error!(token))?;
+        let width_select = if let Some(part_select) = &part_select {
+            part_select.to_base_select(context, &width_select)
+        } else {
+            eval_width_select(context, &var_path, &comptime.r#type, width_select)
+        }
+        .ok_or_else(|| ir_error!(token))?;
 
         if array_select.is_range() {
             Err(ir_error!(token))
@@ -2366,7 +2426,7 @@ fn eval_factor_path_inner(
                     &[],
                 ));
             }
-            HierReference::Resolved(..) | HierReference::NotHier => unreachable!(),
+            HierReference::Resolved { .. } | HierReference::NotHier => unreachable!(),
         }
         Err(ir_error!(token))
     } else if let Some(x) = generic_path.to_literal() {
@@ -3634,11 +3694,40 @@ pub fn get_port_connects(
     Ok(ret)
 }
 
+/// Expands an unpacked-array slice connection (`i: arr[2*n+:2]`) into one
+/// expression per port element; anything else stays a single expression.
+///
+/// Separate from `insert_port_connect` so the caller can clock-domain check the
+/// result: unexpanded, the slice evaluates to `Unknown`, which carries no domain.
+pub fn expand_input_connect(
+    context: &mut Context,
+    variable: &ir::Variable,
+    dst: &[VarPathSelect],
+    expr: ir::Expression,
+) -> Vec<ir::Expression> {
+    if variable.kind != VarKind::Input
+        || variable.r#type.array.is_empty()
+        || dst.len() != 1
+        || !dst[0].is_array_range(context)
+    {
+        return vec![expr];
+    }
+
+    // A mismatched count keeps the single-expression form, so a malformed
+    // connection is diagnosed downstream as before.
+    let exprs = dst[0].clone().to_expressions(context);
+    if exprs.len() == variable.r#type.total_array().unwrap_or(1) {
+        exprs
+    } else {
+        vec![expr]
+    }
+}
+
 pub fn insert_port_connect(
     context: &mut Context,
     variable: &ir::Variable,
     dst: Vec<VarPathSelect>,
-    expr: ir::Expression,
+    exprs: Vec<ir::Expression>,
     inputs: &mut Vec<ir::InstInput>,
     outputs: &mut Vec<ir::InstOutput>,
 ) {
@@ -3646,10 +3735,12 @@ pub fn insert_port_connect(
         VarKind::Input => {
             inputs.push(ir::InstInput {
                 id: variable.id,
-                expr,
+                exprs,
             });
         }
         VarKind::Output => {
+            // Expansion applies to inputs only, so an output always has one.
+            let expr = &exprs[0];
             if !expr.is_assignable() {
                 context.insert_error(AnalyzerError::unassignable_output(&expr.token_range()));
             }

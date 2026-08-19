@@ -9,7 +9,9 @@ use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
 use crate::ir::partial_index::partial_index_base;
-use crate::ir::statement::{ProtoAssignStatement, msb_first_window, size_fill_literal_rhs};
+use crate::ir::statement::{
+    ProtoAssignStatement, const_array_element_exprs, msb_first_window, size_literal_rhs,
+};
 use crate::ir::variable::{
     ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
 };
@@ -20,6 +22,74 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_parser::token_range::TokenRange;
+
+/// Read of an `always_ff` reset net, as the `if_reset` condition.  Built as a
+/// plain factor so port aliasing and selects are applied like any other read.
+fn build_reset_condition(
+    context: &mut Context,
+    reset: &air::FfReset,
+) -> Result<ProtoExpression, SimulatorError> {
+    let factor = air::Factor::Variable(
+        reset.id,
+        reset.index.clone(),
+        reset.select.clone(),
+        reset.comptime.clone(),
+    );
+    Conv::conv(context, &air::Expression::Term(Box::new(factor)))
+}
+
+/// The declared type kind of a reset net.
+fn reset_kind(context: &mut Context, id: air::VarId) -> Option<air::TypeKind> {
+    context
+        .scope()
+        .analyzer_context
+        .variables
+        .get(&id)
+        .map(|x| x.r#type.kind.clone())
+}
+
+/// `(active low, synchronous)` a polarity-agnostic `reset` net takes from the
+/// instance ports it is wired to.
+///
+/// Those ports were lowered against their own declarations, so a block reading
+/// the same net has to match them or the two ends of one wire run at opposite
+/// polarities.  A port of THIS module is excluded: the emitted SystemVerilog
+/// resolves it from `reset_type`, and so must the simulator.
+fn inst_declared_reset_kind(context: &mut Context, id: air::VarId) -> Option<(bool, bool)> {
+    let scope = context.scope();
+    let is_port = scope
+        .analyzer_context
+        .variables
+        .get(&id)
+        .is_some_and(|v| scope.analyzer_context.port_types.contains_key(&v.path));
+    if is_port {
+        return None;
+    }
+    scope.inst_reset_kind.get(&id).copied().flatten()
+}
+
+/// True when the reset net asserts LOW.
+fn reset_active_low(context: &mut Context, id: air::VarId) -> bool {
+    match reset_kind(context, id) {
+        Some(air::TypeKind::ResetAsyncHigh) | Some(air::TypeKind::ResetSyncHigh) => false,
+        Some(air::TypeKind::ResetAsyncLow) | Some(air::TypeKind::ResetSyncLow) => true,
+        _ => inst_declared_reset_kind(context, id)
+            .map(|(active_low, _)| active_low)
+            .unwrap_or(!context.config.abstract_reset_active_high),
+    }
+}
+
+/// True when the reset asserts as an event of its own rather than being
+/// sampled at a clock edge.
+fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
+    match reset_kind(context, id) {
+        Some(air::TypeKind::ResetAsyncHigh) | Some(air::TypeKind::ResetAsyncLow) => true,
+        Some(air::TypeKind::ResetSyncHigh) | Some(air::TypeKind::ResetSyncLow) => false,
+        _ => inst_declared_reset_kind(context, id)
+            .map(|(_, sync)| !sync)
+            .unwrap_or(!context.config.abstract_reset_sync),
+    }
+}
 
 /// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
 ///
@@ -683,14 +753,11 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 // cross-test caches, so every module's always_comb is seen
                 // while still a flat SequentialBlock (at top level the DUT's
                 // blocks end up nested inside CompiledBlocks).
-                //
-                // Skipped when the block alone already makes the incremental
-                // plan infeasible (a statement reading a whole memory): the
-                // plan the transform serves will be declined, so its cost —
-                // and its select chains over huge reads — buy nothing.
+                // Skipped when a statement in the block reads a whole memory:
+                // the pass's select chains over such reads buy nothing.
                 #[cfg(not(target_family = "wasm"))]
                 if version_split::pass_enabled(context.config.use_4state)
-                    && !crate::ir::incremental::stmts_infeasible(&comb_statements)
+                    && !crate::ir::deps::stmts_infeasible(&comb_statements)
                 {
                     // Fresh comb offsets for rename temps come from the same
                     // allocator as function locals; instance-reuse records
@@ -716,6 +783,18 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 })
             }
             air::Declaration::Ff(x) => {
+                // Converted before the body so statements its own conversion
+                // defers (an inlined function inside an index) stay separable
+                // from the body's.
+                let reset_cond = match &x.reset {
+                    Some(reset) => {
+                        let cond = build_reset_condition(context, reset)?;
+                        let pending = std::mem::take(&mut context.pending_statements);
+                        Some((cond, pending))
+                    }
+                    None => None,
+                };
+
                 let mut statements = vec![];
                 for stmt in &x.statements {
                     let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
@@ -726,15 +805,41 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 let mut event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
 
                 if let Some(reset) = &x.reset {
-                    let reset_event = Event::Reset(reset.id);
+                    let (cond, mut clock_stmts) = reset_cond.unwrap();
                     let head = statements.remove(0);
                     let (mut true_side, mut false_side) = head.split_if_reset().unwrap();
                     // Statements after `if_reset` run on both reset and clock
                     // edges, so append to both branches instead of dropping them.
                     true_side.extend(statements.iter().cloned());
                     false_side.extend(statements);
-                    event_statements.insert(reset_event, true_side);
-                    event_statements.insert(clock_event, false_side);
+
+                    // The `negedge rst_n` arm of the sensitivity list: an async
+                    // reset must also reach a block whose clock is stopped, and
+                    // no clock-edge test can express that.  Reaching a block
+                    // through both arms in one step runs its reset branch twice,
+                    // as it does in SystemVerilog.  A sync reset has no such arm.
+                    if reset_is_async(context, reset.id) {
+                        event_statements.insert(Event::Reset(reset.id), true_side.clone());
+                    }
+
+                    // The `if (rst)` of the emitted body: a reset produced by
+                    // `assign`, by a cast, or by another `always_ff` has no
+                    // assertion event and is reached only this way.
+                    //
+                    // Polarity rides in the branch ORDER so the condition stays
+                    // a bare 1-bit read: active-low takes the clock branch when
+                    // the net reads 1.
+                    let (true_side, false_side) = if reset_active_low(context, reset.id) {
+                        (false_side, true_side)
+                    } else {
+                        (true_side, false_side)
+                    };
+                    clock_stmts.push(ProtoStatement::If(crate::ir::ProtoIfStatement {
+                        cond: Some(cond),
+                        true_side,
+                        false_side,
+                    }));
+                    event_statements.insert(clock_event, clock_stmts);
                 } else {
                     event_statements.insert(clock_event, statements);
                 }
@@ -906,7 +1011,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             for (i, x) in hoisted_child_decls.iter().enumerate() {
                 x.gather_ff(&mut child_analyzer_context, &mut child_ff_table, i);
             }
-            child_ff_table.update_is_ff();
+            child_ff_table.update_is_ff(&hoisted_child_decls, &mut child_analyzer_context);
             if context.config.disable_ff_opt {
                 child_ff_table.force_all_ff();
             }
@@ -937,8 +1042,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             context.config.use_4state,
             ff_start,
             comb_start,
-        )
-        .unwrap();
+        )?;
 
         context.ff_total_bytes += child_ff_count;
         context.comb_total_bytes += child_comb_count;
@@ -958,7 +1062,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for input in &src.inputs {
-                let air::Expression::Term(factor) = &input.expr else {
+                let Some(air::Expression::Term(factor)) = input.single() else {
                     continue;
                 };
                 let air::Factor::Variable(parent_id, idx, sel, _) = factor.as_ref() else {
@@ -1141,6 +1245,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 variable_meta: child_variable_meta.clone(),
                 analyzer_context: child_analyzer_context,
                 ff_table: child_ff_table.clone(),
+                inst_reset_kind: crate::ir::module::collect_inst_reset_kinds(
+                    &child_module.declarations,
+                ),
                 func_offset_index: None,
             };
             context.scope_contexts.push(child_scope);
@@ -1221,10 +1328,51 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
             let child_meta = child_variable_meta.get(&input.id).unwrap();
 
+            // One expression per port element: an unpacked-array slice, wired
+            // element-wise.
+            if input.exprs.len() != 1 {
+                if input.exprs.len() != child_meta.elements.len() {
+                    return Err(SimulatorError::unsupported_description(&src.token));
+                }
+                for (child_element, expr) in child_meta.elements.iter().zip(&input.exprs) {
+                    let mut proto_expr: ProtoExpression = Conv::conv(context, expr)?;
+                    size_literal_rhs(&mut proto_expr, None, None, child_meta.width);
+                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: child_element.current,
+                        dst_width: child_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr: proto_expr,
+                        dst_ff_current_offset: 0, // not FF
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
+            let input_expr = &input.exprs[0];
+
+            // Array port fed by a const array (`inst u: Sub (i: pk::TBL)`).
+            if let Some(exprs) = const_array_element_exprs(input_expr, child_meta.elements.len()) {
+                for (child_element, expr) in child_meta.elements.iter().zip(exprs) {
+                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: child_element.current,
+                        dst_width: child_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: 0, // not FF
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
+
             // Array port fed by a bare or constant partial-index variable
             // (e.g. `w_q[i]` from `logic [N, M]`): expand per-element.
             if child_meta.elements.len() > 1
-                && let air::Expression::Term(factor) = &input.expr
+                && let air::Expression::Term(factor) = input_expr
                 && let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref()
                 && select.is_empty()
             {
@@ -1278,10 +1426,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
             }
 
-            let mut proto_expr: ProtoExpression = Conv::conv(context, &input.expr)?;
-            // Size an unsized all-bit literal (`'1` etc.) to the port
-            // width — there is no assignment statement here to do it.
-            size_fill_literal_rhs(&mut proto_expr, None, None, child_meta.width);
+            let mut proto_expr: ProtoExpression = Conv::conv(context, input_expr)?;
+            // No assignment statement here to size the literal.
+            size_literal_rhs(&mut proto_expr, None, None, child_meta.width);
             let element = &child_meta.elements[0];
             all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                 dst: element.current,
@@ -1304,11 +1451,15 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
             let child_meta = child_variable_meta.get(&output.id).unwrap();
             let multi_dst = output.dst.len() > 1;
+            // One dst per array element (`o: arr[2*n+:2]`) is element-wise
+            // wiring, not a concat destructure of a single packed port value.
+            let element_wise = multi_dst && child_meta.elements.len() == output.dst.len();
+            let concat_dst = multi_dst && !element_wise;
 
             // Field widths for the windows below, which slice a single
             // packed child port value.
             let mut dst_widths: Vec<usize> = Vec::with_capacity(output.dst.len());
-            if multi_dst {
+            if concat_dst {
                 if child_meta.elements.len() != 1 {
                     return Err(SimulatorError::unsupported_description(
                         &output.dst[0].token,
@@ -1400,7 +1551,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
                 // MSB-first window, clamped to the port width: bits above
                 // it read zero (SV zero-extension of the RHS).
-                let (rhs_select, field_above_port) = if multi_dst {
+                let (rhs_select, field_above_port) = if concat_dst {
                     let (msb, lsb) = msb_first_window(&mut remaining, dst_widths[dst_idx]);
                     if lsb >= child_meta.width {
                         (None, true)
@@ -1439,7 +1590,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
 
                 for (elem_idx, &parent_elem_idx) in parent_element_indices.iter().enumerate() {
-                    let child_element = &child_meta.elements[elem_idx];
+                    // Element-wise wiring puts one parent element per dst, so
+                    // the child element advances with the dst.
+                    let child_elem_idx = if element_wise { dst_idx } else { elem_idx };
+                    let child_element = &child_meta.elements[child_elem_idx];
                     let parent_element = &parent_meta.elements[parent_elem_idx];
 
                     let child_expr = if field_above_port {
@@ -1491,7 +1645,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // Remap child event keys (clock/reset) to parent VarIds via input port connections
         let mut child_to_parent_var: HashMap<air::VarId, air::VarId> = HashMap::default();
         for input in &src.inputs {
-            if let air::Expression::Term(factor) = &input.expr
+            if let Some(air::Expression::Term(factor)) = input.single()
                 && let air::Factor::Variable(parent_var_id, _, _, _) = factor.as_ref()
             {
                 child_to_parent_var.insert(input.id, *parent_var_id);
@@ -1532,10 +1686,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // here, where the owner scope closes: VarIds are per-module-scope,
         // so a nested id can numerically equal an ancestor's input-port
         // id, and the event remap at that boundary would hijack the key
-        // onto an unrelated clock.  Reset-typed internal vars get the
-        // same re-key for `Event::Reset`, but no schedule candidate —
-        // there is no derived-reset edge detection, so a re-keyed reset
-        // event simply never fires.
+        // onto an unrelated clock.  A reset-typed internal var gets the
+        // same re-key, and no schedule candidate: nothing generates an
+        // assertion edge for a reset a module produces itself, so its
+        // `Event::Reset` never fires — the clock-edge level test in
+        // `Event::Clock` is what serves those blocks.
         let child_port_var_set: HashSet<air::VarId> =
             child_module.ports.values().copied().collect();
         for (vid, var) in &child_module.variables {

@@ -429,6 +429,90 @@ mod tests {
         handler.join().unwrap()
     }
 
+    const SV_FILE_A: &str = r#"
+    module SvModuleA {
+        inst u_if: $sv::foo_if;
+    }
+    "#;
+
+    const SV_FILE_B: &str = r#"
+    module SvModuleB {
+        inst u_if: $sv::foo_if;
+    }
+    "#;
+
+    /// Returns b.veryl's fragment. a.veryl registers `$sv::foo_if` first, so
+    /// b.veryl's own insert is shadowed.
+    fn capture_sv_fragment() -> Fragment {
+        let builder = thread::Builder::new().stack_size(16 * 1024 * 1024);
+        builder
+            .spawn(|| {
+                let metadata = Metadata::create_default("prj").unwrap();
+                let analyzer = Analyzer::new(&metadata);
+
+                let mut fragment = None;
+                let mut parsers = vec![];
+                for (path, code) in [("a.veryl", SV_FILE_A), ("b.veryl", SV_FILE_B)] {
+                    let wm = watermark();
+                    let parser = Parser::parse(code, &path).unwrap();
+                    assert!(analyzer.analyze_pass1("prj", &parser.veryl).is_empty());
+                    if path == "b.veryl" {
+                        fragment = Some(capture(Path::new(path), code, &wm).unwrap());
+                    }
+                    parsers.push(parser);
+                }
+                fragment.unwrap()
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    /// Restores b.veryl's fragment into fresh tables and returns the resulting
+    /// errors. `with_a` decides whether a.veryl has already registered
+    /// `$sv::foo_if`.
+    fn restore_sv_fragment(fragment: Fragment, with_a: bool) -> Vec<String> {
+        let builder = thread::Builder::new().stack_size(16 * 1024 * 1024);
+        builder
+            .spawn(move || {
+                let metadata = Metadata::create_default("prj").unwrap();
+                let analyzer = Analyzer::new(&metadata);
+
+                let mut errors: Vec<AnalyzerError> = vec![];
+                let mut parsers = vec![];
+                if with_a {
+                    let parser = Parser::parse(SV_FILE_A, &"a.veryl").unwrap();
+                    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
+                    parsers.push(parser);
+                }
+
+                scope::set_project("prj".into(), true);
+                restore(&fragment, "prj".into()).unwrap();
+
+                errors.append(&mut Analyzer::analyze_post_pass1());
+                errors.iter().map(|x| x.to_string()).collect()
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    /// The file that first mentions an `$sv::` member may itself be restored,
+    /// or no longer mention it, on a warm build.
+    #[test]
+    fn restored_fragment_defines_its_own_sv_members() {
+        let errors = restore_sv_fragment(capture_sv_fragment(), false);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// A restore must not fall back to a parse just because another file
+    /// registered the same `$sv::` member.
+    #[test]
+    fn restoring_an_already_registered_sv_member_is_not_a_conflict() {
+        let errors = restore_sv_fragment(capture_sv_fragment(), true);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
     #[test]
     fn restored_fragment_matches_direct_pass1() {
         let cold = run(None);

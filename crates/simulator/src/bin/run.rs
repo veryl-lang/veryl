@@ -93,7 +93,7 @@ fn main() {
     let rst = sim.get_reset("rst").unwrap();
 
     sim.step(&Event::Initial);
-    sim.step(&rst);
+    sim.step_reset(&clk, &rst);
 
     for _ in 0..cycle {
         sim.step(&clk);

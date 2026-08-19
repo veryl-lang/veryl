@@ -2,10 +2,11 @@ use crate::HashMap;
 use crate::HashSet;
 use crate::assert_buffer;
 use crate::backend::ChunkArtifact;
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
 use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
-    build_linear_index_expr,
+    build_linear_index_expr, inline_function_call,
 };
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::variable::{
@@ -30,6 +31,62 @@ use veryl_parser::token_range::TokenRange;
 
 /// Per-statement dependency: (input offsets, output offsets).
 pub type StmtDep = (Vec<VarOffset>, Vec<VarOffset>);
+
+/// The analyzer folds a const array to one value per element, which has no
+/// single-width expression form -- every array destination copies it
+/// element-wise instead.
+fn const_array_operand(expr: &air::Expression) -> Option<(&air::Comptime, &[Value])> {
+    let air::Expression::Term(factor) = expr else {
+        return None;
+    };
+    let air::Factor::Value(comptime) = factor.as_ref() else {
+        return None;
+    };
+    match &comptime.value {
+        ValueVariant::NumericArray(values) => Some((comptime, values)),
+        _ => None,
+    }
+}
+
+/// Array shape an operand still has after its index prefix -- `s[0]` against
+/// `logic<8> [2, 3]` leaves `[3]`. `None` when there is no element list to
+/// expand over: a scalar, or a prefix that isn't constant.
+fn remaining_array_shape(
+    context: &mut Context,
+    id: &air::VarId,
+    index: &air::VarIndex,
+) -> Option<air::Shape> {
+    let shape = &context.scope().variable_meta.get(id)?.r#type.array;
+    let dim = index.dimension();
+    if dim >= shape.dims() || !index.is_const() {
+        return None;
+    }
+    Some(air::Shape::new(shape.as_slice()[dim..].to_vec()))
+}
+
+/// `None` on a shape mismatch, leaving the caller's generic path to report it.
+pub(crate) fn const_array_element_exprs(
+    expr: &air::Expression,
+    elements: usize,
+) -> Option<Vec<ProtoExpression>> {
+    let (comptime, values) = const_array_operand(expr)?;
+    if values.len() != elements {
+        return None;
+    }
+    let width = comptime.r#type.total_width()?;
+    let expr_context: ExpressionContext = (&comptime.expr_context).into();
+
+    Some(
+        values
+            .iter()
+            .map(|value| ProtoExpression::Value {
+                value: value.clone(),
+                width,
+                expr_context,
+            })
+            .collect(),
+    )
+}
 
 #[derive(Clone)]
 pub enum ProtoStatementBlock {
@@ -68,6 +125,7 @@ impl ProtoStatements {
                         comb: comb_ptr as *const u8,
                         log_buf: std::ptr::null_mut(),
                         ff_delta: 0,
+                        outputs: None,
                     }));
                 }
             }
@@ -82,6 +140,15 @@ pub struct ReadmemhElement {
     pub next_offset: Option<isize>,
 }
 
+/// A `@` directive in a `$readmemh` file moves the load position.
+enum HexItem {
+    Address(u64),
+    Word(AnalyzerValue),
+}
+
+/// (current, next, native_bytes, use_4state) for one `$readmemh` word.
+type ReadmemhSlot = (*mut u8, Option<*mut u8>, usize, bool);
+
 #[derive(Clone)]
 pub enum SystemFunctionCall {
     Display {
@@ -94,8 +161,8 @@ pub enum SystemFunctionCall {
     },
     Readmemh {
         filename: String,
-        /// (current_ptr, next_ptr, native_bytes, use_4state)
-        elements: Vec<(*mut u8, Option<*mut u8>, usize, bool)>,
+        /// Shared because building the testbench program clones the statement.
+        elements: Arc<[ReadmemhSlot]>,
         width: usize,
     },
     Assert {
@@ -327,6 +394,10 @@ pub struct CompiledStmt {
     /// FF byte delta passed to the chunk (4th `FuncPtr` arg) so it records
     /// absolute write-log offsets. 0 unless this is a relocated cache reuse.
     pub ff_delta: isize,
+    /// Destination offsets the chunk writes, when the builder recorded them
+    /// (testbench-body chunks).  `tb_dirty` classifies the chunk as
+    /// comb-clean from these; `None` means unknown (conservatively dirty).
+    pub outputs: Option<Arc<Vec<VarOffset>>>,
 }
 
 #[derive(Clone)]
@@ -717,15 +788,28 @@ impl SystemFunctionCall {
                 elements,
                 width,
             } => {
-                let values = parse_hex_file(filename, *width);
-                let count = values.len().min(elements.len());
-                for i in 0..count {
-                    let (current, next, nb, use_4state) = elements[i];
-                    unsafe { write_native_value(current, nb, use_4state, &values[i]) };
+                let content = read_hex_file(filename);
+                let mut i = 0usize;
+                for_each_hex_item(&content, *width, |item| {
+                    let value = match item {
+                        HexItem::Address(a) => {
+                            // An address too large for the host is past the end
+                            // of any memory, so let the next word stop the load.
+                            i = usize::try_from(a).unwrap_or(usize::MAX);
+                            return true;
+                        }
+                        HexItem::Word(v) => v,
+                    };
+                    let Some(&(current, next, nb, use_4state)) = elements.get(i) else {
+                        return false;
+                    };
+                    unsafe { write_native_value(current, nb, use_4state, &value) };
                     if let Some(next) = next {
-                        unsafe { write_native_value(next, nb, use_4state, &values[i]) };
+                        unsafe { write_native_value(next, nb, use_4state, &value) };
                     }
-                }
+                    i += 1;
+                    true
+                });
             }
             SystemFunctionCall::Assert {
                 kind,
@@ -1565,22 +1649,32 @@ impl ProtoStatement {
     /// encoding.
     pub fn gather_variable_offsets_expanded(
         &self,
+        fold: &BigArrayFold,
         inputs: &mut Vec<VarOffset>,
         outputs: &mut Vec<VarOffset>,
     ) {
         match self {
             ProtoStatement::Assign(x) => {
-                x.expr.gather_variable_offsets_expanded(inputs);
+                x.expr.gather_variable_offsets_expanded(fold, inputs);
                 if let Some(dyn_sel) = &x.dynamic_select {
-                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                    dyn_sel
+                        .index_expr
+                        .gather_variable_offsets_expanded(fold, inputs);
                 }
-                outputs.push(x.dst);
+                outputs.push(fold.canon(x.dst));
             }
             ProtoStatement::AssignDynamic(x) => {
-                x.dst_index_expr.gather_variable_offsets_expanded(inputs);
-                x.expr.gather_variable_offsets_expanded(inputs);
+                x.dst_index_expr
+                    .gather_variable_offsets_expanded(fold, inputs);
+                x.expr.gather_variable_offsets_expanded(fold, inputs);
                 if let Some(dyn_sel) = &x.dynamic_select {
-                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                    dyn_sel
+                        .index_expr
+                        .gather_variable_offsets_expanded(fold, inputs);
+                }
+                if fold.covers(x.dst_base) {
+                    outputs.push(x.dst_base);
+                    return;
                 }
                 for i in 0..x.dst_num_elements {
                     let off = VarOffset::new(
@@ -1592,42 +1686,42 @@ impl ProtoStatement {
             }
             ProtoStatement::If(x) => {
                 if let Some(cond) = &x.cond {
-                    cond.gather_variable_offsets_expanded(inputs);
+                    cond.gather_variable_offsets_expanded(fold, inputs);
                 }
                 for s in &x.true_side {
-                    s.gather_variable_offsets_expanded(inputs, outputs);
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
                 for s in &x.false_side {
-                    s.gather_variable_offsets_expanded(inputs, outputs);
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
             }
             ProtoStatement::Case(x) => {
                 for arm in &x.arms {
-                    arm.cond.gather_variable_offsets_expanded(inputs);
+                    arm.cond.gather_variable_offsets_expanded(fold, inputs);
                     for s in &arm.body {
-                        s.gather_variable_offsets_expanded(inputs, outputs);
+                        s.gather_variable_offsets_expanded(fold, inputs, outputs);
                     }
                 }
                 for s in &x.default {
-                    s.gather_variable_offsets_expanded(inputs, outputs);
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
             }
             ProtoStatement::SystemFunctionCall(x) => match x {
                 ProtoSystemFunctionCall::Display { args, .. }
                 | ProtoSystemFunctionCall::Write { args, .. } => {
                     for arg in args {
-                        arg.gather_variable_offsets_expanded(inputs);
+                        arg.gather_variable_offsets_expanded(fold, inputs);
                     }
                 }
                 ProtoSystemFunctionCall::Readmemh { .. } => {}
                 ProtoSystemFunctionCall::Assert {
                     condition, args, ..
                 } => {
-                    condition.gather_variable_offsets_expanded(inputs);
+                    condition.gather_variable_offsets_expanded(fold, inputs);
                     // Assert message args are also reads (mirror the
                     // non-expanded variant).
                     for arg in args {
-                        arg.gather_variable_offsets_expanded(inputs);
+                        arg.gather_variable_offsets_expanded(fold, inputs);
                     }
                 }
                 ProtoSystemFunctionCall::Finish => {}
@@ -1639,32 +1733,32 @@ impl ProtoStatement {
                 // originals weren't retained.
                 if !x.original_stmts.is_empty() {
                     for s in &x.original_stmts {
-                        s.gather_variable_offsets_expanded(inputs, outputs);
+                        s.gather_variable_offsets_expanded(fold, inputs, outputs);
                     }
                 } else if !x.stmt_deps.is_empty() {
                     for (ins, outs) in &x.stmt_deps {
                         for &off in ins {
-                            inputs.push(off);
+                            inputs.push(fold.canon(off));
                         }
                         for &off in outs {
-                            outputs.push(off);
+                            outputs.push(fold.canon(off));
                         }
                     }
                 } else {
                     for &off in &x.input_offsets {
-                        inputs.push(off);
+                        inputs.push(fold.canon(off));
                     }
                     for &off in &x.output_offsets {
-                        outputs.push(off);
+                        outputs.push(fold.canon(off));
                     }
                 }
             }
             ProtoStatement::For(x) => {
                 for e in x.range.dynamic_bounds() {
-                    e.gather_variable_offsets_expanded(inputs);
+                    e.gather_variable_offsets_expanded(fold, inputs);
                 }
                 for s in &x.body {
-                    s.gather_variable_offsets_expanded(inputs, outputs);
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
             }
             ProtoStatement::SequentialBlock(body) => {
@@ -1675,11 +1769,91 @@ impl ProtoStatement {
                 // just have no external readers), so we keep the full
                 // input/output sets.
                 for s in body {
-                    s.gather_variable_offsets_expanded(inputs, outputs);
+                    s.gather_variable_offsets_expanded(fold, inputs, outputs);
                 }
             }
             ProtoStatement::TbMethodCall { .. } => {}
             ProtoStatement::Break => {}
+        }
+    }
+
+    /// Record every dynamically-indexed array this statement reaches, so
+    /// [`BigArrayFold`] can decide which are large enough to fold.
+    pub fn collect_big_arrays(&self, fold: &mut BigArrayFold) {
+        match self {
+            ProtoStatement::Assign(x) => {
+                x.expr.collect_big_arrays(fold);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::AssignDynamic(x) => {
+                x.dst_index_expr.collect_big_arrays(fold);
+                x.expr.collect_big_arrays(fold);
+                if let Some(dyn_sel) = &x.dynamic_select {
+                    dyn_sel.index_expr.collect_big_arrays(fold);
+                }
+                fold.record(x.dst_base, x.dst_stride, x.dst_num_elements);
+            }
+            ProtoStatement::If(x) => {
+                if let Some(cond) = &x.cond {
+                    cond.collect_big_arrays(fold);
+                }
+                for s in x.true_side.iter().chain(&x.false_side) {
+                    s.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    arm.cond.collect_big_arrays(fold);
+                    for s in &arm.body {
+                        s.collect_big_arrays(fold);
+                    }
+                }
+                for s in &x.default {
+                    s.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::SystemFunctionCall(x) => match x {
+                ProtoSystemFunctionCall::Display { args, .. }
+                | ProtoSystemFunctionCall::Write { args, .. } => {
+                    for arg in args {
+                        arg.collect_big_arrays(fold);
+                    }
+                }
+                ProtoSystemFunctionCall::Assert {
+                    condition, args, ..
+                } => {
+                    condition.collect_big_arrays(fold);
+                    for arg in args {
+                        arg.collect_big_arrays(fold);
+                    }
+                }
+                ProtoSystemFunctionCall::Readmemh { .. } | ProtoSystemFunctionCall::Finish => {}
+            },
+            ProtoStatement::CompiledBlock(x) => {
+                // The cached offset lists carry no array shape, so only the
+                // retained originals can name a foldable array.  A block
+                // reduced to its cache keeps its arrays expanded — safe,
+                // since the gather reads the same lists.
+                for s in &x.original_stmts {
+                    s.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::For(x) => {
+                for e in x.range.dynamic_bounds() {
+                    e.collect_big_arrays(fold);
+                }
+                for s in &x.body {
+                    s.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    s.collect_big_arrays(fold);
+                }
+            }
+            ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
         }
     }
 
@@ -1963,7 +2137,7 @@ impl ProtoStatement {
                         width,
                     } => {
                         let nb = calc_native_bytes(*width);
-                        let resolved: Vec<_> = elements
+                        let resolved: Arc<[_]> = elements
                             .iter()
                             .map(|elem| {
                                 let current = if elem.current.is_ff() {
@@ -2044,12 +2218,18 @@ impl ProtoStatement {
                         (ff_values_ptr as *const u8).wrapping_offset(x.ff_delta_bytes);
                     let adjusted_comb =
                         (comb_values_ptr as *const u8).wrapping_offset(x.comb_delta_bytes);
+                    // The offsets are only valid clean-classification anchors
+                    // for an unrelocated block (deltas shift the storage the
+                    // offsets name).
+                    let outputs = (x.ff_delta_bytes == 0 && x.comb_delta_bytes == 0)
+                        .then(|| Arc::new(x.output_offsets.clone()));
                     Statement::Compiled(CompiledStmt {
                         artifact: Arc::clone(&x.artifact),
                         ff: adjusted_ff,
                         comb: adjusted_comb,
                         log_buf: std::ptr::null_mut(),
                         ff_delta: x.ff_delta_bytes,
+                        outputs,
                     })
                 }
                 ProtoStatement::For(x) => {
@@ -3352,36 +3532,29 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
     fn conv(context: &mut Context, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         let in_initial = context.in_initial;
 
-        // Whole-array assignment (`assign out = arr;`): analyzer emits dst
-        // with empty index but non-empty array shape, which the single-stmt
-        // conv path can't address. Expand to N element-wise assigns.
+        // Array-shaped assignment (`assign out = arr;`, `s[0] = arr;`), which
+        // the single-stmt conv path below can't address.
         if src.dst.len() == 1 {
             let dst0 = &src.dst[0];
-            if dst0.index.dimension() == 0 {
-                let dst_array = {
-                    let scope = context.scope();
-                    scope
-                        .variable_meta
-                        .get(&dst0.id)
-                        .map(|m| m.r#type.array.clone())
-                };
-                if let Some(arr_shape) = dst_array
-                    && !arr_shape.is_empty()
-                    && let air::Expression::Term(factor) = &src.expr
-                    && let air::Factor::Variable(_, vidx, _, _) = factor.as_ref()
-                    && vidx.dimension() == 0
+            if let Some(dst_shape) = remaining_array_shape(context, &dst0.id, &dst0.index) {
+                let total: usize = dst_shape.iter().map(|d| d.unwrap_or(1)).product();
+
+                if let air::Expression::Term(factor) = &src.expr
+                    && let air::Factor::Variable(rhs_id, rhs_index, _, _) = factor.as_ref()
+                    && let Some(rhs_shape) = remaining_array_shape(context, rhs_id, rhs_index)
+                    && rhs_shape.iter().map(|d| d.unwrap_or(1)).product::<usize>() == total
                 {
-                    let total: usize = arr_shape.iter().map(|d| d.unwrap_or(1)).product();
                     let mut result = Vec::with_capacity(total);
                     for i in 0..total {
-                        let elem_idx = air::VarIndex::from_index(i, &arr_shape);
                         let mut new_dst = dst0.clone();
-                        new_dst.index = elem_idx.clone();
+                        new_dst
+                            .index
+                            .append(&air::VarIndex::from_index(i, &dst_shape));
                         let mut new_expr = src.expr.clone();
                         if let air::Expression::Term(ref mut fbox) = new_expr
-                            && let air::Factor::Variable(_, vidx2, _, _) = fbox.as_mut()
+                            && let air::Factor::Variable(_, vidx, _, _) = fbox.as_mut()
                         {
-                            *vidx2 = elem_idx;
+                            vidx.append(&air::VarIndex::from_index(i, &rhs_shape));
                         }
                         let element_assign = air::AssignStatement {
                             dst: vec![new_dst],
@@ -3391,6 +3564,115 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                         };
                         let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
                         result.push(ProtoStatement::Assign(proto));
+                    }
+                    if in_initial {
+                        append_ff_next_copies(&mut result);
+                    }
+                    return Ok(result);
+                }
+
+                // A const array on the RHS (`s = pk::TBL;`).
+                if dst0.select.is_empty()
+                    && let Some((comptime, values)) = const_array_operand(&src.expr)
+                {
+                    if values.len() != total {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    }
+                    let mut element_comptime = comptime.clone();
+                    element_comptime.r#type.array.clear();
+
+                    let mut result = Vec::with_capacity(total);
+                    for (i, value) in values.iter().enumerate() {
+                        let mut new_dst = dst0.clone();
+                        new_dst
+                            .index
+                            .append(&air::VarIndex::from_index(i, &dst_shape));
+                        let mut element_comptime = element_comptime.clone();
+                        element_comptime.value = ValueVariant::Numeric(value.clone());
+                        let element_assign = air::AssignStatement {
+                            dst: vec![new_dst],
+                            width: src.width,
+                            expr: air::Expression::Term(Box::new(air::Factor::Value(
+                                element_comptime,
+                            ))),
+                            token: src.token,
+                        };
+                        let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
+                        result.push(ProtoStatement::Assign(proto));
+                    }
+                    if in_initial {
+                        append_ff_next_copies(&mut result);
+                    }
+                    return Ok(result);
+                }
+
+                // An array-returning call on the RHS (`state = round(state);`).
+                // Inlined once: re-converting the call per element would
+                // inline the body N times.
+                if dst0.select.is_empty()
+                    && let air::Expression::Term(factor) = &src.expr
+                    && let air::Factor::FunctionCall(call) = factor.as_ref()
+                {
+                    let ret_offsets = inline_function_call(context, call)?;
+                    let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
+                    let ret_width = call
+                        .comptime
+                        .r#type
+                        .total_width()
+                        .ok_or_else(|| SimulatorError::unsupported_description(&src.token))?;
+                    let (elements, dst_width, dims) = {
+                        let scope = context.scope();
+                        let meta = scope.variable_meta.get(&dst0.id).unwrap();
+                        (
+                            meta.elements.clone(),
+                            meta.width,
+                            meta.r#type.array.as_slice().to_vec(),
+                        )
+                    };
+                    // An empty index prefix resolves to 0, so a bare dst needs
+                    // no special case here.
+                    let base = dst0
+                        .index
+                        .eval_value(&mut context.scope().analyzer_context)
+                        .and_then(|v| partial_index_base(&dims, &v, total, elements.len()));
+                    let Some(base) = base else {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    };
+                    if ret_offsets.len() != total {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    }
+
+                    let mut result = Vec::with_capacity(total);
+                    for (element, ret_offset) in
+                        elements[base..base + total].iter().zip(ret_offsets)
+                    {
+                        let current_offset = element.current_offset();
+                        let dst = if element.is_ff() {
+                            if in_initial {
+                                VarOffset::Ff(current_offset)
+                            } else {
+                                VarOffset::Ff(element.next_offset)
+                            }
+                        } else {
+                            VarOffset::Comb(current_offset)
+                        };
+                        result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                            dst,
+                            dst_width,
+                            select: None,
+                            dynamic_select: None,
+                            rhs_select: None,
+                            expr: ProtoExpression::Variable {
+                                var_offset: ret_offset,
+                                select: None,
+                                dynamic_select: None,
+                                width: ret_width,
+                                var_full_width: ret_width,
+                                expr_context,
+                            },
+                            dst_ff_current_offset: current_offset,
+                            token: src.token,
+                        }));
                     }
                     if in_initial {
                         append_ff_next_copies(&mut result);
@@ -3449,10 +3731,10 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
         }
 
         let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
-        // Expand an unsized fill literal (`{a, b} = '1`) to the concat
-        // width before the windows slice it; a width-0 sentinel sliced by
-        // a window reads as zero.
-        size_fill_literal_rhs(&mut expr, None, None, src.width.unwrap());
+        // Size before the windows slice the RHS: a width-0 sentinel would
+        // slice as zero, and an unsized signed literal would leave the high
+        // windows reading zero instead of sign bits.
+        size_literal_rhs(&mut expr, None, None, src.width.unwrap());
 
         let mut result = Vec::new();
         let mut remaining = src.width.unwrap();
@@ -3676,16 +3958,21 @@ fn append_ff_next_copies(stmts: &mut Vec<ProtoStatement>) {
     stmts.extend(extras);
 }
 
-/// Size an unsized all-bit fill literal (`'0`/`'1`/`'x`/`'z`) on an
-/// assignment RHS to the destination width.
+/// Size a literal assignment RHS to the width its context evaluates it at.
 ///
-/// The analyzer leaves these literals unsized (`width` 0) and lets the
-/// assignment context resolve the width; the interpret path fills them
-/// lazily at `assign`/`trunc` time.  The JIT backends (Cranelift / AOT-C)
-/// materialize the value eagerly, so an unsized sentinel would be filled to
-/// width 0 — all zeros — silently dropping the value (e.g. `f.a = '1` reads
-/// back 0).  Expanding here keeps every backend consistent.
-pub(crate) fn size_fill_literal_rhs(
+/// The analyzer leaves an all-bit fill (`'0`/`'1`/`'x`/`'z`) unsized
+/// (`width` 0) and lets the assignment context resolve it; the interpret
+/// path fills it lazily at `assign`/`trunc` time.  The JIT backends
+/// (Cranelift / AOT-C) materialize the value eagerly, so an unsized
+/// sentinel would be filled to width 0 — all zeros — silently dropping the
+/// value (e.g. `f.a = '1` reads back 0).
+///
+/// A signed literal is sized but still sign-extends at the store
+/// (`ProtoExpression::store_sign_extend_from` keys on the expression's
+/// `width`, not on the constant the analyzer evaluated).  Sizing it here
+/// leaves the store nothing to do: a store path that cannot sign-extend
+/// falls back to the interpreter, taking its enclosing statement with it.
+pub(crate) fn size_literal_rhs(
     expr: &mut ProtoExpression,
     select: Option<(usize, usize)>,
     dyn_window: Option<usize>,
@@ -3699,11 +3986,6 @@ pub(crate) fn size_fill_literal_rhs(
     else {
         return;
     };
-    // Only the unsized fill sentinels have width 0; sized literals
-    // (`1'b1`, `8'hff`, …) already carry their width.
-    if value.width() != 0 {
-        return;
-    }
     // Target is the number of bits actually written: the dynamic-select
     // window or the static bit-select width for a partial write, else the
     // full destination width.
@@ -3713,7 +3995,20 @@ pub(crate) fn size_fill_literal_rhs(
     if target == 0 {
         return;
     }
-    *value = value.expand(target, false).into_owned();
+    // A fill sentinel is the only literal without a width of its own.  For a
+    // signed one the analyzer's evaluated constant can be wider than `width`;
+    // requiring the payload between the two makes `expand` start from the
+    // same sign bit the store would have.  A partial write is left alone: its
+    // store extends to `dst_width`, not to the written window.
+    let sentinel = value.width() == 0;
+    let sign_extend = value.signed()
+        && *width < target
+        && (*width..=target).contains(&value.width())
+        && target == dst_width;
+    if !sentinel && !sign_extend {
+        return;
+    }
+    *value = value.expand(target, sign_extend).into_owned();
     *width = target;
     expr_context.width = target;
 }
@@ -3796,7 +4091,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             };
 
             let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
-            size_fill_literal_rhs(
+            size_literal_rhs(
                 &mut expr,
                 select,
                 dynamic_select.as_ref().map(|d| d.window),
@@ -3836,7 +4131,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
 
             let index_proto = build_linear_index_expr(context, &array_shape, &dst.index)?;
             let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
-            size_fill_literal_rhs(
+            size_literal_rhs(
                 &mut expr,
                 select,
                 dynamic_select.as_ref().map(|d| d.window),
@@ -3936,7 +4231,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
         };
 
         let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
-        size_fill_literal_rhs(
+        size_literal_rhs(
             &mut expr,
             select,
             dynamic_select.as_ref().map(|d| d.window),
@@ -4092,7 +4387,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                         )
                     };
                     let mut proto_expr: ProtoExpression = Conv::conv(context, &array_expr.expr)?;
-                    size_fill_literal_rhs(&mut proto_expr, select, None, arg_meta.width);
+                    size_literal_rhs(&mut proto_expr, select, None, arg_meta.width);
                     let arg_element = &arg_meta.elements[arg_index];
                     result.push(ProtoStatement::Assign(ProtoAssignStatement {
                         dst: arg_element.current,
@@ -4102,6 +4397,25 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                         rhs_select: None,
                         expr: proto_expr,
                         dst_ff_current_offset: 0,
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
+
+            // Array argument fed by a const array (`f(pk::TBL)`).
+            if let Some(arg_meta) = arg_meta_clone.as_ref()
+                && let Some(exprs) = const_array_element_exprs(expr, arg_meta.elements.len())
+            {
+                for (arg_element, expr) in arg_meta.elements.iter().zip(exprs) {
+                    result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: arg_element.current,
+                        dst_width: arg_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: 0, // not FF
                         token: TokenRange::default(),
                     }));
                 }
@@ -4170,9 +4484,8 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             let scope = context.scope();
             let meta = scope.variable_meta.get(arg_var_id).unwrap();
             let element = &meta.elements[0];
-            // Size an unsized all-bit literal (`'1` etc.) to the parameter
-            // width — there is no assignment statement here to do it.
-            size_fill_literal_rhs(&mut proto_expr, None, None, meta.width);
+            // No assignment statement here to size the literal.
+            size_literal_rhs(&mut proto_expr, None, None, meta.width);
             result.push(ProtoStatement::Assign(ProtoAssignStatement {
                 dst: element.current,
                 dst_width: meta.width,
@@ -4249,23 +4562,35 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
     }
 }
 
-fn parse_hex_file(filename: &str, width: usize) -> Vec<AnalyzerValue> {
-    let content = match std::fs::read_to_string(filename) {
-        Ok(c) => c,
-        Err(e) => {
-            log::warn!("$readmemh: failed to read '{}': {}", filename, e);
-            return vec![];
-        }
-    };
-    parse_hex_content(&content, width)
+fn read_hex_file(filename: &str) -> Vec<u8> {
+    let content = std::fs::read(filename).unwrap_or_else(|e| {
+        log::warn!("$readmemh: failed to read '{filename}': {e}");
+        Vec::new()
+    });
+    // Otherwise every word drops and the image loads empty in silence.
+    if std::str::from_utf8(&content).is_err() {
+        log::warn!("$readmemh: '{filename}' is not text");
+    }
+    content
 }
 
 pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
     let bytes = content.as_bytes();
     let mut result: Vec<AnalyzerValue> = Vec::with_capacity(bytes.len() / 4 + 1);
-    let mut i = 0usize;
+    for_each_hex_item(bytes, width, |item| {
+        if let HexItem::Word(v) = item {
+            result.push(v);
+        }
+        true
+    });
+    result
+}
+
+/// `sink` returns false to stop early.  A token carrying a character outside
+/// `[0-9a-fA-F_]`, or a value past 64 bits, is dropped.
+fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -> bool) {
     let len = bytes.len();
-    let mut digits: Vec<u8> = Vec::with_capacity(32);
+    let mut i = 0usize;
 
     while i < len {
         let c = bytes[i];
@@ -4293,42 +4618,45 @@ pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
                 continue;
             }
         }
-        let start = i;
-        while i < len {
-            let c = bytes[i];
-            if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
-                break;
-            }
-            if c == b'/' && i + 1 < len && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') {
-                break;
-            }
+        let is_address = bytes[i] == b'@';
+        if is_address {
             i += 1;
         }
-        if start == i {
-            continue;
-        }
-        let tok = &bytes[start..i];
-        let parsed = if tok.contains(&b'_') {
-            digits.clear();
-            for &b in tok {
-                if b != b'_' {
-                    digits.push(b);
+        let mut acc = 0u64;
+        let mut digits = 0usize;
+        let mut ok = true;
+        while i < len {
+            let c = bytes[i];
+            let d = match c {
+                b'0'..=b'9' => c - b'0',
+                b'a'..=b'f' => c - b'a' + 10,
+                b'A'..=b'F' => c - b'A' + 10,
+                b' ' | b'\t' | b'\n' | b'\r' => break,
+                b'/' if i + 1 < len && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') => break,
+                b'_' => {
+                    i += 1;
+                    continue;
                 }
+                _ => {
+                    ok = false;
+                    i += 1;
+                    continue;
+                }
+            };
+            ok &= acc >> 60 == 0;
+            acc = (acc << 4) | d as u64;
+            digits += 1;
+            i += 1;
+        }
+        if ok && digits > 0 {
+            let item = if is_address {
+                HexItem::Address(acc)
+            } else {
+                HexItem::Word(AnalyzerValue::new(acc, width, false))
+            };
+            if !sink(item) {
+                return;
             }
-            if digits.is_empty() {
-                continue;
-            }
-            std::str::from_utf8(&digits)
-                .ok()
-                .and_then(|s| u64::from_str_radix(s, 16).ok())
-        } else {
-            std::str::from_utf8(tok)
-                .ok()
-                .and_then(|s| u64::from_str_radix(s, 16).ok())
-        };
-        if let Some(val) = parsed {
-            result.push(AnalyzerValue::new(val, width, false));
         }
     }
-    result
 }

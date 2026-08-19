@@ -1,7 +1,6 @@
 use crate::backend::{CompiledWhole, DispatchOutcome};
 use crate::component::loader::ComponentError;
 use crate::component::runtime::{RuntimeComponent, build_components};
-use crate::ir::incremental;
 use crate::ir::write_log::{
     WriteLogBuffer, clear_event_write_log, ff_commit_from_log, set_event_write_log,
 };
@@ -47,6 +46,9 @@ pub struct Simulator {
     pub mask_cache: MaskCache,
     comb_dirty: bool,
     pub profile: SimProfile,
+    /// Which testbench statements are known not to invalidate the comb.
+    /// Empty (the default) settles after every testbench statement.
+    pub(crate) tb_dirty: crate::tb_dirty::TbDirtyFilter,
     last_event: Option<Event>,
     last_event_stmts: *const Vec<Statement>,
     /// Whole-event AOT-C handle for `last_event`, cached alongside
@@ -56,11 +58,6 @@ pub struct Simulator {
     /// backend for `last_event`.  Points into `self.ir.whole_events`'s `Arc`,
     /// which is never mutated after `Ir` construction.
     last_whole_event: Option<*const dyn CompiledWhole>,
-    /// `LateAotc::event_version` as of the last cache refresh: late
-    /// whole-event handles land asynchronously (plan decline / abandon —
-    /// see `backend::late`), so a version bump forces a refresh even when
-    /// the event itself didn't change.  0 when no `late_aotc`.
-    last_late_ver: u32,
     /// Previous-step derived-clock values (sampled at master=0).  Empty
     /// when no derived clocks; otherwise used for 0→1 edge detection.
     prev_derived_clock_values: Vec<u8>,
@@ -69,17 +66,6 @@ pub struct Simulator {
     /// automatically when the cycle counter crosses a logarithmic
     /// checkpoint (doubling cadence, capped at 1 M cycles).
     pub write_log_diag: WriteLogDiag,
-    /// Change-driven settle state; `Some` iff `ir.incr_plan` is set
-    /// (`VERYL_INCR=1`, see `ir::incremental`).
-    pub incr_state: Option<Box<incremental::IncrState>>,
-    /// `VERYL_INCR_PROBE=1`: the plan is built but never executed; this counts
-    /// what it would have run (see `incremental::ProbeState`).
-    pub incr_probe: Option<Box<incremental::ProbeState>>,
-    /// Per-event snapshots for the change-driven event skip (`event_plans`):
-    /// event → per-statement `Some(values)` of the plan's word list as of
-    /// the statement's last run (None until first run).
-    event_incr: HashMap<Event, Vec<Option<Vec<u64>>>>,
-    event_skip_stats: (u64, u64),
     /// Env-gated `VERYL_EVENT_DIAG=1` per-statement time attribution for
     /// event evaluation: (event, stmt index) → (cumulative ns, fires).
     pub event_diag: Option<HashMap<(Event, usize), (u64, u64)>>,
@@ -97,6 +83,12 @@ pub struct Simulator {
     /// Waveform handles for component trace variables:
     /// (handle, component index, trace variable index).
     trace_dump_vars: Vec<(crate::wave_dumper::VarHandle, usize, usize)>,
+    /// `(clock event, reset event)` installed by `step_in_reset`: components
+    /// keep their own reset hook while the RTL takes an ordinary clock edge.
+    component_event_override: Option<(Event, Event)>,
+    /// The async-reset assertion edge to evaluate alongside this step's clock
+    /// event, taken once.  See `step_in_reset`.
+    pending_assertion_edge: Option<Event>,
 }
 
 struct WatchVar {
@@ -107,26 +99,6 @@ struct WatchVar {
     /// Raw byte snapshot (payload + optional 4-state mask) for the
     /// change-only reporting used by `step_legacy`.
     last: Vec<u8>,
-}
-
-/// Resolve the variable containing byte `byte_off` of the buffer starting at
-/// `base` (diagnostics for the incremental-settle validate mode).
-fn find_var_path(module: &ModuleVariables, base: *const u8, byte_off: usize) -> Option<String> {
-    let target = base as usize + byte_off;
-    for v in module.variables.values() {
-        for (i, &ptr) in v.current_values.iter().enumerate() {
-            let p = ptr as usize;
-            if target >= p && target < p + v.native_bytes {
-                return Some(format!("{}[{}] (+{})", v.path, i, target - p));
-            }
-        }
-    }
-    for child in &module.children {
-        if let Some(p) = find_var_path(child, base, byte_off) {
-            return Some(format!("{}.{}", child.name, p));
-        }
-    }
-    None
 }
 
 #[derive(Default)]
@@ -171,28 +143,6 @@ impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
         let n_derived = ir.derived_clock_schedule.clocks.len();
         let components_pending = !ir.external_components.is_empty();
-        // The initial binding is generation 1; see `IncrState::rebind`.
-        // A plan present but not to be RUN means this comb list has no
-        // recorded verdict yet: probe it (measure what the plan would have
-        // run) while the ordinary full settle does the work.
-        let probing = !ir.incr_run || incremental::probe_enabled();
-        let incr_probe_init = probing
-            .then(|| {
-                ir.incr_plan
-                    .as_ref()
-                    .map(|p| Box::new(incremental::ProbeState::new(p)))
-            })
-            .flatten();
-        let incr_state_init = incr_probe_init
-            .is_none()
-            .then(|| {
-                ir.incr_plan.as_ref().map(|plan| {
-                    let mut s = Box::<incremental::IncrState>::default();
-                    s.rebind(Some(plan));
-                    s
-                })
-            })
-            .flatten();
         let mut ret = Self {
             ir,
             time: 0,
@@ -201,20 +151,16 @@ impl Simulator {
             mask_cache: MaskCache::default(),
             comb_dirty: true,
             profile: Default::default(),
+            tb_dirty: Default::default(),
             last_event: None,
             last_event_stmts: std::ptr::null(),
             last_whole_event: None,
-            last_late_ver: 0,
             prev_derived_clock_values: vec![0u8; n_derived],
             write_log_diag: WriteLogDiag {
                 enabled: env::var("VERYL_WRITE_LOG_DIAG").as_deref() == Ok("1"),
                 next_print_cycle: 1_000_000,
                 ..Default::default()
             },
-            incr_state: incr_state_init,
-            incr_probe: incr_probe_init,
-            event_incr: HashMap::default(),
-            event_skip_stats: (0, 0),
             event_diag: (env::var("VERYL_EVENT_DIAG").as_deref() == Ok("1")).then(HashMap::default),
             cycle_limit: None,
             cycle_count: 0,
@@ -222,7 +168,25 @@ impl Simulator {
             components: Vec::new(),
             components_pending,
             trace_dump_vars: Vec::new(),
+            component_event_override: None,
+            pending_assertion_edge: None,
         };
+
+        // Reset nets start DEASSERTED: zeroed storage reads as ASSERTED on an
+        // active-low reset and would hold every `if_reset` block from time 0.
+        // A driven net is overwritten by the first comb settle, so this decides
+        // only the nets an external driver owns.
+        let reset_ids: Vec<VarId> = ret
+            .ir
+            .module_variables
+            .variables
+            .iter()
+            .filter(|(_, x)| x.r#type.is_reset())
+            .map(|(id, _)| *id)
+            .collect();
+        for id in reset_ids {
+            ret.set_reset_level(&id, false);
+        }
 
         if env::var("VERYL_DERIVED_CLOCK_DUMP").as_deref() == Ok("1") {
             fn find_var_by_ptr(
@@ -379,230 +343,13 @@ impl Simulator {
         // Clocks toggle every step, so a full-scan fallback here would
         // defeat the dirty-seed path: record the covered word precisely
         // through the shared range entry.
-        self.note_ptr_write(ptr, 1);
         self.comb_dirty = true;
     }
 
-    /// The **single** generation-swap point for the incremental plan.
-    /// Chunk/entry/word ids are stable only within a generation (fused
-    /// contract v2 §1), so everything indexed by them is rebuilt here and
-    /// nowhere else.  The fused contract puts the swap at the commit
-    /// (§6); the settle entry is the equivalent quiescent point for the
-    /// change-driven engine, and P6 moves it when the two dispatchers
-    /// merge.
-    fn apply_incr_swap(&mut self) {
-        let Some(state) = self.incr_state.as_deref_mut() else {
-            return;
-        };
-        let Some(next) = state.pending_swap.take() else {
-            return;
-        };
-        state.rebind(next.as_deref());
-        // Validate-mode event snapshots are sized from the retired plan.
-        self.event_incr.clear();
-        self.ir.incr_plan = next;
-    }
-
     /// Settle the comb list with whichever engine is configured.
-    ///
-    /// Kept small on purpose: it runs on every settle, whereas the validate
-    /// dual-run it would otherwise contain is ~80 lines that execute only
-    /// under `VERYL_INCR_VALIDATE`.
     #[inline]
     fn do_settle_comb(&mut self) {
-        if self.incr_state.is_some() {
-            self.do_settle_comb_incremental();
-            return;
-        }
         self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
-        if let (Some(probe), Some(plan)) = (self.incr_probe.as_deref_mut(), &self.ir.incr_plan) {
-            self.ir.incr_probe_tick(probe, plan);
-        }
-    }
-
-    /// The incremental engine's settle, plus the `VERYL_INCR_VALIDATE`
-    /// dual-run.
-    fn do_settle_comb_incremental(&mut self) {
-        self.apply_incr_swap();
-        let Some(state) = self.incr_state.as_deref_mut() else {
-            // Not reachable through `do_settle_comb`, which checks first; the
-            // borrow simply has to be re-taken after `apply_incr_swap`.
-            self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
-            return;
-        };
-        if !incremental::validate_enabled() {
-            self.ir
-                .settle_comb_incremental(state, &mut self.mask_cache, &mut self.profile);
-            return;
-        }
-        self.do_settle_comb_validate();
-    }
-
-    /// `VERYL_INCR_VALIDATE`: run the incremental settle on the live buffers,
-    /// then restore and run the baseline; panic on the first divergence.
-    fn do_settle_comb_validate(&mut self) {
-        let Some(state) = self.incr_state.as_deref_mut() else {
-            return;
-        };
-        // Dual-run: incremental on the live buffers, then restore
-        // and run the baseline; panic on the first divergence.
-        let pre_comb = self.ir.comb_values.to_vec();
-        let pre_ff = self.ir.ff_values.to_vec();
-        self.ir
-            .settle_comb_incremental(state, &mut self.mask_cache, &mut self.profile);
-        let post_comb = self.ir.comb_values.to_vec();
-        let post_ff = self.ir.ff_values.to_vec();
-        self.ir.comb_values.copy_from_slice(&pre_comb);
-        self.ir.ff_values.copy_from_slice(&pre_ff);
-        // The restore rewinds comb bytes the run-once const cone may have
-        // just written; clear the flag so the baseline recomputes them.
-        self.ir
-            .const_cone_done
-            .store(false, std::sync::atomic::Ordering::Relaxed);
-        self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
-        let settles = self
-            .incr_state
-            .as_ref()
-            .map(|s| s.stats_settles)
-            .unwrap_or(0);
-        if let Some(state) = self.incr_state.as_mut() {
-            state.forensics_pre_settle = Some(pre_comb.clone());
-        }
-        for (i, (a, b)) in post_comb.iter().zip(self.ir.comb_values.iter()).enumerate() {
-            if a != b
-                && let (Some(state), Some(plan)) =
-                    (self.incr_state.as_ref(), self.ir.incr_plan.as_ref())
-            {
-                // Forensics compare the INCREMENTAL result against
-                // the full evaluation, not the pre-settle state.
-                state.dump_divergence(plan, i / 8, &post_comb, &self.ir.comb_values);
-                // Missing-coverage hunt: every comb word the FULL
-                // settle changed this settle (pre -> full) — if none
-                // of the diverged writer's registered inputs are in
-                // this list, its actual read set is under-covered
-                // and the changed word it really reads is here.
-                let mut n_changed = 0usize;
-                for w in 0..plan.comb_words {
-                    let p = incremental::read_word(&pre_comb, w);
-                    let f = incremental::read_word(&self.ir.comb_values, w);
-                    if p != f {
-                        n_changed += 1;
-                        if n_changed <= 200 {
-                            eprintln!(
-                                "[incr forensics] full changed word {w}: {p:#x} -> {f:#x} var={}",
-                                find_var_path(
-                                    &self.ir.module_variables,
-                                    self.ir.comb_values.as_ptr(),
-                                    w * 8,
-                                )
-                                .unwrap_or_else(|| "?".to_string()),
-                            );
-                        }
-                    }
-                }
-                eprintln!("[incr forensics] full changed {n_changed} comb words this settle");
-            }
-            assert_eq!(
-                a,
-                b,
-                "incr settle divergence at settle #{settles}: comb byte {i} (word {}) \
-                     incr={a:#x} full={b:#x} var={}",
-                i / 8,
-                find_var_path(&self.ir.module_variables, self.ir.comb_values.as_ptr(), i)
-                    .unwrap_or_else(|| "?".to_string()),
-            );
-        }
-        for (i, (a, b)) in post_ff.iter().zip(self.ir.ff_values.iter()).enumerate() {
-            assert_eq!(
-                a,
-                b,
-                "incr settle divergence at settle #{settles}: ff byte {i} (word {}) \
-                     incr={a:#x} full={b:#x} var={}",
-                i / 8,
-                find_var_path(&self.ir.module_variables, self.ir.ff_values.as_ptr(), i)
-                    .unwrap_or_else(|| "?".to_string()),
-            );
-        }
-    }
-
-    /// (skipped, total) skippable event-chunk fires (change-driven skip).
-    pub fn event_skip_stats(&self) -> (u64, u64) {
-        self.event_skip_stats
-    }
-
-    /// End-of-run probe verdict: record whether this comb list should run the
-    /// plan, so later runs act on it instead of probing again.  Deterministic
-    /// — activity is a property of the design and its stimulus — so the same
-    /// project always converges to the same answer.
-    pub fn finish_probe_verdict(&self) {
-        let (Some(probe), Some(plan)) = (self.incr_probe.as_deref(), self.ir.incr_plan.as_ref())
-        else {
-            return;
-        };
-        // Too few samples to persist a verdict from; the default (no plan)
-        // stands for the next run too.
-        if probe.settles < incremental::VERDICT_MIN_SETTLES {
-            return;
-        }
-        let pct = probe.activity_pct(plan.n_entries);
-        let thr = incremental::abandon_threshold_pct(plan.n_entries) as f64;
-        let path = self.ir.incr_feedback_path.as_deref();
-        if incremental::diag_enabled() {
-            eprintln!(
-                "[incr probe] entries={} settles={} would-run activity={:.2}% threshold={:.0}% verdict={}",
-                plan.n_entries,
-                probe.settles,
-                pct,
-                thr,
-                if pct < thr { "feasible" } else { "infeasible" },
-            );
-        }
-        if pct < thr {
-            crate::backend::late::note_runtime_feasible(self.ir.incr_key, path);
-        } else {
-            crate::backend::late::note_runtime_infeasible(self.ir.incr_key, path);
-        }
-    }
-
-    /// End-of-run auto-abandon verdict.  The in-run check needs a full
-    /// [`ABANDON_WINDOW`](crate::ir::incremental::ABANDON_WINDOW) to fire, so
-    /// a run that ends before it never reaches a verdict and pays the same
-    /// bad plan on EVERY later run.  Re-run the same activity test here over
-    /// whatever the run did observe past the warmup: the simulation is over,
-    /// so this cannot change its behaviour — it only persists the verdict for
-    /// the next run, exactly like a mid-run abandon does.
-    ///
-    /// Shortening the window instead would fold the reset transient into the
-    /// measurement, and a false abandon is the expensive direction (it forfeits
-    /// the incremental win outright).
-    pub fn finish_incr_verdict(&self) {
-        use crate::ir::incremental::{ABANDON_WARMUP, VERDICT_MIN_SETTLES, abandon_threshold_pct};
-        let (Some(state), Some(plan), Some(late)) = (
-            self.incr_state.as_ref(),
-            self.ir.incr_plan.as_ref(),
-            self.ir.late_aotc.as_ref(),
-        ) else {
-            return;
-        };
-        // Already abandoned mid-run (which recorded the verdict itself), or
-        // too short to have a transient-free sample.
-        if state.abandoned || state.gen_settles < ABANDON_WARMUP + VERDICT_MIN_SETTLES {
-            return;
-        }
-        let pct = abandon_threshold_pct(plan.n_entries);
-        if pct == 0 {
-            return;
-        }
-        let settles = state.gen_settles - ABANDON_WARMUP;
-        let runs = state.stats_runs.saturating_sub(state.abandon_runs0);
-        if runs * 100 > settles * plan.n_entries as u64 * pct {
-            log::info!(
-                "incremental plan recorded infeasible at end of run: run fraction {:.1}% \
-                 over {settles} settles exceeds {pct}%",
-                runs as f64 * 100.0 / (settles * plan.n_entries as u64).max(1) as f64,
-            );
-            late.note_infeasible();
-        }
     }
 
     /// Dump the `VERYL_EVENT_DIAG=1` per-statement event-eval time
@@ -617,19 +364,7 @@ impl Simulator {
                 return "?".into();
             };
             match stmts.get(idx) {
-                Some(Statement::Compiled(c)) => {
-                    if let Some(d) = &c.artifact.deps {
-                        format!(
-                            "cb(ins={},outs={}{}{})",
-                            d.ins.len(),
-                            d.outs.len(),
-                            if d.always_ff { ",ff" } else { "" },
-                            if d.always_side { ",side" } else { "" },
-                        )
-                    } else {
-                        "cb".into()
-                    }
-                }
+                Some(Statement::Compiled(_)) => "cb".into(),
                 Some(Statement::CompiledBatch(b)) => format!("batch(x{})", b.args.len()),
                 Some(Statement::Assign(_)) => "assign".into(),
                 Some(Statement::AssignDynamic(_)) => "assign_dyn".into(),
@@ -702,9 +437,6 @@ impl Simulator {
                 );
             }
             self.comb_dirty = true;
-            if let Some(st) = self.incr_state.as_mut() {
-                st.force_full_seed();
-            }
         }
     }
 
@@ -851,50 +583,6 @@ impl Simulator {
         self.comb_dirty = true;
     }
 
-    /// An untracked path (testbench statement, component hook, external
-    /// API write) may have modified simulation buffers: the next
-    /// incremental settle must run its full seed scans.
-    pub fn note_untracked_write(&mut self) {
-        if let Some(st) = self.incr_state.as_mut() {
-            st.force_full_seed();
-        }
-    }
-
-    /// Precise variant of [`note_untracked_write`] for a raw-pointer write
-    /// of `bytes` at `ptr` (e.g. the testbench loop variable): records the
-    /// covered words in the dirty-seed lists when the target is a tracked
-    /// ext/ff word, falling back to the full scans otherwise.
-    pub fn note_ptr_write(&mut self, ptr: *const u8, bytes: usize) {
-        let Some(st) = self.incr_state.as_mut() else {
-            return;
-        };
-        let Some(plan) = self.ir.incr_plan.as_ref() else {
-            return;
-        };
-        let n = bytes.max(1);
-        let comb_base = self.ir.comb_values.as_ptr() as usize;
-        let off = (ptr as usize).wrapping_sub(comb_base);
-        if off < self.ir.comb_values.len() {
-            for w in (off / 8)..=((off + n - 1) / 8) {
-                if plan.ext_pos.get(w).is_some_and(|&x| x != 0) {
-                    st.note_ext_write(w as u32);
-                } else {
-                    st.force_full_seed();
-                }
-            }
-            return;
-        }
-        let ff_base = self.ir.ff_values.as_ptr() as usize;
-        let foff = (ptr as usize).wrapping_sub(ff_base);
-        if foff < self.ir.ff_values.len() {
-            for w in (foff / 8)..=((foff + n - 1) / 8) {
-                st.note_ff_write(w as u32);
-            }
-            return;
-        }
-        st.force_full_seed();
-    }
-
     pub fn get_clock(&self, port: &str) -> Option<Event> {
         let port = VarPath::from_str(port).unwrap();
         self.ir.ports.get(&port).map(|id| Event::Clock(*id))
@@ -902,7 +590,59 @@ impl Simulator {
 
     pub fn get_reset(&self, port: &str) -> Option<Event> {
         let port = VarPath::from_str(port).unwrap();
-        self.ir.ports.get(&port).map(|id| Event::Reset(*id))
+        let id = self.ir.ports.get(&port)?;
+        let var = self.ir.module_variables.variables.get(id)?;
+        var.r#type.is_reset().then_some(Event::Reset(*id))
+    }
+
+    /// Drives a reset net to its asserted or deasserted level — all it takes
+    /// to put the design in or out of reset, since `if_reset` samples the
+    /// level at the next clock edge.
+    pub fn set_reset_level(&mut self, id: &VarId, asserted: bool) {
+        let high = asserted != self.ir.reset_active_low(id);
+        self.set_var_by_id(id, Value::new(high as u64, 1, false));
+    }
+
+    /// One clock edge with `reset` asserted around it, for driving a design
+    /// directly.  A testbench instead holds the level across the whole
+    /// assertion window and calls `step_in_reset` per edge.
+    pub fn step_reset(&mut self, clock: &Event, reset: &Event) {
+        let id = reset.var_id();
+        if let Some(ref id) = id {
+            self.set_reset_level(id, true);
+        }
+        self.step_in_reset(clock, reset, true);
+        if let Some(ref id) = id {
+            self.set_reset_level(id, false);
+        }
+    }
+
+    /// One clock edge taken while `reset` is asserted by the caller.
+    ///
+    /// `assertion_edge` also fires the reset's own event in the same step,
+    /// which is what reaches a block whose clock is not running (an async
+    /// reset asserting into a gated-off domain).  Components have a reset
+    /// hook of their own, so they are staged and fired with the reset event.
+    pub fn step_in_reset(&mut self, clock: &Event, reset: &Event, assertion_edge: bool) {
+        if assertion_edge {
+            self.pending_assertion_edge = Some(reset.clone());
+        }
+        if self.components.is_empty() {
+            self.step(clock);
+        } else {
+            self.component_event_override = Some((clock.clone(), reset.clone()));
+            self.step(clock);
+            self.component_event_override = None;
+        }
+        self.pending_assertion_edge = None;
+    }
+
+    /// Event whose component hooks `event` fires; see `step_in_reset`.
+    fn component_event<'a>(&'a self, event: &'a Event) -> &'a Event {
+        match &self.component_event_override {
+            Some((from, to)) if from == event => to,
+            _ => event,
+        }
     }
 
     pub fn step(&mut self, event: &Event) {
@@ -966,17 +706,6 @@ impl Simulator {
         self.dump_variables();
     }
 
-    /// `partial_settle` + the mark-driven event-skip diff of its outputs
-    /// (see `Ir::mark_event_partial`).  Every derived-clock partial settle
-    /// must go through here or event chunks reading the closure would
-    /// skip on stale verdicts.
-    fn partial_settle_marked(&mut self) {
-        self.ir.partial_settle(&mut self.mask_cache);
-        if let Some(st) = self.incr_state.as_mut() {
-            self.ir.mark_event_partial(st);
-        }
-    }
-
     /// Fire `event_statements[event]` then `ff_commit_from_log`.  The
     /// caller is responsible for `set_event_write_log`, `settle_comb`,
     /// and `dump_variables`.
@@ -986,6 +715,10 @@ impl Simulator {
             self.stage_components(event);
         }
         self.eval_event_stmts(event);
+        // The async-reset assertion edge, if this step carries one.
+        if let Some(reset) = self.pending_assertion_edge.take() {
+            self.eval_event_stmts(&reset);
+        }
         self.commit_event_log();
         if has_components {
             self.fire_components(event);
@@ -1032,12 +765,10 @@ impl Simulator {
         if self.components.is_empty() {
             return;
         }
-        if let Some(st) = self.incr_state.as_mut() {
-            st.force_full_seed();
-        }
+        let event = self.component_event(event).clone();
         let mut components = std::mem::take(&mut self.components);
         for c in &mut components {
-            if c.listens_to(event) {
+            if c.listens_to(&event) {
                 c.stage_inputs(&mut self.mask_cache);
             }
         }
@@ -1051,9 +782,8 @@ impl Simulator {
         if self.components.is_empty() {
             return;
         }
-        if let Some(st) = self.incr_state.as_mut() {
-            st.force_full_seed();
-        }
+        let event = self.component_event(event).clone();
+        let event = &event;
         let mut components = std::mem::take(&mut self.components);
         let mut wrote = false;
         for c in &mut components {
@@ -1139,39 +869,20 @@ impl Simulator {
         // raw pointers stay valid; this turns the per-cycle `whole_events`
         // HashMap probe + `Arc` clone into a single predicate check that the
         // per-stmt cache already pays for.
-        // A late whole-event handle can land asynchronously (see
-        // `backend::late`); its version bump invalidates the cache so the
-        // landed `.so` is picked up even when the event never changes.
-        let late_ver = self.ir.late_aotc.as_ref().map_or(0, |l| l.event_version());
-        let (stmts_ptr, whole_event_ptr) =
-            if self.last_event.as_ref() == Some(event) && self.last_late_ver == late_ver {
-                (self.last_event_stmts, self.last_whole_event)
-            } else {
-                let ptr: *const Vec<Statement> = match self.ir.event_statements.get(event) {
-                    Some(v) => v as *const _,
-                    None => std::ptr::null(),
-                };
-                // Late slots are `OnceLock`s owned by `self.ir.late_aotc`: set
-                // at most once and never replaced, so their `Arc` pointee is as
-                // stable as `whole_events`'.
-                let wptr: Option<*const dyn CompiledWhole> = self
-                    .ir
-                    .whole_events
-                    .get(event)
-                    .map(Arc::as_ptr)
-                    .or_else(|| {
-                        self.ir
-                            .late_aotc
-                            .as_ref()
-                            .and_then(|l| l.whole_event(event))
-                            .map(Arc::as_ptr)
-                    });
-                self.last_event = Some(event.clone());
-                self.last_event_stmts = ptr;
-                self.last_whole_event = wptr;
-                self.last_late_ver = late_ver;
-                (ptr, wptr)
+        let (stmts_ptr, whole_event_ptr) = if self.last_event.as_ref() == Some(event) {
+            (self.last_event_stmts, self.last_whole_event)
+        } else {
+            let ptr: *const Vec<Statement> = match self.ir.event_statements.get(event) {
+                Some(v) => v as *const _,
+                None => std::ptr::null(),
             };
+            let wptr: Option<*const dyn CompiledWhole> =
+                self.ir.whole_events.get(event).map(Arc::as_ptr);
+            self.last_event = Some(event.clone());
+            self.last_event_stmts = ptr;
+            self.last_whole_event = wptr;
+            (ptr, wptr)
+        };
 
         // Whole-event backend (today: AOT-C): if a backend committed to
         // a one-function compile for this event, invoke it in place of
@@ -1224,243 +935,8 @@ impl Simulator {
         if !dispatched && !stmts_ptr.is_null() {
             // SAFETY: event_statements is never mutated after Ir construction.
             let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
-            // An auto-abandoned plan (see `IncrState::abandoned`) stops
-            // feeding the marks the event skip relies on; run every
-            // statement through the plan-less path instead.
-            let abandoned = self.incr_state.as_deref().is_some_and(|s| s.abandoned);
-            let eplan = self
-                .ir
-                .incr_plan
-                .as_ref()
-                .filter(|_| !abandoned)
-                .and_then(|p| p.event_plans.get(event))
-                .filter(|p| p.stmt_words.len() == statements.len());
-            // The probe builds a plan it never executes, so there is no
-            // `IncrState` for the mark-driven event skip to key off: run
-            // events whole, exactly like a plan-less configuration.
-            let eplan = eplan.filter(|_| self.incr_state.is_some());
-            if let Some(eplan) = eplan.filter(|p| p.mark_mode) {
-                // Mark-driven skip (default): a chunk's dirty bit is set by
-                // the settle diff / seed scans whenever a watched word
-                // changes (and by on_run marks for same-pass comb flow); a
-                // clean chunk would push the same write-log values, so
-                // skipping it is value-neutral (see EventPlan docs).
-                let st = self
-                    .incr_state
-                    .as_mut()
-                    .expect("incr_plan implies incr_state");
-                // Events can fire before the first settle sizes the bitmap;
-                // run everything until then (all-dirty semantics).
-                let inited = !st.event_dirty.is_empty();
-                // Debug oracle (`VERYL_INCR_EVENT=validate`): cross-check a
-                // clean verdict against the exact snapshot diff and report
-                // any watched-word change the marks missed.
-                static MARK_VALIDATE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-                let mark_validate = *MARK_VALIDATE.get_or_init(|| {
-                    env::var("VERYL_INCR_EVENT").ok().as_deref() == Some("validate")
-                });
-                let mut snaps_opt = if mark_validate {
-                    Some(
-                        self.event_incr
-                            .entry(event.clone())
-                            .or_insert_with(|| vec![None; statements.len()]),
-                    )
-                } else {
-                    None
-                };
-                let comb_words = self.ir.incr_plan.as_ref().unwrap().comb_words;
-                // Pre-run values of the statement's direct comb-write words,
-                // captured just before dispatch and diffed right after: the
-                // pre/post pair detects exactly what THIS run changed.  (A
-                // persistent per-slot baseline instead under-triggers: a
-                // settle repair or a co-writing statement moves the buffer
-                // behind the baseline, and a statement then writing the
-                // baseline's value back compares equal while the buffer DID
-                // change — starving the dirty seed.)
-                let mut onrun_pre: Vec<u64> = Vec::new();
-                for (i, x) in statements.iter().enumerate() {
-                    if inited && let Some(id) = eplan.stmt_ids[i] {
-                        let id = id as usize;
-                        self.event_skip_stats.1 += 1;
-                        let (wi, bit) = (id / 64, 1u64 << (id % 64));
-                        let clean = st.event_dirty[wi] & bit == 0;
-                        if let Some(snaps) = snaps_opt.as_deref_mut() {
-                            let words = eplan.stmt_words[i].as_ref().unwrap();
-                            let comb: &[u8] = &self.ir.comb_values;
-                            let ff: &[u8] = &self.ir.ff_values;
-                            let read = |w: u32| -> u64 {
-                                let w = w as usize;
-                                if w < comb_words {
-                                    incremental::read_word(comb, w)
-                                } else {
-                                    incremental::read_word(ff, w - comb_words)
-                                }
-                            };
-                            let bmask = |gm: u8| -> u64 {
-                                let mut m = 0u64;
-                                for b in 0..8 {
-                                    if gm & (1 << b) != 0 {
-                                        m |= 0xFFu64 << (8 * b);
-                                    }
-                                }
-                                m
-                            };
-                            match &mut snaps[i] {
-                                Some(prev) => {
-                                    for (p, &(w, gm)) in prev.iter_mut().zip(words) {
-                                        let v = read(w);
-                                        if (v ^ *p) & bmask(gm) != 0 && clean {
-                                            eprintln!(
-                                                "[mark-miss] event={event:?} stmt={i} id={id} word={w} gm={gm:#x} {:#x}->{:#x}",
-                                                *p, v
-                                            );
-                                        }
-                                        *p = v;
-                                    }
-                                }
-                                None => {
-                                    snaps[i] = Some(words.iter().map(|&(w, _)| read(w)).collect());
-                                }
-                            }
-                        }
-                        if clean {
-                            self.event_skip_stats.0 += 1;
-                            if !mark_validate {
-                                continue;
-                            }
-                        } else {
-                            st.event_dirty[wi] &= !bit;
-                        }
-                    }
-                    let (oa, ob) = if inited { eplan.onrun_slice[i] } else { (0, 0) };
-                    if oa != ob {
-                        let plan = self.ir.incr_plan.as_ref().unwrap();
-                        onrun_pre.clear();
-                        for k in oa as usize..ob as usize {
-                            let w = plan.event_onrun_words[k] as usize;
-                            onrun_pre.push(incremental::read_word(&self.ir.comb_values, w));
-                        }
-                    }
-                    if let Some(diag) = &mut self.event_diag {
-                        let t = std::time::Instant::now();
-                        dispatch_stmt_fast(x, &mut self.mask_cache);
-                        let e = diag.entry((event.clone(), i)).or_insert((0, 0));
-                        e.0 += t.elapsed().as_nanos() as u64;
-                        e.1 += 1;
-                    } else {
-                        dispatch_stmt_fast(x, &mut self.mask_cache);
-                    }
-                    if inited {
-                        // Clobber solidarity: co-writers of this statement's
-                        // FF bytes must push this commit too.
-                        let (ca, cb) = eplan.co_slice[i];
-                        if ca != cb {
-                            let plan = self.ir.incr_plan.as_ref().unwrap();
-                            for k in ca as usize..cb as usize {
-                                let m = plan.event_co_ids[k] as usize;
-                                st.event_dirty[m / 64] |= 1u64 << (m % 64);
-                            }
-                        }
-                        if oa != ob {
-                            let plan = self.ir.incr_plan.as_ref().unwrap();
-                            let src = incremental::MarkSource::OnRun {
-                                chunk: eplan.stmt_ids[i].unwrap_or(u32::MAX),
-                            };
-                            for (j, k) in (oa as usize..ob as usize).enumerate() {
-                                let w = plan.event_onrun_words[k] as usize;
-                                let v = incremental::read_word(&self.ir.comb_values, w);
-                                let pre = onrun_pre[j];
-                                if v == pre {
-                                    continue;
-                                }
-                                let dgm = incremental::byte_nonzero_mask(v ^ pre);
-                                plan.mark_word(&mut st.sink(), src, w, dgm);
-                            }
-                        }
-                    }
-                }
-            } else if let Some(eplan) = eplan {
-                // Change-driven skip: a chunk whose ins ∪ outs words are all
-                // unchanged since its last run would push the same write-log
-                // values; skipping it is value-neutral (see EventPlan docs).
-                // Legacy snapshot mode diffs nothing into the dirty-seed
-                // lists, so the next settle scans in full.
-                if let Some(st) = self.incr_state.as_mut() {
-                    st.force_full_seed();
-                }
-                let snaps = self
-                    .event_incr
-                    .entry(event.clone())
-                    .or_insert_with(|| vec![None; statements.len()]);
-                let comb: &[u8] = &self.ir.comb_values;
-                let ff: &[u8] = &self.ir.ff_values;
-                let comb_words = self.ir.incr_plan.as_ref().unwrap().comb_words;
-                let read = |w: u32| -> u64 {
-                    let w = w as usize;
-                    if w < comb_words {
-                        incremental::read_word(comb, w)
-                    } else {
-                        incremental::read_word(ff, w - comb_words)
-                    }
-                };
-                for (i, x) in statements.iter().enumerate() {
-                    if let Some(words) = &eplan.stmt_words[i] {
-                        self.event_skip_stats.1 += 1;
-                        match &mut snaps[i] {
-                            Some(prev) => {
-                                let mut same = true;
-                                for (p, &(w, _)) in prev.iter_mut().zip(words) {
-                                    let v = read(w);
-                                    same &= v == *p;
-                                    *p = v;
-                                }
-                                if same {
-                                    self.event_skip_stats.0 += 1;
-                                    continue;
-                                }
-                            }
-                            None => {
-                                snaps[i] = Some(words.iter().map(|&(w, _)| read(w)).collect());
-                            }
-                        }
-                    }
-                    if let Some(diag) = &mut self.event_diag {
-                        let t = std::time::Instant::now();
-                        dispatch_stmt_fast(x, &mut self.mask_cache);
-                        let e = diag.entry((event.clone(), i)).or_insert((0, 0));
-                        e.0 += t.elapsed().as_nanos() as u64;
-                        e.1 += 1;
-                    } else {
-                        dispatch_stmt_fast(x, &mut self.mask_cache);
-                    }
-                }
-            } else {
-                // Plan-less event list (Initial, or an alignment mismatch):
-                // its writes aren't diffed anywhere, so the next settle
-                // must run its full seed scans.
-                if let Some(st) = self.incr_state.as_mut() {
-                    st.force_full_seed();
-                }
-                if let Some(diag) = &mut self.event_diag {
-                    for (i, x) in statements.iter().enumerate() {
-                        let t = std::time::Instant::now();
-                        dispatch_stmt_fast(x, &mut self.mask_cache);
-                        let e = diag.entry((event.clone(), i)).or_insert((0, 0));
-                        e.0 += t.elapsed().as_nanos() as u64;
-                        e.1 += 1;
-                    }
-                } else {
-                    for x in statements {
-                        dispatch_stmt_fast(x, &mut self.mask_cache);
-                    }
-                }
-            }
-        } else if dispatched {
-            // The whole-event backend ran everything; per-statement
-            // snapshots are stale.
-            self.event_incr.remove(event);
-            if let Some(st) = self.incr_state.as_mut() {
-                st.force_full_seed();
+            for x in statements {
+                dispatch_stmt_fast(x, &mut self.mask_cache);
             }
         }
 
@@ -1475,17 +951,7 @@ impl Simulator {
         #[cfg(feature = "profile")]
         let ff_start = Instant::now();
 
-        if let Some(st) = self.incr_state.as_mut() {
-            // Feed changed FF words to the next settle's dirty-seed diff.
-            let mut f = |w: u32| st.note_ff_write(w);
-            ff_commit_from_log(
-                &mut self.ir.ff_values,
-                &self.ir.write_log_buffer,
-                Some(&mut f),
-            );
-        } else {
-            ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer, None);
-        }
+        ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
 
         if self.write_log_diag.enabled {
             let n = self.ir.write_log_buffer.count();
@@ -1549,7 +1015,7 @@ impl Simulator {
         if let Some(id) = master_id_opt {
             self.set_input_clock_bit(id, 1);
             if has_eval_chunk {
-                self.partial_settle_marked();
+                self.ir.partial_settle(&mut self.mask_cache);
             }
         }
 
@@ -1589,6 +1055,11 @@ impl Simulator {
             self.eval_event_stmts(&Event::Clock(vid));
             fired_mask[i] = true;
         }
+        // Rides the master event's commit so a domain whose clock is gated off
+        // still takes its reset values.
+        if let Some(reset) = self.pending_assertion_edge.take() {
+            self.eval_event_stmts(&reset);
+        }
         self.commit_event_log();
         self.fire_components(event);
         for &i in &pre_fire {
@@ -1612,7 +1083,7 @@ impl Simulator {
         let mut iters = 0;
         loop {
             if has_eval_chunk {
-                self.partial_settle_marked();
+                self.ir.partial_settle(&mut self.mask_cache);
             }
             for i in 0..n {
                 let clk = &self.ir.derived_clock_schedule.clocks[i];
@@ -1675,7 +1146,7 @@ impl Simulator {
         if let Some(id) = master_id_opt {
             self.set_input_clock_bit(id, 0);
             if has_eval_chunk {
-                self.partial_settle_marked();
+                self.ir.partial_settle(&mut self.mask_cache);
             }
         }
 
@@ -1806,7 +1277,23 @@ impl Simulator {
             cr_wide_count,
         );
 
-        if aot_bytes != cr_bytes {
+        // Backends may log different byte SETS for one committed effect: a
+        // full-width select RMW (Cranelift) re-logs untouched bytes with
+        // their old values, while a range-exact slice writer (AOT-C) logs
+        // only the slice.  Commit overlays entries onto existing storage, so
+        // compare the POST-COMMIT state rather than the logged sets.
+        let eff = |m: &HashMap<u32, u8>, off: u32| {
+            m.get(&off)
+                .copied()
+                .or_else(|| ff_snap.get(off as usize).copied())
+        };
+        let mut offs: BTreeSet<u32> = Default::default();
+        offs.extend(aot_bytes.keys());
+        offs.extend(cr_bytes.keys());
+        if offs
+            .iter()
+            .any(|&off| eff(&aot_bytes, off) != eff(&cr_bytes, off))
+        {
             eprintln!(
                 "[aot_event_validate] DIVERGENCE module={} event={:?}: committed-FF bytes differ (aot {} bytes, cranelift {} bytes)",
                 self.ir.name,
@@ -1814,12 +1301,9 @@ impl Simulator {
                 aot_bytes.len(),
                 cr_bytes.len(),
             );
-            let mut offs: BTreeSet<u32> = Default::default();
-            offs.extend(aot_bytes.keys());
-            offs.extend(cr_bytes.keys());
             for off in offs {
-                let a = aot_bytes.get(&off);
-                let c = cr_bytes.get(&off);
+                let a = eff(&aot_bytes, off);
+                let c = eff(&cr_bytes, off);
                 if a != c {
                     eprintln!("  byte off={off:#x}: aot={a:?} cranelift={c:?}");
                 }
@@ -1844,9 +1328,6 @@ impl Simulator {
                 );
             }
             self.comb_dirty = true;
-            if let Some(st) = self.incr_state.as_mut() {
-                st.force_full_seed();
-            }
         }
     }
 

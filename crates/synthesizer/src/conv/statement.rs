@@ -305,8 +305,9 @@ fn const_subword_range(
         }
         None => (0, scalar_width),
     };
+    // A non-empty select is already in whole-variable coordinates.
     let (lo, hi) = if dst.select.is_empty() {
-        (0, member_width - 1)
+        (member_offset, member_offset + member_width - 1)
     } else if dst.select.is_const() {
         let (hi, lo) = dst
             .select
@@ -321,7 +322,7 @@ fn const_subword_range(
             &dst.token,
         ));
     };
-    Ok((member_offset + lo, member_offset + hi))
+    Ok((lo, hi))
 }
 
 /// AND of every enclosing branch condition (`Neg` negated). Constants fold, so
@@ -370,6 +371,19 @@ fn or_nets(ctx: &mut ConvContext, a: NetId, b: NetId) -> NetId {
     }
 }
 
+/// The index/select machinery addresses a single element, so `arr = expr`
+/// has to be handled as one flat write instead.
+fn is_whole_array_dst(
+    dst: &air::AssignDestination,
+    scalar_width: usize,
+    total_width: usize,
+) -> bool {
+    dst.index.0.is_empty()
+        && dst.select.is_empty()
+        && dst.comptime.part_select.is_none()
+        && total_width > scalar_width
+}
+
 /// Computes how many source bits an `AssignDestination` consumes. Purely
 /// structural — doesn't allocate any cells. `write_to_dst` produces the
 /// dynamic-index/select nets later.
@@ -377,10 +391,10 @@ pub(crate) fn dst_slice_width(
     ctx: &mut ConvContext,
     dst: &air::AssignDestination,
 ) -> Result<usize, SynthesizerError> {
-    let scalar_width = ctx
+    let (scalar_width, total_width) = ctx
         .variables
         .get(&dst.id)
-        .map(|s| s.scalar_width)
+        .map(|s| (s.scalar_width, s.width))
         .ok_or_else(|| SynthesizerError::internal(format!("unknown assign target {}", dst.id)))?;
     let member_width = match &dst.comptime.part_select {
         Some(ps) => ps
@@ -392,6 +406,9 @@ pub(crate) fn dst_slice_width(
     };
 
     if dst.select.is_empty() {
+        if is_whole_array_dst(dst, scalar_width, total_width) {
+            return Ok(total_width);
+        }
         Ok(member_width)
     } else if dst.select.is_const() {
         let (hi, lo) = dst
@@ -458,6 +475,19 @@ pub(crate) fn write_to_dst(
         None => (0, scalar_width),
     };
 
+    if is_whole_array_dst(dst, scalar_width, total_width) {
+        let var_current = current.entry(dst.id).or_insert_with(|| {
+            ctx.variables
+                .get(&dst.id)
+                .map(|s| s.nets.clone())
+                .unwrap_or_default()
+        });
+        for (bit, &net) in src.iter().enumerate().take(var_current.len()) {
+            var_current[bit] = net;
+        }
+        return Ok(());
+    }
+
     enum SelectKind {
         Static { lo: usize, hi: usize },
         DynamicSingle { idx_nets: Vec<NetId> },
@@ -510,7 +540,10 @@ pub(crate) fn write_to_dst(
                 &dst.token,
             ));
         }
-        let idx_bits = arith::index_bits_for(member_width);
+        // The index is rebased into whole-variable coordinates: truncating it
+        // to the member width cancels a power-of-two offset but corrupts any
+        // other.
+        let idx_bits = arith::index_bits_for(member_offset + member_width);
         let idx_nets = synthesize_expr(ctx, &dst.select.0[0], current, idx_bits)?;
         SelectKind::DynamicSingle { idx_nets }
     };
@@ -590,11 +623,21 @@ pub(crate) fn write_to_dst(
         }
     };
     let (bit_positions, bit_match): (Vec<usize>, Option<Vec<NetId>>) = match select_kind {
-        SelectKind::Static { lo, hi } => ((lo..=hi).map(|p| member_offset + p).collect(), None),
+        SelectKind::Static { lo, hi } => {
+            // The analyzer rebased a non-empty select into whole-variable
+            // coordinates (`PartSelectPath::to_base_select`); adding the offset
+            // again pushes the write past the end, where it is silently dropped.
+            let base = if dst.select.is_empty() {
+                member_offset
+            } else {
+                0
+            };
+            ((lo..=hi).map(|p| base + p).collect(), None)
+        }
         SelectKind::DynamicSingle { idx_nets } => {
             let positions: Vec<usize> = (0..member_width).map(|b| member_offset + b).collect();
             let matches: Vec<NetId> = (0..member_width)
-                .map(|b| arith::eq_const(ctx, &idx_nets, b))
+                .map(|b| arith::eq_const(ctx, &idx_nets, member_offset + b))
                 .collect();
             (positions, Some(matches))
         }

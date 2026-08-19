@@ -1,13 +1,14 @@
+pub(crate) mod big_array;
 pub(crate) mod comb_layout;
 pub(crate) mod comb_pipeline_cache;
 pub(crate) mod context;
 pub(crate) mod declaration;
+pub mod deps;
 pub mod derived_clock;
 mod event;
 mod expression;
 pub(crate) mod external;
 pub(crate) mod hier_ref;
-pub mod incremental;
 pub(crate) mod inst_layout;
 pub(crate) mod module;
 pub(crate) mod opt;
@@ -17,6 +18,7 @@ mod statement;
 pub(crate) mod variable;
 pub(crate) mod write_log;
 
+pub use big_array::BigArrayFold;
 pub use context::{Context, Conv};
 pub use declaration::ProtoDeclaration;
 pub use derived_clock::{DerivedClock, DerivedClockSchedule};
@@ -26,6 +28,7 @@ pub use external::{
     ExternalComponentInst, ExternalConnectInst, ProtoExternalComponent, ProtoExternalConnect,
 };
 pub use module::{Module, ProtoModule};
+pub use opt::comb_fusion::force_disable as force_disable_comb_fusion;
 pub use statement::{
     CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
     ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoComponentArg,
@@ -64,6 +67,8 @@ pub struct Ir {
     pub ff_values: Box<[u8]>,
     pub comb_values: Box<[u8]>,
     pub use_4state: bool,
+    /// See `Config::abstract_reset_active_high`.
+    pub abstract_reset_active_high: bool,
     pub module_variables: ModuleVariables,
     pub event_statements: HashMap<Event, Vec<Statement>>,
     /// Unified comb statements: all port connections, child comb, and internal
@@ -134,6 +139,14 @@ pub struct Ir {
     pub component_file_base: Option<PathBuf>,
     /// See `Module::rtl_driven`.
     pub rtl_driven: HashSet<VarId>,
+    /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
+    /// comb-dirty filter (`tb_dirty::TbDirtyFilter`).
+    pub comb_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
+    /// Cone-gate segments over `comb_statements`; empty when ungated.
+    /// Runtime shadows live in `cone_gate_state`.
+    pub cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment>,
+    /// Lazily initialised per-segment shadows + auto-off counters.
+    pub cone_gate_state: std::cell::RefCell<Option<crate::ir::opt::cone_gate::ConeGateState>>,
     /// See `Module::fused_comb_offsets` (diagnostic; consumed by the
     /// dual-run checker to skip storage the fusion pass retired).
     pub fused_comb_offsets: Vec<isize>,
@@ -141,20 +154,6 @@ pub struct Ir {
     /// taken every cycle; the residency table (a mutex) must be touched once.
     whole_comb_fallback_recorded: AtomicBool,
     pub(crate) whole_event_fallback_recorded: AtomicBool,
-    /// Change-driven settle plan (`None` unless the incremental settle is on
-    /// and the module is supported); see `ir::incremental`.
-    pub incr_plan: Option<Arc<incremental::IncrPlan>>,
-    /// See `ProtoModule::incr_run`.
-    pub incr_run: bool,
-    /// See `ProtoModule::incr_key`.
-    pub incr_key: u128,
-    /// Where verdicts are persisted (`Config::incr_feedback_path`).
-    pub incr_feedback_path: Option<PathBuf>,
-    /// Deferred whole-module AOT-C (`Some` only under the incremental
-    /// configuration): compile inputs + landing slots, spawned when the
-    /// plan is declined at build time or auto-abandoned at runtime.  See
-    /// `backend::late`.
-    pub late_aotc: Option<Arc<crate::backend::late::LateAotc>>,
     /// Whether the whole-comb backend's run-once constant-cone entry has
     /// executed for THIS instance.  Per-instance (not per-artifact): a
     /// shared `.so` serves many simulators, each with fresh comb buffers.
@@ -177,6 +176,7 @@ impl Ir {
             ff_values: module.ff_values,
             comb_values: module.comb_values,
             use_4state: config.use_4state,
+            abstract_reset_active_high: config.abstract_reset_active_high,
             module_variables: module.module_variables,
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
@@ -203,13 +203,11 @@ impl Ir {
             component_file_base: config.component_file_base.clone(),
             rtl_driven: module.rtl_driven,
             fused_comb_offsets: module.fused_comb_offsets,
+            comb_touched_offsets: module.comb_touched_offsets,
+            cone_segments: module.cone_segments,
+            cone_gate_state: std::cell::RefCell::new(None),
             whole_comb_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
-            incr_plan: module.incr_plan,
-            incr_run: module.incr_run,
-            incr_key: module.incr_key,
-            incr_feedback_path: config.incr_feedback_path.clone(),
-            late_aotc: module.late_aotc,
             const_cone_done: Default::default(),
         };
         // Bake the WriteLogBuffer's heap-stable address into every
@@ -217,15 +215,113 @@ impl Ir {
         // inline log pushes without a TLS lookup.
         ir.install_write_log_ptr();
         ir.backend_diag();
-        // Incremental plan declined at build time: the full-settle fallback
-        // is permanent from cycle 0, so start the deferred whole-module
-        // AOT-C compile right away (see `backend::late`).
-        if ir.incr_plan.is_none()
-            && let Some(late) = ir.late_aotc.as_ref()
-        {
-            crate::backend::late::LateAotc::spawn(late);
+        if env::var("VERYL_DUMP_VARMAP").ok().as_deref() == Some("1") {
+            ir.dump_varmap();
         }
         ir
+    }
+
+    /// True when the reset net `id` asserts LOW.  The polarity-agnostic
+    /// `reset` type carries none of its own, so a declaration on the ports the
+    /// net reaches decides — their `if_reset` blocks were lowered against it —
+    /// and `[build] reset_type` is the fallback when none does.
+    pub fn reset_active_low(&self, id: &VarId) -> bool {
+        let var = self.module_variables.variables.get(id);
+        match var.map(|x| &x.r#type.kind) {
+            Some(air::TypeKind::ResetAsyncHigh) | Some(air::TypeKind::ResetSyncHigh) => false,
+            Some(air::TypeKind::ResetAsyncLow) | Some(air::TypeKind::ResetSyncLow) => true,
+            _ => var
+                .and_then(|v| self.declared_reset_polarity(v))
+                .unwrap_or(!self.abstract_reset_active_high),
+        }
+    }
+
+    /// The polarity declared for the net `var` denotes, found through the
+    /// storage it shares with connected ports.  `None` when nothing declares
+    /// one or the declarations disagree — neither leaves a level to pick.
+    fn declared_reset_polarity(&self, var: &Variable) -> Option<bool> {
+        let &ptr = var.current_values.first()?;
+        let mut found: Option<bool> = None;
+        let mut stack = vec![&self.module_variables];
+        while let Some(vars) = stack.pop() {
+            for other in vars.variables.values() {
+                if other.current_values.first() != Some(&ptr) {
+                    continue;
+                }
+                let active_low = match other.r#type.kind {
+                    air::TypeKind::ResetAsyncHigh | air::TypeKind::ResetSyncHigh => false,
+                    air::TypeKind::ResetAsyncLow | air::TypeKind::ResetSyncLow => true,
+                    _ => continue,
+                };
+                match found {
+                    None => found = Some(active_low),
+                    Some(prev) if prev != active_low => return None,
+                    Some(_) => {}
+                }
+            }
+            for child in &vars.children {
+                stack.push(child);
+            }
+        }
+        found
+    }
+
+    /// Reset-typed ports of the top module — the nets an external driver
+    /// supplies.  Sorted by path so a caller picking one is deterministic.
+    pub fn reset_ports(&self) -> Vec<VarId> {
+        let mut ports: Vec<(&VarPath, &VarId)> = self
+            .ports
+            .iter()
+            .filter(|(_, id)| {
+                self.module_variables
+                    .variables
+                    .get(*id)
+                    .is_some_and(|x| x.r#type.is_reset())
+            })
+            .collect();
+        ports.sort_by(|a, b| a.0.cmp(b.0));
+        ports.into_iter().map(|(_, id)| *id).collect()
+    }
+
+    /// `VERYL_DUMP_VARMAP=1`: every variable element's storage offset with its
+    /// hierarchical path — the table an emitted-code offset is joined against
+    /// to name the signal behind it.
+    fn dump_varmap(&self) {
+        // Millions of lines on a large design, and stderr is unbuffered: hold
+        // one buffer for the whole dump.
+        use std::io::Write;
+        let stderr = std::io::stderr();
+        let mut out = std::io::BufWriter::new(stderr.lock());
+        let comb_base = self.comb_values.as_ptr() as usize;
+        let comb_end = comb_base + self.comb_values.len();
+        let ff_base = self.ff_values.as_ptr() as usize;
+        let ff_end = ff_base + self.ff_values.len();
+        let mut stack = vec![(String::new(), &self.module_variables)];
+        while let Some((prefix, m)) = stack.pop() {
+            let here = if prefix.is_empty() {
+                m.name.to_string()
+            } else {
+                format!("{prefix}.{}", m.name)
+            };
+            for var in m.variables.values() {
+                for (i, &p) in var.current_values.iter().enumerate() {
+                    let p = p as usize;
+                    let (kind, off) = if (comb_base..comb_end).contains(&p) {
+                        ("comb", p - comb_base)
+                    } else if (ff_base..ff_end).contains(&p) {
+                        ("ff", p - ff_base)
+                    } else {
+                        continue; // external component storage
+                    };
+                    let _ = writeln!(
+                        out,
+                        "[varmap] {kind} {off:#x} w={} {here}.{}[{i}]",
+                        var.width, var.path
+                    );
+                }
+            }
+            stack.extend(m.children.iter().map(|c| (here.clone(), c)));
+        }
     }
 
     /// `VERYL_BACKEND_DIAG=1`: report per-event/comb jit vs interpreter counts
@@ -372,65 +468,6 @@ impl Ir {
         }
     }
 
-    /// Mark-driven event skip: diff the words `partial_settle` writes and
-    /// mark event chunks watching a changed one.  Those writes happen
-    /// between the full settle and the event evals of the same step, so
-    /// the seed scans can't see them in time (the ext scan would deliver
-    /// them one event pass late).  Call right after each `partial_settle`.
-    pub fn mark_event_partial(&self, state: &mut incremental::IncrState) {
-        let Some(plan) = self.incr_plan.as_ref() else {
-            return;
-        };
-        if state.abandoned || plan.event_chunk_count == 0 || plan.partial_out_words.is_empty() {
-            return;
-        }
-        // Pre-first-settle fires run under all-dirty semantics; the bitmap
-        // isn't sized yet.
-        if state.event_dirty.is_empty() {
-            return;
-        }
-        if state.prev_partial.len() != plan.partial_out_words.len() {
-            // First use: zeros make every watched word "changed", which
-            // only re-marks chunks that start all-dirty anyway.
-            state.prev_partial = vec![0u64; plan.partial_out_words.len()];
-        }
-        let comb: &[u8] = &self.comb_values;
-        let ff: &[u8] = &self.ff_values;
-        let read = |w: usize| -> u64 {
-            if w < plan.comb_words {
-                incremental::read_word(comb, w)
-            } else {
-                incremental::read_word(ff, w - plan.comb_words)
-            }
-        };
-        let words = &plan.partial_out_words;
-        let mut i = 0usize;
-        while i < words.len() {
-            let end = (i + 8).min(words.len());
-            let mut acc = 0u64;
-            for (&w, &p) in words[i..end].iter().zip(&state.prev_partial[i..end]) {
-                acc |= read(w as usize) ^ p;
-            }
-            if acc != 0 {
-                // Index-based so the `prev_partial` borrow ends before the
-                // mark; the marks feed the next settle's dirty-seed diff
-                // too, so comb consumers of the closure's writes wake
-                // without a full scan.
-                for (k, &wid) in words.iter().enumerate().take(end).skip(i) {
-                    let w = wid as usize;
-                    let v = read(w);
-                    let p = state.prev_partial[k];
-                    if v != p {
-                        let dgm = incremental::byte_nonzero_mask(v ^ p);
-                        state.prev_partial[k] = v;
-                        plan.mark_word(&mut state.sink(), incremental::MarkSource::Partial, w, dgm);
-                    }
-                }
-            }
-            i = end;
-        }
-    }
-
     /// Evaluate comb for `required_comb_passes` passes.
     ///
     /// Real combinational loops are rejected by `analyze_dependency`
@@ -452,13 +489,7 @@ impl Ir {
         // first divergence.  Both paths fall through to Cranelift if
         // the whole-comb backend declines (`whole_comb == None`) or
         // returns `NotReady` (async compile pending).
-        // `whole_comb` is populated at conv time (default pipeline); the
-        // late slot lands asynchronously after an incremental-plan decline
-        // or auto-abandon (see `backend::late`) — one atomic load to poll.
-        let whole_comb = self
-            .whole_comb
-            .as_ref()
-            .or_else(|| self.late_aotc.as_ref().and_then(|l| l.whole_comb()));
+        let whole_comb = self.whole_comb.as_ref();
         if let Some(whole) = whole_comb {
             // Cache env var lookups in a process-static OnceLock: settle_comb
             // runs once per cycle, so a per-cycle `std::env::var`/getenv would
@@ -520,609 +551,6 @@ impl Ir {
         self.run_chunked_settle(mask_cache, profile);
     }
 
-    /// Change-driven settle (`VERYL_INCR=1`): seed dirtiness from
-    /// FF-buffer / external-word diffs against the previous settle, then
-    /// sweep the topologically-ordered statement list running only dirty
-    /// entries, diffing their outputs to propagate.  Semantics match the
-    /// baseline fixed-pass evaluation (see `ir::incremental`).
-    pub fn settle_comb_incremental(
-        &self,
-        state: &mut incremental::IncrState,
-        mask_cache: &mut MaskCache,
-        profile: &mut SimProfile,
-    ) {
-        use incremental::read_word;
-        // Auto-abandoned plan (see `incremental::abandon_threshold_pct`):
-        // the DUT's activity makes change-driven bookkeeping a net loss —
-        // run the baseline full sweep instead.  (Event skip is disabled by
-        // the same flag in `eval_event_stmts`.)
-        if state.abandoned {
-            self.settle_comb(mask_cache, profile);
-            return;
-        }
-        // Diagnostic trial clock (`VERYL_INCR_TRIAL=dry`).
-        let trial_t0 = incremental::trial_enabled()
-            .then(std::time::Instant::now)
-            .filter(|_| incremental::trial_window(state.gen_settles).is_some());
-        let plan = self
-            .incr_plan
-            .as_ref()
-            .expect("settle_comb_incremental requires incr_plan");
-        debug_assert_eq!(plan.n_entries, self.comb_statements.len());
-        // Every id-indexed structure below belongs to one generation; a
-        // state carried over from another plan would index silently wrong
-        // (fused contract v2 §1).
-        debug_assert_eq!(
-            state.bound_plan,
-            std::ptr::from_ref::<incremental::IncrPlan>(plan) as usize,
-            "incremental state is bound to a different plan generation"
-        );
-
-        #[cfg(feature = "profile")]
-        {
-            profile.settle_comb_count += 1;
-        }
-        let _ = profile;
-
-        let comb: &[u8] = &self.comb_values;
-        let ff: &[u8] = &self.ff_values;
-        let ff_words = plan.total_words - plan.comb_words;
-
-        let first_settle = !state.inited;
-        if first_settle {
-            // First settle: run everything through the sweep below (marking
-            // every entry each pass) so the per-entry output snapshots are
-            // populated with each entry's own values in schedule order.
-            state.prev_ff = vec![0u64; ff_words];
-            state.prev_ext = vec![0u64; plan.ext_comb_words.len()];
-            state.dirty = vec![0u64; plan.n_entries.div_ceil(64)];
-            // All-dirty so every event chunk runs its first fire.
-            state.event_dirty = vec![!0u64; plan.event_chunk_count.div_ceil(64)];
-            state.build_flat(plan, &self.comb_statements);
-            state.inited = true;
-        }
-
-        let mut seed_words = 0u64;
-        // Full scans when an untracked writer may have touched the buffers
-        // (or on the first settle); the dirty-seed lists cover the tracked
-        // every-cycle paths.
-        let force_full = first_settle || state.seed_full;
-        if force_full {
-            if state.seed_full {
-                state.stats_seed_full += 1;
-            }
-            state.seed_full = false;
-            state.pending_ff.clear();
-            state.pending_ext.clear();
-            // Both seed scans below run in blocks of 8 with an xor-or reduction
-            // and only fall into the per-word marking path when the block
-            // differs: ~99.5% of words are unchanged in a typical settle, so the
-            // scans are dominated by confirming "no change" (branchless in the
-            // common case; the changed block re-reads at most 8 words).
-            //
-            // Seed: external comb words (event writes, testbench/root vars).
-            // Wakes both readers and writers: the settled version must be
-            // re-established over an external write, like the baseline's
-            // unconditional evaluation would.
-            let ext_words = &plan.ext_comb_words;
-            let mut i = 0usize;
-            while i < ext_words.len() {
-                let end = (i + 8).min(ext_words.len());
-                let mut acc = 0u64;
-                for (&w, &p) in ext_words[i..end].iter().zip(&state.prev_ext[i..end]) {
-                    acc |= read_word(comb, w as usize) ^ p;
-                }
-                if acc != 0 {
-                    for (k, &wid) in ext_words.iter().enumerate().take(end).skip(i) {
-                        let w = wid as usize;
-                        let v = read_word(comb, w);
-                        let p = state.prev_ext[k];
-                        if v != p {
-                            let dgm = incremental::byte_nonzero_mask(v ^ p);
-                            state.prev_ext[k] = v;
-                            seed_words += 1;
-                            plan.mark_word(
-                                &mut state.sink(),
-                                incremental::MarkSource::ExtSeed,
-                                w,
-                                dgm,
-                            );
-                        }
-                    }
-                }
-                i = end;
-            }
-            // Seed: FF words (event/commit writes since the previous settle).
-            let mut w0 = 0usize;
-            while w0 < ff_words {
-                let end = (w0 + 8).min(ff_words);
-                let mut acc = 0u64;
-                for w in w0..end {
-                    acc |= read_word(ff, w) ^ state.prev_ff[w];
-                }
-                if acc != 0 {
-                    for lw in w0..end {
-                        let v = read_word(ff, lw);
-                        let p = state.prev_ff[lw];
-                        if v != p {
-                            let dgm = incremental::byte_nonzero_mask(v ^ p);
-                            state.prev_ff[lw] = v;
-                            seed_words += 1;
-                            plan.mark_word(
-                                &mut state.sink(),
-                                incremental::MarkSource::FfSeed,
-                                plan.comb_words + lw,
-                                dgm,
-                            );
-                        }
-                    }
-                }
-                w0 = end;
-            }
-        } else {
-            // Dirty-seed path: only words some tracked writer touched since
-            // the last settle (commit compare-on-apply, event on-run diff,
-            // partial-settle diff, input-clock toggles).  Diff semantics
-            // and marking are identical to the full scans; duplicates are
-            // harmless (the first diff updates prev, the second no-ops).
-            let mut pend = std::mem::take(&mut state.pending_ext);
-            for &w in &pend {
-                let w = w as usize;
-                let pi = plan.ext_pos[w] as usize;
-                if pi == 0 {
-                    continue;
-                }
-                let v = read_word(comb, w);
-                let p = state.prev_ext[pi - 1];
-                if v != p {
-                    let dgm = incremental::byte_nonzero_mask(v ^ p);
-                    state.prev_ext[pi - 1] = v;
-                    seed_words += 1;
-                    plan.mark_word(&mut state.sink(), incremental::MarkSource::ExtSeed, w, dgm);
-                }
-            }
-            pend.clear();
-            state.pending_ext = pend;
-
-            let mut pend = std::mem::take(&mut state.pending_ff);
-            for &lw in &pend {
-                let lw = lw as usize;
-                if lw >= ff_words {
-                    continue;
-                }
-                let v = read_word(ff, lw);
-                let p = state.prev_ff[lw];
-                if v != p {
-                    let dgm = incremental::byte_nonzero_mask(v ^ p);
-                    state.prev_ff[lw] = v;
-                    seed_words += 1;
-                    plan.mark_word(
-                        &mut state.sink(),
-                        incremental::MarkSource::FfSeed,
-                        plan.comb_words + lw,
-                        dgm,
-                    );
-                }
-            }
-            pend.clear();
-            state.pending_ff = pend;
-        }
-        state.stats_seed_words += seed_words;
-
-        for _pass in 0..plan.required_passes {
-            if first_settle {
-                for d in state.dirty.iter_mut() {
-                    *d = !0;
-                }
-            } else {
-                for &e in &plan.always_run {
-                    state.dirty[e as usize / 64] |= 1u64 << (e % 64);
-                }
-            }
-            let ran = self.incr_sweep_pass(state, plan, mask_cache);
-            if !ran {
-                break;
-            }
-        }
-        // Leftover dirty bits are marks that landed BEHIND the sweep in the
-        // last pass — backward edges.  Baseline stops after its fixed pass
-        // count too, but it re-runs EVERY entry next settle, so a backward
-        // reader picks the new value up one settle late; the equivalent
-        // here is to CARRY the marks (dirty + sub-mask) into the next
-        // settle's first pass, not to drop them.  Dropping is only
-        // value-neutral when every backward mark targets an always-run
-        // entry (the versioned-word protection) — pe_core happens to
-        // satisfy that, but a schedule with a reader ordered before a
-        // same-word writer (relaxed false-cycle SCCs, under-covered
-        // dynamic-array edges) produces plain backward dataflow marks,
-        // and dropping those freezes the reader on a stale value forever
-        // (found on heliodor's OoO dcache at fine chunk granularity).
-        // Running the leftovers with extra sweeps in THIS settle is wrong
-        // in the other direction: they would read values the baseline only
-        // sees next settle.
-        // Entries may have rewritten external words; refresh the snapshot so
-        // the next seed diff doesn't re-trigger on our own writes.  A full
-        // re-read beats keeping every ext word in the diff records (the
-        // records are the sweep's hottest data).
-        for (i, &w) in plan.ext_comb_words.iter().enumerate() {
-            state.prev_ext[i] = read_word(comb, w as usize);
-        }
-        // Match the seed baselines to the settled state (first settle).
-        if first_settle {
-            for (w, p) in state.prev_ff.iter_mut().enumerate() {
-                *p = read_word(ff, w);
-            }
-        }
-        state.stats_settles += 1;
-        state.gen_settles += 1;
-        // Diagnostic (`VERYL_INCR_REBIND`): queue an identity generation
-        // swap so the suites exercise the swap path.
-        {
-            let iv = incremental::rebind_interval();
-            if iv > 0 && state.gen_settles.is_multiple_of(iv) {
-                state.request_swap(Some(std::sync::Arc::clone(plan)));
-            }
-        }
-        // Auto-abandon evaluation: entry-run fraction over the warmup
-        // window (see `incremental::abandon_threshold_pct`).  One-shot and
-        // permanent — a high-activity DUT does not become low-activity.
-        // The clock is generation-local: a swap re-arms the window, since
-        // the run fraction it measures is a property of the plan.
-        {
-            use incremental::{ABANDON_WARMUP, ABANDON_WINDOW, abandon_threshold_pct};
-            let pct = abandon_threshold_pct(plan.n_entries);
-            if pct > 0 && !state.abandoned {
-                if state.gen_settles == ABANDON_WARMUP {
-                    state.abandon_runs0 = state.stats_runs;
-                } else if state.gen_settles == ABANDON_WARMUP + ABANDON_WINDOW {
-                    let runs = state.stats_runs - state.abandon_runs0;
-                    let possible = ABANDON_WINDOW * plan.n_entries as u64;
-                    if runs * 100 > possible * pct {
-                        state.abandoned = true;
-                        log::info!(
-                            "incremental plan abandoned: run fraction {:.1}% over settles \
-                             {ABANDON_WARMUP}..{} exceeds {pct}% (falling back to full settle)",
-                            runs as f64 * 100.0 / possible as f64,
-                            ABANDON_WARMUP + ABANDON_WINDOW,
-                        );
-                        // Under the generation model this verdict is a
-                        // retirement (`request_swap(None)` at the swap
-                        // point); it stays a flag until P6, because the
-                        // event dispatch must keep honouring it in the
-                        // window between the verdict and the swap.
-                        //
-                        // The fallback is permanent — start the deferred
-                        // whole-module AOT-C compile so the full settle /
-                        // full event eval get their default-pipeline
-                        // backends back (see `backend::late`).
-                        if let Some(late) = self.late_aotc.as_ref() {
-                            crate::backend::late::LateAotc::spawn(late);
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(t0) = trial_t0 {
-            self.incr_trial_tick(state, t0.elapsed());
-        }
-    }
-
-    /// One `VERYL_INCR_TRIAL=dry` sample: charge this settle's time to the
-    /// current window, then time a SHADOW whole-comb dispatch against a
-    /// scratch copy of the comb buffer.  The scratch is what makes this
-    /// value-neutral: the incremental settle deliberately carries backward
-    /// marks into the next settle, so an extra in-place full settle would
-    /// advance state the baseline leaves for later.
-    fn incr_trial_tick(&self, state: &mut incremental::IncrState, incr: std::time::Duration) {
-        let Some(w) = incremental::trial_window(state.gen_settles) else {
-            return;
-        };
-        state
-            .trial
-            .resize(incremental::TRIAL_STARTS.len(), Default::default());
-        state.trial[w].incr_ns += incr.as_nanos() as u64;
-        let whole = self
-            .whole_comb
-            .as_ref()
-            .or_else(|| self.late_aotc.as_ref().and_then(|l| l.whole_comb()));
-        let mut measured = false;
-        if let Some(whole) = whole {
-            state.trial_scratch.clear();
-            state.trial_scratch.extend_from_slice(&self.comb_values);
-            let ff_ptr = self.ff_values.as_ptr();
-            let comb_ptr = state.trial_scratch.as_mut_ptr();
-            let log_ptr = (&*self.write_log_buffer as *const _ as *const u8) as *mut u8;
-            let passes = self.required_comb_passes.max(1);
-            let t = std::time::Instant::now();
-            measured = (0..passes).all(|_| {
-                matches!(
-                    whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
-                    DispatchOutcome::Done
-                )
-            });
-            if measured {
-                state.trial[w].whole_ns += t.elapsed().as_nanos() as u64;
-                state.trial[w].n += 1;
-            }
-        }
-        if !measured {
-            state.trial[w].unavailable += 1;
-        }
-        if state.gen_settles + 1 == incremental::TRIAL_STARTS[w] + incremental::TRIAL_LEN {
-            let t = &state.trial[w];
-            let n = t.n.max(1) as f64;
-            let (i, o) = (t.incr_ns as f64 / n, t.whole_ns as f64 / n);
-            eprintln!(
-                "[incr trial] module={} window={} (settles {}..{}) n={} unavailable={} \
-                 incr={:.1}us whole={:.1}us ratio={:.2} verdict={}",
-                self.name,
-                w,
-                incremental::TRIAL_STARTS[w],
-                incremental::TRIAL_STARTS[w] + incremental::TRIAL_LEN,
-                t.n,
-                t.unavailable,
-                i / 1000.0,
-                o / 1000.0,
-                if o > 0.0 { i / o } else { 0.0 },
-                if t.n == 0 {
-                    "none"
-                } else if i > o {
-                    "retire"
-                } else {
-                    "keep"
-                },
-            );
-        }
-    }
-
-    /// One sweep over the dirty-entry bitmap in schedule order; returns
-    /// whether any entry ran.  See `settle_comb_incremental` for the
-    /// surrounding pass/drain structure.
-    fn incr_sweep_pass(
-        &self,
-        state: &mut incremental::IncrState,
-        plan: &incremental::IncrPlan,
-        mask_cache: &mut MaskCache,
-    ) -> bool {
-        use incremental::read_word;
-        let comb: &[u8] = &self.comb_values;
-        let ff: &[u8] = &self.ff_values;
-        let incremental::IncrState {
-            dirty,
-            blob,
-            blob_off,
-            arg_sets,
-            prev_ff,
-            prev_ext,
-            event_dirty,
-            pending_ff,
-            pending_ext,
-            seed_full,
-            last_run,
-            stats_runs,
-            stats_runs_nochange,
-            stats_settles,
-            stats_event_marks,
-            ..
-        } = state;
-        {
-            let mut any = false;
-            for widx in 0..dirty.len() {
-                // Re-read after each run so forward marks into this same
-                // word are picked up within the pass.  `processed` blocks
-                // everything at or below the scan position: entry id equals
-                // schedule position, so a mark that lands BEHIND the scan
-                // (same word or an earlier one) can only come from a
-                // later-scheduled entry — a backward edge, which under the
-                // baseline's fixed pass count is next-pass work.  Running
-                // it late in this pass instead would read future values
-                // and re-clobber later writers' final versions (this was a
-                // real divergence on pe_core: a mid-chain writer of a
-                // versioned word woken by a later reader's output change
-                // overwrote the chain's final version).  The bit stays set
-                // in `dirty` for the next pass, matching baseline pass
-                // semantics.
-                let mut processed = 0u64;
-                loop {
-                    let b = dirty[widx] & !processed;
-                    if b == 0 {
-                        break;
-                    }
-                    let t = b.trailing_zeros() as usize;
-                    dirty[widx] &= !(1u64 << t);
-                    processed |= (1u64 << t) | ((1u64 << t) - 1);
-                    let e = widx * 64 + t;
-                    if e >= plan.n_entries {
-                        break;
-                    }
-                    any = true;
-                    *stats_runs += 1;
-                    if incremental::validate_enabled() {
-                        last_run.resize(plan.n_entries, 0);
-                        last_run[e] = *stats_settles + 1;
-                    }
-
-                    // Software-pipelined prefetch: the next dirty entry in
-                    // this word is known now, so pull its record line in
-                    // while the current entry runs, and its code line in
-                    // before its call.  The per-run fixed cost is
-                    // miss-dominated (record + call target), and the call
-                    // below gives the prefetches time to land.
-                    let next_rec: Option<usize> = {
-                        let b2 = dirty[widx] & !processed;
-                        if b2 != 0 {
-                            let e2 = widx * 64 + b2.trailing_zeros() as usize;
-                            if e2 < plan.n_entries {
-                                let r = blob_off[e2] as usize;
-                                prefetch_read(blob[r..].as_ptr());
-                                Some(r)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    };
-
-                    // Run + bookkeeping off the flat record (see
-                    // `IncrState::build_flat` for the layout): one
-                    // sequential blob stream per entry — call target and
-                    // args, unconditional repair marks, then per-output
-                    // `{src, prev, marks}` with the diff baseline stored
-                    // inline and consumer wakes pre-merged into
-                    // (dirty word, mask) OR pairs.
-                    let off0 = blob_off[e] as usize;
-                    let func_bits = blob[off0];
-                    let counts = blob[off0 + 1];
-                    if func_bits != 0 {
-                        // SAFETY: bits were captured from a live
-                        // `Statement::Compiled` whose artifact (and the
-                        // buffers its args point into) is kept alive by
-                        // `self.comb_statements` for `self`'s lifetime.
-                        unsafe {
-                            let a = arg_sets[(counts >> 56) as usize];
-                            let f: crate::FuncPtr = std::mem::transmute(func_bits as usize);
-                            f(
-                                a.0 as usize as *const u8,
-                                a.1 as usize as *const u8,
-                                a.2 as usize as *mut u8,
-                                a.3 as isize,
-                            );
-                        }
-                    } else {
-                        dispatch_stmt_fast(&self.comb_statements[e], mask_cache);
-                    }
-                    // The next record line should have arrived during the
-                    // call; now warm the next entry's code so its call
-                    // doesn't stall on icache misses (chunks span several
-                    // lines and the settle is icache-fetch bound).  Warm a
-                    // fixed leading window of the chunk body: 512 B covers a
-                    // typical 8-statement chunk.  Dropping it costs 5% and
-                    // halving it 3%; 1 KiB buys nothing back.
-                    if let Some(r) = next_rec {
-                        let nf = blob[r];
-                        if nf != 0 {
-                            let c = nf as usize as *const u8;
-                            let mut o = 0usize;
-                            while o < 512 {
-                                prefetch_read(c.wrapping_add(o));
-                                o += 64;
-                            }
-                        }
-                    }
-                    let n_repair = counts as u32 as usize;
-                    let n_out = (counts >> 32) as usize & 0xff_ffff;
-                    let p = off0 + 2;
-                    // The run may have put an intermediate version on top of
-                    // a later writer's value; re-establish those regardless
-                    // of any value change.
-                    for m in 0..n_repair {
-                        let id = (blob[p + (m >> 1)] >> ((m & 1) * 32)) as u32 as usize;
-                        dirty[id / 64] |= 1u64 << (id % 64);
-                    }
-                    // Diff against this entry's own previous outputs, off
-                    // the three fixed-stride arrays (`build_flat` layout) —
-                    // iterations are address-independent so loads pipeline;
-                    // the mark pool is only touched when a word changed.
-                    // Split once so the loop itself indexes nothing.
-                    let hdr = p + n_repair.div_ceil(2);
-                    let pool0 = hdr + 3 * n_out;
-                    let (dense, pool) = blob[hdr..].split_at_mut(3 * n_out);
-                    let (hdrs, rest) = dense.split_at_mut(n_out);
-                    let (idxs, prevs) = rest.split_at_mut(n_out);
-                    let mut any_out_changed = false;
-                    for ((&h, &h1), pv) in hdrs.iter().zip(idxs.iter()).zip(prevs.iter_mut()) {
-                        let src = h as u32;
-                        let nm = (h >> 32) as usize;
-                        let tail = src & incremental::OUT_SRC_TAIL != 0;
-                        let v = if !tail {
-                            let base = if src & incremental::OUT_SRC_FF == 0 {
-                                comb.as_ptr()
-                            } else {
-                                ff.as_ptr()
-                            };
-                            let off = (src & !incremental::OUT_SRC_FF) as usize;
-                            // SAFETY: plan build verified off + 8 <= buf len.
-                            u64::from_le(unsafe { (base.add(off) as *const u64).read_unaligned() })
-                        } else {
-                            let w = (h1 >> 32) as usize;
-                            if w < plan.comb_words {
-                                read_word(comb, w)
-                            } else {
-                                read_word(ff, w - plan.comb_words)
-                            }
-                        };
-                        if v != *pv {
-                            any_out_changed = true;
-                            // Wake only consumers whose read bytes overlap
-                            // the changed bytes: packed struct fields share
-                            // words, and a neighbour-field change is not a
-                            // trigger for this reader.
-                            let dgm = incremental::byte_nonzero_mask(v ^ *pv);
-                            *pv = v;
-                            let w = (h1 >> 32) as usize;
-                            if w >= plan.comb_words {
-                                // Keep the FF snapshot current so the next
-                                // settle doesn't double-trigger.
-                                prev_ff[w - plan.comb_words] = v;
-                            } else {
-                                // Same for ext words: the settle's own write
-                                // must not re-trigger the next seed diff.
-                                let ep = plan.ext_pos[w] as usize;
-                                if ep != 0 {
-                                    prev_ext[ep - 1] = v;
-                                }
-                            }
-                            // `build_flat` appends the mark pools after the
-                            // dense arrays, so an absolute mark index never
-                            // falls below `pool0`.
-                            debug_assert!(h1 as u32 as usize >= pool0);
-                            let marks = h1 as u32 as usize - pool0;
-                            let gm_base = marks + nm.div_ceil(2);
-                            for m in 0..nm {
-                                let gm = (pool[gm_base + (m >> 3)] >> ((m & 7) * 8)) as u8;
-                                if gm & dgm == 0 {
-                                    continue;
-                                }
-                                let id = (pool[marks + (m >> 1)] >> ((m & 1) * 32)) as u32 as usize;
-                                dirty[id / 64] |= 1u64 << (id % 64);
-                            }
-                            plan.mark_word(
-                                &mut incremental::MarkSink {
-                                    dirty: &mut *dirty,
-                                    event_dirty: &mut *event_dirty,
-                                    pending_ff: &mut *pending_ff,
-                                    pending_ext: &mut *pending_ext,
-                                    seed_full: &mut *seed_full,
-                                    stats_event_marks: &mut *stats_event_marks,
-                                },
-                                incremental::MarkSource::OutDiff,
-                                w,
-                                dgm,
-                            );
-                        }
-                    }
-                    if !any_out_changed {
-                        *stats_runs_nochange += 1;
-                    }
-                }
-            }
-            any
-        }
-    }
-
-    /// One [`incremental::probe_enabled`] sample: count the entries the plan
-    /// would have run this settle.  Runs AFTER the ordinary full settle, off
-    /// the settled state, so it observes exactly the input changes the plan's
-    /// seed diff and out-diff would have propagated between settles.
-    pub(crate) fn incr_probe_tick(
-        &self,
-        probe: &mut incremental::ProbeState,
-        plan: &incremental::IncrPlan,
-    ) {
-        probe.tick(plan, &self.comb_values, &self.ff_values);
-    }
-
     /// Cranelift-only settle path, factored out so the validate mode can
     /// invoke it after AOT-C eval has run and the buffers have been restored.
     pub(crate) fn run_chunked_settle(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
@@ -1152,13 +580,144 @@ impl Ir {
         #[cfg(feature = "profile")]
         let start = std::time::Instant::now();
 
-        for x in &self.comb_statements {
-            dispatch_stmt_fast(x, mask_cache);
+        if self.cone_segments.is_empty() {
+            for x in &self.comb_statements {
+                dispatch_stmt_fast(x, mask_cache);
+            }
+        } else {
+            self.eval_comb_cone_gated(mask_cache);
         }
 
         #[cfg(feature = "profile")]
         {
             profile.eval_comb_full_ns += start.elapsed().as_nanos() as u64;
+        }
+    }
+
+    /// Settle pass with cone-gate segments: at each gated range, one compare
+    /// of its external inputs against the shadow of its last run decides
+    /// whether the whole range can be skipped (its outputs still hold the
+    /// fixpoint of those same inputs).  See `opt::cone_gate`.
+    fn eval_comb_cone_gated(&self, mask_cache: &mut MaskCache) {
+        // `VERYL_CONE_GATE_CHECK=1`: run every would-be-skipped segment
+        // anyway and panic on the first output byte the skip would have got
+        // wrong.  Debug instrument, quadratic in buffer size.
+        static CHECK: OnceLock<bool> = OnceLock::new();
+        let check = *CHECK.get_or_init(|| env::var("VERYL_CONE_GATE_CHECK").as_deref() == Ok("1"));
+        let mut slot = self.cone_gate_state.borrow_mut();
+        let state = slot.get_or_insert_with(|| {
+            crate::ir::opt::cone_gate::ConeGateState::new(self.cone_segments.len())
+        });
+        // `VERYL_CONE_GATE_DIAG=1`: periodic segment-dispatch statistics.
+        static DIAG: OnceLock<bool> = OnceLock::new();
+        let diag = *DIAG.get_or_init(|| env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1"));
+        if diag {
+            let total = state.skipped + state.ran;
+            if total >= state.next_report {
+                state.next_report = total + (1 << 18);
+                eprintln!(
+                    "[cone_gate] segment dispatches: skipped {:.1}% ({} of {})",
+                    100.0 * state.skipped as f64 / total as f64,
+                    state.skipped,
+                    total,
+                );
+                // Every 8th report, the per-segment table.
+                if total >= (1 << 21) && (total >> 18).is_multiple_of(8) {
+                    for (si, &(sk, rn)) in state.per_seg.iter().enumerate() {
+                        if let Some(seg) = self.cone_segments.get(si) {
+                            eprintln!(
+                                "[cone_gate]   seg{si} [{}..{}) sk={sk} rn={rn} ({:.1}%) {}",
+                                seg.lo,
+                                seg.hi,
+                                100.0 * sk as f64 / (sk + rn).max(1) as f64,
+                                seg.cone,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let n = self.comb_statements.len();
+        let mut i = 0usize;
+        let mut si = 0usize;
+        while i < n {
+            if let Some(seg) = self.cone_segments.get(si)
+                && seg.lo == i
+            {
+                if state.check_clean(si, seg, &self.ff_values, &self.comb_values) {
+                    if check {
+                        // Oracle: a real run starts from the PRE-replay
+                        // state (its inputs just compared clean), so run
+                        // from that state and require the result to match
+                        // what skip+replay produced.  Re-running on the
+                        // post-replay buffer instead would feed post-run
+                        // values into read-before-write chains and flag
+                        // sound skips spuriously.  Diff only the FINAL
+                        // state: mid-segment transients (an init store
+                        // whose conditional companion overwrites it later
+                        // in the segment) are not errors.
+                        let pre = self.comb_values.to_vec();
+                        if !seg.replay.is_empty() {
+                            // SAFETY: the comb buffer outlives the settle
+                            // and the spans were bounds-checked at plan
+                            // time.
+                            unsafe {
+                                state.replay(si, seg, self.comb_values.as_ptr() as *mut u8);
+                            }
+                        }
+                        let before = self.comb_values.to_vec();
+                        // SAFETY: same buffer, same length.
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                pre.as_ptr(),
+                                self.comb_values.as_ptr() as *mut u8,
+                                pre.len(),
+                            );
+                        }
+                        for x in &self.comb_statements[i..seg.hi] {
+                            dispatch_stmt_fast(x, mask_cache);
+                        }
+                        for (o, (a, b)) in before.iter().zip(self.comb_values.iter()).enumerate() {
+                            if a != b {
+                                panic!(
+                                    "[cone_gate] WRONG SKIP seg {si} [{}..{}) {}: comb {:#x} \
+                                     {:#04x} -> {:#04x}\n  compare={:x?}\n  compare_pre={:x?}\n  \
+                                     replay={:x?}\n  backedge={:x?}",
+                                    seg.lo,
+                                    seg.hi,
+                                    seg.cone,
+                                    o,
+                                    a,
+                                    b,
+                                    seg.compare,
+                                    seg.compare_pre,
+                                    seg.replay,
+                                    seg.backedge,
+                                );
+                            }
+                        }
+                    } else if !seg.replay.is_empty() {
+                        // SAFETY: the comb buffer outlives the settle and
+                        // the spans were bounds-checked at plan time.
+                        unsafe {
+                            state.replay(si, seg, self.comb_values.as_ptr() as *mut u8);
+                        }
+                    }
+                    i = seg.hi;
+                    si += 1;
+                    continue;
+                }
+                state.before_run(si, seg, &self.comb_values);
+                for x in &self.comb_statements[i..seg.hi] {
+                    dispatch_stmt_fast(x, mask_cache);
+                }
+                state.refresh(si, seg, &self.ff_values, &self.comb_values);
+                i = seg.hi;
+                si += 1;
+                continue;
+            }
+            dispatch_stmt_fast(&self.comb_statements[i], mask_cache);
+            i += 1;
         }
     }
 
@@ -1227,25 +786,6 @@ impl Ir {
         }
         (comb_jit, comb_interp, event_jit, event_interp)
     }
-}
-
-/// Inline-friendly dispatch for the per-cycle hot loop.  Handles the
-/// common JIT cases (Compiled / CompiledBatch) with a direct indirect call
-/// and falls back to `Statement::eval_step` for the interpreter path.
-///
-/// Inlining at the call site removes the (otherwise non-inlined)
-/// `Statement::eval_step` function-call frame plus the 10-arm match
-/// jump it performs.
-/// Best-effort read prefetch of the cache line holding `p` (no-op off x86).
-#[inline(always)]
-pub(crate) fn prefetch_read<T>(p: *const T) {
-    #[cfg(target_arch = "x86_64")]
-    // SAFETY: prefetch never faults, even on invalid addresses.
-    unsafe {
-        core::arch::x86_64::_mm_prefetch(p as *const i8, core::arch::x86_64::_MM_HINT_T0);
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    let _ = p;
 }
 
 #[inline(always)]
@@ -1381,6 +921,12 @@ pub fn build_ir_cached(
 #[derive(Clone, Debug, Default)]
 pub struct Config {
     pub use_4state: bool,
+    /// Polarity the polarity-agnostic `reset` type falls back to, from the
+    /// project's `[build] reset_type`.  Declared types carry their own and
+    /// ignore this.  Default false = active low, as `ResetType` defaults.
+    pub abstract_reset_active_high: bool,
+    /// Whether that fallback is SYNCHRONOUS.  Default false = asynchronous.
+    pub abstract_reset_sync: bool,
     pub use_jit: bool,
     pub dump_cranelift: bool,
     pub dump_asm: bool,
@@ -1424,13 +970,6 @@ pub struct Config {
     pub component_libraries: std::collections::HashMap<String, ComponentLibrary>,
     /// See `Ir::component_file_base`.
     pub component_file_base: Option<PathBuf>,
-    /// File persisting the runtime-infeasible comb keys across processes
-    /// (see `backend::late`): a DUT whose incremental plan was abandoned
-    /// once skips the incremental conv configuration in every later run.
-    /// Keys are structural fingerprints, so a changed DUT (or compiler)
-    /// simply never matches — stale entries are inert.  `None` (unit
-    /// tests, wasm) keeps the verdict process-local.
-    pub incr_feedback_path: Option<PathBuf>,
 }
 
 impl Config {

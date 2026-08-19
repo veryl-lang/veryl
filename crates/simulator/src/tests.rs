@@ -231,8 +231,17 @@ impl DualSimulator {
 
     #[track_caller]
     fn step(&mut self, jit_event: &Event, interp_event: &Event) {
-        self.jit.step(jit_event);
-        self.interp.step(interp_event);
+        // A reset step is a clock edge with the net asserted; these fixtures
+        // have one clock, so call sites keep passing just the reset event.
+        if matches!(jit_event, Event::Reset(_)) {
+            let jit_clock = sole_clock_event(&self.jit);
+            let interp_clock = sole_clock_event(&self.interp);
+            self.jit.step_reset(&jit_clock, jit_event);
+            self.interp.step_reset(&interp_clock, interp_event);
+        } else {
+            self.jit.step(jit_event);
+            self.interp.step(interp_event);
+        }
         self.cycle += 1;
 
         // Ensure comb is settled on both
@@ -276,7 +285,9 @@ impl DualSimulator {
         // compiled-block structure keys a different schedule / different
         // defs disappear), so byte-identical buffers are no longer expected
         // — compare per-variable through each arm's own meta instead.
-        if crate::ir::comb_layout::enabled() || crate::ir::opt::comb_fusion::enabled() {
+        if crate::ir::comb_layout::enabled(self.jit.ir.use_4state)
+            || crate::ir::opt::comb_fusion::enabled(self.jit.ir.use_4state)
+        {
             self.compare_vars_recursive(
                 &self.jit.ir.module_variables,
                 &self.interp.ir.module_variables,
@@ -409,6 +420,21 @@ impl DualSimulator {
     fn get(&mut self, port: &str) -> Option<Value> {
         self.jit.get(port)
     }
+}
+
+/// The clock event of a single-clock fixture.  Lowest VarId wins so a
+/// multi-clock fixture still resolves deterministically.
+fn sole_clock_event(sim: &Simulator) -> Event {
+    sim.ir
+        .event_statements
+        .keys()
+        .filter_map(|x| match x {
+            Event::Clock(id) => Some(*id),
+            _ => None,
+        })
+        .min()
+        .map(Event::Clock)
+        .expect("fixture has no clock event to take the reset step on")
 }
 
 /// Run a test with DualSimulator for both use_4state=false and use_4state=true.

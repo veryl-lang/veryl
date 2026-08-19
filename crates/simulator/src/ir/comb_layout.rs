@@ -69,6 +69,35 @@ impl CombLayoutSchedule {
         }
     }
 
+    /// Translate a byte RANGE through the schedule, piecewise: a unit moves
+    /// as a whole (intra-unit deltas preserved) but adjacent units may land
+    /// apart, so one input range can map to several output ranges.
+    pub fn translate_range(&self, start: isize, end: isize) -> Vec<(isize, isize)> {
+        let mut out: Vec<(isize, isize)> = Vec::new();
+        let mut x = start;
+        while x < end {
+            let i = self.units.partition_point(|&(s, _, _)| s <= x);
+            let (seg_end, nx) = match i.checked_sub(1) {
+                Some(i) => {
+                    let (s, e, n) = self.units[i];
+                    if x < e {
+                        (e.min(end), n + (x - s))
+                    } else {
+                        let next = self.units.get(i + 1).map(|u| u.0).unwrap_or(isize::MAX);
+                        (next.min(end), x)
+                    }
+                }
+                None => {
+                    let next = self.units.first().map(|u| u.0).unwrap_or(isize::MAX);
+                    (next.min(end), x)
+                }
+            };
+            out.push((nx, nx + (seg_end - x)));
+            x = seg_end;
+        }
+        out
+    }
+
     /// Translate a typed offset; FF offsets pass through untouched.
     pub fn translate_off(&self, off: VarOffset) -> VarOffset {
         match off {
@@ -88,10 +117,14 @@ pub struct LayoutInputs {
     pub comb_total: usize,
 }
 
-/// `VERYL_COMB_LAYOUT=1` opt-in.
-pub fn enabled() -> bool {
+/// Default-on for 2-state storage; `VERYL_COMB_LAYOUT=0` opts out.  Off on
+/// wasm, which has no whole-comb backend to profit from the reordering.
+pub fn enabled(use_4state: bool) -> bool {
+    if cfg!(target_family = "wasm") {
+        return false;
+    }
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("VERYL_COMB_LAYOUT").as_deref() == Ok("1"))
+    !use_4state && *ON.get_or_init(|| std::env::var("VERYL_COMB_LAYOUT").as_deref() != Ok("0"))
 }
 
 fn diag() -> bool {

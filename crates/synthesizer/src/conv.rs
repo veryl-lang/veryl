@@ -175,6 +175,10 @@ pub(crate) struct VarSlot {
     pub scalar_width: usize,
     /// Array dimensions. Empty shape = scalar.
     pub shape: Shape,
+    /// A reference's `Comptime::type` has the selected width dimensions
+    /// drained, so only the declared type can resolve a packed multi-dim
+    /// select.
+    pub r#type: air::Type,
     pub name: StrId,
     pub kind: VarKind,
     pub driver: VarDriverKind,
@@ -424,6 +428,7 @@ impl ConvContext {
                     width,
                     scalar_width,
                     shape,
+                    r#type: v.r#type.clone(),
                     name,
                     kind: v.kind,
                     driver: VarDriverKind::None,
@@ -842,7 +847,23 @@ impl ConvContext {
                     port_path
                 )));
             }
-            let expr_nets = synthesize_expr(self, &input.expr, current, child_nets.len())?;
+            // Element-wise wiring: one expression per port element.
+            let expr_nets = if let Some(expr) = input.single() {
+                synthesize_expr(self, expr, current, child_nets.len())?
+            } else {
+                if input.exprs.is_empty() || child_nets.len() % input.exprs.len() != 0 {
+                    return Err(SynthesizerError::internal(format!(
+                        "port {:?} element count does not divide its net count",
+                        port_path
+                    )));
+                }
+                let per_element = child_nets.len() / input.exprs.len();
+                let mut nets = Vec::with_capacity(child_nets.len());
+                for expr in &input.exprs {
+                    nets.extend(synthesize_expr(self, expr, current, per_element)?);
+                }
+                nets
+            };
             for (cn, en) in child_nets.iter().zip(expr_nets.iter()) {
                 net_map[*cn as usize] = *en;
             }
@@ -957,7 +978,15 @@ impl ConvContext {
             let parent_nets: Vec<NetId> = child_nets.iter().map(|n| net_map[*n as usize]).collect();
 
             // Multi-dst (concat-LHS shape `y: {a, b}`) slices MSB-first so
-            // dst[0] gets the high bits.
+            // dst[0] gets the high bits. An unpacked-array slice instead gives
+            // one dst per element, so dst[0] takes the LOW nets.
+            let port_elements = child_module
+                .variables
+                .get(&vid)
+                .and_then(|v| v.r#type.total_array())
+                .unwrap_or(1);
+            let element_wise = output.dst.len() > 1 && port_elements == output.dst.len();
+
             let mut widths: Vec<usize> = Vec::with_capacity(output.dst.len());
             for dst in &output.dst {
                 widths.push(statement::dst_slice_width(self, dst)?);
@@ -971,9 +1000,15 @@ impl ConvContext {
                 )));
             }
             let mut lo = 0;
-            for (dst, w) in output.dst.iter().zip(widths.iter()).rev() {
+            let order: Vec<usize> = if element_wise {
+                (0..output.dst.len()).collect()
+            } else {
+                (0..output.dst.len()).rev().collect()
+            };
+            for i in order {
+                let w = widths[i];
                 let slice = parent_nets[lo..lo + w].to_vec();
-                statement::write_to_dst(self, dst, &slice, current)?;
+                statement::write_to_dst(self, &output.dst[i], &slice, current)?;
                 lo += w;
             }
         }

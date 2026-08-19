@@ -1,4 +1,5 @@
 use crate::HashMap;
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
 use crate::ir::variable::{
     VarOffset, is_wide_ptr, native_bytes as calc_native_bytes, read_native_value, value_size,
@@ -7,6 +8,7 @@ use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
 use num_bigint::BigUint;
 use num_traits::One;
+use std::cmp::Ordering;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::{MaskCache, ValueU64};
 use veryl_parser::resource_table::StrId;
@@ -54,6 +56,8 @@ pub enum Expression {
     },
     Concatenation {
         elements: Vec<(Box<Expression>, usize, usize)>, // (expr, repeat, elem_width)
+        /// Result signedness, so a `$signed({..})` sign-extends at a wider store.
+        signed: bool,
     },
     Ternary {
         cond: Box<Expression>,
@@ -142,7 +146,7 @@ impl Expression {
                 let y = y.eval(mask_cache);
                 op.eval_value_binary(&x, &y, expr_context.width, expr_context.signed, mask_cache)
             }
-            Expression::Concatenation { elements } => {
+            Expression::Concatenation { elements, signed } => {
                 let mut ret = Value::new(0, 0, false);
                 for (expr, repeat, _elem_width) in elements {
                     let val = expr.eval(mask_cache);
@@ -150,6 +154,7 @@ impl Expression {
                         ret = ret.concat(&val);
                     }
                 }
+                ret.set_signed(*signed);
                 ret
             }
             Expression::Ternary {
@@ -259,7 +264,7 @@ impl Expression {
                 x.gather_variable(inputs, outputs);
                 y.gather_variable(inputs, outputs);
             }
-            Expression::Concatenation { elements } => {
+            Expression::Concatenation { elements, .. } => {
                 for (expr, _, _) in elements {
                     expr.gather_variable(inputs, outputs);
                 }
@@ -369,9 +374,8 @@ impl ProtoExpression {
     /// element, not the post-select width).  The span travels with the read
     /// because meta-less storage (inlined-function and version-split
     /// temps) cannot be sized by a variable-meta lookup later — an 8-byte
-    /// fallback there silently under-covers a wide temp's readers in the
-    /// incremental plan.  Dynamic array reads expand to every element
-    /// (full coverage), range-unknown.
+    /// fallback there silently under-covers a wide temp.  Dynamic array
+    /// reads expand to every element (full coverage), range-unknown.
     pub fn gather_reads_expanded_ranged(&self, out: &mut Vec<RangedRead>) {
         match self {
             ProtoExpression::HierVariable(_) => {
@@ -426,16 +430,12 @@ impl ProtoExpression {
                 if let Some(dyn_sel) = dynamic_select {
                     dyn_sel.index_expr.gather_reads_expanded_ranged(out);
                 }
-                // A whole-array read above the plan's per-entry expansion cap
-                // collapses to one whole-span dep: the plan downgrades any
-                // entry carrying such a span to always_run before per-element
-                // precision is ever consumed, while the expansion itself is
-                // GBs of resident deps on an SoC (a multi-M-element DRAM read
-                // is captured per chunk AND per sub-group).  The union only
-                // widens (stride padding gaps), never narrows, so coverage
-                // stays safe.
+                // Past the cap, per-element precision buys nothing while
+                // the expansion costs GBs of resident entries on an SoC (a
+                // multi-M-element DRAM read).  The whole-span union only
+                // widens (stride padding gaps), so coverage stays safe.
                 let span = (*stride as usize).saturating_mul(*num_elements);
-                if *stride > 0 && span > crate::ir::incremental::read_expand_cap_bytes() {
+                if *stride > 0 && span > READ_EXPAND_CAP_BYTES {
                     out.push((*base_offset, None, span));
                 } else {
                     for i in 0..*num_elements {
@@ -522,7 +522,16 @@ impl ProtoExpression {
     /// (`dup_assign_dce`) so a runtime-indexed read keeps every element it
     /// could touch alive. Not used by `analyze_dependency` (which keeps the
     /// O(N²)-avoiding base+last encoding).
-    pub fn gather_variable_offsets_expanded(&self, inputs: &mut Vec<VarOffset>) {
+    ///
+    /// `fold` names the arrays too large to expand element by element; both
+    /// their dynamic accesses and static element reads come out as the array
+    /// base instead, so the caller's offset map still sees them alias.  See
+    /// [`BigArrayFold`].
+    pub fn gather_variable_offsets_expanded(
+        &self,
+        fold: &BigArrayFold,
+        inputs: &mut Vec<VarOffset>,
+    ) {
         match self {
             ProtoExpression::HierVariable(_) => {
                 unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
@@ -532,20 +541,22 @@ impl ProtoExpression {
                 dynamic_select,
                 ..
             } => {
-                inputs.push(*var_offset);
+                inputs.push(fold.canon(*var_offset));
                 if let Some(dyn_sel) = dynamic_select {
-                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                    dyn_sel
+                        .index_expr
+                        .gather_variable_offsets_expanded(fold, inputs);
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets_expanded(inputs),
+            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets_expanded(fold, inputs),
             ProtoExpression::Binary { x, y, .. } => {
-                x.gather_variable_offsets_expanded(inputs);
-                y.gather_variable_offsets_expanded(inputs);
+                x.gather_variable_offsets_expanded(fold, inputs);
+                y.gather_variable_offsets_expanded(fold, inputs);
             }
             ProtoExpression::Concatenation { elements, .. } => {
                 for (expr, _, _) in elements {
-                    expr.gather_variable_offsets_expanded(inputs);
+                    expr.gather_variable_offsets_expanded(fold, inputs);
                 }
             }
             ProtoExpression::Ternary {
@@ -554,9 +565,9 @@ impl ProtoExpression {
                 false_expr,
                 ..
             } => {
-                cond.gather_variable_offsets_expanded(inputs);
-                true_expr.gather_variable_offsets_expanded(inputs);
-                false_expr.gather_variable_offsets_expanded(inputs);
+                cond.gather_variable_offsets_expanded(fold, inputs);
+                true_expr.gather_variable_offsets_expanded(fold, inputs);
+                false_expr.gather_variable_offsets_expanded(fold, inputs);
             }
             ProtoExpression::DynamicVariable {
                 base_offset,
@@ -566,9 +577,18 @@ impl ProtoExpression {
                 dynamic_select,
                 ..
             } => {
-                index_expr.gather_variable_offsets_expanded(inputs);
+                index_expr.gather_variable_offsets_expanded(fold, inputs);
                 if let Some(dyn_sel) = dynamic_select {
-                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                    dyn_sel
+                        .index_expr
+                        .gather_variable_offsets_expanded(fold, inputs);
+                }
+                // A folded array names its base once; every static element
+                // access canonicalises to that same offset above, so the
+                // aliasing the expansion existed to expose survives.
+                if fold.covers(*base_offset) {
+                    inputs.push(*base_offset);
+                    return;
                 }
                 for i in 0..*num_elements {
                     let off = VarOffset::new(
@@ -577,6 +597,81 @@ impl ProtoExpression {
                     );
                     inputs.push(off);
                 }
+            }
+        }
+    }
+
+    /// True when this expression reads `off`, a dynamic array access whose
+    /// span reaches it included.
+    ///
+    /// Same answer as scanning `gather_variable_offsets_expanded`, but it asks
+    /// each dynamic read whether its span contains `off` rather than listing
+    /// every element the read can reach, so the work is proportional to the
+    /// expression instead of to the array.
+    pub fn reads_offset(&self, off: VarOffset) -> bool {
+        let mut ranges: Vec<(bool, isize, isize, usize)> = Vec::new();
+        self.gather_dynamic_read_ranges(&mut ranges);
+        let raw = off.raw();
+        let in_span = ranges.iter().any(|&(is_ff, base, stride, num_elements)| {
+            is_ff == off.is_ff()
+                && stride > 0
+                && raw >= base
+                && raw < base.saturating_add(stride.saturating_mul(num_elements as isize))
+                && (raw - base) % stride == 0
+        });
+        if in_span {
+            return true;
+        }
+        // Everything else — plain reads, index sub-expressions, and the
+        // base/last summary of an array the ranges above already cover.
+        let mut offs: Vec<VarOffset> = Vec::new();
+        self.gather_variable_offsets(&mut offs);
+        offs.contains(&off)
+    }
+
+    /// Record every dynamically-indexed array this expression reaches, so
+    /// [`BigArrayFold`] can decide which are large enough to fold.
+    pub fn collect_big_arrays(&self, fold: &mut BigArrayFold) {
+        match self {
+            ProtoExpression::HierVariable(_) | ProtoExpression::Value { .. } => (),
+            ProtoExpression::Variable { dynamic_select, .. } => {
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.collect_big_arrays(fold);
+                }
+            }
+            ProtoExpression::Unary { x, .. } => x.collect_big_arrays(fold),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.collect_big_arrays(fold);
+                y.collect_big_arrays(fold);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.collect_big_arrays(fold);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.collect_big_arrays(fold);
+                true_expr.collect_big_arrays(fold);
+                false_expr.collect_big_arrays(fold);
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                stride,
+                index_expr,
+                num_elements,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.collect_big_arrays(fold);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.collect_big_arrays(fold);
+                }
+                fold.record(*base_offset, *stride, *num_elements);
             }
         }
     }
@@ -666,6 +761,9 @@ pub struct DynamicBitSelect {
 /// One read gathered by `gather_reads_expanded_ranged`:
 /// `(offset, static bit range when known, native byte span of the read)`.
 pub type RangedRead = (VarOffset, Option<(usize, usize)>, usize);
+
+/// Read-expansion cap for `gather_reads_expanded_ranged`.
+const READ_EXPAND_CAP_BYTES: usize = (1 << 20) * 8;
 
 #[derive(Clone, Debug, Hash)]
 pub enum ProtoExpression {
@@ -1211,13 +1309,12 @@ impl ProtoExpression {
         }
     }
 
-    /// SystemVerilog evaluates an assignment RHS at the destination width, so
-    /// a bare narrower signed RHS sign-extends at the store; operators already
-    /// extend to the context width, so only leaf reads/literals reach the store
-    /// at natural width. Bit/part-selects are unsigned per the LRM, so selected
-    /// leaves are exempt. All backends must key their store paths on this identically.
-    pub fn store_sign_extend_from(&self, dst_width: usize) -> Option<usize> {
-        let (width, signed) = match self {
+    /// The leaf a store sees, as `(width, signed)`.  Operators already extend
+    /// to the context width, so only leaf reads/literals reach a store at
+    /// their natural width; bit/part-selects are unsigned per the LRM, so
+    /// selected leaves are exempt.
+    fn store_leaf(&self) -> Option<(usize, bool)> {
+        match self {
             ProtoExpression::Variable {
                 width,
                 select: None,
@@ -1231,11 +1328,32 @@ impl ProtoExpression {
                 dynamic_select: None,
                 expr_context,
                 ..
-            } => (*width, expr_context.signed),
-            ProtoExpression::Value { value, width, .. } => (*width, value.signed()),
-            _ => return None,
-        };
+            } => Some((*width, expr_context.signed)),
+            ProtoExpression::Value { value, width, .. } => Some((*width, value.signed())),
+            // A concatenation is unsigned per the LRM, but `$signed({..})` marks
+            // it signed and it reaches the store at its natural width too.
+            ProtoExpression::Concatenation {
+                width,
+                expr_context,
+                ..
+            } => Some((*width, expr_context.signed)),
+            _ => None,
+        }
+    }
+
+    /// SystemVerilog evaluates an assignment RHS at the destination width, so
+    /// a bare narrower signed RHS sign-extends at the store.  All backends
+    /// must key their store paths on this identically.
+    pub fn store_sign_extend_from(&self, dst_width: usize) -> Option<usize> {
+        let (width, signed) = self.store_leaf()?;
         (signed && width > 0 && width < dst_width).then_some(width)
+    }
+
+    /// Whether the store's sign extension applies at any wider destination.
+    /// Such an expression is bound to the width it was stored at: moved to a
+    /// wider one it would be re-signed.
+    pub fn is_signed_store_leaf(&self) -> bool {
+        matches!(self.store_leaf(), Some((width, true)) if width > 0)
     }
 
     /// # Safety
@@ -1383,7 +1501,11 @@ impl ProtoExpression {
                         expr_context: *expr_context,
                     }
                 }
-                ProtoExpression::Concatenation { elements, .. } => {
+                ProtoExpression::Concatenation {
+                    elements,
+                    expr_context,
+                    ..
+                } => {
                     let elements = elements
                         .iter()
                         .map(|(expr, repeat, elem_width)| {
@@ -1397,7 +1519,10 @@ impl ProtoExpression {
                             (Box::new(expr), *repeat, *elem_width)
                         })
                         .collect();
-                    Expression::Concatenation { elements }
+                    Expression::Concatenation {
+                        elements,
+                        signed: expr_context.signed,
+                    }
                 }
                 ProtoExpression::Ternary {
                     cond,
@@ -1510,6 +1635,25 @@ impl ProtoExpression {
     }
 }
 
+/// Non-`Value` expressions already carry the width the analyzer resolved.
+fn fit_literal_width(expr: &mut ProtoExpression, width: usize) {
+    let ProtoExpression::Value {
+        value,
+        width: value_width,
+        expr_context,
+    } = expr
+    else {
+        return;
+    };
+    match value.width().cmp(&width) {
+        Ordering::Less => *value = value.expand(width, value.signed()).into_owned(),
+        Ordering::Greater => value.trunc(width),
+        Ordering::Equal => {}
+    }
+    *value_width = width;
+    expr_context.width = width;
+}
+
 /// Build a ProtoExpression computing the linear index from a multi-dimensional VarIndex.
 /// Equivalent to calc_index_expr but produces ProtoExpression directly with correct widths.
 pub fn build_linear_index_expr(
@@ -1531,13 +1675,12 @@ pub fn build_linear_index_expr(
         });
     }
 
-    assert_eq!(
-        index.0.len(),
-        array.dims(),
-        "index dimension mismatch: {} != {}",
-        index.0.len(),
-        array.dims()
-    );
+    // A partial index (`s[i]` against `logic<8> [2, 3]`) leaves a sub-array,
+    // which has no single element to offset to.
+    if index.0.len() != array.dims() {
+        let token = index.0.first().map(|x| x.token_range()).unwrap_or_default();
+        return Err(SimulatorError::unsupported_description(&token));
+    }
 
     let mut ret: Option<ProtoExpression> = None;
     let mut base: usize = 1;
@@ -1795,6 +1938,98 @@ pub fn build_dynamic_bit_select(
     })
 }
 
+/// Inlines a call into `context.pending_statements` and returns the offset of
+/// every element of its return variable (one entry unless the return type is
+/// an array).
+pub(crate) fn inline_function_call(
+    context: &mut Context,
+    call: &air::FunctionCall,
+) -> Result<Vec<VarOffset>, SimulatorError> {
+    let mut stmts: Vec<ProtoStatement> = Conv::conv(context, call)?;
+
+    // Locate the function body and its return variable.
+    let func = context
+        .scope()
+        .analyzer_context
+        .functions
+        .get(&call.id)
+        .unwrap()
+        .clone();
+    let body = if let Some(ref idx) = call.index {
+        func.get_function(idx).unwrap()
+    } else {
+        func.get_function(&[]).unwrap()
+    };
+    let ret_id = body.ret.unwrap();
+
+    let mut ret_offsets: Vec<VarOffset> = {
+        let scope = context.scope();
+        let meta = scope.variable_meta.get(&ret_id).unwrap();
+        meta.elements.iter().map(|e| e.current).collect()
+    };
+
+    // Give this call site its own copy of the function body's comb scratch.
+    // Without it, two inlines in independent comb blocks share the same
+    // offsets and the compiled backends collapse them, returning one call's
+    // result for both.
+    //
+    // Relocate only function-affiliated WRITTEN variables: a read-only var
+    // keeps its value in its initial-value slot (e.g. an unrolled loop's
+    // per-iteration index constants), which fresh zero-init storage would
+    // drop. Whole variables move together so array stride survives dynamic
+    // indexing.
+    let mut written = Vec::new();
+    for s in &stmts {
+        s.collect_written_offsets(&mut written);
+    }
+
+    let mut relocate_vids: Vec<air::VarId> = Vec::new();
+    {
+        let mut seen = crate::HashSet::default();
+        for off in &written {
+            if off.is_ff() {
+                continue;
+            }
+            if let Some(vid) = context.scope().func_offset_varid(off.raw())
+                && seen.insert(vid)
+            {
+                relocate_vids.push(vid);
+            }
+        }
+    }
+
+    if !relocate_vids.is_empty() {
+        let use_4state = context.config.use_4state;
+        let mut map: HashMap<VarOffset, VarOffset> = HashMap::default();
+        for vid in relocate_vids {
+            let elems: Vec<(VarOffset, usize)> = {
+                let scope = context.scope();
+                let meta = scope.variable_meta.get(&vid).unwrap();
+                meta.elements
+                    .iter()
+                    .map(|e| (e.current, value_size(e.native_bytes, use_4state)))
+                    .collect()
+            };
+            for (old, vs) in elems {
+                let new_off = context.comb_total_bytes as isize;
+                context.comb_total_bytes += vs;
+                map.insert(old, VarOffset::Comb(new_off));
+            }
+        }
+        for s in &mut stmts {
+            s.remap_offsets(&map);
+        }
+        for off in &mut ret_offsets {
+            if let Some(&n) = map.get(off) {
+                *off = n;
+            }
+        }
+    }
+
+    context.pending_statements.extend(stmts);
+    Ok(ret_offsets)
+}
+
 impl Conv<&air::Expression> for ProtoExpression {
     fn conv(context: &mut Context, src: &air::Expression) -> Result<Self, SimulatorError> {
         match src {
@@ -1929,92 +2164,13 @@ impl Conv<&air::Expression> for ProtoExpression {
                     })
                 }
                 air::Factor::FunctionCall(call) => {
-                    let mut stmts: Vec<ProtoStatement> = Conv::conv(context, call)?;
-
-                    // Locate the function body and its return variable.
-                    let func = context
-                        .scope()
-                        .analyzer_context
-                        .functions
-                        .get(&call.id)
-                        .unwrap()
-                        .clone();
-                    let body = if let Some(ref idx) = call.index {
-                        func.get_function(idx).unwrap()
-                    } else {
-                        func.get_function(&[]).unwrap()
-                    };
-                    let ret_id = body.ret.unwrap();
-
-                    let mut ret_offset = {
-                        let scope = context.scope();
-                        let meta = scope.variable_meta.get(&ret_id).unwrap();
-                        meta.elements[0].current
-                    };
+                    let ret_offsets = inline_function_call(context, call)?;
                     let width = call.comptime.r#type.total_width().unwrap();
                     let var_full_width = width;
                     let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
 
-                    // Give this call site its own copy of the function body's
-                    // comb scratch. Without it, two inlines in independent comb
-                    // blocks share the same offsets and the compiled backends
-                    // collapse them, returning one call's result for both.
-                    //
-                    // Relocate only function-affiliated WRITTEN variables: a
-                    // read-only var keeps its value in its initial-value slot
-                    // (e.g. an unrolled loop's per-iteration index constants),
-                    // which fresh zero-init storage would drop. Whole variables
-                    // move together so array stride survives dynamic indexing.
-                    let mut written = Vec::new();
-                    for s in &stmts {
-                        s.collect_written_offsets(&mut written);
-                    }
-
-                    let mut relocate_vids: Vec<air::VarId> = Vec::new();
-                    {
-                        let mut seen = crate::HashSet::default();
-                        for off in &written {
-                            if off.is_ff() {
-                                continue;
-                            }
-                            if let Some(vid) = context.scope().func_offset_varid(off.raw())
-                                && seen.insert(vid)
-                            {
-                                relocate_vids.push(vid);
-                            }
-                        }
-                    }
-
-                    if !relocate_vids.is_empty() {
-                        let use_4state = context.config.use_4state;
-                        let mut map: HashMap<VarOffset, VarOffset> = HashMap::default();
-                        for vid in relocate_vids {
-                            let elems: Vec<(VarOffset, usize)> = {
-                                let scope = context.scope();
-                                let meta = scope.variable_meta.get(&vid).unwrap();
-                                meta.elements
-                                    .iter()
-                                    .map(|e| (e.current, value_size(e.native_bytes, use_4state)))
-                                    .collect()
-                            };
-                            for (old, vs) in elems {
-                                let new_off = context.comb_total_bytes as isize;
-                                context.comb_total_bytes += vs;
-                                map.insert(old, VarOffset::Comb(new_off));
-                            }
-                        }
-                        for s in &mut stmts {
-                            s.remap_offsets(&map);
-                        }
-                        if let Some(&n) = map.get(&ret_offset) {
-                            ret_offset = n;
-                        }
-                    }
-
-                    context.pending_statements.extend(stmts);
-
                     Ok(ProtoExpression::Variable {
-                        var_offset: ret_offset,
+                        var_offset: ret_offsets[0],
                         select: None,
                         dynamic_select: None,
                         width,
@@ -2381,8 +2537,12 @@ impl Conv<&air::Expression> for ProtoExpression {
 
                 let mut elements = Vec::new();
                 for ((_name, expr), member_type) in members.iter().zip(struct_members.iter()) {
-                    let converted: ProtoExpression = Conv::conv(context, expr)?;
+                    let mut converted: ProtoExpression = Conv::conv(context, expr)?;
                     let elem_width = member_type.width().unwrap();
+                    // An unsized literal is 32 bits, and the concatenation
+                    // joins elements at their value width, not `elem_width`.
+                    fit_literal_width(&mut converted, elem_width);
+                    debug_assert_eq!(converted.width(), elem_width);
                     elements.push((Box::new(converted), 1, elem_width));
                 }
 

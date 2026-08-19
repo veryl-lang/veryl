@@ -613,6 +613,21 @@ impl ProtoExpression {
                     return Some((payload, mask_xz));
                 }
 
+                // `air::Factor::Value` sources `width` from the expression's
+                // type and `value` from the comptime evaluation, which carries
+                // the surrounding context's width.  Callers size operands from
+                // `width` alone, so an over-wide BigUint would reach an I64
+                // slot as an I128 constant.
+                let narrowed;
+                let value = if matches!(value, Value::BigUint(_)) && value.width() > *width {
+                    let mut v = value.clone();
+                    v.trunc(*width);
+                    narrowed = v;
+                    &narrowed
+                } else {
+                    value
+                };
+
                 // If expression width is >128, always return a wide pointer
                 // to ensure consistency with is_wide_ptr() checks in callers.
                 if is_wide_ptr(*width) {
