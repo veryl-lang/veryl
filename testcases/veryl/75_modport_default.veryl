@@ -1,13 +1,13 @@
 interface Interface75 {
-    var a: logic;
-    var b: logic;
-    var c: logic;
-    var d: logic;
-
     #[ifdef(TRACE)]
     var f: logic;
     #[else]
     var g: logic;
+
+    var a: logic;
+    var b: logic;
+    var c: logic;
+    var d: logic;
 
     function Func75 () -> logic {
         var e: logic;

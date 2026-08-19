@@ -1,14 +1,14 @@
 interface veryl_testcase_Interface75;
-    logic a;
-    logic b;
-    logic c;
-    logic d;
-
     `ifdef TRACE
     logic f;
     `else
     logic g;
     `endif
+
+    logic a;
+    logic b;
+    logic c;
+    logic d;
 
     function automatic logic Func75() ;
         logic e;

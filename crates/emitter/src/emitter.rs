@@ -2786,12 +2786,8 @@ impl Emitter {
                     })
                     .collect();
                 // Each member carries its comma inside its own guard so the comma
-                // vanishes with it. Only the last member's absent comma can't, so
-                // guarded members go first and an unconditional one ends the list.
-                // Modport item order is not significant.
-                let (guarded, unguarded): (Vec<_>, Vec<_>) =
-                    members.into_iter().partition(|x| !x.3.is_empty());
-                let members: Vec<_> = guarded.into_iter().chain(unguarded).collect();
+                // vanishes with it. The last member has no comma to vanish, so a
+                // guarded one there is rejected in `link_modports` instead.
                 let last = members.len().saturating_sub(1);
 
                 for (n, (_, symbol, direction, defines)) in members.iter().enumerate() {

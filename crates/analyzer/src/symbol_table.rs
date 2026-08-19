@@ -4,6 +4,7 @@ mod function;
 mod msb;
 
 use crate::analyzer_error::DuplicatedIdentifierKind;
+use crate::attribute_table;
 use crate::namespace::{DefineContext, Namespace};
 use crate::scope;
 use crate::sv_system_function;
@@ -28,6 +29,7 @@ use std::fmt;
 use std::rc::Rc;
 use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::token_collector::TokenCollector;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{Expression, ExpressionIdentifier, HierarchicalIdentifier};
 use veryl_parser::veryl_token::{Token, TokenSource};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -2052,7 +2054,7 @@ impl SymbolTable {
         for modport in &modports {
             self.link_modport_members(*modport, &members);
         }
-        self.link_modports(if_symbol, &members, &modports);
+        self.link_modports(if_symbol, &members, &modports, errors);
     }
 
     fn collect_interface_members(
@@ -2230,18 +2232,38 @@ impl SymbolTable {
         if_symbol: &Symbol,
         members: &HashMap<StrId, SymbolId>,
         modports: &Vec<SymbolId>,
+        errors: &mut Vec<AnalyzerError>,
     ) {
         for mp_id in modports {
             if let Some(mut mp_symbol) = self.get(*mp_id)
                 && let SymbolKind::Modport(mp) = &mp_symbol.kind
             {
                 let mut default_members = self.collect_modport_default_members(&mp_symbol, members);
-                let mut members = mp.members.clone();
-                members.append(&mut default_members);
+                let mut mp_members = mp.members.clone();
+                mp_members.append(&mut default_members);
+
+                // The last member has no trailing comma to drop with it, so a
+                // guarded one there would strand the previous member's comma.
+                // Same rule `last_item_with_define` applies to a written list.
+                if let Some(last) = mp_members.last()
+                    && let Some(last_symbol) = self.get(*last)
+                    && matches!(last_symbol.token.source, TokenSource::Generated(_))
+                    && let Some(source) = match last_symbol.kind {
+                        SymbolKind::ModportVariableMember(ref x) => self.get(x.variable),
+                        SymbolKind::ModportFunctionMember(ref x) => self.get(x.function),
+                        _ => None,
+                    }
+                    && attribute_table::get(&source.token)
+                        .iter()
+                        .any(|x| x.is_ifdef())
+                {
+                    let token: TokenRange = (&source.token).into();
+                    errors.push(AnalyzerError::last_item_with_define(&token));
+                }
 
                 mp_symbol.kind = SymbolKind::Modport(ModportProperty {
                     interface: if_symbol.id,
-                    members,
+                    members: mp_members,
                     default: mp.default.clone(),
                 });
                 self.update(mp_symbol);
