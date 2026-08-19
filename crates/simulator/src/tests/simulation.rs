@@ -21996,3 +21996,54 @@ fn wide_concat_element_placement() {
         );
     }
 }
+
+#[test]
+fn i128_concat_element_placement() {
+    // A 65..=128-bit concatenation assembles in two I64 halves, so it needs the
+    // same guard as the wider one: one element per bit, and elements straddling
+    // the 64-bit boundary.
+    const W: usize = 100;
+    let bits: Vec<String> = (0..W).map(|i| format!("a[{i}]")).collect();
+    let code = format!(
+        r#"
+    module Top (
+        a:        input  logic<100>,
+        reversed: output logic<100>,
+        straddle: output logic<100>,
+    ) {{
+        always_comb {{
+            reversed = {{{}}};
+            straddle = {{a[39:0], a[79:40], a[99:80]}};
+        }}
+    }}
+    "#,
+        bits.join(", ")
+    );
+
+    let a_val: u128 = 0x0dec_0ffe_ebad_c0de_1234_5678_9abcu128 & ((1u128 << W) - 1);
+    let mut rev = 0u128;
+    for i in 0..W {
+        if (a_val >> i) & 1 == 1 {
+            rev |= 1u128 << (W - 1 - i);
+        }
+    }
+    let field = |lo: usize, len: usize| (a_val >> lo) & ((1u128 << len) - 1);
+    let straddle = (field(0, 40) << 60) | (field(40, 40) << 20) | field(80, 20);
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::from_u128(a_val, 0, W, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("reversed").unwrap(),
+            Value::from_u128(rev, 0, W, false),
+            "reversed config={config:?}"
+        );
+        assert_eq!(
+            sim.get("straddle").unwrap(),
+            Value::from_u128(straddle, 0, W, false),
+            "straddle config={config:?}"
+        );
+    }
+}

@@ -1924,6 +1924,17 @@ impl ProtoExpression {
                     return self.build_binary_wide_concat(context, builder);
                 }
 
+                // 65..=128 bits accumulate in an I128, whose shift lowers to a
+                // variable-amount sequence (two shifts, a complement shift and
+                // two `cmov` fixups) even when the amount is the constant
+                // element width.  Placing the elements into the two halves
+                // costs one shift and one OR each.
+                if *width > 64
+                    && let Some(built) = self.build_binary_i128_concat_into(context, builder)
+                {
+                    return Some(built);
+                }
+
                 let wide = *width > 64;
                 let z = zero_for_width(context, builder, *width);
                 let mut acc_payload = z;
@@ -3061,6 +3072,81 @@ impl ProtoExpression {
             }
             _ => None,
         }
+    }
+
+    /// Assemble a 65..=128-bit concatenation into its two I64 halves.
+    ///
+    /// The accumulate form shifts an I128 by each element's width, and an I128
+    /// shift lowers to a variable-amount sequence — two shifts, a complement
+    /// shift and two `cmov` fixups, with the amount staged through the stack —
+    /// even when that amount is a constant, so a bit-assembled vector pays
+    /// about fifteen instructions per element.  Positions are compile-time
+    /// constants, so place each element into the half it lands in instead.
+    ///
+    /// Declines on an element wider than 64 bits: that one is an I128 itself.
+    fn build_binary_i128_concat_into(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        let ProtoExpression::Concatenation {
+            elements, width, ..
+        } = self
+        else {
+            unreachable!()
+        };
+
+        let mut total = 0usize;
+        for (expr, repeat, elem_width) in elements {
+            if *elem_width > 64 || expr.width() > 64 || returns_wide_pointer(expr) {
+                return None;
+            }
+            total += elem_width * repeat;
+        }
+        if total != *width {
+            return None;
+        }
+
+        let mut halves: Vec<Option<CraneliftValue>> = vec![None; 2];
+        let mut halves_xz: Vec<Option<CraneliftValue>> = vec![None; 2];
+        let mut pos = *width;
+        for (expr, repeat, elem_width) in elements {
+            let repeat = *repeat;
+            let ew = *elem_width;
+            if repeat == 0 || ew == 0 {
+                continue;
+            }
+            let elem_is_zero = matches!(
+                expr.as_ref(),
+                ProtoExpression::Value { value, .. }
+                    if !value.is_xz() && value.payload().iter_u64_digits().next().is_none()
+            );
+            if elem_is_zero {
+                pos -= ew * repeat;
+                continue;
+            }
+            let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
+            let elem_payload = concat_element_word(builder, elem_payload);
+            let elem_mask_xz = elem_mask_xz.map(|m| concat_element_word(builder, m));
+            for _ in 0..repeat {
+                pos -= ew;
+                place_concat_element(builder, &mut halves, elem_payload, pos, ew);
+                if let Some(m) = elem_mask_xz {
+                    place_concat_element(builder, &mut halves_xz, m, pos, ew);
+                }
+            }
+        }
+
+        let zero = builder.ins().iconst(I64, 0);
+        let lo = halves[0].unwrap_or(zero);
+        let hi = halves[1].unwrap_or(zero);
+        let payload = builder.ins().iconcat(lo, hi);
+        let mask_xz = context.use_4state.then(|| {
+            let lo = halves_xz[0].unwrap_or(zero);
+            let hi = halves_xz[1].unwrap_or(zero);
+            builder.ins().iconcat(lo, hi)
+        });
+        Some((payload, mask_xz))
     }
 
     /// Assemble a wide concatenation straight into its destination words.
