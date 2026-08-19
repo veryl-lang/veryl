@@ -1,3 +1,4 @@
+pub(crate) mod big_array;
 pub(crate) mod comb_layout;
 pub(crate) mod comb_pipeline_cache;
 pub(crate) mod context;
@@ -17,6 +18,7 @@ mod statement;
 pub(crate) mod variable;
 pub(crate) mod write_log;
 
+pub use big_array::BigArrayFold;
 pub use context::{Context, Conv};
 pub use declaration::ProtoDeclaration;
 pub use derived_clock::{DerivedClock, DerivedClockSchedule};

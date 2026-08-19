@@ -34,6 +34,7 @@
 //!   def's RHS, or the def's own offset (the value must be position
 //!   independent over that span).
 
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::event::Event;
 use crate::ir::expression::{ExpressionContext, ProtoExpression};
 use crate::ir::opt::lane_vector;
@@ -534,6 +535,7 @@ fn replace_all_reads_stmt(s: &mut ProtoStatement, off: isize, template: &ProtoEx
 /// two expressions that hash equal twice).
 fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
     use std::hash::{Hash, Hasher};
+    let fold = BigArrayFold::from_statements(stmts.iter());
     let mut write_idxs: HashMap<isize, Vec<usize>> = HashMap::default();
     {
         let mut ins: Vec<VarOffset> = vec![];
@@ -541,7 +543,7 @@ fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
         for (i, s) in stmts.iter().enumerate() {
             ins.clear();
             outs.clear();
-            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
             for off in outs.drain(..) {
                 if let VarOffset::Comb(o) = off {
                     write_idxs.entry(o).or_default().push(i);
@@ -569,6 +571,11 @@ fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
         let VarOffset::Comb(dst) = a.dst else {
             continue;
         };
+        // `write_idxs` is array-wide for a folded element, so the window check
+        // below could not tell a rewrite of THIS element from a neighbour's.
+        if fold.covers(a.dst) {
+            continue;
+        }
         if a.select.is_some()
             || a.dynamic_select.is_some()
             || a.rhs_select.is_some()
@@ -593,7 +600,7 @@ fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
                 // and the first dst must be untouched over (i, j].
                 ins.clear();
                 outs.clear();
-                stmts[j].gather_variable_offsets_expanded(&mut ins, &mut outs);
+                stmts[j].gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
                 // E reading x is a settle back-edge: statement i itself
                 // rewrites x between the two evaluations, and the window
                 // check below starts past i.
@@ -645,6 +652,7 @@ fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
 /// external visibility poses no constraint.
 fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, usize) {
     let n = stmts.len();
+    let fold = BigArrayFold::from_statements(stmts.iter());
     // Group top-level static-select stores by destination offset.
     struct Group {
         idxs: Vec<usize>,
@@ -676,6 +684,9 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
                 && a.dst_width > 0
                 && word_ok
                 && a.dst_width == g.w
+                // Array-wide `read_idxs` / `write_idxs` cannot license moving
+                // a folded element's stores.
+                && !fold.covers(a.dst)
             {
                 g.idxs.push(i);
             } else {
@@ -695,7 +706,7 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
         for (i, s) in stmts.iter().enumerate() {
             ins.clear();
             outs.clear();
-            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
             for off in ins.drain(..) {
                 if let VarOffset::Comb(o) = off {
                     read_idxs.entry(o).or_default().push(i);
@@ -773,7 +784,7 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
         'legality: for &i in &g.idxs {
             e_ins.clear();
             e_outs.clear();
-            stmts[i].gather_variable_offsets_expanded(&mut e_ins, &mut e_outs);
+            stmts[i].gather_variable_offsets_expanded(&fold, &mut e_ins, &mut e_outs);
             for off in &e_ins {
                 if let VarOffset::Comb(io) = off
                     && any_in_window(write_idxs.get(io), first, last)
@@ -988,11 +999,15 @@ pub fn inline_single_readers(
     events: &HashMap<Event, Vec<ProtoStatement>>,
     externals_extra: &HashSet<VarOffset>,
 ) -> (Vec<ProtoStatement>, Vec<isize>) {
+    // Folds this pass's own view of the very large arrays; the event walk
+    // below sees the same offsets the comb statements do.
+    let fold = BigArrayFold::from_statements(stmts.iter().chain(events.values().flatten()));
+
     // -- externals: offsets we must never make disappear.
     let mut externals: HashSet<isize> = HashSet::default();
     for off in externals_extra {
-        if let VarOffset::Comb(o) = off {
-            externals.insert(*o);
+        if let VarOffset::Comb(o) = fold.canon(*off) {
+            externals.insert(o);
         }
     }
     {
@@ -1006,7 +1021,7 @@ pub fn inline_single_readers(
                 // so an event reading `arr[idx]` would leave a MIDDLE
                 // element's def retirable — the event then reads frozen
                 // storage.  (Same hole class as the comb-side census.)
-                s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+                s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
                 for off in ins.drain(..) {
                     if let VarOffset::Comb(o) = off {
                         externals.insert(o);
@@ -1030,7 +1045,7 @@ pub fn inline_single_readers(
     // `lane_vector` for why that order.
     let mut fused_offsets: Vec<isize> = Vec::new();
     let folded = if lane_vector::fold_enabled() {
-        lane_vector::transpose_fold(&mut stmts, &externals, &mut fused_offsets)
+        lane_vector::transpose_fold(&mut stmts, &fold, &externals, &mut fused_offsets)
     } else {
         0
     };
@@ -1068,7 +1083,7 @@ pub fn inline_single_readers(
         for (i, s) in stmts.iter().enumerate() {
             ins.clear();
             outs.clear();
-            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
             let opaque = !rewritable_reader(s);
             for off in ins.drain(..) {
                 if let VarOffset::Comb(o) = off {
@@ -1133,7 +1148,11 @@ pub fn inline_single_readers(
                         && a.dst_width <= 64
                         && a.expr.width() > 0
                         && a.expr.width() <= 64
-                        && cheap_rhs(&a.expr) =>
+                        && cheap_rhs(&a.expr)
+                        // Array-wide map entries make neither the reader set
+                        // nor the redefinition window precise enough to retire
+                        // a folded element's def.
+                        && !fold.covers(a.dst) =>
                 {
                     match a.dst {
                         VarOffset::Comb(o) if reads.get(&o).is_some_and(|ri| ri.count >= 2) => {
@@ -1152,7 +1171,7 @@ pub fn inline_single_readers(
             }
             e_ins.clear();
             e_outs.clear();
-            stmts[i].gather_variable_offsets_expanded(&mut e_ins, &mut e_outs);
+            stmts[i].gather_variable_offsets_expanded(&fold, &mut e_ins, &mut e_outs);
             if e_ins.contains(&VarOffset::Comb(o)) {
                 continue; // self-read
             }
@@ -1282,7 +1301,10 @@ pub fn inline_single_readers(
                     // Inlining retires an unsigned variable load, so a signed
                     // leaf put in its place would be sign-extended by a wider
                     // reader.
-                    && !a.expr.is_signed_store_leaf() =>
+                    && !a.expr.is_signed_store_leaf()
+                    // See the duplication pass: a folded element cannot be
+                    // told apart from its neighbours in `reads` / `writes`.
+                    && !fold.covers(a.dst) =>
             {
                 match a.dst {
                     VarOffset::Comb(o) => {
@@ -1366,7 +1388,7 @@ pub fn inline_single_readers(
         // entries in `writes`; that only vetoes conservatively.)
         e_ins.clear();
         e_outs.clear();
-        stmts[i].gather_variable_offsets_expanded(&mut e_ins, &mut e_outs);
+        stmts[i].gather_variable_offsets_expanded(&fold, &mut e_ins, &mut e_outs);
         let window_has_write = |o: isize, lo: usize, hi: usize| -> bool {
             writes.get(&o).is_some_and(|v| {
                 let p = v.partition_point(|&x| x <= lo);

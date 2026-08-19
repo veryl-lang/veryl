@@ -1,5 +1,6 @@
 use crate::backend::inst::next_test_top_id;
 use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole, whole};
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
 use crate::ir::context::{Context, Conv, ScopeContext};
@@ -642,7 +643,8 @@ fn tb_chunkable(s: &ProtoStatement, private: &HashSet<VarOffset>) -> bool {
         return false;
     }
     let (mut ins, mut outs) = (Vec::new(), Vec::new());
-    s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+    // `private` is keyed on unfolded offsets, so this side must expand too.
+    s.gather_variable_offsets_expanded(&BigArrayFold::default(), &mut ins, &mut outs);
     outs.iter().all(|o| private.contains(o))
 }
 
@@ -700,8 +702,10 @@ fn precompile_tb_bodies(
         }
         let originals = std::mem::take(run);
         let (mut inputs, mut outputs) = (Vec::new(), Vec::new());
+        // The output count below is the expansion itself, so nothing folds.
+        let unfolded = BigArrayFold::default();
         for s in &originals {
-            s.gather_variable_offsets_expanded(&mut inputs, &mut outputs);
+            s.gather_variable_offsets_expanded(&unfolded, &mut inputs, &mut outputs);
         }
         for v in [&mut inputs, &mut outputs] {
             v.sort_unstable_by_key(|o: &VarOffset| (o.is_ff(), o.raw()));
@@ -1984,6 +1988,7 @@ fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
     // array deps); narrow mode uses base+last (what synthesis tools see).
     let narrow = std::env::var("VERYL_SCC_NARROW").is_ok();
     let bitaware = std::env::var("VERYL_SCC_BITAWARE").is_ok();
+    let fold = BigArrayFold::from_statements(sorted.iter());
     let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
     let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
     let mut stmt_output_bits: Vec<Vec<(VarOffset, BitRange)>> = Vec::with_capacity(n);
@@ -1993,7 +1998,7 @@ fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
         if narrow {
             s.gather_variable_offsets(&mut ins, &mut outs);
         } else {
-            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
         }
         stmt_inputs.push(ins);
         stmt_outputs.push(outs);
@@ -2788,12 +2793,13 @@ fn compute_scc_iteration_depth(sorted: &[ProtoStatement]) -> usize {
         return 0;
     }
 
+    let fold = BigArrayFold::from_statements(sorted.iter());
     let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
     let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
     for s in sorted {
         let mut ins = vec![];
         let mut outs = vec![];
-        s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+        s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
         stmt_inputs.push(ins);
         stmt_outputs.push(outs);
     }
@@ -3512,10 +3518,12 @@ impl Conv<&air::Module> for ProtoModule {
                 // (conservatively: inputs too) so a component write always
                 // lands in some segment's compare set.
                 let mut ins: Vec<VarOffset> = Vec::new();
+                // The compare set is keyed on unfolded offsets.
+                let unfolded = BigArrayFold::default();
                 for ext in &all_external_components {
                     for c in &ext.connects {
                         ins.clear();
-                        c.expr.gather_variable_offsets_expanded(&mut ins);
+                        c.expr.gather_variable_offsets_expanded(&unfolded, &mut ins);
                         for o in &ins {
                             if let VarOffset::Comb(x) = o {
                                 evt.insert(*x);
