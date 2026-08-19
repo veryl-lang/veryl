@@ -21937,10 +21937,9 @@ fn cone_gate_skips_only_when_the_result_is_unchanged() {
 
 #[test]
 fn wide_concat_element_placement() {
-    // A >128-bit concatenation is assembled by placing each element into the
-    // destination word it lands in, so the two shapes that stress the position
-    // arithmetic are one element per bit (192 of them, what a per-bit driven
-    // bus lowers to) and elements whose width straddles a word boundary.
+    // A >128-bit concatenation places each element into the word it lands in,
+    // so the two shapes that stress the position arithmetic are one element per
+    // bit and elements straddling a word boundary.
     use num_bigint::BigUint;
 
     const W: usize = 192;
@@ -21999,9 +21998,8 @@ fn wide_concat_element_placement() {
 
 #[test]
 fn i128_concat_element_placement() {
-    // A 65..=128-bit concatenation assembles in two I64 halves, so it needs the
-    // same guard as the wider one: one element per bit, and elements straddling
-    // the 64-bit boundary.
+    // Same two shapes as `wide_concat_element_placement`, against the two-half
+    // assembly a 65..=128-bit concatenation uses.
     const W: usize = 100;
     let bits: Vec<String> = (0..W).map(|i| format!("a[{i}]")).collect();
     let code = format!(
@@ -22045,5 +22043,58 @@ fn i128_concat_element_placement() {
             Value::from_u128(straddle, 0, W, false),
             "straddle config={config:?}"
         );
+    }
+}
+
+#[test]
+fn concat_bit_repeat_run() {
+    // `{N{bit}}` folds to `0 - bit` masked to the run.  A leading run takes a
+    // separate path, so check all three placements against both bit values.
+    let code = r#"
+    module Top (
+        s:       input  logic    ,
+        a:       input  logic<8> ,
+        top_run: output logic<20>,
+        mid_run: output logic<20>,
+        low_run:  output logic<20>,
+        full_run: output logic<64>,
+    ) {
+        always_comb {
+            top_run  = {s repeat 12, a};
+            mid_run  = {a, s repeat 6, a[5:0]};
+            low_run  = {a, a[3:0], s repeat 8};
+            full_run = {s repeat 64};
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        for (s, a) in [(0u64, 0xa5u64), (1, 0xa5), (1, 0x00), (0, 0xff)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("s", Value::new(s, 1, false));
+            sim.set("a", Value::new(a, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let fill = |n: u64| if s == 1 { (1u64 << n) - 1 } else { 0 };
+            let expect = [
+                ("top_run", (fill(12) << 8) | a),
+                ("mid_run", (a << 12) | (fill(6) << 6) | (a & 0x3f)),
+                ("low_run", (a << 12) | ((a & 0xf) << 8) | fill(8)),
+            ];
+            // The run mask is `(1 << n) - 1`, so a run filling the whole word
+            // is the case that overflows it.
+            assert_eq!(
+                sim.get("full_run").unwrap(),
+                Value::new(if s == 1 { u64::MAX } else { 0 }, 64, false),
+                "full_run s={s} config={config:?}"
+            );
+            for (name, want) in expect {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(want, 20, false),
+                    "{name} s={s} a={a:#x} config={config:?}"
+                );
+            }
+        }
     }
 }
