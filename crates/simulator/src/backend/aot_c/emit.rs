@@ -4316,6 +4316,143 @@ fn gc_orphan_temps(cache_dir: &Path) {
     });
 }
 
+/// The chunked emit writes this a few hundred lines above, so the split below
+/// cannot drift from it.
+const CHUNK_FN_MARKER: &str = "static __attribute__((noinline)) void veryl_aot_chunk_";
+
+/// Bytes of C per translation unit, and the ceiling on how many to make.
+///
+/// One `cc` on a multi-megabyte source is the whole cold-start latency: the
+/// simulation runs on Cranelift until the `.so` lands, and Cranelift is
+/// several times slower than the compiled code.  Splitting shortens that
+/// window without changing how many compiles run at once (the pool decides
+/// that).  The size is what the ceiling is for — parts much smaller than this
+/// spend their time on the header every unit repeats.
+const TU_SPLIT_BYTES: usize = 1536 * 1024;
+const TU_SPLIT_MAX: usize = 8;
+
+/// How many translation units to compile `src` as.
+///
+/// Derived from the source alone, never from machine load: a split that varied
+/// run to run would give one cache key sources that compile to different
+/// binaries, and would make a split-only bug reproduce only sometimes.
+/// `VERYL_AOT_C_TU_SPLIT` pins it (0/1 disables splitting).
+fn tu_split_count(src: &str) -> usize {
+    #[cfg(test)]
+    if let Some(v) = TEST_TU_SPLIT.with(|c| c.get()) {
+        return v;
+    }
+    if let Ok(v) = std::env::var("VERYL_AOT_C_TU_SPLIT") {
+        return v.parse::<usize>().unwrap_or(1).max(1);
+    }
+    (src.len() / TU_SPLIT_BYTES).clamp(1, TU_SPLIT_MAX)
+}
+
+// Thread-local so a test that pins the split cannot perturb the tests running
+// beside it — the env var is process-global and libtest is multi-threaded.
+#[cfg(test)]
+thread_local! {
+    static TEST_TU_SPLIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// Split one emitted comb source into `n` compilable units.
+///
+/// The chunk functions are already separate and `noinline`, so nothing that
+/// was inlined stops being inlined; what each unit repeats is the header of
+/// `static inline` helpers, which every unit still inlines from.  `None` when
+/// the source does not have the shape below — the caller then compiles it
+/// whole, which is always correct.
+fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
+    if n < 2 {
+        return None;
+    }
+    let lines: Vec<&str> = src.split('\n').collect();
+    let chunk_starts: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.starts_with(CHUNK_FN_MARKER))
+        .map(|(i, _)| i)
+        .collect();
+    // Fewer chunks than units would leave empty ones; the entry functions must
+    // follow the last chunk for the tail split below to hold.
+    if chunk_starts.len() < n * 2 {
+        return None;
+    }
+    let last_chunk = *chunk_starts.last()?;
+    let entry_start = lines
+        .iter()
+        .enumerate()
+        .position(|(i, l)| i > last_chunk && l.starts_with(ENTRY_ATTR))?;
+
+    let header = &lines[..chunk_starts[0]];
+    let entries = &lines[entry_start..];
+    // Only the wide-op table may cross units, and only because the split gives
+    // it one definition and the rest a declaration.  Anything else exported
+    // from the header would lose its definition in the non-entry units, so
+    // leave such a source whole.
+    if header
+        .iter()
+        .any(|l| l.starts_with(ENTRY_ATTR) && !l.contains(WIDEOPS_DEF) && !l.contains(WIDEOPS_SET))
+    {
+        return None;
+    }
+    // Every unit defines the chunks it holds and declares the rest, so the
+    // entry unit can call across.  `hidden` keeps them out of the dynamic
+    // symbol table exactly as `static` did.
+    let decls: Vec<String> = chunk_starts
+        .iter()
+        .filter_map(|&i| {
+            let name = lines[i]
+                .strip_prefix(CHUNK_FN_MARKER)?
+                .split('(')
+                .next()?
+                .trim();
+            Some(format!("{CHUNK_DECL_ATTR} void veryl_aot_chunk_{name}(uint8_t *__restrict__, uint8_t *__restrict__, uint64_t *__restrict__);"))
+        })
+        .collect();
+    if decls.len() != chunk_starts.len() {
+        return None;
+    }
+
+    let mut units = Vec::with_capacity(n);
+    for part in 0..n {
+        let lo = chunk_starts[chunk_starts.len() * part / n];
+        let hi = if part + 1 == n {
+            entry_start
+        } else {
+            chunk_starts[chunk_starts.len() * (part + 1) / n]
+        };
+        let mut out: Vec<String> = Vec::with_capacity(header.len() + decls.len() + (hi - lo) + 16);
+        for l in header {
+            // The wide-op table has one definition, in the entry unit; the
+            // others reach it through the dynamic symbol the setter publishes.
+            if part == 0 || !l.starts_with(ENTRY_ATTR) {
+                out.push((*l).to_string());
+            } else if l.contains(WIDEOPS_DEF) {
+                out.push(format!("extern {WIDEOPS_DEF}"));
+            }
+        }
+        out.extend(decls.iter().cloned());
+        out.extend(
+            lines[lo..hi]
+                .iter()
+                .map(|l| l.replace(CHUNK_FN_MARKER, CHUNK_DEF_PREFIX)),
+        );
+        if part == 0 {
+            out.extend(entries.iter().map(|l| (*l).to_string()));
+        }
+        units.push(out.join("\n"));
+    }
+    Some(units)
+}
+
+const ENTRY_ATTR: &str = "__attribute__((visibility(\"default\")))";
+const WIDEOPS_DEF: &str = "veryl_wideops_t veryl_wideops;";
+const WIDEOPS_SET: &str = "void veryl_set_wideops(";
+const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
+const CHUNK_DEF_PREFIX: &str =
+    "__attribute__((noinline,visibility(\"hidden\"))) void veryl_aot_chunk_";
+
 /// `compile_source` with an explicit cache directory instead of resolving
 /// it from `VERYL_AOT_CACHE_DIR`/`XDG_CACHE_HOME`/`HOME`.  Tests pass a
 /// per-test dir here directly: the cache dir is a *process-global* env var,
@@ -4411,6 +4548,25 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         let log_path = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.log"));
         fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
 
+        // Split units are compiled in parallel and linked; `tmp_c` above stays
+        // the source that gets published, so the cache entry keeps naming the
+        // whole module however it was built.
+        #[cfg(unix)]
+        let unit_paths: Vec<PathBuf> = split_translation_units(src, tu_split_count(src))
+            .map(|units| {
+                units
+                    .iter()
+                    .enumerate()
+                    .map(|(i, u)| {
+                        let p = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.u{i}.c"));
+                        fs::write(&p, u).map(|_| p)
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()
+            .map_err(|e| format!("write split unit: {e}"))?
+            .unwrap_or_default();
+
         // The compile AND the publish run through one shell so the cache
         // entry lands even when this process exits first: a short run
         // finishes before cc does and the pool worker dies with it, so a
@@ -4420,19 +4576,25 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         // shell-quoting territory.
         #[cfg(unix)]
         let out = {
+            let paths = CompileScriptPaths {
+                cc: &cc_name,
+                tmp_so: &tmp_so,
+                tmp_c: &tmp_c,
+                published_c: &c_path,
+                published_so: &so_path,
+                lock: lock_path.as_deref(),
+                log: &log_path,
+            };
             let mut cmd = Command::new("/bin/sh");
-            cmd.arg("-c").arg(COMPILE_SCRIPT).args(compile_script_args(
-                &CompileScriptPaths {
-                    cc: &cc_name,
-                    tmp_so: &tmp_so,
-                    tmp_c: &tmp_c,
-                    published_c: &c_path,
-                    published_so: &so_path,
-                    lock: lock_path.as_deref(),
-                    log: &log_path,
-                },
-                &flags,
-            ));
+            if unit_paths.is_empty() {
+                cmd.arg("-c")
+                    .arg(COMPILE_SCRIPT)
+                    .args(compile_script_args(&paths, &flags));
+            } else {
+                cmd.arg("-c")
+                    .arg(SPLIT_COMPILE_SCRIPT)
+                    .args(split_script_args(&paths, &flags, &unit_paths));
+            }
             // Own process group: a group-delivered signal (Ctrl-C on the
             // run, a harness killing its group) must not take the publish
             // down with it.
@@ -4542,6 +4704,20 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
 #[cfg(unix)]
 const COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; shift 8; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; if "$cc" "$@" -o "$tso" "$tc"; then mv -f "$tc" "$pc"; rm -f "$lg"; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso"; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
 
+/// [`COMPILE_SCRIPT`] for a source split into units: compile them at once,
+/// link, publish.  Same contract otherwise — one shell owns the publish and
+/// the lock, and the whole source (`$tc`) is what lands beside the `.so`.
+///
+/// The compile flags arrive as one word-split parameter because the unit paths
+/// take the variadic slot.  `-shared` belongs to the link, so the caller sends
+/// two lists (see [`split_script_args`]).
+///
+/// The units are backgrounded together rather than fed to one `cc`: a single
+/// invocation compiles them in sequence, which is the latency this exists to
+/// remove.
+#[cfg(unix)]
+const SPLIT_COMPILE_SCRIPT: &str = r#"cc="$1"; tso="$2"; tc="$3"; pc="$4"; pso="$5"; lk="$6"; lg="$7"; mem="$8"; cf="$9"; shift 9; exec > "$lg" 2>&1; if [ "$mem" != 0 ]; then ulimit -v "$mem" 2>/dev/null || true; fi; ps=""; os=""; for u in "$@"; do "$cc" $cf -c "$u" -o "$u.o" & ps="$ps $!"; os="$os $u.o"; done; ok=1; for p in $ps; do wait "$p" || ok=0; done; if [ "$ok" = 1 ] && "$cc" -shared -fPIC -o "$tso" $os; then mv -f "$tc" "$pc"; rm -f "$lg" "$@" $os; mv -f "$tso" "$pso"; rc=0; else rm -f "$tso" $os; rc=1; fi; if [ -n "$lk" ]; then rm -f "$lk"; fi; exit $rc"#;
+
 /// Address-space ceiling for the compiler, in KiB (`VERYL_AOT_C_MAX_MEM_MB`
 /// gives it in MB; 0 disables).  The compile is detached on purpose — it has
 /// to outlive the run to publish its `.so` — so nothing reclaims it if it
@@ -4585,6 +4761,40 @@ fn compile_script_args(p: &CompileScriptPaths, flags: &[String]) -> Vec<std::ffi
         compile_mem_limit_kb().to_string().into(),
     ];
     args.extend(flags.iter().map(std::ffi::OsString::from));
+    args
+}
+
+/// [`compile_script_args`] for [`SPLIT_COMPILE_SCRIPT`]: the compile flags
+/// become one word-split parameter and the unit paths take the variadic tail.
+///
+/// `-shared` is dropped here because these invocations produce objects; the
+/// script passes it to the link itself.
+#[cfg(unix)]
+fn split_script_args(
+    p: &CompileScriptPaths,
+    flags: &[String],
+    units: &[PathBuf],
+) -> Vec<std::ffi::OsString> {
+    let compile_flags: Vec<&str> = flags
+        .iter()
+        .map(String::as_str)
+        .filter(|f| *f != "-shared")
+        .collect();
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "sh".into(),
+        p.cc.into(),
+        p.tmp_so.as_os_str().to_os_string(),
+        p.tmp_c.as_os_str().to_os_string(),
+        p.published_c.as_os_str().to_os_string(),
+        p.published_so.as_os_str().to_os_string(),
+        p.lock
+            .map(|q| q.as_os_str().to_os_string())
+            .unwrap_or_default(),
+        p.log.as_os_str().to_os_string(),
+        compile_mem_limit_kb().to_string().into(),
+        compile_flags.join(" ").into(),
+    ];
+    args.extend(units.iter().map(|u| u.as_os_str().to_os_string()));
     args
 }
 
@@ -11644,6 +11854,129 @@ mod tests {
         assert_eq!(written, 0xdeadbeef, "comb[0..4] should be 0xdeadbeef");
         // Best-effort cleanup; ignore failures.
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// A source shaped like the chunked emit, with `count` chunks each storing
+    /// its own index, and an entry that calls them all.
+    #[cfg(unix)]
+    fn chunked_stub_source(count: usize) -> String {
+        let mut s = String::from(
+            "// AOT-C generated (noslp); do not edit.\n\
+             #include <stdint.h>\n\
+             typedef struct { int unused; } veryl_wideops_t;\n\
+             __attribute__((visibility(\"default\"))) veryl_wideops_t veryl_wideops;\n\
+             __attribute__((visibility(\"default\"))) void veryl_set_wideops(const void* t) { veryl_wideops = *(const veryl_wideops_t*)t; }\n\
+             static inline uint32_t vw_tag(uint32_t i) { return i + 1; }\n",
+        );
+        for i in 0..count {
+            s.push_str(&format!(
+                "{CHUNK_FN_MARKER}{i}(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log) {{\n\
+                 (void)ff_values; (void)write_log;\n\
+                 *(uint32_t*)(comb_values + {}) = vw_tag({i});\n\
+                 }}\n",
+                i * 4
+            ));
+        }
+        s.push_str(
+            "__attribute__((visibility(\"default\")))\n\
+             void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n\
+             (void)ff_delta;\n",
+        );
+        for i in 0..count {
+            s.push_str(&format!(
+                "veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n"
+            ));
+        }
+        s.push_str("}\n");
+        s
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn split_units_compile_to_the_same_behaviour() {
+        // The split rewrites the source that reaches `cc`, so the guarantee
+        // worth testing is behavioural: every chunk still runs, and reaches
+        // the header's `static inline` helper from whichever unit it landed in.
+        if Command::new(std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string()))
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("split_units_compile_to_the_same_behaviour: cc unavailable, skipping");
+            return;
+        }
+        const CHUNKS: usize = 12;
+        let src = chunked_stub_source(CHUNKS);
+        assert!(
+            split_translation_units(&src, 4).is_some(),
+            "the stub must have the shape the split recognises"
+        );
+
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_split_{}", std::process::id()));
+        TEST_TU_SPLIT.with(|c| c.set(Some(4)));
+        let module = compile_for_test(&tmp, &src, "split_units_compile_to_the_same_behaviour");
+        TEST_TU_SPLIT.with(|c| c.set(None));
+        let Some(module) = module else { return };
+
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; CHUNKS * 4];
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        for i in 0..CHUNKS {
+            let got = u32::from_le_bytes(comb[i * 4..i * 4 + 4].try_into().unwrap());
+            assert_eq!(got, i as u32 + 1, "chunk {i} did not run");
+        }
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn split_declines_sources_it_does_not_recognise() {
+        // Anything without the chunked shape must compile whole rather than
+        // be cut at a guess.
+        assert!(split_translation_units("int main(void) { return 0; }", 4).is_none());
+        // Too few chunks to fill the units.
+        assert!(
+            split_translation_units(
+                &{
+                    let mut s = String::new();
+                    for i in 0..3 {
+                        s.push_str(&format!("{CHUNK_FN_MARKER}{i}(void) {{}}\n"));
+                    }
+                    s
+                },
+                4
+            )
+            .is_none()
+        );
+        // An exported symbol the split cannot give every unit.
+        let mut extra = String::from("#include <stdint.h>\n");
+        extra.push_str("__attribute__((visibility(\"default\"))) int veryl_extra_global;\n");
+        for i in 0..12 {
+            extra.push_str(&format!("{CHUNK_FN_MARKER}{i}(void) {{}}\n"));
+        }
+        extra.push_str("__attribute__((visibility(\"default\")))\nvoid veryl_aot_eval(void) {}\n");
+        assert!(split_translation_units(&extra, 4).is_none());
+    }
+
+    #[test]
+    fn split_count_is_a_function_of_the_source_alone() {
+        // Load-dependent splitting would give one cache key differing binaries
+        // and make a split-only bug reproduce only sometimes.
+        let small = "x".repeat(TU_SPLIT_BYTES - 1);
+        let large = "x".repeat(TU_SPLIT_BYTES * 3);
+        assert_eq!(tu_split_count(&small), 1);
+        assert_eq!(tu_split_count(&large), 3);
+        assert_eq!(
+            tu_split_count(&"x".repeat(TU_SPLIT_BYTES * (TU_SPLIT_MAX + 4))),
+            TU_SPLIT_MAX
+        );
     }
 
     // --- Chunk-local localization (compute_localize_sets) ---
