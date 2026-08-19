@@ -1942,6 +1942,32 @@ fn invalid_import() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 
+    // A generic parameter is not importable, even with a proto interface bound.
+    let code = r#"
+    proto interface ProtoIfA {
+        var _x: logic;
+    }
+    interface IfA for ProtoIfA {
+        var _x: logic;
+    }
+    module ModuleI::<IF: ProtoIfA> {
+        import IF;
+    }
+    module ModuleJ {
+        inst u: ModuleI::<IfA>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|e| matches!(e, AnalyzerError::InvalidImport { .. }))
+            .count(),
+        1,
+        "{errors:?}"
+    );
+
     let code = r#"
     package a_pkg::<a: u32> {
         const A: u32 = a;
