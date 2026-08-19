@@ -21934,3 +21934,167 @@ fn cone_gate_skips_only_when_the_result_is_unchanged() {
     }
     assert!(armed >= 4, "too few configs exercised the gate: {armed}");
 }
+
+#[test]
+fn wide_concat_element_placement() {
+    // A >128-bit concatenation places each element into the word it lands in,
+    // so the two shapes that stress the position arithmetic are one element per
+    // bit and elements straddling a word boundary.
+    use num_bigint::BigUint;
+
+    const W: usize = 192;
+    let bits: Vec<String> = (0..W).map(|i| format!("a[{i}]")).collect();
+    let code = format!(
+        r#"
+    module Top (
+        a:        input  logic<192>,
+        reversed: output logic<192>,
+        straddle: output logic<192>,
+    ) {{
+        always_comb {{
+            reversed = {{{}}};
+            straddle = {{a[39:0], a[79:40], a[119:80], a[159:120], a[191:160]}};
+        }}
+    }}
+    "#,
+        bits.join(", ")
+    );
+
+    let a_bytes: Vec<u8> = (0..24u8)
+        .map(|i| i.wrapping_mul(37).wrapping_add(11))
+        .collect();
+    let a_val = BigUint::from_bytes_le(&a_bytes);
+    // The leftmost element is the most significant, so `reversed` is `a` backwards.
+    let mut rev_val = BigUint::ZERO;
+    for i in 0..W {
+        if a_val.bit(i as u64) {
+            rev_val.set_bit((W - 1 - i) as u64, true);
+        }
+    }
+    let field = |lo: usize, len: usize| (&a_val >> lo) & ((BigUint::from(1u32) << len) - 1u32);
+    let straddle_val: BigUint = (field(0, 40) << 152)
+        | (field(40, 40) << 112)
+        | (field(80, 40) << 72)
+        | (field(120, 40) << 32)
+        | field(160, 32);
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new_biguint(a_val.clone(), W, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("reversed").unwrap(),
+            Value::new_biguint(rev_val.clone(), W, false),
+            "reversed config={config:?}"
+        );
+        assert_eq!(
+            sim.get("straddle").unwrap(),
+            Value::new_biguint(straddle_val.clone(), W, false),
+            "straddle config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn i128_concat_element_placement() {
+    // Same two shapes as `wide_concat_element_placement`, against the two-half
+    // assembly a 65..=128-bit concatenation uses.
+    const W: usize = 100;
+    let bits: Vec<String> = (0..W).map(|i| format!("a[{i}]")).collect();
+    let code = format!(
+        r#"
+    module Top (
+        a:        input  logic<100>,
+        reversed: output logic<100>,
+        straddle: output logic<100>,
+    ) {{
+        always_comb {{
+            reversed = {{{}}};
+            straddle = {{a[39:0], a[79:40], a[99:80]}};
+        }}
+    }}
+    "#,
+        bits.join(", ")
+    );
+
+    let a_val: u128 = 0x0dec_0ffe_ebad_c0de_1234_5678_9abcu128 & ((1u128 << W) - 1);
+    let mut rev = 0u128;
+    for i in 0..W {
+        if (a_val >> i) & 1 == 1 {
+            rev |= 1u128 << (W - 1 - i);
+        }
+    }
+    let field = |lo: usize, len: usize| (a_val >> lo) & ((1u128 << len) - 1);
+    let straddle = (field(0, 40) << 60) | (field(40, 40) << 20) | field(80, 20);
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::from_u128(a_val, 0, W, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("reversed").unwrap(),
+            Value::from_u128(rev, 0, W, false),
+            "reversed config={config:?}"
+        );
+        assert_eq!(
+            sim.get("straddle").unwrap(),
+            Value::from_u128(straddle, 0, W, false),
+            "straddle config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn concat_bit_repeat_run() {
+    // `{N{bit}}` folds to `0 - bit` masked to the run.  A leading run takes a
+    // separate path, so check all three placements against both bit values.
+    let code = r#"
+    module Top (
+        s:       input  logic    ,
+        a:       input  logic<8> ,
+        top_run: output logic<20>,
+        mid_run: output logic<20>,
+        low_run:  output logic<20>,
+        full_run: output logic<64>,
+    ) {
+        always_comb {
+            top_run  = {s repeat 12, a};
+            mid_run  = {a, s repeat 6, a[5:0]};
+            low_run  = {a, a[3:0], s repeat 8};
+            full_run = {s repeat 64};
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        for (s, a) in [(0u64, 0xa5u64), (1, 0xa5), (1, 0x00), (0, 0xff)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("s", Value::new(s, 1, false));
+            sim.set("a", Value::new(a, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let fill = |n: u64| if s == 1 { (1u64 << n) - 1 } else { 0 };
+            let expect = [
+                ("top_run", (fill(12) << 8) | a),
+                ("mid_run", (a << 12) | (fill(6) << 6) | (a & 0x3f)),
+                ("low_run", (a << 12) | ((a & 0xf) << 8) | fill(8)),
+            ];
+            // The run mask is `(1 << n) - 1`, so a run filling the whole word
+            // is the case that overflows it.
+            assert_eq!(
+                sim.get("full_run").unwrap(),
+                Value::new(if s == 1 { u64::MAX } else { 0 }, 64, false),
+                "full_run s={s} config={config:?}"
+            );
+            for (name, want) in expect {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(want, 20, false),
+                    "{name} s={s} a={a:#x} config={config:?}"
+                );
+            }
+        }
+    }
+}
