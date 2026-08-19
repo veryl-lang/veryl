@@ -27,6 +27,9 @@ jobs:
 
     name: Run benchmarks
     runs-on: ubuntu-latest
+    # The CodSpeed runner's apt valgrind install has no timeout of its own and
+    # has hung to the 6h job limit; successful runs peak around 16 min.
+    timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
       CARGO_INCREMENTAL: "0"
@@ -95,6 +98,8 @@ jobs:
   boot-benchmark:
     name: Run heliodor boot benchmark (walltime)
     runs-on: codspeed-macro
+    # Successful runs peak around 27 min.
+    timeout-minutes: 60
     env:
       CARGO_INCREMENTAL: "0"
     steps:
