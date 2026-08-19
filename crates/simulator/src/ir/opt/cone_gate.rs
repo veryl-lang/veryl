@@ -346,7 +346,7 @@ pub(crate) fn diag() -> bool {
 
 /// Total gated compare bytes cap: bounds the worst-case (always-dirty)
 /// per-settle overhead regardless of how many cones qualify.
-const MAX_TOTAL_COMPARE: usize = 256 << 10;
+pub(crate) const MAX_TOTAL_COMPARE: usize = 256 << 10;
 /// A segment smaller than this is not worth its dispatch branch.
 const MIN_SEGMENT_STMTS: usize = 64;
 /// A subtree carrying fewer statements than this is not worth a cone of its

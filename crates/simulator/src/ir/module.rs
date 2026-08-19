@@ -965,8 +965,21 @@ fn collect_event_written_comb(
             }
             ProtoStatement::AssignDynamic(a) => {
                 if !a.dst_base.is_ff() && a.dst_stride != 0 {
-                    for k in 0..a.dst_num_elements {
-                        out.insert(a.dst_base.raw() + a.dst_stride * k as isize);
+                    // A run whose own bytes pass the gate's compare budget owns
+                    // a single folded span, so its ends resolve to the same span
+                    // the interior would and the interior costs a hash insert
+                    // per element — millions of them on a modelled DRAM.  Below
+                    // the budget the elements own separate spans and each one
+                    // has to be named.
+                    let bytes = a.dst_stride.unsigned_abs() * a.dst_num_elements;
+                    if bytes > cone_gate::MAX_TOTAL_COMPARE {
+                        let last = a.dst_num_elements.saturating_sub(1) as isize;
+                        out.insert(a.dst_base.raw());
+                        out.insert(a.dst_base.raw() + a.dst_stride * last);
+                    } else {
+                        for k in 0..a.dst_num_elements {
+                            out.insert(a.dst_base.raw() + a.dst_stride * k as isize);
+                        }
                     }
                 }
                 true
@@ -1002,11 +1015,23 @@ fn collect_event_written_comb(
                 f.body.iter().all(|s| walk(s, out))
             }
             ProtoStatement::SystemFunctionCall(c) => {
-                // Readmemh writes are boundable: one offset per element.
+                // Readmemh writes are boundable: one offset per element, or
+                // just the ends once the image owns a folded span (see
+                // `AssignDynamic` above — a preloaded memory reaches millions).
                 if let crate::ir::ProtoSystemFunctionCall::Readmemh { elements, .. } = c {
-                    for e in elements {
-                        if !e.current.is_ff() {
-                            out.insert(e.current.raw());
+                    let comb = || elements.iter().filter(|e| !e.current.is_ff());
+                    // The elements carry no width, but a span this wide is
+                    // past the budget whatever they are.
+                    let lo = comb().map(|e| e.current.raw()).min();
+                    let hi = comb().map(|e| e.current.raw()).max();
+                    if let (Some(lo), Some(hi)) = (lo, hi) {
+                        if (hi - lo) as usize > cone_gate::MAX_TOTAL_COMPARE {
+                            out.insert(lo);
+                            out.insert(hi);
+                        } else {
+                            for e in comb() {
+                                out.insert(e.current.raw());
+                            }
                         }
                     }
                 }
