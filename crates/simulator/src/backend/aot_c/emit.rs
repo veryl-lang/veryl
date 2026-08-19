@@ -143,6 +143,15 @@ static inline void vw_lshr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t 
     uint64_t lo = si<n ? VW_RD(a,si) : 0;
     uint64_t hi = si+1<n ? VW_RD(a,si+1) : 0;
     VW_WR(d,i, bs==0 ? lo : (lo>>bs)|(hi<<(64-bs))); } }
+/* The low dnb bytes of (a >> amount), where a holds anb bytes: a wide
+   bit-select needs only its own result window, not the whole shifted
+   source. */
+static inline void vw_lshr_win(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t dnb,uint32_t anb){
+  unsigned dn=dnb/8, an=anb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
+  for(unsigned i=0;i<dn;i++){ unsigned si=i+ws;
+    uint64_t lo = si<an ? VW_RD(a,si) : 0;
+    uint64_t hi = si+1<an ? VW_RD(a,si+1) : 0;
+    VW_WR(d,i, bs==0 ? lo : (lo>>bs)|(hi<<(64-bs))); } }
 static inline void vw_ashr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t packed){
   uint32_t nb=packed&0xFFFF, width=packed>>16; if(nb==0||width==0) return;
   unsigned n=nb/8; unsigned sw=(width-1)/64, sb=(width-1)%64;
@@ -387,6 +396,25 @@ pub fn clear_const_unsafe() {
 fn const_skip_armed() -> bool {
     CONST_SKIP_ARMED.with(|a| a.get())
         && std::env::var("VERYL_AOT_C_CONST_SKIP").as_deref() != Ok("0")
+}
+
+thread_local! {
+    /// Cone-gate segments for the next whole-comb emit.
+    /// Non-empty: the emitter keeps the caller's statement order (no const
+    /// split, no field gather), forces chunk boundaries at the segment edges,
+    /// and guards the dispatcher's calls with the segment compares.
+    static CONE_SEGMENTS: std::cell::RefCell<Vec<crate::ir::opt::cone_gate::ConeSegment>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Install the cone-gate segments for the next comb emit.  Paired with
+/// `clear_cone_segments`.
+pub fn set_cone_segments(segs: Vec<crate::ir::opt::cone_gate::ConeSegment>) {
+    CONE_SEGMENTS.with(|s| *s.borrow_mut() = segs);
+}
+
+pub fn clear_cone_segments() {
+    CONE_SEGMENTS.with(|s| s.borrow_mut().clear());
 }
 
 fn clear_current_local() {
@@ -868,16 +896,17 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                 let idx = emit_expr(&dyn_sel.index_expr)?;
                 let max_idx = dyn_sel.num_elements - 1;
                 let src_nb = native_bytes(*var_full_width);
-                let src_nw = wide_words(src_nb);
+                let res_nb = native_bytes(dyn_sel.window);
+                let res_nw = wide_words(res_nb);
                 let t = next_wide_tmp();
                 pre.push_str(&format!(
-                    "uint64_t _w{t}[{src_nw}]; \
+                    "uint64_t _w{t}[{res_nw}]; \
                      {{ uint64_t _di_raw = (uint64_t)({idx}); \
                         uint64_t _di = _di_raw < {max_idx}ull ? _di_raw : {max_idx}ull; \
-                        vw_lshr((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), _di * {ew}ull, {src_nb}u); }} \
+                        vw_lshr_win((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), _di * {ew}ull, {res_nb}u, {src_nb}u); }} \
                      vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {mask}u); ",
                     ew = dyn_sel.elem_width,
-                    mask = wpack(src_nb, dyn_sel.window),
+                    mask = wpack(res_nb, dyn_sel.window),
                 ));
                 return Some(WideRef {
                     addr: format!("((uint8_t*)_w{t})"),
@@ -896,14 +925,14 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                     return None;
                 }
                 let src_nb = native_bytes(*var_full_width);
-                let src_nw = wide_words(src_nb);
                 let res_nb = native_bytes(nbits);
+                let res_nw = wide_words(res_nb);
                 let t = next_wide_tmp();
                 pre.push_str(&format!(
-                    "uint64_t _w{t}[{src_nw}]; \
-                     vw_lshr((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), {lo}ull, {src_nb}u); \
+                    "uint64_t _w{t}[{res_nw}]; \
+                     vw_lshr_win((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), {lo}ull, {res_nb}u, {src_nb}u); \
                      vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {mask}u); ",
-                    mask = wpack(src_nb, nbits),
+                    mask = wpack(res_nb, nbits),
                 ));
                 return Some(WideRef {
                     addr: format!("((uint8_t*)_w{t})"),
@@ -2998,7 +3027,7 @@ fn sink_census(stmts: &[ProtoStatement], chunks: &[&[ProtoStatement]]) {
 fn const_cone_partition(
     stmts: &[ProtoStatement],
     unsafe_comb: &HashSet<isize>,
-) -> Option<(Vec<ProtoStatement>, usize)> {
+) -> Option<(Vec<ProtoStatement>, usize, Vec<bool>)> {
     #[derive(Default)]
     struct Io {
         /// (is_ff, base offset) of every scalar read.
@@ -3202,7 +3231,7 @@ fn const_cone_partition(
             out.push(s.clone());
         }
     }
-    Some((out, n))
+    Some((out, n, is_const))
 }
 
 /// The aligned `(start_byte, width_bytes)` sub-word of a 16-byte container
@@ -3397,10 +3426,31 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
 /// Event-path WIDE FF write (static dst, `dst_width > 64`): materialize the
 /// masked RHS into a scratch and push it through the 64-byte WriteLogWideEntry
 /// pool (≤56-byte payload chunks).  Covers 65-128 bit (scalar promoted) and
-/// >128 bit (helper-table value).  Select / dynamic_select / rhs_select wide
-/// > FFs stay on Cranelift (the module bails).  2-state only.
+/// `>128` bit (helper-table value).  A static slice covering whole words
+/// reduces to the full-width form at a shifted offset: the commit is a plain
+/// byte-range copy, so a byte-exact subrange needs no read-modify-write
+/// against uncommitted state.  Other select / dynamic_select / rhs_select
+/// wide FFs stay on Cranelift (the module bails).  2-state only.
 fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
-    if a.select.is_some() || a.dynamic_select.is_some() || a.rhs_select.is_some() {
+    if let Some(ds) = &a.dynamic_select
+        && a.select.is_none()
+        && a.rhs_select.is_none()
+        && let Some(s) = emit_event_ff_assign_wide_dynsel(a, ds)
+    {
+        return Some(s);
+    }
+    let aligned_slice = match a.select {
+        None => Some(None),
+        Some((hi, lo)) => {
+            let nbits = hi.checked_sub(lo).and_then(|d| d.checked_add(1));
+            match nbits {
+                Some(n) if lo % 64 == 0 && n % 64 == 0 && n > 64 => Some(Some((lo, n))),
+                _ => None,
+            }
+        }
+    };
+    let (Some(slice), false, None) = (aligned_slice, a.dynamic_select.is_some(), &a.rhs_select)
+    else {
         ev_diag(&format!(
             "wide FF: select={:?} dynsel={} rhssel={:?} width={}",
             a.select,
@@ -3409,7 +3459,11 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
             a.dst_width
         ));
         return None;
-    }
+    };
+    let (byte_off, eff_width) = match slice {
+        Some((lo, n)) => ((lo / 8) as isize, n),
+        None => (0, a.dst_width),
+    };
     let dst_raw = match a.dst {
         VarOffset::Ff(o) => o,
         VarOffset::Comb(_) => return None,
@@ -3419,7 +3473,8 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
         return None;
     }
     let packed = dst_raw == cur_off;
-    let nb = native_bytes(a.dst_width);
+    let (dst_raw, cur_off) = (dst_raw + byte_off, cur_off + byte_off);
+    let nb = native_bytes(eff_width);
     let nw = wide_words(nb);
     let mut pre = String::new();
     // Build the RHS to `nb` bytes, then copy into a fresh scratch and mask it
@@ -3431,7 +3486,7 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
         "uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
          vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
         src = r.addr,
-        p = wpack(nb, a.dst_width),
+        p = wpack(nb, eff_width),
     ));
     // Dual-slot FF: mirror the narrow path by writing the next physical slot
     // directly (vestigial — ff_commit applies the log — but kept for parity).
@@ -3444,6 +3499,61 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
         )
     };
     let push = emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), &format!("{cur_off:#x}"), nb);
+    Some(format!("{{ {pre}{store}{push} }}"))
+}
+
+/// Runtime whole-element write into a packed wide FF (`ff[idx] <= v` on an
+/// array whose element spans whole words — a `+:` part-select on a flat
+/// register instead strides by one bit and is declined below).  Same
+/// byte-exact reduction as above, at a runtime offset.  The index clamps to
+/// the last element, mirroring `AssignStatement::eval_step`.
+fn emit_event_ff_assign_wide_dynsel(
+    a: &ProtoAssignStatement,
+    ds: &crate::ir::ProtoDynamicBitSelect,
+) -> Option<String> {
+    let ew = ds.elem_width;
+    let ne = ds.num_elements;
+    if ew < 64 || !ew.is_multiple_of(64) || ds.window != ew || ne == 0 {
+        return None;
+    }
+    let dst_raw = match a.dst {
+        VarOffset::Ff(o) => o,
+        VarOffset::Comb(_) => return None,
+    };
+    let cur_off = a.dst_ff_current_offset;
+    if cur_off < 0 || dst_raw < 0 {
+        return None;
+    }
+    let packed = dst_raw == cur_off;
+    let nb = ew / 8;
+    let nw = wide_words(nb);
+    let mut pre = String::new();
+    let idx = emit_expr(&ds.index_expr)?;
+    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+    let d = next_wide_tmp();
+    pre.push_str(&format!(
+        "uint64_t _di{d} = (uint64_t)({idx}); \
+         if (_di{d} > {max}ull) _di{d} = {max}ull; \
+         uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
+         vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
+        max = ne - 1,
+        src = r.addr,
+        p = wpack(nb, ew),
+    ));
+    let store = if packed {
+        String::new()
+    } else {
+        format!(
+            "vw_copy((uint8_t*)(ff_values + {dst:#x}) + _di{d} * {nb}u, \
+             (const uint8_t*)_w{d}, {nb}u); ",
+            dst = dst_raw,
+        )
+    };
+    let push = emit_wide_log_chunks(
+        &format!("(uint8_t*)_w{d}"),
+        &format!("({cur_off:#x}u + (unsigned)(_di{d} * {nb}u))"),
+        nb,
+    );
     Some(format!("{{ {pre}{store}{push} }}"))
 }
 
@@ -4675,7 +4785,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     // in order — the re-count below just shrinks it to the run that is
     // still contiguously const, and a boundary-split sink pair reverts to
     // buffer traffic (the localize sets are recomputed per final chunk).
-    let const_part: Option<(Vec<ProtoStatement>, usize)> = if const_skip_armed() {
+    let const_part: Option<(Vec<ProtoStatement>, usize, Vec<bool>)> = if const_skip_armed() {
         let unsafe_comb = CONST_UNSAFE_COMB.with(|b| b.borrow().clone());
         const_cone_partition(stmts, &unsafe_comb)
     } else {
@@ -4686,15 +4796,89 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             "[const_skip] armed={} stmts={} n_const={}",
             const_skip_armed(),
             stmts.len(),
-            const_part.as_ref().map_or(0, |(_, n)| *n),
+            const_part.as_ref().map_or(0, |(_, n, _)| *n),
         );
     }
-    let mut n_const = const_part.as_ref().map_or(0, |(_, n)| *n);
-    let stmts: &[ProtoStatement] = const_part.as_ref().map_or(stmts, |(s, _)| s.as_slice());
+    let mut n_const = const_part.as_ref().map_or(0, |(_, n, _)| *n);
+    let stmts: &[ProtoStatement] = const_part.as_ref().map_or(stmts, |(s, _, _)| s.as_slice());
 
-    // Field-group roles and gathering: see plan_field_groups.
+    // Cone-gate segments and the const split compose: the split is a STABLE
+    // partition, so a segment's non-const members stay contiguous in the
+    // tail and its ranges just shift by the const counts.  A const statement
+    // extracted OUT of a segment is sound to leave ungated — its run-once
+    // output never changes, so neither the skip (which preserves it) nor the
+    // replay (which rewrites the same value) can disturb it.  The field
+    // gather below still cannot run: it permutes arbitrarily.
+    let mut cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment> =
+        CONE_SEGMENTS.with(|s| s.borrow().clone());
+    if let Some((_, _, is_const)) = &const_part
+        && !cone_segments.is_empty()
+    {
+        let mut cb = vec![0u32; is_const.len() + 1];
+        for (i, &c) in is_const.iter().enumerate() {
+            cb[i + 1] = cb[i] + c as u32;
+        }
+        let n_const_total = cb[is_const.len()] as usize;
+        for s in &mut cone_segments {
+            let lo_c = cb[s.stmt_lo.min(is_const.len())] as usize;
+            let hi_c = cb[s.stmt_hi.min(is_const.len())] as usize;
+            s.stmt_lo = n_const_total + s.stmt_lo - lo_c;
+            s.stmt_hi = n_const_total + s.stmt_hi - hi_c;
+        }
+        cone_segments.retain(|s| s.stmt_lo < s.stmt_hi);
+    }
+
+    // Field-group roles and gathering: see plan_field_groups.  With cone
+    // segments, the gather runs PER REGION (each segment and each gap
+    // independently) so no statement crosses a segment edge: the region
+    // permutations keep every segment's [stmt_lo, stmt_hi) intact, and the
+    // roles merge by their position-independent (window, mask) keys — a key
+    // two regions disagree on is dropped back to plain emission.
     let _field_roles = FieldRolesGuard;
-    let plan = plan_field_groups(stmts);
+    let plan = if cone_segments.is_empty() {
+        plan_field_groups(stmts)
+    } else {
+        let mut bounds: Vec<usize> = cone_segments
+            .iter()
+            .flat_map(|s| [s.stmt_lo, s.stmt_hi])
+            .filter(|&b| b <= stmts.len())
+            .collect();
+        bounds.push(0);
+        bounds.push(stmts.len());
+        bounds.sort_unstable();
+        bounds.dedup();
+        let mut roles: HashMap<(isize, u64), FieldRole> = HashMap::default();
+        let mut conflicted: HashSet<(isize, u64)> = HashSet::default();
+        let mut order: Vec<usize> = Vec::with_capacity(stmts.len());
+        let mut atoms: Vec<(usize, usize)> = Vec::new();
+        for w in bounds.windows(2) {
+            let (lo, hi) = (w[0], w[1]);
+            if lo >= hi {
+                continue;
+            }
+            let p = plan_field_groups(&stmts[lo..hi]);
+            for (k, v) in p.roles {
+                match roles.get(&k) {
+                    Some(&prev) if prev != v => {
+                        conflicted.insert(k);
+                    }
+                    _ => {
+                        roles.insert(k, v);
+                    }
+                }
+            }
+            atoms.extend(p.atoms.iter().map(|&(s, l)| (order.len() + s, l)));
+            order.extend(p.order.iter().map(|&i| lo + i));
+        }
+        for k in &conflicted {
+            roles.remove(k);
+        }
+        FieldPlan {
+            roles,
+            order,
+            atoms,
+        }
+    };
     FIELD_ROLES.with(|r| *r.borrow_mut() = plan.roles.clone());
     let gathered: Option<Vec<ProtoStatement>> =
         (!plan.atoms.is_empty()).then(|| plan.order.iter().map(|&i| stmts[i].clone()).collect());
@@ -4749,49 +4933,74 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             _ => 1,
         }
     }
-    let chunks: Vec<&[ProtoStatement]> = if chunk_size == 0 || stmts.len() <= chunk_size {
-        if n_const > 0 && n_const < stmts.len() {
-            vec![&stmts[..n_const], &stmts[n_const..]]
-        } else {
-            vec![stmts]
-        }
-    } else {
-        // Never cut inside a gathered group — splitting one puts the
-        // accumulating stores in different functions and gcc can no longer
-        // keep the window in a register.
-        let mut chunks = Vec::new();
-        let (mut start, mut ai) = (0usize, 0usize);
-        while start < stmts.len() {
-            let mut end = start;
-            let mut cost = 0usize;
-            while end < stmts.len() && cost < chunk_size {
-                cost += stmt_cost(&stmts[end]);
-                end += 1;
-            }
-            while ai < plan.atoms.len() && plan.atoms[ai].0 + plan.atoms[ai].1 <= end {
-                ai += 1;
-            }
-            if ai < plan.atoms.len() && plan.atoms[ai].0 < end {
-                end = if plan.atoms[ai].0 > start {
-                    plan.atoms[ai].0
-                } else {
-                    plan.atoms[ai].0 + plan.atoms[ai].1
-                };
-            }
-            // Force a boundary at the const prefix so the const chunks can
-            // be routed to the run-once entry.  A field-group atom is never
-            // split here (the co-writer rule makes its members all-const or
-            // all-demoted together); a sink atom straddling the boundary is
-            // split, which only costs the pair its locality (the localize
-            // sets are recomputed per final chunk).
-            if start < n_const && end > n_const {
-                end = n_const;
-            }
-            chunks.push(&stmts[start..end]);
-            start = end;
-        }
-        chunks
+    // Cone-gate segment edges force chunk boundaries so the dispatcher can
+    // guard a segment as a whole number of chunk calls.
+    let seg_bounds: Vec<usize> = {
+        let mut v: Vec<usize> = cone_segments
+            .iter()
+            .flat_map(|s| [s.stmt_lo, s.stmt_hi])
+            .filter(|&b| b > 0 && b < stmts.len())
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        v
     };
+    let clamp_to_seg = |start: usize, end: usize| -> usize {
+        let i = seg_bounds.partition_point(|&b| b <= start);
+        match seg_bounds.get(i) {
+            Some(&b) if b < end => b,
+            _ => end,
+        }
+    };
+    let chunks: Vec<&[ProtoStatement]> =
+        if (chunk_size == 0 || stmts.len() <= chunk_size) && seg_bounds.is_empty() {
+            if n_const > 0 && n_const < stmts.len() {
+                vec![&stmts[..n_const], &stmts[n_const..]]
+            } else {
+                vec![stmts]
+            }
+        } else {
+            // Never cut inside a gathered group — splitting one puts the
+            // accumulating stores in different functions and gcc can no longer
+            // keep the window in a register.
+            let mut chunks = Vec::new();
+            let (mut start, mut ai) = (0usize, 0usize);
+            while start < stmts.len() {
+                let mut end = start;
+                if chunk_size == 0 {
+                    end = stmts.len();
+                } else {
+                    let mut cost = 0usize;
+                    while end < stmts.len() && cost < chunk_size {
+                        cost += stmt_cost(&stmts[end]);
+                        end += 1;
+                    }
+                }
+                while ai < plan.atoms.len() && plan.atoms[ai].0 + plan.atoms[ai].1 <= end {
+                    ai += 1;
+                }
+                if ai < plan.atoms.len() && plan.atoms[ai].0 < end {
+                    end = if plan.atoms[ai].0 > start {
+                        plan.atoms[ai].0
+                    } else {
+                        plan.atoms[ai].0 + plan.atoms[ai].1
+                    };
+                }
+                // Force a boundary at the const prefix so the const chunks can
+                // be routed to the run-once entry.  A field-group atom is never
+                // split here (the co-writer rule makes its members all-const or
+                // all-demoted together); a sink atom straddling the boundary is
+                // split, which only costs the pair its locality (the localize
+                // sets are recomputed per final chunk).
+                if start < n_const && end > n_const {
+                    end = n_const;
+                }
+                let end = clamp_to_seg(start, end);
+                chunks.push(&stmts[start..end]);
+                start = end;
+            }
+            chunks
+        };
     let const_chunks = {
         let mut acc = 0usize;
         let mut k = 0usize;
@@ -4819,6 +5028,21 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     // that chunk and read only there (and not blocklisted) become C locals
     // instead of comb_values round-trips.  Empty sets when the knob is off.
     LAST_LOCALIZED_BYTES.with(|b| b.borrow_mut().clear());
+    // The cone-gate state regions live in comb_values but only the AOT side
+    // writes them — the validate dual-run must skip them like localized bytes.
+    if !cone_segments.is_empty() {
+        LAST_LOCALIZED_BYTES.with(|b| {
+            let mut v = b.borrow_mut();
+            for s in &cone_segments {
+                let be: usize = s.backedge.iter().map(|&(a, x)| (x - a) as usize).sum();
+                let pb: usize = s.compare_pre.iter().map(|&(a, x)| (x - a) as usize).sum();
+                let cb: usize = s.compare.iter().map(|&(_, a, x)| (x - a) as usize).sum();
+                let rb: usize = s.replay.iter().map(|&(a, x)| (x - a) as usize).sum();
+                let len = (8 + be + pb + cb + rb).next_multiple_of(8);
+                v.push((s.state_off as isize, len));
+            }
+        });
+    }
     let localize_sets: Vec<HashSet<isize>> = if localize_armed() {
         let bl = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
         let rg = LOCALIZE_RANGES.with(|r| r.borrow().clone());
@@ -4893,7 +5117,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         );
     }
 
-    if chunks.len() == 1 && const_chunks == 0 {
+    if chunks.len() == 1 && const_chunks == 0 && cone_segments.is_empty() {
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n\
@@ -4929,14 +5153,222 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             }
             body.push_str("}\n");
         }
+        // Cone-gate guards: map each segment to its chunk-call range (chunk
+        // boundaries were forced at segment edges above) and emit its compare
+        // helper.  A segment whose edges did not land on chunk boundaries is
+        // left unguarded — safe, just unskippable.
+        let chunk_starts: Vec<usize> = {
+            let mut v = Vec::with_capacity(chunks.len() + 1);
+            let mut p = 0usize;
+            for c in &chunks {
+                v.push(p);
+                p += c.len();
+            }
+            v.push(p);
+            v
+        };
+        let cg_dbg = std::env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1");
+        let guards: Vec<(usize, usize, &crate::ir::opt::cone_gate::ConeSegment)> = cone_segments
+            .iter()
+            .filter_map(|s| {
+                let k1 = chunk_starts.iter().position(|&q| q == s.stmt_lo)?;
+                let k2 = chunk_starts.iter().position(|&q| q == s.stmt_hi)?;
+                (k1 < k2 && k1 >= const_chunks).then_some((k1, k2, s))
+            })
+            .collect();
+        for (gi, &(_, _, s)) in guards.iter().enumerate() {
+            let mut f = format!(
+                "static int cg_cmp_{gi}(const uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values) {{\n"
+            );
+            let be: usize = s.backedge.iter().map(|&(a, b)| (b - a) as usize).sum();
+            let pb: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
+            let pre_shadow_abs = s.state_off as usize + 8 + be;
+            let shadow_abs = s.state_off as usize + 8 + be + pb;
+            let mut acc = 0usize;
+            for &(a, b) in &s.compare_pre {
+                let l = (b - a) as usize;
+                f.push_str(&format!(
+                    "    if (__builtin_memcmp(comb_values + {a:#x}, comb_values + {sh:#x}, {l})) return 0;\n",
+                    sh = pre_shadow_abs + acc,
+                ));
+                acc += l;
+            }
+            let mut acc = 0usize;
+            for (ri, &(is_ff, a, b)) in s.compare.iter().enumerate() {
+                let l = (b - a) as usize;
+                let buf = if is_ff { "ff_values" } else { "comb_values" };
+                let stash = if cg_dbg {
+                    format!(
+                        "{{ comb_values[{st}] = {ri_b}; return 0; }}",
+                        st = s.state_off as usize + 3,
+                        ri_b = (ri % 255) + 1,
+                    )
+                } else {
+                    "return 0;".to_string()
+                };
+                f.push_str(&format!(
+                    "    if (__builtin_memcmp({buf} + {a:#x}, comb_values + {sh:#x}, {l})) {stash}\n",
+                    sh = shadow_abs + acc,
+                ));
+                acc += l;
+            }
+            f.push_str("    return 1;\n}\n\n");
+            body.push_str(&f);
+        }
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
         );
-        for i in const_chunks..chunks.len() {
+        // Emit-time debug (VERYL_CONE_GATE_DIAG=1 at emit): per-segment
+        // skip/run counters printed every ~1M evals.  Statics are fine for a
+        // debug build of the artifact.
+        if cg_dbg && !guards.is_empty() {
             body.push_str(&format!(
-                "    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n",
+                "    static unsigned long long cg_sk[{n}], cg_rn[{n}]; static unsigned long long cg_calls;\n\
+                 \x20   static const unsigned cg_stoff[{n}] = {{{offs}}};\n\
+                 \x20   uint8_t *cg_st[{n}]; for (int z = 0; z < {n}; z++) cg_st[z] = comb_values + cg_stoff[z];\n\
+                 \x20   if ((++cg_calls & 0x3fff) == 0) {{\n\
+                 \x20     __builtin_printf(\"[cg] evals=%llu\", cg_calls);\n\
+                 \x20     for (int z = 0; z < {n}; z++) __builtin_printf(\" %llu/%llu:c%u:f%u\", cg_sk[z], cg_rn[z], (unsigned)cg_st[z][1], (unsigned)cg_st[z][3]);\n\
+                 \x20     __builtin_printf(\"\\n\");\n\
+                 \x20   }}\n",
+                n = guards.len(),
+                offs = guards
+                    .iter()
+                    .map(|&(_, _, s)| format!("{:#x}", s.state_off))
+                    .collect::<Vec<_>>()
+                    .join(", "),
             ));
+        }
+        let mut gi = 0usize;
+        let mut i = const_chunks;
+        while i < chunks.len() {
+            if gi < guards.len() && guards[gi].0 == i {
+                let (k1, k2, s) = guards[gi];
+                let st = s.state_off as usize;
+                let be: usize = s.backedge.iter().map(|&(a, b)| (b - a) as usize).sum();
+                let pb: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
+                let cb: usize = s.compare.iter().map(|&(_, a, b)| (b - a) as usize).sum();
+                let prerun_abs = st + 8;
+                let pre_shadow_abs = st + 8 + be;
+                let shadow_abs = st + 8 + be + pb;
+                let replay_abs = st + 8 + be + pb + cb;
+                // After auto-off the shadows are never consulted again, so
+                // the whole maintenance path (pre-run snapshots, convergence
+                // check, shadow/replay refresh) is skipped too — an off
+                // segment costs exactly the plain chunk calls, mirroring the
+                // Rust-side `before_run`/`refresh` early returns.
+                body.push_str(&format!(
+                    "    {{ uint8_t *cgst = comb_values + {st:#x};\n\
+                     \x20     int cg_run = 1;\n\
+                     \x20     int cg_off = cgst[2];\n\
+                     \x20     if (!cg_off && cgst[0] && cgst[1]) {{\n\
+                     \x20       if (cg_cmp_{gi}(ff_values, comb_values)) {{\n\
+                     \x20         cg_run = 0;\n\
+                     \x20         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
+                     \x20           cg_stk = cg_stk > {decay}u ? cg_stk - {decay}u : 0;\n\
+                     \x20           __builtin_memcpy(cgst + 4, &cg_stk, 4); }}\n",
+                    decay = s.off_decay,
+                ));
+                if cg_dbg {
+                    body.push_str(&format!("          cg_sk[{gi}]++;\n"));
+                }
+                let mut acc = 0usize;
+                for &(a, b) in &s.replay {
+                    let l = (b - a) as usize;
+                    body.push_str(&format!(
+                        "          __builtin_memcpy(comb_values + {a:#x}, comb_values + {src:#x}, {l});\n",
+                        src = replay_abs + acc,
+                    ));
+                    acc += l;
+                }
+                body.push_str(
+                    "        } else {\n\
+                     \x20         uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
+                     \x20         if (++cg_stk >= 1024u) cgst[2] = 1;\n\
+                     \x20         __builtin_memcpy(cgst + 4, &cg_stk, 4);\n\
+                     \x20       }\n\
+                     \x20     }\n\
+                     \x20     if (cg_run) {\n\
+                     \x20       if (!cg_off) {\n",
+                );
+                let mut acc = 0usize;
+                for &(a, b) in &s.backedge {
+                    let l = (b - a) as usize;
+                    body.push_str(&format!(
+                        "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
+                        dst = prerun_abs + acc,
+                    ));
+                    acc += l;
+                }
+                let mut acc = 0usize;
+                for &(a, b) in &s.compare_pre {
+                    let l = (b - a) as usize;
+                    body.push_str(&format!(
+                        "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
+                        dst = pre_shadow_abs + acc,
+                    ));
+                    acc += l;
+                }
+                body.push_str("        }\n");
+                for k in k1..k2 {
+                    body.push_str(&format!(
+                        "        veryl_aot_chunk_{k}(ff_values, comb_values, write_log);\n",
+                    ));
+                }
+                body.push_str("        if (!cg_off) {\n        { int cg_conv = 1;\n");
+                let mut acc = 0usize;
+                for (ri, &(a, b)) in s.backedge.iter().enumerate() {
+                    let l = (b - a) as usize;
+                    if cg_dbg {
+                        body.push_str(&format!(
+                            "          if (cg_conv && __builtin_memcmp(comb_values + {pre:#x}, comb_values + {a:#x}, {l})) {{ cg_conv = 0; cgst[3] = {ri_b}; \
+                             if ((cg_calls & 0x3fff) == 1) __builtin_printf(\"[cgconv] seg_state={st:#x} range={ri} off={a:#x} pre=%016llx post=%016llx\\n\", *(unsigned long long*)(comb_values + {pre:#x}), *(unsigned long long*)(comb_values + {a:#x})); }}\n",
+                            pre = prerun_abs + acc,
+                            ri_b = (ri % 255) + 1,
+                            st = s.state_off,
+                            ri = ri,
+                        ));
+                    } else {
+                        body.push_str(&format!(
+                            "          cg_conv = cg_conv && !__builtin_memcmp(comb_values + {pre:#x}, comb_values + {a:#x}, {l});\n",
+                            pre = prerun_abs + acc,
+                        ));
+                    }
+                    acc += l;
+                }
+                body.push_str("          cgst[1] = (uint8_t)cg_conv; }\n");
+                let mut acc = 0usize;
+                for &(is_ff, a, b) in &s.compare {
+                    let l = (b - a) as usize;
+                    let buf = if is_ff { "ff_values" } else { "comb_values" };
+                    body.push_str(&format!(
+                        "        __builtin_memcpy(comb_values + {dst:#x}, {buf} + {a:#x}, {l});\n",
+                        dst = shadow_abs + acc,
+                    ));
+                    acc += l;
+                }
+                let mut acc = 0usize;
+                for &(a, b) in &s.replay {
+                    let l = (b - a) as usize;
+                    body.push_str(&format!(
+                        "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
+                        dst = replay_abs + acc,
+                    ));
+                    acc += l;
+                }
+                if cg_dbg {
+                    body.push_str(&format!("        cg_rn[{gi}]++;\n"));
+                }
+                body.push_str("        cgst[0] = 1;\n        }\n      }\n    }\n");
+                gi += 1;
+                i = k2;
+            } else {
+                body.push_str(&format!(
+                    "    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n",
+                ));
+                i += 1;
+            }
         }
         body.push_str("}\n");
     }
@@ -9336,6 +9768,148 @@ mod tests {
     }
 
     #[test]
+    fn emit_wide_select_reads_above_128_bits() {
+        // Reads whose RESULT exceeds 128 bits, from a 576-bit source: a
+        // static select spanning words 2..5, one whose top window has no
+        // successor word to funnel in, and a dynamic 192-bit element.
+        if !cc_available() {
+            eprintln!("emit_wide_select_reads_above_128_bits: cc unavailable, skipping");
+            return;
+        }
+        use crate::ir::ProtoDynamicBitSelect;
+        // Reference extraction, bit by bit: independent of the shift the
+        // emitted helper performs.
+        fn slice_bits(src: &[u64; 9], lo: usize, nbits: usize) -> Vec<u8> {
+            let mut out = vec![0u8; nbits.div_ceil(64) * 8];
+            for i in 0..nbits {
+                let bit = lo + i;
+                if bit < 576 && (src[bit / 64] >> (bit % 64)) & 1 == 1 {
+                    out[i / 8] |= 1 << (i % 8);
+                }
+            }
+            out
+        }
+        let sel_read = |hi: usize, lo: usize| ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0),
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            width: hi - lo + 1,
+            var_full_width: 576,
+            expr_context: ctx(hi - lo + 1, false),
+        };
+        let dyn_read = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0),
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(var_expr(VarOffset::Comb(72), 32)),
+                elem_width: 192,
+                window: 192,
+                num_elements: 3,
+            }),
+            width: 192,
+            var_full_width: 576,
+            expr_context: ctx(192, false),
+        };
+        let mk_assign = |dst: isize, dw: usize, e: ProtoExpression| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(dst),
+                dst_width: dw,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: e,
+                dst_ff_current_offset: 0,
+                token: dummy_token(),
+            })
+        };
+        // Two windowed reads as operands of a wider op: each is promoted from
+        // its own 192-bit window, not from the 576-bit source.
+        let xor256 = ProtoExpression::Binary {
+            x: Box::new(sel_read(330, 139)),
+            op: Op::BitXor,
+            y: Box::new(sel_read(521, 330)),
+            width: 256,
+            expr_context: ctx(256, false),
+        };
+        // src576 at comb[0..72], index at comb[72..76], the results at
+        // comb[80..104], [104..128], [128..152], [152..176] and [176..208].
+        let src = emit_function(&[
+            mk_assign(80, 192, sel_read(330, 139)),
+            mk_assign(104, 160, sel_read(559, 400)),
+            mk_assign(128, 192, dyn_read),
+            // Reaching past the source reads zeros, not its neighbours.
+            mk_assign(152, 192, sel_read(640, 449)),
+            mk_assign(176, 256, xor256),
+        ])
+        .expect(">128-bit select reads must stay AOT-covered");
+        assert!(
+            src.contains("vw_lshr_win((uint8_t*)_w"),
+            "the read is windowed to its result: {src}"
+        );
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_wsr_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "emit_wide_select_reads_above_128_bits")
+        else {
+            return;
+        };
+        let words: [u64; 9] = [
+            0x0123_4567_89AB_CDEF,
+            0xFEDC_BA98_7654_3210,
+            0xAAAA_5555_CCCC_3333,
+            0xDEAD_BEEF_0BAD_F00D,
+            0x1122_3344_5566_7788,
+            0x99AA_BBCC_DDEE_FF00,
+            0xF00D_FACE_CAFE_BEEF,
+            0x0102_0304_0506_0708,
+            0x8090_A0B0_C0D0_E0F0,
+        ];
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 208];
+        for (i, w) in words.iter().enumerate() {
+            comb[i * 8..i * 8 + 8].copy_from_slice(&w.to_le_bytes());
+        }
+        let mut log = vec![0u64; 16];
+        // Index 3 is out of range and clamps to the last element.
+        for (idx, elem) in [(0u32, 0usize), (1, 1), (2, 2), (3, 2)] {
+            comb[72..76].copy_from_slice(&idx.to_le_bytes());
+            unsafe {
+                (module.func)(
+                    ff.as_mut_ptr(),
+                    comb.as_mut_ptr(),
+                    log.as_mut_ptr() as *mut u8,
+                    0,
+                );
+            }
+            assert_eq!(
+                &comb[80..104],
+                &slice_bits(&words, 139, 192)[..],
+                "[330:139]"
+            );
+            assert_eq!(
+                &comb[104..128],
+                &slice_bits(&words, 400, 160)[..],
+                "[559:400]"
+            );
+            assert_eq!(
+                &comb[128..152],
+                &slice_bits(&words, elem * 192, 192)[..],
+                "element {idx}"
+            );
+            assert_eq!(
+                &comb[152..176],
+                &slice_bits(&words, 449, 192)[..],
+                "[640:449]"
+            );
+            let (x, y) = (slice_bits(&words, 139, 192), slice_bits(&words, 330, 192));
+            let mut want = [0u8; 32];
+            for (i, w) in want.iter_mut().enumerate().take(24) {
+                *w = x[i] ^ y[i];
+            }
+            assert_eq!(&comb[176..208], &want[..], "[330:139] ^ [521:330]");
+        }
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn emit_expr_concatenation_64_bit_slot_drops_the_accumulator() {
         // Regression: emitted `((0ULL) << 64) | elem`, which gcc warns on
         // (-Wshift-count-overflow) and x86 evaluates as `acc | elem`.
@@ -11411,7 +11985,7 @@ mod tests {
             cassign(0x0, 32, const_expr(7, 32)),
             cassign(0x8, 32, var_expr(VarOffset::Comb(0x0), 32)),
         ];
-        let (out, n) = const_cone_partition(&stmts, &HashSet::default()).unwrap();
+        let (out, n, _) = const_cone_partition(&stmts, &HashSet::default()).unwrap();
         assert_eq!(n, 2);
         assert!(matches!(&out[0], ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x0)));
         assert!(matches!(&out[1], ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x8)));
@@ -11428,7 +12002,7 @@ mod tests {
             cassign(0x8, 32, var_expr(VarOffset::Comb(0x0), 32)),
         ];
         assert_eq!(
-            const_cone_partition(&stmts, &HashSet::default()).map(|(_, n)| n),
+            const_cone_partition(&stmts, &HashSet::default()).map(|(_, n, _)| n),
             Some(2)
         );
         let unsafe_comb = HashSet::from_iter([0x0isize]);
@@ -11445,7 +12019,7 @@ mod tests {
             cassign(0x8, 32, var_expr(VarOffset::Comb(0x0), 32)),
             cassign(0x0, 32, const_expr(7, 32)),
         ];
-        let (out, n) = const_cone_partition(&stmts, &HashSet::default()).unwrap();
+        let (out, n, _) = const_cone_partition(&stmts, &HashSet::default()).unwrap();
         assert_eq!(n, 1);
         assert!(matches!(&out[0], ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x0)));
     }
@@ -11468,7 +12042,7 @@ mod tests {
             cassign(0x20, 32, const_expr(7, 32)),
         ];
         assert_eq!(
-            const_cone_partition(&past_range, &HashSet::default()).map(|(_, n)| n),
+            const_cone_partition(&past_range, &HashSet::default()).map(|(_, n, _)| n),
             Some(1)
         );
     }

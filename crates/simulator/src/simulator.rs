@@ -46,6 +46,9 @@ pub struct Simulator {
     pub mask_cache: MaskCache,
     comb_dirty: bool,
     pub profile: SimProfile,
+    /// Which testbench statements are known not to invalidate the comb.
+    /// Empty (the default) settles after every testbench statement.
+    pub(crate) tb_dirty: crate::tb_dirty::TbDirtyFilter,
     last_event: Option<Event>,
     last_event_stmts: *const Vec<Statement>,
     /// Whole-event AOT-C handle for `last_event`, cached alongside
@@ -80,6 +83,12 @@ pub struct Simulator {
     /// Waveform handles for component trace variables:
     /// (handle, component index, trace variable index).
     trace_dump_vars: Vec<(crate::wave_dumper::VarHandle, usize, usize)>,
+    /// `(clock event, reset event)` installed by `step_in_reset`: components
+    /// keep their own reset hook while the RTL takes an ordinary clock edge.
+    component_event_override: Option<(Event, Event)>,
+    /// The async-reset assertion edge to evaluate alongside this step's clock
+    /// event, taken once.  See `step_in_reset`.
+    pending_assertion_edge: Option<Event>,
 }
 
 struct WatchVar {
@@ -142,6 +151,7 @@ impl Simulator {
             mask_cache: MaskCache::default(),
             comb_dirty: true,
             profile: Default::default(),
+            tb_dirty: Default::default(),
             last_event: None,
             last_event_stmts: std::ptr::null(),
             last_whole_event: None,
@@ -158,7 +168,25 @@ impl Simulator {
             components: Vec::new(),
             components_pending,
             trace_dump_vars: Vec::new(),
+            component_event_override: None,
+            pending_assertion_edge: None,
         };
+
+        // Reset nets start DEASSERTED: zeroed storage reads as ASSERTED on an
+        // active-low reset and would hold every `if_reset` block from time 0.
+        // A driven net is overwritten by the first comb settle, so this decides
+        // only the nets an external driver owns.
+        let reset_ids: Vec<VarId> = ret
+            .ir
+            .module_variables
+            .variables
+            .iter()
+            .filter(|(_, x)| x.r#type.is_reset())
+            .map(|(id, _)| *id)
+            .collect();
+        for id in reset_ids {
+            ret.set_reset_level(&id, false);
+        }
 
         if env::var("VERYL_DERIVED_CLOCK_DUMP").as_deref() == Ok("1") {
             fn find_var_by_ptr(
@@ -562,7 +590,59 @@ impl Simulator {
 
     pub fn get_reset(&self, port: &str) -> Option<Event> {
         let port = VarPath::from_str(port).unwrap();
-        self.ir.ports.get(&port).map(|id| Event::Reset(*id))
+        let id = self.ir.ports.get(&port)?;
+        let var = self.ir.module_variables.variables.get(id)?;
+        var.r#type.is_reset().then_some(Event::Reset(*id))
+    }
+
+    /// Drives a reset net to its asserted or deasserted level — all it takes
+    /// to put the design in or out of reset, since `if_reset` samples the
+    /// level at the next clock edge.
+    pub fn set_reset_level(&mut self, id: &VarId, asserted: bool) {
+        let high = asserted != self.ir.reset_active_low(id);
+        self.set_var_by_id(id, Value::new(high as u64, 1, false));
+    }
+
+    /// One clock edge with `reset` asserted around it, for driving a design
+    /// directly.  A testbench instead holds the level across the whole
+    /// assertion window and calls `step_in_reset` per edge.
+    pub fn step_reset(&mut self, clock: &Event, reset: &Event) {
+        let id = reset.var_id();
+        if let Some(ref id) = id {
+            self.set_reset_level(id, true);
+        }
+        self.step_in_reset(clock, reset, true);
+        if let Some(ref id) = id {
+            self.set_reset_level(id, false);
+        }
+    }
+
+    /// One clock edge taken while `reset` is asserted by the caller.
+    ///
+    /// `assertion_edge` also fires the reset's own event in the same step,
+    /// which is what reaches a block whose clock is not running (an async
+    /// reset asserting into a gated-off domain).  Components have a reset
+    /// hook of their own, so they are staged and fired with the reset event.
+    pub fn step_in_reset(&mut self, clock: &Event, reset: &Event, assertion_edge: bool) {
+        if assertion_edge {
+            self.pending_assertion_edge = Some(reset.clone());
+        }
+        if self.components.is_empty() {
+            self.step(clock);
+        } else {
+            self.component_event_override = Some((clock.clone(), reset.clone()));
+            self.step(clock);
+            self.component_event_override = None;
+        }
+        self.pending_assertion_edge = None;
+    }
+
+    /// Event whose component hooks `event` fires; see `step_in_reset`.
+    fn component_event<'a>(&'a self, event: &'a Event) -> &'a Event {
+        match &self.component_event_override {
+            Some((from, to)) if from == event => to,
+            _ => event,
+        }
     }
 
     pub fn step(&mut self, event: &Event) {
@@ -635,6 +715,10 @@ impl Simulator {
             self.stage_components(event);
         }
         self.eval_event_stmts(event);
+        // The async-reset assertion edge, if this step carries one.
+        if let Some(reset) = self.pending_assertion_edge.take() {
+            self.eval_event_stmts(&reset);
+        }
         self.commit_event_log();
         if has_components {
             self.fire_components(event);
@@ -681,9 +765,10 @@ impl Simulator {
         if self.components.is_empty() {
             return;
         }
+        let event = self.component_event(event).clone();
         let mut components = std::mem::take(&mut self.components);
         for c in &mut components {
-            if c.listens_to(event) {
+            if c.listens_to(&event) {
                 c.stage_inputs(&mut self.mask_cache);
             }
         }
@@ -697,6 +782,8 @@ impl Simulator {
         if self.components.is_empty() {
             return;
         }
+        let event = self.component_event(event).clone();
+        let event = &event;
         let mut components = std::mem::take(&mut self.components);
         let mut wrote = false;
         for c in &mut components {
@@ -968,6 +1055,11 @@ impl Simulator {
             self.eval_event_stmts(&Event::Clock(vid));
             fired_mask[i] = true;
         }
+        // Rides the master event's commit so a domain whose clock is gated off
+        // still takes its reset values.
+        if let Some(reset) = self.pending_assertion_edge.take() {
+            self.eval_event_stmts(&reset);
+        }
         self.commit_event_log();
         self.fire_components(event);
         for &i in &pre_fire {
@@ -1185,7 +1277,23 @@ impl Simulator {
             cr_wide_count,
         );
 
-        if aot_bytes != cr_bytes {
+        // Backends may log different byte SETS for one committed effect: a
+        // full-width select RMW (Cranelift) re-logs untouched bytes with
+        // their old values, while a range-exact slice writer (AOT-C) logs
+        // only the slice.  Commit overlays entries onto existing storage, so
+        // compare the POST-COMMIT state rather than the logged sets.
+        let eff = |m: &HashMap<u32, u8>, off: u32| {
+            m.get(&off)
+                .copied()
+                .or_else(|| ff_snap.get(off as usize).copied())
+        };
+        let mut offs: BTreeSet<u32> = Default::default();
+        offs.extend(aot_bytes.keys());
+        offs.extend(cr_bytes.keys());
+        if offs
+            .iter()
+            .any(|&off| eff(&aot_bytes, off) != eff(&cr_bytes, off))
+        {
             eprintln!(
                 "[aot_event_validate] DIVERGENCE module={} event={:?}: committed-FF bytes differ (aot {} bytes, cranelift {} bytes)",
                 self.ir.name,
@@ -1193,12 +1301,9 @@ impl Simulator {
                 aot_bytes.len(),
                 cr_bytes.len(),
             );
-            let mut offs: BTreeSet<u32> = Default::default();
-            offs.extend(aot_bytes.keys());
-            offs.extend(cr_bytes.keys());
             for off in offs {
-                let a = aot_bytes.get(&off);
-                let c = cr_bytes.get(&off);
+                let a = eff(&aot_bytes, off);
+                let c = eff(&cr_bytes, off);
                 if a != c {
                     eprintln!("  byte off={off:#x}: aot={a:?} cranelift={c:?}");
                 }

@@ -124,6 +124,7 @@ impl ProtoStatements {
                         comb: comb_ptr as *const u8,
                         log_buf: std::ptr::null_mut(),
                         ff_delta: 0,
+                        outputs: None,
                     }));
                 }
             }
@@ -392,6 +393,10 @@ pub struct CompiledStmt {
     /// FF byte delta passed to the chunk (4th `FuncPtr` arg) so it records
     /// absolute write-log offsets. 0 unless this is a relocated cache reuse.
     pub ff_delta: isize,
+    /// Destination offsets the chunk writes, when the builder recorded them
+    /// (testbench-body chunks).  `tb_dirty` classifies the chunk as
+    /// comb-clean from these; `None` means unknown (conservatively dirty).
+    pub outputs: Option<Arc<Vec<VarOffset>>>,
 }
 
 #[derive(Clone)]
@@ -2122,12 +2127,18 @@ impl ProtoStatement {
                         (ff_values_ptr as *const u8).wrapping_offset(x.ff_delta_bytes);
                     let adjusted_comb =
                         (comb_values_ptr as *const u8).wrapping_offset(x.comb_delta_bytes);
+                    // The offsets are only valid clean-classification anchors
+                    // for an unrelocated block (deltas shift the storage the
+                    // offsets name).
+                    let outputs = (x.ff_delta_bytes == 0 && x.comb_delta_bytes == 0)
+                        .then(|| Arc::new(x.output_offsets.clone()));
                     Statement::Compiled(CompiledStmt {
                         artifact: Arc::clone(&x.artifact),
                         ff: adjusted_ff,
                         comb: adjusted_comb,
                         log_buf: std::ptr::null_mut(),
                         ff_delta: x.ff_delta_bytes,
+                        outputs,
                     })
                 }
                 ProtoStatement::For(x) => {

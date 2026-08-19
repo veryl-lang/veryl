@@ -516,6 +516,30 @@ pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestR
     }
 }
 
+/// What a run needs before its first cycle that the ELABORATED DESIGN alone
+/// fixes — build work that merely happens to be done here.  One call, so the
+/// boundary is a fact about the code and not about where a timer sits.
+fn derive_testbench(
+    sim: &mut Simulator,
+    module_name: &str,
+) -> Result<Vec<TestbenchStatement>, SimulatorError> {
+    let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+    let clock_periods = build_clock_periods(&sim.ir.event_statements);
+
+    let token = sim.ir.token;
+    let initial_stmts = sim
+        .ir
+        .event_statements
+        .get(&Event::Initial)
+        .ok_or_else(|| SimulatorError::no_initial_block(module_name, &token))?;
+
+    let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
+    // Statements that write only testbench-private state do not have to
+    // re-settle the design; see `tb_dirty`.
+    sim.tb_dirty = crate::tb_dirty::TbDirtyFilter::build(&sim.ir, &tb_stmts);
+    Ok(tb_stmts)
+}
+
 /// Run a native testbench from a simulator IR.
 ///
 /// `module_name` must be pre-resolved from `ir.name` on the main thread
@@ -536,6 +560,18 @@ pub fn run_native_testbench_capped(
     module_name: String,
     max_cycles: Option<u64>,
 ) -> Result<TestResult, SimulatorError> {
+    run_native_testbench_timed(ir, dump, module_name, max_cycles).map(|(r, _)| r)
+}
+
+/// Like [`run_native_testbench_capped`], and additionally reports how long
+/// [`derive_testbench`] took, for a caller that measures simulation and has to
+/// take that build work out of its span.
+pub fn run_native_testbench_timed(
+    ir: Ir,
+    dump: Option<WaveDumper>,
+    module_name: String,
+    max_cycles: Option<u64>,
+) -> Result<(TestResult, std::time::Duration), SimulatorError> {
     // The dump attaches after `init_components` so component trace
     // variables (registered during `create`) land in the waveform header.
     let mut sim = Simulator::new(ir, None);
@@ -544,22 +580,14 @@ pub fn run_native_testbench_capped(
     // errors.
     let seed = sim.ir.seed;
     if let Err(err) = sim.init_components(seed, &module_name) {
-        return Ok(TestResult::Fail(err.to_string()));
+        return Ok((TestResult::Fail(err.to_string()), std::time::Duration::ZERO));
     }
     if let Some(dump) = dump {
         sim.attach_dump(dump);
     }
-    let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
-    let clock_periods = build_clock_periods(&sim.ir.event_statements);
-
-    let token = sim.ir.token;
-    let initial_stmts = sim
-        .ir
-        .event_statements
-        .get(&Event::Initial)
-        .ok_or_else(|| SimulatorError::no_initial_block(&module_name, &token))?;
-
-    let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
+    let t_derive = std::time::Instant::now();
+    let tb_stmts = derive_testbench(&mut sim, &module_name)?;
+    let derive_el = t_derive.elapsed();
     let result = run_testbench(&mut sim, &tb_stmts);
 
     #[cfg(feature = "profile")]
@@ -613,7 +641,7 @@ pub fn run_native_testbench_capped(
     }
     sim.dump_event_diag();
 
-    Ok(result)
+    Ok((result, derive_el))
 }
 
 fn exec(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> ExecResult {
@@ -634,7 +662,11 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
         TestbenchStatement::Stmt(s) => {
             sim.ensure_comb_updated();
             let flow = s.eval_step(&mut sim.mask_cache);
-            sim.mark_comb_dirty();
+            // A statement that writes only testbench-private variables cannot
+            // change a comb input, so the next read does not need a settle.
+            if !sim.tb_dirty.is_clean(s) {
+                sim.mark_comb_dirty();
+            }
             if flow == ControlFlow::Break {
                 ExecResult::Break
             } else {
@@ -698,18 +730,20 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             high_time,
             low_time,
         } => {
-            // Step reset event for `duration` cycles.
-            // In this simulator, Event::Reset represents a clock edge
-            // with reset asserted (executes the if_reset branch of always_ff).
+            // Hold the net asserted and take `duration` ordinary clock edges:
+            // the rest of the design keeps clocking through the window, as it
+            // does in SystemVerilog, and a reset derived from that net reaches
+            // its own `if_reset` too.
             let has_dump = sim.dump.is_some();
-            if has_dump && let Some(id) = reset.var_id() {
-                sim.set_var_by_id(&id, Value::new(1, 1, false));
+            let reset_id = reset.var_id();
+            if let Some(id) = &reset_id {
+                sim.set_reset_level(id, true);
             }
-            for _ in 0..*duration {
+            for i in 0..*duration {
                 if has_dump && let Some(id) = clock.var_id() {
                     sim.set_var_by_id(&id, Value::new(1, 1, false));
                 }
-                sim.step(reset);
+                sim.step_in_reset(clock, reset, i == 0);
                 sim.time += high_time;
                 if has_dump {
                     if let Some(id) = clock.var_id() {
@@ -719,8 +753,8 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
                 }
                 sim.time += low_time;
             }
-            if has_dump && let Some(id) = reset.var_id() {
-                sim.set_var_by_id(&id, Value::new(0, 1, false));
+            if let Some(id) = &reset_id {
+                sim.set_reset_level(id, false);
             }
             ExecResult::Continue
         }

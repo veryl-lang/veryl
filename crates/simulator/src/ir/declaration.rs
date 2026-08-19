@@ -23,6 +23,74 @@ use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_parser::token_range::TokenRange;
 
+/// Read of an `always_ff` reset net, as the `if_reset` condition.  Built as a
+/// plain factor so port aliasing and selects are applied like any other read.
+fn build_reset_condition(
+    context: &mut Context,
+    reset: &air::FfReset,
+) -> Result<ProtoExpression, SimulatorError> {
+    let factor = air::Factor::Variable(
+        reset.id,
+        reset.index.clone(),
+        reset.select.clone(),
+        reset.comptime.clone(),
+    );
+    Conv::conv(context, &air::Expression::Term(Box::new(factor)))
+}
+
+/// The declared type kind of a reset net.
+fn reset_kind(context: &mut Context, id: air::VarId) -> Option<air::TypeKind> {
+    context
+        .scope()
+        .analyzer_context
+        .variables
+        .get(&id)
+        .map(|x| x.r#type.kind.clone())
+}
+
+/// `(active low, synchronous)` a polarity-agnostic `reset` net takes from the
+/// instance ports it is wired to.
+///
+/// Those ports were lowered against their own declarations, so a block reading
+/// the same net has to match them or the two ends of one wire run at opposite
+/// polarities.  A port of THIS module is excluded: the emitted SystemVerilog
+/// resolves it from `reset_type`, and so must the simulator.
+fn inst_declared_reset_kind(context: &mut Context, id: air::VarId) -> Option<(bool, bool)> {
+    let scope = context.scope();
+    let is_port = scope
+        .analyzer_context
+        .variables
+        .get(&id)
+        .is_some_and(|v| scope.analyzer_context.port_types.contains_key(&v.path));
+    if is_port {
+        return None;
+    }
+    scope.inst_reset_kind.get(&id).copied().flatten()
+}
+
+/// True when the reset net asserts LOW.
+fn reset_active_low(context: &mut Context, id: air::VarId) -> bool {
+    match reset_kind(context, id) {
+        Some(air::TypeKind::ResetAsyncHigh) | Some(air::TypeKind::ResetSyncHigh) => false,
+        Some(air::TypeKind::ResetAsyncLow) | Some(air::TypeKind::ResetSyncLow) => true,
+        _ => inst_declared_reset_kind(context, id)
+            .map(|(active_low, _)| active_low)
+            .unwrap_or(!context.config.abstract_reset_active_high),
+    }
+}
+
+/// True when the reset asserts as an event of its own rather than being
+/// sampled at a clock edge.
+fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
+    match reset_kind(context, id) {
+        Some(air::TypeKind::ResetAsyncHigh) | Some(air::TypeKind::ResetAsyncLow) => true,
+        Some(air::TypeKind::ResetSyncHigh) | Some(air::TypeKind::ResetSyncLow) => false,
+        _ => inst_declared_reset_kind(context, id)
+            .map(|(_, sync)| !sync)
+            .unwrap_or(!context.config.abstract_reset_sync),
+    }
+}
+
 /// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
 ///
 /// Dependency edges come in two classes:
@@ -715,6 +783,18 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 })
             }
             air::Declaration::Ff(x) => {
+                // Converted before the body so statements its own conversion
+                // defers (an inlined function inside an index) stay separable
+                // from the body's.
+                let reset_cond = match &x.reset {
+                    Some(reset) => {
+                        let cond = build_reset_condition(context, reset)?;
+                        let pending = std::mem::take(&mut context.pending_statements);
+                        Some((cond, pending))
+                    }
+                    None => None,
+                };
+
                 let mut statements = vec![];
                 for stmt in &x.statements {
                     let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
@@ -725,15 +805,41 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 let mut event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
 
                 if let Some(reset) = &x.reset {
-                    let reset_event = Event::Reset(reset.id);
+                    let (cond, mut clock_stmts) = reset_cond.unwrap();
                     let head = statements.remove(0);
                     let (mut true_side, mut false_side) = head.split_if_reset().unwrap();
                     // Statements after `if_reset` run on both reset and clock
                     // edges, so append to both branches instead of dropping them.
                     true_side.extend(statements.iter().cloned());
                     false_side.extend(statements);
-                    event_statements.insert(reset_event, true_side);
-                    event_statements.insert(clock_event, false_side);
+
+                    // The `negedge rst_n` arm of the sensitivity list: an async
+                    // reset must also reach a block whose clock is stopped, and
+                    // no clock-edge test can express that.  Reaching a block
+                    // through both arms in one step runs its reset branch twice,
+                    // as it does in SystemVerilog.  A sync reset has no such arm.
+                    if reset_is_async(context, reset.id) {
+                        event_statements.insert(Event::Reset(reset.id), true_side.clone());
+                    }
+
+                    // The `if (rst)` of the emitted body: a reset produced by
+                    // `assign`, by a cast, or by another `always_ff` has no
+                    // assertion event and is reached only this way.
+                    //
+                    // Polarity rides in the branch ORDER so the condition stays
+                    // a bare 1-bit read: active-low takes the clock branch when
+                    // the net reads 1.
+                    let (true_side, false_side) = if reset_active_low(context, reset.id) {
+                        (false_side, true_side)
+                    } else {
+                        (true_side, false_side)
+                    };
+                    clock_stmts.push(ProtoStatement::If(crate::ir::ProtoIfStatement {
+                        cond: Some(cond),
+                        true_side,
+                        false_side,
+                    }));
+                    event_statements.insert(clock_event, clock_stmts);
                 } else {
                     event_statements.insert(clock_event, statements);
                 }
@@ -1139,6 +1245,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 variable_meta: child_variable_meta.clone(),
                 analyzer_context: child_analyzer_context,
                 ff_table: child_ff_table.clone(),
+                inst_reset_kind: crate::ir::module::collect_inst_reset_kinds(
+                    &child_module.declarations,
+                ),
                 func_offset_index: None,
             };
             context.scope_contexts.push(child_scope);
@@ -1577,10 +1686,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // here, where the owner scope closes: VarIds are per-module-scope,
         // so a nested id can numerically equal an ancestor's input-port
         // id, and the event remap at that boundary would hijack the key
-        // onto an unrelated clock.  Reset-typed internal vars get the
-        // same re-key for `Event::Reset`, but no schedule candidate —
-        // there is no derived-reset edge detection, so a re-keyed reset
-        // event simply never fires.
+        // onto an unrelated clock.  A reset-typed internal var gets the
+        // same re-key, and no schedule candidate: nothing generates an
+        // assertion edge for a reset a module produces itself, so its
+        // `Event::Reset` never fires — the clock-edge level test in
+        // `Event::Clock` is what serves those blocks.
         let child_port_var_set: HashSet<air::VarId> =
             child_module.ports.values().copied().collect();
         for (vid, var) in &child_module.variables {

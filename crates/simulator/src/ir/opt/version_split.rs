@@ -22,10 +22,10 @@
 //! here is applied to both sides and is therefore invisible to it.  Changes
 //! to this pass must be gated on golden SystemVerilog co-simulation.
 
-use crate::ir::Value;
 use crate::ir::expression::{ExpressionContext, ProtoExpression};
 use crate::ir::statement::{ProtoAssignStatement, ProtoIfStatement, ProtoStatement};
 use crate::ir::variable::VarOffset;
+use crate::ir::{Op, Value};
 use crate::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use veryl_parser::token_range::TokenRange;
@@ -58,13 +58,15 @@ pub struct RunStats {
     /// unrolled static for-loop), whose abort-the-rest control flow the
     /// write-position fold cannot model.
     pub skip_break: usize,
+    /// Chains replaced by a table lookup.
+    pub lut_vars: usize,
 }
 
 type Counter = (&'static str, fn(&RunStats) -> usize);
 
 /// Report order.  Pairing each label with its accessor here is what keeps a
 /// counter from being reported under another one's name.
-const COUNTERS: [Counter; 11] = [
+const COUNTERS: [Counter; 12] = [
     ("blocks", |s| s.blocks),
     ("fused_vars", |s| s.fused_vars),
     ("fused_writes", |s| s.fused_writes),
@@ -76,6 +78,7 @@ const COUNTERS: [Counter; 11] = [
     ("skip.fold", |s| s.skip_fold),
     ("skip.budget", |s| s.skip_budget),
     ("skip.break", |s| s.skip_break),
+    ("lut_vars", |s| s.lut_vars),
 ];
 
 /// Process-wide totals: the pass runs per always_comb during conv (including
@@ -478,6 +481,24 @@ fn split_block(
         let folded = fold_var(body, &writer_stmts, dst, width, alloc, evs[0].token);
         match folded {
             Some((temps, expr)) => {
+                // The fold's rename temps stay: a surviving leaf expression
+                // may read a snapshot; unreferenced ones are dead stores.
+                let (temps, expr) = if lut_enabled() {
+                    match try_lut_compress(&expr, width, alloc, evs[0].token)
+                        .filter(|_| lut_budget_ok())
+                    {
+                        Some((lut_temps, lut_expr)) => {
+                            stats.lut_vars += 1;
+                            lut_diag(&format!("compressed dst={dst:#x} width={width}"));
+                            let mut t = temps;
+                            t.extend(lut_temps);
+                            (t, lut_expr)
+                        }
+                        None => (temps, expr),
+                    }
+                } else {
+                    (temps, expr)
+                };
                 let cap = max_fused_nodes();
                 if cap != 0 {
                     let mut nodes = expr_nodes_capped(&expr, cap);
@@ -925,6 +946,417 @@ fn fold_var(
     }
     let expr = map.to_expr(width)?;
     Some((temps, expr))
+}
+
+// ---------------------------------------------------------------------------
+// Selector-table compression
+// ---------------------------------------------------------------------------
+//
+// An instruction decoder writes each of its outputs from ONE priority chain
+// over a shared narrow selector (`casez ({inst[31:26], inst[14:12]})` …), and
+// the per-variable fold above replicates the WHOLE chain of arm conditions
+// into every output's RHS — hundreds of compares re-evaluated per output per
+// settle.  When every arm condition is a masked equality on one common
+// selector expression, the chain IS a function of the selector alone:
+// evaluate it per selector value at build time and replace the RHS with a
+// table lookup (constant words + shift).
+
+fn lut_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_VSPLIT_LUT").as_deref() != Ok("0"))
+}
+
+/// Bisection knob: stop compressing after N chains.
+fn lut_budget_ok() -> bool {
+    static MAX: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    static USED: AtomicUsize = AtomicUsize::new(0);
+    match MAX.get_or_init(|| {
+        std::env::var("VERYL_VSPLIT_LUT_MAX")
+            .ok()
+            .and_then(|s| s.parse().ok())
+    }) {
+        None => true,
+        Some(n) => USED.fetch_add(1, Relaxed) < *n,
+    }
+}
+
+/// Table size cap in bits: at most 64 constant 64-bit words materialized
+/// as a balanced mux.
+const LUT_MAX_TABLE_BITS: usize = 4096;
+/// Chains shorter than this stay as compares — the win is not worth churn.
+const LUT_MIN_ARMS: usize = 8;
+/// Because the table stores an INDEX, a handful of non-constant leaves (an
+/// `!inst[25]` among hundreds of constant arms) still compresses.  Every
+/// leaf is then evaluated unconditionally, so each must stay small.
+const LUT_MAX_LEAVES: usize = 8;
+/// Emit-weighted size cap per non-constant leaf.
+const LUT_MAX_LEAF_NODES: usize = 16;
+
+fn ctx_of(width: usize) -> ExpressionContext {
+    ExpressionContext {
+        width,
+        signed: false,
+    }
+}
+
+fn lut_const_u64(e: &ProtoExpression) -> Option<u64> {
+    if let ProtoExpression::Value {
+        value: Value::U64(v),
+        ..
+    } = e
+        && v.mask_xz == 0
+    {
+        Some(v.payload)
+    } else {
+        None
+    }
+}
+
+/// Match a chain condition against `sel == k`, `(sel & m) == k`, or the
+/// wildcard forms (a `==?` constant's mask_xz bits are don't-cares).
+/// Returns the selector expression with the effective mask and value.
+fn lut_cond(e: &ProtoExpression) -> Option<(&ProtoExpression, u64, u64)> {
+    use ProtoExpression as PE;
+    let PE::Binary { x, op, y, .. } = e else {
+        return None;
+    };
+    let wild = match op {
+        Op::Eq => false,
+        Op::EqWildcard => true,
+        _ => return None,
+    };
+    let PE::Value {
+        value: Value::U64(k),
+        ..
+    } = y.as_ref()
+    else {
+        return None;
+    };
+    if k.signed || (k.mask_xz != 0 && !wild) {
+        return None;
+    }
+    let kw = k.width.min(64);
+    let width_mask = if kw >= 64 { !0u64 } else { (1u64 << kw) - 1 };
+    let mut mask = width_mask & !k.mask_xz;
+    let sel = match x.as_ref() {
+        PE::Binary {
+            x: ax,
+            op: Op::BitAnd,
+            y: ay,
+            ..
+        } => {
+            let m = lut_const_u64(ay)?;
+            mask &= m;
+            ax.as_ref()
+        }
+        other => other,
+    };
+    // The compare must see the selector bits unmodified: a selector wider
+    // than the compare would truncate, a narrower one zero-extends (fine).
+    if sel_width(sel)? > k.width as usize {
+        return None;
+    }
+    Some((sel, mask, k.payload & mask))
+}
+
+fn sel_width(e: &ProtoExpression) -> Option<usize> {
+    use ProtoExpression as PE;
+    Some(match e {
+        PE::Variable { width, .. }
+        | PE::Value { width, .. }
+        | PE::Unary { width, .. }
+        | PE::Binary { width, .. }
+        | PE::Concatenation { width, .. }
+        | PE::Ternary { width, .. }
+        | PE::DynamicVariable { width, .. } => *width,
+        PE::HierVariable(_) => return None,
+    })
+}
+
+/// A folded priority chain `c1 ? l1 : c2 ? l2 : … : ldef` reduced to
+/// `(selector, (mask, value, leaf index) per arm, default leaf, leaves)`.
+/// Arm values are deduplicated into the leaf list, so the arms carry indices
+/// rather than the values themselves.
+type LutChain<'a> = (
+    &'a ProtoExpression,
+    Vec<(u64, u64, usize)>,
+    usize,
+    Vec<&'a ProtoExpression>,
+);
+
+fn lut_chain<'a>(mut e: &'a ProtoExpression, width: usize) -> Option<LutChain<'a>> {
+    use ProtoExpression as PE;
+    // A one-element concatenation wraps a chain without changing it.
+    while let PE::Concatenation { elements, .. } = e {
+        let [(inner, 1, _)] = elements.as_slice() else {
+            return None;
+        };
+        e = inner.as_ref();
+    }
+    if width > 64 || !width.is_power_of_two() {
+        return None;
+    }
+    let mut sel: Option<(&ProtoExpression, String)> = None;
+    let mut arms: Vec<(u64, u64, usize)> = Vec::new();
+    let mut leaves: Vec<&'a ProtoExpression> = Vec::new();
+    let mut leaf_keys: Vec<String> = Vec::new();
+    let leaf_of = |leaves: &mut Vec<&'a ProtoExpression>,
+                   keys: &mut Vec<String>,
+                   e: &'a ProtoExpression|
+     -> Option<usize> {
+        let key = format!("{e:?}");
+        if let Some(i) = keys.iter().position(|k| *k == key) {
+            return Some(i);
+        }
+        if leaves.len() >= LUT_MAX_LEAVES {
+            lut_diag(&format!("too many leaves: {key:.200}"));
+            return None;
+        }
+        if lut_const_u64(e).is_none()
+            && expr_nodes_capped(e, LUT_MAX_LEAF_NODES) > LUT_MAX_LEAF_NODES
+        {
+            lut_diag(&format!("big leaf: {key:.200}"));
+            return None;
+        }
+        leaves.push(e);
+        keys.push(key);
+        Some(leaves.len() - 1)
+    };
+    loop {
+        match e {
+            PE::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                let Some((s, m, k)) = lut_cond(cond) else {
+                    lut_diag(&format!(
+                        "cond mismatch after {} arms: {:.200}",
+                        arms.len(),
+                        format!("{cond:?}")
+                    ));
+                    return None;
+                };
+                let li = leaf_of(&mut leaves, &mut leaf_keys, true_expr)?;
+                match &sel {
+                    None => sel = Some((s, format!("{s:?}"))),
+                    Some((_, d)) => {
+                        if format!("{s:?}") != *d {
+                            lut_diag(&format!(
+                                "selector change after {} arms: {:.200}",
+                                arms.len(),
+                                format!("{s:?}")
+                            ));
+                            return None;
+                        }
+                    }
+                }
+                arms.push((m, k, li));
+                e = false_expr;
+            }
+            _ => {
+                let def = leaf_of(&mut leaves, &mut leaf_keys, e)?;
+                let (sel, _) = sel?;
+                if arms.len() < LUT_MIN_ARMS {
+                    return None;
+                }
+                return Some((sel, arms, def, leaves));
+            }
+        }
+    }
+}
+
+/// Diagnostic: why a chain refused to compress.
+fn lut_diag(msg: &str) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var("VERYL_VSPLIT_LUT_DIAG").as_deref() == Ok("1")) {
+        eprintln!("[vsplit_lut] {msg}");
+    }
+}
+
+/// Try to replace a folded chain with a selector-table lookup, returning the
+/// rename temps to place ahead of the fused write and the new RHS.
+fn try_lut_compress(
+    expr: &ProtoExpression,
+    width: usize,
+    alloc: &mut dyn FnMut(usize) -> isize,
+    token: TokenRange,
+) -> Option<(Vec<ProtoAssignStatement>, ProtoExpression)> {
+    use ProtoExpression as PE;
+    let (sel, arms, def, leaves) = lut_chain(expr, width)?;
+    let selw = sel_width(sel)?;
+    // `VERYL_VSPLIT_LUT_DUMP=1`: dump every accepted chain's ingredients.
+    static DUMP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *DUMP.get_or_init(|| std::env::var("VERYL_VSPLIT_LUT_DUMP").as_deref() == Ok("1")) {
+        eprintln!(
+            "[lut_dump] width={width} selw={selw} arms={:x?}\n  sel={:.400}\n  def={def} leaves={:.600}",
+            arms,
+            format!("{sel:?}"),
+            format!("{leaves:?}"),
+        );
+    }
+    // The table stores leaf INDICES, so a lookup is followed by a leaf
+    // select.  A narrow all-constant chain instead stores the values
+    // themselves and drops the select.
+    let const_leaves: Option<Vec<u64>> = leaves.iter().map(|l| lut_const_u64(l)).collect();
+    let direct = const_leaves
+        .as_ref()
+        .filter(|vs| width <= 2 && vs.iter().all(|&v| v < (1 << width)))
+        .is_some();
+    let ew = if direct {
+        width
+    } else if leaves.len() <= 4 {
+        2
+    } else {
+        4
+    };
+    if selw == 0 || selw > 12 || (1usize << selw) * ew > LUT_MAX_TABLE_BITS {
+        return None;
+    }
+    // Bake the table: for each selector value, the FIRST matching arm wins.
+    let n = 1usize << selw;
+    let entries_per_word = 64 / ew;
+    let mut words = vec![0u64; n.div_ceil(entries_per_word)];
+    let emask = if ew >= 64 { !0u64 } else { (1u64 << ew) - 1 };
+    for s in 0..n {
+        let sv = s as u64;
+        let li = arms
+            .iter()
+            .find(|&&(m, k, _)| sv & m == k)
+            .map_or(def, |&(_, _, li)| li);
+        let entry = if direct {
+            const_leaves.as_ref().unwrap()[li]
+        } else {
+            li as u64
+        };
+        words[s / entries_per_word] |= (entry & emask) << ((s % entries_per_word) * ew);
+    }
+    // Materialize the selector.  Each output gets its OWN temp even when
+    // siblings share the selector expression: every fused assign lands at
+    // its variable's last-write position, and a temp shared across
+    // positions would be read before it is written by the earlier ones.
+    let mut temps: Vec<ProtoAssignStatement> = Vec::new();
+    let sel_off = {
+        let off = alloc(selw);
+        temps.push(ProtoAssignStatement {
+            dst: VarOffset::Comb(off),
+            dst_width: selw,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: sel.clone(),
+            dst_ff_current_offset: 0,
+            token,
+        });
+        off
+    };
+    let sel_var = |w: usize| PE::Variable {
+        var_offset: VarOffset::Comb(sel_off),
+        select: None,
+        dynamic_select: None,
+        width: w,
+        var_full_width: selw,
+        expr_context: ctx_of(w),
+    };
+    let val = |v: u64, w: usize| PE::Value {
+        value: Value::U64(veryl_analyzer::value::ValueU64 {
+            payload: v,
+            mask_xz: 0,
+            width: w as u32,
+            signed: false,
+        }),
+        width: w,
+        expr_context: ctx_of(w),
+    };
+    let bin = |x: PE, op: Op, y: PE, w: usize| PE::Binary {
+        x: Box::new(x),
+        op,
+        y: Box::new(y),
+        width: w,
+        expr_context: ctx_of(w),
+    };
+    // Balanced constant mux over the table words, indexed by the selector's
+    // upper bits.
+    fn word_mux(
+        words: &[u64],
+        lo: usize,
+        hi: usize,
+        idx: &dyn Fn(usize) -> ProtoExpression,
+        val: &dyn Fn(u64, usize) -> ProtoExpression,
+    ) -> ProtoExpression {
+        if hi - lo == 1 {
+            return val(words[lo], 64);
+        }
+        let mid = lo + (hi - lo) / 2;
+        ProtoExpression::Ternary {
+            cond: Box::new(idx(mid)),
+            true_expr: Box::new(word_mux(words, mid, hi, idx, val)),
+            false_expr: Box::new(word_mux(words, lo, mid, idx, val)),
+            width: 64,
+            expr_context: ctx_of(64),
+        }
+    }
+    let word = if words.len() == 1 {
+        val(words[0], 64)
+    } else {
+        // idx(mid) = (sel >> log2(entries_per_word)) >= mid
+        let epw_shift = entries_per_word.trailing_zeros() as u64;
+        let idx = |mid: usize| {
+            bin(
+                bin(sel_var(selw), Op::LogicShiftR, val(epw_shift, selw), selw),
+                Op::GreaterEq,
+                val(mid as u64, selw),
+                1,
+            )
+        };
+        word_mux(&words, 0, words.len(), &idx, &val)
+    };
+    // shift = (sel % entries_per_word) * ew, both powers of two.
+    let shift = if entries_per_word == 1 {
+        val(0, 6)
+    } else {
+        let within = bin(
+            sel_var(selw),
+            Op::BitAnd,
+            val((entries_per_word - 1) as u64, selw),
+            selw,
+        );
+        if ew == 1 {
+            within
+        } else {
+            bin(
+                within,
+                Op::LogicShiftL,
+                val(ew.trailing_zeros() as u64, selw),
+                12,
+            )
+        }
+    };
+    let entry = bin(
+        bin(word, Op::LogicShiftR, shift, 64),
+        Op::BitAnd,
+        val(emask, ew),
+        ew,
+    );
+    if direct {
+        return Some((temps, entry));
+    }
+    // Leaf select: `idx == n ? leaf_n : …`, the chain's default innermost.
+    let mut out = leaves[def].clone();
+    for (li, leaf) in leaves.iter().enumerate() {
+        if li == def {
+            continue;
+        }
+        out = PE::Ternary {
+            cond: Box::new(bin(entry.clone(), Op::Eq, val(li as u64, ew), 1)),
+            true_expr: Box::new((*leaf).clone()),
+            false_expr: Box::new(out),
+            width,
+            expr_context: ctx_of(width),
+        };
+    }
+    Some((temps, out))
 }
 
 /// Replace plain / statically-selected reads of `dst` with reads of the
