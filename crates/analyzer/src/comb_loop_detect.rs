@@ -15,8 +15,8 @@ mod ssa;
 #[cfg(test)]
 pub(crate) use procedure::{
     function_barrier_evaluation_count, function_evaluation_count,
-    function_result_region_probe_count, function_result_version_count,
-    reset_function_evaluation_count,
+    function_result_region_probe_count, function_result_version_count, module_context_entries,
+    reset_function_evaluation_count, reset_module_context_entries,
 };
 
 use region::{ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, var_reads};
@@ -915,12 +915,16 @@ fn build_module_graph(
 
     let mut graph: Graph<NodeKey, ()> = Graph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
+    let mut function_summaries = procedure::FunctionSummaries::new(module, &bit_part);
+    let mut procedure_context = procedure::ProcedureContext::new(module);
 
     for declaration in &module.declarations {
         let Declaration::Comb(comb) = declaration else {
             continue;
         };
-        for (source, destination) in procedure::analyze(module, &bit_part, &comb.statements) {
+        for (source, destination) in
+            procedure::analyze(&bit_part, &comb.statements, &mut procedure_context)
+        {
             if !is_module_scope_var(source.0, &module.variables)
                 || !is_module_scope_var(destination.0, &module.variables)
             {
@@ -947,6 +951,8 @@ fn build_module_graph(
                     &mut node_map,
                     &module.variables,
                     &mut ctx,
+                    &mut procedure_context,
+                    &mut function_summaries,
                 );
             }
             // SV black box: under-detect.
@@ -960,15 +966,17 @@ fn build_module_graph(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn add_inst_feedthrough_edges(
+fn add_inst_feedthrough_edges<'a>(
     inst: &InstDeclaration,
     child: &Module,
     summary: &ModuleCombSummary,
-    bit_part: &BitPartition,
+    bit_part: &'a BitPartition,
     graph: &mut Graph<NodeKey, ()>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
+    procedure_context: &mut procedure::ProcedureContext,
+    function_summaries: &mut procedure::FunctionSummaries<'a>,
 ) {
     add_sparse_whole_port_copy_edges(inst, child, bit_part, graph, node_map, parent_vars);
 
@@ -979,8 +987,17 @@ fn add_inst_feedthrough_edges(
         }
         let mut reads = Vec::new();
         for expr in &inp.exprs {
-            collect_expr_node_keys(expr, bit_part, &mut reads, ctx);
+            let (sources, dependencies) =
+                analyze_instance_actual(bit_part, expr, ctx, procedure_context, function_summaries);
+            reads.extend(sources);
+            for (source, destination) in dependencies {
+                let source = ensure_node(graph, node_map, source);
+                let destination = ensure_node(graph, node_map, destination);
+                graph.add_edge(source, destination, ());
+            }
         }
+        reads.sort_unstable();
+        reads.dedup();
         if !reads.is_empty() {
             input_reads.insert(inp.id, reads);
         }
@@ -1010,9 +1027,6 @@ fn add_inst_feedthrough_edges(
             };
             for r in parent_reads {
                 for d in parent_dsts {
-                    if r == d {
-                        continue;
-                    }
                     let s = ensure_node(graph, node_map, *r);
                     let t = ensure_node(graph, node_map, *d);
                     graph.add_edge(s, t, ());
@@ -1136,39 +1150,162 @@ fn is_pure_input_or_output(id: VarId, vars: &HashMap<VarId, Variable>, want: Dir
     actual == want
 }
 
-fn collect_expr_node_keys(
-    expr: &Expression,
-    bit_part: &BitPartition,
-    out: &mut Vec<NodeKey>,
+fn analyze_instance_actual<'a>(
+    bit_part: &'a BitPartition,
+    expression: &Expression,
     ctx: &mut Context,
-) {
-    match expr {
-        Expression::Term(t) => collect_factor_node_keys(t, bit_part, out, ctx),
-        Expression::Unary(_, e, _) => collect_expr_node_keys(e, bit_part, out, ctx),
-        Expression::Binary(a, _, b, _) => {
-            collect_expr_node_keys(a, bit_part, out, ctx);
-            collect_expr_node_keys(b, bit_part, out, ctx);
+    procedure_context: &mut procedure::ProcedureContext,
+    summaries: &mut procedure::FunctionSummaries<'a>,
+) -> (Vec<NodeKey>, Vec<(NodeKey, NodeKey)>) {
+    let mut analysis = InstanceActualAnalysis {
+        bit_part,
+        ctx,
+        procedure_context,
+        summaries: Some(summaries),
+        procedure: None,
+        reads: Vec::new(),
+        deferred_reads: Vec::new(),
+        defer_direct_reads: 0,
+    };
+    analysis.eval(expression);
+    analysis.reads.sort_unstable();
+    analysis.reads.dedup();
+    let dependencies = if let Some(mut procedure) = analysis.procedure.take() {
+        let dependencies = procedure.dependencies();
+        procedure.restore(analysis.procedure_context);
+        dependencies
+    } else {
+        Vec::new()
+    };
+    (analysis.reads, dependencies)
+}
+
+struct InstanceActualAnalysis<'a, 's, 'c> {
+    bit_part: &'a BitPartition,
+    ctx: &'c mut Context,
+    procedure_context: &'c mut procedure::ProcedureContext,
+    summaries: Option<&'s mut procedure::FunctionSummaries<'a>>,
+    procedure: Option<procedure::ExpressionAnalysis<'a, 's>>,
+    reads: Vec<NodeKey>,
+    deferred_reads: Vec<NodeKey>,
+    defer_direct_reads: usize,
+}
+
+impl InstanceActualAnalysis<'_, '_, '_> {
+    fn eval(&mut self, expression: &Expression) {
+        if let Some(procedure) = &mut self.procedure {
+            self.reads.extend(procedure.eval(expression));
+            return;
         }
-        Expression::Ternary(a, b, c, _) => {
-            collect_expr_node_keys(a, bit_part, out, ctx);
-            collect_expr_node_keys(b, bit_part, out, ctx);
-            collect_expr_node_keys(c, bit_part, out, ctx);
-        }
-        Expression::Concatenation(parts, _) => {
-            for (a, b) in parts {
-                collect_expr_node_keys(a, bit_part, out, ctx);
-                if let Some(b) = b {
-                    collect_expr_node_keys(b, bit_part, out, ctx);
+        match expression {
+            Expression::Term(factor) => match factor.as_ref() {
+                Factor::FunctionCall(_) => {
+                    let summaries = self.summaries.take().expect("initialized once");
+                    let procedure = procedure::ExpressionAnalysis::new(
+                        self.bit_part,
+                        self.procedure_context,
+                        summaries,
+                    );
+                    self.procedure = Some(procedure);
+                    self.eval(expression);
+                }
+                Factor::Variable(_, index, select, _) => {
+                    for expression in index.0.iter().chain(select.0.iter()) {
+                        self.eval(expression);
+                    }
+                    if let Some((_, expression)) = &select.1 {
+                        self.eval(expression);
+                    }
+                    let reads = if self.defer_direct_reads == 0 {
+                        &mut self.reads
+                    } else {
+                        &mut self.deferred_reads
+                    };
+                    collect_factor_node_keys(factor, self.bit_part, reads, self.ctx);
+                }
+                Factor::SystemFunctionCall(call) => match &call.kind {
+                    SystemFunctionKind::Onehot(input)
+                    | SystemFunctionKind::Signed(input)
+                    | SystemFunctionKind::Unsigned(input)
+                    | SystemFunctionKind::Readmemh(input, _) => self.eval(&input.0),
+                    SystemFunctionKind::Bits(_)
+                    | SystemFunctionKind::Size(_)
+                    | SystemFunctionKind::Clog2(_)
+                    | SystemFunctionKind::Display(_)
+                    | SystemFunctionKind::Write(_)
+                    | SystemFunctionKind::Assert { .. }
+                    | SystemFunctionKind::Finish => {}
+                },
+                _ => {}
+            },
+            Expression::Unary(_, operand, _) => self.eval(operand),
+            Expression::Binary(left, op, right, _) => {
+                self.eval(left);
+                let evaluate_right = match op {
+                    Op::LogicAnd => constant_truth(left, self.ctx) != Some(false),
+                    Op::LogicOr => constant_truth(left, self.ctx) != Some(true),
+                    _ => true,
+                };
+                if evaluate_right {
+                    self.eval(right);
+                }
+            }
+            Expression::Ternary(condition, left, right, _) => {
+                self.eval(condition);
+                match constant_truth(condition, self.ctx) {
+                    Some(true) => self.eval(left),
+                    Some(false) => self.eval(right),
+                    None => {
+                        self.eval(left);
+                        self.eval(right);
+                    }
+                }
+            }
+            Expression::Concatenation(parts, _) => {
+                for (part, repeat) in parts {
+                    self.eval(part);
+                    if let Some(repeat) = repeat {
+                        self.eval(repeat);
+                    }
+                }
+            }
+            Expression::ArrayLiteral(items, _) => {
+                let outermost_deferred = self.defer_direct_reads == 0;
+                self.defer_direct_reads += 1;
+                for item in items {
+                    match item {
+                        crate::ir::ArrayLiteralItem::Value(value, repeat) => {
+                            self.eval(value);
+                            if let Some(repeat) = repeat {
+                                self.eval(repeat);
+                            }
+                        }
+                        crate::ir::ArrayLiteralItem::Defaul(value) => self.eval(value),
+                    }
+                }
+                self.defer_direct_reads -= 1;
+                if outermost_deferred {
+                    if self.procedure.is_some() {
+                        self.reads.append(&mut self.deferred_reads);
+                    } else {
+                        self.deferred_reads.clear();
+                    }
+                }
+            }
+            Expression::StructConstructor(_, fields, _) => {
+                for (_, value) in fields {
+                    self.eval(value);
                 }
             }
         }
-        Expression::StructConstructor(_, fields, _) => {
-            for (_, e) in fields {
-                collect_expr_node_keys(e, bit_part, out, ctx);
-            }
-        }
-        Expression::ArrayLiteral(_, _) => {}
     }
+}
+
+fn constant_truth(expression: &Expression, ctx: &mut Context) -> Option<bool> {
+    expression
+        .eval_value(ctx)
+        .and_then(|value| value.to_usize())
+        .map(|value| value != 0)
 }
 
 fn collect_factor_node_keys(
