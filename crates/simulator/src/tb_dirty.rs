@@ -133,7 +133,10 @@ impl SpanTable {
         touched_ff.sort_unstable();
         touched_comb.sort_unstable();
         let any_in = |set: &[usize], lo: usize, hi: usize| -> bool {
-            lo < hi && set.partition_point(|&x| x < lo) < set.partition_point(|&x| x < hi)
+            lo < hi && {
+                let i = set.partition_point(|&x| x < lo);
+                set.get(i).is_some_and(|&x| x < hi)
+            }
         };
 
         let mut ff: Vec<Span> = Vec::new();
