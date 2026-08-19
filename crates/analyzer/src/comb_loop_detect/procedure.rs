@@ -2,7 +2,9 @@
 
 use super::BitDependency;
 use super::region::{ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, var_reads};
-use super::ssa::{BranchState, Checkpoint, PositionRelation, SsaStore, VersionId};
+use super::ssa::{
+    BranchState, Checkpoint, PositionOverflow, PositionRelation, SsaStore, VersionId,
+};
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
@@ -14,10 +16,14 @@ use crate::value::Value;
 use crate::{HashMap, HashSet};
 use std::rc::Rc;
 
-fn signed_difference(destination: usize, source: usize) -> Option<i128> {
-    i128::try_from(destination)
-        .ok()?
-        .checked_sub(i128::try_from(source).ok()?)
+fn checked_position(value: usize) -> Result<isize, PositionOverflow> {
+    isize::try_from(value).map_err(|_| PositionOverflow)
+}
+
+fn signed_difference(destination: usize, source: usize) -> Result<isize, PositionOverflow> {
+    checked_position(destination)?
+        .checked_sub(checked_position(source)?)
+        .ok_or(PositionOverflow)
 }
 
 enum RepeatedProjection {
@@ -113,6 +119,7 @@ struct FunctionSummary {
     writes: Vec<(NodeKey, Vec<NodeKey>)>,
     opaque_sources: Vec<NodeKey>,
     complete: bool,
+    position_overflow: bool,
 }
 
 pub(super) struct FunctionSummaries<'a> {
@@ -245,6 +252,7 @@ pub(super) fn analyze(
 pub(super) struct ProcedureResult {
     pub(super) dependencies: Vec<Dependency>,
     pub(super) complete: bool,
+    pub(super) position_overflow: bool,
 }
 
 pub(super) struct Dependency {
@@ -272,10 +280,11 @@ impl ExpressionSources {
         self.whole.extend(other.whole);
     }
 
-    fn translate(&mut self, offset: PositionRelation) {
+    fn translate(&mut self, offset: PositionRelation) -> Result<(), PositionOverflow> {
         for (_, current) in &mut self.positional {
-            *current = current.compose(offset);
+            *current = current.compose(offset)?;
         }
+        Ok(())
     }
 
     fn forget_array_position(&mut self) {
@@ -349,12 +358,18 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
             let wrapper = inner
                 .ssa
                 .positional_definition(vec![(version, expression_offset)], Vec::new());
-            for (source, relation) in inner.ssa.root_source_relations(wrapper) {
+            let relations = inner.ssa.root_source_relations(wrapper);
+            let Some(relations) = inner.position(relations) else {
+                continue;
+            };
+            for (source, relation) in relations {
                 if source.call_frame.is_some() {
                     continue;
                 }
                 let source = source.node;
-                let relation = relation.reversed();
+                let Some(relation) = inner.position(relation.reversed()) else {
+                    continue;
+                };
                 let offset = relation.array.zip(relation.packed);
                 mapped.push(RegionSource {
                     key: source,
@@ -364,18 +379,16 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         }
         for version in sources.whole {
             let wrapper = inner.ssa.definition(vec![version]);
-            mapped.extend(
-                inner
-                    .ssa
-                    .root_source_relations(wrapper)
-                    .into_keys()
-                    .filter_map(|source| {
-                        source.call_frame.is_none().then_some(RegionSource {
-                            key: source.node,
-                            offset: None,
-                        })
-                    }),
-            );
+            let relations = inner.ssa.root_source_relations(wrapper);
+            let Some(relations) = inner.position(relations) else {
+                continue;
+            };
+            mapped.extend(relations.into_keys().filter_map(|source| {
+                source.call_frame.is_none().then_some(RegionSource {
+                    key: source.node,
+                    offset: None,
+                })
+            }));
         }
         mapped.sort_unstable_by_key(|source| (source.key, source.offset));
         mapped.dedup();
@@ -397,12 +410,19 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
             .expect("expression analysis is active")
             .complete
     }
+
+    pub(super) fn position_overflowed(&self) -> bool {
+        self.inner
+            .as_ref()
+            .expect("expression analysis is active")
+            .position_overflow
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct RegionSource {
     pub(super) key: NodeKey,
-    pub(super) offset: Option<(i128, i128)>,
+    pub(super) offset: Option<(isize, isize)>,
 }
 
 struct ProcedureAnalysis<'a, 's> {
@@ -416,6 +436,7 @@ struct ProcedureAnalysis<'a, 's> {
     receiver_indices: Vec<Option<VarIndex>>,
     function_flows: Vec<FunctionFlow>,
     complete: bool,
+    position_overflow: bool,
     summaries: Option<&'s mut FunctionSummaries<'a>>,
 }
 
@@ -432,7 +453,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             receiver_indices: Vec::new(),
             function_flows: Vec::new(),
             complete: true,
+            position_overflow: false,
             summaries: None,
+        }
+    }
+
+    fn position<T>(&mut self, result: Result<T, PositionOverflow>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(PositionOverflow) => {
+                self.position_overflow = true;
+                None
+            }
+        }
+    }
+
+    fn translate_sources(&mut self, sources: &mut ExpressionSources, offset: PositionRelation) {
+        if sources.translate(offset).is_err() {
+            self.position_overflow = true;
+            sources.positional.clear();
         }
     }
 
@@ -446,6 +485,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let result = ProcedureResult {
             dependencies: this.dependencies(),
             complete: this.complete,
+            position_overflow: this.position_overflow,
         };
         context.restore(this.ctx);
         result
@@ -454,12 +494,29 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<NodeKey> {
         let versions = self.eval_reachable_expr(expression);
         let value = self.ssa.definition(versions);
-        let mut sources = self
-            .ssa
-            .root_sources(value)
+        let roots = self.ssa.root_sources(value);
+        let Some(roots) = self.position(roots) else {
+            return Vec::new();
+        };
+        let mut sources = roots
             .into_iter()
             .filter_map(|source| source.call_frame.is_none().then_some(source.node))
             .filter(|source| self.is_module_scope_key(*source))
+            .collect::<Vec<_>>();
+        sources.sort_unstable();
+        sources.dedup();
+        sources
+    }
+
+    fn visible_sources(&mut self, version: VersionId, formal_ids: &HashSet<VarId>) -> Vec<NodeKey> {
+        let roots = self.ssa.root_sources(version);
+        let Some(roots) = self.position(roots) else {
+            return Vec::new();
+        };
+        let mut sources = roots
+            .into_iter()
+            .filter_map(|source| source.call_frame.is_none().then_some(source.node))
+            .filter(|source| formal_ids.contains(&source.0) || self.is_module_scope_key(*source))
             .collect::<Vec<_>>();
         sources.sort_unstable();
         sources.dedup();
@@ -487,21 +544,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         this.receiver_indices.pop();
         this.call_caches.pop();
 
-        let visible_sources = |this: &Self, version| {
-            let mut sources = this
-                .ssa
-                .root_sources(version)
-                .into_iter()
-                .filter_map(|source| source.call_frame.is_none().then_some(source.node))
-                .filter(|source| {
-                    formal_ids.contains(&source.0) || this.is_module_scope_key(*source)
-                })
-                .collect::<Vec<_>>();
-            sources.sort_unstable();
-            sources.dedup();
-            sources
-        };
-
         let result = body
             .ret
             .map(|ret| {
@@ -510,7 +552,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     .map(|regions| {
                         regions
                             .into_iter()
-                            .map(|(span, version)| (span, visible_sources(&this, version)))
+                            .map(|(span, version)| {
+                                (span, this.visible_sources(version, &formal_ids))
+                            })
                             .collect()
                     })
                     .collect()
@@ -530,7 +574,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .into_iter()
             .map(|destination| {
                 let version = this.read_key(destination);
-                (destination, visible_sources(&this, version))
+                (destination, this.visible_sources(version, &formal_ids))
             })
             .collect();
 
@@ -552,6 +596,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             writes,
             opaque_sources,
             complete: this.complete,
+            position_overflow: this.position_overflow,
         };
         context.restore(this.ctx);
         Some(summary)
@@ -568,6 +613,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         for destination in destinations {
             let version = self.read_key(destination);
             let sources = self.ssa.root_source_relations(version);
+            let Some(sources) = self.position(sources) else {
+                continue;
+            };
             dependencies.extend(
                 sources
                     .into_iter()
@@ -753,14 +801,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .into_iter()
             .map(|(array, _)| array)
             .next();
+        let overflow_before_destination_offset = self.position_overflow;
         let destination_offset = destination_array
             .zip(selected)
             .and_then(|(array, (_, low))| {
-                Some(PositionRelation {
-                    array: Some(i128::try_from(array.start).ok()?),
-                    packed: Some(signed_difference(low, expression_offset)?),
-                })
+                let relation = (|| {
+                    Ok(PositionRelation {
+                        array: Some(checked_position(array.start)?),
+                        packed: Some(signed_difference(low, expression_offset)?),
+                    })
+                })();
+                self.position(relation)
             });
+        let destination_offset_overflowed =
+            self.position_overflow != overflow_before_destination_offset;
         let keys = self.write_keys(destination);
         let dynamic = self.destination_is_dynamic(destination);
         for key in keys {
@@ -796,10 +850,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             sources.normalize();
             let mut positional = Vec::new();
             for (version, offset) in sources.positional {
-                if let Some(offset) = destination_offset.map(|base| offset.compose(base)) {
-                    positional.push((version, offset));
-                } else {
-                    sources.whole.push(version);
+                match destination_offset {
+                    Some(base) => {
+                        if let Some(offset) = self.position(offset.compose(base)) {
+                            positional.push((version, offset));
+                        }
+                    }
+                    None if !destination_offset_overflowed => sources.whole.push(version),
+                    None => {}
                 }
             }
             let version = self.ssa.positional_definition(positional, sources.whole);
@@ -1199,14 +1257,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 }
                             }
                         }
+                        let overflow_before_offset = self.position_overflow;
                         let offset = position_preserving
                             .then(|| {
-                                Some(PositionRelation {
-                                    array: Some(
-                                        i128::try_from(accesses[0].0.start).ok()?.checked_neg()?,
-                                    ),
-                                    packed: Some(i128::try_from(low).ok()?.checked_neg()?),
-                                })
+                                let relation = (|| {
+                                    Ok(PositionRelation {
+                                        array: Some(
+                                            checked_position(accesses[0].0.start)?
+                                                .checked_neg()
+                                                .ok_or(PositionOverflow)?,
+                                        ),
+                                        packed: Some(
+                                            checked_position(low)?
+                                                .checked_neg()
+                                                .ok_or(PositionOverflow)?,
+                                        ),
+                                    })
+                                })();
+                                self.position(relation)
                             })
                             .flatten();
                         if let Some(offset) = offset {
@@ -1217,9 +1285,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     .collect(),
                                 whole: selector_sources,
                             }
-                        } else {
+                        } else if self.position_overflow == overflow_before_offset {
                             selector_sources.extend(reads);
                             ExpressionSources::whole(selector_sources)
+                        } else {
+                            ExpressionSources::default()
                         }
                     } else {
                         selector_sources.extend(self.read_variable(*id, index, select));
@@ -1265,15 +1335,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             && let Some(input) = PackedSpan::new(start - shift, length)
                         {
                             let mut input = self.eval_expr_bits(left, requested_array, input);
-                            if let Ok(shift) = i128::try_from(shift) {
-                                input.translate(PositionRelation {
-                                    array: Some(0),
-                                    packed: Some(shift),
-                                });
-                            } else {
-                                input
-                                    .whole
-                                    .extend(input.positional.drain(..).map(|(version, _)| version));
+                            if let Some(shift) = self.position(checked_position(shift)) {
+                                self.translate_sources(
+                                    &mut input,
+                                    PositionRelation {
+                                        array: Some(0),
+                                        packed: Some(shift),
+                                    },
+                                );
                             }
                             reads.extend(input);
                         }
@@ -1294,15 +1363,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             .and_then(|shifted| PackedSpan::whole(width)?.intersection(shifted))
                         {
                             let mut input = self.eval_expr_bits(left, requested_array, input);
-                            if let Ok(shift) = i128::try_from(shift) {
-                                input.translate(PositionRelation {
-                                    array: Some(0),
-                                    packed: Some(-shift),
-                                });
-                            } else {
-                                input
-                                    .whole
-                                    .extend(input.positional.drain(..).map(|(version, _)| version));
+                            let shift = checked_position(shift)
+                                .and_then(|shift| shift.checked_neg().ok_or(PositionOverflow));
+                            if let Some(shift) = self.position(shift) {
+                                self.translate_sources(
+                                    &mut input,
+                                    PositionRelation {
+                                        array: Some(0),
+                                        packed: Some(shift),
+                                    },
+                                );
                             }
                             reads.extend(input);
                         }
@@ -1395,14 +1465,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 continue;
                             };
                             let mut part = self.eval_expr_bits(part, requested_array, local);
-                            if let Ok(output_start) = i128::try_from(output_start) {
-                                part.translate(PositionRelation {
-                                    array: Some(0),
-                                    packed: Some(output_start),
-                                });
-                            } else {
-                                part.whole
-                                    .extend(part.positional.drain(..).map(|(version, _)| version));
+                            if let Some(output_start) =
+                                self.position(checked_position(output_start))
+                            {
+                                self.translate_sources(
+                                    &mut part,
+                                    PositionRelation {
+                                        array: Some(0),
+                                        packed: Some(output_start),
+                                    },
+                                );
                             }
                             reads.extend(part);
                         }
@@ -1484,14 +1556,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     .total_width()
                                     .unwrap_or(requested.length),
                             );
-                            if let Ok(output_start) = i128::try_from(output_start) {
-                                item.translate(PositionRelation {
-                                    array: Some(output_start),
-                                    packed: Some(0),
-                                });
-                            } else {
-                                item.whole
-                                    .extend(item.positional.drain(..).map(|(version, _)| version));
+                            if let Some(output_start) =
+                                self.position(checked_position(output_start))
+                            {
+                                self.translate_sources(
+                                    &mut item,
+                                    PositionRelation {
+                                        array: Some(output_start),
+                                        packed: Some(0),
+                                    },
+                                );
                             }
                             reads.extend(item);
                         }
@@ -1553,14 +1627,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     .total_width()
                                     .unwrap_or(requested.length),
                             );
-                            if let Ok(output_start) = i128::try_from(output_start) {
-                                item.translate(PositionRelation {
-                                    array: Some(output_start),
-                                    packed: Some(0),
-                                });
-                            } else {
-                                item.whole
-                                    .extend(item.positional.drain(..).map(|(version, _)| version));
+                            if let Some(output_start) =
+                                self.position(checked_position(output_start))
+                            {
+                                self.translate_sources(
+                                    &mut item,
+                                    PositionRelation {
+                                        array: Some(output_start),
+                                        packed: Some(0),
+                                    },
+                                );
                             }
                             reads.extend(item);
                         }
@@ -1602,15 +1678,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     {
                         let mut field =
                             self.eval_expr_requested(value, requested_array, local, width);
-                        if let Ok(low) = i128::try_from(low) {
-                            field.translate(PositionRelation {
-                                array: Some(0),
-                                packed: Some(low),
-                            });
-                        } else {
-                            field
-                                .whole
-                                .extend(field.positional.drain(..).map(|(version, _)| version));
+                        if let Some(low) = self.position(checked_position(low)) {
+                            self.translate_sources(
+                                &mut field,
+                                PositionRelation {
+                                    array: Some(0),
+                                    packed: Some(low),
+                                },
+                            );
                         }
                         reads.extend(field);
                     }
@@ -1980,6 +2055,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         summary: &FunctionSummary,
     ) -> CallResult {
         self.complete &= summary.complete;
+        self.position_overflow |= summary.position_overflow;
         self.call_caches.push(Some(HashMap::default()));
         for actual in call.inputs.values() {
             self.eval_expr(actual);
@@ -2155,14 +2231,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .into_iter()
             .map(|(array, _)| array)
             .next();
+        let overflow_before_position_offset = self.position_overflow;
         let position_offset = destination_array
             .zip(selected)
             .and_then(|(array, (_, low))| {
-                Some(PositionRelation {
-                    array: Some(i128::try_from(array.start).ok()?),
-                    packed: Some(signed_difference(low, formal_offset)?),
-                })
+                let relation = (|| {
+                    Ok(PositionRelation {
+                        array: Some(checked_position(array.start)?),
+                        packed: Some(signed_difference(low, formal_offset)?),
+                    })
+                })();
+                self.position(relation)
             });
+        let position_offset_overflowed = self.position_overflow != overflow_before_position_offset;
         let dynamic = self.destination_is_dynamic(destination);
         for key in self.write_keys(destination) {
             let mut positional = Vec::new();
@@ -2192,7 +2273,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         }
                     }
                 }
-            } else {
+            } else if !position_offset_overflowed {
                 whole.extend(formal_versions.iter().map(|(_, version)| *version));
             }
             let version = self.ssa.positional_definition(positional, whole);

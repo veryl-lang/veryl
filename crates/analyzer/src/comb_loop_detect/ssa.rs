@@ -17,9 +17,12 @@ enum Version<K> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct PositionRelation {
-    pub(super) array: Option<i128>,
-    pub(super) packed: Option<i128>,
+    pub(super) array: Option<isize>,
+    pub(super) packed: Option<isize>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PositionOverflow;
 
 impl Default for PositionRelation {
     fn default() -> Self {
@@ -38,18 +41,18 @@ impl PositionRelation {
         }
     }
 
-    pub(super) fn compose(self, other: Self) -> Self {
-        Self {
-            array: compose_axis(self.array, other.array),
-            packed: compose_axis(self.packed, other.packed),
-        }
+    pub(super) fn compose(self, other: Self) -> Result<Self, PositionOverflow> {
+        Ok(Self {
+            array: compose_axis(self.array, other.array)?,
+            packed: compose_axis(self.packed, other.packed)?,
+        })
     }
 
-    pub(super) fn reversed(self) -> Self {
-        Self {
-            array: self.array.and_then(i128::checked_neg),
-            packed: self.packed.and_then(i128::checked_neg),
-        }
+    pub(super) fn reversed(self) -> Result<Self, PositionOverflow> {
+        Ok(Self {
+            array: reverse_axis(self.array)?,
+            packed: reverse_axis(self.packed)?,
+        })
     }
 
     pub(super) fn union(self, other: Self) -> Self {
@@ -62,8 +65,20 @@ impl PositionRelation {
     }
 }
 
-fn compose_axis(left: Option<i128>, right: Option<i128>) -> Option<i128> {
-    left?.checked_add(right?)
+fn compose_axis(
+    left: Option<isize>,
+    right: Option<isize>,
+) -> Result<Option<isize>, PositionOverflow> {
+    match (left, right) {
+        (Some(left), Some(right)) => left.checked_add(right).map(Some).ok_or(PositionOverflow),
+        _ => Ok(None),
+    }
+}
+
+fn reverse_axis(value: Option<isize>) -> Result<Option<isize>, PositionOverflow> {
+    value
+        .map(|value| value.checked_neg().ok_or(PositionOverflow))
+        .transpose()
 }
 
 #[derive(Clone, Copy)]
@@ -256,11 +271,14 @@ where
         }
     }
 
-    pub(super) fn root_sources(&self, version: VersionId) -> HashSet<K> {
-        self.root_source_relations(version).into_keys().collect()
+    pub(super) fn root_sources(&self, version: VersionId) -> Result<HashSet<K>, PositionOverflow> {
+        Ok(self.root_source_relations(version)?.into_keys().collect())
     }
 
-    pub(super) fn root_source_relations(&self, version: VersionId) -> HashMap<K, PositionRelation> {
+    pub(super) fn root_source_relations(
+        &self,
+        version: VersionId,
+    ) -> Result<HashMap<K, PositionRelation>, PositionOverflow> {
         let mut sources: HashMap<K, PositionRelation> = HashMap::default();
         let mut visited = HashSet::default();
         let mut pending = Vec::new();
@@ -303,11 +321,9 @@ where
                     }
                 }
                 Version::Definition { positional, whole } => {
-                    pending.extend(
-                        positional
-                            .iter()
-                            .map(|(input, inner)| (*input, true, relation.compose(*inner))),
-                    );
+                    for (input, inner) in positional {
+                        pending.push((*input, true, relation.compose(*inner)?));
+                    }
                     pending.extend(
                         whole
                             .iter()
@@ -319,7 +335,7 @@ where
                 }
             }
         }
-        sources
+        Ok(sources)
     }
 
     fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
@@ -345,7 +361,7 @@ mod tests {
         let destination = ssa.definition(vec![source]);
 
         let expected = ["source"].into_iter().collect::<HashSet<_>>();
-        assert_eq!(ssa.root_sources(destination), expected);
+        assert_eq!(ssa.root_sources(destination).unwrap(), expected);
     }
 
     #[test]
@@ -356,7 +372,9 @@ mod tests {
             ssa.positional_definition(vec![(source, PositionRelation::default())], Vec::new());
 
         assert_eq!(
-            ssa.root_source_relations(destination).get("source"),
+            ssa.root_source_relations(destination)
+                .unwrap()
+                .get("source"),
             Some(&PositionRelation::default())
         );
     }
@@ -387,7 +405,9 @@ mod tests {
         );
 
         assert_eq!(
-            ssa.root_source_relations(destination).get("source"),
+            ssa.root_source_relations(destination)
+                .unwrap()
+                .get("source"),
             Some(&PositionRelation {
                 array: Some(2),
                 packed: Some(3),
@@ -414,11 +434,44 @@ mod tests {
         );
 
         assert_eq!(
-            ssa.root_source_relations(destination).get("source"),
+            ssa.root_source_relations(destination)
+                .unwrap()
+                .get("source"),
             Some(&PositionRelation {
                 array: Some(0),
                 packed: None,
             })
+        );
+    }
+
+    #[test]
+    fn positional_offset_overflow_is_reported() {
+        let mut ssa = SsaStore::default();
+        let source = ssa.read("source");
+        let first = ssa.positional_definition(
+            vec![(
+                source,
+                PositionRelation {
+                    array: Some(isize::MAX),
+                    packed: Some(0),
+                },
+            )],
+            Vec::new(),
+        );
+        let destination = ssa.positional_definition(
+            vec![(
+                first,
+                PositionRelation {
+                    array: Some(1),
+                    packed: Some(0),
+                },
+            )],
+            Vec::new(),
+        );
+
+        assert_eq!(
+            ssa.root_source_relations(destination),
+            Err(PositionOverflow)
         );
     }
 
@@ -430,7 +483,9 @@ mod tests {
             ssa.positional_definition(vec![(source, PositionRelation::default())], vec![source]);
 
         assert_eq!(
-            ssa.root_source_relations(destination).get("source"),
+            ssa.root_source_relations(destination)
+                .unwrap()
+                .get("source"),
             Some(&PositionRelation::whole())
         );
     }
@@ -448,7 +503,7 @@ mod tests {
 
         let merged = ssa.read("destination");
         assert_ne!(merged, retained);
-        assert!(ssa.root_sources(merged).is_empty());
+        assert!(ssa.root_sources(merged).unwrap().is_empty());
     }
 
     #[test]
@@ -458,11 +513,11 @@ mod tests {
         ssa.weak_bind(0, replacement);
 
         let retained = ssa.read(0);
-        assert!(ssa.root_sources(retained).is_empty());
+        assert!(ssa.root_sources(retained).unwrap().is_empty());
 
         let observed = ssa.definition(vec![retained]);
         let expected: HashSet<_> = [0].into_iter().collect();
-        assert_eq!(ssa.root_sources(observed), expected);
+        assert_eq!(ssa.root_sources(observed).unwrap(), expected);
     }
 
     #[test]
@@ -477,8 +532,8 @@ mod tests {
         let restored = ssa.read("destination");
 
         let expected = ["source"].into_iter().collect::<HashSet<_>>();
-        assert_eq!(ssa.root_sources(definition), expected);
-        assert!(ssa.root_sources(restored).is_empty());
+        assert_eq!(ssa.root_sources(definition).unwrap(), expected);
+        assert!(ssa.root_sources(restored).unwrap().is_empty());
     }
 
     #[test]
