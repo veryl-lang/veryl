@@ -21934,3 +21934,65 @@ fn cone_gate_skips_only_when_the_result_is_unchanged() {
     }
     assert!(armed >= 4, "too few configs exercised the gate: {armed}");
 }
+
+#[test]
+fn wide_concat_element_placement() {
+    // A >128-bit concatenation is assembled by placing each element into the
+    // destination word it lands in, so the two shapes that stress the position
+    // arithmetic are one element per bit (192 of them, what a per-bit driven
+    // bus lowers to) and elements whose width straddles a word boundary.
+    use num_bigint::BigUint;
+
+    const W: usize = 192;
+    let bits: Vec<String> = (0..W).map(|i| format!("a[{i}]")).collect();
+    let code = format!(
+        r#"
+    module Top (
+        a:        input  logic<192>,
+        reversed: output logic<192>,
+        straddle: output logic<192>,
+    ) {{
+        always_comb {{
+            reversed = {{{}}};
+            straddle = {{a[39:0], a[79:40], a[119:80], a[159:120], a[191:160]}};
+        }}
+    }}
+    "#,
+        bits.join(", ")
+    );
+
+    let a_bytes: Vec<u8> = (0..24u8)
+        .map(|i| i.wrapping_mul(37).wrapping_add(11))
+        .collect();
+    let a_val = BigUint::from_bytes_le(&a_bytes);
+    // The leftmost element is the most significant, so `reversed` is `a` backwards.
+    let mut rev_val = BigUint::ZERO;
+    for i in 0..W {
+        if a_val.bit(i as u64) {
+            rev_val.set_bit((W - 1 - i) as u64, true);
+        }
+    }
+    let field = |lo: usize, len: usize| (&a_val >> lo) & ((BigUint::from(1u32) << len) - 1u32);
+    let straddle_val: BigUint = (field(0, 40) << 152)
+        | (field(40, 40) << 112)
+        | (field(80, 40) << 72)
+        | (field(120, 40) << 32)
+        | field(160, 32);
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new_biguint(a_val.clone(), W, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("reversed").unwrap(),
+            Value::new_biguint(rev_val.clone(), W, false),
+            "reversed config={config:?}"
+        );
+        assert_eq!(
+            sim.get("straddle").unwrap(),
+            Value::new_biguint(straddle_val.clone(), W, false),
+            "straddle config={config:?}"
+        );
+    }
+}

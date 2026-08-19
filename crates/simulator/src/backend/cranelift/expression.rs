@@ -119,6 +119,53 @@ fn wide_operand_as_ptr(
     }
 }
 
+/// Narrow a concat element to the I64 the word placement shifts.  A ≤64-bit
+/// element can still arrive as I128 (an unsized all-ones literal), and its
+/// high half carries no bits of the element.
+fn concat_element_word(builder: &mut FunctionBuilder, v: CraneliftValue) -> CraneliftValue {
+    let ty = builder.func.dfg.value_type(v);
+    if ty == I64 {
+        v
+    } else if ty.bits() > 64 {
+        builder.ins().ireduce(I64, v)
+    } else {
+        builder.ins().uextend(I64, v)
+    }
+}
+
+/// OR one concat element into the destination words it occupies.  `pos` is the
+/// element's low bit in the result; an element straddling a word boundary
+/// contributes to two.  Elements are masked to their own width by their
+/// builders, which is what lets the shifted copies be OR-ed together.
+fn place_concat_element(
+    builder: &mut FunctionBuilder,
+    words: &mut [Option<CraneliftValue>],
+    v: CraneliftValue,
+    pos: usize,
+    elem_width: usize,
+) {
+    let (w, bit) = (pos / 64, pos % 64);
+    if w >= words.len() {
+        return;
+    }
+    let lo = if bit == 0 {
+        v
+    } else {
+        builder.ins().ishl_imm_s(v, bit as i64)
+    };
+    words[w] = Some(match words[w] {
+        None => lo,
+        Some(acc) => builder.ins().bor(acc, lo),
+    });
+    if bit + elem_width > 64 && w + 1 < words.len() {
+        let hi = builder.ins().ushr_imm_s(v, (64 - bit) as i64);
+        words[w + 1] = Some(match words[w + 1] {
+            None => hi,
+            Some(acc) => builder.ins().bor(acc, hi),
+        });
+    }
+}
+
 impl ProtoExpression {
     pub fn can_build_binary(&self) -> bool {
         match self {
@@ -3016,11 +3063,115 @@ impl ProtoExpression {
         }
     }
 
+    /// Assemble a wide concatenation straight into its destination words.
+    ///
+    /// [`Self::build_binary_wide_concat`] accumulates instead — a full-width
+    /// shift plus a full-width OR per element, each into a fresh stack slot —
+    /// so it costs elements × words, and a bit-assembled vector (one element
+    /// per bit, what a per-bit driven bus lowers to) grows quadratically in the
+    /// width with a frame to match.  Every element's bit position is a
+    /// compile-time constant, so place each one in the word (or word pair) it
+    /// lands in and store each word once.
+    ///
+    /// Wide elements arrive as pointers and keep the accumulate form: placing
+    /// their words individually was measured and bought nothing.
+    fn build_binary_wide_concat_into(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+    ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        let ProtoExpression::Concatenation {
+            elements, width, ..
+        } = self
+        else {
+            unreachable!()
+        };
+
+        let nb = calc_native_bytes(*width);
+        let nw = nb / 8;
+        // The placement assumes the elements exactly tile `[0, width)` and that
+        // each one fits a single 64-bit register.
+        let mut total = 0usize;
+        for (expr, repeat, elem_width) in elements {
+            if *elem_width > 64 || expr.width() > 64 || returns_wide_pointer(expr) {
+                return None;
+            }
+            total += elem_width * repeat;
+        }
+        if nw == 0 || total != *width {
+            return None;
+        }
+
+        let mut words: Vec<Option<CraneliftValue>> = vec![None; nw];
+        let mut words_xz: Vec<Option<CraneliftValue>> = vec![None; nw];
+        let mut pos = *width;
+        for (expr, repeat, elem_width) in elements {
+            let repeat = *repeat;
+            if repeat == 0 {
+                continue;
+            }
+            let ew = *elem_width;
+            if ew == 0 {
+                continue;
+            }
+            // A zero element contributes no bits, so a long zero pad costs
+            // nothing here (the accumulate form has to shift past it).
+            let elem_is_zero = matches!(
+                expr.as_ref(),
+                ProtoExpression::Value { value, .. }
+                    if !value.is_xz() && value.payload().iter_u64_digits().next().is_none()
+            );
+            if elem_is_zero {
+                pos -= ew * repeat;
+                continue;
+            }
+            let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
+            let elem_payload = concat_element_word(builder, elem_payload);
+            let elem_mask_xz = elem_mask_xz.map(|m| concat_element_word(builder, m));
+            for _ in 0..repeat {
+                pos -= ew;
+                place_concat_element(builder, &mut words, elem_payload, pos, ew);
+                if let Some(m) = elem_mask_xz {
+                    place_concat_element(builder, &mut words_xz, m, pos, ew);
+                }
+            }
+        }
+
+        let zero = builder.ins().iconst(I64, 0);
+        let acc = alloc_wide_slot(builder, nb);
+        for (i, w) in words.iter().enumerate() {
+            let v = w.unwrap_or(zero);
+            builder
+                .ins()
+                .store(MemFlagsData::trusted(), v, acc, (i * 8) as i32);
+        }
+        let acc_xz = context.use_4state.then(|| {
+            let p = alloc_wide_slot(builder, nb);
+            for (i, w) in words_xz.iter().enumerate() {
+                let v = w.unwrap_or(zero);
+                builder
+                    .ins()
+                    .store(MemFlagsData::trusted(), v, p, (i * 8) as i32);
+            }
+            p
+        });
+
+        emit_wide_apply_mask(context, builder, acc, nb, *width);
+        if let Some(xz) = acc_xz {
+            emit_wide_apply_mask(context, builder, xz, nb, *width);
+        }
+        Some((acc, acc_xz))
+    }
+
     fn build_binary_wide_concat(
         &self,
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+        if let Some(built) = self.build_binary_wide_concat_into(context, builder) {
+            return Some(built);
+        }
+
         let ProtoExpression::Concatenation {
             elements, width, ..
         } = self
