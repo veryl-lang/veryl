@@ -1119,8 +1119,13 @@ impl SymbolTable {
             // Path to generic arg should have its project prefix to make it visible from
             // the namespace of base component. An empty query namespace carries no project
             // to prepend, so there is nothing to append.
+            // The comparison uses the base component's declaration scope rather than
+            // the resolution cursor: a head reached through an import binding (or
+            // its synthetic token scope) leaves the cursor in the importing project,
+            // which would suppress the prefix and leave the argument unresolvable
+            // from the base component's namespace.
             if let Some(prj) = scope::project_of(entry_scope)
-                && Some(prj) != scope::project_of(context.scope)
+                && Some(prj) != scope::project_of(found.scope)
             {
                 self.append_project_path(arg, entry_scope, entry_define_context);
             }

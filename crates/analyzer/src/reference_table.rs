@@ -322,15 +322,26 @@ impl ReferenceTable {
                     let n_args = path.paths[i].arguments.len();
 
                     if in_import_declaration
+                        && i + 1 == path.paths.len()
                         && !params.is_empty()
                         && (matches!(
                             symbol.found.kind,
                             SymbolKind::Struct(_) | SymbolKind::Union(_)
-                        ) || matches!(symbol.found.kind, SymbolKind::Function(ref x) if !x.is_proto))
+                        ) || matches!(
+                            symbol.found.kind,
+                            SymbolKind::Package(_)
+                                | SymbolKind::Module(_)
+                                | SymbolKind::Interface(_)
+                        ) && n_args == 0
+                            || matches!(symbol.found.kind, SymbolKind::Function(ref x) if !x.is_proto))
                     {
-                        // Generic function, struct and union should be imorted as-is
-                        // but not as thier instances.
+                        // Generic function, struct, union and package should be
+                        // imported as-is but not as their instances.
+                        // A package without generic arguments is imported as-is
+                        // so that it can be instantiated at the use site; an
+                        // instantiated package keeps the wildcard-import path.
                         // https://github.com/veryl-lang/veryl/issues/1619
+                        // https://github.com/veryl-lang/veryl/issues/3122
                         if !impoted_path && n_args != 0 {
                             self.errors.push(AnalyzerError::invalid_import(&path.range))
                         }

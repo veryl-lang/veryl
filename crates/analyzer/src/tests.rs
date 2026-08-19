@@ -1787,16 +1787,160 @@ fn invalid_import() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    // Importing a package namespace itself is allowed:
+    // https://github.com/veryl-lang/veryl/issues/3122
     let code = r#"
     package PkgA {
+        struct S {
+            x: logic,
+        }
     }
-    module ModuleA {
-        import PkgA;
+    import prj::PkgA;
+    module ModuleA (
+        audio: output PkgA::S,
+    ) {
+        assign audio = PkgA::S'{x: 1'b0};
     }
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::InvalidImport { .. }));
+    assert!(errors.is_empty());
+
+    // A top-level package can also be imported under its own name.
+    let code = r#"
+    package PkgB {
+        struct S {
+            x: logic,
+        }
+    }
+    module ModuleB {
+        import PkgB;
+        let _s: PkgB::S = PkgB::S'{x: 1'b0};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // A generic package is imported as-is and instantiated at the use site.
+    let code = r#"
+    package PkgG::<W: u32> {
+        const C: u32 = W;
+    }
+    module ModuleC {
+        import prj::PkgG;
+        const X: u32 = PkgG::<8>::C;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // An interface can also be imported under its own name, keeping
+    // modport members qualified.
+    let code = r#"
+    interface IfA {
+        var _x: logic<8>;
+        modport mp {
+            _x: input,
+        }
+    }
+    module ModuleD (
+        ifp: modport IfA::mp,
+    ) {
+        import prj::IfA;
+        inst u: IfA;
+        assign u._x = 0;
+        let _p: logic = ifp._x;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // A module can also be imported under its own name.
+    let code = r#"
+    module ModA {
+        var _y: logic<8>;
+        assign _y = 0;
+    }
+    module ModuleE {
+        import prj::ModA;
+        inst u: ModA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Generic interfaces and modules are imported as-is and
+    // instantiated at the use site.
+    let code = r#"
+    interface IfG::<W: u32> {
+        var _x: logic<W>;
+    }
+    module ModG::<W: u32> {
+        var _y: logic<W>;
+        assign _y = 0;
+    }
+    module ModuleF {
+        import prj::IfG;
+        import prj::ModG;
+        inst u: IfG::<8>;
+        inst v: ModG::<8>;
+        assign u._x = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // A generic component must be imported as its definition, not as an
+    // instantiated instance.
+    let code = r#"
+    package PkgG::<W: u32> {
+        const C: u32 = W;
+    }
+    module ModG::<W: u32> {
+        var _y: logic<W>;
+        assign _y = 0;
+    }
+    interface IfG::<W: u32> {
+        var _x: logic<W>;
+    }
+    module ModuleG {
+        import prj::PkgG::<8>;
+        import prj::ModG::<8>;
+        import prj::IfG::<8>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|e| matches!(e, AnalyzerError::InvalidImport { .. }))
+            .count(),
+        3,
+        "{errors:?}"
+    );
+
+    // Wildcard import of an instance and member imports through an
+    // instance remain valid.
+    let code = r#"
+    package PkgG::<W: u32> {
+        const C: u32 = W;
+    }
+    module ModuleH {
+        import prj::PkgG::<8>::*;
+        import prj::PkgG::<8>::C;
+        const X: u32 = C;
+        const Y: u32 = C;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 
     let code = r#"
     package a_pkg::<a: u32> {
