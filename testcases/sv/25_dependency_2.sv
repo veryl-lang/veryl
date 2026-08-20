@@ -298,4 +298,20 @@ module veryl_testcase_Module25S;
     veryl_sample4___foo_module__veryl_sample4___foo_pkg__3 u0 ();
     veryl_sample4___foo_module__veryl_sample4___foo_pkg__3 u1 ();
 endmodule
+
+module veryl_testcase_Module25T;
+    // A non-generic project-scope function is imported by its project-qualified
+    // path and called under the imported name.
+
+
+
+
+
+    int unsigned _r;
+    always_comb _r = veryl_sample4_foo_func_2();
+
+    function automatic int unsigned veryl_sample4_foo_func_2() ;
+        return 2;
+    endfunction
+endmodule
 //# sourceMappingURL=../map/25_dependency_2.sv.map

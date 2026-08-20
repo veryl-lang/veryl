@@ -3861,6 +3861,33 @@ module top {
 }
 
 #[test]
+fn project_scope_function_import_suppressed() {
+    // SystemVerilog `import` requires a package qualifier. A project-scope
+    // function has no package in its emitted form, so its import is dropped;
+    // the function is already available at the use site.
+    let code = r#"
+function project_func::<W: u32> (value: input logic<W>) -> logic<W> {
+    return value;
+}
+module M {
+    import prj::project_func;
+    var r: logic<8>;
+    assign r = project_func::<8>(8'd1);
+}
+"#;
+
+    let ret = emit_with_default(code);
+    assert!(
+        !ret.contains("import prj_project_func;"),
+        "project-scope function import must not be emitted: {ret}"
+    );
+    assert!(
+        ret.contains("__project_func__8"),
+        "function must be emitted: {ret}"
+    );
+}
+
+#[test]
 fn regression_cast_to_positive_type_balanced_parens() {
     // `as p8/p16/p32/p64` must emit balanced parentheses (previously the
     // closing `))` was missing, producing invalid SystemVerilog).
