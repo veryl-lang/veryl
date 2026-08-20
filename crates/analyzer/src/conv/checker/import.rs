@@ -66,11 +66,25 @@ pub fn check_import(context: &mut Context, value: &ImportDeclaration) {
                     .map(|parent| parent.imported && symbol.found.is_importable(true))
                     .unwrap()
             } else {
-                // The preceding symbol must be a package, an enum, or
-                // a proto-package referenced through a generic parameter.
-                (parent_symbol.is_package(false)
-                    || matches!(parent_symbol.kind, SymbolKind::Enum(_)))
-                    && symbol.found.is_importable(true)
+                // The preceding symbol must be a package, an enum, the
+                // project namespace (project-scope items), or a proto-package
+                // referenced through a generic parameter.
+                let parent_is_qualifier = parent_symbol.is_package(false)
+                    || matches!(
+                        parent_symbol.kind,
+                        SymbolKind::Enum(_) | SymbolKind::Namespace
+                    );
+                let item_importable = if matches!(parent_symbol.kind, SymbolKind::Namespace) {
+                    // A project-scope function has the project namespace as its
+                    // parent, which is not a package. The emitted SystemVerilog
+                    // has no package to qualify the import with, so only
+                    // functions are accepted here; their import is suppressed
+                    // by the emitter.
+                    matches!(symbol.found.kind, SymbolKind::Function(_))
+                } else {
+                    symbol.found.is_importable(true)
+                };
+                parent_is_qualifier && item_importable
             }
         } else {
             false
