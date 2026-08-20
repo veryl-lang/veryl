@@ -585,9 +585,15 @@ pub fn run_native_testbench_timed(
     if let Some(dump) = dump {
         sim.attach_dump(dump);
     }
+    // `Instant::now` panics on wasm, where the playground runs the testbench,
+    // so the derivation span is measured off-wasm only.
+    #[cfg(not(target_family = "wasm"))]
     let t_derive = std::time::Instant::now();
     let tb_stmts = derive_testbench(&mut sim, &module_name)?;
+    #[cfg(not(target_family = "wasm"))]
     let derive_el = t_derive.elapsed();
+    #[cfg(target_family = "wasm")]
+    let derive_el = std::time::Duration::ZERO;
     let result = run_testbench(&mut sim, &tb_stmts);
 
     #[cfg(feature = "profile")]
