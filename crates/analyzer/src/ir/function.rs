@@ -1,4 +1,5 @@
 use crate::conv::Context;
+use crate::conv::checker::portability::allow_multiple_assign;
 use crate::conv::utils::{
     check_compatibility, check_implicit_clock_conversion, eval_array_literal,
 };
@@ -266,7 +267,10 @@ impl FunctionCall {
                             false,
                             self.comptime.token,
                         );
-                        if !success & assign_context.is_ff() {
+                        if !success
+                            && assign_context.is_ff()
+                            && !allow_multiple_assign(context, dst.id)
+                        {
                             context.insert_error(AnalyzerError::multiple_assignment(
                                 &variable.path.to_string(),
                                 &self.comptime.token,
