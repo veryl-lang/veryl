@@ -7,5 +7,6 @@ pub mod import;
 pub mod inst;
 pub mod modport;
 pub mod port;
+pub mod portability;
 pub mod proto;
 pub mod separator;

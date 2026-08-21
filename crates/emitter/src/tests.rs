@@ -4841,3 +4841,51 @@ fn struct_member_ifdef_keeps_semicolon_inside_guard() {
         "no stray ';' after `endif:\n{ret}"
     );
 }
+
+#[test]
+fn non_portable_variable_lowers_always_ff_to_always() {
+    // SystemVerilog forbids another process from writing a variable an
+    // `always_ff` writes, so the opt-in has to drop the `_ff`.
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M (
+    clk0: input clock,
+    clk1: input clock,
+    en0 : input logic,
+    en1 : input logic,
+) {
+    #[allow(multiple_assign)]
+    var ram: logic<32> [32];
+    var other: logic;
+
+    always_ff (clk0) {
+        if en0 {
+            ram[0] = 0;
+        }
+    }
+    always_ff (clk1) {
+        if en1 {
+            ram[1] = 1;
+        }
+    }
+    always_ff (clk0) {
+        other = ram[0];
+    }
+}
+"#;
+    let ret = emit(&metadata, code);
+    assert_eq!(
+        ret.matches("always @").count(),
+        2,
+        "both writers must be plain always:\n{ret}"
+    );
+    assert_eq!(
+        ret.matches("always_ff @").count(),
+        1,
+        "a reader-only block keeps always_ff:\n{ret}"
+    );
+
+    let code = code.replace("    #[allow(multiple_assign)]\n", "");
+    let ret = emit(&metadata, &code);
+    assert_eq!(ret.matches("always_ff @").count(), 3, "{ret}");
+}

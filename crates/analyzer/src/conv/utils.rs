@@ -5,6 +5,7 @@ use crate::analyzer_error::{
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_refereence;
+use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
@@ -1994,6 +1995,7 @@ pub fn eval_function_call(
             SymbolKind::SystemFunction(_) => {
                 let name = symbol.found.token.text;
                 let args = args.to_system_function_args(context, &symbol.found);
+                check_initial_assign_system_function_args(context, &symbol.found, &args);
                 let ret = ir::SystemFunctionCall::new(context, name, args, token)?;
                 Ok(ir::Expression::Term(Box::new(
                     ir::Factor::SystemFunctionCall(ret),
