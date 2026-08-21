@@ -426,7 +426,7 @@ impl ExpandedModportPortTable {
     }
 
     pub fn drain(&mut self) -> Vec<ExpandedModportPortTableEntry> {
-        self.entries.drain(..).collect()
+        std::mem::take(&mut self.entries)
     }
 
     pub fn is_empty(&self) -> bool {

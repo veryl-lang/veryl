@@ -148,14 +148,13 @@ pub unsafe fn read_native_value(
     unsafe {
         if nb > 16 {
             let payload = std::slice::from_raw_parts(ptr, nb);
-            let mask_xz_slice: &[u8];
             let zeros;
-            if use_4state {
-                mask_xz_slice = std::slice::from_raw_parts(ptr.add(nb), nb);
+            let mask_xz_slice: &[u8] = if use_4state {
+                std::slice::from_raw_parts(ptr.add(nb), nb)
             } else {
                 zeros = vec![0u8; nb];
-                mask_xz_slice = &zeros;
-            }
+                &zeros
+            };
             Value::from_le_bytes(payload, mask_xz_slice, width as usize, signed)
         } else if nb == 16 {
             let payload = read_payload_128(ptr);

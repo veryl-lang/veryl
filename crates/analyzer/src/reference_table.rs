@@ -418,7 +418,7 @@ impl ReferenceTable {
                     // it from the scope cursor only on this generic branch.
                     let namespace = scope::namespace(scope, define_context);
 
-                    let mut args: Vec<_> = path.paths[i].arguments.drain(0..).collect();
+                    let mut args: Vec<_> = std::mem::take(&mut path.paths[i].arguments);
                     for param in params.iter().skip(n_args) {
                         //  apply default value
                         args.push(param.1.default_value.as_ref().unwrap().clone());
@@ -764,7 +764,7 @@ impl ReferenceTable {
 
     pub fn apply(&mut self) -> Vec<AnalyzerError> {
         symbol_table::suppress_cache_clear();
-        let candidates: Vec<_> = self.candidates.drain(0..).collect();
+        let candidates: Vec<_> = std::mem::take(&mut self.candidates);
 
         for x in &candidates {
             match x {
@@ -882,7 +882,7 @@ impl ReferenceTable {
         }
 
         symbol_table::resume_cache_clear();
-        self.errors.drain(0..).collect()
+        std::mem::take(&mut self.errors)
     }
 
     fn get_struct_namespace(symbol: &Symbol) -> Namespace {
