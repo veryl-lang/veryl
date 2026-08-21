@@ -11395,6 +11395,7 @@ mod tests {
             var_width: 32,
             var_native_bytes: 4,
             var_signed: false,
+            token: TokenRange::default(),
             range: ProtoForRange::Forward {
                 start: ProtoForBound::Const(0),
                 end: ProtoForBound::Const(8),
@@ -11419,6 +11420,7 @@ mod tests {
             var_width: 8,
             var_native_bytes: 1,
             var_signed: false,
+            token: TokenRange::default(),
             range: ProtoForRange::Forward {
                 start: ProtoForBound::Const(0),
                 end: ProtoForBound::Const(7),
@@ -11440,6 +11442,7 @@ mod tests {
             var_width: 32,
             var_native_bytes: 4,
             var_signed: false,
+            token: TokenRange::default(),
             range: ProtoForRange::Forward {
                 start: ProtoForBound::Const(0),
                 end: ProtoForBound::Dynamic(const_expr(8, 32)),
@@ -11463,6 +11466,7 @@ mod tests {
             var_width: 32,
             var_native_bytes: 4,
             var_signed: false,
+            token: TokenRange::default(),
             range: ProtoForRange::Reverse {
                 start: ProtoForBound::Const(0),
                 end: ProtoForBound::Const(8),
@@ -11484,6 +11488,7 @@ mod tests {
             var_width: 32,
             var_native_bytes: 4,
             var_signed: false,
+            token: TokenRange::default(),
             range: ProtoForRange::Stepped {
                 start: ProtoForBound::Const(1),
                 end: ProtoForBound::Const(64),
