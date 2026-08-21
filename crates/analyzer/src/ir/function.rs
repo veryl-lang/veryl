@@ -6,7 +6,7 @@ use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
     AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, Signature, Statement,
-    ValueVariant, VarId, VarIndex, VarPath, VarPathSelect, VarSelect,
+    ValueVariant, VarId, VarIndex, VarPath, VarPathSelect,
 };
 use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind};
 use crate::value::{Value, ValueBigUint};
@@ -171,6 +171,7 @@ pub struct FunctionCall {
     pub index: Option<Vec<usize>>,
     pub comptime: Comptime,
     pub inputs: CallArgs<Expression>,
+    /// Output bindings that may actually be written by this specialization.
     pub outputs: CallArgs<Vec<AssignDestination>>,
 }
 
@@ -253,7 +254,9 @@ impl FunctionCall {
         for output in self.outputs.values() {
             for dst in output {
                 if let Some(index) = dst.index.eval_value(context) {
-                    let variable = context.get_variable_info(dst.id).unwrap();
+                    let Some(variable) = context.get_variable_info(dst.id) else {
+                        continue;
+                    };
                     if let Some((beg, end)) =
                         dst.select.eval_value(context, &variable.r#type, false)
                     {
@@ -395,6 +398,10 @@ impl<T> CallArgs<T> {
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.0.iter_mut().map(|(_, v)| v)
     }
+
+    pub(crate) fn retain(&mut self, mut f: impl FnMut(&VarPath) -> bool) {
+        self.0.retain(|(path, _)| f(path));
+    }
 }
 
 impl<T> std::ops::Deref for CallArgs<T> {
@@ -520,7 +527,12 @@ impl Arguments {
         };
 
         for (arg, mut expr, dst) in connections {
-            if arg.members.len() == 1 {
+            if arg.members.len() == 1
+                && !matches!(
+                    &arg.comptime.r#type.kind,
+                    crate::ir::TypeKind::Modport(_, _)
+                )
+            {
                 let (path, _, direction) = &arg.members[0];
                 match direction {
                     Direction::Input => {
@@ -560,28 +572,26 @@ impl Arguments {
             } else {
                 let expr_comptime = expr.eval_comptime(context, None);
                 let expr_token = expr_comptime.token;
-                let expr_members = expr_comptime
-                    .r#type
-                    .expand_interface(context, &dst[0].0, expr_token)?;
 
                 check_compatibility(context, &arg.comptime.r#type, expr_comptime, &expr_token);
 
-                for (x, y) in arg.members.iter().zip(expr_members.iter()) {
+                let actual = &dst[0];
+                for x in &arg.members {
                     let arg_path = x.0.clone();
                     let direction = x.2;
-                    let expr_path = y.0.clone();
+                    let mut expr_path = actual.0.clone();
+                    expr_path.0.extend_from_slice(&arg_path.0[1..]);
+                    let actual_member = VarPathSelect(expr_path, actual.1.clone(), expr_token);
 
                     match direction {
                         Direction::Input => {
-                            let expr = VarPathSelect(expr_path, VarSelect::default(), expr_token);
-                            let expr = expr.to_expression(context);
+                            let expr = actual_member.to_expression(context);
                             if let Some(expr) = expr {
                                 inputs.push((arg_path, expr));
                             }
                         }
                         Direction::Output => {
-                            let dst = VarPathSelect(expr_path, VarSelect::default(), expr_token);
-                            let dst = dst.to_assign_destination(context, false);
+                            let dst = actual_member.to_assign_destination(context, false);
                             if let Some(dst) = dst {
                                 outputs.push((arg_path, vec![dst]));
                             }

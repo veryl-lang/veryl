@@ -14,6 +14,7 @@ use crate::conv::checker::import::check_import;
 use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
+use crate::conv::context::{FunctionOutputBinding, RuntimeFunctionEffect};
 use crate::conv::utils::{
     TypePosition, assign_rhs_context_type, check_assign_before_definition,
     check_assign_clock_domain, eval_array_range_assign, eval_assign_statement, eval_clock,
@@ -1254,6 +1255,46 @@ fn conv_function(
             }
         }
 
+        let mut output_ids = HashMap::default();
+        for (arg, port) in args.iter().zip(&proeprty.ports) {
+            let Some(port) = symbol_table::get(port.symbol) else {
+                continue;
+            };
+            let SymbolKind::Port(port) = &port.kind else {
+                continue;
+            };
+            for (path, _, direction) in &arg.members {
+                if !matches!(direction, Direction::Output | Direction::Inout) {
+                    continue;
+                }
+                if let Some(id) = arg_map.get(path) {
+                    output_ids.insert(
+                        *id,
+                        FunctionOutputBinding {
+                            scheduler_external: port.direction != Direction::Output,
+                        },
+                    );
+                }
+            }
+        }
+        let (specialized_external_write, specialized_formal_writes) =
+            symbol_table::specialized_direct_effect(symbol, c);
+        let mut effect = RuntimeFunctionEffect {
+            external_write: proeprty.has_side_effect_in(&c.config.defines),
+            written_outputs: proeprty
+                .written_output_paths(&c.config.defines)
+                .into_iter()
+                .filter_map(|path| path.to_var_path())
+                .collect(),
+        };
+        effect.external_write |= specialized_external_write;
+        effect.written_outputs.extend(
+            specialized_formal_writes
+                .into_iter()
+                .filter_map(|path| path.to_var_path()),
+        );
+        c.begin_function_effect(path.clone(), output_ids, effect);
+
         let body = if let Some(block) = statement_block {
             let disable_const_opt = c.disalbe_const_opt;
             c.disalbe_const_opt = true;
@@ -1264,13 +1305,23 @@ fn conv_function(
             let statements: IrResult<ir::StatementBlock> = Conv::conv(c, block);
             c.in_tb_block = in_tb_block;
             c.disalbe_const_opt = disable_const_opt;
+            let statements = match statements {
+                Ok(statements) => statements,
+                Err(error) => {
+                    c.finish_function_effect();
+                    return Err(error);
+                }
+            };
+            c.record_function_statement_writes(&statements.0);
+            c.finish_function_effect();
 
             vec![ir::FunctionBody {
                 ret: ret_id,
                 arg_map,
-                statements: statements?.0,
+                statements: statements.0,
             }]
         } else {
+            c.finish_function_effect();
             vec![]
         };
 

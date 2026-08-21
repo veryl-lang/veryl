@@ -1,0 +1,20 @@
+module transitive_side_effect_function_call_in_always_ff (
+    clk: input  clock,
+    q  : output logic,
+) {
+    function write_q () {
+        q = 1;
+    }
+
+    function apply () {
+        write_q();
+    }
+
+    function update () {
+        apply();
+    }
+
+    always_ff (clk) {
+        update();
+    }
+}

@@ -3,8 +3,8 @@ use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
 use crate::ir::{
     Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function, Interface,
-    IrResult, ShapeRef, Signature, Type, VarId, VarIndex, VarKind, VarPath, VarSelect, Variable,
-    VariableInfo,
+    IrResult, ShapeRef, Signature, Statement, Type, VarId, VarIndex, VarKind, VarPath, VarSelect,
+    Variable, VariableInfo,
 };
 use crate::namespace::Namespace;
 use crate::scope;
@@ -28,6 +28,35 @@ pub struct Config {
     pub evaluate_size_limit: usize,
     pub evaluate_array_limit: usize,
     pub defines: HashSet<StrId>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RuntimeFunctionEffect {
+    pub external_write: bool,
+    pub written_outputs: HashSet<VarPath>,
+}
+
+impl RuntimeFunctionEffect {
+    pub fn written_paths_for<'a>(
+        &'a self,
+        formal: &'a VarPath,
+    ) -> impl Iterator<Item = &'a VarPath> {
+        self.written_outputs
+            .iter()
+            .filter(move |path| path.0.starts_with(&formal.0))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FunctionOutputBinding {
+    pub scheduler_external: bool,
+}
+
+#[derive(Clone, Debug)]
+struct FunctionEffectFrame {
+    path: FuncPath,
+    outputs: HashMap<VarId, FunctionOutputBinding>,
+    effect: RuntimeFunctionEffect,
 }
 
 impl Default for Config {
@@ -77,6 +106,8 @@ pub struct Context {
     /// complete via `set_instance_history`, which functions never call, so it
     /// would stay wedged as "active" forever.
     pub function_call_stack: Vec<Signature>,
+    function_effects: HashMap<FuncPath, RuntimeFunctionEffect>,
+    function_effect_stack: Vec<FunctionEffectFrame>,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
@@ -225,6 +256,11 @@ impl Context {
             &mut tgt.comptime_for_overflow,
         );
         std::mem::swap(&mut self.function_call_stack, &mut tgt.function_call_stack);
+        std::mem::swap(&mut self.function_effects, &mut tgt.function_effects);
+        std::mem::swap(
+            &mut self.function_effect_stack,
+            &mut tgt.function_effect_stack,
+        );
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
@@ -276,6 +312,133 @@ impl Context {
 
     pub fn get_variable_info(&self, id: VarId) -> Option<VariableInfo> {
         self.variables.get(&id).map(VariableInfo::new)
+    }
+
+    pub(crate) fn begin_function_effect(
+        &mut self,
+        path: FuncPath,
+        outputs: HashMap<VarId, FunctionOutputBinding>,
+        effect: RuntimeFunctionEffect,
+    ) {
+        self.function_effect_stack.push(FunctionEffectFrame {
+            path,
+            outputs,
+            effect,
+        });
+    }
+
+    pub(crate) fn finish_function_effect(&mut self) {
+        if let Some(frame) = self.function_effect_stack.pop() {
+            self.function_effects.insert(frame.path, frame.effect);
+        }
+    }
+
+    pub(crate) fn function_effect(&self, path: &FuncPath) -> Option<RuntimeFunctionEffect> {
+        self.function_effects.get(path).cloned()
+    }
+
+    pub(crate) fn record_function_call_effect(
+        &mut self,
+        effect: &RuntimeFunctionEffect,
+        outputs: &[(VarPath, Vec<crate::ir::AssignDestination>)],
+    ) {
+        let Some(frame) = self.function_effect_stack.last() else {
+            return;
+        };
+        let caller_outputs = frame.outputs.clone();
+        let mut external_write = effect.external_write;
+        let mut written_outputs = HashSet::default();
+
+        for (formal, destinations) in outputs {
+            for written in effect.written_paths_for(formal) {
+                let suffix = &written.0[formal.0.len()..];
+                for destination in destinations {
+                    if let Some(output) = caller_outputs.get(&destination.id) {
+                        let mut mapped = destination.path.clone();
+                        mapped.0.extend_from_slice(suffix);
+                        written_outputs.insert(mapped);
+                        external_write |= output.scheduler_external;
+                    } else if self
+                        .get_variable_info(destination.id)
+                        .is_none_or(|variable| variable.affiliation != Affiliation::Function)
+                    {
+                        external_write = true;
+                    }
+                }
+            }
+        }
+
+        if let Some(frame) = self.function_effect_stack.last_mut() {
+            frame.effect.external_write |= external_write;
+            frame.effect.written_outputs.extend(written_outputs);
+        }
+    }
+
+    pub(crate) fn record_function_statement_writes(&mut self, statements: &[Statement]) {
+        let Some(caller_outputs) = self
+            .function_effect_stack
+            .last()
+            .map(|frame| frame.outputs.clone())
+        else {
+            return;
+        };
+        let mut effect = RuntimeFunctionEffect::default();
+
+        fn visit(
+            context: &Context,
+            statements: &[Statement],
+            caller_outputs: &HashMap<VarId, FunctionOutputBinding>,
+            effect: &mut RuntimeFunctionEffect,
+        ) {
+            for statement in statements {
+                match statement {
+                    Statement::Assign(assign) => {
+                        for destination in &assign.dst {
+                            if let Some(output) = caller_outputs.get(&destination.id) {
+                                effect.written_outputs.insert(destination.path.clone());
+                                effect.external_write |= output.scheduler_external;
+                            } else if context.get_variable_info(destination.id).is_none_or(
+                                |variable| {
+                                    variable.affiliation != Affiliation::Function
+                                        || matches!(variable.kind, VarKind::Output | VarKind::Inout)
+                                },
+                            ) {
+                                effect.external_write = true;
+                            }
+                        }
+                    }
+                    Statement::If(statement) => {
+                        visit(context, &statement.true_side, caller_outputs, effect);
+                        visit(context, &statement.false_side, caller_outputs, effect);
+                    }
+                    Statement::IfReset(statement) => {
+                        visit(context, &statement.true_side, caller_outputs, effect);
+                        visit(context, &statement.false_side, caller_outputs, effect);
+                    }
+                    Statement::Case(statement) => {
+                        for arm in &statement.arms {
+                            visit(context, &arm.body, caller_outputs, effect);
+                        }
+                        visit(context, &statement.default, caller_outputs, effect);
+                    }
+                    Statement::For(statement) => {
+                        visit(context, &statement.body, caller_outputs, effect);
+                    }
+                    Statement::SystemFunctionCall(_)
+                    | Statement::FunctionCall(_)
+                    | Statement::TbMethodCall(_)
+                    | Statement::Break
+                    | Statement::Unsupported(_)
+                    | Statement::Null => {}
+                }
+            }
+        }
+
+        visit(self, statements, &caller_outputs, &mut effect);
+        if let Some(frame) = self.function_effect_stack.last_mut() {
+            frame.effect.external_write |= effect.external_write;
+            frame.effect.written_outputs.extend(effect.written_outputs);
+        }
     }
 
     pub fn resolve_path(&self, mut path: GenericSymbolPath) -> GenericSymbolPath {

@@ -1,0 +1,22 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+side_effect_function_call_in_always_ff (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#side_effect_function_call_in_always_ff)
+
+  × function "update" can't be called in always_ff because it may write an HDL object declared outside the function
+    ╭─[../../testcases/error/systemverilog_side_effect_function_call_in_always_ff.veryl:11:9]
+ 10 │     always_ff (clk) {
+ 11 │         update();
+    ·         ────┬────
+    ·             ╰── called from always_ff
+ 12 │     }
+    ╰────
+   ╭─[../../testcases/error/systemverilog_side_effect_function_call_in_always_ff.veryl:7:9]
+ 6 │     function update () {
+ 7 │         u.a = 1;
+   ·         ─┬─
+   ·          ╰── external write occurs here
+ 8 │     }
+   ╰────
+  help: move the external write into this always_ff, or use an output argument connected to a variable declared inside it
