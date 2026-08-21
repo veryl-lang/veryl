@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 425
+expression: out
+---
+mismatch_type (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_type)
+
+  × "i_a" is expected to "enum or union or struct", but it is "input port"
+   ╭─[../../testcases/error/mismatch_type_variable.veryl:4:12]
+ 3 │ ) {
+ 4 │     var b: i_a;
+   ·            ─┬─
+   ·             ╰── Error location
+ 5 │     assign b = 0;
+   ╰────
+  help:
