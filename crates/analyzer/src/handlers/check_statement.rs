@@ -196,4 +196,14 @@ impl VerylGrammarTrait for CheckStatement {
         }
         Ok(())
     }
+
+    fn method_declaration(&mut self, arg: &MethodDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.in_non_void_function = arg.method_declaration_opt0.is_some()
+            }
+            HandlerPoint::After => self.in_non_void_function = false,
+        }
+        Ok(())
+    }
 }

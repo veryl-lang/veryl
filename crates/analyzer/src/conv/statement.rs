@@ -478,6 +478,15 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             Box::new(ret),
                         )]))
                     }
+                    SymbolKind::Function(_)
+                        if matches!(
+                            symbol_table::get_namespace_symbol(&symbol.found.namespace)
+                                .map(|x| x.kind),
+                            Some(SymbolKind::Struct(_))
+                        ) =>
+                    {
+                        Err(ir_error!(token))
+                    }
                     SymbolKind::Function(x) if !x.is_proto => {
                         let ret = function_call(
                             context,

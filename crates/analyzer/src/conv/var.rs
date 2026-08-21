@@ -212,8 +212,13 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
     fn conv(context: &mut Context, value: &ExpressionIdentifier) -> IrResult<Self> {
         check_separator(context, value);
 
-        let mut path: VarPath = Conv::conv(context, value.scoped_identifier.as_ref())?;
-        let mut generic_path: GenericSymbolPath = value.scoped_identifier.as_ref().into();
+        let mut path: VarPath = match value.expression_identifier_group.as_ref() {
+            ExpressionIdentifierGroup::ScopedIdentifier(x) => {
+                Conv::conv(context, x.scoped_identifier.as_ref())?
+            }
+            ExpressionIdentifierGroup::Slf(x) => VarPath(vec![x.slf.self_token.token.text]),
+        };
+        let mut generic_path: GenericSymbolPath = value.into();
         let mut select = VarSelect::default();
         let token: TokenRange = value.into();
         let mut end: Option<(VarSelectOp, ir::Expression)> = None;

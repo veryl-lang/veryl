@@ -95,28 +95,36 @@ impl VerylWalker for Finder {
 
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
-        let x = &arg.scoped_identifier;
         self.group_hit = false;
         self.in_group = true;
-        match &*x.scoped_identifier_group {
-            ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
-                self.identifier(&x.identifier);
-                if let Some(ref x) = x.scoped_identifier_opt {
-                    self.with_generic_argument(&x.with_generic_argument);
+        match arg.expression_identifier_group.as_ref() {
+            ExpressionIdentifierGroup::Slf(x) => {
+                self.slf(&x.slf);
+                self.in_group = false;
+            }
+            ExpressionIdentifierGroup::ScopedIdentifier(x) => {
+                let x = &x.scoped_identifier;
+                match &*x.scoped_identifier_group {
+                    ScopedIdentifierGroup::IdentifierScopedIdentifierOpt(x) => {
+                        self.identifier(&x.identifier);
+                        if let Some(ref x) = x.scoped_identifier_opt {
+                            self.with_generic_argument(&x.with_generic_argument);
+                        }
+                    }
+                    ScopedIdentifierGroup::DollarIdentifier(x) => {
+                        self.dollar_identifier(&x.dollar_identifier)
+                    }
                 }
-            }
-            ScopedIdentifierGroup::DollarIdentifier(x) => {
-                self.dollar_identifier(&x.dollar_identifier)
-            }
-        }
-        self.in_group = false;
-        for x in &x.scoped_identifier_list {
-            self.colon_colon(&x.colon_colon);
-            self.in_group = true;
-            self.identifier(&x.identifier);
-            self.in_group = false;
-            if let Some(ref x) = x.scoped_identifier_opt0 {
-                self.with_generic_argument(&x.with_generic_argument);
+                self.in_group = false;
+                for x in &x.scoped_identifier_list {
+                    self.colon_colon(&x.colon_colon);
+                    self.in_group = true;
+                    self.identifier(&x.identifier);
+                    self.in_group = false;
+                    if let Some(ref x) = x.scoped_identifier_opt0 {
+                        self.with_generic_argument(&x.with_generic_argument);
+                    }
+                }
             }
         }
         if let Some(ref x) = arg.expression_identifier_opt {

@@ -83,6 +83,7 @@ pub enum TokenType {
     I64,
     IfReset,
     If,
+    Impl,
     Import,
     Include,
     Initial,
@@ -115,6 +116,7 @@ pub enum TokenType {
     Rev,
     Break,
     Same,
+    Slf,
     Signed,
     Step,
     String,
@@ -178,6 +180,7 @@ impl TokenType {
                 | TokenType::I64
                 | TokenType::IfReset
                 | TokenType::If
+                | TokenType::Impl
                 | TokenType::Import
                 | TokenType::Include
                 | TokenType::Initial
@@ -210,6 +213,7 @@ impl TokenType {
                 | TokenType::Rev
                 | TokenType::Break
                 | TokenType::Same
+                | TokenType::Slf
                 | TokenType::Signed
                 | TokenType::Step
                 | TokenType::String
@@ -319,6 +323,7 @@ impl From<&str> for TokenType {
             "I64Term" => TokenType::I64,
             "IfResetTerm" => TokenType::IfReset,
             "IfTerm" => TokenType::If,
+            "ImplTerm" => TokenType::Impl,
             "ImportTerm" => TokenType::Import,
             "IncludeTerm" => TokenType::Include,
             "InitialTerm" => TokenType::Initial,
@@ -351,6 +356,7 @@ impl From<&str> for TokenType {
             "RevTerm" => TokenType::Rev,
             "BreakTerm" => TokenType::Break,
             "SameTerm" => TokenType::Same,
+            "SelfTerm" => TokenType::Slf,
             "SignedTerm" => TokenType::Signed,
             "StepTerm" => TokenType::Step,
             "StringTerm" => TokenType::String,
@@ -464,6 +470,7 @@ impl std::fmt::Display for TokenType {
             TokenType::I64 => "i64",
             TokenType::IfReset => "if_reset",
             TokenType::If => "if",
+            TokenType::Impl => "impl",
             TokenType::Import => "import",
             TokenType::Include => "include",
             TokenType::Initial => "initial",
@@ -496,6 +503,7 @@ impl std::fmt::Display for TokenType {
             TokenType::Rev => "rev",
             TokenType::Break => "break",
             TokenType::Same => "same",
+            TokenType::Slf => "self",
             TokenType::Signed => "signed",
             TokenType::Step => "step",
             TokenType::String => "string",

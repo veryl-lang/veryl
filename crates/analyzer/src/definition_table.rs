@@ -4,8 +4,8 @@ use std::cell::RefCell;
 use std::sync::Arc;
 use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::veryl_grammar_trait::{
-    FunctionDeclaration, InterfaceDeclaration, ModuleDeclaration, ProtoFunctionDeclaration,
-    ProtoModuleDeclaration,
+    FunctionDeclaration, InterfaceDeclaration, MethodDeclaration, ModuleDeclaration,
+    ProtoFunctionDeclaration, ProtoModuleDeclaration,
 };
 use veryl_parser::veryl_token::TokenSource;
 
@@ -47,6 +47,7 @@ pub enum Definition {
     Module(ModuleDeclaration),
     Interface(InterfaceDeclaration),
     Function(FunctionDeclaration),
+    Method(MethodDeclaration),
     ProtoFunction(ProtoFunctionDeclaration),
     ProtoModule(ProtoModuleDeclaration),
 }
@@ -69,6 +70,13 @@ impl Definition {
                 }
             }
             Definition::Function(x) => {
+                if let TokenSource::File { path, .. } = x.function.function_token.token.source {
+                    Some(path)
+                } else {
+                    None
+                }
+            }
+            Definition::Method(x) => {
                 if let TokenSource::File { path, .. } = x.function.function_token.token.source {
                     Some(path)
                 } else {

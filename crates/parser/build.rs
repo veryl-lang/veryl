@@ -71,6 +71,13 @@ fn generate_token_type() {
                 .strip_suffix("Term")
                 .unwrap_or(&term_name)
                 .to_string();
+            // `Self` is a Rust keyword and can't be an enum variant; mirror the
+            // grammar's `Slf` nonterminal name.
+            let variant_name = if variant_name == "Self" {
+                "Slf".to_string()
+            } else {
+                variant_name
+            };
 
             let display = if is_keyword {
                 literal.clone().unwrap_or_else(|| {

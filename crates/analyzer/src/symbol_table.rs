@@ -708,6 +708,11 @@ impl SymbolTable {
                 context.set_inner(found);
                 context.inner = true;
             }
+            SymbolKind::Struct(_) => {
+                context.set_inner(found);
+                context.last_found_type = Some(found.id);
+                context.inner = true;
+            }
             SymbolKind::TbComponent(x) => {
                 context.set_inner(found);
                 context.inner = true;
@@ -740,7 +745,6 @@ impl SymbolTable {
             }
             // don't trace inner item
             SymbolKind::Function(_)
-            | SymbolKind::Struct(_)
             | SymbolKind::Union(_)
             | SymbolKind::Modport(_)
             | SymbolKind::ModportFunctionMember(_)
@@ -839,6 +843,36 @@ impl SymbolTable {
             }
             _ => false,
         };
+        let struct_typed = context
+            .last_found_type
+            .map(|x| {
+                let symbol = self.symbol_table.get(&x).unwrap();
+                match &symbol.kind {
+                    SymbolKind::Struct(_) => true,
+                    SymbolKind::GenericInstance(x) => matches!(
+                        self.symbol_table.get(&x.base).unwrap().kind,
+                        SymbolKind::Struct(_)
+                    ),
+                    _ => false,
+                }
+            })
+            .unwrap_or(false);
+        let via_struct_type = struct_typed
+            && matches!(
+                last_found.kind,
+                SymbolKind::Struct(_) | SymbolKind::TypeDef(_) | SymbolKind::GenericInstance(_)
+            );
+        let via_struct_value = struct_typed
+            && matches!(
+                last_found.kind,
+                SymbolKind::Port(_)
+                    | SymbolKind::Variable(_)
+                    | SymbolKind::StructMember(_)
+                    | SymbolKind::UnionMember(_)
+                    | SymbolKind::Parameter(_)
+                    | SymbolKind::GenericParameter(_)
+                    | SymbolKind::ModportVariableMember(_)
+            );
         let via_namespace = matches!(last_found.kind, SymbolKind::Namespace);
         let via_prop_namespace = matches!(last_found.kind, SymbolKind::PropNamespace);
         let via_tb_component = matches!(last_found_type, Some(SymbolKind::TbComponent(_)));
@@ -857,6 +891,8 @@ impl SymbolTable {
                     | SymbolKind::UnionMember(_)
                     | SymbolKind::GenericParameter(_)
             ),
+            SymbolKind::Parameter(_) if via_struct_type => true,
+            SymbolKind::Function(x) if !x.is_proto && (via_struct_type || via_struct_value) => true,
             SymbolKind::Parameter(_)
             | SymbolKind::TypeDef(_)
             | SymbolKind::Enum(_)

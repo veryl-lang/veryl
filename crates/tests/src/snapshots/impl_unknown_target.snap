@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 425
+expression: out
+---
+invalid_impl_target (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_impl_target)
+
+  × "StructA" can't be implemented because it is not defined
+   ╭─[../../testcases/error/impl_unknown_target.veryl:2:10]
+ 1 │ module impl_unknown_target {
+ 2 │     impl StructA {
+   ·          ───┬───
+   ·             ╰── Error location
+ 3 │         function f (
+   ╰────
+  help:

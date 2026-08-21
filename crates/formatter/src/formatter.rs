@@ -2750,6 +2750,96 @@ impl VerylWalker for Formatter {
         self.align_reset();
     }
 
+    /// Semantic action for non-terminal 'ImplDeclaration'
+    fn impl_declaration(&mut self, arg: &ImplDeclaration) {
+        self.r#impl(&arg.r#impl);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.impl_declaration_opt {
+            self.with_generic_parameter(&x.with_generic_parameter);
+            self.align_reset();
+        }
+        self.space(1);
+        self.token_will_push(&arg.l_brace.l_brace_token);
+        for (i, x) in arg.impl_declaration_list.iter().enumerate() {
+            self.newline_list(i);
+            self.impl_group(&x.impl_group);
+            self.align_note_statement_end();
+        }
+        self.newline_list_post(
+            arg.impl_declaration_list.is_empty(),
+            &arg.l_brace.l_brace_token,
+        );
+        self.r_brace(&arg.r_brace);
+        self.align_reset();
+    }
+
+    /// Semantic action for non-terminal 'ImplGroup'
+    fn impl_group(&mut self, arg: &ImplGroup) {
+        for x in &arg.impl_group_list {
+            self.attribute(&x.attribute);
+            self.newline();
+        }
+        match &*arg.impl_group_group {
+            ImplGroupGroup::LBraceImplGroupGroupListRBrace(x) => {
+                self.token_will_push(&x.l_brace.l_brace_token);
+                for (i, x) in x.impl_group_group_list.iter().enumerate() {
+                    self.newline_list(i);
+                    self.impl_group(&x.impl_group);
+                    self.align_note_statement_end();
+                }
+                self.newline_list_post(
+                    x.impl_group_group_list.is_empty(),
+                    &x.l_brace.l_brace_token,
+                );
+                self.r_brace(&x.r_brace);
+            }
+            ImplGroupGroup::ImplItem(x) => self.impl_item(&x.impl_item),
+        }
+    }
+
+    /// Semantic action for non-terminal 'MethodDeclaration'
+    fn method_declaration(&mut self, arg: &MethodDeclaration) {
+        self.function(&arg.function);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.method_declaration_opt {
+            self.with_generic_parameter(&x.with_generic_parameter);
+            self.align_reset();
+        }
+        self.space(1);
+        self.method_port_declaration(&arg.method_port_declaration);
+        self.space(1);
+        self.align_reset();
+        if let Some(ref x) = arg.method_declaration_opt0 {
+            self.minus_g_t(&x.minus_g_t);
+            self.space(1);
+            self.scalar_type(&x.scalar_type);
+            self.space(1);
+            self.align_reset();
+        }
+        self.statement_block(&arg.statement_block);
+        self.align_reset();
+    }
+
+    /// Semantic action for non-terminal 'MethodPortDeclaration'
+    fn method_port_declaration(&mut self, arg: &MethodPortDeclaration) {
+        self.token_will_push(&arg.l_paren.l_paren_token);
+        self.newline_push();
+        self.slf(&arg.slf);
+        if let Some(ref x) = arg.method_port_declaration_opt {
+            self.str(",");
+            if let Some(ref x) = x.method_port_declaration_opt0 {
+                self.newline();
+                self.port_declaration_list(&x.port_declaration_list);
+            }
+        } else {
+            self.str(",");
+        }
+        self.newline_pop();
+        self.r_paren(&arg.r_paren);
+    }
+
     /// Semantic action for non-terminal 'ImportDeclaration'
     fn import_declaration(&mut self, arg: &ImportDeclaration) {
         self.import(&arg.import);

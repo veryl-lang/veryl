@@ -130,6 +130,7 @@ pub struct Emitter {
     attribute: Vec<AttributeType>,
     assignment_lefthand_side: Option<ExpressionIdentifier>,
     generic_map: Vec<Vec<GenericMap>>,
+    impl_target: Option<(VerylToken, GenericMap)>,
     resolved_identifier: Vec<String>,
     inst_module_namespace: Option<Namespace>,
     bound_namespace: Option<Namespace>,
@@ -194,6 +195,7 @@ impl Default for Emitter {
             attribute: Vec::new(),
             assignment_lefthand_side: None,
             generic_map: Vec::new(),
+            impl_target: None,
             resolved_identifier: Vec::new(),
             inst_module_namespace: None,
             bound_namespace: None,
@@ -2284,7 +2286,7 @@ impl Emitter {
         identifier: &ExpressionIdentifier,
         member: &Symbol,
     ) {
-        let port_identifier = identifier.scoped_identifier.identifier();
+        let port_identifier = identifier.identifier();
 
         let mut expanded_modport = None;
         if let Some(table) = self.modport_ports_table.as_ref() {
@@ -2488,8 +2490,8 @@ impl Emitter {
             let symbol =
                 if let (Ok(symbol), _) = self.resolve_generic_path(&identifier.into(), None) {
                     Rc::clone(&symbol.found)
-                } else if let (Ok(symbol), _) =
-                    self.resolve_scoped_idnetifier(&identifier.scoped_identifier)
+                } else if let Some(scoped) = identifier.scoped_identifier()
+                    && let (Ok(symbol), _) = self.resolve_scoped_idnetifier(scoped)
                     && let SymbolKind::Port(port) = &symbol.found.kind
                     && port.direction == SymDirection::Interface
                 {
@@ -2579,6 +2581,85 @@ impl Emitter {
         }
         self.in_named_argument.pop();
         self.modport_connections_tables.pop();
+    }
+
+    fn resolve_method_call(
+        &mut self,
+        exp: &ExpressionIdentifier,
+    ) -> Option<Rc<symbol_table::ResolveResult>> {
+        if exp.expression_identifier_list0.is_empty() {
+            return None;
+        }
+        let symbol = symbol_table::resolve(exp).ok()?;
+        if !matches!(symbol.found.kind, SymbolKind::Function(_)) {
+            return None;
+        }
+        let parent = symbol_table::get_namespace_symbol(&symbol.found.namespace)?;
+        matches!(parent.kind, SymbolKind::Struct(_)).then_some(symbol)
+    }
+
+    fn emit_method_call(
+        &mut self,
+        exp: &ExpressionIdentifier,
+        function_call: &FunctionCall,
+        resolved: &symbol_table::ResolveResult,
+    ) {
+        let context: SymbolContext = self.into();
+        let name = symbol_string(
+            exp.identifier(),
+            &resolved.found,
+            &resolved.found.namespace,
+            &resolved.full_path,
+            &resolved.generic_tables,
+            &context,
+            exp.scoped_identifier()
+                .map(|x| x.get_scope_depth())
+                .unwrap_or(1),
+        );
+        self.veryl_token(&exp.identifier().replace(&name));
+
+        self.in_named_argument.push(false);
+        self.group_begin();
+        self.l_paren(&function_call.l_paren);
+        self.group_nest_begin();
+        self.soft_break();
+        self.emit_method_receiver(exp);
+        if let Some(ref x) = function_call.function_call_opt {
+            self.str(",");
+            self.soft_line();
+            self.argument_list(&x.argument_list);
+        }
+        self.group_nest_end();
+        self.soft_break();
+        self.r_paren(&function_call.r_paren);
+        self.group_end();
+        self.in_named_argument.pop();
+    }
+
+    fn emit_expression_identifier_head(&mut self, arg: &ExpressionIdentifier) {
+        match arg.expression_identifier_group.as_ref() {
+            ExpressionIdentifierGroup::ScopedIdentifier(x) => {
+                self.scoped_identifier(&x.scoped_identifier)
+            }
+            ExpressionIdentifierGroup::Slf(x) => self.slf(&x.slf),
+        }
+    }
+
+    fn emit_method_receiver(&mut self, arg: &ExpressionIdentifier) {
+        self.resolved_identifier.push("".to_string());
+        self.emit_expression_identifier_head(arg);
+        for x in &arg.expression_identifier_list {
+            self.select(&x.select);
+        }
+        let last = arg.expression_identifier_list0.len() - 1;
+        for x in arg.expression_identifier_list0.iter().take(last) {
+            self.dot(&x.dot);
+            self.emit_identifier(&x.identifier, None);
+            for x in &x.expression_identifier_list0_list {
+                self.select(&x.select);
+            }
+        }
+        self.resolved_identifier.pop();
     }
 
     fn emit_argument_item(&mut self, arg: &ArgumentItem, port_index: usize) {
@@ -2970,6 +3051,11 @@ impl Emitter {
         generic_map: &GenericMap,
         omit_project_prefix: bool,
     ) {
+        let name = self.generic_instance_name(generic_map, omit_project_prefix);
+        self.token(&token.replace(&name));
+    }
+
+    fn generic_instance_name(&self, generic_map: &GenericMap, omit_project_prefix: bool) -> String {
         let name = generic_map.name(true, self.build_opt.hashed_mangled_name);
         let name = if self.build_opt.omit_project_prefix || omit_project_prefix {
             let project_name = format!("{}_", self.project_name.unwrap());
@@ -2981,9 +3067,29 @@ impl Emitter {
         } else {
             &name
         };
-        let name = name.replace("$std_", "__std_");
+        name.replace("$std_", "__std_")
+    }
 
+    fn impl_type_name(&self) -> String {
+        let (token, map) = self.impl_target.as_ref().unwrap();
+        if map.generic() {
+            self.generic_instance_name(map, true)
+        } else {
+            token.token.to_string()
+        }
+    }
+
+    fn emit_impl_member_name(&mut self, token: &VerylToken) {
+        let name = format!("{}_{}", self.impl_type_name(), token.token.text);
         self.token(&token.replace(&name));
+    }
+
+    fn emit_const_identifier(&mut self, arg: &Identifier) {
+        if self.impl_target.is_some() {
+            self.emit_impl_member_name(&arg.identifier_token);
+        } else {
+            self.identifier(arg);
+        }
     }
 }
 
@@ -3375,7 +3481,7 @@ impl VerylWalker for Emitter {
         if let Some(table) = self.modport_ports_table.as_ref()
             && let Some(member_identifier) = arg.expression_identifier_list0.first()
         {
-            let port_identifier = arg.scoped_identifier.identifier();
+            let port_identifier = arg.identifier();
             expanded_modport = table
                 .get_modport_member(
                     &port_identifier.token,
@@ -3389,7 +3495,9 @@ impl VerylWalker for Emitter {
             && !arg.expression_identifier_list.is_empty()
             && expanded_modport.is_none()
         {
-            self.get_inst_modport_array_size(&arg.scoped_identifier.as_ref().into())
+            arg.scoped_identifier()
+                .map(|x| self.get_inst_modport_array_size(&x.into()))
+                .unwrap_or_default()
         } else {
             vec![]
         };
@@ -3405,11 +3513,11 @@ impl VerylWalker for Emitter {
                 .iter()
                 .map(|x| x.select.clone())
                 .collect();
-            self.scoped_identifier(&arg.scoped_identifier);
+            self.emit_expression_identifier_head(arg);
             self.emit_flattened_select(&select, &array_size);
             self.push_resolved_identifier("[0]");
         } else {
-            self.scoped_identifier(&arg.scoped_identifier);
+            self.emit_expression_identifier_head(arg);
             for x in &arg.expression_identifier_list {
                 self.select(&x.select);
             }
@@ -3768,6 +3876,14 @@ impl VerylWalker for Emitter {
         if let Some(ref x) = arg.identifier_factor_opt {
             match x.identifier_factor_opt_group.as_ref() {
                 IdentifierFactorOptGroup::FunctionCall(x) => {
+                    if let Some(symbol) = self.resolve_method_call(&arg.expression_identifier) {
+                        self.emit_method_call(
+                            &arg.expression_identifier,
+                            &x.function_call,
+                            &symbol,
+                        );
+                        return;
+                    }
                     self.expression_identifier(&arg.expression_identifier);
                     self.emit_function_call(&arg.expression_identifier, &x.function_call);
                 }
@@ -4192,6 +4308,13 @@ impl VerylWalker for Emitter {
     fn identifier_statement(&mut self, arg: &IdentifierStatement) {
         let connect_statement_emitted = self.emit_connect_statement(arg);
         if !connect_statement_emitted {
+            if let IdentifierStatementGroup::FunctionCall(x) = &*arg.identifier_statement_group
+                && let Some(symbol) = self.resolve_method_call(&arg.expression_identifier)
+            {
+                self.emit_method_call(&arg.expression_identifier, &x.function_call, &symbol);
+                self.semicolon(&arg.semicolon);
+                return;
+            }
             // Aligning a call statement would pad its `(` out to the widest name.
             let align = matches!(
                 &*arg.identifier_statement_group,
@@ -4241,7 +4364,9 @@ impl VerylWalker for Emitter {
         let is_nba = if !self.in_always_ff {
             false
         } else if let Some(lhs) = &self.assignment_lefthand_side {
-            if let Ok(lhs_symbol) = symbol_table::resolve(lhs.scoped_identifier.as_ref()) {
+            if let Some(scoped) = lhs.scoped_identifier()
+                && let Ok(lhs_symbol) = symbol_table::resolve(scoped)
+            {
                 match &lhs_symbol.found.kind {
                     SymbolKind::Variable(x) => !matches!(
                         x.affiliation,
@@ -4769,7 +4894,7 @@ impl VerylWalker for Emitter {
             self.emit_inferred_type(arg.identifier.identifier_token.token.id);
             self.space(1);
             self.align_start(align_kind::IDENTIFIER);
-            self.identifier(&arg.identifier);
+            self.emit_const_identifier(&arg.identifier);
             self.align_finish(align_kind::IDENTIFIER);
             self.emit_inferred_array(arg.identifier.identifier_token.token.id);
             self.space(1);
@@ -4793,7 +4918,7 @@ impl VerylWalker for Emitter {
                     self.align_finish(align_kind::TYPE);
                 }
                 self.align_start(align_kind::IDENTIFIER);
-                self.identifier(&arg.identifier);
+                self.emit_const_identifier(&arg.identifier);
                 self.align_finish(align_kind::IDENTIFIER);
                 self.align_start(align_kind::ARRAY);
                 if let Some(ref x) = x.array_type.array_type_opt {
@@ -4818,7 +4943,7 @@ impl VerylWalker for Emitter {
                 }
                 self.align_finish(align_kind::TYPE);
                 self.align_start(align_kind::IDENTIFIER);
-                self.identifier(&arg.identifier);
+                self.emit_const_identifier(&arg.identifier);
                 self.align_finish(align_kind::IDENTIFIER);
             }
         }
@@ -5935,6 +6060,108 @@ impl VerylWalker for Emitter {
         }
     }
 
+    fn impl_declaration(&mut self, arg: &ImplDeclaration) {
+        let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+        let maps = self.get_generic_maps(&symbol.found);
+
+        self.token(&arg.r#impl.impl_token.replace(""));
+        self.token(&arg.l_brace.l_brace_token.replace(""));
+
+        for (i, map) in maps.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.push_generic_map(map.clone());
+            self.impl_target = Some((arg.identifier.identifier_token.clone(), map.clone()));
+            self.emit_generic_instance_name_comment(map);
+
+            for (j, x) in arg.impl_declaration_list.iter().enumerate() {
+                if j != 0 {
+                    self.newline();
+                }
+                self.impl_group(&x.impl_group);
+            }
+
+            self.impl_target = None;
+            self.pop_generic_map();
+        }
+
+        self.token(&arg.r_brace.r_brace_token.replace(""));
+    }
+
+    fn method_declaration(&mut self, arg: &MethodDeclaration) {
+        let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+        let maps = self.get_generic_maps(&symbol.found);
+
+        for (i, map) in maps.iter().enumerate() {
+            if i != 0 {
+                self.newline();
+            }
+            self.push_generic_map(map.clone());
+
+            if let SymbolKind::Function(ref x) = symbol.found.kind {
+                let modport_ports_table = ExpandedModportPortTable::create(
+                    &x.ports,
+                    &self.get_generic_map(),
+                    &arg.identifier.identifier_token,
+                    &symbol.found.namespace,
+                    true,
+                    &self.into(),
+                );
+                if !modport_ports_table.is_empty() {
+                    self.modport_ports_table = Some(modport_ports_table);
+                }
+            }
+
+            self.emit_generic_instance_name_comment(map);
+            self.function(&arg.function);
+            self.space(1);
+            self.str("automatic");
+            self.space(1);
+            if let Some(ref x) = arg.method_declaration_opt0 {
+                self.emit_scalar_type(&x.scalar_type, false);
+            } else {
+                self.str("void");
+            }
+            self.space(1);
+            self.emit_impl_member_name(&arg.identifier.identifier_token);
+            self.method_port_declaration(&arg.method_port_declaration);
+            self.space(1);
+            if let Some(ref x) = arg.method_declaration_opt0 {
+                self.token(&x.minus_g_t.minus_g_t_token.replace(""));
+            }
+            self.str(";");
+            self.emit_statement_block(&arg.statement_block, "", "endfunction");
+
+            self.pop_generic_map();
+            self.align_reset();
+        }
+
+        self.modport_ports_table = None;
+    }
+
+    fn method_port_declaration(&mut self, arg: &MethodPortDeclaration) {
+        self.token_will_push(&arg.l_paren.l_paren_token);
+        self.newline_push();
+        self.str("input");
+        self.space(1);
+        self.str("var");
+        self.space(1);
+        let name = self.impl_type_name();
+        self.veryl_token(&arg.slf.self_token.replace(&name));
+        self.space(1);
+        self.veryl_token(&arg.slf.self_token);
+        if let Some(ref x) = arg.method_port_declaration_opt
+            && let Some(ref x) = x.method_port_declaration_opt0
+        {
+            self.str(",");
+            self.newline();
+            self.port_declaration_list(&x.port_declaration_list);
+        }
+        self.newline_pop();
+        self.r_paren(&arg.r_paren);
+    }
+
     /// Semantic action for non-terminal 'FunctionDeclaration'
     fn function_declaration(&mut self, arg: &FunctionDeclaration) {
         let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
@@ -6824,6 +7051,40 @@ pub fn symbol_string(
         }
         SymbolKind::TypeDef(x) if x.is_proto => {
             unreachable!("proto typedef is not emitted as a symbol")
+        }
+        SymbolKind::Parameter(_) | SymbolKind::Function(_)
+            if matches!(
+                symbol_table::get_namespace_symbol(symbol_namespace).map(|x| x.kind),
+                Some(SymbolKind::Struct(_))
+            ) =>
+        {
+            let struct_symbol = symbol_table::get_namespace_symbol(symbol_namespace).unwrap();
+            let mut member_namespace = symbol_namespace.clone();
+            member_namespace.pop();
+
+            if scope_depth >= 3 || !namespace.included(&member_namespace) {
+                ret.push_str(&namespace_string(
+                    &member_namespace,
+                    generic_tables,
+                    context,
+                ));
+            }
+            let type_name = if let Some(inst) = get_generic_instance(&struct_symbol, generic_tables)
+            {
+                if context.build_opt.hashed_mangled_name {
+                    inst.generic_maps()
+                        .first()
+                        .map(|x| x.name(false, true))
+                        .unwrap()
+                } else {
+                    inst.token.to_string()
+                }
+            } else {
+                struct_symbol.token.to_string()
+            };
+            ret.push_str(&type_name);
+            ret.push('_');
+            ret.push_str(&token_text);
         }
         SymbolKind::Parameter(_)
         | SymbolKind::Function(_)

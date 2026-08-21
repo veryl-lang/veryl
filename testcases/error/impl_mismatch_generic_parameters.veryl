@@ -1,0 +1,13 @@
+module impl_mismatch_generic_parameters {
+    struct StructA::<W: p32> {
+        a: logic<W>,
+    }
+
+    impl StructA::<X: p32> {
+        function f (
+            self,
+        ) -> logic {
+            return 0;
+        }
+    }
+}

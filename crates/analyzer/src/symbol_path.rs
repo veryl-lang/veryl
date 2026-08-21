@@ -123,7 +123,14 @@ impl From<&syntax_tree::ScopedIdentifier> for SymbolPath {
 
 impl From<&syntax_tree::ExpressionIdentifier> for SymbolPath {
     fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
-        let mut path: SymbolPath = value.scoped_identifier.as_ref().into();
+        let mut path: SymbolPath = match value.expression_identifier_group.as_ref() {
+            syntax_tree::ExpressionIdentifierGroup::ScopedIdentifier(x) => {
+                x.scoped_identifier.as_ref().into()
+            }
+            syntax_tree::ExpressionIdentifierGroup::Slf(x) => {
+                SymbolPath::new(&[x.slf.self_token.token.text])
+            }
+        };
         for x in &value.expression_identifier_list0 {
             path.push(x.identifier.identifier_token.token.text);
         }
@@ -1080,7 +1087,19 @@ impl From<&syntax_tree::ScopedIdentifier> for GenericSymbolPath {
 
 impl From<&syntax_tree::ExpressionIdentifier> for GenericSymbolPath {
     fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
-        let mut path: GenericSymbolPath = value.scoped_identifier.as_ref().into();
+        let mut path: GenericSymbolPath = match value.expression_identifier_group.as_ref() {
+            syntax_tree::ExpressionIdentifierGroup::ScopedIdentifier(x) => {
+                x.scoped_identifier.as_ref().into()
+            }
+            syntax_tree::ExpressionIdentifierGroup::Slf(x) => GenericSymbolPath {
+                paths: vec![GenericSymbol {
+                    base: x.slf.self_token.token,
+                    arguments: Vec::new(),
+                }],
+                kind: GenericSymbolPathKind::Identifier,
+                range: x.slf.as_ref().into(),
+            },
+        };
 
         for base in value
             .expression_identifier_list0

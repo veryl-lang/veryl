@@ -19701,3 +19701,96 @@ fn orphan_else_across_scopes() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn impl_method_and_const() {
+    let code = r#"
+    module ModuleA {
+        struct StructA::<W: p32> {
+            a: logic<W>,
+        }
+        impl StructA::<W: p32> {
+            const ZERO: u32 = 0;
+            function get (
+                self,
+            ) -> logic<W> {
+                return self.a;
+            }
+        }
+        type TypeA = StructA::<8>;
+        var x: TypeA;
+        let _y: logic<8> = x.get();
+        let _z: logic<8> = TypeA::get(x);
+        let _w: u32      = TypeA::ZERO;
+        always_comb {
+            x.a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn impl_unknown_target() {
+    let code = r#"
+    module ModuleA {
+        impl StructA {
+            function f (
+                self,
+            ) -> logic {
+                return 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidImplTarget { .. }));
+}
+
+#[test]
+fn impl_invalid_target() {
+    let code = r#"
+    module ModuleA {
+        enum EnumA {
+            A,
+        }
+        impl EnumA {
+            function f (
+                self,
+            ) -> logic {
+                return 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidImplTarget { .. }));
+}
+
+#[test]
+fn impl_mismatch_generic_parameters() {
+    let code = r#"
+    module ModuleA {
+        struct StructA::<W: p32> {
+            a: logic<W>,
+        }
+        impl StructA::<X: p32> {
+            function f (
+                self,
+            ) -> logic {
+                return 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchImplGenericParameters { .. }
+    ));
+}

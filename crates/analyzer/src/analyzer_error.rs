@@ -461,6 +461,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_impl_target),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{name}\" can't be implemented because {reason}")]
+    InvalidImplTarget {
+        name: String,
+        reason: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_import),
         help("fix import item"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1148,6 +1165,22 @@ pub enum AnalyzerError {
         name: String,
         arity: usize,
         args: usize,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(mismatch_impl_generic_parameters),
+        help("align the generic parameters with the type definition"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("generic parameters of impl \"{name}\" don't match the definition of \"{name}\"")]
+    MismatchImplGenericParameters {
+        name: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -2122,6 +2155,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidForRange { input, .. } => input,
             AnalyzerError::InvalidForStep { input, .. } => input,
             AnalyzerError::InvalidIdentifier { input, .. } => input,
+            AnalyzerError::InvalidImplTarget { input, .. } => input,
             AnalyzerError::InvalidImport { input, .. } => input,
             AnalyzerError::InvalidMixin { input, .. } => input,
             AnalyzerError::InvalidLogicalOperand { input, .. } => input,
@@ -2154,6 +2188,7 @@ impl AnalyzerError {
             AnalyzerError::MismatchFunctionArg { input, .. } => input,
             AnalyzerError::MismatchFunctionArity { input, .. } => input,
             AnalyzerError::MismatchGenericsArity { input, .. } => input,
+            AnalyzerError::MismatchImplGenericParameters { input, .. } => input,
             AnalyzerError::MismatchType { input, .. } => input,
             AnalyzerError::MissingClockDomain { input, .. } => input,
             AnalyzerError::MissingClockSignal { input, .. } => input,
@@ -2237,6 +2272,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::InvalidFactor { token_source, .. } => *token_source,
             AnalyzerError::InvalidIdentifier { token_source, .. } => *token_source,
+            AnalyzerError::InvalidImplTarget { token_source, .. } => *token_source,
             AnalyzerError::InvalidImport { token_source, .. } => *token_source,
             AnalyzerError::InvalidMixin { token_source, .. } => *token_source,
             AnalyzerError::InvalidUnsizedLiteral { token_source, .. } => *token_source,
@@ -2279,6 +2315,7 @@ impl AnalyzerError {
             AnalyzerError::MismatchFunctionArg { token_source, .. } => *token_source,
             AnalyzerError::MismatchFunctionArity { token_source, .. } => *token_source,
             AnalyzerError::MismatchGenericsArity { token_source, .. } => *token_source,
+            AnalyzerError::MismatchImplGenericParameters { token_source, .. } => *token_source,
             AnalyzerError::MismatchType { token_source, .. } => *token_source,
             AnalyzerError::MissingClockDomain { token_source, .. } => *token_source,
             AnalyzerError::MissingClockSignal { token_source, .. } => *token_source,
@@ -2560,6 +2597,15 @@ impl AnalyzerError {
         AnalyzerError::InvalidIdentifier {
             identifier: identifier.to_string(),
             rule: rule.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_impl_target(name: &str, reason: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidImplTarget {
+            name: name.to_string(),
+            reason: reason.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -2988,6 +3034,14 @@ impl AnalyzerError {
             name: name.to_string(),
             arity,
             args,
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn mismatch_impl_generic_parameters(name: &str, token: &TokenRange) -> Self {
+        AnalyzerError::MismatchImplGenericParameters {
+            name: name.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

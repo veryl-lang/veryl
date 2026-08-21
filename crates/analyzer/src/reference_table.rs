@@ -794,13 +794,17 @@ impl ReferenceTable {
                     self.check_complex_identifier(&arg.into(), &token, *in_import_declaration);
                 }
                 ReferenceCandidate::ExpressionIdentifier { arg } => {
-                    let token = arg.scoped_identifier.identifier().token;
+                    let token = arg.identifier().token;
                     let path: GenericSymbolPath = arg.into();
                     self.testbench_hier_root = Some(path.range.beg.id);
                     self.check_complex_identifier(&path, &token, false);
                     self.testbench_hier_root = None;
                     if !arg.expression_identifier_list0.is_empty() {
-                        let scoped_len = arg.scoped_identifier.scoped_identifier_list.len() + 1;
+                        let scoped_len = arg
+                            .scoped_identifier()
+                            .map(|x| x.scoped_identifier_list.len())
+                            .unwrap_or(0)
+                            + 1;
                         let mut selects = vec![0usize; path.len()];
                         if scoped_len <= selects.len() {
                             selects[scoped_len - 1] = arg.expression_identifier_list.len();

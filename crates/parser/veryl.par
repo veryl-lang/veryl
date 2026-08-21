@@ -136,6 +136,7 @@ I32Term               : <INITIAL, Generic                                       
 I64Term               : <INITIAL, Generic                                             >'i64'                                                                                 : Token; // Keyword: Type
 IfResetTerm           : <INITIAL, Generic                                             >'if_reset'                                                                            : Token; // Keyword: Conditional
 IfTerm                : <INITIAL, Generic                                             >'if'                                                                                  : Token; // Keyword: Conditional
+ImplTerm              : <INITIAL, Generic                                             >'impl'                                                                                : Token; // Keyword: Structure
 ImportTerm            : <INITIAL, Generic                                             >'import'                                                                              : Token; // Keyword: Statement
 IncludeTerm           : <INITIAL, Generic                                             >'include'                                                                             : Token; // Keyword: Structure
 InitialTerm           : <INITIAL, Generic                                             >'initial'                                                                             : Token; // Keyword: Statement
@@ -168,6 +169,7 @@ ReturnTerm            : <INITIAL, Generic                                       
 RevTerm               : <INITIAL, Generic                                             >'rev'                                                                                 : Token; // Keyword: Repeat
 BreakTerm             : <INITIAL, Generic                                             >'break'                                                                               : Token; // Keyword: Statement
 SameTerm              : <INITIAL, Generic                                             >'same'                                                                                : Token; // Keyword: Direction
+SelfTerm              : <INITIAL, Generic                                             >'self'                                                                                : Token; // Keyword: Literal
 SignedTerm            : <INITIAL, Generic                                             >'signed'                                                                              : Token; // Keyword: Type
 StepTerm              : <INITIAL, Generic                                             >'step'                                                                                : Token; // Keyword: Repeat
 StringTerm            : <INITIAL, Generic                                             >'string'                                                                              : Token; // Keyword: Type
@@ -287,6 +289,7 @@ I32Token           : I32Term           : Token Comments;
 I64Token           : I64Term           : Token Comments;
 IfResetToken       : IfResetTerm       : Token Comments;
 IfToken            : IfTerm            : Token Comments;
+ImplToken          : ImplTerm          : Token Comments;
 ImportToken        : ImportTerm        : Token Comments;
 IncludeToken       : IncludeTerm       : Token Comments;
 InitialToken       : InitialTerm       : Token Comments;
@@ -319,6 +322,7 @@ ReturnToken        : ReturnTerm        : Token Comments;
 RevToken           : RevTerm           : Token Comments;
 BreakToken         : BreakTerm         : Token Comments;
 SameToken          : SameTerm          : Token Comments;
+SelfToken          : SelfTerm          : Token Comments;
 SignedToken        : SignedTerm        : Token Comments;
 StepToken          : StepTerm          : Token Comments;
 StringToken        : StringTerm        : Token Comments;
@@ -445,6 +449,7 @@ I32           : I32Token           : VerylToken;
 I64           : I64Token           : VerylToken;
 If            : IfToken            : VerylToken;
 IfReset       : IfResetToken       : VerylToken;
+Impl          : ImplToken          : VerylToken;
 Import        : ImportToken        : VerylToken;
 In            : InToken            : VerylToken;
 Include       : IncludeToken       : VerylToken;
@@ -476,6 +481,7 @@ ResetSyncLow  : ResetSyncLowToken  : VerylToken;
 Return        : ReturnToken        : VerylToken;
 Rev           : RevToken           : VerylToken;
 Same          : SameToken          : VerylToken;
+Slf           : SelfToken          : VerylToken; // avoid to conflict with Rust's self keyword
 Signed        : SignedToken        : VerylToken;
 Step          : StepToken          : VerylToken;
 Strin         : StringToken        : VerylToken; // avoid to conflict with Rust's String struct
@@ -525,7 +531,7 @@ RealNumber: FixedPoint
 
 HierarchicalIdentifier: Identifier { Select } { Dot Identifier { Select } };
 ScopedIdentifier      : ( DollarIdentifier | Identifier [ WithGenericArgument ] ) { ColonColon Identifier [ WithGenericArgument ] };
-ExpressionIdentifier  : ScopedIdentifier [ Width ] { Select } { Dot Identifier { Select } };
+ExpressionIdentifier  : ( ScopedIdentifier | Slf ) [ Width ] { Select } { Dot Identifier { Select } };
 GenericArgIdentifier  : ScopedIdentifier { Dot Identifier };
 
 // ----------------------------------------------------------------------------
@@ -922,6 +928,22 @@ Direction: Input
 FunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclaration ] [ MinusGT ScalarType ] StatementBlock;
 
 // ----------------------------------------------------------------------------
+// Impl
+// ----------------------------------------------------------------------------
+
+ImplDeclaration: Impl Identifier [ WithGenericParameter ] LBrace { ImplGroup } RBrace;
+
+ImplGroup: { Attribute } ( LBrace { ImplGroup } RBrace | ImplItem );
+
+ImplItem: MethodDeclaration
+        | ConstDeclaration
+        ;
+
+MethodDeclaration: Function Identifier [ WithGenericParameter ] MethodPortDeclaration [ MinusGT ScalarType ] StatementBlock;
+
+MethodPortDeclaration: LParen Slf [ Comma [ PortDeclarationList ] ] RParen;
+
+// ----------------------------------------------------------------------------
 // Import
 // ----------------------------------------------------------------------------
 
@@ -982,6 +1004,7 @@ GenerateItem: LetDeclaration
             | AssignDeclaration
             | ConnectDeclaration
             | FunctionDeclaration
+            | ImplDeclaration
             | GenerateIfDeclaration
             | GenerateForDeclaration
             | GenerateBlockDeclaration
@@ -1010,6 +1033,7 @@ PackageItem: ConstDeclaration
            | EnumDeclaration
            | StructUnionDeclaration
            | FunctionDeclaration
+           | ImplDeclaration
            | ImportDeclaration
            | AliasDeclaration
            | EmbedDeclaration

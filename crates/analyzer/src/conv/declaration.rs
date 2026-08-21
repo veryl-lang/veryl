@@ -103,6 +103,7 @@ impl Conv<&GenerateItem> for ir::DeclarationBlock {
                     ))),
                 }
             }
+            GenerateItem::ImplDeclaration(_) => Ok(ir::DeclarationBlock::default()),
             GenerateItem::FunctionDeclaration(x) => {
                 let in_generic = context.in_generic;
                 if x.function_declaration.function_declaration_opt.is_some() {

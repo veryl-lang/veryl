@@ -2022,6 +2022,14 @@ pub fn eval_function_call(
                     Err(ir_error!(token))
                 }
             }
+            SymbolKind::Function(_)
+                if matches!(
+                    symbol_table::get_namespace_symbol(&symbol.found.namespace).map(|x| x.kind),
+                    Some(SymbolKind::Struct(_))
+                ) =>
+            {
+                Err(ir_error!(token))
+            }
             SymbolKind::Function(_) | SymbolKind::ModportFunctionMember(_) => {
                 let ret =
                     function_call(context, value.expression_identifier.as_ref(), args, token)?;
@@ -2747,8 +2755,13 @@ pub fn eval_factor_symbol(
 ) -> IrResult<ir::Factor> {
     match &symbol.found.kind {
         SymbolKind::Parameter(x) if !x.is_proto => {
+            let is_impl_member = matches!(
+                symbol_table::get_namespace_symbol(&symbol.found.namespace).map(|x| x.kind),
+                Some(SymbolKind::Struct(_))
+            );
             // Parameter should be found through context.find_path from the defined namespace
-            if let Some(namespace) = context.current_namespace()
+            if !is_impl_member
+                && let Some(namespace) = context.current_namespace()
                 && symbol.found.namespace.included(&namespace)
             {
                 context.insert_error(AnalyzerError::referring_before_definition(
@@ -3953,11 +3966,14 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
         context: &mut Context,
         definition: DefinitionId,
         path: &FuncPath,
+        token: TokenRange,
     ) -> IrResult<()> {
         let definition = definition_table::get(definition).unwrap();
         match definition.as_ref() {
             Definition::Function(x) => Conv::conv(context, (x, Some(path))),
             Definition::ProtoFunction(x) => Conv::conv(context, (x, Some(path))),
+            // Methods are not lowered to IR yet; the call sites report it.
+            Definition::Method(_) => Err(ir_error!(token)),
             _ => unreachable!(),
         }
     }
@@ -3987,7 +4003,7 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             .map(|namespace| symbol.namespace.included(&namespace))
             .unwrap_or(false);
         if is_local_func {
-            let ret = conv_function(context, definition, path);
+            let ret = conv_function(context, definition, path, token);
             ret?;
         } else {
             let generic_arg_paths = if is_global {
@@ -4017,7 +4033,7 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
                 }
             }
 
-            let ret = conv_function(&mut local_context, definition, path);
+            let ret = conv_function(&mut local_context, definition, path, token);
 
             for path in &generic_arg_paths {
                 if let Some((var_id, _)) = local_context.var_paths.remove(path) {

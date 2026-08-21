@@ -289,7 +289,17 @@ impl ScopedIdentifier {
 
 impl ExpressionIdentifier {
     pub fn identifier(&self) -> &VerylToken {
-        self.scoped_identifier.identifier()
+        match self.expression_identifier_group.as_ref() {
+            ExpressionIdentifierGroup::ScopedIdentifier(x) => x.scoped_identifier.identifier(),
+            ExpressionIdentifierGroup::Slf(x) => &x.slf.self_token,
+        }
+    }
+
+    pub fn scoped_identifier(&self) -> Option<&ScopedIdentifier> {
+        match self.expression_identifier_group.as_ref() {
+            ExpressionIdentifierGroup::ScopedIdentifier(x) => Some(&x.scoped_identifier),
+            ExpressionIdentifierGroup::Slf(_) => None,
+        }
     }
 }
 
@@ -544,6 +554,7 @@ token_with_comments!(I32);
 token_with_comments!(I64);
 token_with_comments!(If);
 token_with_comments!(IfReset);
+token_with_comments!(Impl);
 token_with_comments!(Import);
 token_with_comments!(Include);
 token_with_comments!(Initial);
@@ -575,6 +586,7 @@ token_with_comments!(ResetSyncLow);
 token_with_comments!(Return);
 token_with_comments!(Rev);
 token_with_comments!(Same);
+token_with_comments!(Self);
 token_with_comments!(Signed);
 token_with_comments!(Step);
 token_with_comments!(String);

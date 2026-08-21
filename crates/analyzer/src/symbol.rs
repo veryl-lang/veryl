@@ -1821,7 +1821,7 @@ fn try_syntax_expr_to_param_width(expr: &syntax_tree::Expression) -> Option<ir::
     {
         return None;
     }
-    let symbol = symbol_table::resolve(scoped.scoped_identifier.as_ref()).ok()?;
+    let symbol = symbol_table::resolve(scoped.scoped_identifier()?).ok()?;
     if !matches!(symbol.found.kind, SymbolKind::Parameter(ref x) if !x.is_proto) {
         return None;
     }
@@ -2126,7 +2126,11 @@ impl TryFrom<&syntax_tree::Expression> for Type {
                         return Err(());
                     }
 
-                    let r#type: UserDefinedType = x.scoped_identifier.as_ref().into();
+                    let Some(scoped_identifier) = x.scoped_identifier() else {
+                        // `self` is not a type
+                        return Err(());
+                    };
+                    let r#type: UserDefinedType = scoped_identifier.into();
                     let kind = TypeKind::UserDefined(r#type);
                     let width: Vec<_> = if let Some(ref x) = x.expression_identifier_opt {
                         let width: Vec<_> = x.width.as_ref().into();
@@ -2633,7 +2637,7 @@ impl ConnectTargetIdentifier {
 
 impl From<&syntax_tree::ExpressionIdentifier> for ConnectTargetIdentifier {
     fn from(value: &syntax_tree::ExpressionIdentifier) -> Self {
-        let path: SymbolPath = value.scoped_identifier.as_ref().into();
+        let path: SymbolPath = value.into();
 
         let mut ret = vec![];
         for (i, x) in path.as_slice().iter().enumerate() {
