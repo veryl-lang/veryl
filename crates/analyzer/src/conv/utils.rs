@@ -1195,6 +1195,26 @@ pub fn eval_type(
     let mut signed = false;
     let mut is_positive = false;
 
+    let resolved = context.resolve_path(path.clone());
+    if let Ok(symbol) = symbol_table::resolve(&resolved) {
+        let type_error = match pos {
+            TypePosition::Variable => !symbol.found.is_variable_type(),
+            TypePosition::Cast => !symbol.found.is_casting_type(),
+            _ => false,
+        };
+
+        if type_error {
+            context.insert_error(AnalyzerError::mismatch_type(
+                MismatchTypeKind::SymbolKind {
+                    name: symbol.found.token.to_string(),
+                    expected: "enum or union or struct".to_string(),
+                    actual: symbol.found.kind.to_kind_name(),
+                },
+                &path.range,
+            ));
+        }
+    }
+
     let kind = if let Some(x) = path.to_var_path()
         && let Some(x) = context.var_paths.get(&x)
     {
@@ -1222,24 +1242,6 @@ pub fn eval_type(
 
         let map = path.to_generic_maps();
         if let Ok(symbol) = symbol_table::resolve(&path) {
-            let type_error = match pos {
-                TypePosition::Variable => !symbol.found.is_variable_type(),
-                TypePosition::Cast => !symbol.found.is_casting_type(),
-                _ => false,
-            };
-
-            if type_error {
-                let token: TokenRange = symbol.found.token.into();
-                context.insert_error(AnalyzerError::mismatch_type(
-                    MismatchTypeKind::SymbolKind {
-                        name: symbol.found.token.to_string(),
-                        expected: "enum or union or struct".to_string(),
-                        actual: symbol.found.kind.to_kind_name(),
-                    },
-                    &token,
-                ));
-            }
-
             match &symbol.found.kind {
                 SymbolKind::Struct(x) => {
                     context.push_generic_map(map.clone());
