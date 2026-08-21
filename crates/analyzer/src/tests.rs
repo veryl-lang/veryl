@@ -1968,6 +1968,25 @@ fn invalid_import() {
         "{errors:?}"
     );
 
+    // A proto package can be imported as a namespace so it can be used as
+    // a generic constraint without a fully qualified name.
+    let code = r#"
+    proto package ProtoPkg {
+        const WIDTH: u32;
+    }
+    package Impl for ProtoPkg {
+        const WIDTH: u32 = 8;
+    }
+    import prj::ProtoPkg;
+    module ModuleN::<P: ProtoPkg = Impl> {
+        var x: logic<P::WIDTH>;
+        assign x = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
     let code = r#"
     package a_pkg::<a: u32> {
         const A: u32 = a;

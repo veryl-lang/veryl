@@ -3768,6 +3768,32 @@ fn emit_with_default(code: &str) -> String {
 }
 
 #[test]
+fn proto_package_import_suppressed() {
+    // A proto package import is a bare component import; it has no
+    // SystemVerilog form and references through it are emitted as fully
+    // qualified paths.
+    let code = r#"
+proto package ProtoPkg {
+    const WIDTH: u32;
+}
+package Impl for ProtoPkg {
+    const WIDTH: u32 = 8;
+}
+module top {
+    import prj::ProtoPkg;
+    var x: logic<Impl::WIDTH>;
+    assign x = 0;
+}
+"#;
+
+    let ret = emit_with_default(code);
+    assert!(
+        !ret.contains("import prj_ProtoPkg;"),
+        "proto package import must not be emitted: {ret}"
+    );
+}
+
+#[test]
 fn regression_cast_to_positive_type_balanced_parens() {
     // `as p8/p16/p32/p64` must emit balanced parentheses (previously the
     // closing `))` was missing, producing invalid SystemVerilog).
