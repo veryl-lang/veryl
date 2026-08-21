@@ -6848,6 +6848,38 @@ fn referring_before_definition() {
 
     let code = r#"
     module ModuleA {
+        always_comb {
+            a = 1;
+        }
+        var a: logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+    ) {
+        always_ff {
+            a += 1;
+        }
+        var a: logic<8>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
+    let code = r#"
+    module ModuleA {
         let a: logic = b + 1;
         var b: logic;
     }
