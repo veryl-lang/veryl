@@ -1121,8 +1121,13 @@ impl SymbolTable {
             // Path to generic arg should have its project prefix to make it visible from
             // the namespace of base component. An empty query namespace carries no project
             // to prepend, so there is nothing to append.
+            // The comparison uses the base component's declaration scope rather than
+            // the resolution cursor: a head reached through an import binding (or
+            // its synthetic token scope) leaves the cursor in the importing project,
+            // which would suppress the prefix and leave the argument unresolvable
+            // from the base component's namespace.
             if let Some(prj) = scope::project_of(entry_scope)
-                && Some(prj) != scope::project_of(context.scope)
+                && Some(prj) != scope::project_of(found.scope)
             {
                 self.append_project_path(arg, entry_scope, entry_define_context);
             }
@@ -1651,7 +1656,9 @@ impl SymbolTable {
             return;
         }
 
-        if let Some(prj) = scope::project_of(scope)
+        // A head reached through an import binding is declared in the exporting
+        // project, not in the one the path is written in.
+        if let Some(prj) = scope::project_of(symbol.found.scope)
             && let Some(project_symbol) = self.find_project_symbol(prj)
         {
             let project_path = GenericSymbol {
@@ -1919,7 +1926,7 @@ impl SymbolTable {
         // apply import which borrows `&mut self`.
         self.skip_generic_args = true;
 
-        let import_list: Vec<_> = self.import_list.drain(0..).collect();
+        let import_list: Vec<_> = std::mem::take(&mut self.import_list);
         for import in &import_list {
             let context = ResolveContext::new(&import.path.1);
             let Ok((symbol, imported)) = self
@@ -2395,7 +2402,7 @@ impl SymbolTable {
     pub fn apply_bind(&mut self) -> Vec<AnalyzerError> {
         let mut errors = Vec::new();
 
-        let bind_list: Vec<Bind> = self.bind_list.drain(0..).collect();
+        let bind_list: Vec<Bind> = std::mem::take(&mut self.bind_list);
         for bind in bind_list {
             let Ok(target) = self.resolve_generic_path(&bind.target.0, &bind.target.1) else {
                 continue;
@@ -2440,7 +2447,7 @@ impl SymbolTable {
     }
 
     fn get_msb(&mut self) -> Vec<Msb> {
-        self.msb_list.drain(0..).collect()
+        std::mem::take(&mut self.msb_list)
     }
 
     fn add_connect(&mut self, connect: Connect) {
@@ -2448,7 +2455,7 @@ impl SymbolTable {
     }
 
     fn get_connect(&mut self) -> Vec<Connect> {
-        self.connect_list.drain(0..).collect()
+        std::mem::take(&mut self.connect_list)
     }
 
     fn resolve_generic_path(

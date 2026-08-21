@@ -191,7 +191,7 @@ impl FunctionCall {
         for (path, expr) in &self.inputs {
             let id = func.arg_map.get(path)?;
             let value = expr.eval_value(context)?;
-            let var = context.variables.get_mut(id)?;
+            let var = context.variable_mut(id)?;
             var.set_value(&[], value, None);
         }
 

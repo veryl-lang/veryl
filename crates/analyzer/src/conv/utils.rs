@@ -28,6 +28,7 @@ use std::sync::Arc;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::Token;
 
 /// True for "atomic" expressions whose result type is unambiguous:
 /// variable references, sized / real / boolean literals, function
@@ -549,6 +550,29 @@ pub fn eval_size(
     }
 }
 
+/// A write to a variable declared further down is invisible to every analysis,
+/// while the emitter still emits it.
+pub fn check_assign_before_definition<T: Into<SymbolPathNamespace>>(
+    context: &mut Context,
+    identifier: T,
+    token: Token,
+) {
+    if let Ok(symbol) = symbol_table::resolve(identifier)
+        && let SymbolKind::Variable(x) = &symbol.found.kind
+        && x.affiliation == Affiliation::Module
+        // A module-level variable is registered under its bare name, so a miss
+        // means the declaration is still ahead of the write.
+        && context
+            .find_path(&VarPath::new(symbol.found.token.text))
+            .is_none()
+    {
+        context.insert_error(AnalyzerError::referring_before_definition(
+            &token.text.to_string(),
+            &token.into(),
+        ));
+    }
+}
+
 /// Per-destination clock/CDC checks for an assignment (invalid clock assign,
 /// Implicit-domain inference, dst-vs-RHS and dst-vs-always_ff domain). Shared
 /// by the scalar and concatenation-LHS paths, which build AssignStatement directly.
@@ -719,9 +743,11 @@ pub fn eval_array_range_assign(
 
     // Pair each outer literal item with one element dst; `eval_assign_statement`
     // recurses the element's inner dims. (A flat `eval_array_literal` would over-
-    // recurse and mis-decompose a multi-dim element.) Non-literal RHS: defer.
+    // recurse and mis-decompose a multi-dim element.) A non-literal RHS has no
+    // lowering: the scalar path can't take a range either.
     let ir::Expression::ArrayLiteral(items, _) = &mut rhs_expr else {
-        return Ok(None);
+        context.insert_error(AnalyzerError::invalid_range_assign(&token));
+        return Ok(Some(vec![]));
     };
     let mut outer: Vec<ir::Expression> = Vec::new();
     let mut default: Option<ir::Expression> = None;

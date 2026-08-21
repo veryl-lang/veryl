@@ -38,6 +38,22 @@ pub fn check_import(context: &mut Context, value: &ImportDeclaration) {
                     .found
                     .get_parent_package()
                     .is_some_and(|pkg| pkg.token.text == symbol.found.token.text)
+        } else if symbol.found.is_component(false)
+            && !matches!(symbol.found.kind, SymbolKind::GenericParameter(_))
+        {
+            // Importing a component itself (package, module or interface),
+            // so that its members can be referenced with the component name
+            // as a qualifier (e.g. `import dep::MyPkg;` then `MyPkg::Raw`).
+            // A generic component must be imported as its definition, not as
+            // an instantiated instance; members of an instance are imported
+            // through the path instead (`import pkg::<8>::member;`), and
+            // wildcard instance imports (`import pkg::<8>::*;`) keep their
+            // existing behavior. A proto interface bound also makes a generic
+            // parameter a component, but one that names no package to qualify
+            // with, so the emitter would produce a bare SystemVerilog `import`.
+            // https://github.com/veryl-lang/veryl/issues/3122
+            // https://github.com/veryl-lang/veryl/issues/1588
+            !path.paths.last().is_some_and(|p| !p.arguments.is_empty())
         } else if symbol.full_path.len() >= 2 {
             let parent_symbol = symbol
                 .full_path

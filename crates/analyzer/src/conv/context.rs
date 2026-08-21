@@ -118,6 +118,9 @@ pub struct Context {
     pub tb_reset_cycles: HashMap<StrId, Expression>,
     pub tb_clock_period: HashMap<StrId, Expression>,
     pub tb_reset_clock: HashMap<StrId, StrId>,
+    /// Sparse rollback state used by analyses that reuse this otherwise-large
+    /// context across independent procedures. Empty during normal conversion.
+    analysis_transactions: Vec<AnalysisTransaction>,
     hierarchy: Vec<StrId>,
     hierarchical_variables: Vec<Vec<VarPath>>,
     hierarchical_functions: Vec<Vec<FuncPath>>,
@@ -134,7 +137,66 @@ pub struct Context {
     project_name: Option<String>,
 }
 
+struct AnalysisTransaction {
+    variables: HashMap<VarId, Variable>,
+    comptime_for_overflow: Option<TokenRange>,
+    disable_const_opt: bool,
+    function_eval_depth: usize,
+    function_eval_overflow: Option<(TokenRange, usize)>,
+    function_call_stack: Vec<Signature>,
+    errors: Vec<AnalyzerError>,
+}
+
 impl Context {
+    pub(crate) fn begin_analysis_transaction(&mut self) {
+        self.analysis_transactions.push(AnalysisTransaction {
+            variables: HashMap::default(),
+            comptime_for_overflow: self.comptime_for_overflow,
+            disable_const_opt: self.disalbe_const_opt,
+            function_eval_depth: self.function_eval_depth,
+            function_eval_overflow: self.function_eval_overflow.take(),
+            function_call_stack: std::mem::take(&mut self.function_call_stack),
+            errors: std::mem::take(&mut self.errors),
+        });
+        self.function_eval_depth = 0;
+        self.comptime_for_overflow = None;
+    }
+
+    pub(crate) fn rollback_analysis_transaction(&mut self) {
+        let transaction = self
+            .analysis_transactions
+            .pop()
+            .expect("analysis transaction is active");
+        for (id, variable) in transaction.variables {
+            self.variables.insert(id, variable);
+        }
+        self.comptime_for_overflow = transaction.comptime_for_overflow;
+        self.disalbe_const_opt = transaction.disable_const_opt;
+        self.function_eval_depth = transaction.function_eval_depth;
+        self.function_eval_overflow = transaction.function_eval_overflow;
+        self.function_call_stack = transaction.function_call_stack;
+        self.errors = transaction.errors;
+    }
+
+    /// Get a variable for mutation while remembering its prior value in the
+    /// innermost reusable-analysis transaction. Outside such an analysis this
+    /// is identical to `variables.get_mut`.
+    pub(crate) fn variable_mut(&mut self, id: &VarId) -> Option<&mut Variable> {
+        if self
+            .analysis_transactions
+            .last()
+            .is_some_and(|transaction| !transaction.variables.contains_key(id))
+        {
+            let previous = self.variables.get(id)?.clone();
+            self.analysis_transactions
+                .last_mut()
+                .expect("checked above")
+                .variables
+                .insert(*id, previous);
+        }
+        self.variables.get_mut(id)
+    }
+
     /// Run `f` with `cond` on the statement-condition stack (popped before
     /// `?` can skip it).
     pub fn with_condition_domain<T>(
@@ -698,34 +760,89 @@ impl Context {
     }
 
     pub fn drain_var_paths(&mut self) -> HashMap<VarPath, (VarId, Comptime)> {
-        self.var_paths.drain().collect()
+        std::mem::take(&mut self.var_paths)
     }
 
     pub fn drain_func_paths(&mut self) -> HashMap<FuncPath, VarId> {
-        self.func_paths.drain().collect()
+        std::mem::take(&mut self.func_paths)
     }
 
     pub fn drain_variables(&mut self) -> HashMap<VarId, Variable> {
-        self.variables.drain().collect()
+        std::mem::take(&mut self.variables)
     }
 
     pub fn drain_port_types(&mut self) -> HashMap<VarPath, (Type, ClockDomain)> {
-        self.port_types.drain().collect()
+        std::mem::take(&mut self.port_types)
     }
 
     pub fn drain_functions(&mut self) -> HashMap<VarId, Function> {
-        self.functions.drain().collect()
+        std::mem::take(&mut self.functions)
     }
 
     pub fn drain_modports(&mut self) -> HashMap<StrId, Vec<(StrId, Direction)>> {
-        self.modports.drain().collect()
+        std::mem::take(&mut self.modports)
     }
 
     pub fn drain_declarations(&mut self) -> Vec<Declaration> {
-        self.declarations.drain(..).collect()
+        std::mem::take(&mut self.declarations)
     }
 
     pub fn drain_errors(&mut self) -> Vec<AnalyzerError> {
-        self.errors.drain(..).collect()
+        std::mem::take(&mut self.errors)
+    }
+}
+
+#[cfg(test)]
+mod analysis_transaction_tests {
+    use super::*;
+    use crate::value::Value;
+
+    fn test_variable(id: VarId, value: u64) -> Variable {
+        Variable::new(
+            id,
+            VarPath::default(),
+            VarKind::Variable,
+            Type::default(),
+            vec![Value::new(value, 1, false)],
+            Affiliation::Module,
+            &TokenRange::default(),
+            1,
+        )
+    }
+
+    fn value(context: &Context, id: VarId) -> &Value {
+        &context.variables[&id].value[0]
+    }
+
+    #[test]
+    fn nested_analysis_transactions_restore_each_snapshot() {
+        let id = VarId::from_raw(1);
+        let mut context = Context::default();
+        context.variables.insert(id, test_variable(id, 0));
+
+        context.begin_analysis_transaction();
+        context.variable_mut(&id).unwrap().value[0] = Value::new(1, 1, false);
+        context.begin_analysis_transaction();
+        context.variable_mut(&id).unwrap().value[0] = Value::new(0, 1, false);
+
+        context.rollback_analysis_transaction();
+        assert_eq!(value(&context, id), &Value::new(1, 1, false));
+        context.rollback_analysis_transaction();
+        assert_eq!(value(&context, id), &Value::new(0, 1, false));
+    }
+
+    #[test]
+    fn reused_analysis_transactions_do_not_leak_variable_state() {
+        let id = VarId::from_raw(1);
+        let mut context = Context::default();
+        context.variables.insert(id, test_variable(id, 0));
+
+        for _ in 0..2 {
+            context.begin_analysis_transaction();
+            assert_eq!(value(&context, id), &Value::new(0, 1, false));
+            context.variable_mut(&id).unwrap().value[0] = Value::new(1, 1, false);
+            context.rollback_analysis_transaction();
+        }
+        assert_eq!(value(&context, id), &Value::new(0, 1, false));
     }
 }

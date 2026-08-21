@@ -234,6 +234,8 @@ pub fn run_wavedrom_test(
         .iter()
         .position(|s| s.kind == SignalKind::Input && is_reset_name(&s.name));
 
+    // Which wave characters mean "asserted" is a property of the scenario's
+    // naming convention, not of the net's declared type.
     let reset_active_low =
         reset_signal_idx.is_some_and(|idx| is_active_low_reset(&scenario.signals[idx].name));
 
@@ -241,17 +243,17 @@ pub fn run_wavedrom_test(
     let clock_var_id: Option<VarId> = clock_event.var_id();
     let reset_var_id: Option<VarId> = reset_event.as_ref().and_then(|e| e.var_id());
 
+    // Implicit startup reset when the scenario has no reset wave of its own.
     if reset_signal_idx.is_none()
         && let Some(rst_event) = reset_event
+        && let Some(ref id) = reset_var_id
     {
-        if has_dump && let Some(ref id) = reset_var_id {
-            sim.set_var_by_id(id, Value::new(1, 1, false));
-        }
-        for _ in 0..default_reset_cycles {
+        sim.set_reset_level(id, true);
+        for i in 0..default_reset_cycles {
             if has_dump && let Some(ref id) = clock_var_id {
                 sim.set_var_by_id(id, Value::new(1, 1, false));
             }
-            sim.step(rst_event);
+            sim.step_in_reset(clock_event, rst_event, i == 0);
             sim.time += 1;
             if has_dump {
                 if let Some(ref id) = clock_var_id {
@@ -261,9 +263,7 @@ pub fn run_wavedrom_test(
             }
             sim.time += 1;
         }
-        if has_dump && let Some(ref id) = reset_var_id {
-            sim.set_var_by_id(id, Value::new(0, 1, false));
-        }
+        sim.set_reset_level(id, false);
     }
 
     let max_len = scenario
@@ -272,6 +272,9 @@ pub fn run_wavedrom_test(
         .map(|s| s.wave.len())
         .max()
         .unwrap_or(0);
+
+    // Tracked across cycles so the assertion EDGE is taken exactly once.
+    let mut was_in_reset = false;
 
     for t in 0..max_len {
         // Drive input signals
@@ -323,32 +326,30 @@ pub fn run_wavedrom_test(
             }
         }
 
-        // Step clock or reset edge
-        let step_event = if let Some(rst_idx) = reset_signal_idx
-            && let Some(rst_event) = reset_event
+        // The wave is written in the scenario's own polarity, so it is
+        // translated here rather than taken from the generic input loop above.
+        let rst_asserted = if let Some(rst_idx) = reset_signal_idx
             && t < scenario.signals[rst_idx].wave.len()
         {
-            let rst_asserted =
-                is_reset_asserted(&scenario.signals[rst_idx].wave[t], reset_active_low);
-            if rst_asserted {
-                if has_dump && let Some(ref id) = reset_var_id {
-                    sim.set_var_by_id(id, Value::new(1, 1, false));
-                }
-                rst_event
-            } else {
-                if has_dump && let Some(ref id) = reset_var_id {
-                    sim.set_var_by_id(id, Value::new(0, 1, false));
-                }
-                clock_event
+            let asserted = is_reset_asserted(&scenario.signals[rst_idx].wave[t], reset_active_low);
+            if let Some(ref id) = reset_var_id {
+                sim.set_reset_level(id, asserted);
             }
+            asserted
         } else {
-            clock_event
+            false
         };
 
         if has_dump && let Some(ref id) = clock_var_id {
             sim.set_var_by_id(id, Value::new(1, 1, false));
         }
-        sim.step(step_event);
+        // Components keep a reset hook of their own, so an asserted cycle goes
+        // through `step_in_reset`.
+        match (rst_asserted, reset_event) {
+            (true, Some(rst_event)) => sim.step_in_reset(clock_event, rst_event, !was_in_reset),
+            _ => sim.step(clock_event),
+        }
+        was_in_reset = rst_asserted;
         sim.time += 1;
         if has_dump {
             if let Some(ref id) = clock_var_id {

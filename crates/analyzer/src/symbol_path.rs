@@ -831,9 +831,21 @@ impl GenericSymbolPath {
                 }
             }
 
-            if namespace.paths[0] != target_namespace.paths[0] && head_symbol.is_component(true) {
+            // A head reached through an import binding is declared in the
+            // exporting project, not in the referring one.
+            let head_project = if start_with_project_name(head_namespace) {
+                head_namespace.paths[0]
+            } else {
+                namespace.paths[0]
+            };
+
+            // Such a head is qualified even when it shares the base component's
+            // project, so that both spellings mangle alike.
+            if (head_project != namespace.paths[0] || head_project != target_namespace.paths[0])
+                && head_symbol.is_component(true)
+            {
                 // Append the project prefix to the path.
-                let token = Token::generate(namespace.paths[0], file_path);
+                let token = Token::generate(head_project, file_path);
                 scope::insert_token(token.id, file_path, &namespace);
 
                 let symbol_path = GenericSymbol {

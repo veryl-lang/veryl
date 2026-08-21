@@ -1,3 +1,4 @@
+pub(crate) mod big_array;
 pub(crate) mod comb_layout;
 pub(crate) mod comb_pipeline_cache;
 pub(crate) mod context;
@@ -17,6 +18,7 @@ mod statement;
 pub(crate) mod variable;
 pub(crate) mod write_log;
 
+pub use big_array::BigArrayFold;
 pub use context::{Context, Conv};
 pub use declaration::ProtoDeclaration;
 pub use derived_clock::{DerivedClock, DerivedClockSchedule};
@@ -65,6 +67,8 @@ pub struct Ir {
     pub ff_values: Box<[u8]>,
     pub comb_values: Box<[u8]>,
     pub use_4state: bool,
+    /// See `Config::abstract_reset_active_high`.
+    pub abstract_reset_active_high: bool,
     pub module_variables: ModuleVariables,
     pub event_statements: HashMap<Event, Vec<Statement>>,
     /// Unified comb statements: all port connections, child comb, and internal
@@ -135,6 +139,14 @@ pub struct Ir {
     pub component_file_base: Option<PathBuf>,
     /// See `Module::rtl_driven`.
     pub rtl_driven: HashSet<VarId>,
+    /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
+    /// comb-dirty filter (`tb_dirty::TbDirtyFilter`).
+    pub comb_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
+    /// Cone-gate segments over `comb_statements`; empty when ungated.
+    /// Runtime shadows live in `cone_gate_state`.
+    pub cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment>,
+    /// Lazily initialised per-segment shadows + auto-off counters.
+    pub cone_gate_state: std::cell::RefCell<Option<crate::ir::opt::cone_gate::ConeGateState>>,
     /// See `Module::fused_comb_offsets` (diagnostic; consumed by the
     /// dual-run checker to skip storage the fusion pass retired).
     pub fused_comb_offsets: Vec<isize>,
@@ -164,6 +176,7 @@ impl Ir {
             ff_values: module.ff_values,
             comb_values: module.comb_values,
             use_4state: config.use_4state,
+            abstract_reset_active_high: config.abstract_reset_active_high,
             module_variables: module.module_variables,
             event_statements: module.event_statements,
             comb_statements: module.comb_statements,
@@ -190,6 +203,9 @@ impl Ir {
             component_file_base: config.component_file_base.clone(),
             rtl_driven: module.rtl_driven,
             fused_comb_offsets: module.fused_comb_offsets,
+            comb_touched_offsets: module.comb_touched_offsets,
+            cone_segments: module.cone_segments,
+            cone_gate_state: std::cell::RefCell::new(None),
             whole_comb_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
             const_cone_done: Default::default(),
@@ -199,7 +215,113 @@ impl Ir {
         // inline log pushes without a TLS lookup.
         ir.install_write_log_ptr();
         ir.backend_diag();
+        if env::var("VERYL_DUMP_VARMAP").ok().as_deref() == Some("1") {
+            ir.dump_varmap();
+        }
         ir
+    }
+
+    /// True when the reset net `id` asserts LOW.  The polarity-agnostic
+    /// `reset` type carries none of its own, so a declaration on the ports the
+    /// net reaches decides — their `if_reset` blocks were lowered against it —
+    /// and `[build] reset_type` is the fallback when none does.
+    pub fn reset_active_low(&self, id: &VarId) -> bool {
+        let var = self.module_variables.variables.get(id);
+        match var.map(|x| &x.r#type.kind) {
+            Some(air::TypeKind::ResetAsyncHigh) | Some(air::TypeKind::ResetSyncHigh) => false,
+            Some(air::TypeKind::ResetAsyncLow) | Some(air::TypeKind::ResetSyncLow) => true,
+            _ => var
+                .and_then(|v| self.declared_reset_polarity(v))
+                .unwrap_or(!self.abstract_reset_active_high),
+        }
+    }
+
+    /// The polarity declared for the net `var` denotes, found through the
+    /// storage it shares with connected ports.  `None` when nothing declares
+    /// one or the declarations disagree — neither leaves a level to pick.
+    fn declared_reset_polarity(&self, var: &Variable) -> Option<bool> {
+        let &ptr = var.current_values.first()?;
+        let mut found: Option<bool> = None;
+        let mut stack = vec![&self.module_variables];
+        while let Some(vars) = stack.pop() {
+            for other in vars.variables.values() {
+                if other.current_values.first() != Some(&ptr) {
+                    continue;
+                }
+                let active_low = match other.r#type.kind {
+                    air::TypeKind::ResetAsyncHigh | air::TypeKind::ResetSyncHigh => false,
+                    air::TypeKind::ResetAsyncLow | air::TypeKind::ResetSyncLow => true,
+                    _ => continue,
+                };
+                match found {
+                    None => found = Some(active_low),
+                    Some(prev) if prev != active_low => return None,
+                    Some(_) => {}
+                }
+            }
+            for child in &vars.children {
+                stack.push(child);
+            }
+        }
+        found
+    }
+
+    /// Reset-typed ports of the top module — the nets an external driver
+    /// supplies.  Sorted by path so a caller picking one is deterministic.
+    pub fn reset_ports(&self) -> Vec<VarId> {
+        let mut ports: Vec<(&VarPath, &VarId)> = self
+            .ports
+            .iter()
+            .filter(|(_, id)| {
+                self.module_variables
+                    .variables
+                    .get(*id)
+                    .is_some_and(|x| x.r#type.is_reset())
+            })
+            .collect();
+        ports.sort_by(|a, b| a.0.cmp(b.0));
+        ports.into_iter().map(|(_, id)| *id).collect()
+    }
+
+    /// `VERYL_DUMP_VARMAP=1`: every variable element's storage offset with its
+    /// hierarchical path — the table an emitted-code offset is joined against
+    /// to name the signal behind it.
+    fn dump_varmap(&self) {
+        // Millions of lines on a large design, and stderr is unbuffered: hold
+        // one buffer for the whole dump.
+        use std::io::Write;
+        let stderr = std::io::stderr();
+        let mut out = std::io::BufWriter::new(stderr.lock());
+        let comb_base = self.comb_values.as_ptr() as usize;
+        let comb_end = comb_base + self.comb_values.len();
+        let ff_base = self.ff_values.as_ptr() as usize;
+        let ff_end = ff_base + self.ff_values.len();
+        let mut stack = vec![(String::new(), &self.module_variables)];
+        while let Some((prefix, m)) = stack.pop() {
+            let here = if prefix.is_empty() {
+                m.name.to_string()
+            } else {
+                format!("{prefix}.{}", m.name)
+            };
+            for var in m.variables.values() {
+                for (i, &p) in var.current_values.iter().enumerate() {
+                    let p = p as usize;
+                    let (kind, off) = if (comb_base..comb_end).contains(&p) {
+                        ("comb", p - comb_base)
+                    } else if (ff_base..ff_end).contains(&p) {
+                        ("ff", p - ff_base)
+                    } else {
+                        continue; // external component storage
+                    };
+                    let _ = writeln!(
+                        out,
+                        "[varmap] {kind} {off:#x} w={} {here}.{}[{i}]",
+                        var.width, var.path
+                    );
+                }
+            }
+            stack.extend(m.children.iter().map(|c| (here.clone(), c)));
+        }
     }
 
     /// `VERYL_BACKEND_DIAG=1`: report per-event/comb jit vs interpreter counts
@@ -458,13 +580,144 @@ impl Ir {
         #[cfg(feature = "profile")]
         let start = std::time::Instant::now();
 
-        for x in &self.comb_statements {
-            dispatch_stmt_fast(x, mask_cache);
+        if self.cone_segments.is_empty() {
+            for x in &self.comb_statements {
+                dispatch_stmt_fast(x, mask_cache);
+            }
+        } else {
+            self.eval_comb_cone_gated(mask_cache);
         }
 
         #[cfg(feature = "profile")]
         {
             profile.eval_comb_full_ns += start.elapsed().as_nanos() as u64;
+        }
+    }
+
+    /// Settle pass with cone-gate segments: at each gated range, one compare
+    /// of its external inputs against the shadow of its last run decides
+    /// whether the whole range can be skipped (its outputs still hold the
+    /// fixpoint of those same inputs).  See `opt::cone_gate`.
+    fn eval_comb_cone_gated(&self, mask_cache: &mut MaskCache) {
+        // `VERYL_CONE_GATE_CHECK=1`: run every would-be-skipped segment
+        // anyway and panic on the first output byte the skip would have got
+        // wrong.  Debug instrument, quadratic in buffer size.
+        static CHECK: OnceLock<bool> = OnceLock::new();
+        let check = *CHECK.get_or_init(|| env::var("VERYL_CONE_GATE_CHECK").as_deref() == Ok("1"));
+        let mut slot = self.cone_gate_state.borrow_mut();
+        let state = slot.get_or_insert_with(|| {
+            crate::ir::opt::cone_gate::ConeGateState::new(self.cone_segments.len())
+        });
+        // `VERYL_CONE_GATE_DIAG=1`: periodic segment-dispatch statistics.
+        static DIAG: OnceLock<bool> = OnceLock::new();
+        let diag = *DIAG.get_or_init(|| env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1"));
+        if diag {
+            let total = state.skipped + state.ran;
+            if total >= state.next_report {
+                state.next_report = total + (1 << 18);
+                eprintln!(
+                    "[cone_gate] segment dispatches: skipped {:.1}% ({} of {})",
+                    100.0 * state.skipped as f64 / total as f64,
+                    state.skipped,
+                    total,
+                );
+                // Every 8th report, the per-segment table.
+                if total >= (1 << 21) && (total >> 18).is_multiple_of(8) {
+                    for (si, &(sk, rn)) in state.per_seg.iter().enumerate() {
+                        if let Some(seg) = self.cone_segments.get(si) {
+                            eprintln!(
+                                "[cone_gate]   seg{si} [{}..{}) sk={sk} rn={rn} ({:.1}%) {}",
+                                seg.lo,
+                                seg.hi,
+                                100.0 * sk as f64 / (sk + rn).max(1) as f64,
+                                seg.cone,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let n = self.comb_statements.len();
+        let mut i = 0usize;
+        let mut si = 0usize;
+        while i < n {
+            if let Some(seg) = self.cone_segments.get(si)
+                && seg.lo == i
+            {
+                if state.check_clean(si, seg, &self.ff_values, &self.comb_values) {
+                    if check {
+                        // Oracle: a real run starts from the PRE-replay
+                        // state (its inputs just compared clean), so run
+                        // from that state and require the result to match
+                        // what skip+replay produced.  Re-running on the
+                        // post-replay buffer instead would feed post-run
+                        // values into read-before-write chains and flag
+                        // sound skips spuriously.  Diff only the FINAL
+                        // state: mid-segment transients (an init store
+                        // whose conditional companion overwrites it later
+                        // in the segment) are not errors.
+                        let pre = self.comb_values.to_vec();
+                        if !seg.replay.is_empty() {
+                            // SAFETY: the comb buffer outlives the settle
+                            // and the spans were bounds-checked at plan
+                            // time.
+                            unsafe {
+                                state.replay(si, seg, self.comb_values.as_ptr() as *mut u8);
+                            }
+                        }
+                        let before = self.comb_values.to_vec();
+                        // SAFETY: same buffer, same length.
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                pre.as_ptr(),
+                                self.comb_values.as_ptr() as *mut u8,
+                                pre.len(),
+                            );
+                        }
+                        for x in &self.comb_statements[i..seg.hi] {
+                            dispatch_stmt_fast(x, mask_cache);
+                        }
+                        for (o, (a, b)) in before.iter().zip(self.comb_values.iter()).enumerate() {
+                            if a != b {
+                                panic!(
+                                    "[cone_gate] WRONG SKIP seg {si} [{}..{}) {}: comb {:#x} \
+                                     {:#04x} -> {:#04x}\n  compare={:x?}\n  compare_pre={:x?}\n  \
+                                     replay={:x?}\n  backedge={:x?}",
+                                    seg.lo,
+                                    seg.hi,
+                                    seg.cone,
+                                    o,
+                                    a,
+                                    b,
+                                    seg.compare,
+                                    seg.compare_pre,
+                                    seg.replay,
+                                    seg.backedge,
+                                );
+                            }
+                        }
+                    } else if !seg.replay.is_empty() {
+                        // SAFETY: the comb buffer outlives the settle and
+                        // the spans were bounds-checked at plan time.
+                        unsafe {
+                            state.replay(si, seg, self.comb_values.as_ptr() as *mut u8);
+                        }
+                    }
+                    i = seg.hi;
+                    si += 1;
+                    continue;
+                }
+                state.before_run(si, seg, &self.comb_values);
+                for x in &self.comb_statements[i..seg.hi] {
+                    dispatch_stmt_fast(x, mask_cache);
+                }
+                state.refresh(si, seg, &self.ff_values, &self.comb_values);
+                i = seg.hi;
+                si += 1;
+                continue;
+            }
+            dispatch_stmt_fast(&self.comb_statements[i], mask_cache);
+            i += 1;
         }
     }
 
@@ -668,6 +921,12 @@ pub fn build_ir_cached(
 #[derive(Clone, Debug, Default)]
 pub struct Config {
     pub use_4state: bool,
+    /// Polarity the polarity-agnostic `reset` type falls back to, from the
+    /// project's `[build] reset_type`.  Declared types carry their own and
+    /// ignore this.  Default false = active low, as `ResetType` defaults.
+    pub abstract_reset_active_high: bool,
+    /// Whether that fallback is SYNCHRONOUS.  Default false = asynchronous.
+    pub abstract_reset_sync: bool,
     pub use_jit: bool,
     pub dump_cranelift: bool,
     pub dump_asm: bool,

@@ -20,6 +20,7 @@
 
 use crate::HashMap;
 use crate::HashSet;
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::expression::{ExpressionContext, ProtoExpression};
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::VarOffset;
@@ -119,8 +120,12 @@ struct BitWriters {
 /// Retire comb variables that exist only to be reduced.  `dead` collects the
 /// retired offsets (their storage is never written afterwards).  Returns the
 /// number of reductions rewritten.
+/// `fold` must be the caller's: `externals` is keyed by the offsets it
+/// produces, so a different fold would look up an element under a key the
+/// caller never wrote.
 pub fn transpose_fold(
     stmts: &mut Vec<ProtoStatement>,
+    fold: &BigArrayFold,
     externals: &HashSet<isize>,
     dead: &mut Vec<isize>,
 ) -> usize {
@@ -133,6 +138,11 @@ pub fn transpose_fold(
         let VarOffset::Comb(o) = a.dst else {
             continue;
         };
+        // `read_idxs` / `write_idxs` are array-wide for a folded element —
+        // too coarse for the legality window below.
+        if fold.covers(a.dst) {
+            continue;
+        }
         let w = a.dst_width;
         let e = cands.entry(o).or_insert_with(|| BitWriters {
             by_bit: vec![None; w],
@@ -175,7 +185,7 @@ pub fn transpose_fold(
         for (i, s) in stmts.iter().enumerate() {
             ins.clear();
             outs.clear();
-            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            s.gather_variable_offsets_expanded(fold, &mut ins, &mut outs);
             for off in ins.drain(..) {
                 if let VarOffset::Comb(o) = off {
                     let v = read_idxs.entry(o).or_default();
@@ -230,7 +240,7 @@ pub fn transpose_fold(
             }
             ins.clear();
             outs.clear();
-            stmts[i].gather_variable_offsets_expanded(&mut ins, &mut outs);
+            stmts[i].gather_variable_offsets_expanded(fold, &mut ins, &mut outs);
             for off in &ins {
                 if let VarOffset::Comb(io) = off
                     && write_idxs
@@ -365,9 +375,7 @@ fn is_full_read(expr: &ProtoExpression, offset: isize, width: usize) -> bool {
 /// a dynamic select and every element a dynamic read can reach, which the
 /// operand walk does not visit.
 fn mentions(expr: &ProtoExpression, offset: isize) -> bool {
-    let mut offs = Vec::new();
-    expr.gather_variable_offsets_expanded(&mut offs);
-    offs.contains(&VarOffset::Comb(offset))
+    expr.reads_offset(VarOffset::Comb(offset))
 }
 
 // ---------------------------------------------------------------------------
@@ -796,7 +804,12 @@ mod tests {
         let mut stmts = transposed_row();
         let mut dead = vec![];
         assert_eq!(
-            transpose_fold(&mut stmts, &HashSet::default(), &mut dead),
+            transpose_fold(
+                &mut stmts,
+                &BigArrayFold::default(),
+                &HashSet::default(),
+                &mut dead
+            ),
             1
         );
         assert_eq!(stmts.len(), 1);
@@ -831,7 +844,12 @@ mod tests {
         stmts.push(store(0x90, 1, None, bit(0x40, 0, 2)));
         let mut dead = vec![];
         assert_eq!(
-            transpose_fold(&mut stmts, &HashSet::default(), &mut dead),
+            transpose_fold(
+                &mut stmts,
+                &BigArrayFold::default(),
+                &HashSet::default(),
+                &mut dead
+            ),
             0
         );
         assert_eq!(stmts.len(), 4);
@@ -848,7 +866,12 @@ mod tests {
         ];
         let mut dead = vec![];
         assert_eq!(
-            transpose_fold(&mut stmts, &HashSet::default(), &mut dead),
+            transpose_fold(
+                &mut stmts,
+                &BigArrayFold::default(),
+                &HashSet::default(),
+                &mut dead
+            ),
             0
         );
         assert_eq!(stmts.len(), 2);
@@ -859,7 +882,10 @@ mod tests {
         let mut stmts = transposed_row();
         let mut dead = vec![];
         let externals: HashSet<isize> = [0x40].into_iter().collect();
-        assert_eq!(transpose_fold(&mut stmts, &externals, &mut dead), 0);
+        assert_eq!(
+            transpose_fold(&mut stmts, &BigArrayFold::default(), &externals, &mut dead),
+            0
+        );
         assert_eq!(stmts.len(), 3);
     }
 
@@ -871,7 +897,12 @@ mod tests {
         stmts.insert(2, store(0x10, 8, None, lit(0, 8)));
         let mut dead = vec![];
         assert_eq!(
-            transpose_fold(&mut stmts, &HashSet::default(), &mut dead),
+            transpose_fold(
+                &mut stmts,
+                &BigArrayFold::default(),
+                &HashSet::default(),
+                &mut dead
+            ),
             0
         );
         assert_eq!(stmts.len(), 4);
@@ -1042,7 +1073,12 @@ mod tests {
         }
         let mut dead = vec![];
         assert_eq!(
-            transpose_fold(&mut stmts, &HashSet::default(), &mut dead),
+            transpose_fold(
+                &mut stmts,
+                &BigArrayFold::default(),
+                &HashSet::default(),
+                &mut dead
+            ),
             4
         );
         assert_eq!(dead.len(), 4);
@@ -1131,7 +1167,12 @@ mod tests {
         ];
         let mut dead = vec![];
         assert_eq!(
-            transpose_fold(&mut stmts, &HashSet::default(), &mut dead),
+            transpose_fold(
+                &mut stmts,
+                &BigArrayFold::default(),
+                &HashSet::default(),
+                &mut dead
+            ),
             1
         );
         let ProtoExpression::Binary { x, y, .. } = expr_of(&stmts[0]) else {
@@ -1191,7 +1232,12 @@ mod tests {
         );
         let mut dead = vec![];
         assert_eq!(
-            transpose_fold(&mut stmts, &HashSet::default(), &mut dead),
+            transpose_fold(
+                &mut stmts,
+                &BigArrayFold::default(),
+                &HashSet::default(),
+                &mut dead
+            ),
             0
         );
         assert_eq!(stmts.len(), 3);

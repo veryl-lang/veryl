@@ -69,6 +69,35 @@ impl CombLayoutSchedule {
         }
     }
 
+    /// Translate a byte RANGE through the schedule, piecewise: a unit moves
+    /// as a whole (intra-unit deltas preserved) but adjacent units may land
+    /// apart, so one input range can map to several output ranges.
+    pub fn translate_range(&self, start: isize, end: isize) -> Vec<(isize, isize)> {
+        let mut out: Vec<(isize, isize)> = Vec::new();
+        let mut x = start;
+        while x < end {
+            let i = self.units.partition_point(|&(s, _, _)| s <= x);
+            let (seg_end, nx) = match i.checked_sub(1) {
+                Some(i) => {
+                    let (s, e, n) = self.units[i];
+                    if x < e {
+                        (e.min(end), n + (x - s))
+                    } else {
+                        let next = self.units.get(i + 1).map(|u| u.0).unwrap_or(isize::MAX);
+                        (next.min(end), x)
+                    }
+                }
+                None => {
+                    let next = self.units.first().map(|u| u.0).unwrap_or(isize::MAX);
+                    (next.min(end), x)
+                }
+            };
+            out.push((nx, nx + (seg_end - x)));
+            x = seg_end;
+        }
+        out
+    }
+
     /// Translate a typed offset; FF offsets pass through untouched.
     pub fn translate_off(&self, off: VarOffset) -> VarOffset {
         match off {

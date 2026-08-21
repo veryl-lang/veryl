@@ -124,7 +124,7 @@ impl TypeDag {
 
     fn apply(&mut self) -> Vec<AnalyzerError> {
         symbol_table::suppress_cache_clear();
-        let candidates: Vec<_> = self.candidates.drain(..).collect();
+        let candidates: Vec<_> = std::mem::take(&mut self.candidates);
 
         // Process symbol declarations at first to construct dag_owned
         for cand in &candidates {
