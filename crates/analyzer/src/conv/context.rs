@@ -760,35 +760,35 @@ impl Context {
     }
 
     pub fn drain_var_paths(&mut self) -> HashMap<VarPath, (VarId, Comptime)> {
-        self.var_paths.drain().collect()
+        std::mem::take(&mut self.var_paths)
     }
 
     pub fn drain_func_paths(&mut self) -> HashMap<FuncPath, VarId> {
-        self.func_paths.drain().collect()
+        std::mem::take(&mut self.func_paths)
     }
 
     pub fn drain_variables(&mut self) -> HashMap<VarId, Variable> {
-        self.variables.drain().collect()
+        std::mem::take(&mut self.variables)
     }
 
     pub fn drain_port_types(&mut self) -> HashMap<VarPath, (Type, ClockDomain)> {
-        self.port_types.drain().collect()
+        std::mem::take(&mut self.port_types)
     }
 
     pub fn drain_functions(&mut self) -> HashMap<VarId, Function> {
-        self.functions.drain().collect()
+        std::mem::take(&mut self.functions)
     }
 
     pub fn drain_modports(&mut self) -> HashMap<StrId, Vec<(StrId, Direction)>> {
-        self.modports.drain().collect()
+        std::mem::take(&mut self.modports)
     }
 
     pub fn drain_declarations(&mut self) -> Vec<Declaration> {
-        self.declarations.drain(..).collect()
+        std::mem::take(&mut self.declarations)
     }
 
     pub fn drain_errors(&mut self) -> Vec<AnalyzerError> {
-        self.errors.drain(..).collect()
+        std::mem::take(&mut self.errors)
     }
 }
 
