@@ -1,4 +1,5 @@
 use crate::analyzer_error::{ComponentInterfaceMismatchKind, MismatchTypeKind};
+use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::utils::{
     TbMethodCallPosition, TypePosition, argument_list, assign_rhs_context_type, build_for_range,
     build_for_statement, case_patterns, check_assign_before_definition, check_assign_clock_domain,
@@ -471,6 +472,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                     SymbolKind::SystemFunction(_) => {
                         let name = symbol.found.token.text;
                         let args = args.to_system_function_args(context, &symbol.found);
+                        check_initial_assign_system_function_args(context, &symbol.found, &args);
                         let ret = ir::SystemFunctionCall::new(context, name, args, token)?;
                         Ok(ir::StatementBlock(vec![ir::Statement::SystemFunctionCall(
                             Box::new(ret),

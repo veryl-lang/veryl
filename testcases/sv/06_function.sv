@@ -51,9 +51,10 @@ module veryl_testcase_Module06;
         return c;
     endfunction
 
-    logic        [ParamX-1:0] a; always_comb a = 1;
-    logic        [ParamX-1:0] b;
-    logic        [ParamX-1:0] c;
+    logic [ParamX-1:0] a; always_comb a = 1;
+    logic [ParamX-1:0] b;
+    logic [ParamX-1:0] c;
+
     logic        [ParamX-1:0] d;
     logic        [ParamX-1:0] e;
     logic        [ParamX-1:0] f;

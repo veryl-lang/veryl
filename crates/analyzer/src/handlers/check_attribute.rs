@@ -1,7 +1,8 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::attribute::Attribute as Attr;
-use crate::attribute::AttributeError;
+use crate::attribute::{AllowItem, AttributeError};
 use crate::attribute_table;
+use veryl_metadata::{Lint, NonPortableItem};
 use veryl_parser::ParolError;
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::{TokenExt, TokenRange};
@@ -24,11 +25,51 @@ pub struct CheckAttribute {
     ifdef_state: IfdefState,
     ifdef_pos: Vec<StrId>,
     ifdef_neg: Vec<StrId>,
+    allow_in_dependencies: Vec<NonPortableItem>,
+    is_dependency: bool,
+    project_name: StrId,
 }
 
 impl CheckAttribute {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(lint_opt: &Lint, is_dependency: bool, project_name: StrId) -> Self {
+        Self {
+            allow_in_dependencies: lint_opt.portability.allow_in_dependencies.clone(),
+            is_dependency,
+            project_name,
+            ..Default::default()
+        }
+    }
+
+    /// The attribute is the dependency author's call for their own target, so
+    /// accepting it is the consumer's; otherwise an ASIC project would absorb
+    /// FPGA-only constructs silently.
+    fn check_portability(&mut self, attr: &Attr, arg: &Attribute) {
+        if !self.is_dependency {
+            return;
+        }
+
+        let Attr::Allow(item) = attr else {
+            return;
+        };
+
+        let non_portable = match item {
+            AllowItem::InitialAssign => NonPortableItem::InitialAssign,
+            AllowItem::MultipleAssign => NonPortableItem::MultipleAssign,
+            AllowItem::MissingPort
+            | AllowItem::MissingResetStatement
+            | AllowItem::UnusedVariable
+            | AllowItem::UnassignVariable => return,
+        };
+
+        if self.allow_in_dependencies.contains(&non_portable) {
+            return;
+        }
+
+        self.errors.push(AnalyzerError::non_portable_dependency(
+            &non_portable.to_string(),
+            &self.project_name.to_string(),
+            &arg.identifier.as_ref().into(),
+        ));
     }
 
     fn gen_attrs(&mut self, args: &[&Attribute]) -> Vec<Option<(Attr, TokenRange)>> {
@@ -39,6 +80,7 @@ impl CheckAttribute {
                 (*arg).try_into();
             match attr {
                 Ok(attr) => {
+                    self.check_portability(&attr, arg);
                     ret.push(Some((attr, arg.range())));
                 }
                 Err(err) => {

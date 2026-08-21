@@ -1,4 +1,5 @@
 use crate::expaneded_modport::{ExpandModportConnectionsTable, ExpandedModportPortTable};
+use crate::portability::drives_non_portable_variable;
 use std::fs;
 use std::path::Path;
 use std::rc::Rc;
@@ -4794,7 +4795,11 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
         self.in_always_ff = true;
-        self.always_ff(&arg.always_ff);
+        if drives_non_portable_variable(arg) {
+            self.token(&arg.always_ff.always_ff_token.replace("always"));
+        } else {
+            self.always_ff(&arg.always_ff);
+        }
         self.space(1);
         self.str("@");
         self.space(1);

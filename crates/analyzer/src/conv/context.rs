@@ -90,6 +90,10 @@ pub struct Context {
     pub in_if_reset: bool,
     /// Inside an initial/final block (testbench statement context).
     pub in_tb_block: bool,
+    /// Inside an `initial` block, holding the next `VarId` at its entry so the
+    /// block's own procedural locals can be told from the module's state.
+    /// `in_tb_block` is unusable here: it also covers `final` and connections.
+    pub in_initial: Option<VarId>,
     /// Sink for component method calls hoisted out of the current
     /// testbench statement's expressions; `Some` only while initial/final
     /// statements convert. Each hoisted call runs as its own zero-time

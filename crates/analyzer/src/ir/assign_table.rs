@@ -1,5 +1,6 @@
 use crate::HashSet;
 use crate::conv::Context;
+use crate::conv::checker::portability::{allow_initial_assign, allow_multiple_assign};
 use crate::ir::{Shape, ShapeRef, VarId, VarPath, Variable, VariableInfo};
 use crate::symbol::Affiliation;
 use crate::{AnalyzerError, BigUint, HashMap};
@@ -312,6 +313,24 @@ impl AssignTable {
         }
     }
 
+    /// Initialization by the configuration bitstream is not a driving process,
+    /// so it must not conflict with what drives the variable at run time.
+    /// `mask` is kept, so the write still counts for the unassigned check.
+    pub fn exempt_initial_writes(&mut self, context: &Context) {
+        let zero = BigUint::from(0u32);
+        for (id, entry) in self.table.iter_mut() {
+            if !allow_initial_assign(context, *id) {
+                continue;
+            }
+            for x in entry.definite_mask.iter_mut() {
+                *x = zero.clone();
+            }
+            for x in entry.dynamic_mask.iter_mut() {
+                *x = zero.clone();
+            }
+        }
+    }
+
     pub fn merge_by_or(
         &mut self,
         context: &mut Context,
@@ -354,7 +373,9 @@ impl AssignTable {
                             || &val.dynamic_mask[i] & &x.mask[i] != 0u32.into();
                         let definite_overlap =
                             &x.definite_mask[i] & &val.definite_mask[i] != 0u32.into();
-                        if (multi_process && dynamic_overlap || definite_overlap) && check_conflict
+                        if (multi_process && dynamic_overlap || definite_overlap)
+                            && check_conflict
+                            && !allow_multiple_assign(context, key)
                         {
                             context.insert_error(AnalyzerError::multiple_assignment(
                                 &x.path.to_string(),

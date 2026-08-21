@@ -1,0 +1,7 @@
+module ModuleA {
+    var regs: logic<16> [8];
+
+    initial {
+        regs[0] = '0;
+    }
+}

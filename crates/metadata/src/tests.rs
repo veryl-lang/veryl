@@ -326,6 +326,37 @@ four_state = true
 }
 
 #[test]
+fn lint_portability_defaults_empty_and_parses() {
+    let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();
+    assert!(metadata.lint.portability.allow_in_dependencies.is_empty());
+
+    let toml = r#"
+[project]
+name = "test"
+version = "0.1.0"
+
+[lint.portability]
+allow_in_dependencies = ["initial_assign"]
+"#;
+    let metadata: Metadata = toml::from_str(toml).unwrap();
+    assert_eq!(
+        metadata.lint.portability.allow_in_dependencies,
+        vec![NonPortableItem::InitialAssign]
+    );
+
+    // A typo is a manifest error rather than a silently ignored entry.
+    let toml = r#"
+[project]
+name = "test"
+version = "0.1.0"
+
+[lint.portability]
+allow_in_dependencies = ["initial_assignment"]
+"#;
+    assert!(toml::from_str::<Metadata>(toml).is_err());
+}
+
+#[test]
 fn synth_ram_thresholds_default_and_override() {
     // Omitted RAM thresholds fall back to the built-in defaults.
     let metadata: Metadata = toml::from_str(TEST_TOML).unwrap();

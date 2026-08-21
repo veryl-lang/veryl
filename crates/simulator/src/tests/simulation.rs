@@ -4661,6 +4661,7 @@ fn readmemh_basic() {
     module Top (
         i_clk: input clock,
     ) {{
+        #[allow(initial_assign)]
         var mem: logic<8> [4];
         initial {{
             $readmemh("{}", mem);
@@ -4701,6 +4702,7 @@ fn readmemh_address_directive_moves_the_load_position() {
     module Top (
         i_clk: input clock,
     ) {{
+        #[allow(initial_assign)]
         var mem: logic<8> [6];
         initial {{
             $readmemh("{}", mem);
@@ -12091,7 +12093,9 @@ fn lhs_concatenation_in_initial() {
         hi: output logic<8>,
         lo: output logic<8>,
     ) {
+        #[allow(initial_assign)]
         var hi_v: logic<8>;
+        #[allow(initial_assign)]
         var lo_v: logic<8>;
 
         initial {
