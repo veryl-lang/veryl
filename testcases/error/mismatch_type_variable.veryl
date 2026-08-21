@@ -1,0 +1,6 @@
+module mismatch_type_variable (
+    i_a: input logic,
+) {
+    var b: i_a;
+    assign b = 0;
+}
