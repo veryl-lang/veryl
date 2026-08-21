@@ -92,3 +92,22 @@ interface Interface75 {
         ..same(master)
     }
 }
+
+interface Interface75MemberDefine {
+    var b: logic;
+    var a: logic;
+
+    modport master {
+        #[ifdef(TRACE)]
+        b: input,
+        a: input,
+    }
+
+    modport slave {
+        ..converse(master)
+    }
+
+    modport relay {
+        ..same(slave)
+    }
+}

@@ -5,7 +5,9 @@ use std::rc::Rc;
 use veryl_aligner::{Aligner, Location, PadKind, align_kind};
 use veryl_analyzer::attribute;
 use veryl_analyzer::attribute::Attribute as Attr;
-use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncodingItem, FormatItem};
+use veryl_analyzer::attribute::{
+    AlignItem, AllowItem, CondTypeItem, EnumEncodingItem, FormatItem, IfdefCondition,
+};
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::connect_operation_table;
 use veryl_analyzer::conv::{Context, Conv};
@@ -1204,6 +1206,28 @@ impl Emitter {
         popped
     }
 
+    fn defines_begin(&mut self, defines: &[IfdefCondition]) {
+        if defines.is_empty() {
+            return;
+        }
+        for define in defines {
+            self.str(&format!("`{} {}", define.directive(), define.define));
+            self.newline();
+        }
+        // The directives have no source line of their own, so without this the
+        // line sync inserts a blank line before the item.
+        self.clear_adjust_line();
+    }
+
+    /// Close the chain opened by [`Self::defines_begin`]. A separator the item
+    /// owns must already have been emitted, so that it vanishes with the item.
+    fn defines_end(&mut self, defines: &[IfdefCondition]) {
+        for _ in defines {
+            self.newline();
+            self.str("`endif");
+        }
+    }
+
     fn attribute_end(&mut self) {
         match self.attribute.pop() {
             Some(AttributeType::Ifdef) => {
@@ -1851,6 +1875,7 @@ impl Emitter {
                         self.newline();
                     }
                     self.clear_adjust_line();
+                    self.defines_begin(&port.defines);
 
                     let (lhs, rhs) = if matches!(port.direction, SymDirection::Input) {
                         (&port.interface_target, &port.identifier)
@@ -1869,7 +1894,8 @@ impl Emitter {
                     self.align_start(align_kind::EXPRESSION);
                     self.duplicated_token(rhs);
                     self.align_finish(align_kind::EXPRESSION);
-                    self.str(";")
+                    self.str(";");
+                    self.defines_end(&port.defines);
                 }
                 self.newline_pop();
                 self.str("end");
@@ -2575,20 +2601,26 @@ impl Emitter {
             self.aligner.disable_auto_finish();
             self.clear_adjust_line();
 
-            for (i, connection) in x
+            let connections: Vec<_> = x
                 .connections
                 .iter()
                 .flat_map(|x| x.connections.iter())
-                .enumerate()
-            {
+                .collect();
+            let last = connections.len().saturating_sub(1);
+            for (i, connection) in connections.iter().enumerate() {
                 if i > 0 {
-                    self.str(",");
-                    if *self.in_named_argument.last().unwrap() {
+                    // A directive needs a line of its own even where the
+                    // arguments would otherwise be packed onto one line.
+                    if *self.in_named_argument.last().unwrap()
+                        || !connection.defines.is_empty()
+                        || !connections[i - 1].defines.is_empty()
+                    {
                         self.newline();
                     } else {
                         self.space(1);
                     }
                 }
+                self.defines_begin(&connection.defines);
 
                 if arg.argument_item_opt.is_some() {
                     self.str(".");
@@ -2606,6 +2638,10 @@ impl Emitter {
                     self.duplicated_token(&connection.interface_target);
                 }
 
+                if i != last {
+                    self.str(",");
+                }
+                self.defines_end(&connection.defines);
                 self.clear_adjust_line();
             }
 
@@ -2739,11 +2775,12 @@ impl Emitter {
     fn emit_modport_default_member(&mut self, arg: &ModportDeclaration) {
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let SymbolKind::Modport(x) = &symbol.found.kind {
+                // Generated members have no source position, so their guards come
+                // from the declarations they were generated from.
                 let members: Vec<_> = x
                     .members
                     .iter()
-                    .enumerate()
-                    .filter_map(|(i, id)| {
+                    .filter_map(|id| {
                         let symbol = symbol_table::get(*id)?;
                         if !matches!(symbol.token.source, TokenSource::Generated(_)) {
                             return None;
@@ -2753,51 +2790,22 @@ impl Emitter {
                             SymbolKind::ModportFunctionMember(_) => SymDirection::Import,
                             _ => return None,
                         };
-                        Some((i, symbol, direction))
-                    })
-                    .collect();
-                // Generated members have no source position, so the guards have to
-                // come from the variable or function they were generated from.
-                let members: Vec<_> = members
-                    .into_iter()
-                    .map(|(i, symbol, direction)| {
-                        let source = match symbol.kind {
-                            SymbolKind::ModportVariableMember(ref x) => Some(x.variable),
-                            SymbolKind::ModportFunctionMember(ref x) => Some(x.function),
-                            _ => None,
-                        };
-                        // `else` / `elsif` have no guarded neighbour to attach to
-                        // here, so the branch is rebuilt as a standalone nested
-                        // guard: `pos` must be defined and `neg` must not.
-                        let preceding = |pos: Vec<StrId>, neg: Vec<StrId>| {
-                            pos.into_iter()
-                                .map(|x| ("ifdef", x))
-                                .chain(neg.into_iter().map(|x| ("ifndef", x)))
-                        };
-                        let defines: Vec<_> = source
-                            .and_then(symbol_table::get)
-                            .map(|x| attribute_table::get(&x.token))
-                            .unwrap_or_default()
-                            .into_iter()
-                            .flat_map(|x| match x {
-                                Attr::Ifdef(x) => vec![("ifdef", x)],
-                                Attr::Ifndef(x) => vec![("ifndef", x)],
-                                Attr::Elsif(x, pos, neg) => preceding(pos, neg)
-                                    .chain(std::iter::once(("ifdef", x)))
-                                    .collect(),
-                                Attr::Else(pos, neg) => preceding(pos, neg).collect(),
-                                _ => vec![],
-                            })
-                            .collect();
-                        (i, symbol, direction, defines)
+                        let defines = symbol_table::modport_member_conditions(&symbol);
+                        Some((symbol, direction, defines))
                     })
                     .collect();
                 // Each member carries its comma inside its own guard so the comma
                 // vanishes with it. The last member has no comma to vanish, so a
                 // guarded one there is rejected in `link_modports` instead.
                 let last = members.len().saturating_sub(1);
+                let token = &arg
+                    .modport_declaration_opt0
+                    .as_ref()
+                    .unwrap()
+                    .dot_dot
+                    .dot_dot_token;
 
-                for (n, (_, symbol, direction, defines)) in members.iter().enumerate() {
+                for (n, (symbol, direction, defines)) in members.iter().enumerate() {
                     let has_prev = n != 0 || arg.modport_declaration_opt.is_some();
 
                     if has_prev {
@@ -2807,17 +2815,7 @@ impl Emitter {
                         self.newline();
                     }
 
-                    let token = arg
-                        .modport_declaration_opt0
-                        .clone()
-                        .unwrap()
-                        .dot_dot
-                        .dot_dot_token;
-
-                    for (kind, define) in defines {
-                        self.str(&format!("`{kind} {define}"));
-                        self.newline();
-                    }
+                    self.defines_begin(defines);
                     self.align_start(align_kind::DIRECTION);
                     self.duplicated_token(&token.replace(&direction.to_string()));
                     self.align_finish(align_kind::DIRECTION);
@@ -2828,10 +2826,7 @@ impl Emitter {
                     if n != last {
                         self.str(",");
                     }
-                    for _ in defines {
-                        self.newline();
-                        self.str("`endif");
-                    }
+                    self.defines_end(defines);
                 }
             } else {
                 unreachable!();
@@ -5595,16 +5590,17 @@ impl VerylWalker for Emitter {
             self.aligner.disable_auto_finish();
             self.clear_adjust_line();
 
-            for (i, connection) in x
+            let connections: Vec<_> = x
                 .connections
                 .iter()
                 .flat_map(|x| x.connections.iter())
-                .enumerate()
-            {
+                .collect();
+            let last = connections.len().saturating_sub(1);
+            for (i, connection) in connections.iter().enumerate() {
                 if i > 0 {
-                    self.str(",");
                     self.newline();
                 }
+                self.defines_begin(&connection.defines);
 
                 self.str(".");
                 self.align_start(align_kind::IDENTIFIER);
@@ -5618,6 +5614,10 @@ impl VerylWalker for Emitter {
                 self.align_finish(align_kind::EXPRESSION);
                 self.str(")");
 
+                if i != last {
+                    self.str(",");
+                }
+                self.defines_end(&connection.defines);
                 self.clear_adjust_line();
             }
 
@@ -5812,11 +5812,16 @@ impl VerylWalker for Emitter {
                     self.clear_adjust_line();
                     self.in_direction_with_var = true;
 
-                    for (i, port) in entry.ports.iter().flat_map(|x| x.ports.iter()).enumerate() {
+                    // Each port carries its comma inside its own guard so the
+                    // comma vanishes with it. A guarded last port has none, and is
+                    // rejected as an unexpandable modport instead.
+                    let ports: Vec<_> = entry.ports.iter().flat_map(|x| x.ports.iter()).collect();
+                    let last = ports.len().saturating_sub(1);
+                    for (i, port) in ports.iter().enumerate() {
                         if i > 0 {
-                            self.str(",");
                             self.newline();
                         }
+                        self.defines_begin(&port.defines);
                         let array_type = port.r#type.array_type.as_ref().unwrap();
 
                         self.align_start(align_kind::DIRECTION);
@@ -5840,6 +5845,10 @@ impl VerylWalker for Emitter {
                         }
                         self.align_finish(align_kind::ARRAY);
 
+                        if i != last {
+                            self.str(",");
+                        }
+                        self.defines_end(&port.defines);
                         self.clear_adjust_line();
                     }
 
