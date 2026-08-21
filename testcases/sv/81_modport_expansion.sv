@@ -141,4 +141,52 @@ module veryl_testcase_Module81B;
         .__s_if_0_1_data    (b_if[0][1].data   )
     );
 endmodule
+
+interface veryl_testcase_Interface81Define;
+    `ifdef TRACE
+    logic trace;
+    `endif
+    logic data ;
+
+    modport master (
+        `ifdef TRACE
+        output trace,
+        `endif
+        output data 
+    );
+
+    modport slave (
+        `ifdef TRACE
+        input trace,
+        `endif
+        input data 
+    );
+endinterface
+
+module veryl_testcase_Module81C (
+    `ifdef TRACE
+    output var logic __m_if_trace,
+    `endif
+    output var logic __m_if_data 
+);
+    veryl_testcase_Interface81Define m_if ();
+    always_comb begin
+        `ifdef TRACE
+        __m_if_trace = m_if.trace;
+        `endif
+        __m_if_data  = m_if.data ;
+    end
+    always_comb m_if.data = 0;
+endmodule
+
+module veryl_testcase_Module81D;
+    veryl_testcase_Interface81Define c_if ();
+
+    veryl_testcase_Module81C u (
+        `ifdef TRACE
+        .__m_if_trace (c_if.trace),
+        `endif
+        .__m_if_data  (c_if.data )
+    );
+endmodule
 //# sourceMappingURL=../map/81_modport_expansion.sv.map

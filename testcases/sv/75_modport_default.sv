@@ -170,4 +170,30 @@ interface veryl_testcase_Interface75;
         import set_d
     );
 endinterface
+
+interface veryl_testcase_Interface75MemberDefine;
+    logic b;
+    logic a;
+
+    modport master (
+        `ifdef TRACE
+        input b,
+        `endif
+        input a
+    );
+
+    modport slave (
+        `ifdef TRACE
+        output b,
+        `endif
+        output a
+    );
+
+    modport relay (
+        `ifdef TRACE
+        output b,
+        `endif
+        output a
+    );
+endinterface
 //# sourceMappingURL=../map/75_modport_default.sv.map

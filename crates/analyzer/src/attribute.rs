@@ -103,6 +103,49 @@ impl fmt::Display for Attribute {
     }
 }
 
+/// One condition an item is guarded by. `#[elsif]`/`#[else]` yield several, all
+/// of which must hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IfdefCondition {
+    pub define: StrId,
+    pub negated: bool,
+}
+
+impl IfdefCondition {
+    pub fn directive(&self) -> &'static str {
+        if self.negated { "ifndef" } else { "ifdef" }
+    }
+}
+
+impl Attribute {
+    /// An `elsif`/`else` branch is flattened into a standalone nested guard, since
+    /// there is no preceding `` `ifdef `` to attach it to.
+    pub fn ifdef_conditions(&self) -> Vec<IfdefCondition> {
+        let pos = |x: &StrId| IfdefCondition {
+            define: *x,
+            negated: false,
+        };
+        let neg = |x: &StrId| IfdefCondition {
+            define: *x,
+            negated: true,
+        };
+        let preceding = |p: &[StrId], n: &[StrId]| -> Vec<IfdefCondition> {
+            p.iter().map(pos).chain(n.iter().map(neg)).collect()
+        };
+        match self {
+            Attribute::Ifdef(x) => vec![pos(x)],
+            Attribute::Ifndef(x) => vec![neg(x)],
+            Attribute::Elsif(x, p, n) => {
+                let mut ret = preceding(p, n);
+                ret.push(pos(x));
+                ret
+            }
+            Attribute::Else(p, n) => preceding(p, n),
+            _ => Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum AttributeError {
     UnknownAttribute,

@@ -919,6 +919,29 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(last_item_with_define),
+        help(
+            "declare \"{identifier}\" before a member without ifdef/ifndef/elsif/else so that it is not generated last"
+        ),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error(
+        "ifdef/ifndef/elsif/else attribute can't be used with \"{identifier}\", which is generated as the last member of modport \"{modport}\""
+    )]
+    LastItemWithDefineInModport {
+        identifier: String,
+        modport: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        #[label(collection, "generated from")]
+        member_source: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(member_access_on_array),
         help("\"{name}\" has {array_dims} array dimension(s); index all of them before accessing member \"{member}\""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2089,6 +2112,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidWavedrom { input, .. } => input,
             AnalyzerError::InvisibleIndentifier { input, .. } => input,
             AnalyzerError::LastItemWithDefine { input, .. } => input,
+            AnalyzerError::LastItemWithDefineInModport { input, .. } => input,
             AnalyzerError::MemberAccessOnArray { input, .. } => input,
             AnalyzerError::MismatchAssignment { input, .. } => input,
             AnalyzerError::MismatchAttributeArgs { input, .. } => input,
@@ -2207,6 +2231,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidTypeDeclaration { token_source, .. } => *token_source,
             AnalyzerError::InvisibleIndentifier { token_source, .. } => *token_source,
             AnalyzerError::LastItemWithDefine { token_source, .. } => *token_source,
+            AnalyzerError::LastItemWithDefineInModport { token_source, .. } => *token_source,
             AnalyzerError::MemberAccessOnArray { token_source, .. } => *token_source,
             AnalyzerError::MismatchAssignment { token_source, .. } => *token_source,
             AnalyzerError::ImplicitClockConversion { token_source, .. } => *token_source,
@@ -2768,6 +2793,22 @@ impl AnalyzerError {
         AnalyzerError::LastItemWithDefine {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn last_item_with_define_in_modport(
+        identifier: &str,
+        modport: &str,
+        token: &TokenRange,
+        member_source: &TokenRange,
+    ) -> Self {
+        let (input, member_source) = source_with_context(token, &[*member_source]);
+        AnalyzerError::LastItemWithDefineInModport {
+            identifier: identifier.to_string(),
+            modport: modport.to_string(),
+            input,
+            error_location: token.into(),
+            member_source,
             token_source: token.source(),
         }
     }

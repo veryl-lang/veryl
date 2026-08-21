@@ -1138,6 +1138,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         Direction::Import(_) => {
                             let property = ModportFunctionMemberProperty {
                                 function: SymbolId::default(),
+                                generated_from: None,
                             };
                             SymbolKind::ModportFunctionMember(property)
                         }
@@ -1147,6 +1148,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                             let property = ModportVariableMemberProperty {
                                 direction,
                                 variable: SymbolId::default(),
+                                generated_from: None,
                             };
                             SymbolKind::ModportVariableMember(property)
                         }

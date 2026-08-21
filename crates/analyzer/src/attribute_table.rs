@@ -1,4 +1,4 @@
-use crate::attribute::{AlignItem, Attribute, ExpandItem, FormatItem};
+use crate::attribute::{AlignItem, Attribute, ExpandItem, FormatItem, IfdefCondition};
 use crate::range_table::RangeTable;
 use std::cell::RefCell;
 use veryl_parser::resource_table::PathId;
@@ -21,6 +21,13 @@ pub fn end(token: Token) {
 
 pub fn get(token: &Token) -> Vec<Attribute> {
     ATTRIBUTE_TABLE.with(|f| f.borrow().get(token))
+}
+
+pub fn ifdef_conditions(token: &Token) -> Vec<IfdefCondition> {
+    get(token)
+        .iter()
+        .flat_map(|x| x.ifdef_conditions())
+        .collect()
 }
 
 pub fn is_align(token: &Token, item: AlignItem) -> bool {

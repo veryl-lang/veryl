@@ -247,6 +247,7 @@ mod tests {
             SymbolKind::ModportVariableMember(ModportVariableMemberProperty {
                 direction: Direction::Input,
                 variable: SymbolId(0),
+                generated_from: None,
             }),
             &Namespace::new(),
             false,
