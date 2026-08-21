@@ -196,6 +196,7 @@ struct Pattern {
     pub missing_reset_statement: StrId,
     pub unused_variable: StrId,
     pub unassign_variable: StrId,
+    pub mutable_for_bound: StrId,
     pub enum_encoding: StrId,
     pub sequential: StrId,
     pub onehot: StrId,
@@ -231,6 +232,7 @@ impl Pattern {
             missing_reset_statement: resource_table::insert_str("missing_reset_statement"),
             unused_variable: resource_table::insert_str("unused_variable"),
             unassign_variable: resource_table::insert_str("unassign_variable"),
+            mutable_for_bound: resource_table::insert_str("mutable_for_bound"),
             enum_encoding: resource_table::insert_str("enum_encoding"),
             sequential: resource_table::insert_str("sequential"),
             onehot: resource_table::insert_str("onehot"),
@@ -347,6 +349,9 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                         }
                         x if x == pat.unassign_variable => {
                             Ok(Attribute::Allow(AllowItem::UnassignVariable))
+                        }
+                        x if x == pat.mutable_for_bound => {
+                            Ok(Attribute::Allow(AllowItem::MutableForBound))
                         }
                         _ => Err(err),
                     }
@@ -536,6 +541,7 @@ pub enum AllowItem {
     MissingResetStatement,
     UnusedVariable,
     UnassignVariable,
+    MutableForBound,
 }
 
 impl AllowItem {
@@ -558,6 +564,7 @@ impl fmt::Display for AllowItem {
             AllowItem::MissingResetStatement => "missing_reset_statement",
             AllowItem::UnusedVariable => "unused_variable",
             AllowItem::UnassignVariable => "unassign_variable",
+            AllowItem::MutableForBound => "mutable_for_bound",
         };
         text.fmt(f)
     }

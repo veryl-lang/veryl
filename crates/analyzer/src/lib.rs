@@ -7,6 +7,7 @@ pub mod component_manifest_table;
 pub mod connect_operation_table;
 pub mod conv;
 pub mod definition_table;
+pub mod dynamic_for_check;
 pub mod fragment_cache;
 pub mod fragment_codec;
 pub mod generic_inference_table;

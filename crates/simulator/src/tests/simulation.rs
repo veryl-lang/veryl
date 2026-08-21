@@ -15048,6 +15048,66 @@ fn for_break_in_dynamic_range_function() {
 }
 
 #[test]
+fn dynamic_for_bound_ignores_ff_nba_writes() {
+    let code = r#"
+    module Top (
+        clk           : input  clock,
+        rst           : input  reset,
+        direct_count  : output logic<8>,
+        selector_count: output logic<8>,
+    ) {
+        var direct_bound: logic<8>;
+        var limits: logic<8>[4];
+        var selector: logic<2>;
+
+        always_ff {
+            if_reset {
+                direct_bound = 4;
+                limits = '{1, 1, 4, 1};
+                selector = 2;
+                direct_count = 0;
+                selector_count = 0;
+            } else {
+                var count: logic<8>;
+
+                count = 0;
+                for _i in 0..direct_bound {
+                    count += 1;
+                    direct_bound = 1;
+                }
+                direct_count = count;
+
+                count = 0;
+                for _i in 0..limits[selector] {
+                    count += 1;
+                    selector = 0;
+                }
+                selector_count = count;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step(&rst);
+        sim.step(&clk);
+
+        for name in ["direct_count", "selector_count"] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(4, 8, false),
+                "FF/NBA bound {name}: config={config:?}",
+            );
+        }
+    }
+}
+
+#[test]
 fn dynamic_for_range_in_function() {
     let code = r#"
     module Top #(

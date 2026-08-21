@@ -756,6 +756,23 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Warning),
+        code(mutable_for_bound),
+        help("move the assignment outside the loop or iterate over a separate, stable bound; this will become an error in a future release"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error(
+        "for-loop continuation bound is modified by the loop body, so backends may execute different iteration counts"
+    )]
+    MutableForBound {
+        #[source_code]
+        input: MultiSources,
+        #[label("Warning location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
         severity(Error),
         code(invalid_for_step),
         help("make the step strictly advance the induction variable toward the end of the range"),
@@ -2108,6 +2125,7 @@ impl AnalyzerError {
             AnalyzerError::MissingTri { input, .. } => input,
             AnalyzerError::MixedFunctionArgument { input, .. } => input,
             AnalyzerError::MixedStructUnionMember { input, .. } => input,
+            AnalyzerError::MutableForBound { input, .. } => input,
             AnalyzerError::MultipleAssignment { input, .. } => input,
             AnalyzerError::MultipleDefault { input, .. } => input,
             AnalyzerError::NonConstantSelectWidth { input, .. } => input,
@@ -2231,6 +2249,7 @@ impl AnalyzerError {
             AnalyzerError::MissingTri { token_source, .. } => *token_source,
             AnalyzerError::MixedFunctionArgument { token_source, .. } => *token_source,
             AnalyzerError::MixedStructUnionMember { token_source, .. } => *token_source,
+            AnalyzerError::MutableForBound { token_source, .. } => *token_source,
             AnalyzerError::MultipleAssignment { token_source, .. } => *token_source,
             AnalyzerError::MultipleDefault { token_source, .. } => *token_source,
             AnalyzerError::PrivateMember { token_source, .. } => *token_source,
@@ -2674,6 +2693,13 @@ impl AnalyzerError {
         AnalyzerError::InvalidForRange {
             help: kind.help().to_string(),
             kind,
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn mutable_for_bound(token: &TokenRange) -> Self {
+        AnalyzerError::MutableForBound {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
