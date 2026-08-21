@@ -1,4 +1,9 @@
 interface Interface75 {
+    #[ifdef(TRACE)]
+    var f: logic;
+    #[else]
+    var g: logic;
+
     var a: logic;
     var b: logic;
     var c: logic;
@@ -31,8 +36,12 @@ interface Interface75 {
     }
 
     modport master_ac {
-        a    : input ,
-        c    : output,
+        a: input ,
+        c: output,
+        #[ifdef(TRACE)]
+        f: input,
+        #[else]
+        g    : input ,
         get_a: import,
         set_c: import,
     }
