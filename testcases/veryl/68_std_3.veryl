@@ -1,0 +1,7 @@
+package Package68I {
+    const ADDR_W    : u32 = 16;
+    const DATA_BYTES: u32 = 4;
+    const ID_W      : u32 = 8;
+
+    alias package axi4lite_pkg = $std::axi4_lite_pkg::<ADDR_W, DATA_BYTES, ID_W>;
+}

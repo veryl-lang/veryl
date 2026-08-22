@@ -147,12 +147,14 @@ impl TypeDag {
 
                 for map in symbol.generic_maps() {
                     for arg_path in map.map.values() {
+                        if arg_path.is_empty() {
+                            continue;
+                        }
+
+                        let arg_namespace = Self::get_arg_namespace(&symbol, arg_path);
+
                         // insert edge between given generic arg and base symbol
-                        self.insert_path(
-                            arg_path.clone(),
-                            &symbol.namespace,
-                            &Some((*id, *context)),
-                        );
+                        self.insert_path(arg_path.clone(), &arg_namespace, &Some((*id, *context)));
                     }
                 }
             }
@@ -172,6 +174,20 @@ impl TypeDag {
 
         symbol_table::resume_cache_clear();
         self.errors.drain(..).map(|x| x.into()).collect()
+    }
+
+    fn get_arg_namespace(base_symbol: &Symbol, path: &GenericSymbolPath) -> Namespace {
+        if base_symbol.is_global_function() {
+            // A global function is emitted into the caller namespace, so its arguments
+            // keep the template namespace.
+            base_symbol.namespace.clone()
+        } else {
+            // A generic argument is written at the instantiation site, not
+            // at the base template's declaration, so it must be resolved from
+            // the scope its head token belongs to.
+            let head = path.paths.first().unwrap();
+            Namespace::from_token(head.base).unwrap_or_else(|| base_symbol.namespace.clone())
+        }
     }
 
     fn insert_path(
@@ -197,6 +213,17 @@ impl TypeDag {
                 parent.map(|(id, context)| (symbol_table::get_rc(id).unwrap(), context))
             {
                 if !base_symbol.namespace.included(&parent_symbol.namespace) {
+                    // An alias emits nothing; it is substituted by its target at
+                    // the use site, so it carries no dependency of its own. The
+                    // bubbling below would attribute the target to the alias'
+                    // enclosing component, manufacturing a component-level
+                    // dependency the output does not have and closing a false
+                    // cycle against the target's real dependency on that
+                    // component's consts.
+                    if matches!(parent_context, Context::Alias) {
+                        continue;
+                    }
+
                     let (parent_symbol, parent_context) =
                         if let Some(symbol) = parent_symbol.get_parent_component() {
                             let context = if symbol.is_module(true) {
