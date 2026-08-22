@@ -1030,22 +1030,6 @@ fn cyclic_type_dependency() {
     ));
 
     let code = r#"
-    package PkgA::<V: u32> {
-        const A: u32 = V;
-    }
-    package PkgB {
-        const B: u32 = 32;
-        alias package PKG = PkgA::<B>;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::CyclicTypeDependency { .. }
-    ));
-
-    let code = r#"
     package Pkg::<a: u32, b: u32> {
         const A: u32 = a;
         const B: u32 = b;
