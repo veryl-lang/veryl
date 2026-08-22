@@ -4,7 +4,7 @@ use crate::conv::checker::generic::check_generic_bound;
 use crate::conv::checker::proto::check_proto;
 use crate::conv::utils::{check_module_with_unevaluable_generic_parameters, get_component};
 use crate::conv::{Affiliation, Context, Conv};
-use crate::ir::{self, IrResult, VarPath};
+use crate::ir::{self, IrResult, VarKind, VarPath, Variable};
 use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use crate::{HashMap, ir_error};
@@ -159,6 +159,33 @@ fn conv_global_function(context: &mut Context, value: &FunctionDeclaration) {
     upper_context.inherit(&mut context);
 }
 
+fn collect_interface_members(context: &Context) -> HashMap<ir::VarId, Variable> {
+    context
+        .var_paths
+        .iter()
+        .filter_map(|(path, (id, comptime))| {
+            let belongs_to_modport = context.port_types.iter().any(|(port, (r#type, _))| {
+                matches!(r#type.kind, ir::TypeKind::Modport(_, _))
+                    && path.0.len() > port.0.len()
+                    && path.starts_with(&port.0)
+            });
+            (!context.variables.contains_key(id) && belongs_to_modport).then(|| {
+                let variable = Variable::new(
+                    *id,
+                    path.clone(),
+                    VarKind::Variable,
+                    comptime.r#type.clone(),
+                    vec![],
+                    Affiliation::Module,
+                    &comptime.token,
+                    0,
+                );
+                (*id, variable)
+            })
+        })
+        .collect()
+}
+
 impl Conv<&ModuleDeclaration> for ir::Module {
     fn conv(context: &mut Context, value: &ModuleDeclaration) -> IrResult<Self> {
         Conv::conv(context, (value, false))
@@ -181,7 +208,8 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::Module);
 
-        if let Ok(symbol) = symbol_table::resolve(module_declaration.identifier.as_ref())
+        let signature = if let Ok(symbol) =
+            symbol_table::resolve(module_declaration.identifier.as_ref())
             && let SymbolKind::Module(x) = &symbol.found.kind
             && !x.is_proto
         {
@@ -195,10 +223,11 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
                 let path = VarPath::new(symbol_table::get(x).unwrap().token.text);
                 context.set_default_reset(path, x);
             }
+            ir::Signature::new(symbol.found.id)
         } else {
             let token: TokenRange = module_declaration.identifier.as_ref().into();
             return Err(ir_error!(token));
-        }
+        };
 
         if let Some(x) = &module_declaration.module_declaration_opt {
             check_generic_bound(&mut context, &x.with_generic_parameter);
@@ -289,6 +318,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         }
 
         declarations.retain(|x| !x.is_null());
+        let interface_members = collect_interface_members(&context);
         let port_types = context.drain_port_types();
         let variables = context.drain_variables();
         let functions = context.drain_functions();
@@ -306,11 +336,13 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
 
         Ok(ir::Module {
             name: module_declaration.identifier.text(),
+            signature,
             token: module_declaration.identifier.as_ref().into(),
             ports,
             port_types,
             variables,
             functions,
+            interface_members,
             declarations,
             suppress_unassigned: false,
             per_decl_refs: HashMap::default(),
@@ -487,14 +519,15 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
         // pop_affiliation is not necessary because the local `context` will be dropped
         context.push_affiliation(Affiliation::ProtoModule);
 
-        if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+        let signature = if let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
             && matches!(symbol.found.kind, SymbolKind::Module(ref x) if x.is_proto)
         {
             context.push_namespace(symbol.found.inner_namespace());
+            ir::Signature::new(symbol.found.id)
         } else {
             let token: TokenRange = value.identifier.as_ref().into();
             return Err(ir_error!(token));
-        }
+        };
 
         if let Some(x) = &value.proto_module_declaration_opt
             && let Some(x) = &x.with_parameter.with_parameter_opt
@@ -514,6 +547,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
             }
         }
 
+        let interface_members = collect_interface_members(&context);
         let port_types = context.drain_port_types();
         let variables = context.drain_variables();
 
@@ -530,11 +564,13 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
 
         Ok(ir::Module {
             name: value.identifier.text(),
+            signature,
             token: value.identifier.as_ref().into(),
             ports,
             port_types,
             variables,
             functions: HashMap::default(),
+            interface_members,
             declarations: vec![],
             suppress_unassigned: false,
             per_decl_refs: HashMap::default(),

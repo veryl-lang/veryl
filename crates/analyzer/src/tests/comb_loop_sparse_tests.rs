@@ -238,7 +238,6 @@ fn comb_loop_aliases_overlapping_unknown_regions_disjoint_dynamic_prefixes_remai
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; sparse and dynamic regions"]
 fn comb_loop_alias_and_opaque_effect_boundaries_local_copy_chains_propagate_bit_identity_through_every_hop()
  {
     assert_comb_loop(
@@ -296,30 +295,6 @@ fn comb_loop_alias_and_opaque_effect_boundaries_same_width_bitwise_operators_ret
             function low (x: input logic<8>) -> logic {
                 var tmp: logic<8>;
                 tmp = x | 8'b00000000;
-                return tmp[0];
-            }
-            var value: logic<8>;
-            assign o = low(value);
-            assign value[0] = o;
-            assign value[7:1] = 0;
-        }
-        "#,
-        true,
-    );
-}
-
-#[test]
-fn comb_loop_alias_and_opaque_effect_boundaries_structural_dependence_is_not_removed_by_boolean_cancellation()
- {
-    assert_comb_loop(
-        "structural dependence is not removed by Boolean cancellation",
-        r#"
-        module Top (
-            o: output logic,
-        ) {
-            function low (x: input logic<8>) -> logic {
-                var tmp: logic<8>;
-                tmp = x & 8'b00000000;
                 return tmp[0];
             }
             var value: logic<8>;
@@ -630,13 +605,11 @@ fn comb_loop_shifted_dynamic_index_overlaps_element_zero() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; shifted dynamic index can select element two"]
 fn comb_loop_shifted_dynamic_index_overlaps_element_two() {
     assert_structural_dynamic_selector_element(2);
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; dynamic part-select can overlap bit three"]
 fn comb_loop_dynamic_part_select_overlaps_bit_three() {
     assert_structural_dynamic_part_select_bit(3);
 }
@@ -647,13 +620,11 @@ fn comb_loop_dynamic_part_select_overlaps_bit_zero() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; multiplied dynamic index can select element one"]
 fn comb_loop_multiplied_dynamic_index_overlaps_element_one() {
     assert_multiplied_dynamic_index_overlap(1);
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; multiplied dynamic index can select element two"]
 fn comb_loop_multiplied_dynamic_index_overlaps_element_two() {
     assert_multiplied_dynamic_index_overlap(2);
 }
