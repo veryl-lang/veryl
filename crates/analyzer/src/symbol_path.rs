@@ -536,6 +536,18 @@ impl GenericSymbolPath {
                 }
                 alias_target.unalias_inner(Some(&generic_maps), visited);
 
+                // The target is written in the alias declaration's namespace, so
+                // lifting it out to the referring scope can leave segments that
+                // are not visible there. `resolve_imported` above only covers a
+                // head the declaration reached through an import; a sibling
+                // member of the declaring package needs this qualification.
+                // It runs after the recursion: qualifying an argument that is
+                // itself an alias would keep it from being expanded.
+                alias_target.append_namespace_path(
+                    &symbol.found.namespace,
+                    &scope::namespace(scope, &define_context),
+                );
+
                 self.paths = alias_target.paths;
                 self.kind = alias_target.kind;
                 self.range = alias_target.range;
@@ -806,6 +818,7 @@ impl GenericSymbolPath {
         {
             let head_symbol = &head_symbol.found;
             let head_namespace = &head_symbol.namespace;
+            let mut is_head_component = head_symbol.is_component(true);
 
             let mut namespace = add_root_project_name(namespace);
             if start_with_project_name(head_namespace) {
@@ -829,6 +842,8 @@ impl GenericSymbolPath {
                     };
                     self.paths.insert(i - 1, symbol_path);
                 }
+
+                is_head_component = true;
             }
 
             // A head reached through an import binding is declared in the
@@ -842,7 +857,7 @@ impl GenericSymbolPath {
             // Such a head is qualified even when it shares the base component's
             // project, so that both spellings mangle alike.
             if (head_project != namespace.paths[0] || head_project != target_namespace.paths[0])
-                && head_symbol.is_component(true)
+                && is_head_component
             {
                 // Append the project prefix to the path.
                 let token = Token::generate(head_project, file_path);

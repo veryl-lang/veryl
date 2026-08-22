@@ -2,7 +2,7 @@ module Module68H (
     i_d     : input  logic     <WIDTH>,
     o_result: output lzc_result       ,
 ) {
-    import Pkg68G::WIDTH;
+    import Package68G::WIDTH;
     import $std::lzc_pkg::<WIDTH>::{lzc_result, lzc};
 
     assign o_result = lzc(i_d, true);

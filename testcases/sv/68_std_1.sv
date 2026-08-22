@@ -380,7 +380,7 @@ module veryl_testcase_Module68F;
     );
 endmodule
 
-package veryl_testcase_Pkg68G;
+package veryl_testcase_Package68G;
     localparam int unsigned WIDTH = 32;
 endpackage
 //# sourceMappingURL=../map/68_std_1.sv.map
