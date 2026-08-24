@@ -4,7 +4,7 @@ use crate::ir::big_array::BigArrayFold;
 use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
 use crate::ir::context::{Context, Conv, ScopeContext};
-use crate::ir::declaration::{stable_topo_sort, stable_topo_sort_with_blocks};
+use crate::ir::declaration::stable_topo_sort_with_blocks;
 use crate::ir::derived_clock::{
     DerivedClockSchedule, build_schedule as build_derived_clock_schedule, extract_eval_proto_stmts,
 };
@@ -1629,192 +1629,167 @@ pub(crate) fn analyze_dependency(
         return Ok((sorted, Some(1)));
     }
 
-    // Phase 2: Expand CompiledBlocks and SequentialBlocks and retry.
-    // Rebuild the table with fresh sequential IDs so expanded sub-statements
-    // keep their parent's position; Phase 3's fallback sorts by ID and relies
-    // on that ordering for `let x = expr` vs `always_comb { x = expr; }` to
-    // produce equivalent schedules when the block participates in a cycle.
-    let has_expandable = table.values().any(|x| {
-        matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty())
-            || matches!(x, ProtoStatement::SequentialBlock(_))
-    });
-
-    // Flattened stmt id → source block (original table key); set by the
-    // Phase-2 full flatten.
-    let mut block_of: Option<Vec<usize>> = None;
-
-    if has_expandable {
-        // FAST PATH: flatten only blocks WITHOUT an intra-block reorder hazard
-        // (a write to a comb var an earlier statement of the block read or
-        // wrote — WAR/WAW/reassignment); those keep their program order by
-        // staying atomic. A bipartite topological sort then interleaves the
-        // hazard-free statements across blocks into a backward-edge-free order
-        // that settles in ONE comb pass — the common case, where the full
-        // recursive flatten + stable_topo_sort below instead leaves a backward
-        // edge for cross-block no-prior-writer reads that doubles the passes.
-        //
-        // On failure fall through to that full-flatten path: an atomic hazard
-        // block's conflated I/O can form a phantom cross-block cycle that the
-        // bipartite sort rejects but the per-statement flatten resolves.
-        fn hazard_flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
-            match stmt {
-                ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
-                    if block_has_reorder_hazard(&cb.original_stmts) {
-                        out.push(ProtoStatement::CompiledBlock(cb));
-                    } else {
-                        for sub in cb.original_stmts {
-                            hazard_flatten(sub, out);
-                        }
-                    }
-                }
-                ProtoStatement::SequentialBlock(body) => {
-                    if block_has_reorder_hazard(&body) {
-                        out.push(ProtoStatement::SequentialBlock(body));
-                    } else {
-                        for sub in body {
-                            hazard_flatten(sub, out);
-                        }
-                    }
-                }
-                other => out.push(other),
-            }
-        }
-        let mut keys: Vec<usize> = table.keys().cloned().collect();
-        keys.sort();
-        let mut fast: HashMap<usize, ProtoStatement> = HashMap::default();
-        let mut id = 0usize;
-        for key in &keys {
-            let mut flat = Vec::new();
-            hazard_flatten(table[key].clone(), &mut flat);
-            for sub in flat {
-                fast.insert(id, sub);
-                id += 1;
-            }
-        }
-        if let Ok(sorted) = try_topo_sort(&fast) {
-            pass_diag_phase("phase2-fast: hazard-flatten + bipartite");
-            return Ok((sorted, Some(1)));
-        }
-
-        // Recursive: SequentialBlock's gather conflates per-stmt I/O, so
-        // nested SeqBlocks (e.g. inside a CompiledBlock's original_stmts)
-        // must be unwrapped too or they manufacture phantom edges.
-        fn flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
-            match stmt {
-                ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+    // Phase 1 has already failed, so its cycle is either real or an artefact
+    // of statement granularity.  Nothing below needs a BLOCK to expand — the
+    // deep split reaches a concatenation too, which is all a module written
+    // from `assign` alone has.
+    //
+    // Keeping hazard blocks atomic buys a one-pass order the full flatten
+    // below does not reach for cross-block no-prior-writer reads.  On failure
+    // fall through: an atomic block's conflated I/O can form a phantom cycle
+    // that the per-statement flatten resolves.
+    fn hazard_flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
+        match stmt {
+            ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+                if block_has_reorder_hazard(&cb.original_stmts) {
+                    out.push(ProtoStatement::CompiledBlock(cb));
+                } else {
                     for sub in cb.original_stmts {
-                        flatten(sub, out);
+                        hazard_flatten(sub, out);
                     }
                 }
-                ProtoStatement::SequentialBlock(body) => {
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                if block_has_reorder_hazard(&body) {
+                    out.push(ProtoStatement::SequentialBlock(body));
+                } else {
                     for sub in body {
-                        flatten(sub, out);
+                        hazard_flatten(sub, out);
                     }
                 }
-                other => split_nested(other, out, false),
             }
+            other => out.push(other),
         }
+    }
+    let mut keys: Vec<usize> = table.keys().cloned().collect();
+    keys.sort();
+    let mut fast: HashMap<usize, ProtoStatement> = HashMap::default();
+    let mut id = 0usize;
+    for key in &keys {
+        let mut flat = Vec::new();
+        hazard_flatten(table[key].clone(), &mut flat);
+        for sub in flat {
+            fast.insert(id, sub);
+            id += 1;
+        }
+    }
+    if let Ok(sorted) = try_topo_sort(&fast) {
+        pass_diag_phase("phase2-fast: hazard-flatten + bipartite");
+        return Ok((sorted, Some(1)));
+    }
 
-        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-        sorted_keys.sort();
-
-        let mut new_table: HashMap<usize, ProtoStatement> = HashMap::default();
-        let mut flat_block_of: Vec<usize> = Vec::new();
-        let mut new_id = 0usize;
-        for key in sorted_keys {
-            let stmt = table.remove(&key).unwrap();
-            let mut flat = Vec::new();
-            flatten(stmt, &mut flat);
-            for sub in flat {
-                new_table.insert(new_id, sub);
-                flat_block_of.push(key);
-                new_id += 1;
+    // Recursive: SequentialBlock's gather conflates per-stmt I/O, so
+    // nested SeqBlocks (e.g. inside a CompiledBlock's original_stmts)
+    // must be unwrapped too or they manufacture phantom edges.
+    fn flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
+        match stmt {
+            ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+                for sub in cb.original_stmts {
+                    flatten(sub, out);
+                }
             }
+            ProtoStatement::SequentialBlock(body) => {
+                for sub in body {
+                    flatten(sub, out);
+                }
+            }
+            other => split_nested(other, out, false),
         }
-        table = new_table;
-        block_of = Some(flat_block_of);
+    }
 
-        // Sort the flattened (program-order) statements with the block-aware
-        // `stable_topo_sort`, NOT the bipartite `try_topo_sort`: the bipartite
-        // model makes a reader wait for EVERY writer of a var, reordering
-        // sequential reassignment — flattened `x=a; y=x; x=b` would become
-        // `x=a; x=b; y=x`, so `y` wrongly reads `b`. `stable_topo_sort` links
-        // `y` to its most recent PRIOR writer only. (reorder_by_level applies
-        // the matching WAR/WAW leveling downstream.)
-        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-        sorted_keys.sort();
-        let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-        let blocks: Vec<usize> = sorted_keys
-            .iter()
-            .map(|k| block_of.as_ref().unwrap()[*k])
-            .collect();
-        let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
-        if !fell_back {
-            pass_diag_phase("phase2-full: flatten + stable_topo_sort");
-            return Ok((sorted, passes_hint));
+    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+    sorted_keys.sort();
+
+    let mut new_table: HashMap<usize, ProtoStatement> = HashMap::default();
+    // Flattened stmt id → source block (original table key).
+    let mut block_of: Vec<usize> = Vec::new();
+    let mut new_id = 0usize;
+    for key in sorted_keys {
+        let stmt = table.remove(&key).unwrap();
+        let mut flat = Vec::new();
+        flatten(stmt, &mut flat);
+        for sub in flat {
+            new_table.insert(new_id, sub);
+            block_of.push(key);
+            new_id += 1;
         }
+    }
+    table = new_table;
 
-        // Still cyclic. The remaining loop may run through a conditional that
-        // decides two independent variables several levels down — a handshake
-        // raising its request in one statement of an arm and consulting the
-        // acknowledge in the next — which the flat split above cannot reach.
-        // Split inside the arms of what the flatten produced and sort once
-        // more.  Every group re-evaluates the guards it sits under, so only a
-        // design that would otherwise fail to schedule pays for that code, and
-        // splitting in place keeps the flattened program order.
+    // Sort the flattened (program-order) statements with the block-aware
+    // `stable_topo_sort`, NOT the bipartite `try_topo_sort`: the bipartite
+    // model makes a reader wait for EVERY writer of a var, reordering
+    // sequential reassignment — flattened `x=a; y=x; x=b` would become
+    // `x=a; x=b; y=x`, so `y` wrongly reads `b`. `stable_topo_sort` links
+    // `y` to its most recent PRIOR writer only. (reorder_by_level applies
+    // the matching WAR/WAW leveling downstream.)
+    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+    sorted_keys.sort();
+    let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
+    let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
+    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
+    if !fell_back {
+        pass_diag_phase("phase2-full: flatten + stable_topo_sort");
+        return Ok((sorted, passes_hint));
+    }
+    // The sort reports a cycle rather than answering with a degraded order:
+    // a synthesisable design has a one-pass order, so the cycle is in the
+    // SCHEDULE, not in the circuit.  The usual source is a `Case`/`If` kept
+    // whole, whose reads and writes are the union over its arms, so two of
+    // them cross through variables no single arm pairs.  Splitting inside
+    // the arms is exactly what resolves that.
+
+    // Still cyclic: the loop may run through a conditional several levels
+    // down, which the flat split cannot reach.  Splitting in place keeps the
+    // flattened program order, and only a design that would otherwise fail to
+    // schedule pays for the re-evaluated guards.
+    let mut keys: Vec<usize> = table.keys().cloned().collect();
+    keys.sort();
+    let mut deep_stmts: Vec<ProtoStatement> = Vec::new();
+    let mut deep_block_of: Vec<usize> = Vec::new();
+    for key in keys {
+        let mut deep = Vec::new();
+        split_nested(table.remove(&key).unwrap(), &mut deep, true);
+        for sub in deep {
+            deep_stmts.push(sub);
+            deep_block_of.push(block_of[key]);
+        }
+    }
+    table = deep_stmts.into_iter().enumerate().collect();
+    // Versions before scheduling: each write is its own statement now, so
+    // a reader between two of them can be given the earlier version's
+    // storage and stop forcing a WAR edge to the later write.
+    {
         let mut keys: Vec<usize> = table.keys().cloned().collect();
         keys.sort();
-        let flat_block_of = block_of.take().unwrap_or_default();
-        let mut deep_stmts: Vec<ProtoStatement> = Vec::new();
-        let mut deep_block_of: Vec<usize> = Vec::new();
-        for key in keys {
-            let mut deep = Vec::new();
-            split_nested(table.remove(&key).unwrap(), &mut deep, true);
-            for sub in deep {
-                deep_stmts.push(sub);
-                deep_block_of.push(flat_block_of[key]);
-            }
+        let mut flat: Vec<ProtoStatement> = keys.iter().map(|k| table.remove(k).unwrap()).collect();
+        let mut blocks = deep_block_of;
+        let renamed = rename_versions(&mut flat, &mut blocks, alloc);
+        if renamed > 0 {
+            pass_diag_phase(&format!("phase2-deep: {renamed} version(s) renamed"));
         }
-        table = deep_stmts.into_iter().enumerate().collect();
-        // Versions before scheduling: each write is its own statement now, so
-        // a reader between two of them can be given the earlier version's
-        // storage and stop forcing a WAR edge to the later write.
-        {
-            let mut keys: Vec<usize> = table.keys().cloned().collect();
-            keys.sort();
-            let mut flat: Vec<ProtoStatement> =
-                keys.iter().map(|k| table.remove(k).unwrap()).collect();
-            let mut blocks = deep_block_of;
-            let renamed = rename_versions(&mut flat, &mut blocks, alloc);
-            if renamed > 0 {
-                pass_diag_phase(&format!("phase2-deep: {renamed} version(s) renamed"));
-            }
-            table = flat.into_iter().enumerate().collect();
-            block_of = Some(blocks);
-        }
-
-        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-        sorted_keys.sort();
-        let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-        let blocks: Vec<usize> = sorted_keys
-            .iter()
-            .map(|k| block_of.as_ref().unwrap()[*k])
-            .collect();
-        let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
-        if !fell_back {
-            pass_diag_phase("phase2-deep: nested split + stable_topo_sort");
-            return Ok((sorted, passes_hint));
-        }
-        // Neither granularity linearized it, so no order here honours every
-        // edge.  Phase 3 below still produces one, but it is not the one-pass
-        // order a synthesisable design has: say so rather than let the extra
-        // settle passes pass for normal.
-        log::warn!(
-            "the statement order for this scope could not be linearized at either granularity; \
-             simulation stays correct but settles in more than one pass. \
-             Re-run with VERYL_PASS_DIAG=1 to see the cycle."
-        );
+        table = flat.into_iter().enumerate().collect();
+        block_of = blocks;
     }
+
+    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+    sorted_keys.sort();
+    let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
+    let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
+    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
+    if !fell_back {
+        pass_diag_phase("phase2-deep: nested split + stable_topo_sort");
+        return Ok((sorted, passes_hint));
+    }
+    // Neither granularity linearized it, so no order here honours every edge.
+    // Phase 3 below still produces one, but it is not the one-pass order a
+    // synthesisable design has: say so rather than let the extra settle
+    // passes pass for normal.
+    log::warn!(
+        "the statement order for this scope could not be linearized at either granularity; \
+         simulation stays correct but settles in more than one pass. \
+         Re-run with VERYL_PASS_DIAG=1 to see the cycle."
+    );
 
     // Phase 3: Check for genuine combinational loop vs false positive
     // from non-expandable CompiledBlocks (shared JIT cache).
@@ -1827,17 +1802,13 @@ pub(crate) fn analyze_dependency(
 
     if !has_any_cb || !has_non_expandable_cb {
         // DAG-based sort failed (false cycle from inlined function bodies).
-        // Fall back to direct statement-level sort (block-aware when Phase 2
-        // flattened the table and recorded statement origins).
+        // Fall back to the block-aware statement-level sort over what Phase 2
+        // flattened.
         let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
         sorted_keys.sort();
         let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-        let (sorted, passes_hint, _) = if let Some(block_of) = &block_of {
-            let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
-            stable_topo_sort_with_blocks(stmts, &blocks)
-        } else {
-            (stable_topo_sort(stmts), None, false)
-        };
+        let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
+        let (sorted, passes_hint, _) = stable_topo_sort_with_blocks(stmts, &blocks);
         // Verify no genuine combinational loop remains.
         let n = sorted.len();
         let mut s_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
