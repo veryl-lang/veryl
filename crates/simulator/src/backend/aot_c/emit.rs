@@ -2078,6 +2078,20 @@ pub fn comb_uncovered_census(stmts: &[ProtoStatement]) -> Vec<String> {
     out
 }
 
+/// The same census for an EVENT statement list.  Event mode changes which
+/// arm an FF write takes, so the walk has to run under it or the report names
+/// statements the event emit never even reaches.
+pub fn event_uncovered_census(stmts: &[ProtoStatement]) -> Vec<String> {
+    let prev = event_mode();
+    set_event_mode(true);
+    let mut out = Vec::new();
+    for s in stmts {
+        collect_uncovered(s, &mut out);
+    }
+    set_event_mode(prev);
+    out
+}
+
 fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
     if emit_stmt(stmt).is_some() {
         return;
@@ -2095,6 +2109,22 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
                 out.push(format!("If-cond-expr {}", classify_uncovered_expr(c)));
             }
             for s in x.true_side.iter().chain(x.false_side.iter()) {
+                collect_uncovered(s, out);
+            }
+        }
+        ProtoStatement::Case(c) => {
+            for (n, arm) in c.arms.iter().enumerate() {
+                if emit_expr(&arm.cond).is_none() {
+                    out.push(format!(
+                        "Case-arm{n}-cond-expr {}",
+                        classify_uncovered_expr(&arm.cond)
+                    ));
+                }
+                for s in &arm.body {
+                    collect_uncovered(s, out);
+                }
+            }
+            for s in &c.default {
                 collect_uncovered(s, out);
             }
         }
@@ -2135,7 +2165,8 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
             emit_expr(&a.expr).is_some(),
         )),
         ProtoStatement::SystemFunctionCall(_) => out.push("SysFn".to_string()),
-        _ => out.push("leaf".to_string()),
+        ProtoStatement::TbMethodCall { .. } => out.push("TbMethodCall".to_string()),
+        ProtoStatement::Break => out.push("Break".to_string()),
     }
 }
 
@@ -2147,6 +2178,21 @@ fn expr_covered(e: &ProtoExpression) -> bool {
         emit_wide_expr(e, &mut String::new()).is_some()
     } else {
         emit_expr(e).is_some()
+    }
+}
+
+/// Bare variant name of `e`, for the census breadcrumbs that describe a
+/// COVERED node (where `classify_uncovered_expr` would say nothing).
+fn diag_expr_kind(e: &ProtoExpression) -> &'static str {
+    match e {
+        ProtoExpression::HierVariable(_) => "HierVar",
+        ProtoExpression::Variable { .. } => "Var",
+        ProtoExpression::Value { .. } => "Val",
+        ProtoExpression::Unary { .. } => "Un",
+        ProtoExpression::Binary { .. } => "Bin",
+        ProtoExpression::Ternary { .. } => "Tern",
+        ProtoExpression::Concatenation { .. } => "Concat",
+        ProtoExpression::DynamicVariable { .. } => "DynVar",
     }
 }
 
@@ -2214,7 +2260,13 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
                     return format!("Concat/{}", classify_uncovered_expr(el));
                 }
             }
-            format!("Concat(w={width},n={})", elements.len())
+            let els: Vec<String> = elements
+                .iter()
+                .map(|(el, rep, ew)| {
+                    format!("{}:w={},ew={ew},rep={rep}", diag_expr_kind(el), el.width())
+                })
+                .collect();
+            format!("Concat(w={width},n={})[{}]", elements.len(), els.join(" "))
         }
         ProtoExpression::DynamicVariable {
             width,
@@ -3451,8 +3503,15 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
     };
     let (Some(slice), false, None) = (aligned_slice, a.dynamic_select.is_some(), &a.rhs_select)
     else {
+        let ds = match &a.dynamic_select {
+            Some(d) => format!(
+                " ew={} window={} ne={}",
+                d.elem_width, d.window, d.num_elements
+            ),
+            None => String::new(),
+        };
         ev_diag(&format!(
-            "wide FF: select={:?} dynsel={} rhssel={:?} width={}",
+            "wide FF: select={:?} dynsel={} rhssel={:?} width={}{ds}",
             a.select,
             a.dynamic_select.is_some(),
             a.rhs_select,

@@ -20562,10 +20562,8 @@ fn wide_bit_select_store_stays_compiled() {
 
 #[test]
 fn dynamic_index_store_into_a_65_to_128_bit_element() {
-    // A runtime-indexed element of that width is 16-byte storage, which the
-    // native-dst store path cannot address — it used to drop the whole
-    // statement to the interpreter.  Full element, ≤64-bit field, and wider
-    // field each take a different arm of the flat-buffer emitter.
+    // A runtime-indexed element of that width is 16-byte storage the native-dst
+    // path cannot address.  The three shapes take three emitter arms.
     let code = r#"
     module Top (
         idx: input  logic<2> ,

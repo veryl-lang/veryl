@@ -4042,6 +4042,25 @@ impl Conv<&air::Module> for ProtoModule {
                     stmts.len(),
                     whole_events.contains_key(event),
                 );
+                // Census of EVERY uncovered statement, not just the first, so
+                // one fix does not simply surface the next bail.
+                #[cfg(not(target_family = "wasm"))]
+                if !whole_events.contains_key(event) {
+                    let census = crate::backend::aot_c::emit::event_uncovered_census(stmts);
+                    let mut counts: HashMap<String, usize> = Default::default();
+                    for c in census {
+                        *counts.entry(c).or_default() += 1;
+                    }
+                    let mut v: Vec<_> = counts.into_iter().collect();
+                    v.sort_by_key(|x| std::cmp::Reverse(x.1));
+                    eprintln!(
+                        "[aot_event_census] {} distinct uncovered event stmts:",
+                        v.len()
+                    );
+                    for (k, n) in v.iter().take(40) {
+                        eprintln!("  {n:6}x  {k}");
+                    }
+                }
             }
         }
 
