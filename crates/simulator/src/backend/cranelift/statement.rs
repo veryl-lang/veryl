@@ -105,9 +105,10 @@ impl ProtoAssignDynamicStatement {
         if self.rhs_select.is_some() && self.expr.width() > 64 {
             return false;
         }
-        // Wide (>128-bit) comb-base dynamic-indexed store: see
-        // `build_binary_dynamic_wide`.
-        if self.dst_width > 128 && !self.dst_base.is_ff() && self.rhs_select.is_none() {
+        // Wide (>64-bit) comb-base dynamic-indexed store: a 65..128-bit
+        // element is 16-byte storage the narrow path below cannot address,
+        // and `build_binary_dynamic_wide` is width-generic.
+        if self.dst_width > 64 && !self.dst_base.is_ff() && self.rhs_select.is_none() {
             return true;
         }
         // Wide (>64-bit) FF-base full-element dynamic store:
@@ -130,8 +131,11 @@ impl ProtoAssignDynamicStatement {
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
         // The narrow path below assumes a native (≤8-byte) dst; route the
-        // wide (>128-bit) comb-base case to its own emitter.
-        if self.dst_width > 128 && !self.dst_base.is_ff() {
+        // wide comb-base cases to their own emitter.  The 65..128-bit band
+        // joins it only without `dynamic_select`, which that emitter declines.
+        if !self.dst_base.is_ff()
+            && (self.dst_width > 128 || (self.dst_width > 64 && self.dynamic_select.is_none()))
+        {
             return self.build_binary_dynamic_wide(context, builder);
         }
         // Wide (>64-bit) FF-base full-element dynamic write: see
@@ -893,15 +897,33 @@ impl ProtoStatement {
 }
 
 impl ProtoAssignStatement {
+    /// Field width of a wide bit-select store whose sign extension this backend
+    /// can materialize: it happens in an I64/I128 register and is clipped to
+    /// the field, so both must fit.  Anything else stays on the interpreter.
+    fn wide_select_sign_extend_field(&self, from_width: usize) -> Option<usize> {
+        if from_width > 64
+            || self.dynamic_select.is_some()
+            || self.rhs_select.is_some()
+            || returns_wide_pointer(&self.expr)
+        {
+            return None;
+        }
+        let (beg, end) = self.select?;
+        let nbits = beg.checked_sub(end)?.checked_add(1)?;
+        (nbits <= 128).then_some(nbits)
+    }
+
     pub fn can_build_binary(&self) -> bool {
         if !self.expr.can_build_binary() {
             return false;
         }
         // The wide (>128-bit) flat-buffer store path can't sign-extend a
-        // narrow signed RHS; run on the interpreter instead.
+        // narrow signed RHS; run on the interpreter instead.  A field no wider
+        // than the RHS needs no extension (`visible_store_sign_extend`); one
+        // that does is served by `wide_select_sign_extend_field`.
         if self.dst_width > 128
-            && self.rhs_select.is_none()
-            && self.expr.store_sign_extend_from(self.dst_width).is_some()
+            && let Some(from_width) = self.visible_store_sign_extend()
+            && self.wide_select_sign_extend_field(from_width).is_none()
         {
             return false;
         }
@@ -1486,6 +1508,17 @@ impl ProtoAssignStatement {
             } else {
                 raw
             };
+            // The field is ≤64 bits and `emit_wide_narrow_field_store` clips
+            // to it, so extending in I64 lands exactly the bits that survive.
+            let sv = match self.visible_store_sign_extend() {
+                Some(from_width) => {
+                    let reg_bits = builder.func.dfg.value_type(sv).bits() as usize;
+                    let sh = (reg_bits - from_width) as i64;
+                    let v = builder.ins().ishl_imm_u(sv, sh);
+                    builder.ins().sshr_imm_u(v, sh)
+                }
+                None => sv,
+            };
             emit_wide_narrow_field_store(
                 builder,
                 context.comb_values,
@@ -1500,6 +1533,30 @@ impl ProtoAssignStatement {
 
         let expr_width = self.expr.width();
         let (payload, mask_xz) = self.expr.build_binary(context, builder)?;
+        // Only a bit-select destination reaches here (`can_build_binary` keeps
+        // the rest on the interpreter) and its field fits an I64/I128 register,
+        // so extend there and let the RMW below clip.  `payload` is a scalar.
+        let payload = match self.visible_store_sign_extend() {
+            Some(from_width) => {
+                let field = self.wide_select_sign_extend_field(from_width)?;
+                let reg_bits = if field > 64 { 128 } else { 64 };
+                let v = if reg_bits == 128 {
+                    if builder.func.dfg.value_type(payload) == I128 {
+                        payload
+                    } else {
+                        builder.ins().uextend(I128, payload)
+                    }
+                } else if builder.func.dfg.value_type(payload) == I128 {
+                    builder.ins().ireduce(I64, payload)
+                } else {
+                    payload
+                };
+                let sh = (reg_bits - from_width) as i64;
+                let v = builder.ins().ishl_imm_u(v, sh);
+                builder.ins().sshr_imm_u(v, sh)
+            }
+            None => payload,
+        };
         let nb = calc_native_bytes(self.dst_width);
         let n_words = nb / 8;
         let flags = MemFlagsData::trusted();
