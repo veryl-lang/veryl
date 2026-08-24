@@ -22379,3 +22379,71 @@ fn a_register_read_only_as_a_write_index_keeps_its_pre_edge_value() {
         );
     }
 }
+
+#[test]
+fn an_early_return_in_a_package_function_wins() {
+    // `return` lowers to an assignment to the function's return variable, and
+    // the constant evaluator used to walk every statement of the body — so the
+    // FINAL `return` overwrote the early one. A generate-if keyed on such a
+    // function then took the wrong arm and the signals it should drive stayed
+    // at 0, with no diagnostic anywhere.
+    let code = r#"
+    package pkg {
+        function any_set (
+            cfg: input logic<4>,
+        ) -> logic {
+            for i in 0..4 {
+                if cfg[i] == 1'b1 {
+                    return 1'b1;
+                }
+            }
+            return 1'b0;
+        }
+        function bit0_set (
+            cfg: input logic<4>,
+        ) -> logic {
+            if cfg[0] == 1'b1 {
+                return 1'b1;
+            }
+            return 1'b0;
+        }
+    }
+    module Top (
+        hit : output logic,
+        low : output logic,
+        miss: output logic,
+    ) {
+        if pkg::any_set(4'b0010) == 1'b1 :g_hit {
+            assign hit = 1'b1;
+        } else :g_no_hit {
+            assign hit = 1'b0;
+        }
+        assign low  = pkg::bit0_set(4'b0001);
+        assign miss = pkg::any_set(4'b0000);
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let one = Value::new(1, 1, false);
+        let zero = Value::new(0, 1, false);
+        // The early `return 1'b1` fires for both, and the final `return 1'b0`
+        // is only reached when nothing matched.
+        assert_eq!(
+            sim.get("hit").unwrap(),
+            one,
+            "generate arm keyed on an early return"
+        );
+        assert_eq!(sim.get("low").unwrap(), one, "early return without a loop");
+        assert_eq!(
+            sim.get("miss").unwrap(),
+            zero,
+            "the final return still wins when reached"
+        );
+    }
+}

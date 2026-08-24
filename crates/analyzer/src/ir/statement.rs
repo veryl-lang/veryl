@@ -324,6 +324,12 @@ impl Statement {
     }
 
     pub fn eval_value(&self, context: &mut Context) -> ControlFlow {
+        // A `return` already ran in the function body being evaluated, so
+        // everything after it is unreachable. `Break` also unwinds any
+        // enclosing comptime `for`, which is what leaving a function does.
+        if context.function_returned {
+            return ControlFlow::Break;
+        }
         match self {
             Statement::Assign(x) => {
                 x.eval_value(context);
@@ -820,6 +826,13 @@ impl AssignStatement {
             {
                 variable.set_value(&index, value, Some((beg, end)));
             }
+        }
+        // `return expr;` lowers to an assignment to the function's return
+        // variable, and it is the only thing that writes it.
+        if let Some(dst) = self.dst.first()
+            && context.function_ret_var == Some(dst.id)
+        {
+            context.function_returned = true;
         }
     }
 
