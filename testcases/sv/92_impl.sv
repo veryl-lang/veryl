@@ -14,6 +14,11 @@ package veryl_testcase_Package92;
         logic [2-1:0] exp ;
         logic [1-1:0] mts ;
     } __FpT__2__1;
+    typedef struct packed {
+        logic         sign;
+        logic [3-1:0] exp ;
+        logic [2-1:0] mts ;
+    } __FpT__3__2;
 
     localparam int unsigned __FpT__5__10_BIAS = (1 << (5 - 1)) - 1;
 
@@ -30,6 +35,7 @@ package veryl_testcase_Package92;
         return (self.exp == '1) && (self.mts != '0);
     endfunction
     localparam int unsigned __FpT__2__1_BIAS = (1 << (2 - 1)) - 1;
+    localparam int unsigned __FpT__3__2_BIAS = (1 << (3 - 1)) - 1;
 
     function automatic logic __FpT__2__1_is_nan(
         input var __FpT__2__1 self
@@ -40,6 +46,13 @@ package veryl_testcase_Package92;
     typedef __FpT__5__10 Fp16;
     typedef __FpT__8__23 Fp32;
     typedef __FpT__2__1  Fp4 ;
+    typedef __FpT__3__2  Fp6 ;
+
+    function automatic logic __FpT__3__2_is_nan(
+        input var __FpT__3__2 self
+    ) ;
+        return 1'b0;
+    endfunction
 endpackage
 
 module veryl_testcase_Module92 (
@@ -77,6 +90,15 @@ module veryl_testcase_Module92 (
         m.sign = 0;
         m.exp  = 0;
         m.mts  = 0;
+    end
+
+    veryl_testcase_Package92::Fp6 q ;
+    logic                         _y; always_comb _y = veryl_testcase_Package92::__FpT__3__2_is_nan(q);
+    int unsigned                  _z; always_comb _z = veryl_testcase_Package92::__FpT__3__2_BIAS;
+    always_comb begin
+        q.sign = 0;
+        q.exp  = 0;
+        q.mts  = 0;
     end
 
     initial begin

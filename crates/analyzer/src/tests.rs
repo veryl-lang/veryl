@@ -19773,6 +19773,80 @@ fn impl_specialization() {
 }
 
 #[test]
+fn impl_specialization_through_alias() {
+    let code = r#"
+    module ModuleA {
+        struct StructA::<W: p32> {
+            a: logic<W>,
+        }
+        impl StructA {
+            function get (
+                self,
+            ) -> logic<W> {
+                return self.a;
+            }
+            function zero (
+                self,
+            ) -> logic<W> {
+                return 0;
+            }
+        }
+        type TypeA = StructA::<8>;
+        impl TypeA {
+            function get (
+                self,
+            ) -> logic<8> {
+                return 0;
+            }
+        }
+        var x: TypeA;
+        let _y: logic<8> = x.get();
+        let _z: logic<8> = x.zero();
+        always_comb {
+            x.a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn impl_duplicated_specialization() {
+    let code = r#"
+    module ModuleA {
+        struct StructA::<W: p32> {
+            a: logic<W>,
+        }
+        type TypeA = StructA::<8>;
+        type TypeB = StructA::<8>;
+        impl TypeA {
+            function get (
+                self,
+            ) -> logic<8> {
+                return 0;
+            }
+        }
+        impl TypeB {
+            function get (
+                self,
+            ) -> logic<8> {
+                return 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidImplTarget { .. }))
+    );
+}
+
+#[test]
 fn invalid_impl_argument() {
     let code = r#"
     module ModuleA {

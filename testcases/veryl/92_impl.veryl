@@ -26,6 +26,15 @@ package Package92 {
     type Fp16 = FpT::<5, 10>;
     type Fp32 = FpT::<8, 23>;
     type Fp4  = FpT::<2, 1> ;
+    type Fp6  = FpT::<3, 2> ;
+
+    impl Fp6 {
+        function is_nan (
+            self,
+        ) -> logic {
+            return 1'b0;
+        }
+    }
 }
 
 module Module92 (
@@ -84,6 +93,15 @@ module Module92 (
         m.sign = 0;
         m.exp  = 0;
         m.mts  = 0;
+    }
+
+    var q : Package92::Fp6;
+    let _y: logic          = q.is_nan();
+    let _z: u32            = Package92::Fp6::BIAS;
+    always_comb {
+        q.sign = 0;
+        q.exp  = 0;
+        q.mts  = 0;
     }
 
     initial {

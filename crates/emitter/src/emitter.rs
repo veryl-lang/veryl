@@ -130,7 +130,7 @@ pub struct Emitter {
     attribute: Vec<AttributeType>,
     assignment_lefthand_side: Option<ExpressionIdentifier>,
     generic_map: Vec<Vec<GenericMap>>,
-    impl_target: Option<(VerylToken, GenericMap)>,
+    impl_target: Option<(String, GenericMap)>,
     resolved_identifier: Vec<String>,
     inst_module_namespace: Option<Namespace>,
     bound_namespace: Option<Namespace>,
@@ -3070,7 +3070,10 @@ impl Emitter {
         name.replace("$std_", "__std_")
     }
 
-    fn impl_instance_name(&self, arg: &ImplDeclaration) -> StrId {
+    fn impl_target_symbol(
+        &self,
+        arg: &ImplDeclaration,
+    ) -> Option<(Rc<Symbol>, Vec<GenericSymbolPath>)> {
         let mut arguments = Vec::new();
         if let Some(ref x) = arg.impl_declaration_opt
             && let Some(ref x) = x.with_generic_argument.with_generic_argument_opt
@@ -3080,11 +3083,24 @@ impl Emitter {
                 arguments.push(GenericSymbolPath::from(item));
             }
         }
-        GenericSymbol {
-            base: arg.identifier.identifier_token.token,
-            arguments,
+
+        let symbol = symbol_table::resolve(arg.identifier.as_ref()).ok()?;
+        match &symbol.found.kind {
+            SymbolKind::Struct(_) => Some((Rc::clone(&symbol.found), arguments)),
+            SymbolKind::TypeDef(x) => {
+                let TypeKind::UserDefined(x) = &x.r#type.as_ref()?.kind else {
+                    return None;
+                };
+                let head = x.path.paths.first()?;
+                if arguments.is_empty() {
+                    arguments = head.arguments.clone();
+                }
+                let path = SymbolPath::new(&[head.base.text]);
+                let target = symbol_table::resolve((&path, &symbol.found.namespace)).ok()?;
+                Some((Rc::clone(&target.found), arguments))
+            }
+            _ => None,
         }
-        .mangled()
     }
 
     fn is_specialized(&self, instance: StrId, group: &ImplGroup, target: &Symbol) -> bool {
@@ -3100,11 +3116,11 @@ impl Emitter {
     }
 
     fn impl_type_name(&self) -> String {
-        let (token, map) = self.impl_target.as_ref().unwrap();
+        let (name, map) = self.impl_target.as_ref().unwrap();
         if map.generic() {
             self.generic_instance_name(map, true)
         } else {
-            token.token.to_string()
+            name.clone()
         }
     }
 
@@ -6090,17 +6106,24 @@ impl VerylWalker for Emitter {
     }
 
     fn impl_declaration(&mut self, arg: &ImplDeclaration) {
-        let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let specialized = arg.impl_declaration_opt.is_some();
+        let Some((target, arguments)) = self.impl_target_symbol(arg) else {
+            return;
+        };
+        let specialized = !arguments.is_empty();
 
         let maps = if specialized {
-            let path = SymbolPath::new(&[self.impl_instance_name(arg)]);
-            match symbol_table::resolve((&path, &symbol.found.namespace)) {
+            let instance = GenericSymbol {
+                base: target.token,
+                arguments,
+            }
+            .mangled();
+            let path = SymbolPath::new(&[instance]);
+            match symbol_table::resolve((&path, &target.namespace)) {
                 Ok(x) => x.found.generic_maps(),
                 Err(_) => return,
             }
         } else {
-            self.get_generic_maps(&symbol.found)
+            self.get_generic_maps(&target)
         };
 
         self.token(&arg.r#impl.impl_token.replace(""));
@@ -6111,7 +6134,7 @@ impl VerylWalker for Emitter {
                 self.newline();
             }
             self.push_generic_map(map.clone());
-            self.impl_target = Some((arg.identifier.identifier_token.clone(), map.clone()));
+            self.impl_target = Some((target.token.to_string(), map.clone()));
             self.emit_generic_instance_name_comment(map);
 
             let instance =
@@ -6119,7 +6142,7 @@ impl VerylWalker for Emitter {
             let mut emitted = 0;
             for x in &arg.impl_declaration_list {
                 if let Some(instance) = instance
-                    && self.is_specialized(instance, &x.impl_group, &symbol.found)
+                    && self.is_specialized(instance, &x.impl_group, &target)
                 {
                     continue;
                 }
