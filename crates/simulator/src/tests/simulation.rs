@@ -20457,6 +20457,113 @@ fn bare_signed_rhs_sign_extends_at_wide_store() {
 }
 
 #[test]
+fn wide_bit_select_store_keeps_only_the_field_of_the_extension() {
+    // A field no wider than the RHS shows none of the extension, a wider one
+    // shows all of it.  The three widths pick three emit paths.
+    let code = r#"
+    module Top (
+        clk: input  clock          ,
+        rst: input  reset          ,
+        c  : input  signed logic<8>,
+        o  : output logic<200>     ,
+        q  : output logic<200>     ,
+    ) {
+        var w: logic<200>;
+        always_comb {
+            w = 0;
+            w[7:0] = c;
+            w[47:32] = c;
+            w[159:80] = c;
+        }
+        assign o = w;
+
+        always_ff {
+            if_reset {
+                q = 0;
+            } else {
+                q[71:64] = c;
+                q[159:80] = c;
+            }
+        }
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    // -5 sign-extended to `bits`.
+    let minus5 = |bits: u32| ((BigUint::from(1u32) << bits) - 1u32) ^ BigUint::from(4u32);
+    let comb = BigUint::from(0xfbu32) + (minus5(16) << 32u32) + (minus5(80) << 80u32);
+    let ff = (BigUint::from(0xfbu32) << 64u32) + (minus5(80) << 80u32);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        sim.set("c", Value::new(0xfb, 8, true));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new_biguint(comb.clone(), 200, false),
+            "o config={config:?}"
+        );
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new_biguint(ff.clone(), 200, false),
+            "q config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_bit_select_store_stays_compiled() {
+    // The value test above passes either way — the interpreter fallback is
+    // correct too.  Pin the predicate itself: a wide store keeps reaching the
+    // compiled backends whether its field discards the extension or takes it,
+    // while a full-width one (no register-sized field to extend into) does
+    // not.
+    use crate::ir::{ExpressionContext, ProtoAssignStatement, ProtoExpression, VarOffset};
+    use veryl_parser::token_range::TokenRange;
+
+    let assign = |select, dst_width| ProtoAssignStatement {
+        dst: VarOffset::Comb(0),
+        dst_width,
+        select,
+        dynamic_select: None,
+        rhs_select: None,
+        expr: ProtoExpression::Value {
+            value: Value::new(0xfb, 8, true),
+            width: 8,
+            expr_context: ExpressionContext {
+                width: 8,
+                signed: true,
+            },
+        },
+        dst_ff_current_offset: -1,
+        token: TokenRange::default(),
+    };
+
+    // Field narrower than / equal to the 8-bit RHS: nothing to extend.
+    for select in [Some((3, 0)), Some((7, 0)), Some((87, 80))] {
+        let a = assign(select, 200);
+        assert_eq!(a.visible_store_sign_extend(), None, "select={select:?}");
+        assert!(a.can_build_binary(), "select={select:?}");
+    }
+    // Wider field: the extension lands, and the field still fits a register.
+    for select in [Some((15, 0)), Some((47, 32)), Some((207, 80))] {
+        let a = assign(select, 300);
+        assert_eq!(a.visible_store_sign_extend(), Some(8), "select={select:?}");
+        assert!(a.can_build_binary(), "select={select:?}");
+    }
+    // No field, or one wider than a register: interpreter.
+    for select in [None, Some((208, 80))] {
+        let a = assign(select, 300);
+        assert_eq!(a.visible_store_sign_extend(), Some(8), "select={select:?}");
+        assert!(!a.can_build_binary(), "select={select:?}");
+    }
+}
+
+#[test]
 fn bare_signed_rhs_sign_extends_at_dynamic_store() {
     let code = r#"
     module Top (

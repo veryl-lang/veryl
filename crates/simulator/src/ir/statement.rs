@@ -2796,6 +2796,22 @@ impl std::hash::Hash for ProtoAssignStatement {
 }
 
 impl ProtoAssignStatement {
+    /// The RHS width a store's sign extension must actually reach, or `None`
+    /// when it cannot be observed: `Value::assign` clips to `[end..beg]`, so a
+    /// static field no wider than the RHS discards every extended bit.
+    /// Runtime-indexed destinations are reported as visible regardless.
+    pub fn visible_store_sign_extend(&self) -> Option<usize> {
+        if self.rhs_select.is_some() {
+            return None;
+        }
+        let from_width = self.expr.store_sign_extend_from(self.dst_width)?;
+        let landed = match self.select {
+            Some((beg, end)) if self.dynamic_select.is_none() => beg.saturating_sub(end) + 1,
+            _ => self.dst_width,
+        };
+        (landed > from_width).then_some(from_width)
+    }
+
     /// # Safety
     /// `ff_values_ptr` and `comb_values_ptr` must point to valid buffers.
     pub unsafe fn apply_values_ptr(

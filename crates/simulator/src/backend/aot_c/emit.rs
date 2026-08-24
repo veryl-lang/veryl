@@ -5657,11 +5657,22 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // Handled inline below for dst_width <= 128 by producing a
             // sign-extended rhs (`se_from`); wider signed stores stay on
             // Cranelift (none occur in practice).
+            //
+            // A dst bit-select no wider than the RHS discards every extended
+            // bit — `visible_store_sign_extend`'s rule, restated because the
+            // fold above can replace the RHS.
             let se_from = if eff_rhs_select.is_none() {
                 eff_expr.store_sign_extend_from(a.dst_width)
             } else {
                 None
             };
+            let se_from = se_from.filter(|from_width| {
+                let landed = match a.select {
+                    Some((hi, lo)) if a.dynamic_select.is_none() => hi.saturating_sub(lo) + 1,
+                    _ => a.dst_width,
+                };
+                landed > *from_width
+            });
             // FF stores stay on Cranelift because emit_event_ff_assign does
             // not sign-extend; comb stores are covered at every width.
             if se_from.is_some() && a.dst.is_ff() {
