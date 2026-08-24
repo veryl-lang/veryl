@@ -5979,14 +5979,11 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
 // ---------------------------------------------------------------------------
 // Constant decode tables
 //
-// A decoder written as `case` (or the `if / else if` cascade one lowers to)
-// that only ever assigns constants to one signal is a lookup table spelled as
-// control flow.  Nested decoders multiply out: a 9-bit outer selector over
-// 7-bit inner ones is one 16-bit index.  Left as branches, a wide one costs
-// megabytes of C, and the host compiler's time grows faster than that source
-// does — one such statement can be most of a cold start.  Emitting the table
-// as data instead removes the blocks, the text and the live ranges together,
-// and at run time replaces a walk down the arms with a single indexed load.
+// A decoder that only ever assigns constants is a lookup table spelled as
+// control flow.  Nested decoders multiply out into one index, and an arm
+// driving several signals becomes one row so a lookup lands contiguously.
+// Left as branches a wide decoder costs megabytes of C, and host-compiler
+// time grows faster still — one such statement can be most of a cold start.
 
 /// One selector of a decode table.  Its axis spans `maxv + 1` slots an arm
 /// can reach, plus one for "no arm matched" — which every value above `maxv`
@@ -6000,7 +5997,8 @@ struct DecodeAxis<'a> {
 /// own depth, so the axis order is the nesting order and a `Leaf` above the
 /// last axis is simply constant along the axes below it.
 enum DecodeNode {
-    Leaf(u64),
+    /// One constant per destination, in the destinations' fixed order.
+    Leaf(Vec<u64>),
     Branch {
         arms: Vec<(u64, DecodeNode)>,
         default: Box<DecodeNode>,
@@ -6009,8 +6007,10 @@ enum DecodeNode {
 
 #[derive(Default)]
 struct DecodeScan<'a> {
-    /// The store every leaf must repeat, differing only in the constant.
-    anchor: Option<&'a ProtoAssignStatement>,
+    /// The stores every leaf must repeat, in order, differing only in their
+    /// constants.  An arm writing a different set of signals is a different
+    /// row shape, which one table cannot hold.
+    anchor: Vec<&'a ProtoAssignStatement>,
     axes: Vec<DecodeAxis<'a>>,
     leaves: usize,
 }
@@ -6074,9 +6074,9 @@ fn decode_selector_width(sel: &ProtoExpression) -> Option<usize> {
     }
 }
 
-/// The constant a leaf stores, as it lands in the destination — `None` unless
-/// the leaf is the same plain scalar comb store every other leaf makes.
-fn decode_leaf_value<'a>(a: &'a ProtoAssignStatement, scan: &mut DecodeScan<'a>) -> Option<u64> {
+/// The constant one store writes, as it lands in the destination — `None`
+/// unless it is a plain scalar comb store of a constant.
+fn decode_store_value(a: &ProtoAssignStatement) -> Option<u64> {
     if a.dst.is_ff()
         || a.select.is_some()
         || a.dynamic_select.is_some()
@@ -6097,11 +6097,6 @@ fn decode_leaf_value<'a>(a: &'a ProtoAssignStatement, scan: &mut DecodeScan<'a>)
     if a.expr.store_sign_extend_from(a.dst_width).is_some() {
         return None;
     }
-    match scan.anchor {
-        Some(first) if first.dst != a.dst || first.dst_width != a.dst_width => return None,
-        Some(_) => {}
-        None => scan.anchor = Some(a),
-    }
     // Take the constant through the same masking `emit_value` applies, so the
     // entry is what the arm would have stored.
     let ProtoExpression::Value {
@@ -6119,27 +6114,63 @@ fn decode_leaf_value<'a>(a: &'a ProtoAssignStatement, scan: &mut DecodeScan<'a>)
     Some(v.payload & width_mask(emitted_width) & width_mask(a.dst_width))
 }
 
+/// One table row: the constants a leaf writes, checked against the row shape
+/// the first leaf established.
+fn decode_leaf_row<'a>(block: &'a [ProtoStatement], scan: &mut DecodeScan<'a>) -> Option<Vec<u64>> {
+    // An empty arm stores nothing, so it has no row; it also must not be
+    // mistaken for "no row shape established yet".
+    if block.is_empty() {
+        return None;
+    }
+    let mut stores = Vec::with_capacity(block.len());
+    let mut row = Vec::with_capacity(block.len());
+    for stmt in block {
+        let ProtoStatement::Assign(a) = stmt else {
+            return None;
+        };
+        row.push(decode_store_value(a)?);
+        stores.push(a);
+    }
+    if scan.anchor.is_empty() {
+        scan.anchor = stores;
+    } else if scan.anchor.len() != stores.len()
+        || scan
+            .anchor
+            .iter()
+            .zip(&stores)
+            .any(|(first, s)| first.dst != s.dst || first.dst_width != s.dst_width)
+    {
+        return None;
+    }
+    Some(row)
+}
+
 fn scan_decode_node<'a>(
     block: &'a [ProtoStatement],
     depth: usize,
     scan: &mut DecodeScan<'a>,
 ) -> Option<DecodeNode> {
-    // An arm that stores nothing leaves the destination as it was, which no
-    // table entry can express.
-    let [stmt] = block else {
-        return None;
-    };
-    match stmt {
-        ProtoStatement::SequentialBlock(inner) => scan_decode_node(inner, depth, scan),
-        ProtoStatement::Assign(a) => {
-            let value = decode_leaf_value(a, scan)?;
-            scan.leaves += 1;
-            Some(DecodeNode::Leaf(value))
+    // A nested decoder is the arm's only statement; anything else is a row of
+    // stores.  An arm that stores nothing leaves its destinations as they
+    // were, which no table entry can express — `decode_leaf_row` rejects the
+    // empty block because the row shape can never match.
+    if let [stmt] = block {
+        match stmt {
+            ProtoStatement::SequentialBlock(inner) => {
+                return scan_decode_node(inner, depth, scan);
+            }
+            ProtoStatement::If(x) => {
+                return scan_decode_chain(&collect_eq_chain(x, 1)?, depth, scan);
+            }
+            ProtoStatement::Case(c) => {
+                return scan_decode_chain(&case_as_eq_chain(c)?, depth, scan);
+            }
+            _ => {}
         }
-        ProtoStatement::If(x) => scan_decode_chain(&collect_eq_chain(x, 1)?, depth, scan),
-        ProtoStatement::Case(c) => scan_decode_chain(&case_as_eq_chain(c)?, depth, scan),
-        _ => None,
     }
+    let row = decode_leaf_row(block, scan)?;
+    scan.leaves += 1;
+    Some(DecodeNode::Leaf(row))
 }
 
 fn scan_decode_chain<'a>(
@@ -6176,11 +6207,15 @@ fn scan_decode_chain<'a>(
     Some(DecodeNode::Branch { arms, default })
 }
 
-/// Write the sub-table `out` — the entries whose outer indices are already
-/// fixed — from the tree below `depth`.
-fn fill_decode_table(node: &DecodeNode, depth: usize, dims: &[u64], out: &mut [u64]) {
+/// Write the sub-table `out` — the rows whose outer indices are already fixed
+/// — from the tree below `depth`.  `out` holds `row` values per entry.
+fn fill_decode_table(node: &DecodeNode, depth: usize, dims: &[u64], row: usize, out: &mut [u64]) {
     match node {
-        DecodeNode::Leaf(v) => out.fill(*v),
+        DecodeNode::Leaf(v) => {
+            for entry in out.chunks_exact_mut(row) {
+                entry.copy_from_slice(v);
+            }
+        }
         DecodeNode::Branch { arms, default } => {
             let dim = dims[depth] as usize;
             let stride = out.len() / dim;
@@ -6191,6 +6226,7 @@ fn fill_decode_table(node: &DecodeNode, depth: usize, dims: &[u64], out: &mut [u
                     default,
                     depth + 1,
                     dims,
+                    row,
                     &mut out[slot * stride..][..stride],
                 );
             }
@@ -6198,7 +6234,13 @@ fn fill_decode_table(node: &DecodeNode, depth: usize, dims: &[u64], out: &mut [u
             // exactly as the comparisons would have.
             for (value, child) in arms.iter().rev() {
                 let slot = *value as usize;
-                fill_decode_table(child, depth + 1, dims, &mut out[slot * stride..][..stride]);
+                fill_decode_table(
+                    child,
+                    depth + 1,
+                    dims,
+                    row,
+                    &mut out[slot * stride..][..stride],
+                );
             }
         }
     }
@@ -6209,10 +6251,10 @@ fn fill_decode_table(node: &DecodeNode, depth: usize, dims: &[u64], out: &mut [u
 fn emit_decode_table(stmt: &ProtoStatement) -> Option<String> {
     let mut scan = DecodeScan::default();
     let root = scan_decode_node(std::slice::from_ref(stmt), 0, &mut scan)?;
-    if scan.leaves < DECODE_TABLE_MIN_LEAVES || scan.axes.is_empty() {
+    if scan.leaves < DECODE_TABLE_MIN_LEAVES || scan.axes.is_empty() || scan.anchor.is_empty() {
         return None;
     }
-    let anchor = scan.anchor?;
+    let row = scan.anchor.len();
 
     // Slots per axis: the values an arm claims, plus the one every other
     // value clamps onto.  That last slot is what makes the load in-bounds for
@@ -6234,21 +6276,28 @@ fn emit_decode_table(stmt: &ProtoStatement) -> Option<String> {
         return None;
     }
 
-    let mut cells = vec![0u64; entries as usize];
-    fill_decode_table(&root, 0, &dims, &mut cells);
+    let cell_count = entries.checked_mul(row as u64)?;
+    if cell_count as usize > decode_table_max_bytes() {
+        return None;
+    }
+    let mut cells = vec![0u64; cell_count as usize];
+    fill_decode_table(&root, 0, &dims, row, &mut cells);
     let widest = cells.iter().copied().max().unwrap_or(0);
+    // One element type across the whole row: a row is read as a unit, so
+    // packing it tightly per destination would only trade the padding for
+    // alignment holes, at the cost of a second array per width.
     let (elem_ty, elem_bytes) = match widest {
         v if v <= u8::MAX as u64 => ("uint8_t", 1),
         v if v <= u16::MAX as u64 => ("uint16_t", 2),
         v if v <= u32::MAX as u64 => ("uint32_t", 4),
         _ => ("uint64_t", 8),
     };
-    if entries as usize * elem_bytes > decode_table_max_bytes() {
+    if cell_count as usize * elem_bytes > decode_table_max_bytes() {
         return None;
     }
 
     // The index, most-significant axis first, so the innermost selector walks
-    // adjacent entries.
+    // adjacent rows.
     let id = next_wide_tmp();
     let mut pre = String::new();
     let mut index = String::new();
@@ -6264,36 +6313,47 @@ fn emit_decode_table(stmt: &ProtoStatement) -> Option<String> {
         if !index.is_empty() {
             index.push_str(" + ");
         }
-        if stride > 1 {
-            index.push_str(&format!("{name} * {stride}ULL"));
+        let scale = stride * row as u64;
+        if scale > 1 {
+            index.push_str(&format!("{name} * {scale}ULL"));
         } else {
             index.push_str(&name);
         }
     }
 
     let table = format!(
-        "static const {elem_ty} _dtbl{id}[{entries}] = {{{}}}; ",
+        "static const {elem_ty} _dtbl{id}[{cell_count}] = {{{}}}; ",
         cells
             .iter()
             .map(|v| format!("{v:#x}"))
             .collect::<Vec<_>>()
             .join(",")
     );
-    let read = format!("_dtbl{id}[{index}]");
-    let VarOffset::Comb(off) = anchor.dst else {
-        return None;
-    };
-    // The entries are already masked to the destination width, so the store
-    // needs no further masking on either path.
-    let store = if is_localized(off) {
-        format!("{nm} = (uint64_t){read};", nm = local_name(off))
-    } else {
-        let cty = native_c_type(native_bytes(anchor.dst_width))?;
-        format!("*(({cty}*)(comb_values + {off:#x})) = ({cty}){read};")
-    };
+    // The entries are already masked to each destination's width, so the
+    // stores need no further masking on either path.
+    let mut store = String::new();
+    for (k, a) in scan.anchor.iter().enumerate() {
+        let VarOffset::Comb(off) = a.dst else {
+            return None;
+        };
+        let read = if k == 0 {
+            format!("_dtbl{id}[{index}]")
+        } else {
+            format!("_dtbl{id}[{index} + {k}]")
+        };
+        if is_localized(off) {
+            store.push_str(&format!("{nm} = (uint64_t){read}; ", nm = local_name(off)));
+        } else {
+            let cty = native_c_type(native_bytes(a.dst_width))?;
+            store.push_str(&format!(
+                "*(({cty}*)(comb_values + {off:#x})) = ({cty}){read}; "
+            ));
+        }
+    }
     if diag_enabled() {
         eprintln!(
-            "[decode_table] dst={off:#x} axes={} entries={entries} elem={elem_ty} leaves={}",
+            "[decode_table] dst={:#x} axes={} entries={entries} row={row} elem={elem_ty} leaves={}",
+            scan.anchor[0].dst.raw(),
             scan.axes.len(),
             scan.leaves,
         );
@@ -13990,8 +14050,46 @@ mod tests {
         assert!(!s.contains("static const"), "{s}");
     }
 
-    // Two destinations are two tables' worth of work; one table cannot say
-    // which signal an arm wrote.
+    // An arm driving several signals becomes one row, read at one index.
+    #[test]
+    fn multi_destination_arms_become_table_rows() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms = (0..10u64)
+            .map(|v| {
+                (
+                    v,
+                    ProtoStatement::SequentialBlock(vec![
+                        cassign(0x80, 8, const_expr(v, 8)),
+                        cassign(0x90, 8, const_expr(0x40 + v, 8)),
+                    ]),
+                )
+            })
+            .collect();
+        let stmt = dt_case(
+            sel,
+            arms,
+            vec![ProtoStatement::SequentialBlock(vec![
+                cassign(0x80, 8, const_expr(0xfe, 8)),
+                cassign(0x90, 8, const_expr(0xff, 8)),
+            ])],
+        );
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("if ("), "no comparisons should remain: {s}");
+        assert!(s.contains("[22]"), "11 slots of 2: {s}");
+        assert!(s.contains("*((uint32_t*)(comb_values + 0x80))"), "{s}");
+        assert!(s.contains("*((uint32_t*)(comb_values + 0x90))"), "{s}");
+        let body = s.split('{').nth(2).unwrap().split('}').next().unwrap();
+        let cells: Vec<u64> = body
+            .split(',')
+            .map(|t| u64::from_str_radix(t.trim().trim_start_matches("0x"), 16).unwrap())
+            .collect();
+        // The two destinations of one arm sit next to each other, so a lookup
+        // touches one row rather than two tables.
+        assert_eq!(&cells[..6], &[0x0, 0x40, 0x1, 0x41, 0x2, 0x42]);
+        assert_eq!(&cells[20..], &[0xfe, 0xff]);
+    }
+
+    // An arm writing a different set of signals is a different row shape.
     #[test]
     fn second_destination_keeps_the_cascade() {
         let sel = var_expr(VarOffset::Comb(0x40), 4);
