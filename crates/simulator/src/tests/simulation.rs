@@ -22736,3 +22736,51 @@ fn negating_a_width_64_value_wraps_instead_of_overflowing() {
         }
     }
 }
+
+#[test]
+fn an_unpacked_array_parameter_element_sizes_a_child() {
+    // `N: Regs[1]` arrives const but unfolded — the comptime of an indexed
+    // read describes the array, not the element — so no instance is
+    // specialised and the child's width stays symbolic.  `build` and `check`
+    // stay clean because SystemVerilog resolves the parameter later.
+    let code = r#"
+    module Leaf #(
+        param N: u32 = 0,
+    ) (
+        a: input  logic<8>,
+        b: output logic<8>,
+    ) {
+        var r: logic<N + 1, 8>;
+        assign r[0] = a;
+        for i in 0..N :g {
+            assign r[i + 1] = r[i];
+        }
+        assign b = r[N];
+    }
+    module Top #(
+        param Regs: u32 [3] = '{2, 3, 1},
+    ) (
+        a: input  logic<8>,
+        b: output logic<8>,
+    ) {
+        inst u: Leaf #( N: Regs[1] ) ( a, b );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x12, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // the chain is a plain copy whatever its depth
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::new(0x12, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
