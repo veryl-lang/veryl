@@ -156,12 +156,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arrayref"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
-
-[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -336,11 +330,10 @@ dependencies = [
 
 [[package]]
 name = "blake3"
-version = "1.8.6"
+version = "1.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76ae7bad254120e9e4c63bafc385310756f90c484eac0e36b8317cf09cb92a77"
+checksum = "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae"
 dependencies = [
- "arrayref",
  "arrayvec",
  "cc",
  "cfg-if",
@@ -2074,7 +2067,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a791e6620676a875f362f3156ed213e73ca099a09bf992c18812abe65cc37b1"
 dependencies = [
  "bstr",
- "hashbrown 0.15.5",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -2762,7 +2755,7 @@ dependencies = [
  "console",
  "handlebars",
  "serde",
- "similar 3.1.2",
+ "similar 3.2.0",
  "tempfile",
 ]
 
@@ -3579,7 +3572,7 @@ dependencies = [
  "regex",
  "semver",
  "serde_json",
- "similar 3.1.2",
+ "similar 3.2.0",
  "toml",
  "veryl-analyzer",
  "veryl-formatter",
@@ -4107,9 +4100,9 @@ checksum = "54ec451836679aaa55158b454b441e21446a111ea34aa1917eba29245bafe4b8"
 
 [[package]]
 name = "parol_runtime"
-version = "5.0.0"
+version = "5.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f07c0c74ba7f586309810e9538b08a79b041aa8429279dda62ef5cac4eafb137"
+checksum = "4b36bcb5c5908d5d063aa32c5c34dc75d23b0bd8839a1ff2ce0dfe8688bd9c76"
 dependencies = [
  "anyhow",
  "codespan-reporting",
@@ -5194,9 +5187,9 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "similar"
-version = "3.1.2"
+version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85ee016af5d736b69fc89e19254540fa4b5f5492853fb5503920f084011c78b6"
+checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
 dependencies = [
  "bstr",
 ]
@@ -6034,9 +6027,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.24.0"
+version = "1.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
+checksum = "2cefc03fd367c0c6d4305de1b312cf00248c4114f4a0418ce6a6af769e3b0bd9"
 dependencies = [
  "js-sys",
  "serde_core",
@@ -6080,7 +6073,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "similar 3.1.2",
+ "similar 3.2.0",
  "tempfile",
  "thiserror",
  "tokio",
@@ -6125,7 +6118,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
- "similar 3.1.2",
+ "similar 3.2.0",
  "smallvec",
  "strnum_bitwidth",
  "strum",
