@@ -761,7 +761,21 @@ impl ProtoExpression {
                 expr_context,
                 ..
             } => {
-                let width = expr_context.width;
+                // A reduction is one bit however wide the node's context says:
+                // that width belongs to the consumer.  Down the wide path the
+                // operand's `native_bytes` is under a limb, so the helpers
+                // reduce over ZERO limbs and always answer 0.
+                let reduction = matches!(
+                    op,
+                    Op::BitAnd
+                        | Op::BitNand
+                        | Op::BitOr
+                        | Op::BitNor
+                        | Op::LogicNot
+                        | Op::BitXor
+                        | Op::BitXnor
+                );
+                let width = if reduction { 1 } else { expr_context.width };
 
                 // Wide path for >128-bit unary operations
                 if is_wide_ptr(width) || is_wide_ptr(x.width()) {
@@ -772,7 +786,7 @@ impl ProtoExpression {
 
                 let wide = width > 64;
                 let x_wide = x.width() > 64;
-                if expr_context.signed {
+                if expr_context.signed && !reduction {
                     (x_payload, x_mask_xz) =
                         expand_sign(width, x.width(), x_payload, x_mask_xz, builder);
                 } else if wide && builder.func.dfg.value_type(x_payload) != I128 {

@@ -22447,3 +22447,45 @@ fn an_early_return_in_a_package_function_wins() {
         );
     }
 }
+
+#[test]
+fn a_reduction_over_a_narrow_operand_survives_a_wide_destination() {
+    // `|a` is one bit, but the node carries its consumer's width (223) and the
+    // Cranelift dispatch keyed the wide path off that.  The operand's
+    // `native_bytes` is under a limb, so the reduction ran over ZERO limbs.
+    let code = r#"
+    package pkg {
+        struct req_t {
+            v   : logic     ,
+            rest: logic<222>,
+        }
+    }
+    module Top (
+        a: input  logic<2> ,
+        y: output pkg::req_t,
+    ) {
+        always_comb {
+            y.v    = |a;
+            y.rest = '0;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (a, top) in [(0u64, 0u64), (1, 1), (2, 1), (3, 1)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::new(a, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap().select(222, 222),
+                Value::new(top, 1, false),
+                "y[222]: a={a} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
