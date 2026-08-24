@@ -105,9 +105,10 @@ impl ProtoAssignDynamicStatement {
         if self.rhs_select.is_some() && self.expr.width() > 64 {
             return false;
         }
-        // Wide (>128-bit) comb-base dynamic-indexed store: see
-        // `build_binary_dynamic_wide`.
-        if self.dst_width > 128 && !self.dst_base.is_ff() && self.rhs_select.is_none() {
+        // Wide (>64-bit) comb-base dynamic-indexed store: a 65..128-bit
+        // element is 16-byte storage the narrow path below cannot address,
+        // and `build_binary_dynamic_wide` is width-generic.
+        if self.dst_width > 64 && !self.dst_base.is_ff() && self.rhs_select.is_none() {
             return true;
         }
         // Wide (>64-bit) FF-base full-element dynamic store:
@@ -130,8 +131,11 @@ impl ProtoAssignDynamicStatement {
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
         // The narrow path below assumes a native (≤8-byte) dst; route the
-        // wide (>128-bit) comb-base case to its own emitter.
-        if self.dst_width > 128 && !self.dst_base.is_ff() {
+        // wide comb-base cases to their own emitter.  The 65..128-bit band
+        // joins it only without `dynamic_select`, which that emitter declines.
+        if !self.dst_base.is_ff()
+            && (self.dst_width > 128 || (self.dst_width > 64 && self.dynamic_select.is_none()))
+        {
             return self.build_binary_dynamic_wide(context, builder);
         }
         // Wide (>64-bit) FF-base full-element dynamic write: see

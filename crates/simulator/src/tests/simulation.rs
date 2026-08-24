@@ -20517,11 +20517,8 @@ fn wide_bit_select_store_keeps_only_the_field_of_the_extension() {
 
 #[test]
 fn wide_bit_select_store_stays_compiled() {
-    // The value test above passes either way — the interpreter fallback is
-    // correct too.  Pin the predicate itself: a wide store keeps reaching the
-    // compiled backends whether its field discards the extension or takes it,
-    // while a full-width one (no register-sized field to extend into) does
-    // not.
+    // The value test above passes on the interpreter too.  Pin the predicate:
+    // only a store with a register-sized field reaches the compiled backends.
     use crate::ir::{ExpressionContext, ProtoAssignStatement, ProtoExpression, VarOffset};
     use veryl_parser::token_range::TokenRange;
 
@@ -20560,6 +20557,118 @@ fn wide_bit_select_store_stays_compiled() {
         let a = assign(select, 300);
         assert_eq!(a.visible_store_sign_extend(), Some(8), "select={select:?}");
         assert!(!a.can_build_binary(), "select={select:?}");
+    }
+}
+
+#[test]
+fn dynamic_index_store_into_a_65_to_128_bit_element() {
+    // A runtime-indexed element of that width is 16-byte storage, which the
+    // native-dst store path cannot address — it used to drop the whole
+    // statement to the interpreter.  Full element, ≤64-bit field, and wider
+    // field each take a different arm of the flat-buffer emitter.
+    let code = r#"
+    module Top (
+        idx: input  logic<2> ,
+        v  : input  logic<96>,
+        n  : input  logic<32>,
+        w  : input  logic<80>,
+        o  : output logic<96>,
+        p  : output logic<96>,
+        q  : output logic<96>,
+    ) {
+        var a: logic<96> [4];
+        var b: logic<96> [4];
+        var c: logic<96> [4];
+        always_comb {
+            a[0] = 0;
+            a[1] = 0;
+            a[2] = 0;
+            a[3] = 0;
+            b[0] = 0;
+            b[1] = 0;
+            b[2] = 0;
+            b[3] = 0;
+            c[0] = 0;
+            c[1] = 0;
+            c[2] = 0;
+            c[3] = 0;
+            a[idx] = v;
+            b[idx][39:8] = n;
+            c[idx][87:8] = w;
+        }
+        assign o = a[1];
+        assign p = b[1];
+        assign q = c[1];
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let v = (BigUint::from(0xfeed_face_u32) << 64u32) + BigUint::from(0x0123_4567_89ab_cdef_u64);
+    let n = BigUint::from(0xdead_beef_u32);
+    let w = (BigUint::from(0xc0de_u32) << 64u32) + BigUint::from(0xfedc_ba98_7654_3210_u64);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("idx", Value::new(1, 2, false));
+        sim.set("v", Value::new_biguint(v.clone(), 96, false));
+        sim.set("n", Value::new_biguint(n.clone(), 32, false));
+        sim.set("w", Value::new_biguint(w.clone(), 80, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        for (name, expected) in [
+            ("o", v.clone()),
+            ("p", n.clone() << 8u32),
+            ("q", w.clone() << 8u32),
+        ] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new_biguint(expected, 96, false),
+                "{name} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dynamic_index_store_stays_compiled_above_64_bits() {
+    // The value test above passes on the interpreter too.  Pin the predicate:
+    // a comb-base element store is compiled at every width above 64, not only
+    // above 128.  An FF base keeps its own narrower gate.
+    use crate::ir::{ExpressionContext, ProtoAssignDynamicStatement, ProtoExpression, VarOffset};
+
+    let index = ProtoExpression::Value {
+        value: Value::new(1, 2, false),
+        width: 2,
+        expr_context: ExpressionContext {
+            width: 2,
+            signed: false,
+        },
+    };
+    let assign = |dst_base, dst_width: usize| ProtoAssignDynamicStatement {
+        dst_base,
+        dst_stride: (dst_width.div_ceil(64) * 8) as isize,
+        dst_num_elements: 4,
+        dst_index_expr: index.clone(),
+        dst_width,
+        select: None,
+        dynamic_select: None,
+        rhs_select: None,
+        expr: ProtoExpression::Value {
+            value: Value::new(7, 32, false),
+            width: 32,
+            expr_context: ExpressionContext {
+                width: 32,
+                signed: false,
+            },
+        },
+        dst_ff_current_base_offset: -1,
+    };
+
+    for width in [65, 96, 128, 200] {
+        assert!(
+            assign(VarOffset::Comb(0), width).can_build_binary(),
+            "comb width={width}"
+        );
     }
 }
 
