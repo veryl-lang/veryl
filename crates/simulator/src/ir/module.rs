@@ -3564,6 +3564,7 @@ impl Conv<&air::Module> for ProtoModule {
                     &variable_meta,
                     &all_child_modules,
                     &evt,
+                    &context.comb_reloc,
                     context.config.use_4state,
                 )
             })

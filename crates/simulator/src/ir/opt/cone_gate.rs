@@ -529,11 +529,41 @@ fn comb_extent(elements: &[VariableElement], use_4state: bool) -> (usize, usize)
 /// `event_written` holds every comb offset the event statements can write
 /// (element-expanded); the covering variable spans join each segment's
 /// compare set so an event overwrite wakes the segment.
+/// Give each function-local comb copy the owner of the storage it was copied
+/// from (`Context::comb_reloc`): the copy is private to the same instance, so
+/// the original's owner is exactly right, and without one the statement reads
+/// as `unbounded` and pins itself to the root.  `comb_owner` must be sorted on
+/// entry; an unowned original adds nothing.
+fn inherit_reloc_owners(
+    comb_owner: &mut Vec<(usize, usize, u32)>,
+    comb_reloc: &[(isize, isize, usize)],
+) {
+    let mut extra: Vec<(usize, usize, u32)> = Vec::new();
+    for &(old, new, bytes) in comb_reloc {
+        if old < 0 || new < 0 || bytes == 0 {
+            continue;
+        }
+        let x = old as usize;
+        let i = comb_owner.partition_point(|&(s, _, _)| s <= x);
+        if let Some(i) = i.checked_sub(1)
+            && comb_owner[i].0 <= x
+            && x < comb_owner[i].1
+        {
+            extra.push((new as usize, new as usize + bytes, comb_owner[i].2));
+        }
+    }
+    if !extra.is_empty() {
+        comb_owner.extend(extra);
+        radix_sort_intervals(comb_owner);
+    }
+}
+
 pub fn build_inputs(
     top_name: &str,
     top_vars: &HashMap<VarId, VariableMeta>,
     children: &[ModuleVariableMeta],
     event_written: &crate::HashSet<isize>,
+    comb_reloc: &[(isize, isize, usize)],
     use_4state: bool,
 ) -> ConeGateInputs {
     let mut node_parent: Vec<u32> = vec![u32::MAX];
@@ -606,6 +636,7 @@ pub fn build_inputs(
         }
     }
     radix_sort_intervals(&mut comb_owner);
+    inherit_reloc_owners(&mut comb_owner, comb_reloc);
     ff_runs.sort_unstable();
     ff_runs.dedup();
     debug_assert!(
@@ -1520,6 +1551,28 @@ mod tests {
         assert_eq!(padded.span(15), None);
         assert_eq!(padded.span(16), Some((16, 24)));
         assert_eq!(padded.span(47), None);
+    }
+
+    #[test]
+    fn a_relocated_function_local_inherits_its_original_owner() {
+        // A per-call-site copy has no `VariableMeta`; left unowned it reads as
+        // `unbounded` and pins its statement to the root.
+        let mut owner = vec![(0usize, 8usize, 1u32), (8, 16, 2)];
+        inherit_reloc_owners(
+            &mut owner,
+            &[
+                (0, 100, 8),   // copy of node 1's scratch
+                (8, 108, 8),   // copy of node 2's scratch
+                (900, 116, 8), // original itself unowned: stays out
+                (0, 200, 0),   // zero-length: nothing to own
+                (-1, 208, 8),  // no original offset at all
+            ],
+        );
+        assert_eq!(
+            owner,
+            vec![(0, 8, 1), (8, 16, 2), (100, 108, 1), (108, 116, 2)],
+            "each copy takes its original's node; an unowned original adds nothing"
+        );
     }
 
     #[test]
