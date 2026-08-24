@@ -209,6 +209,18 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
     // --- Edge construction ---------------------------------------------
     let mut adj_sem: Vec<HashSet<usize>> = vec![HashSet::default(); n];
     let mut adj_opt: Vec<HashSet<usize>> = vec![HashSet::default(); n];
+    // Why each edge exists.  Only populated under `VERYL_PASS_DIAG`: reading a
+    // cycle without it means cross-referencing a second dump in a different
+    // numbering space.
+    let diag = std::env::var("VERYL_PASS_DIAG").is_ok();
+    let mut edge_cause: HashMap<(usize, usize), &'static str> = HashMap::default();
+    macro_rules! cause {
+        ($from:expr, $to:expr, $why:expr) => {
+            if diag {
+                edge_cause.entry(($from, $to)).or_insert($why);
+            }
+        };
+    }
     // Cross-block prior bindings are indistinguishable without block
     // identity, and void the one-pass hint.
     let mut hint_blocked = blocks.is_none();
@@ -360,10 +372,12 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                     || writers.get(key).is_some_and(|ws| ws.len() == 1)
                 {
                     adj_sem[writer_idx].insert(reader_idx);
+                    cause!(writer_idx, reader_idx, "raw");
                 } else {
                     // Sole overlapping writer comes later: a settled-value
                     // read, so the edge is best-effort rather than semantic.
                     adj_opt[writer_idx].insert(reader_idx);
+                    cause!(writer_idx, reader_idx, "raw-settled");
                 }
             } else if relevant.binary_search(&reader_idx).is_ok() {
                 // The reader itself writes overlapping bits (shared inlined
@@ -383,6 +397,7 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 .flatten()
             {
                 adj_sem[writer_idx].insert(reader_idx);
+                cause!(writer_idx, reader_idx, "prior-binding");
                 if relevant.last().is_some_and(|&w| w > reader_idx)
                     && !prior_unconditional_cover(reader_idx, key, *rr)
                 {
@@ -399,6 +414,7 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 // the read sees settled values.
                 for &writer_idx in &relevant {
                     adj_opt[writer_idx].insert(reader_idx);
+                    cause!(writer_idx, reader_idx, "settled-group");
                 }
             }
         }
@@ -428,6 +444,7 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 .find(|(p, wr)| *p > reader_idx && ranges_overlap(*wr, *rr))
             {
                 adj_sem[reader_idx].insert(next_writer);
+                cause!(reader_idx, next_writer, "war");
             }
         }
     }
@@ -460,6 +477,7 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 }
                 if !reachable {
                     adj_sem[prev].insert(next);
+                    cause!(prev, next, "waw");
                 } else {
                     // Two overlapping writes whose order the sort cannot
                     // guarantee: never claim an exact one-pass schedule.
@@ -556,7 +574,7 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
                  reporting it for the caller to split",
             );
-            trace_first_scc_cycle(&statements, &adj_sem, &adj_opt, &scc_id);
+            trace_sort_cycles(&statements, &adj_sem, &adj_opt, &scc_id, &edge_cause);
         }
         return (statements, None, true);
     };
@@ -570,78 +588,167 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
     (sorted, (!hint_blocked).then_some(1), false)
 }
 
-/// `VERYL_PASS_DIAG=1` diagnostic: BFS one shortest cycle inside the
-/// first nontrivial SCC and print it with source locations, edge class
-/// and connecting variable offsets.
-fn trace_first_scc_cycle(
+/// `VERYL_PASS_DIAG=1` diagnostic: BFS one shortest cycle per nontrivial
+/// SCC and print it with source locations, edge class and cause, and the
+/// variable ranges that connect each step.
+fn trace_sort_cycles(
     statements: &[ProtoStatement],
     adj_sem: &[HashSet<usize>],
     adj_opt: &[HashSet<usize>],
     scc_id: &[usize],
+    edge_cause: &HashMap<(usize, usize), &'static str>,
 ) {
     let n = statements.len();
-    let Some(first_id) = scc_id.iter().copied().find(|&x| x != usize::MAX) else {
-        return;
-    };
-    let members: Vec<usize> = (0..n).filter(|&i| scc_id[i] == first_id).collect();
-    log::info!("pass_diag: first SCC has {} members", members.len());
-    let mset: HashSet<usize> = members.iter().cloned().collect();
-    let start = members[0];
-    let mut parent: HashMap<usize, usize> = HashMap::default();
-    let mut bfsq: VecDeque<usize> = VecDeque::new();
-    bfsq.push_back(start);
-    let mut closer: Option<usize> = None;
-    'bfs: while let Some(u) = bfsq.pop_front() {
-        for &v in adj_sem[u].iter().chain(adj_opt[u].iter()) {
-            if !mset.contains(&v) {
-                continue;
-            }
-            if v == start {
-                closer = Some(u);
-                break 'bfs;
-            }
-            if let std::collections::hash_map::Entry::Vacant(e) = parent.entry(v) {
-                e.insert(u);
-                bfsq.push_back(v);
-            }
+    // Every nontrivial SCC, not just the first: on a design with several, the
+    // one that costs a settle pass is rarely the one that happens to come
+    // first in statement order.
+    let mut ids: Vec<usize> = Vec::new();
+    for &id in scc_id.iter() {
+        if id != usize::MAX && !ids.contains(&id) {
+            ids.push(id);
         }
     }
-    let Some(last) = closer else {
+    if ids.is_empty() {
         return;
-    };
-    let mut path = vec![start];
-    let mut cur = last;
-    let mut rev = vec![];
-    while cur != start {
-        rev.push(cur);
-        cur = parent[&cur];
     }
-    rev.reverse();
-    path.extend(rev);
-    for (i, &m) in path.iter().enumerate() {
-        let nxt = path.get(i + 1).copied().unwrap_or(start);
-        let kind = if adj_sem[m].contains(&nxt) {
-            "sem"
-        } else {
-            "opt"
-        };
-        let desc = match statements[m].token() {
-            Some(t) => {
-                let src = t.beg.source.to_string();
-                let file = src.rsplit('/').next().unwrap_or(&src).to_string();
-                format!("{file}:{}", t.beg.line)
+    for (k, id) in ids.iter().enumerate() {
+        log::info!(
+            "pass_diag: SCC {k} (id {id}) has {} members",
+            scc_id.iter().filter(|&&x| x == *id).count()
+        );
+    }
+
+    const MAX_TRACED: usize = 4;
+    for (k, id) in ids.iter().enumerate().take(MAX_TRACED) {
+        let members: Vec<usize> = (0..n).filter(|&i| scc_id[i] == *id).collect();
+        log::info!("pass_diag: cycle inside SCC {k}:");
+        let mset: HashSet<usize> = members.iter().cloned().collect();
+        let start = members[0];
+        let mut parent: HashMap<usize, usize> = HashMap::default();
+        let mut bfsq: VecDeque<usize> = VecDeque::new();
+        bfsq.push_back(start);
+        let mut closer: Option<usize> = None;
+        'bfs: while let Some(u) = bfsq.pop_front() {
+            for &v in adj_sem[u].iter().chain(adj_opt[u].iter()) {
+                if !mset.contains(&v) {
+                    continue;
+                }
+                if v == start {
+                    closer = Some(u);
+                    break 'bfs;
+                }
+                if let std::collections::hash_map::Entry::Vacant(e) = parent.entry(v) {
+                    e.insert(u);
+                    bfsq.push_back(v);
+                }
             }
-            None => "generated".to_string(),
+        }
+        let Some(last) = closer else {
+            return;
         };
-        let mut ins = vec![];
-        let mut outs = vec![];
-        statements[m].gather_variable_offsets(&mut ins, &mut outs);
-        let outs: HashSet<VarOffset> = outs.into_iter().collect();
-        ins.clear();
-        let mut nxt_outs = vec![];
-        statements[nxt].gather_variable_offsets(&mut ins, &mut nxt_outs);
-        let via: Vec<VarOffset> = ins.into_iter().filter(|o| outs.contains(o)).collect();
-        log::info!("  cycle[{i}] #{m} {desc} -[{kind}]-> #{nxt} via {via:?}");
+        let mut path = vec![start];
+        let mut cur = last;
+        let mut rev = vec![];
+        while cur != start {
+            rev.push(cur);
+            cur = parent[&cur];
+        }
+        rev.reverse();
+        path.extend(rev);
+        for (i, &m) in path.iter().enumerate() {
+            let nxt = path.get(i + 1).copied().unwrap_or(start);
+            let kind = if adj_sem[m].contains(&nxt) {
+                "sem"
+            } else {
+                "opt"
+            };
+            let kind_of = |st: &ProtoStatement| match st {
+                ProtoStatement::Assign(_) => "Assign",
+                ProtoStatement::AssignDynamic(_) => "AssignDynamic",
+                ProtoStatement::If(_) => "If",
+                ProtoStatement::Case(_) => "Case",
+                ProtoStatement::For(_) => "For",
+                ProtoStatement::SequentialBlock(_) => "SeqBlock",
+                ProtoStatement::CompiledBlock(_) => "CompiledBlock",
+                ProtoStatement::SystemFunctionCall(_) => "SysFn",
+                _ => "?",
+            };
+            let desc = match statements[m].token() {
+                Some(t) => {
+                    let src = t.beg.source.to_string();
+                    let file = src.rsplit('/').next().unwrap_or(&src).to_string();
+                    format!("{}@{file}:{}", kind_of(&statements[m]), t.beg.line)
+                }
+                None => format!("{}@generated", kind_of(&statements[m])),
+            };
+            // The pair of RANGES is what decides whether the edge is real: the
+            // writer's bits on `m` against the reader's bits on `nxt`.
+            let mut w_bits = vec![];
+            gather_bit_aware_outputs(&statements[m], &mut w_bits);
+            let mut r_bits = vec![];
+            statements[nxt].gather_reads_with_ranges(&mut r_bits);
+            let mut via: Vec<String> = Vec::new();
+            for (woff, wr) in &w_bits {
+                for (roff, rr) in &r_bits {
+                    if woff == roff && ranges_overlap(*wr, *rr) {
+                        let e = format!("{woff:?} w{wr:?} r{rr:?}");
+                        if !via.contains(&e) {
+                            via.push(e);
+                        }
+                    }
+                }
+            }
+            log::info!(
+                "  cycle[{i}] #{m} {desc} -[{kind}/{}]-> #{nxt} via {}",
+                edge_cause.get(&(m, nxt)).copied().unwrap_or("?"),
+                via.join(", ")
+            );
+            // The node's OWN reads, so a cycle is readable without a second
+            // dump in a different numbering space.
+            {
+                let mut r = vec![];
+                statements[m].gather_reads_with_ranges(&mut r);
+                r.sort_unstable_by_key(|(o, br)| (o.is_ff(), o.raw(), *br));
+                r.dedup();
+                let mut w = vec![];
+                gather_bit_aware_outputs(&statements[m], &mut w);
+                w.sort_unstable_by_key(|(o, br)| (o.is_ff(), o.raw(), *br));
+                w.dedup();
+                let fmt = |v: &[(VarOffset, BitRange)]| -> String {
+                    v.iter()
+                        .take(12)
+                        .map(|(o, br)| match br {
+                            Some((hi, lo)) => format!("{o:?}[{hi}:{lo}]"),
+                            None => format!("{o:?}"),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                log::info!(
+                    "        #{m} writes {} | reads {}{}",
+                    fmt(&w),
+                    fmt(&r),
+                    if r.len() > 12 { " ..." } else { "" }
+                );
+                // Per-arm reads: a node that writes ONE variable from many
+                // arms carries the UNION of the arms' reads, and a cycle
+                // through that union is false whenever no single arm closes it.
+                if let ProtoStatement::Case(c) = &statements[m] {
+                    for (a, arm) in c.arms.iter().enumerate() {
+                        let mut ar = vec![];
+                        arm.cond.gather_variable_offsets(&mut ar);
+                        let mut reads: Vec<(VarOffset, BitRange)> =
+                            ar.into_iter().map(|o| (o, None)).collect();
+                        for st in &arm.body {
+                            st.gather_reads_with_ranges(&mut reads);
+                        }
+                        reads.sort_unstable_by_key(|(o, br)| (o.is_ff(), o.raw(), *br));
+                        reads.dedup();
+                        log::info!("          arm{a} reads {}", fmt(&reads));
+                    }
+                }
+            }
+        }
     }
 }
 

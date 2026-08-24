@@ -3140,6 +3140,7 @@ fn trace_scc_cycles(sorted: &[ProtoStatement], meta: &ModuleVariableMeta) {
                         None,
                         match &sorted[idx] {
                             ProtoStatement::If(_) => "If",
+                            ProtoStatement::Case(_) => "Case",
                             ProtoStatement::AssignDynamic(_) => "AssignDynamic",
                             ProtoStatement::For(_) => "For",
                             ProtoStatement::SequentialBlock(_) => "SeqBlock",
@@ -3429,6 +3430,7 @@ fn dump_backward_edge_chain(
                 None,
                 match &sorted[idx] {
                     ProtoStatement::If(_) => "If",
+                    ProtoStatement::Case(_) => "Case",
                     ProtoStatement::AssignDynamic(_) => "AssignDynamic",
                     ProtoStatement::For(_) => "For",
                     ProtoStatement::SequentialBlock(_) => "SeqBlock",
