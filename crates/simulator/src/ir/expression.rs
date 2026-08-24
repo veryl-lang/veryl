@@ -2013,6 +2013,12 @@ pub(crate) fn inline_function_call(
             for (old, vs) in elems {
                 let new_off = context.comb_total_bytes as isize;
                 context.comb_total_bytes += vs;
+                // The copy has no `VariableMeta`; record it so the owner
+                // table can inherit the original's owner (see
+                // `Context::comb_reloc`).
+                if let VarOffset::Comb(old_off) = old {
+                    context.comb_reloc.push((old_off, new_off, vs));
+                }
                 map.insert(old, VarOffset::Comb(new_off));
             }
         }
