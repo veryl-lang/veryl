@@ -3,7 +3,7 @@
 //! shape which lets a backend swap the comparisons for an index — so the
 //! recognizer lives here rather than in either backend.
 
-use crate::ir::{ProtoCaseStatement, ProtoExpression, ProtoIfStatement, ProtoStatement};
+use crate::ir::{ProtoCaseStatement, ProtoExpression, ProtoIfStatement, ProtoStatement, Value};
 
 pub struct EqChainArm<'a> {
     pub value: u64,
@@ -28,19 +28,44 @@ pub fn extract_eq_const(cond: &ProtoExpression) -> Option<(&ProtoExpression, u64
     ) {
         return None;
     }
+    // A signed operand is sign-extended before the comparison, so which values
+    // match depends on both operands' widths and not on the payload alone —
+    // an index built from the payload would dispatch to the wrong arm.
+    if cond.expr_context().signed || x.expr_context().signed || y.expr_context().signed {
+        return None;
+    }
     fn try_extract<'b>(
         val_side: &'b ProtoExpression,
         var_side: &'b ProtoExpression,
     ) -> Option<(&'b ProtoExpression, u64)> {
         match val_side {
-            ProtoExpression::Value { value, .. } => {
+            ProtoExpression::Value {
+                value,
+                width,
+                expr_context,
+            } => {
                 // xz constants would match any value under wildcard
                 // semantics and cannot be encoded as a table index.
                 if value.is_xz() {
-                    None
-                } else {
-                    value.to_u64().map(|v| (var_side, v))
+                    return None;
                 }
+                // The unsized all-ones literal (`'1`) is encoded as a 1-bit
+                // payload that each backend replicates across the surrounding
+                // context width; its payload is not the value compared.
+                if let Value::U64(v) = value
+                    && v.width == 0
+                    && v.payload != 0
+                {
+                    return None;
+                }
+                // Likewise a payload carrying bits above the width it is
+                // emitted at: the comparison sees the truncation, we would not.
+                let w = (*width).max(expr_context.width);
+                let payload = value.to_u64()?;
+                if w < 64 && payload >= (1u64 << w) {
+                    return None;
+                }
+                Some((var_side, payload))
             }
             _ => None,
         }
@@ -306,5 +331,69 @@ mod eq_chain_tests {
         assert_eq!(chain.arms.len(), 4);
         assert_eq!(chain.default.len(), 1);
         assert!(matches!(chain.default[0], ProtoStatement::Break));
+    }
+
+    fn eq_against(value: ProtoExpression) -> ProtoExpression {
+        ProtoExpression::Binary {
+            x: Box::new(var_expr(0x10, 8)),
+            op: Op::Eq,
+            y: Box::new(value),
+            width: 1,
+            expr_context: ctx(1),
+        }
+    }
+
+    // `x == '1` compares against the context filled with ones, not against the
+    // 1-bit payload the analyzer stores.
+    #[test]
+    fn unsized_all_ones_literal_is_not_its_payload() {
+        let all_ones = ProtoExpression::Value {
+            value: Value::U64(ValueU64 {
+                payload: 1,
+                mask_xz: 0,
+                width: 0,
+                signed: false,
+            }),
+            width: 0,
+            expr_context: ctx(8),
+        };
+        assert!(extract_eq_const(&eq_against(all_ones)).is_none());
+    }
+
+    // A payload wider than the width it is emitted at compares against the
+    // truncation, so it cannot key an arm at the untruncated value.
+    #[test]
+    fn payload_above_the_emitted_width_declines() {
+        let over = ProtoExpression::Value {
+            value: Value::U64(ValueU64 {
+                payload: 0x1ff,
+                mask_xz: 0,
+                width: 8,
+                signed: false,
+            }),
+            width: 8,
+            expr_context: ctx(8),
+        };
+        assert!(extract_eq_const(&eq_against(over)).is_none());
+    }
+
+    // A signed operand is sign-extended first, so equal payloads need not
+    // compare equal (and unequal ones may).
+    #[test]
+    fn signed_comparison_declines() {
+        let signed_const = ProtoExpression::Value {
+            value: Value::U64(ValueU64 {
+                payload: 0xf,
+                mask_xz: 0,
+                width: 8,
+                signed: true,
+            }),
+            width: 8,
+            expr_context: ExpressionContext {
+                width: 8,
+                signed: true,
+            },
+        };
+        assert!(extract_eq_const(&eq_against(signed_const)).is_none());
     }
 }
