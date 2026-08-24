@@ -22323,3 +22323,59 @@ fn concat_bit_repeat_run() {
         }
     }
 }
+
+#[test]
+fn a_register_read_only_as_a_write_index_keeps_its_pre_edge_value() {
+    // `ptr` is read ONLY inside another `always_ff`'s left-hand-side index.
+    // That read lives outside the expression, so `ptr` looked unread and got
+    // storage where the increment is visible to the same edge — filling the
+    // vector from bit 1 instead of bit 0.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        vec: output logic<8>,
+    ) {
+        var ptr: logic<3>;
+        var v  : logic<8>;
+        always_ff {
+            if_reset {
+                ptr = 0;
+            } else {
+                ptr = ptr + 1;
+            }
+        }
+        always_ff {
+            if_reset {
+                v = 0;
+            } else {
+                v[ptr] = 1'b1;
+            }
+        }
+        assign vec = v;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+
+        // Edges see ptr = 0, 1, 2 -- the pre-edge value every time.
+        assert_eq!(
+            sim.get("vec").unwrap(),
+            Value::new(0b0000_0111, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}

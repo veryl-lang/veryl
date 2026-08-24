@@ -732,6 +732,30 @@ impl AssignDestination {
         }
     }
 
+    /// A dynamic index or select on the left-hand side READS the variables in
+    /// it. Those reads live outside `expr`, so without registering them here a
+    /// register used *only* as an index looks unread, and the optimizer is
+    /// free to give it storage where the write is visible immediately — the
+    /// indexed write then lands in the post-edge slot.
+    pub fn gather_ff_selectors(
+        &self,
+        context: &mut Context,
+        table: &mut FfTable,
+        decl: usize,
+        assign_target: Option<&AssignTarget>,
+        from_ff: bool,
+    ) {
+        for expression in &self.index.0 {
+            expression.gather_ff(context, table, decl, assign_target, from_ff);
+        }
+        for expression in &self.select.0 {
+            expression.gather_ff(context, table, decl, assign_target, from_ff);
+        }
+        if let Some((_, expression)) = &self.select.1 {
+            expression.gather_ff(context, table, decl, assign_target, from_ff);
+        }
+    }
+
     pub fn set_index(&mut self, index: &VarIndex) {
         self.index.add_prelude(index);
     }
@@ -816,6 +840,7 @@ impl AssignStatement {
         self.expr
             .gather_ff(context, table, decl, assign_target.as_ref(), true);
         for dst in &self.dst {
+            dst.gather_ff_selectors(context, table, decl, assign_target.as_ref(), true);
             dst.gather_ff(context, table, decl);
         }
     }
@@ -825,6 +850,7 @@ impl AssignStatement {
         self.expr
             .gather_ff(context, table, decl, assign_target.as_ref(), false);
         for dst in &self.dst {
+            dst.gather_ff_selectors(context, table, decl, assign_target.as_ref(), false);
             dst.gather_ff_comb_assign(context, table, decl);
         }
     }
