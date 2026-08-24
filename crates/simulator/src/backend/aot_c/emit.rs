@@ -7656,6 +7656,32 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     let body = format!("((__uint128_t)(({xm}) {c_op} ({ym})))");
                     return Some(if w < 128 { mask_u128(&body, w) } else { body });
                 }
+                // Add/Sub/Mul are modular, so signedness is invisible once
+                // both operands reach `width`.  Only an operand narrower than
+                // the result needs its sign bits filled in.
+                if expr_context.signed
+                    && expr_context.width > 64
+                    && expr_context.width <= 128
+                    && matches!(op, Op::Add | Op::Sub | Op::Mul)
+                {
+                    let w = expr_context.width;
+                    let sext = |s: &str, sw: usize| -> String {
+                        if sw == 0 || sw >= w {
+                            format!("((__uint128_t)({s}))")
+                        } else {
+                            let sh = 128 - sw;
+                            format!(
+                                "((__uint128_t)(((__int128_t)(((__uint128_t)({s})) << {sh})) >> {sh}))"
+                            )
+                        }
+                    };
+                    let body = format!(
+                        "((__uint128_t)(({xe}) {c_op} ({ye})))",
+                        xe = sext(&xs, x.width()),
+                        ye = sext(&ys, y.width()),
+                    );
+                    return Some(if w < 128 { mask_u128(&body, w) } else { body });
+                }
                 let wide_truncates = match op {
                     Op::LogicShiftL | Op::ArithShiftL => x.width() <= 64,
                     _ => false,
@@ -9409,6 +9435,117 @@ mod tests {
             s.contains("<< 8"),
             "the literal still occupies its 8-bit slot: {s}"
         );
+    }
+
+    #[test]
+    fn emit_signed_wide_add_stays_covered_and_matches_expand() {
+        // Signedness is invisible here (the low 66 bits are modular), but the
+        // emitter used to bail every signed >64-bit arithmetic op.
+        if !cc_available() {
+            eprintln!("emit_signed_wide_add_stays_covered_and_matches_expand: cc unavailable");
+            return;
+        }
+        let mask66 = (1u128 << 66) - 1;
+        let add = ProtoExpression::Binary {
+            x: Box::new(var_expr_signed(VarOffset::Comb(0), 66)),
+            op: Op::Add,
+            y: Box::new(var_expr_signed(VarOffset::Comb(16), 66)),
+            width: 66,
+            expr_context: ctx(66, true),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(32),
+            dst_width: 66,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: add,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign]).expect("signed 66-bit add must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_swadd_{}", std::process::id()));
+        let Some(module) = compile_for_test(
+            &tmp,
+            &src,
+            "emit_signed_wide_add_stays_covered_and_matches_expand",
+        ) else {
+            return;
+        };
+        // -3 and +5 in 66-bit two's complement.
+        let a = mask66 - 2;
+        let b = 5u128;
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 64];
+        comb[0..16].copy_from_slice(&a.to_le_bytes());
+        comb[16..32].copy_from_slice(&b.to_le_bytes());
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        assert_eq!(read_u128(&comb, 32), 2, "-3 + 5 == 2 modulo 2^66");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_signed_wide_add_sign_extends_a_narrow_operand() {
+        // The one case where signedness IS visible: an operand narrower than
+        // the result is sign-extended before the add (`expand(width, signed)`
+        // in eval_value_binary), so -1 in 8 bits must fill bits 8..65.
+        if !cc_available() {
+            eprintln!("emit_signed_wide_add_sign_extends_a_narrow_operand: cc unavailable");
+            return;
+        }
+        let add = ProtoExpression::Binary {
+            x: Box::new(var_expr_signed(VarOffset::Comb(0), 66)),
+            op: Op::Add,
+            y: Box::new(var_expr_signed(VarOffset::Comb(16), 8)),
+            width: 66,
+            expr_context: ctx(66, true),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(32),
+            dst_width: 66,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: add,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign]).expect("signed 66-bit add must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_swadds_{}", std::process::id()));
+        let Some(module) = compile_for_test(
+            &tmp,
+            &src,
+            "emit_signed_wide_add_sign_extends_a_narrow_operand",
+        ) else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 64];
+        comb[0..16].copy_from_slice(&10u128.to_le_bytes());
+        comb[16] = 0xff; // 8-bit -1
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        assert_eq!(
+            read_u128(&comb, 32),
+            9,
+            "the 8-bit -1 must sign-extend to 66 bits, not add 255"
+        );
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
