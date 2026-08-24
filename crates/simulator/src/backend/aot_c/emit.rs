@@ -4655,7 +4655,13 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
     let entry_start = lines
         .iter()
         .enumerate()
-        .position(|(i, l)| i > last_chunk && l.starts_with(ENTRY_ATTR))?;
+        .position(|(i, l)| i > last_chunk && l.starts_with(ENTRY_SECTION_MARKER))
+        .or_else(|| {
+            lines
+                .iter()
+                .enumerate()
+                .position(|(i, l)| i > last_chunk && l.starts_with(ENTRY_ATTR))
+        })?;
 
     let header = &lines[..chunk_starts[0]];
     let entries = &lines[entry_start..];
@@ -4699,7 +4705,10 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
             (start..end).map(line_bytes).sum::<usize>()
         })
         .collect();
-    let total: usize = chunk_size.iter().sum();
+    // The entry section is not a chunk but unit 0 compiles all of it, so
+    // leaving it out of the balance makes unit 0 finish last.
+    let entry_bytes: usize = (entry_start..lines.len()).map(line_bytes).sum();
+    let total: usize = chunk_size.iter().sum::<usize>() + entry_bytes;
     // `bound[p]` is the first chunk of unit `p`.  Each unit takes its share of
     // what is LEFT, so an oversized chunk claims its unit and the rest
     // re-divide the remainder.  The inner guard keeps every unit non-empty.
@@ -4710,13 +4719,10 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
     for part in 0..n - 1 {
         let target = remaining / (n - part);
         let reserved = n - 1 - part;
-        let mut taken = 0usize;
-        while k < chunk_starts.len() - reserved {
+        let mut taken = if part == 0 { entry_bytes } else { 0 };
+        while k < chunk_starts.len() - reserved && taken < target {
             taken += chunk_size[k];
             k += 1;
-            if taken >= target {
-                break;
-            }
         }
         remaining -= taken;
         bound.push(k);
@@ -4755,6 +4761,10 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
 }
 
 const ENTRY_ATTR: &str = "__attribute__((visibility(\"default\")))";
+/// Written once, right after the last chunk function.  Everything below it is
+/// reachable only from the entry unit; locating the boundary by the first
+/// exported function would strand the `static` compare helpers elsewhere.
+const ENTRY_SECTION_MARKER: &str = "// AOT-C entry section; keep with the entry unit.";
 const WIDEOPS_DEF: &str = "veryl_wideops_t veryl_wideops;";
 const WIDEOPS_SET: &str = "void veryl_set_wideops(";
 const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
@@ -5262,6 +5272,63 @@ fn max_stmt_bytes() -> usize {
         * 1024
 }
 
+/// Bytes of dispatcher per emitted function.  Host-compiler time is not
+/// monotonic in function size — 4.6 MB took 51 s, 1.2 MB parts 59 s, and only
+/// below ~0.5 MB did it drop (29 s) — and a byte target keeps the layout a
+/// function of the text, so the artifact hash does not move with the design.
+const ENTRY_PART_BYTES: usize = 192 * 1024;
+
+/// Don't split a dispatcher that was never going to be expensive: the extra
+/// calls are free, but the emitted source and the .so both grow a little.
+const ENTRY_SPLIT_MIN_BYTES: usize = 512 * 1024;
+
+/// Lay the dispatcher's top-level units out over one or more functions and
+/// return the C for all of them.
+fn split_entry_function(prologue: &str, units: &[String], cg_dbg: bool) -> String {
+    const SIG: &str = "(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, \
+                       uint64_t *__restrict__ write_log, intptr_t ff_delta)";
+    const ARGS: &str = "(ff_values, comb_values, write_log, ff_delta)";
+    let total: usize = units.iter().map(String::len).sum();
+    // The debug prologue's counters are function-scope statics that the units
+    // reference, so that build stays whole.
+    // `VERYL_AOT_C_ENTRY_SPLIT=0` keeps one function, for A/B and bisection.
+    let split = total > ENTRY_SPLIT_MIN_BYTES
+        && !cg_dbg
+        && prologue.is_empty()
+        && std::env::var("VERYL_AOT_C_ENTRY_SPLIT").as_deref() != Ok("0");
+    if !split {
+        let mut out = format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{prologue}");
+        for u in units {
+            out.push_str(u);
+        }
+        out.push_str("}\n");
+        return out;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for u in units {
+        cur.push_str(u);
+        if cur.len() >= ENTRY_PART_BYTES {
+            parts.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        parts.push(cur);
+    }
+    let mut out = String::with_capacity(total + parts.len() * 256);
+    for (k, part) in parts.iter().enumerate() {
+        out.push_str(&format!(
+            "static __attribute__((noinline)) void veryl_aot_eval_p{k}{SIG} {{\n{part}}}\n\n"
+        ));
+    }
+    out.push_str(&format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n"));
+    for k in 0..parts.len() {
+        out.push_str(&format!("    veryl_aot_eval_p{k}{ARGS};\n"));
+    }
+    out.push_str("}\n");
+    out
+}
+
 /// Full C source for a comb statement sequence.  Signature matches the
 /// Cranelift FuncPtr ABI: `void veryl_aot_eval(uint8_t *ff, uint8_t
 /// *comb, uint64_t *log, intptr_t ff_delta)`.  Comb-target writes store
@@ -5656,6 +5723,8 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             body.push_str(cb);
             body.push_str("}\n\n");
         }
+        body.push_str(ENTRY_SECTION_MARKER);
+        body.push('\n');
         // Const-prefix chunks go to a separate run-once entry: their inputs
         // never change, so the runtime (Ir::const_cone_done) calls this once per
         // simulator instance and the main entry skips them every settle.
@@ -5733,15 +5802,16 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             f.push_str("    return 1;\n}\n\n");
             body.push_str(&f);
         }
-        body.push_str(
-            "__attribute__((visibility(\"default\")))\n\
-             void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
-        );
+        // The dispatcher is built as a list of independent top-level units —
+        // one guarded cone segment or one bare chunk call each — so
+        // `split_entry_function` can lay them out across several functions.
+        let mut entry_units: Vec<String> = Vec::new();
+        let mut entry_prologue = String::new();
         // Emit-time debug (VERYL_CONE_GATE_DIAG=1 at emit): per-segment
         // skip/run counters printed every ~1M evals.  Statics are fine for a
         // debug build of the artifact.
         if cg_dbg && !guards.is_empty() {
-            body.push_str(&format!(
+            entry_prologue.push_str(&format!(
                 "    static unsigned long long cg_sk[{n}], cg_rn[{n}]; static unsigned long long cg_calls;\n\
                  \x20   static const unsigned cg_stoff[{n}] = {{{offs}}};\n\
                  \x20   uint8_t *cg_st[{n}]; for (int z = 0; z < {n}; z++) cg_st[z] = comb_values + cg_stoff[z];\n\
@@ -5761,6 +5831,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         let mut gi = 0usize;
         let mut i = const_chunks;
         while i < chunks.len() {
+            let mut unit = String::new();
             if gi < guards.len() && guards[gi].0 == i {
                 let (k1, k2, s) = guards[gi];
                 let st = s.state_off as usize;
@@ -5776,7 +5847,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 // check, shadow/replay refresh) is skipped too — an off
                 // segment costs exactly the plain chunk calls, mirroring the
                 // Rust-side `before_run`/`refresh` early returns.
-                body.push_str(&format!(
+                unit.push_str(&format!(
                     "    {{ uint8_t *cgst = comb_values + {st:#x};\n\
                      \x20     int cg_run = 1;\n\
                      \x20     int cg_off = cgst[2];\n\
@@ -5789,18 +5860,18 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                     decay = s.off_decay,
                 ));
                 if cg_dbg {
-                    body.push_str(&format!("          cg_sk[{gi}]++;\n"));
+                    unit.push_str(&format!("          cg_sk[{gi}]++;\n"));
                 }
                 let mut acc = 0usize;
                 for &(a, b) in &s.replay {
                     let l = (b - a) as usize;
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "          __builtin_memcpy(comb_values + {a:#x}, comb_values + {src:#x}, {l});\n",
                         src = replay_abs + acc,
                     ));
                     acc += l;
                 }
-                body.push_str(
+                unit.push_str(
                     "        } else {\n\
                      \x20         uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
                      \x20         if (++cg_stk >= 1024u) cgst[2] = 1;\n\
@@ -5813,7 +5884,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let mut acc = 0usize;
                 for &(a, b) in &s.backedge {
                     let l = (b - a) as usize;
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
                         dst = prerun_abs + acc,
                     ));
@@ -5822,24 +5893,24 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let mut acc = 0usize;
                 for &(a, b) in &s.compare_pre {
                     let l = (b - a) as usize;
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
                         dst = pre_shadow_abs + acc,
                     ));
                     acc += l;
                 }
-                body.push_str("        }\n");
+                unit.push_str("        }\n");
                 for k in k1..k2 {
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "        veryl_aot_chunk_{k}(ff_values, comb_values, write_log);\n",
                     ));
                 }
-                body.push_str("        if (!cg_off) {\n        { int cg_conv = 1;\n");
+                unit.push_str("        if (!cg_off) {\n        { int cg_conv = 1;\n");
                 let mut acc = 0usize;
                 for (ri, &(a, b)) in s.backedge.iter().enumerate() {
                     let l = (b - a) as usize;
                     if cg_dbg {
-                        body.push_str(&format!(
+                        unit.push_str(&format!(
                             "          if (cg_conv && __builtin_memcmp(comb_values + {pre:#x}, comb_values + {a:#x}, {l})) {{ cg_conv = 0; cgst[3] = {ri_b}; \
                              if ((cg_calls & 0x3fff) == 1) __builtin_printf(\"[cgconv] seg_state={st:#x} range={ri} off={a:#x} pre=%016llx post=%016llx\\n\", *(unsigned long long*)(comb_values + {pre:#x}), *(unsigned long long*)(comb_values + {a:#x})); }}\n",
                             pre = prerun_abs + acc,
@@ -5848,19 +5919,19 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                             ri = ri,
                         ));
                     } else {
-                        body.push_str(&format!(
+                        unit.push_str(&format!(
                             "          cg_conv = cg_conv && !__builtin_memcmp(comb_values + {pre:#x}, comb_values + {a:#x}, {l});\n",
                             pre = prerun_abs + acc,
                         ));
                     }
                     acc += l;
                 }
-                body.push_str("          cgst[1] = (uint8_t)cg_conv; }\n");
+                unit.push_str("          cgst[1] = (uint8_t)cg_conv; }\n");
                 let mut acc = 0usize;
                 for &(is_ff, a, b) in &s.compare {
                     let l = (b - a) as usize;
                     let buf = if is_ff { "ff_values" } else { "comb_values" };
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "        __builtin_memcpy(comb_values + {dst:#x}, {buf} + {a:#x}, {l});\n",
                         dst = shadow_abs + acc,
                     ));
@@ -5869,26 +5940,27 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let mut acc = 0usize;
                 for &(a, b) in &s.replay {
                     let l = (b - a) as usize;
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
                         dst = replay_abs + acc,
                     ));
                     acc += l;
                 }
                 if cg_dbg {
-                    body.push_str(&format!("        cg_rn[{gi}]++;\n"));
+                    unit.push_str(&format!("        cg_rn[{gi}]++;\n"));
                 }
-                body.push_str("        cgst[0] = 1;\n        }\n      }\n    }\n");
+                unit.push_str("        cgst[0] = 1;\n        }\n      }\n    }\n");
                 gi += 1;
                 i = k2;
             } else {
-                body.push_str(&format!(
+                unit.push_str(&format!(
                     "    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n",
                 ));
                 i += 1;
             }
+            entry_units.push(unit);
         }
-        body.push_str("}\n");
+        body.push_str(&split_entry_function(&entry_prologue, &entry_units, cg_dbg));
     }
     if comb_noslp {
         // The marker line is the cheapest way to carry the verdict to
@@ -12836,6 +12908,76 @@ mod tests {
         assert!(
             !units[holder].contains("veryl_aot_chunk_11(void)"),
             "the byte split must move later chunks out of the giant chunk's unit"
+        );
+    }
+
+    // A `static` helper the entry calls sits between the last chunk and the
+    // entry; without the section marker the byte split can strand it.
+    #[test]
+    fn entry_section_marker_keeps_the_entry_helpers_with_the_entry() {
+        let mut src = String::from(
+            "// AOT-C generated; do not edit.\n\
+             #include <stdint.h>\n\
+             typedef struct { int unused; } veryl_wideops_t;\n\
+             __attribute__((visibility(\"default\"))) veryl_wideops_t veryl_wideops;\n",
+        );
+        for i in 0..12 {
+            src.push_str(&format!("{CHUNK_FN_MARKER}{i}(void) {{\n"));
+            src.push_str("  /* body body body body body body body body */\n}\n");
+        }
+        src.push_str(ENTRY_SECTION_MARKER);
+        src.push('\n');
+        src.push_str("static int cg_cmp_0(void) { return 1; }\n");
+        src.push_str(&format!(
+            "{ENTRY_ATTR}\nvoid veryl_aot_eval(void) {{ (void)cg_cmp_0(); }}\n"
+        ));
+
+        let units = split_translation_units(&src, 4).expect("stub must have the chunked shape");
+        let entry = units
+            .iter()
+            .find(|u| u.contains("void veryl_aot_eval(void)"))
+            .expect("some unit defines the entry");
+        assert!(
+            entry.contains("static int cg_cmp_0(void)"),
+            "the entry's own helper must travel with it"
+        );
+        assert_eq!(
+            units
+                .iter()
+                .filter(|u| u.contains("static int cg_cmp_0(void)"))
+                .count(),
+            1,
+            "and only with it"
+        );
+    }
+
+    // Below the threshold the dispatcher stays one function; above it the
+    // units are laid out over several, in order, losing none.
+    #[test]
+    fn entry_splits_only_when_it_is_large() {
+        let small: Vec<String> = (0..4)
+            .map(|i| format!("    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n"))
+            .collect();
+        let out = split_entry_function("", &small, false);
+        assert_eq!(out.matches("veryl_aot_eval").count(), 1, "{out}");
+
+        // Units of ~64 KiB each: enough of them to clear both thresholds.
+        let big: Vec<String> = (0..32)
+            .map(|i| format!("    /* {i} {} */\n", "x".repeat(64 * 1024)))
+            .collect();
+        let out = split_entry_function("", &big, false);
+        // Only the definitions carry `void`; the calls do not.
+        let parts = out.matches("void veryl_aot_eval_p").count();
+        assert!(parts >= 8, "{parts} parts is too few for 2 MB");
+        for i in 0..32 {
+            assert!(out.contains(&format!("/* {i} ")), "unit {i} was dropped");
+        }
+        // The debug build keeps its function-scope counters, so it stays whole.
+        assert_eq!(
+            split_entry_function("", &big, true)
+                .matches("void veryl_aot_eval_p")
+                .count(),
+            0
         );
     }
 
