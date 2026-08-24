@@ -2487,6 +2487,148 @@ pub(crate) fn gather_bit_aware_outputs(
     }
 }
 
+/// Union the ranges reported for each offset.  `None` (full width) wins, and
+/// two known ranges merge into the range that bounds them: both directions
+/// keep an edge a finer answer might drop.
+fn union_bit_ranges(items: Vec<(VarOffset, BitRange)>) -> HashMap<VarOffset, BitRange> {
+    let mut out: HashMap<VarOffset, BitRange> = HashMap::default();
+    for (off, br) in items {
+        match out.entry(off) {
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                let merged = match (*e.get(), br) {
+                    (None, _) | (_, None) => None,
+                    (Some((ah, al)), Some((bh, bl))) => Some((ah.max(bh), al.min(bl))),
+                };
+                e.insert(merged);
+            }
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(br);
+            }
+        }
+    }
+    out
+}
+
+/// Collect (offset, bit_range) reads of one expression tree.
+///
+/// The reader side of the SCC graph: without it, the elements of a PACKED
+/// array all share one `VarOffset`, so a chain that walks `a[0] -> a[1] ->
+/// a[2]` reads as a cycle even though no bit ever reaches itself.  A dynamic
+/// bit-select can land anywhere, so it reports full width.
+fn gather_bit_aware_expr_reads(expr: &ProtoExpression, out: &mut Vec<(VarOffset, BitRange)>) {
+    match expr {
+        ProtoExpression::Value { .. } => {}
+        ProtoExpression::HierVariable(_) => {}
+        ProtoExpression::Variable {
+            var_offset,
+            select,
+            dynamic_select,
+            ..
+        } => {
+            if let Some(d) = dynamic_select {
+                out.push((*var_offset, None));
+                gather_bit_aware_expr_reads(&d.index_expr, out);
+            } else {
+                out.push((*var_offset, *select));
+            }
+        }
+        ProtoExpression::DynamicVariable {
+            base_offset,
+            stride,
+            num_elements,
+            index_expr,
+            dynamic_select,
+            ..
+        } => {
+            for i in 0..*num_elements {
+                let off = VarOffset::new(
+                    base_offset.is_ff(),
+                    base_offset.raw() + *stride * (i as isize),
+                );
+                out.push((off, None));
+            }
+            gather_bit_aware_expr_reads(index_expr, out);
+            if let Some(d) = dynamic_select {
+                gather_bit_aware_expr_reads(&d.index_expr, out);
+            }
+        }
+        ProtoExpression::Unary { x, .. } => gather_bit_aware_expr_reads(x, out),
+        ProtoExpression::Binary { x, y, .. } => {
+            gather_bit_aware_expr_reads(x, out);
+            gather_bit_aware_expr_reads(y, out);
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            gather_bit_aware_expr_reads(cond, out);
+            gather_bit_aware_expr_reads(true_expr, out);
+            gather_bit_aware_expr_reads(false_expr, out);
+        }
+        ProtoExpression::Concatenation { elements, .. } => {
+            for (e, _, _) in elements {
+                gather_bit_aware_expr_reads(e, out);
+            }
+        }
+    }
+}
+
+/// Collect (offset, bit_range) reads for bit-aware SCC analysis.
+///
+/// Only the forms whose range is known precisely are narrowed; everything
+/// else reports full width (`None`), which keeps an edge the precise answer
+/// might have dropped.  Erring that way can only leave a false SCC standing,
+/// never hide a real one.
+pub(crate) fn gather_bit_aware_inputs(stmt: &ProtoStatement, out: &mut Vec<(VarOffset, BitRange)>) {
+    match stmt {
+        ProtoStatement::Assign(x) => {
+            gather_bit_aware_expr_reads(&x.expr, out);
+            if let Some(d) = &x.dynamic_select {
+                gather_bit_aware_expr_reads(&d.index_expr, out);
+            }
+        }
+        ProtoStatement::AssignDynamic(x) => {
+            gather_bit_aware_expr_reads(&x.expr, out);
+            gather_bit_aware_expr_reads(&x.dst_index_expr, out);
+            if let Some(d) = &x.dynamic_select {
+                gather_bit_aware_expr_reads(&d.index_expr, out);
+            }
+        }
+        ProtoStatement::If(x) => {
+            if let Some(cond) = &x.cond {
+                gather_bit_aware_expr_reads(cond, out);
+            }
+            for s in x.true_side.iter().chain(&x.false_side) {
+                gather_bit_aware_inputs(s, out);
+            }
+        }
+        ProtoStatement::Case(x) => {
+            for arm in &x.arms {
+                gather_bit_aware_expr_reads(&arm.cond, out);
+                for s in &arm.body {
+                    gather_bit_aware_inputs(s, out);
+                }
+            }
+            for s in &x.default {
+                gather_bit_aware_inputs(s, out);
+            }
+        }
+        ProtoStatement::For(x) => {
+            for s in &x.body {
+                gather_bit_aware_inputs(s, out);
+            }
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            for s in body {
+                gather_bit_aware_inputs(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Diagnostic: compute strongly-connected components of the stmt-level
 /// dataflow graph (stmt A → stmt B when A writes a variable B reads).
 /// Returns (num_nontrivial_sccs, max_scc_size, total_stmts_in_sccs).
@@ -2497,10 +2639,11 @@ pub(crate) fn gather_bit_aware_outputs(
 /// overlap are filtered out — what remains is scalar comb cycles
 /// that would be flagged by a logic synthesis tool.
 ///
-/// When VERYL_SCC_BITAWARE=1, treats partial-width writes (via
-/// Assign.select bit ranges) as independent edges: a write to x[7:4]
-/// does not create an edge to readers of x[3:0].  This eliminates
-/// SCCs formed only by bit-lane overlap in the VarOffset-level IR.
+/// Edges are bit-aware on both sides: a write to x[7:4] does not reach a
+/// reader of x[3:0].  Without that, the elements of a PACKED array — which
+/// share one `VarOffset` — turn any chain through them into a cycle.  Ranges
+/// are used only where they are known precisely; everything else is full
+/// width, which can leave a false SCC standing but never hides a real one.
 fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
     use daggy::petgraph::Graph;
     use daggy::petgraph::algo::tarjan_scc;
@@ -2513,11 +2656,14 @@ fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
     // Gather per-stmt I/O. Expanded by default (captures per-element
     // array deps); narrow mode uses base+last (what synthesis tools see).
     let narrow = std::env::var("VERYL_SCC_NARROW").is_ok();
-    let bitaware = std::env::var("VERYL_SCC_BITAWARE").is_ok();
     let fold = BigArrayFold::from_statements(sorted.iter());
     let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
     let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
-    let mut stmt_output_bits: Vec<Vec<(VarOffset, BitRange)>> = Vec::with_capacity(n);
+    // offset -> the bits this statement is known to touch, unioned.  The
+    // offset lists above stay the coverage authority: a range appears here
+    // only where it is known precisely, and anything absent is full width.
+    let mut read_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
+    let mut write_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
     for s in sorted {
         let mut ins = vec![];
         let mut outs = vec![];
@@ -2528,60 +2674,46 @@ fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
         }
         stmt_inputs.push(ins);
         stmt_outputs.push(outs);
-        if bitaware {
-            let mut bit_outs = vec![];
-            gather_bit_aware_outputs(s, &mut bit_outs);
-            stmt_output_bits.push(bit_outs);
-        } else {
-            stmt_output_bits.push(vec![]);
-        }
+
+        let mut bit_ins = vec![];
+        gather_bit_aware_inputs(s, &mut bit_ins);
+        read_bits.push(union_bit_ranges(bit_ins));
+        let mut bit_outs = vec![];
+        gather_bit_aware_outputs(s, &mut bit_outs);
+        write_bits.push(union_bit_ranges(bit_outs));
     }
 
-    // var → list of (writer stmt index, bit range for bit-aware mode).
-    // In non-bitaware mode, bit_range is always None and overlap is trivial.
+    // var → list of (writer stmt index, the bits it writes there).
     let mut writers: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
-    if bitaware {
-        for (i, outs) in stmt_output_bits.iter().enumerate() {
-            for &(off, br) in outs {
-                if off.is_ff() {
-                    continue;
-                }
-                writers.entry(off).or_default().push((i, br));
+    for (i, outs) in stmt_outputs.iter().enumerate() {
+        for &off in outs {
+            if off.is_ff() {
+                continue;
             }
-        }
-    } else {
-        for (i, outs) in stmt_outputs.iter().enumerate() {
-            for &off in outs {
-                if off.is_ff() {
-                    continue;
-                }
-                writers.entry(off).or_default().push((i, None));
-            }
+            let br = write_bits[i].get(&off).copied().flatten();
+            writers.entry(off).or_default().push((i, br));
         }
     }
 
     let mut graph: Graph<usize, ()> = Graph::new();
     let nodes: Vec<_> = (0..n).map(|i| graph.add_node(i)).collect();
     let mut edge_set: HashSet<(usize, usize)> = HashSet::default();
-    // For bit-aware mode, we need to know the reader's bit range for this
-    // offset. Currently ProtoExpression::Variable reads don't expose
-    // per-field select in gather_variable_offsets, so we conservatively
-    // treat reader ranges as None (= full width).  This still filters
-    // out false cycles that arise from multiple writers on non-overlapping
-    // bit slices, which is the common IR artifact.
+    // A → B only when the bits A writes are bits B reads.  Elements of a
+    // PACKED array share one `VarOffset`, so without the ranges a chain
+    // through `a[0] -> a[1] -> a[2]` closes into a cycle that no bit
+    // actually takes.
     for (reader, ins) in stmt_inputs.iter().enumerate() {
         for &off in ins {
             if off.is_ff() {
                 continue;
             }
+            let rbr = read_bits[reader].get(&off).copied().flatten();
             if let Some(ws) = writers.get(&off) {
                 for &(w, wbr) in ws {
                     if w == reader {
                         continue;
                     }
-                    if bitaware && !ranges_overlap(wbr, None) {
-                        // Reader range is None (full-width) so this should
-                        // never trigger, but kept for structural clarity.
+                    if !ranges_overlap(wbr, rbr) {
                         continue;
                     }
                     if edge_set.insert((w, reader)) {

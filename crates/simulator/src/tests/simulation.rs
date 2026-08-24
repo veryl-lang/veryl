@@ -22962,3 +22962,84 @@ fn a_case_deciding_a_request_and_its_next_state_is_not_one_scheduling_node() {
         }
     }
 }
+
+#[test]
+fn a_chain_through_a_packed_array_is_not_a_comb_cycle() {
+    // The three elements of a PACKED array share one `VarOffset`, so a chain
+    // that walks a[0] -> s[0] -> a[1] -> s[1] -> a[2] is a cycle at
+    // whole-variable granularity even though no bit ever reaches itself.
+    // The schedule is a single pass (it really is acyclic), so the debug
+    // assertion that pairs "SCC present" with "one pass" fired and the design
+    // could not run under a debug build at all -- the release build, with the
+    // assertion compiled out, simulated it correctly the whole time.
+    let code = r#"
+    module Cell (
+        a_di  : input  logic<8>,
+        carry : output logic   ,
+        sum_do: output logic<8>,
+    ) {
+        var sum_ext: logic<9>;
+        assign sum_ext = {1'b0, a_di} + 9'd1;
+        assign carry   = sum_ext[8];
+        assign sum_do  = sum_ext[7:0];
+    }
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        q  : output logic<8>,
+    ) {
+        var a : logic<3, 8>;
+        var s : logic<3, 8>;
+        var cy: logic<3>   ;
+        var qr: logic<8>   ;
+
+        assign q    = qr;
+        assign a[0] = qr;
+        assign a[1] = {s[0][6:0], ~s[0][7]};
+        assign a[2] = {s[1][6:0], ~s[1][7]};
+
+        for i in 0..3 :g {
+            inst u: Cell (
+                a_di  : a[i] ,
+                carry : cy[i],
+                sum_do: s[i] ,
+            );
+        }
+
+        always_ff {
+            if_reset {
+                qr = '0;
+            } else {
+                qr = {s[2][6:0], cy[0] ^ cy[1] ^ cy[2]};
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.nontrivial_comb_scc, 0,
+            "a packed-array chain is not a cycle (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for _ in 0..12 {
+            sim.step(&clk);
+        }
+        // each cycle adds 3 to the low byte through the three +1 cells
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x90, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
