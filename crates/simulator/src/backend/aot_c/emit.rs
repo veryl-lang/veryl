@@ -1280,6 +1280,7 @@ fn emit_wide_narrow_field_store(
     hi: usize,
     lo: usize,
     dst_width: usize,
+    se_from: Option<usize>,
     word_addr: impl Fn(usize) -> String,
 ) -> Option<String> {
     // Bits >= dst_width must be dropped — the reference paths do so (interpret
@@ -1296,6 +1297,15 @@ fn emit_wide_narrow_field_store(
     debug_assert!(nbits <= 64);
     let mut pre = String::new();
     let sv = wide_shift_amount(expr, &mut pre)?; // source's low 64 bits
+    // The store clips to the field, so for a field of at most a word,
+    // extending the signed RHS to 64 bits lands the same bits.
+    let sv = match se_from {
+        Some(w) if w > 0 && w < 64 => {
+            let sh = 64 - w;
+            format!("((uint64_t)(((int64_t)(((uint64_t)({sv})) << {sh})) >> {sh}))")
+        }
+        _ => sv,
+    };
     let k0 = lo / 64;
     let k1 = hi / 64;
     let b = lo % 64;
@@ -6066,11 +6076,6 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // rhs_select (field extract + store); the rhs_select + dst-select
             // combination stays on Cranelift.
             if a.dst_width > 128 || (a.dst_width > 64 && eff_expr.builds_wide_pointer()) {
-                // A sign-extending RHS combined with a dst bit-select isn't
-                // modelled here — only the plain-store arm sign-extends.
-                if se_from.is_some() && a.select.is_some() {
-                    return None;
-                }
                 let VarOffset::Comb(store_off) = a.dst else {
                     return None;
                 };
@@ -6130,19 +6135,41 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     // <=64-bit field → scalar word RMW (see
                     // emit_wide_narrow_field_store); wider fields fall through.
                     if nbits <= 64 {
-                        return emit_wide_narrow_field_store(eff_expr, hi, lo, a.dst_width, |k| {
-                            format!(
-                                "(veryl_u64_ua*)(comb_values + {:#x})",
-                                store_off + (k as isize) * 8
-                            )
-                        });
+                        return emit_wide_narrow_field_store(
+                            eff_expr,
+                            hi,
+                            lo,
+                            a.dst_width,
+                            se_from,
+                            |k| {
+                                format!(
+                                    "(veryl_u64_ua*)(comb_values + {:#x})",
+                                    store_off + (k as isize) * 8
+                                )
+                            },
+                        );
                     }
                     // General multi-word field — full wide RMW; see
                     // emit_wide_select_rmw_store.
                     let mut pre = String::new();
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
+                    // Same sign extension as the scalar field path: fill from
+                    // the RHS's own width so the field's upper bits carry the
+                    // sign, then let the RMW take the low `nbits`.
+                    let src = match se_from {
+                        Some(w) => {
+                            let t = next_wide_tmp();
+                            pre.push_str(&format!(
+                                "uint64_t _w{t}[{nw}]; \
+                                 vw_sext_copy((uint8_t*)_w{t}, {src}, {w}u, {nb}u); ",
+                                src = r.addr,
+                            ));
+                            format!("((uint8_t*)_w{t})")
+                        }
+                        None => r.addr.clone(),
+                    };
                     return Some(emit_wide_select_rmw_store(
-                        &r.addr,
+                        &src,
                         pre,
                         &dst,
                         nw,
@@ -6635,7 +6662,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     // <=64-bit field → scalar word RMW of the runtime-addressed
                     // element; see emit_wide_narrow_field_store.
                     if nbits <= 64 {
-                        emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, |k| {
+                        emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, None, |k| {
                             format!("(veryl_u64_ua*)(_pa + {})", k * 8)
                         })?
                     } else {
@@ -9707,23 +9734,103 @@ mod tests {
         );
     }
 
+    /// Emit `assign` alone, run it over a 256-byte comb preloaded with
+    /// `src_bits` at offset 0, and return the destination's 32 bytes.
+    fn run_wide_field_store(
+        assign: ProtoStatement,
+        what: &str,
+        src_bits: u128,
+    ) -> Option<[u8; 32]> {
+        let src = emit_function(&[assign]).expect("the store must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_{what}_{}", std::process::id()));
+        let module = compile_for_test(&tmp, &src, what)?;
+        let mut ff = vec![0u8; 32];
+        let mut comb = vec![0u8; 256];
+        comb[0..16].copy_from_slice(&src_bits.to_le_bytes());
+        let mut log = vec![0u64; 32];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&comb[64..96]);
+        let _ = fs::remove_dir_all(&tmp);
+        Some(out)
+    }
+
+    /// Read `[hi:lo]` (at most 128 bits) out of a little-endian byte span.
+    fn field_of(bytes: &[u8; 32], hi: usize, lo: usize) -> u128 {
+        let mut v = 0u128;
+        for b in (lo..=hi).rev() {
+            v = (v << 1) | ((bytes[b / 8] >> (b % 8)) & 1) as u128;
+        }
+        v
+    }
+
     #[test]
-    fn emit_sign_extending_store_with_dst_select_declines() {
-        // The plain-store arm is the only one that sign-extends, so the same
-        // signed RHS combined with a dst bit-select must decline rather than
-        // store an unextended value.
-        let src = var_expr_signed(VarOffset::Comb(0), 100);
+    fn emit_sign_extending_store_fills_a_multi_word_dst_select() {
+        // A signed 100-bit RHS into a 111-bit field: bits 100..110 must carry
+        // the sign, which the unextended value would leave zero.
+        if !cc_available() {
+            eprintln!("emit_sign_extending_store_fills_a_multi_word_dst_select: no cc");
+            return;
+        }
         let assign = ProtoStatement::Assign(ProtoAssignStatement {
             dst: VarOffset::Comb(64),
             dst_width: 200,
-            select: Some((150, 40)),
+            select: Some((150, 40)), // 111-bit field
             dynamic_select: None,
             rhs_select: None,
-            expr: src,
+            expr: var_expr_signed(VarOffset::Comb(0), 100),
             dst_ff_current_offset: 0,
             token: dummy_token(),
         });
-        assert!(emit_function(&[assign]).is_none());
+        // -6 in 100-bit two's complement.
+        let neg6 = ((1u128 << 100) - 6) & ((1u128 << 100) - 1);
+        let Some(dst) = run_wide_field_store(assign, "wsx_multi", neg6) else {
+            return;
+        };
+        assert_eq!(field_of(&dst, 139, 40), neg6, "the value itself landed");
+        assert_eq!(
+            field_of(&dst, 150, 140),
+            (1u128 << 11) - 1,
+            "the field's bits above the RHS width carry the sign"
+        );
+        assert_eq!(field_of(&dst, 39, 0), 0, "below the field is untouched");
+        assert_eq!(field_of(&dst, 190, 151), 0, "above the field is untouched");
+    }
+
+    #[test]
+    fn emit_sign_extending_store_fills_a_single_word_dst_select() {
+        // Same rule for a field of at most a word, which takes the scalar
+        // read-modify-write path instead of the wide-op RMW.
+        if !cc_available() {
+            eprintln!("emit_sign_extending_store_fills_a_single_word_dst_select: no cc");
+            return;
+        }
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(64),
+            dst_width: 200,
+            select: Some((105, 66)), // 40-bit field
+            dynamic_select: None,
+            rhs_select: None,
+            expr: var_expr_signed(VarOffset::Comb(0), 8),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let Some(dst) = run_wide_field_store(assign, "wsx_single", 0xfb) else {
+            return; // 8-bit -5
+        };
+        assert_eq!(
+            field_of(&dst, 105, 66),
+            (1u128 << 40) - 5,
+            "-5 fills the whole 40-bit field, not just its low byte"
+        );
+        assert_eq!(field_of(&dst, 65, 0), 0, "below the field is untouched");
     }
 
     /// `{0{sub}}` — a replication whose count folded to zero.
