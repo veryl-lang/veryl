@@ -88,6 +88,43 @@ pub(crate) fn const_array_element_exprs(
     )
 }
 
+/// An array literal wired straight to an unpacked-array port, e.g.
+/// `inst u: Sub (p: '{default: '0})`.  The literal carries no width of its
+/// own, so it takes the child port's shape; the generic expression conversion
+/// has no `ArrayLiteral` arm.  `None` unless one expression lands per element.
+pub(crate) fn array_literal_element_exprs(
+    context: &mut Context,
+    expr: &air::Expression,
+    r#type: &air::Type,
+    elements: usize,
+) -> Option<Vec<ProtoExpression>> {
+    if !matches!(expr, air::Expression::ArrayLiteral(..)) {
+        return None;
+    }
+    let mut expr = expr.clone();
+    let array_exprs = eval_array_literal(
+        &mut context.scope().analyzer_context,
+        Some(&r#type.array),
+        Some(r#type.width()),
+        &mut expr,
+    )
+    .ok()??;
+
+    // The expansion emits one entry per element in flattened order, so the
+    // k-th entry belongs to the k-th element.  A non-empty `select` means the
+    // literal filled a packed vector rather than the array; that is not this
+    // wiring.
+    if array_exprs.len() != elements || array_exprs.iter().any(|x| !x.select.is_empty()) {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(elements);
+    for array_expr in &array_exprs {
+        out.push(Conv::conv(context, &array_expr.expr).ok()?);
+    }
+    Some(out)
+}
+
 #[derive(Clone)]
 pub enum ProtoStatementBlock {
     Interpreted(Vec<ProtoStatement>),

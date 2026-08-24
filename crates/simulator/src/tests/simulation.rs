@@ -22574,3 +22574,42 @@ fn a_constant_index_write_after_a_dynamic_one_does_not_erase_it() {
         }
     }
 }
+
+#[test]
+fn an_array_literal_wired_to_a_port_reaches_every_element() {
+    // An array literal takes its shape from the destination, which for a port
+    // connection is the child's port.  Without that it reaches the generic
+    // expression conversion, which has no `ArrayLiteral` arm and panics —
+    // `build` and `check` stay clean, only the native simulator dies.
+    let code = r#"
+    module Sub (
+        a: input  logic<8> [4],
+        y: output logic<8>    ,
+    ) {
+        assign y = a[0] ^ a[1] ^ a[2] ^ a[3];
+    }
+    module Top (
+        y: output logic<8>,
+    ) {
+        inst u: Sub (
+            a: '{8'h12, 8'h34, default: 8'h56},
+            y: y                              ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(0x12 ^ 0x34 ^ 0x56 ^ 0x56, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
