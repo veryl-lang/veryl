@@ -41,6 +41,26 @@ fn is_unexpandable_modport(context: &mut Context, symbol: &Symbol) -> bool {
                         }
                     }
 
+                    // Only variable members become ports, so an import member at
+                    // the end can leave a guarded one last, where its comma has
+                    // nothing to vanish with.
+                    let expanded = |x: &Symbol| {
+                        let SymbolKind::ModportVariableMember(m) = &x.kind else {
+                            return false;
+                        };
+                        symbol_table::get(m.variable)
+                            .is_some_and(|x| matches!(x.kind, SymbolKind::Variable(_)))
+                    };
+                    if modport
+                        .members
+                        .iter()
+                        .filter_map(|x| symbol_table::get(*x))
+                        .rfind(expanded)
+                        .is_some_and(|x| !symbol_table::modport_member_conditions(&x).is_empty())
+                    {
+                        return true;
+                    }
+
                     if let Some(symbol) = symbol_table::get(modport.interface) {
                         let SymbolKind::Interface(x) = symbol.kind else {
                             unreachable!()

@@ -9,7 +9,6 @@ fn assert_interface_function_comb_loop(code: &str, expected: bool) {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; interface function member read"]
 fn comb_loop_interface_function_read_detects_member_feedback() {
     assert_interface_function_comb_loop(
         r#"
@@ -174,7 +173,6 @@ fn connected_interface_function_code(top_declarations: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; connected sink getter feeds its source"]
 fn comb_loop_connect_detects_interface_function_member_read_feedback() {
     assert_interface_function_comb_loop(
         &connected_interface_function_code(
@@ -199,7 +197,6 @@ fn comb_loop_connect_keeps_interface_function_member_read_one_way() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; connected sink setter feeds its source"]
 fn comb_loop_connect_detects_interface_function_member_write_feedback() {
     assert_interface_function_comb_loop(
         &connected_interface_function_code(
@@ -226,7 +223,6 @@ fn comb_loop_connect_keeps_interface_function_member_write_one_way() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; same receiver interface get-to-put feedback"]
 fn comb_loop_external_interface_get_to_put_detects_same_receiver_feedback() {
     let code = format!(
         r#"
@@ -243,7 +239,29 @@ fn comb_loop_external_interface_get_to_put_detects_same_receiver_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; cross-receiver interface function feedback"]
+#[ignore = "comb-loop follow-up: false negative; disjoint interface member writes require positional procedure SSA"]
+fn comb_loop_external_interface_disjoint_followup_write_preserves_same_bit_feedback() {
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var value: logic[2];
+            function get0 () -> logic { return value[0]; }
+            function put0 (next: input logic) { value[0] = next; }
+            function put1 (next: input logic) { value[1] = next; }
+        }
+        module Top {
+            inst bus: Bus;
+            always_comb {
+                bus.put0(bus.get0());
+                bus.put1(0);
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn comb_loop_external_interface_get_to_put_detects_cross_receiver_feedback() {
     let code = format!(
         r#"
@@ -296,7 +314,6 @@ fn comb_loop_external_interface_read_preserves_receiver_identity() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; same interface function array element feedback"]
 fn comb_loop_interface_function_array_detects_same_element_feedback() {
     let code = format!(
         r#"
@@ -331,7 +348,6 @@ fn comb_loop_interface_function_array_keeps_one_way_elements_loop_free() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; cross-element interface function array feedback"]
 fn comb_loop_interface_function_array_detects_cross_element_feedback() {
     let code = format!(
         r#"
@@ -349,7 +365,6 @@ fn comb_loop_interface_function_array_detects_cross_element_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; interface function captured read in control flow"]
 fn comb_loop_external_interface_function_control_detects_member_feedback() {
     let code = format!(
         r#"
@@ -370,7 +385,6 @@ fn comb_loop_external_interface_function_control_detects_member_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; interface function captured read in instance actual"]
 fn comb_loop_external_interface_function_instance_actual_detects_feedback() {
     let code = format!(
         r#"
@@ -422,7 +436,6 @@ fn comb_loop_modport_formal_get_to_put_detects_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; interface function captured read through output"]
 fn comb_loop_interface_function_output_detects_captured_member_feedback() {
     assert_interface_function_comb_loop(
         r#"
@@ -485,7 +498,6 @@ fn comb_loop_uncalled_interface_function_adds_no_member_dependency() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; inherited interface function member read"]
 fn comb_loop_mixed_interface_function_detects_inherited_member_feedback() {
     assert_interface_function_comb_loop(
         r#"
@@ -508,7 +520,6 @@ fn comb_loop_mixed_interface_function_detects_inherited_member_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; nested interface function member read"]
 fn comb_loop_nested_interface_function_detects_transitive_member_read() {
     assert_interface_function_comb_loop(
         r#"
@@ -552,7 +563,6 @@ fn specialized_interface_function_code(enabled: bool) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; enabled interface function specialization read"]
 fn comb_loop_enabled_interface_function_specialization_reads_member() {
     assert_interface_function_comb_loop(&specialized_interface_function_code(true), true);
 }

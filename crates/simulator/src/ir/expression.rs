@@ -1,4 +1,5 @@
 use crate::HashMap;
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
 use crate::ir::variable::{
     VarOffset, is_wide_ptr, native_bytes as calc_native_bytes, read_native_value, value_size,
@@ -521,7 +522,16 @@ impl ProtoExpression {
     /// (`dup_assign_dce`) so a runtime-indexed read keeps every element it
     /// could touch alive. Not used by `analyze_dependency` (which keeps the
     /// O(N²)-avoiding base+last encoding).
-    pub fn gather_variable_offsets_expanded(&self, inputs: &mut Vec<VarOffset>) {
+    ///
+    /// `fold` names the arrays too large to expand element by element; both
+    /// their dynamic accesses and static element reads come out as the array
+    /// base instead, so the caller's offset map still sees them alias.  See
+    /// [`BigArrayFold`].
+    pub fn gather_variable_offsets_expanded(
+        &self,
+        fold: &BigArrayFold,
+        inputs: &mut Vec<VarOffset>,
+    ) {
         match self {
             ProtoExpression::HierVariable(_) => {
                 unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
@@ -531,20 +541,22 @@ impl ProtoExpression {
                 dynamic_select,
                 ..
             } => {
-                inputs.push(*var_offset);
+                inputs.push(fold.canon(*var_offset));
                 if let Some(dyn_sel) = dynamic_select {
-                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                    dyn_sel
+                        .index_expr
+                        .gather_variable_offsets_expanded(fold, inputs);
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets_expanded(inputs),
+            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets_expanded(fold, inputs),
             ProtoExpression::Binary { x, y, .. } => {
-                x.gather_variable_offsets_expanded(inputs);
-                y.gather_variable_offsets_expanded(inputs);
+                x.gather_variable_offsets_expanded(fold, inputs);
+                y.gather_variable_offsets_expanded(fold, inputs);
             }
             ProtoExpression::Concatenation { elements, .. } => {
                 for (expr, _, _) in elements {
-                    expr.gather_variable_offsets_expanded(inputs);
+                    expr.gather_variable_offsets_expanded(fold, inputs);
                 }
             }
             ProtoExpression::Ternary {
@@ -553,9 +565,9 @@ impl ProtoExpression {
                 false_expr,
                 ..
             } => {
-                cond.gather_variable_offsets_expanded(inputs);
-                true_expr.gather_variable_offsets_expanded(inputs);
-                false_expr.gather_variable_offsets_expanded(inputs);
+                cond.gather_variable_offsets_expanded(fold, inputs);
+                true_expr.gather_variable_offsets_expanded(fold, inputs);
+                false_expr.gather_variable_offsets_expanded(fold, inputs);
             }
             ProtoExpression::DynamicVariable {
                 base_offset,
@@ -565,9 +577,18 @@ impl ProtoExpression {
                 dynamic_select,
                 ..
             } => {
-                index_expr.gather_variable_offsets_expanded(inputs);
+                index_expr.gather_variable_offsets_expanded(fold, inputs);
                 if let Some(dyn_sel) = dynamic_select {
-                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                    dyn_sel
+                        .index_expr
+                        .gather_variable_offsets_expanded(fold, inputs);
+                }
+                // A folded array names its base once; every static element
+                // access canonicalises to that same offset above, so the
+                // aliasing the expansion existed to expose survives.
+                if fold.covers(*base_offset) {
+                    inputs.push(*base_offset);
+                    return;
                 }
                 for i in 0..*num_elements {
                     let off = VarOffset::new(
@@ -576,6 +597,81 @@ impl ProtoExpression {
                     );
                     inputs.push(off);
                 }
+            }
+        }
+    }
+
+    /// True when this expression reads `off`, a dynamic array access whose
+    /// span reaches it included.
+    ///
+    /// Same answer as scanning `gather_variable_offsets_expanded`, but it asks
+    /// each dynamic read whether its span contains `off` rather than listing
+    /// every element the read can reach, so the work is proportional to the
+    /// expression instead of to the array.
+    pub fn reads_offset(&self, off: VarOffset) -> bool {
+        let mut ranges: Vec<(bool, isize, isize, usize)> = Vec::new();
+        self.gather_dynamic_read_ranges(&mut ranges);
+        let raw = off.raw();
+        let in_span = ranges.iter().any(|&(is_ff, base, stride, num_elements)| {
+            is_ff == off.is_ff()
+                && stride > 0
+                && raw >= base
+                && raw < base.saturating_add(stride.saturating_mul(num_elements as isize))
+                && (raw - base) % stride == 0
+        });
+        if in_span {
+            return true;
+        }
+        // Everything else — plain reads, index sub-expressions, and the
+        // base/last summary of an array the ranges above already cover.
+        let mut offs: Vec<VarOffset> = Vec::new();
+        self.gather_variable_offsets(&mut offs);
+        offs.contains(&off)
+    }
+
+    /// Record every dynamically-indexed array this expression reaches, so
+    /// [`BigArrayFold`] can decide which are large enough to fold.
+    pub fn collect_big_arrays(&self, fold: &mut BigArrayFold) {
+        match self {
+            ProtoExpression::HierVariable(_) | ProtoExpression::Value { .. } => (),
+            ProtoExpression::Variable { dynamic_select, .. } => {
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.collect_big_arrays(fold);
+                }
+            }
+            ProtoExpression::Unary { x, .. } => x.collect_big_arrays(fold),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.collect_big_arrays(fold);
+                y.collect_big_arrays(fold);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.collect_big_arrays(fold);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.collect_big_arrays(fold);
+                true_expr.collect_big_arrays(fold);
+                false_expr.collect_big_arrays(fold);
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                stride,
+                index_expr,
+                num_elements,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.collect_big_arrays(fold);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.collect_big_arrays(fold);
+                }
+                fold.record(*base_offset, *stride, *num_elements);
             }
         }
     }
@@ -1213,13 +1309,12 @@ impl ProtoExpression {
         }
     }
 
-    /// SystemVerilog evaluates an assignment RHS at the destination width, so
-    /// a bare narrower signed RHS sign-extends at the store; operators already
-    /// extend to the context width, so only leaf reads/literals reach the store
-    /// at natural width. Bit/part-selects are unsigned per the LRM, so selected
-    /// leaves are exempt. All backends must key their store paths on this identically.
-    pub fn store_sign_extend_from(&self, dst_width: usize) -> Option<usize> {
-        let (width, signed) = match self {
+    /// The leaf a store sees, as `(width, signed)`.  Operators already extend
+    /// to the context width, so only leaf reads/literals reach a store at
+    /// their natural width; bit/part-selects are unsigned per the LRM, so
+    /// selected leaves are exempt.
+    fn store_leaf(&self) -> Option<(usize, bool)> {
+        match self {
             ProtoExpression::Variable {
                 width,
                 select: None,
@@ -1233,18 +1328,32 @@ impl ProtoExpression {
                 dynamic_select: None,
                 expr_context,
                 ..
-            } => (*width, expr_context.signed),
-            ProtoExpression::Value { value, width, .. } => (*width, value.signed()),
+            } => Some((*width, expr_context.signed)),
+            ProtoExpression::Value { value, width, .. } => Some((*width, value.signed())),
             // A concatenation is unsigned per the LRM, but `$signed({..})` marks
             // it signed and it reaches the store at its natural width too.
             ProtoExpression::Concatenation {
                 width,
                 expr_context,
                 ..
-            } => (*width, expr_context.signed),
-            _ => return None,
-        };
+            } => Some((*width, expr_context.signed)),
+            _ => None,
+        }
+    }
+
+    /// SystemVerilog evaluates an assignment RHS at the destination width, so
+    /// a bare narrower signed RHS sign-extends at the store.  All backends
+    /// must key their store paths on this identically.
+    pub fn store_sign_extend_from(&self, dst_width: usize) -> Option<usize> {
+        let (width, signed) = self.store_leaf()?;
         (signed && width > 0 && width < dst_width).then_some(width)
+    }
+
+    /// Whether the store's sign extension applies at any wider destination.
+    /// Such an expression is bound to the width it was stored at: moved to a
+    /// wider one it would be re-signed.
+    pub fn is_signed_store_leaf(&self) -> bool {
+        matches!(self.store_leaf(), Some((width, true)) if width > 0)
     }
 
     /// # Safety

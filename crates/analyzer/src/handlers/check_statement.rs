@@ -54,22 +54,27 @@ impl VerylGrammarTrait for CheckStatement {
     }
 
     fn assignment(&mut self, arg: &Assignment) -> Result<(), ParolError> {
-        if let HandlerPoint::Before = self.point
-            && ((self.in_initial && !self.in_test_module) || self.in_final)
-        {
-            let (kind, token) = match &*arg.assignment_group {
-                AssignmentGroup::Equ(x) => ("assignment", &x.equ.equ_token.token),
-                AssignmentGroup::AssignmentOperator(x) => (
-                    "assignment",
-                    &x.assignment_operator.assignment_operator_token.token,
-                ),
-                AssignmentGroup::DiamondOperator(x) => (
-                    "connection",
-                    &x.diamond_operator.diamond_operator_token.token,
-                ),
-            };
-            self.errors
-                .push(AnalyzerError::invalid_statement(kind, &token.into()));
+        if let HandlerPoint::Before = self.point {
+            // Assignment in `initial` is checked during IR conversion instead,
+            // where the target resolves and can opt in with
+            // `#[allow(initial_assign)]`; a connection has no such opt-in.
+            let connection = matches!(&*arg.assignment_group, AssignmentGroup::DiamondOperator(_));
+
+            if self.in_final || (self.in_initial && !self.in_test_module && connection) {
+                let (kind, token) = match &*arg.assignment_group {
+                    AssignmentGroup::Equ(x) => ("assignment", &x.equ.equ_token.token),
+                    AssignmentGroup::AssignmentOperator(x) => (
+                        "assignment",
+                        &x.assignment_operator.assignment_operator_token.token,
+                    ),
+                    AssignmentGroup::DiamondOperator(x) => (
+                        "connection",
+                        &x.diamond_operator.diamond_operator_token.token,
+                    ),
+                };
+                self.errors
+                    .push(AnalyzerError::invalid_statement(kind, &token.into()));
+            }
         }
         Ok(())
     }

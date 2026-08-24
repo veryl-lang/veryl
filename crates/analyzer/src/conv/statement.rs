@@ -1,17 +1,19 @@
 use crate::analyzer_error::{ComponentInterfaceMismatchKind, MismatchTypeKind};
+use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::utils::{
     TbMethodCallPosition, TypePosition, argument_list, assign_rhs_context_type, build_for_range,
-    build_for_statement, case_patterns, check_assign_clock_domain, eval_array_range_assign,
-    eval_assign_statement, eval_expr, eval_variable, expand_connect, expand_connect_const,
-    function_call, get_return_str, hoist_component_method_call, single_function_call_factor,
-    switch_condition, tb_method_call, try_infer_decl_type, try_infer_var_assign,
+    build_for_statement, case_patterns, check_assign_before_definition, check_assign_clock_domain,
+    eval_array_range_assign, eval_assign_statement, eval_expr, eval_variable, expand_connect,
+    expand_connect_const, function_call, get_return_str, hoist_component_method_call,
+    single_function_call_factor, switch_condition, tb_method_call, try_infer_decl_type,
+    try_infer_var_assign,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
     self, Comptime, IrResult, Shape, TypeKind, VarIndex, VarKind, VarPath, VarPathSelect, VarSelect,
 };
 use crate::namespace::DefineContext;
-use crate::symbol::{Affiliation, SymbolKind};
+use crate::symbol::SymbolKind;
 use crate::symbol_table;
 use crate::{AnalyzerError, ir_error};
 use veryl_parser::token_range::TokenRange;
@@ -165,16 +167,11 @@ impl Conv<&ConcatenationAssignment> for ir::StatementBlock {
             if let Some(x) = x.to_assign_destination(context, false) {
                 dst.push(x);
             } else {
-                if let Ok(symbol) = symbol_table::resolve(item.hierarchical_identifier.as_ref())
-                    && let SymbolKind::Variable(x) = &symbol.found.kind
-                    && x.affiliation == Affiliation::Module
-                {
-                    let ident_token = ident.identifier.identifier_token.token;
-                    context.insert_error(AnalyzerError::referring_before_definition(
-                        &ident_token.text.to_string(),
-                        &ident_token.into(),
-                    ));
-                }
+                check_assign_before_definition(
+                    context,
+                    item.hierarchical_identifier.as_ref(),
+                    ident.identifier.identifier_token.token,
+                );
                 return Err(ir_error!(token));
             }
         }
@@ -365,6 +362,8 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                                 eval_assign_statement(context, &mut dst, &mut expr, token)?;
                             Ok(ir::StatementBlock(statements))
                         } else {
+                            check_assign_before_definition(context, expr, expr.identifier().token);
+
                             // check expression even if dst can't be determined
                             let _ = eval_expr(context, None, &x.assignment.expression, false)?;
 
@@ -411,6 +410,8 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             let statement = ir::Statement::Assign(statement);
                             Ok(ir::StatementBlock(vec![statement]))
                         } else {
+                            check_assign_before_definition(context, expr, expr.identifier().token);
+
                             // check expression even if dst can't be determined
                             let _ = eval_expr(context, None, &x.assignment.expression, false)?;
 
@@ -471,6 +472,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                     SymbolKind::SystemFunction(_) => {
                         let name = symbol.found.token.text;
                         let args = args.to_system_function_args(context, &symbol.found);
+                        check_initial_assign_system_function_args(context, &symbol.found, &args);
                         let ret = ir::SystemFunctionCall::new(context, name, args, token)?;
                         Ok(ir::StatementBlock(vec![ir::Statement::SystemFunctionCall(
                             Box::new(ret),

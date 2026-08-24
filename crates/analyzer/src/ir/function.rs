@@ -1,4 +1,5 @@
 use crate::conv::Context;
+use crate::conv::checker::portability::allow_multiple_assign;
 use crate::conv::utils::{
     check_compatibility, check_implicit_clock_conversion, eval_array_literal,
 };
@@ -191,7 +192,7 @@ impl FunctionCall {
         for (path, expr) in &self.inputs {
             let id = func.arg_map.get(path)?;
             let value = expr.eval_value(context)?;
-            let var = context.variables.get_mut(id)?;
+            let var = context.variable_mut(id)?;
             var.set_value(&[], value, None);
         }
 
@@ -266,7 +267,10 @@ impl FunctionCall {
                             false,
                             self.comptime.token,
                         );
-                        if !success & assign_context.is_ff() {
+                        if !success
+                            && assign_context.is_ff()
+                            && !allow_multiple_assign(context, dst.id)
+                        {
                             context.insert_error(AnalyzerError::multiple_assignment(
                                 &variable.path.to_string(),
                                 &self.comptime.token,

@@ -335,7 +335,7 @@ impl Statement {
             Statement::For(x) => {
                 if let Some(iter) = x.range.eval_iter(context) {
                     'outer: for i in iter {
-                        if let Some(var) = context.variables.get_mut(&x.var_id)
+                        if let Some(var) = context.variable_mut(&x.var_id)
                             && let Some(total_width) = x.var_type.total_width()
                         {
                             let val = Value::new(i as u64, total_width, x.var_type.signed);
@@ -792,7 +792,7 @@ impl AssignStatement {
                     self.dst[0]
                         .select
                         .eval_value(context, &self.dst[0].comptime.r#type, false)
-                && let Some(variable) = context.variables.get_mut(&self.dst[0].id)
+                && let Some(variable) = context.variable_mut(&self.dst[0].id)
             {
                 variable.set_value(&index, value, Some((beg, end)));
             }

@@ -460,7 +460,7 @@ impl CreateSymbolTable {
     }
 
     fn insert_reference_functions(&mut self, id: SymbolId) {
-        let funcs = self.reference_functions.drain(..).collect();
+        let funcs = std::mem::take(&mut self.reference_functions);
         symbol_table::add_reference_functions(id, funcs);
     }
 
@@ -1138,6 +1138,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         Direction::Import(_) => {
                             let property = ModportFunctionMemberProperty {
                                 function: SymbolId::default(),
+                                generated_from: None,
                             };
                             SymbolKind::ModportFunctionMember(property)
                         }
@@ -1147,6 +1148,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                             let property = ModportVariableMemberProperty {
                                 direction,
                                 variable: SymbolId::default(),
+                                generated_from: None,
                             };
                             SymbolKind::ModportVariableMember(property)
                         }
@@ -1533,7 +1535,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             HandlerPoint::After => {
                 let parameter = arg.identifier.identifier_token.token;
                 let identifiers = if arg.inst_parameter_item_opt.is_some() {
-                    self.connect_target_identifiers.drain(0..).collect()
+                    std::mem::take(&mut self.connect_target_identifiers)
                 } else {
                     vec![ConnectTargetIdentifier {
                         path: vec![(parameter.text, vec![])],
@@ -1563,7 +1565,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             HandlerPoint::After => {
                 let port = arg.identifier.identifier_token.token;
                 let identifiers = if arg.inst_port_item_opt.is_some() {
-                    self.connect_target_identifiers.drain(0..).collect()
+                    std::mem::take(&mut self.connect_target_identifiers)
                 } else {
                     vec![ConnectTargetIdentifier {
                         path: vec![(port.text, vec![])],
@@ -2154,7 +2156,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.pop_reference_candidates();
 
                 let (generic_parameters, generic_consts) = self.generic_context.pop();
-                let mixin_sources: Vec<_> = self.mixin_sources.drain(..).collect();
+                let mixin_sources: Vec<_> = std::mem::take(&mut self.mixin_sources);
                 let parameters: Vec<_> = self.parameters.pop().unwrap();
 
                 let proto = if let Some(x) = arg.interface_declaration_opt0.as_ref() {
@@ -2179,7 +2181,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     generic_references: vec![],
                     mixin_sources,
                     parameters,
-                    members: self.declaration_items.drain(..).collect(),
+                    members: std::mem::take(&mut self.declaration_items),
                     definition: Some(definition),
                 };
                 if let Some(id) = self.insert_symbol(
@@ -2236,7 +2238,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     generic_parameters,
                     generic_consts,
                     generic_references: vec![],
-                    members: self.declaration_items.drain(..).collect(),
+                    members: std::mem::take(&mut self.declaration_items),
                 };
                 if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
@@ -2376,7 +2378,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     generic_references: vec![],
                     mixin_sources: vec![],
                     parameters,
-                    members: self.declaration_items.drain(..).collect(),
+                    members: std::mem::take(&mut self.declaration_items),
                     definition: None,
                 };
                 self.insert_symbol(
@@ -2412,7 +2414,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     generic_parameters: vec![],
                     generic_consts: vec![],
                     generic_references: vec![],
-                    members: self.declaration_items.drain(..).collect(),
+                    members: std::mem::take(&mut self.declaration_items),
                 };
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,

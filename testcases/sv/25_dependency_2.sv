@@ -3,6 +3,9 @@
 
 
 module veryl_testcase_Module25A
+
+
+
     import veryl_sample4___bar_pkg__32::*;
     import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C__veryl_testcase___Package25__2_C::*;
 (
@@ -34,6 +37,9 @@ module veryl_testcase_Module25A
 endmodule
 
 module veryl_testcase___Module25B____Package25__1
+
+
+
     import veryl_testcase___Package25__1::*;
 (
     veryl_sample4___qux_if__veryl_testcase___Package25__1_S.mp if3,
@@ -59,11 +65,17 @@ module veryl_testcase___Module25B____Package25__1
 endmodule
 
 module veryl_testcase___Module25C____Package25__1_C;
+
+
+
     veryl_sample4___quu_module__veryl_testcase___Package25__1_C u5 ();
 endmodule
 
 
 module veryl_testcase_Module25D;
+
+
+
     veryl_sample4___qux_if__veryl_testcase___Package25__1_S qux_if     ();
     always_comb qux_if.qux = 0;
     veryl_testcase___Module25B____Package25__1 u6 (
@@ -76,11 +88,18 @@ module veryl_testcase_Module25D;
 endmodule
 
 module veryl_testcase_Module25E;
+
+
+
     localparam int unsigned QUX_0 = veryl_sample4_qux_pkg::QUX_0;
     localparam int unsigned QUX_1 = veryl_sample5_qux_pkg::QUX_1;
 endmodule
 
-module veryl_testcase_Module25F #(
+module veryl_testcase_Module25F
+
+
+
+#(
     parameter int unsigned WIDTH = 8
 ) (
     input  var logic [WIDTH-1:0] i_a,
@@ -101,6 +120,9 @@ module veryl_testcase_Module25F #(
 endmodule
 
 module veryl_testcase_Module25G;
+
+
+
     import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C__veryl_testcase___Package25__2_C::BAZ_0;
     import veryl_sample4___baz_pkg__veryl_testcase___Package25__1_C__veryl_testcase___Package25__2_C::BAZ_1;
 
@@ -127,9 +149,15 @@ package veryl_testcase_Pacakge25H;
 
 
 
+
+
+
 endpackage
 
 module veryl_testcase_Module25I;
+
+
+
 
 
 
@@ -143,6 +171,9 @@ module veryl_testcase_Module25I;
 endmodule
 
 module veryl_testcase_Module25J;
+
+
+
 
 
 
@@ -161,6 +192,9 @@ endmodule
 module veryl_testcase_Module25K;
     // the reverse: guarded import, unguarded reference
 
+
+
+
     `ifdef DEFINE_A
 
     `endif
@@ -170,5 +204,98 @@ module veryl_testcase_Module25K;
     veryl_sample4___baz_module__veryl_sample4___baz_pkg__veryl_sample4___baz_pkg__1__2_BAZ_0__3 u (
         .baz (baz)
     );
+endmodule
+
+// Importing a package namespace itself makes the package name usable as a
+// qualifier at the use site.
+// https://github.com/veryl-lang/veryl/issues/3122
+
+
+
+module veryl_testcase_Module25L;
+
+
+
+    localparam int unsigned QUX_0 = veryl_sample4_qux_pkg::QUX_0;
+    localparam int unsigned QUX_1 = veryl_sample4_qux_pkg::QUX_1;
+endmodule
+
+module veryl_testcase_Module25M;
+    // Module-scope import of a package namespace.
+
+
+
+
+
+    localparam int unsigned QUX_0 = veryl_sample4_qux_pkg::QUX_0;
+endmodule
+
+module veryl_testcase_Module25N;
+    // A generic package is imported as-is and instantiated at the use site.
+
+
+
+    localparam int unsigned BAR = veryl_sample4___bar_pkg__32::BAR;
+endmodule
+
+// Interfaces and modules can also be imported under their own names.
+// https://github.com/veryl-lang/veryl/issues/1588
+
+module veryl_testcase_Module25O
+
+
+
+
+(
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S.mp ifp
+);
+    // An interface is imported as-is; modport members stay qualified.
+
+    veryl_sample4___qux_if__veryl_testcase___Package25__1_S u_if       ();
+    always_comb u_if.qux.s = 0;
+    logic _a        ; always_comb _a         = ifp.qux.s;
+endmodule
+
+module veryl_testcase_Module25P;
+    // Modules are imported as-is and instantiated at the use site.
+
+
+
+
+
+
+
+    veryl_sample4___foo_module__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR                              u0 ();
+    veryl_sample4___bar_module__veryl_sample4___foo_pkg__veryl_sample4___bar_pkg__32_BAR__veryl_sample4___bar_pkg__32 u1 ();
+endmodule
+
+// An imported component keeps its declaring project as a generic argument.
+
+
+module veryl_testcase_Module25Q;
+
+
+
+    veryl_sample4___qux_if__veryl_sample4___foo_pkg__1_Foo u         ();
+    always_comb u.qux.foo = 0;
+endmodule
+
+module veryl_testcase_Module25R;
+    // The argument's project differs from both the use site and the base
+    // component's project.
+
+
+
+    veryl_sample5___qux_if__veryl_sample4___foo_pkg__2_Foo u         ();
+    always_comb u.qux.foo = 0;
+endmodule
+
+module veryl_testcase_Module25S;
+    // Both spellings instantiate the same component.
+
+
+
+    veryl_sample4___foo_module__veryl_sample4___foo_pkg__3 u0 ();
+    veryl_sample4___foo_module__veryl_sample4___foo_pkg__3 u1 ();
 endmodule
 //# sourceMappingURL=../map/25_dependency_2.sv.map

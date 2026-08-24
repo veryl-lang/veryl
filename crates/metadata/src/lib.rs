@@ -31,7 +31,7 @@ pub use component_manifest::{
 pub use doc::Doc;
 pub use format::{Format, NewlineStyle};
 pub use git::Git;
-pub use lint::{Case, Lint};
+pub use lint::{Case, Lint, LintPortability, NonPortableItem};
 pub use lockfile::{DependencyComponents, LockSource, Lockfile};
 pub use metadata::{BumpKind, Metadata, ProjectProperty, UrlPath, check_project_name};
 pub use metadata_error::MetadataError;

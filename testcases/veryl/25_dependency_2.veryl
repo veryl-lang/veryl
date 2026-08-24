@@ -154,3 +154,67 @@ module Module25K {
         baz: baz,
     );
 }
+
+// Importing a package namespace itself makes the package name usable as a
+// qualifier at the use site.
+// https://github.com/veryl-lang/veryl/issues/3122
+import veryl_sample4::qux_pkg;
+import veryl_sample4::bar_pkg;
+
+module Module25L {
+    const QUX_0: u32 = qux_pkg::QUX_0;
+    const QUX_1: u32 = qux_pkg::QUX_1;
+}
+
+module Module25M {
+    // Module-scope import of a package namespace.
+    import veryl_sample4::qux_pkg;
+    const QUX_0: u32 = qux_pkg::QUX_0;
+}
+
+module Module25N {
+    // A generic package is imported as-is and instantiated at the use site.
+    const BAR: u32 = bar_pkg::<32>::BAR;
+}
+
+// Interfaces and modules can also be imported under their own names.
+// https://github.com/veryl-lang/veryl/issues/1588
+
+module Module25O (
+    ifp: modport qux_if::<Package25::<1>::S>::mp,
+) {
+    // An interface is imported as-is; modport members stay qualified.
+    import veryl_sample4::qux_if;
+    inst u_if: qux_if::<Package25::<1>::S>;
+    assign u_if.qux.s = 0;
+    let _a: logic = ifp.qux.s;
+}
+
+module Module25P {
+    // Modules are imported as-is and instantiated at the use site.
+    import veryl_sample4::foo_module;
+    import veryl_sample4::bar_module;
+    inst u0: foo_module::<foopkg>;
+    inst u1: bar_module::<foopkg, barpkg>;
+}
+
+// An imported component keeps its declaring project as a generic argument.
+import veryl_sample4::foo_pkg;
+
+module Module25Q {
+    inst u: veryl_sample4::qux_if::<foo_pkg::<1>::Foo>;
+    assign u.qux.foo = 0;
+}
+
+module Module25R {
+    // The argument's project differs from both the use site and the base
+    // component's project.
+    inst u: veryl_sample5::qux_if::<foo_pkg::<2>::Foo>;
+    assign u.qux.foo = 0;
+}
+
+module Module25S {
+    // Both spellings instantiate the same component.
+    inst u0: veryl_sample4::foo_module::<foo_pkg::<3>>;
+    inst u1: veryl_sample4::foo_module::<veryl_sample4::foo_pkg::<3>>;
+}

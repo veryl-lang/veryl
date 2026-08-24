@@ -34,6 +34,7 @@
 //!   def's RHS, or the def's own offset (the value must be position
 //!   independent over that span).
 
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::event::Event;
 use crate::ir::expression::{ExpressionContext, ProtoExpression};
 use crate::ir::opt::lane_vector;
@@ -534,6 +535,7 @@ fn replace_all_reads_stmt(s: &mut ProtoStatement, off: isize, template: &ProtoEx
 /// two expressions that hash equal twice).
 fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
     use std::hash::{Hash, Hasher};
+    let fold = BigArrayFold::from_statements(stmts.iter());
     let mut write_idxs: HashMap<isize, Vec<usize>> = HashMap::default();
     {
         let mut ins: Vec<VarOffset> = vec![];
@@ -541,7 +543,7 @@ fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
         for (i, s) in stmts.iter().enumerate() {
             ins.clear();
             outs.clear();
-            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
             for off in outs.drain(..) {
                 if let VarOffset::Comb(o) = off {
                     write_idxs.entry(o).or_default().push(i);
@@ -569,6 +571,11 @@ fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
         let VarOffset::Comb(dst) = a.dst else {
             continue;
         };
+        // `write_idxs` is array-wide for a folded element, so the window check
+        // below could not tell a rewrite of THIS element from a neighbour's.
+        if fold.covers(a.dst) {
+            continue;
+        }
         if a.select.is_some()
             || a.dynamic_select.is_some()
             || a.rhs_select.is_some()
@@ -593,7 +600,7 @@ fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
                 // and the first dst must be untouched over (i, j].
                 ins.clear();
                 outs.clear();
-                stmts[j].gather_variable_offsets_expanded(&mut ins, &mut outs);
+                stmts[j].gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
                 // E reading x is a settle back-edge: statement i itself
                 // rewrites x between the two evaluations, and the window
                 // check below starts past i.
@@ -645,6 +652,7 @@ fn collapse_common_rhs(stmts: &mut [ProtoStatement]) -> usize {
 /// external visibility poses no constraint.
 fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>, usize) {
     let n = stmts.len();
+    let fold = BigArrayFold::from_statements(stmts.iter());
     // Group top-level static-select stores by destination offset.
     struct Group {
         idxs: Vec<usize>,
@@ -661,18 +669,24 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
                 w: a.dst_width,
                 bad: false,
             });
-            // A field straddling a word boundary has no single word to land
-            // in, so it disqualifies the group (see `word_coalesce_enabled`).
+            // A field STRADDLING a word boundary is fine — the assembly
+            // below clips it into a per-word part.  The `< 64` bound is what
+            // keeps every part narrower than a word, so `canonical_wrap`
+            // always masks it (it returns the expression bare at 64), which is
+            // what stops a dirty RHS from leaking past the part's own width.
             let word_ok = a.dst_width <= 64
                 || (word_coalesce_enabled()
                     && a.select
-                        .is_some_and(|(hi, lo)| hi.max(lo) / 64 == hi.min(lo) / 64));
+                        .is_some_and(|(hi, lo)| hi.max(lo) - hi.min(lo) < 64));
             if a.select.is_some()
                 && a.dynamic_select.is_none()
                 && a.rhs_select.is_none()
                 && a.dst_width > 0
                 && word_ok
                 && a.dst_width == g.w
+                // Array-wide `read_idxs` / `write_idxs` cannot license moving
+                // a folded element's stores.
+                && !fold.covers(a.dst)
             {
                 g.idxs.push(i);
             } else {
@@ -692,7 +706,7 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
         for (i, s) in stmts.iter().enumerate() {
             ins.clear();
             outs.clear();
-            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
             for off in ins.drain(..) {
                 if let VarOffset::Comb(o) = off {
                     read_idxs.entry(o).or_default().push(i);
@@ -770,7 +784,7 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
         'legality: for &i in &g.idxs {
             e_ins.clear();
             e_outs.clear();
-            stmts[i].gather_variable_offsets_expanded(&mut e_ins, &mut e_outs);
+            stmts[i].gather_variable_offsets_expanded(&fold, &mut e_ins, &mut e_outs);
             for off in &e_ins {
                 if let VarOffset::Comb(io) = off
                     && any_in_window(write_idxs.get(io), first, last)
@@ -816,8 +830,18 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
         };
         // Fusing one field would reproduce that same field store, and a word
         // no field touches keeps its value by not being stored at all.
+        //
+        // With a straddling field in the group the per-word membership is no
+        // longer free to choose: a field must fuse in EVERY word it touches
+        // or in none (its store is deleted whole), so take all touched words.
+        let has_straddler = g.w > 64 && ranges.iter().any(|&(lo, hi, _)| lo / 64 != hi / 64);
         let slices: Vec<(usize, usize)> = if g.w <= 64 {
             vec![(g.w - 1, 0)]
+        } else if has_straddler {
+            (0..g.w.div_ceil(64))
+                .map(|word| (((word + 1) * 64).min(g.w) - 1, word * 64))
+                .filter(|&(whi, wlo)| ranges.iter().any(|&(lo, hi, _)| lo <= whi && hi >= wlo))
+                .collect()
         } else {
             (0..g.w.div_ceil(64))
                 .map(|word| (((word + 1) * 64).min(g.w) - 1, word * 64))
@@ -845,28 +869,68 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
             for &(lo, hi, i) in ranges
                 .iter()
                 .rev()
-                .filter(|&&(lo, _, _)| lo >= slo && lo <= shi)
+                .filter(|&&(lo, hi, _)| lo <= shi && hi >= slo)
             {
-                if hi + 1 < cursor {
-                    elements.push(old_bits(cursor - 1, hi + 1));
+                // A straddler contributes one part per word it touches.
+                let phi = hi.min(shi);
+                let plo = lo.max(slo);
+                if phi + 1 < cursor {
+                    elements.push(old_bits(cursor - 1, phi + 1));
                 }
                 let ProtoStatement::Assign(a) = &mut stmts[i] else {
                     unreachable!()
                 };
-                let expr = std::mem::replace(
-                    &mut a.expr,
-                    ProtoExpression::Value {
-                        value: Value::new(0, 1, false),
-                        width: 1,
-                        expr_context: ExpressionContext {
+                // A straddler's RHS is consumed by two slices — clone it and
+                // leave the (deleted) statement's expression in place.
+                let straddles = lo / 64 != hi / 64;
+                let expr = if straddles {
+                    a.expr.clone()
+                } else {
+                    std::mem::replace(
+                        &mut a.expr,
+                        ProtoExpression::Value {
+                            value: Value::new(0, 1, false),
                             width: 1,
-                            signed: false,
+                            expr_context: ExpressionContext {
+                                width: 1,
+                                signed: false,
+                            },
                         },
-                    },
-                );
+                    )
+                };
                 let ew = hi - lo + 1;
-                elements.push((Box::new(canonical_wrap(expr, ew)), 1, ew));
-                cursor = lo;
+                let pw = phi - plo + 1;
+                let elem = if plo == lo && phi == hi {
+                    canonical_wrap(expr, ew)
+                } else {
+                    // Part of a straddling field: `(expr >> (plo-lo)) & mask(pw)`.
+                    // `(plo-lo) + pw <= ew`, so bits of a dirty RHS at or above
+                    // `ew` never pass the mask — the part stays canonical.
+                    let shifted = if plo > lo {
+                        ProtoExpression::Binary {
+                            x: Box::new(expr),
+                            op: Op::LogicShiftR,
+                            y: Box::new(ProtoExpression::Value {
+                                value: Value::new((plo - lo) as u64, 32, false),
+                                width: 32,
+                                expr_context: ExpressionContext {
+                                    width: 32,
+                                    signed: false,
+                                },
+                            }),
+                            width: ew,
+                            expr_context: ExpressionContext {
+                                width: ew,
+                                signed: false,
+                            },
+                        }
+                    } else {
+                        expr
+                    };
+                    canonical_wrap(shifted, pw)
+                };
+                elements.push((Box::new(elem), 1, pw));
+                cursor = plo;
             }
             if cursor > slo {
                 elements.push(old_bits(cursor - 1, slo));
@@ -935,11 +999,15 @@ pub fn inline_single_readers(
     events: &HashMap<Event, Vec<ProtoStatement>>,
     externals_extra: &HashSet<VarOffset>,
 ) -> (Vec<ProtoStatement>, Vec<isize>) {
+    // Folds this pass's own view of the very large arrays; the event walk
+    // below sees the same offsets the comb statements do.
+    let fold = BigArrayFold::from_statements(stmts.iter().chain(events.values().flatten()));
+
     // -- externals: offsets we must never make disappear.
     let mut externals: HashSet<isize> = HashSet::default();
     for off in externals_extra {
-        if let VarOffset::Comb(o) = off {
-            externals.insert(*o);
+        if let VarOffset::Comb(o) = fold.canon(*off) {
+            externals.insert(o);
         }
     }
     {
@@ -953,7 +1021,7 @@ pub fn inline_single_readers(
                 // so an event reading `arr[idx]` would leave a MIDDLE
                 // element's def retirable — the event then reads frozen
                 // storage.  (Same hole class as the comb-side census.)
-                s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+                s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
                 for off in ins.drain(..) {
                     if let VarOffset::Comb(o) = off {
                         externals.insert(o);
@@ -977,7 +1045,7 @@ pub fn inline_single_readers(
     // `lane_vector` for why that order.
     let mut fused_offsets: Vec<isize> = Vec::new();
     let folded = if lane_vector::fold_enabled() {
-        lane_vector::transpose_fold(&mut stmts, &externals, &mut fused_offsets)
+        lane_vector::transpose_fold(&mut stmts, &fold, &externals, &mut fused_offsets)
     } else {
         0
     };
@@ -1015,7 +1083,7 @@ pub fn inline_single_readers(
         for (i, s) in stmts.iter().enumerate() {
             ins.clear();
             outs.clear();
-            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
             let opaque = !rewritable_reader(s);
             for off in ins.drain(..) {
                 if let VarOffset::Comb(o) = off {
@@ -1080,7 +1148,11 @@ pub fn inline_single_readers(
                         && a.dst_width <= 64
                         && a.expr.width() > 0
                         && a.expr.width() <= 64
-                        && cheap_rhs(&a.expr) =>
+                        && cheap_rhs(&a.expr)
+                        // Array-wide map entries make neither the reader set
+                        // nor the redefinition window precise enough to retire
+                        // a folded element's def.
+                        && !fold.covers(a.dst) =>
                 {
                     match a.dst {
                         VarOffset::Comb(o) if reads.get(&o).is_some_and(|ri| ri.count >= 2) => {
@@ -1099,7 +1171,7 @@ pub fn inline_single_readers(
             }
             e_ins.clear();
             e_outs.clear();
-            stmts[i].gather_variable_offsets_expanded(&mut e_ins, &mut e_outs);
+            stmts[i].gather_variable_offsets_expanded(&fold, &mut e_ins, &mut e_outs);
             if e_ins.contains(&VarOffset::Comb(o)) {
                 continue; // self-read
             }
@@ -1226,10 +1298,13 @@ pub fn inline_single_readers(
                     && a.dst_width <= 64
                     && a.expr.width() > 0
                     && a.expr.width() <= 64
-                    // The store sign-extends this shape (a bare signed leaf
-                    // narrower than the destination); the substituted
-                    // expression would be used unextended.
-                    && a.expr.store_sign_extend_from(a.dst_width).is_none() =>
+                    // Inlining retires an unsigned variable load, so a signed
+                    // leaf put in its place would be sign-extended by a wider
+                    // reader.
+                    && !a.expr.is_signed_store_leaf()
+                    // See the duplication pass: a folded element cannot be
+                    // told apart from its neighbours in `reads` / `writes`.
+                    && !fold.covers(a.dst) =>
             {
                 match a.dst {
                     VarOffset::Comb(o) => {
@@ -1266,7 +1341,7 @@ pub fn inline_single_readers(
                         && a.dst_width <= 64
                         && a.expr.width() > 0
                         && a.expr.width() <= 64
-                        && a.expr.store_sign_extend_from(a.dst_width).is_none()
+                        && !a.expr.is_signed_store_leaf()
                         && (externals.contains(&o) || opaque_read.contains(&o)));
                 if !counted_elsewhere {
                     veto_shape += 1;
@@ -1276,7 +1351,7 @@ pub fn inline_single_readers(
                         vs_rhs_sel += 1;
                     } else if a.dst_width > 64 || a.expr.width() > 64 {
                         vs_wide += 1;
-                    } else if a.expr.store_sign_extend_from(a.dst_width).is_some() {
+                    } else if a.expr.is_signed_store_leaf() {
                         vs_sext += 1;
                     } else if let VarOffset::Comb(o) = a.dst {
                         match reads.get(&o) {
@@ -1313,7 +1388,7 @@ pub fn inline_single_readers(
         // entries in `writes`; that only vetoes conservatively.)
         e_ins.clear();
         e_outs.clear();
-        stmts[i].gather_variable_offsets_expanded(&mut e_ins, &mut e_outs);
+        stmts[i].gather_variable_offsets_expanded(&fold, &mut e_ins, &mut e_outs);
         let window_has_write = |o: isize, lo: usize, hi: usize| -> bool {
             writes.get(&o).is_some_and(|v| {
                 let p = v.partition_point(|&x| x <= lo);
@@ -1991,6 +2066,101 @@ mod tests {
                 (Some((129, 128)), 2),
             ]
         );
+    }
+
+    #[test]
+    fn coalesce_stores_a_word_holding_only_a_straddler() {
+        // `[95:60]` is the only field reaching word 1.  A per-word membership
+        // rule keyed on where fields START would never store that word, while
+        // the field's own store is deleted — leaving [95:64] undriven.
+        let stmts = vec![
+            assign_sel(0x0, 96, 59, 0, var(0x100, 60)),
+            assign_sel(0x0, 96, 95, 60, var(0x108, 36)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 1);
+        let mut words: Vec<Option<(usize, usize)>> = out
+            .iter()
+            .map(|s| match s {
+                ProtoStatement::Assign(a) => a.select,
+                _ => panic!("expected an Assign"),
+            })
+            .collect();
+        words.sort();
+        assert_eq!(
+            words,
+            vec![Some((63, 0)), Some((95, 64))],
+            "both words the straddler touches must be stored"
+        );
+    }
+
+    #[test]
+    fn coalesce_splits_a_word_straddling_field() {
+        // [69:60] crosses the word boundary: its low 4 bits belong to word 0
+        // and its high 6 bits to word 1.  The group fuses into one store per
+        // word, with the straddler clipped into a shifted part on each side.
+        let stmts = vec![
+            assign_sel(0x0, 96, 59, 0, var(0x100, 60)),
+            assign_sel(0x0, 96, 69, 60, var(0x108, 10)),
+            assign_sel(0x0, 96, 95, 70, var(0x110, 26)),
+        ];
+        let (out, fused) = coalesce_field_stores(stmts);
+        assert_eq!(fused, 1);
+        assert_eq!(out.len(), 2, "one store per word, all field stores gone");
+        type StoreShape = (Option<(usize, usize)>, Vec<usize>);
+        let mut seen: Vec<StoreShape> = out
+            .iter()
+            .map(|s| {
+                let ProtoStatement::Assign(a) = s else {
+                    panic!("expected an Assign")
+                };
+                let ProtoExpression::Concatenation { elements, .. } = &a.expr else {
+                    panic!("expected a concatenation")
+                };
+                assert_eq!(a.dst_width, 96);
+                (a.select, elements.iter().map(|(_, _, w)| *w).collect())
+            })
+            .collect();
+        seen.sort();
+        assert_eq!(
+            seen,
+            vec![
+                // word 0: straddler bits [63:60] then the [59:0] field
+                (Some((63, 0)), vec![4, 60]),
+                // word 1: the [95:70] field then straddler bits [69:64]
+                (Some((95, 64)), vec![26, 6]),
+            ]
+        );
+        // The high part must read the straddler's RHS shifted right by 4.
+        let word1 = out
+            .iter()
+            .find_map(|s| match s {
+                ProtoStatement::Assign(a) if a.select == Some((95, 64)) => Some(a),
+                _ => None,
+            })
+            .unwrap();
+        let ProtoExpression::Concatenation { elements, .. } = &word1.expr else {
+            unreachable!()
+        };
+        // elements[1] is `(rhs >> 4) & 0x3f`
+        let ProtoExpression::Binary {
+            op: Op::BitAnd, x, ..
+        } = elements[1].0.as_ref()
+        else {
+            panic!("straddler part must be masked")
+        };
+        let ProtoExpression::Binary {
+            op: Op::LogicShiftR,
+            y,
+            ..
+        } = x.as_ref()
+        else {
+            panic!("straddler high part must be shifted")
+        };
+        let ProtoExpression::Value { value, .. } = y.as_ref() else {
+            panic!("shift amount must be a constant")
+        };
+        assert_eq!(value.to_usize(), Some(4));
     }
 
     #[test]

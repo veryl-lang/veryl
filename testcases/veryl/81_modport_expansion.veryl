@@ -68,3 +68,34 @@ module Module81B {
         s_if: b_if,
     );
 }
+
+interface Interface81Define {
+    #[ifdef(TRACE)]
+    var trace: logic;
+    var data : logic;
+
+    modport master {
+        #[ifdef(TRACE)]
+        trace: output,
+        data : output,
+    }
+
+    modport slave {
+        ..converse(master)
+    }
+}
+
+#[expand(modport)]
+module Module81C (
+    m_if: modport Interface81Define::master,
+) {
+    assign m_if.data = 0;
+}
+
+module Module81D {
+    inst c_if: Interface81Define;
+
+    inst u: Module81C (
+        m_if: c_if,
+    );
+}

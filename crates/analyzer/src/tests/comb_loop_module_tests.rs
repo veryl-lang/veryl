@@ -667,7 +667,6 @@ fn instance_logical_actual_code(expression: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; dead logical-and instance RHS"]
 fn comb_loop_false_logical_and_instance_actual_drops_rhs() {
     assert_comb_loop(
         "a false logical-and instance actual drops its dead RHS",
@@ -677,7 +676,6 @@ fn comb_loop_false_logical_and_instance_actual_drops_rhs() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; dead logical-or instance RHS"]
 fn comb_loop_true_logical_or_instance_actual_drops_rhs() {
     assert_comb_loop(
         "a true logical-or instance actual drops its dead RHS",
@@ -1194,4 +1192,35 @@ fn comb_loop_unaligned_unpacked_instance_element_zero_is_disjoint() {
 #[test]
 fn comb_loop_unaligned_unpacked_instance_element_one_retains_feedback() {
     assert_unaligned_unpacked_instance_input(1, true);
+}
+
+#[test]
+fn many_comb_declarations_build_the_module_context_once() {
+    const COUNT: usize = 256;
+    let variables = (0..COUNT)
+        .map(|index| format!("var value_{index}: logic;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let assignments = (0..COUNT)
+        .map(|index| format!("assign value_{index} = 0;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::comb_loop_detect::reset_module_context_entries();
+    assert_comb_loop(
+        "independent declarations reuse immutable module metadata",
+        &format!(
+            r#"
+            module Top (o: output logic) {{
+                {variables}
+                {assignments}
+                assign o = value_0;
+            }}
+            "#,
+        ),
+        false,
+    );
+    assert!(
+        crate::comb_loop_detect::module_context_entries() <= COUNT + 4,
+        "module variable/function maps must not be cloned per declaration",
+    );
 }
