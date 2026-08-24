@@ -130,6 +130,7 @@ struct ImplContext {
     target: Token,
     namespace: Namespace,
     range: TokenRange,
+    arguments: Vec<GenericSymbolPath>,
 }
 
 impl CreateSymbolTable {
@@ -223,7 +224,7 @@ impl CreateSymbolTable {
         let path = GenericSymbolPath {
             paths: vec![GenericSymbol {
                 base: ctx.target,
-                arguments: Vec::new(),
+                arguments: ctx.arguments.clone(),
             }],
             kind: GenericSymbolPathKind::Identifier,
             range: token.into(),
@@ -1974,12 +1975,37 @@ impl VerylGrammarTrait for CreateSymbolTable {
         let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
+                let mut arguments = Vec::new();
+                if let Some(ref x) = arg.impl_declaration_opt
+                    && let Some(ref x) = x.with_generic_argument.with_generic_argument_opt
+                {
+                    let items: Vec<&WithGenericArgumentItem> =
+                        x.with_generic_argument_list.as_ref().into();
+                    for item in items {
+                        let path: GenericSymbolPath = item.into();
+                        if matches!(path.kind, GenericSymbolPathKind::Identifier) {
+                            self.errors.push(AnalyzerError::invalid_impl_argument(
+                                &path.to_string(),
+                                &path.range,
+                            ));
+                        }
+                        arguments.push(path);
+                    }
+                }
+
+                let symbol = GenericSymbol {
+                    base: arg.identifier.identifier_token.token,
+                    arguments: arguments.clone(),
+                };
+                let scope_name = symbol.mangled();
+
                 self.impl_context = Some(ImplContext {
                     target: arg.identifier.identifier_token.token,
                     namespace: self.current_namespace(),
                     range: arg.identifier.as_ref().into(),
+                    arguments,
                 });
-                self.push_namespace(name);
+                self.push_namespace(scope_name);
             }
             HandlerPoint::After => {
                 self.pop_namespace();

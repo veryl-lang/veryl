@@ -2755,6 +2755,9 @@ impl VerylWalker for Formatter {
         self.r#impl(&arg.r#impl);
         self.space(1);
         self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.impl_declaration_opt {
+            self.with_generic_argument(&x.with_generic_argument);
+        }
         self.space(1);
         self.token_will_push(&arg.l_brace.l_brace_token);
         for (i, x) in arg.impl_declaration_list.iter().enumerate() {

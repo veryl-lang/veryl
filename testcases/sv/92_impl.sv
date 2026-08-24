@@ -1,14 +1,19 @@
 package veryl_testcase_Package92;
     typedef struct packed {
-        logic          sign;
-        logic [5-1:0]  exp ;
+        logic         sign;
+        logic [5-1:0] exp ;
         logic [10-1:0] mts ;
     } __FpT__5__10;
     typedef struct packed {
-        logic          sign;
-        logic [8-1:0]  exp ;
+        logic         sign;
+        logic [8-1:0] exp ;
         logic [23-1:0] mts ;
     } __FpT__8__23;
+    typedef struct packed {
+        logic         sign;
+        logic [2-1:0] exp ;
+        logic [1-1:0] mts ;
+    } __FpT__2__1;
 
     localparam int unsigned __FpT__5__10_BIAS = (1 << (5 - 1)) - 1;
 
@@ -24,9 +29,17 @@ package veryl_testcase_Package92;
     ) ;
         return (self.exp == '1) && (self.mts != '0);
     endfunction
+    localparam int unsigned __FpT__2__1_BIAS = (1 << (2 - 1)) - 1;
+
+    function automatic logic __FpT__2__1_is_nan(
+        input var __FpT__2__1 self
+    ) ;
+        return 1'b0;
+    endfunction
 
     typedef __FpT__5__10 Fp16;
     typedef __FpT__8__23 Fp32;
+    typedef __FpT__2__1  Fp4 ;
 endpackage
 
 module veryl_testcase_Module92 (
@@ -39,26 +52,7 @@ module veryl_testcase_Module92 (
         logic [8-1:0] b;
     } PairT;
 
-    localparam int unsigned PairT_WIDTH = 16;
-
-    function automatic logic [8-1:0] PairT_sum(
-        input var PairT self
-    ) ;
-        return self.a + self.b;
-    endfunction
-
-    function automatic logic [8-1:0] PairT_add(
-        input var PairT self,
-        input var logic [8-1:0] x
-    ) ;
-        return self.a + x;
-    endfunction
-
-    function automatic void PairT_log(
-        input var PairT self
-    ) ;
-        $display("%d", self.a);
-    endfunction
+    
 
     PairT p;
 
@@ -75,6 +69,15 @@ module veryl_testcase_Module92 (
 
     always_comb o_nan = veryl_testcase_Package92::__FpT__8__23_is_nan(i_x);
     always_comb o_b   = veryl_testcase_Package92::__FpT__8__23_BIAS;
+
+    veryl_testcase_Package92::Fp4 m ;
+    logic                         _n; always_comb _n = veryl_testcase_Package92::__FpT__2__1_is_nan(m);
+    int unsigned                  _o; always_comb _o = veryl_testcase_Package92::__FpT__2__1_BIAS;
+    always_comb begin
+        m.sign = 0;
+        m.exp  = 0;
+        m.mts  = 0;
+    end
 
     initial begin
         PairT_log(p);

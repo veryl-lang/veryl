@@ -26,7 +26,7 @@ use veryl_analyzer::symbol::{
     Affiliation, GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TestType, TypeKind,
 };
 use veryl_analyzer::symbol_path::{
-    GenericSymbolPath, GenericSymbolPathKind, SymbolPath, SymbolPathNamespace,
+    GenericSymbol, GenericSymbolPath, GenericSymbolPathKind, SymbolPath, SymbolPathNamespace,
 };
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_analyzer::value::calc_emitted_width;
@@ -3070,6 +3070,35 @@ impl Emitter {
         name.replace("$std_", "__std_")
     }
 
+    fn impl_instance_name(&self, arg: &ImplDeclaration) -> StrId {
+        let mut arguments = Vec::new();
+        if let Some(ref x) = arg.impl_declaration_opt
+            && let Some(ref x) = x.with_generic_argument.with_generic_argument_opt
+        {
+            let items: Vec<&WithGenericArgumentItem> = x.with_generic_argument_list.as_ref().into();
+            for item in items {
+                arguments.push(GenericSymbolPath::from(item));
+            }
+        }
+        GenericSymbol {
+            base: arg.identifier.identifier_token.token,
+            arguments,
+        }
+        .mangled()
+    }
+
+    fn is_specialized(&self, instance: StrId, group: &ImplGroup, target: &Symbol) -> bool {
+        let ImplGroupGroup::ImplItem(x) = group.impl_group_group.as_ref() else {
+            return false;
+        };
+        let member = match x.impl_item.as_ref() {
+            ImplItem::MethodDeclaration(x) => x.method_declaration.identifier.text(),
+            ImplItem::ConstDeclaration(x) => x.const_declaration.identifier.text(),
+        };
+        let scope = scope::inner_scope(target.scope, instance);
+        !scope::locals_get(scope, member).is_empty()
+    }
+
     fn impl_type_name(&self) -> String {
         let (token, map) = self.impl_target.as_ref().unwrap();
         if map.generic() {
@@ -6062,7 +6091,17 @@ impl VerylWalker for Emitter {
 
     fn impl_declaration(&mut self, arg: &ImplDeclaration) {
         let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
-        let maps = self.get_generic_maps(&symbol.found);
+        let specialized = arg.impl_declaration_opt.is_some();
+
+        let maps = if specialized {
+            let path = SymbolPath::new(&[self.impl_instance_name(arg)]);
+            match symbol_table::resolve((&path, &symbol.found.namespace)) {
+                Ok(x) => x.found.generic_maps(),
+                Err(_) => return,
+            }
+        } else {
+            self.get_generic_maps(&symbol.found)
+        };
 
         self.token(&arg.r#impl.impl_token.replace(""));
         self.token(&arg.l_brace.l_brace_token.replace(""));
@@ -6075,11 +6114,20 @@ impl VerylWalker for Emitter {
             self.impl_target = Some((arg.identifier.identifier_token.clone(), map.clone()));
             self.emit_generic_instance_name_comment(map);
 
-            for (j, x) in arg.impl_declaration_list.iter().enumerate() {
-                if j != 0 {
+            let instance =
+                (!specialized).then(|| resource_table::insert_str(&self.impl_type_name()));
+            let mut emitted = 0;
+            for x in &arg.impl_declaration_list {
+                if let Some(instance) = instance
+                    && self.is_specialized(instance, &x.impl_group, &symbol.found)
+                {
+                    continue;
+                }
+                if emitted != 0 {
                     self.newline();
                 }
                 self.impl_group(&x.impl_group);
+                emitted += 1;
             }
 
             self.impl_target = None;

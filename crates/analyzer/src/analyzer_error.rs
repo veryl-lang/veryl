@@ -461,6 +461,22 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_impl_argument),
+        help("use a literal value to specialize, or omit the arguments"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{name}\" can't be used as an impl argument")]
+    InvalidImplArgument {
+        name: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_impl_target),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2139,6 +2155,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidForRange { input, .. } => input,
             AnalyzerError::InvalidForStep { input, .. } => input,
             AnalyzerError::InvalidIdentifier { input, .. } => input,
+            AnalyzerError::InvalidImplArgument { input, .. } => input,
             AnalyzerError::InvalidImplTarget { input, .. } => input,
             AnalyzerError::InvalidImport { input, .. } => input,
             AnalyzerError::InvalidMixin { input, .. } => input,
@@ -2255,6 +2272,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::InvalidFactor { token_source, .. } => *token_source,
             AnalyzerError::InvalidIdentifier { token_source, .. } => *token_source,
+            AnalyzerError::InvalidImplArgument { token_source, .. } => *token_source,
             AnalyzerError::InvalidImplTarget { token_source, .. } => *token_source,
             AnalyzerError::InvalidImport { token_source, .. } => *token_source,
             AnalyzerError::InvalidMixin { token_source, .. } => *token_source,
@@ -2579,6 +2597,14 @@ impl AnalyzerError {
         AnalyzerError::InvalidIdentifier {
             identifier: identifier.to_string(),
             rule: rule.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_impl_argument(name: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidImplArgument {
+            name: name.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
