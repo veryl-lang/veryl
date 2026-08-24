@@ -8,6 +8,7 @@
 //! to Cranelift (per-module for comb, per-event for events).
 
 use crate::FuncPtr;
+use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain, same_var_read};
 use crate::ir::{
     ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement, ProtoSystemFunctionCall,
@@ -5975,6 +5976,391 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     Some(body)
 }
 
+// ---------------------------------------------------------------------------
+// Constant decode tables
+//
+// A decoder that only ever assigns constants is a lookup table spelled as
+// control flow.  Nested decoders multiply out into one index, and an arm
+// driving several signals becomes one row so a lookup lands contiguously.
+// Left as branches a wide decoder costs megabytes of C, and host-compiler
+// time grows faster still — one such statement can be most of a cold start.
+
+/// One selector of a decode table.  Its axis spans `maxv + 1` slots an arm
+/// can reach, plus one for "no arm matched" — which every value above `maxv`
+/// folds onto, so the index is total however dirty the selector is.
+struct DecodeAxis<'a> {
+    sel: &'a ProtoExpression,
+    maxv: u64,
+}
+
+/// The decision tree behind a decode table.  A `Branch` tests the axis at its
+/// own depth, so the axis order is the nesting order and a `Leaf` above the
+/// last axis is simply constant along the axes below it.
+enum DecodeNode {
+    /// One constant per destination, in the destinations' fixed order.
+    Leaf(Vec<u64>),
+    Branch {
+        arms: Vec<(u64, DecodeNode)>,
+        default: Box<DecodeNode>,
+    },
+}
+
+#[derive(Default)]
+struct DecodeScan<'a> {
+    /// The stores every leaf must repeat, in order, differing only in their
+    /// constants.  An arm writing a different set of signals is a different
+    /// row shape, which one table cannot hold.
+    anchor: Vec<&'a ProtoAssignStatement>,
+    axes: Vec<DecodeAxis<'a>>,
+    leaves: usize,
+}
+
+/// Nesting depth of selectors a table may span.  Each one multiplies the
+/// entry count, so the byte ceiling below is the real limit; this only keeps
+/// a pathological tree from being walked at all.
+const DECODE_TABLE_MAX_AXES: usize = 4;
+/// Ceiling on the emitted table, in bytes of rodata.  The table is read at one
+/// unpredictable index per settle, so it competes with the comb buffer for
+/// D-cache: half a typical L1d measured best — 256 KiB turned a 3% win into a
+/// 2% loss and 4 KiB gave back 1%.  Declining still emits the arm bodies, so a
+/// too-wide selector leaves a cascade over per-arm tables.
+const DECODE_TABLE_MAX_BYTES: usize = 16 * 1024;
+
+fn decode_table_max_bytes() -> usize {
+    #[cfg(test)]
+    if let Some(v) = TEST_DECODE_TABLE_BYTES.with(|c| c.get()) {
+        return v;
+    }
+    static V: OnceLock<usize> = OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("VERYL_AOT_C_DECODE_TABLE_KB")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .map_or(DECODE_TABLE_MAX_BYTES, |kb| kb * 1024)
+    })
+}
+
+// Thread-local so a test that pins the ceiling cannot perturb the tests
+// running beside it — the env var is process-global and libtest is
+// multi-threaded (same reasoning as `TEST_TU_SPLIT`).
+#[cfg(test)]
+thread_local! {
+    static TEST_DECODE_TABLE_BYTES: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+}
+/// Fewest leaves worth replacing.  Below this the arms are cheaper than the
+/// load, and the table is mostly its own overhead.
+const DECODE_TABLE_MIN_LEAVES: usize = 8;
+/// How many entries a table may hold per leaf it replaces.  Sparse selector
+/// values leave holes that repeat the default; past this the table is padding.
+const DECODE_TABLE_MAX_SPREAD: usize = 4;
+
+/// `VERYL_AOT_C_DECODE_TABLE=0` keeps the cascade, for A/B and bisection.
+fn decode_table_enabled() -> bool {
+    static V: OnceLock<bool> = OnceLock::new();
+    *V.get_or_init(|| std::env::var("VERYL_AOT_C_DECODE_TABLE").as_deref() != Ok("0"))
+}
+
+/// The width of a selector usable as a table index: a plain read, narrow
+/// enough that its whole range is a table dimension.
+fn decode_selector_width(sel: &ProtoExpression) -> Option<usize> {
+    match sel {
+        ProtoExpression::Variable {
+            dynamic_select: None,
+            width,
+            ..
+        } if *width >= 1 && *width <= 32 => Some(*width),
+        _ => None,
+    }
+}
+
+/// The constant one store writes, as it lands in the destination — `None`
+/// unless it is a plain scalar comb store of a constant.
+fn decode_store_value(a: &ProtoAssignStatement) -> Option<u64> {
+    if a.dst.is_ff()
+        || a.select.is_some()
+        || a.dynamic_select.is_some()
+        || a.rhs_select.is_some()
+        || a.dst_width == 0
+        || a.dst_width > 64
+    {
+        return None;
+    }
+    let VarOffset::Comb(off) = a.dst else {
+        return None;
+    };
+    if off < 0 {
+        return None;
+    }
+    // A store that sign-extends a narrow RHS writes bits the constant does
+    // not carry; leave those to the store paths that implement it.
+    if a.expr.store_sign_extend_from(a.dst_width).is_some() {
+        return None;
+    }
+    // Take the constant through the same masking `emit_value` applies, so the
+    // entry is what the arm would have stored.
+    let ProtoExpression::Value {
+        value: Value::U64(v),
+        width,
+        ..
+    } = &a.expr
+    else {
+        return None;
+    };
+    if v.mask_xz != 0 || (v.width == 0 && v.payload != 0) {
+        return None;
+    }
+    let emitted_width = (*width).min(64);
+    Some(v.payload & width_mask(emitted_width) & width_mask(a.dst_width))
+}
+
+/// One table row: the constants a leaf writes, checked against the row shape
+/// the first leaf established.
+fn decode_leaf_row<'a>(block: &'a [ProtoStatement], scan: &mut DecodeScan<'a>) -> Option<Vec<u64>> {
+    // An empty arm stores nothing, so it has no row; it also must not be
+    // mistaken for "no row shape established yet".
+    if block.is_empty() {
+        return None;
+    }
+    let mut stores = Vec::with_capacity(block.len());
+    let mut row = Vec::with_capacity(block.len());
+    for stmt in block {
+        let ProtoStatement::Assign(a) = stmt else {
+            return None;
+        };
+        row.push(decode_store_value(a)?);
+        stores.push(a);
+    }
+    if scan.anchor.is_empty() {
+        scan.anchor = stores;
+    } else if scan.anchor.len() != stores.len()
+        || scan
+            .anchor
+            .iter()
+            .zip(&stores)
+            .any(|(first, s)| first.dst != s.dst || first.dst_width != s.dst_width)
+    {
+        return None;
+    }
+    Some(row)
+}
+
+fn scan_decode_node<'a>(
+    block: &'a [ProtoStatement],
+    depth: usize,
+    scan: &mut DecodeScan<'a>,
+) -> Option<DecodeNode> {
+    // A nested decoder is the arm's only statement; anything else is a row of
+    // stores.  An arm that stores nothing leaves its destinations as they
+    // were, which no table entry can express — `decode_leaf_row` rejects the
+    // empty block because the row shape can never match.
+    if let [stmt] = block {
+        match stmt {
+            ProtoStatement::SequentialBlock(inner) => {
+                return scan_decode_node(inner, depth, scan);
+            }
+            ProtoStatement::If(x) => {
+                return scan_decode_chain(&collect_eq_chain(x, 1)?, depth, scan);
+            }
+            ProtoStatement::Case(c) => {
+                return scan_decode_chain(&case_as_eq_chain(c)?, depth, scan);
+            }
+            _ => {}
+        }
+    }
+    let row = decode_leaf_row(block, scan)?;
+    scan.leaves += 1;
+    Some(DecodeNode::Leaf(row))
+}
+
+fn scan_decode_chain<'a>(
+    chain: &EqChain<'a>,
+    depth: usize,
+    scan: &mut DecodeScan<'a>,
+) -> Option<DecodeNode> {
+    if depth >= DECODE_TABLE_MAX_AXES {
+        return None;
+    }
+    let width = decode_selector_width(chain.selector)?;
+    match scan.axes.get(depth) {
+        // Depth is the axis, so a nesting that reorders its selectors — or
+        // revisits one already spent — is not a rectangular table.
+        Some(axis) if !same_var_read(axis.sel, chain.selector) => return None,
+        Some(_) => {}
+        None => scan.axes.push(DecodeAxis {
+            sel: chain.selector,
+            maxv: 0,
+        }),
+    }
+    let mut arms = Vec::with_capacity(chain.arms.len());
+    for arm in &chain.arms {
+        // A value outside the selector's range never matches; it would still
+        // stretch the axis past the range an index can reach.
+        if width < 64 && arm.value >= (1u64 << width) {
+            return None;
+        }
+        let node = scan_decode_node(arm.body, depth + 1, scan)?;
+        scan.axes[depth].maxv = scan.axes[depth].maxv.max(arm.value);
+        arms.push((arm.value, node));
+    }
+    let default = Box::new(scan_decode_node(chain.default, depth + 1, scan)?);
+    Some(DecodeNode::Branch { arms, default })
+}
+
+/// Write the sub-table `out` — the rows whose outer indices are already fixed
+/// — from the tree below `depth`.  `out` holds `row` values per entry.
+fn fill_decode_table(node: &DecodeNode, depth: usize, dims: &[u64], row: usize, out: &mut [u64]) {
+    match node {
+        DecodeNode::Leaf(v) => {
+            for entry in out.chunks_exact_mut(row) {
+                entry.copy_from_slice(v);
+            }
+        }
+        DecodeNode::Branch { arms, default } => {
+            let dim = dims[depth] as usize;
+            let stride = out.len() / dim;
+            // Every slot no arm claims takes the default — including the
+            // holes between sparse arm values and the "no arm matched" slot.
+            for slot in 0..dim {
+                fill_decode_table(
+                    default,
+                    depth + 1,
+                    dims,
+                    row,
+                    &mut out[slot * stride..][..stride],
+                );
+            }
+            // Last first, so a value listed twice resolves to its first arm
+            // exactly as the comparisons would have.
+            for (value, child) in arms.iter().rev() {
+                let slot = *value as usize;
+                fill_decode_table(
+                    child,
+                    depth + 1,
+                    dims,
+                    row,
+                    &mut out[slot * stride..][..stride],
+                );
+            }
+        }
+    }
+}
+
+/// Emit a `case` / `if` cascade over constants as an indexed load from a
+/// `static const` table, or `None` when it is not one (or would not pay).
+fn emit_decode_table(stmt: &ProtoStatement) -> Option<String> {
+    let mut scan = DecodeScan::default();
+    let root = scan_decode_node(std::slice::from_ref(stmt), 0, &mut scan)?;
+    if scan.leaves < DECODE_TABLE_MIN_LEAVES || scan.axes.is_empty() || scan.anchor.is_empty() {
+        return None;
+    }
+    let row = scan.anchor.len();
+
+    // Slots per axis: the values an arm claims, plus the one every other
+    // value clamps onto.  That last slot is what makes the load in-bounds for
+    // a selector carrying bits above its declared width — which the arms
+    // would have missed too, landing on the same default.
+    let mut hits = Vec::with_capacity(scan.axes.len());
+    let mut entries: u64 = 1;
+    for axis in &scan.axes {
+        let hit = axis.maxv.checked_add(1)?;
+        hits.push(hit);
+        entries = entries.checked_mul(hit.checked_add(1)?)?;
+        // An element is at least one byte, so this bounds the table already.
+        if entries as usize > decode_table_max_bytes() {
+            return None;
+        }
+    }
+    let dims: Vec<u64> = hits.iter().map(|h| h + 1).collect();
+    if entries as usize > scan.leaves.saturating_mul(DECODE_TABLE_MAX_SPREAD) + 64 {
+        return None;
+    }
+
+    let cell_count = entries.checked_mul(row as u64)?;
+    if cell_count as usize > decode_table_max_bytes() {
+        return None;
+    }
+    let mut cells = vec![0u64; cell_count as usize];
+    fill_decode_table(&root, 0, &dims, row, &mut cells);
+    let widest = cells.iter().copied().max().unwrap_or(0);
+    // One element type across the whole row: a row is read as a unit, so
+    // packing it tightly per destination would only trade the padding for
+    // alignment holes, at the cost of a second array per width.
+    let (elem_ty, elem_bytes) = match widest {
+        v if v <= u8::MAX as u64 => ("uint8_t", 1),
+        v if v <= u16::MAX as u64 => ("uint16_t", 2),
+        v if v <= u32::MAX as u64 => ("uint32_t", 4),
+        _ => ("uint64_t", 8),
+    };
+    if cell_count as usize * elem_bytes > decode_table_max_bytes() {
+        return None;
+    }
+
+    // The index, most-significant axis first, so the innermost selector walks
+    // adjacent rows.
+    let id = next_wide_tmp();
+    let mut pre = String::new();
+    let mut index = String::new();
+    let mut stride = entries;
+    for (n, axis) in scan.axes.iter().enumerate() {
+        stride /= dims[n];
+        let hit = hits[n];
+        let name = format!("_dti{id}_{n}");
+        pre.push_str(&format!(
+            "uint64_t {name} = (uint64_t)({sel}); {name} = {name} < {hit}ULL ? {name} : {hit}ULL; ",
+            sel = emit_expr(axis.sel)?,
+        ));
+        if !index.is_empty() {
+            index.push_str(" + ");
+        }
+        let scale = stride * row as u64;
+        if scale > 1 {
+            index.push_str(&format!("{name} * {scale}ULL"));
+        } else {
+            index.push_str(&name);
+        }
+    }
+
+    let table = format!(
+        "static const {elem_ty} _dtbl{id}[{cell_count}] = {{{}}}; ",
+        cells
+            .iter()
+            .map(|v| format!("{v:#x}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    // The entries are already masked to each destination's width, so the
+    // stores need no further masking on either path.
+    let mut store = String::new();
+    for (k, a) in scan.anchor.iter().enumerate() {
+        let VarOffset::Comb(off) = a.dst else {
+            return None;
+        };
+        let read = if k == 0 {
+            format!("_dtbl{id}[{index}]")
+        } else {
+            format!("_dtbl{id}[{index} + {k}]")
+        };
+        if is_localized(off) {
+            store.push_str(&format!("{nm} = (uint64_t){read}; ", nm = local_name(off)));
+        } else {
+            let cty = native_c_type(native_bytes(a.dst_width))?;
+            store.push_str(&format!(
+                "*(({cty}*)(comb_values + {off:#x})) = ({cty}){read}; "
+            ));
+        }
+    }
+    if diag_enabled() {
+        eprintln!(
+            "[decode_table] dst={:#x} axes={} entries={entries} row={row} elem={elem_ty} leaves={}",
+            scan.anchor[0].dst.raw(),
+            scan.axes.len(),
+            scan.leaves,
+        );
+    }
+    Some(format!("{{ {table}{pre}{store} }}"))
+}
+
 /// One terminated C statement from a `ProtoStatement`.  `None` if the
 /// variant or its substructures aren't emittable, or if the result exceeds
 /// [`max_stmt_bytes`].
@@ -5995,6 +6381,12 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
 }
 
 fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
+    if matches!(stmt, ProtoStatement::If(_) | ProtoStatement::Case(_))
+        && decode_table_enabled()
+        && let Some(s) = emit_decode_table(stmt)
+    {
+        return Some(s);
+    }
     match stmt {
         ProtoStatement::Assign(a) => {
             // A rhs_select on a plain variable is a bit-select on that variable
@@ -13533,5 +13925,256 @@ mod tests {
         clear_const_unsafe();
         let src = src.unwrap();
         assert!(src.contains("veryl_aot_eval_const"));
+    }
+    // ---- Constant decode tables ----
+
+    fn dt_case(
+        sel: ProtoExpression,
+        arms: Vec<(u64, ProtoStatement)>,
+        default: Vec<ProtoStatement>,
+    ) -> ProtoStatement {
+        ProtoStatement::Case(crate::ir::ProtoCaseStatement {
+            arms: arms
+                .into_iter()
+                .map(|(v, body)| crate::ir::ProtoCaseArm {
+                    cond: ProtoExpression::Binary {
+                        x: Box::new(sel.clone()),
+                        op: Op::Eq,
+                        y: Box::new(const_expr(v, 8)),
+                        width: 1,
+                        expr_context: ctx(1, false),
+                    },
+                    body: vec![body],
+                })
+                .collect(),
+            default,
+        })
+    }
+
+    // A `case` that only ever stores constants to one signal becomes a table
+    // plus one indexed load — no comparisons at all.
+    #[test]
+    fn constant_case_lowers_to_a_table() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms = (0..10u64)
+            .map(|v| (v, cassign(0x80, 16, const_expr(0x100 + v, 16))))
+            .collect();
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 16, const_expr(0x7, 16))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("if ("), "no comparisons should remain: {s}");
+        // The element type follows the widest entry; the store follows the
+        // destination's native storage size (4 bytes for a 16-bit signal).
+        assert!(s.contains("static const uint16_t"), "{s}");
+        assert!(s.contains("*((uint32_t*)(comb_values + 0x80))"), "{s}");
+        // Slots 0..9 hold the arms; 10 is the "no arm matched" slot, and it
+        // and every clamped value above it hold the default.
+        let body = s.split('{').nth(2).unwrap().split('}').next().unwrap();
+        let cells: Vec<u64> = body
+            .split(',')
+            .map(|t| u64::from_str_radix(t.trim().trim_start_matches("0x"), 16).unwrap())
+            .collect();
+        assert_eq!(cells.len(), 11);
+        assert_eq!(
+            &cells[..10],
+            &(0..10).map(|v| 0x100 + v).collect::<Vec<_>>()[..]
+        );
+        assert_eq!(cells[10], 0x7);
+    }
+
+    // A selector carrying bits above its declared width must still index a
+    // real slot — the clamp folds it onto the default, which is where the
+    // comparisons would have sent it.
+    #[test]
+    fn decode_table_index_is_clamped() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms = (0..16u64)
+            .map(|v| (v, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(s.contains("< 16ULL ?"), "index must clamp: {s}");
+        assert!(s.contains("[17]"), "one slot past the arms: {s}");
+    }
+
+    // Nested decoders multiply into one index; the inner selector walks
+    // adjacent entries.
+    #[test]
+    fn nested_decode_lowers_to_one_index() {
+        let outer = var_expr(VarOffset::Comb(0x40), 2);
+        let inner = var_expr(VarOffset::Comb(0x44), 2);
+        let arms = (0..3u64)
+            .map(|o| {
+                let inner_arms = (0..3u64)
+                    .map(|i| (i, cassign(0x80, 8, const_expr(o * 16 + i, 8))))
+                    .collect();
+                (
+                    o,
+                    dt_case(
+                        inner.clone(),
+                        inner_arms,
+                        vec![cassign(0x80, 8, const_expr(0xee, 8))],
+                    ),
+                )
+            })
+            .collect();
+        let stmt = dt_case(outer, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(s.contains("[16]"), "4x4 table: {s}");
+        assert!(
+            s.contains("* 4ULL"),
+            "outer axis strides by the inner dim: {s}"
+        );
+        let body = s.split('{').nth(2).unwrap().split('}').next().unwrap();
+        let cells: Vec<u64> = body
+            .split(',')
+            .map(|t| u64::from_str_radix(t.trim().trim_start_matches("0x"), 16).unwrap())
+            .collect();
+        // Row 0: three inner arms then the inner default; row 3 is the outer
+        // default, constant across the inner axis.
+        assert_eq!(&cells[..4], &[0x0, 0x1, 0x2, 0xee]);
+        assert_eq!(&cells[4..8], &[0x10, 0x11, 0x12, 0xee]);
+        assert_eq!(&cells[12..], &[0xff, 0xff, 0xff, 0xff]);
+    }
+
+    // An arm that stores nothing keeps the destination's previous value, so
+    // there is no entry to write; the cascade must survive.
+    #[test]
+    fn empty_arm_keeps_the_cascade() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let mut arms: Vec<(u64, ProtoStatement)> = (0..10u64)
+            .map(|v| (v, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        arms.push((10, ProtoStatement::SequentialBlock(vec![])));
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("static const"), "{s}");
+    }
+
+    // An arm driving several signals becomes one row, read at one index.
+    #[test]
+    fn multi_destination_arms_become_table_rows() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms = (0..10u64)
+            .map(|v| {
+                (
+                    v,
+                    ProtoStatement::SequentialBlock(vec![
+                        cassign(0x80, 8, const_expr(v, 8)),
+                        cassign(0x90, 8, const_expr(0x40 + v, 8)),
+                    ]),
+                )
+            })
+            .collect();
+        let stmt = dt_case(
+            sel,
+            arms,
+            vec![ProtoStatement::SequentialBlock(vec![
+                cassign(0x80, 8, const_expr(0xfe, 8)),
+                cassign(0x90, 8, const_expr(0xff, 8)),
+            ])],
+        );
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("if ("), "no comparisons should remain: {s}");
+        assert!(s.contains("[22]"), "11 slots of 2: {s}");
+        assert!(s.contains("*((uint32_t*)(comb_values + 0x80))"), "{s}");
+        assert!(s.contains("*((uint32_t*)(comb_values + 0x90))"), "{s}");
+        let body = s.split('{').nth(2).unwrap().split('}').next().unwrap();
+        let cells: Vec<u64> = body
+            .split(',')
+            .map(|t| u64::from_str_radix(t.trim().trim_start_matches("0x"), 16).unwrap())
+            .collect();
+        // The two destinations of one arm sit next to each other, so a lookup
+        // touches one row rather than two tables.
+        assert_eq!(&cells[..6], &[0x0, 0x40, 0x1, 0x41, 0x2, 0x42]);
+        assert_eq!(&cells[20..], &[0xfe, 0xff]);
+    }
+
+    // An arm writing a different set of signals is a different row shape.
+    #[test]
+    fn second_destination_keeps_the_cascade() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let mut arms: Vec<(u64, ProtoStatement)> = (0..10u64)
+            .map(|v| (v, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        arms.push((10, cassign(0x90, 8, const_expr(1, 8))));
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("static const"), "{s}");
+    }
+
+    // Few arms are cheaper as comparisons than as a load.
+    #[test]
+    fn short_cascade_keeps_the_cascade() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms = (0..3u64)
+            .map(|v| (v, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("static const"), "{s}");
+    }
+
+    // Sparse selector values pad the table with copies of the default; past
+    // the spread limit that padding is the whole table.
+    #[test]
+    fn sparse_values_keep_the_cascade() {
+        let sel = var_expr(VarOffset::Comb(0x40), 16);
+        let arms = (0..10u64)
+            .map(|v| (v * 1000, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("static const"), "{s}");
+    }
+
+    // A table over the ceiling declines, but its arm bodies go through the
+    // same path — so a decoder too wide to index flat still loses its inner
+    // comparisons, which is where most of the emitted source was.
+    #[test]
+    fn oversized_table_falls_back_to_per_arm_tables() {
+        let outer = var_expr(VarOffset::Comb(0x40), 4);
+        let inner = var_expr(VarOffset::Comb(0x44), 4);
+        let arms = (0..10u64)
+            .map(|o| {
+                let inner_arms = (0..10u64)
+                    .map(|i| (i, cassign(0x80, 8, const_expr(o * 16 + i, 8))))
+                    .collect();
+                (
+                    o,
+                    dt_case(
+                        inner.clone(),
+                        inner_arms,
+                        vec![cassign(0x80, 8, const_expr(0xee, 8))],
+                    ),
+                )
+            })
+            .collect();
+        let stmt = dt_case(outer, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        // 11 x 11 entries clear a 64-byte ceiling only one axis at a time.
+        TEST_DECODE_TABLE_BYTES.with(|c| c.set(Some(64)));
+        let s = emit_stmt(&stmt).unwrap();
+        TEST_DECODE_TABLE_BYTES.with(|c| c.set(None));
+        assert!(
+            s.contains("if ("),
+            "the outer selector stays a cascade: {s}"
+        );
+        assert_eq!(
+            s.matches("static const").count(),
+            10,
+            "one table per outer arm; the outer default is a bare store: {s}"
+        );
+    }
+
+    // The lowering is one env var away from the cascade, so an A/B can
+    // attribute a change to it.
+    #[test]
+    fn decode_table_can_be_disabled() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms: Vec<(u64, ProtoStatement)> = (0..10u64)
+            .map(|v| (v, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        assert!(emit_stmt(&stmt).unwrap().contains("static const"));
+        assert!(!decode_table_enabled() || std::env::var("VERYL_AOT_C_DECODE_TABLE").is_err());
     }
 }
