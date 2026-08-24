@@ -341,6 +341,65 @@ pub fn enabled() -> bool {
     *ON.get_or_init(|| std::env::var("VERYL_CONE_GATE").as_deref() != Ok("0"))
 }
 
+thread_local! {
+    /// Why statements ended up attributed to the root, and so ungated:
+    /// `0` unbounded storage, `1` no comb output, `2` a root-level write.
+    static ROOT_REASONS: std::cell::Cell<[usize; 9]> = const { std::cell::Cell::new([0; 9]) };
+}
+
+thread_local! {
+    /// Comb offsets that landed in no owner span, for the diag report.
+    static MISSES: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn record_miss(off: usize) {
+    MISSES.with(|m| m.borrow_mut().push(off));
+}
+
+fn root_reason(k: usize) {
+    ROOT_REASONS.with(|c| {
+        let mut v = c.get();
+        v[k] += 1;
+        c.set(v);
+    });
+}
+
+/// Print and clear the [`root_reason`] tally.  Every one of these statements
+/// runs on EVERY settle, so the mix says whether the ungated remainder is an
+/// analysis gap or the design's own top level.
+fn report_root_reasons(name: &str, owner: &[(usize, usize, u32)]) {
+    let v = ROOT_REASONS.with(|c| c.replace([0; 9]));
+    if v.iter().any(|&x| x > 0) {
+        eprintln!(
+            "[cone_gate] root-attributed stmts: unbounded={} no_comb_out={} root_write={} {}",
+            v[0], v[1], v[2], name,
+        );
+        eprintln!(
+            "[cone_gate]   unbounded by: out_comb_miss={} out_ff={} out_neg={} \
+             in_comb_miss={} in_ff_miss={} in_neg={}",
+            v[3], v[4], v[5], v[6], v[7], v[8],
+        );
+        MISSES.with(|m| {
+            let mut v = m.borrow_mut();
+            v.sort_unstable();
+            v.dedup();
+            let (lo, hi) = (v.first().copied(), v.last().copied());
+            eprintln!(
+                "[cone_gate]   unowned comb offsets: distinct={} min={lo:?} max={hi:?}",
+                v.len(),
+            );
+            let covered: usize = owner.iter().map(|&(a, b, _)| b - a).sum();
+            let extent = owner.last().map_or(0, |&(_, e, _)| e);
+            eprintln!(
+                "[cone_gate]   comb_owner: spans={} covered={covered} extent={extent} ({:.1}% of extent)",
+                owner.len(),
+                100.0 * covered as f64 / extent.max(1) as f64,
+            );
+            v.clear();
+        });
+    }
+}
+
 pub(crate) fn diag() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1"))
@@ -758,22 +817,55 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
                         info.out_comb.push((s0, e0));
                         node = Some(node.map_or(id, |a| lca(a, id)));
                     }
-                    None => info.unbounded = true,
+                    None => {
+                        info.unbounded = true;
+                        if diag() {
+                            root_reason(3); // out: comb offset outside every owner span
+                            record_miss(*x as usize);
+                        }
+                    }
                 },
-                _ => info.unbounded = true, // FF-writing / negative: root only
+                VarOffset::Ff(_) => {
+                    info.unbounded = true; // FF-writing: root only
+                    if diag() {
+                        root_reason(4);
+                    }
+                }
+                _ => {
+                    info.unbounded = true; // negative offset
+                    if diag() {
+                        root_reason(5);
+                    }
+                }
             }
         }
         for o in &ins {
             match o {
                 VarOffset::Comb(x) if *x >= 0 => match span_in(&inputs.comb_owner, *x as usize) {
                     Some((s0, e0, _)) => info.in_comb.push((s0, e0)),
-                    None => info.unbounded = true,
+                    None => {
+                        info.unbounded = true;
+                        if diag() {
+                            root_reason(6); // in: comb offset outside every owner span
+                            record_miss(*x as usize);
+                        }
+                    }
                 },
                 VarOffset::Ff(x) if *x >= 0 => match inputs.ff_owner.span(*x as usize) {
                     Some((s0, e0)) => info.in_ff.push((s0, e0)),
-                    None => info.unbounded = true,
+                    None => {
+                        info.unbounded = true;
+                        if diag() {
+                            root_reason(7); // in: ff offset outside every owner run
+                        }
+                    }
                 },
-                _ => info.unbounded = true,
+                _ => {
+                    info.unbounded = true;
+                    if diag() {
+                        root_reason(8); // in: negative offset
+                    }
+                }
             }
         }
         merge_ranges(&mut info.in_comb);
@@ -784,6 +876,18 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
         } else {
             node.unwrap_or(root)
         };
+        if diag() && info.node == root {
+            // Why this statement could not join a cone.  Every one of these
+            // runs on EVERY settle, so the mix decides whether the ceiling is
+            // an analysis gap (fixable) or the design's own top level.
+            root_reason(if info.unbounded {
+                0
+            } else if outs.is_empty() {
+                1
+            } else {
+                2
+            });
+        }
         // A side-effecting or unbounded statement poisons its whole ancestor
         // chain: no cone containing it may skip.
         if has_side_effects(s) || info.unbounded {
@@ -848,6 +952,7 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
                 );
             }
         }
+        report_root_reasons(&inputs.node_path[root as usize], &inputs.comb_owner);
     }
 
     // -- candidates: every qualifying node.  A statement joins its DEEPEST
