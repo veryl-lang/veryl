@@ -22613,3 +22613,92 @@ fn an_array_literal_wired_to_a_port_reaches_every_element() {
         );
     }
 }
+
+#[test]
+fn two_aliases_of_one_derived_clock_are_one_edge() {
+    // `c1` and `c2` are two `let`s of the same divided clock, so in Verilog
+    // they are one net: every `always_ff` on them samples the PRE-edge state.
+    // Firing derived clocks one at a time -- committing each domain before
+    // the next reads it -- made the flop on `c2` see the counter's NEW value,
+    // which runs a boot sequence one core edge early.
+    let code = r#"
+    module Top (
+        base: input  '_ clock          ,
+        rst : input  '_ reset_sync_high,
+        a   : output    logic<8>       , // counter, clocked by c1
+        b   : output    logic<8>       , // same alias  -> must be a-1
+        c   : output    logic<8>       , // other alias -> must be a-1
+    ) {
+        var k   : logic<2>;
+        var dclk: logic   ;
+        always_ff (base, rst) {
+            if_reset {
+                k    = 0;
+                dclk = 0;
+            } else {
+                k    = if k == 3 ? 0 : k + 1;
+                dclk = k == 2;
+            }
+        }
+        let c1: '_ clock = dclk;
+        let c2: '_ clock = dclk;
+
+        always_ff (c1, rst) {
+            if_reset {
+                a = 0;
+            } else {
+                a = a + 1;
+            }
+        }
+        always_ff (c1, rst) {
+            if_reset {
+                b = 0;
+            } else {
+                b = a;
+            }
+        }
+        always_ff (c2, rst) {
+            if_reset {
+                c = 0;
+            } else {
+                c = a;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        // 4-state only: the divided domain cannot be initialised here. Its
+        // reset arrives on `c1`/`c2`, which the base reset holds low, so
+        // a/b/c stay X and both assertions below would be vacuous. The
+        // ordering this test is about is 2-state semantics.
+        if config.use_4state {
+            continue;
+        }
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let base = sim.get_clock("base").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&base, &rst);
+
+        // four base edges per divided edge; sample after several of them
+        for _ in 0..16 {
+            sim.step(&base);
+        }
+        let a = sim.get("a").unwrap();
+        let b = sim.get("b").unwrap();
+        let c = sim.get("c").unwrap();
+        assert_eq!(
+            b, c,
+            "the two aliases must agree: a={a:?} b={b:?} c={c:?} JIT={} 4st={}",
+            config.use_jit, config.use_4state,
+        );
+        assert_ne!(
+            a, c,
+            "an alias must see the PRE-edge counter: a={a:?} c={c:?} JIT={} 4st={}",
+            config.use_jit, config.use_4state,
+        );
+    }
+}
