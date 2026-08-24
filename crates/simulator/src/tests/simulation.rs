@@ -22661,3 +22661,48 @@ fn an_unpacked_array_parameter_element_sizes_a_child() {
         );
     }
 }
+
+#[test]
+fn a_reduction_tree_inside_one_vector_settles_in_one_pass() {
+    // Every node of the tree lives in ONE packed vector, so each statement
+    // writes some bits of `node` and reads others. That read is a self
+    // reference at variable granularity and used to be dropped, which left
+    // the schedule free to keep the source order below -- level 0 first,
+    // i.e. the exact reverse of the dependency order -- and a single settle
+    // pass then read stale bits. The order is deliberate: writing the leaves
+    // last is what makes the test bite.
+    let code = r#"
+    module Top (
+        leaves: input  logic<4>,
+        root  : output logic   ,
+    ) {
+        var node: logic<7>;
+        assign node[0] = node[1] | node[2];
+        assign node[1] = node[3] | node[4];
+        assign node[2] = node[5] | node[6];
+        assign node[3] = leaves[0];
+        assign node[4] = leaves[1];
+        assign node[5] = leaves[2];
+        assign node[6] = leaves[3];
+        assign root    = node[0];
+    }
+    "#;
+
+    for config in Config::all() {
+        for leaves in 0u32..16 {
+            // Fresh sim per case: a stale `node` must not be able to satisfy
+            // the assertion by accident.
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("leaves", Value::new(u64::from(leaves), 4, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("root").unwrap(),
+                Value::new(u64::from(leaves != 0), 1, false),
+                "leaves={leaves:#x} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}

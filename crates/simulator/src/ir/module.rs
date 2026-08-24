@@ -1433,7 +1433,9 @@ pub(crate) fn analyze_dependency(
 ) -> Result<(Vec<ProtoStatement>, Option<usize>), SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
-        Var(VarOffset),
+        /// `(variable, bit atom)`. Atom 0 is the whole variable unless
+        /// `self_referenced_bit_atoms` split it.
+        Var(VarOffset, usize),
         Statement(usize),
     }
 
@@ -1448,6 +1450,17 @@ pub(crate) fn analyze_dependency(
     // for statements that have no explicit dependency between them.
     let try_topo_sort =
         |table: &HashMap<usize, ProtoStatement>| -> Result<Vec<ProtoStatement>, usize> {
+            // A statement writing some bits of a variable and reading others
+            // has that read dropped as a self-reference below. At variable
+            // granularity there is no alternative — the edge would be a self
+            // loop — but dropping it breaks the very invariant this phase
+            // reports by returning `Some(1)`: nothing orders the reader after
+            // its writer any more, and the schedule silently needs a second
+            // pass. Split exactly those variables at their writers' bit
+            // boundaries, so the dependency survives as an edge between
+            // distinct atoms.
+            let atoms = self_referenced_bit_atoms(table);
+
             let mut dag = Dag::<Node, ()>::new();
             let mut dag_nodes: HashMap<Node, _> = HashMap::default();
 
@@ -1456,6 +1469,12 @@ pub(crate) fn analyze_dependency(
 
             let mut node_to_stmt: HashMap<daggy::NodeIndex, usize> = HashMap::default();
 
+            let mut bit_reads = vec![];
+            let mut bit_writes = vec![];
+            // Insertion-ordered so the emitted DAG stays deterministic; the
+            // set only suppresses the duplicates bit splitting introduces.
+            let mut edges: Vec<(Node, Node)> = vec![];
+            let mut edge_seen: HashSet<(Node, Node)> = HashSet::default();
             for id in &sorted_keys {
                 let x = &table[id];
                 let mut inputs = vec![];
@@ -1467,29 +1486,63 @@ pub(crate) fn analyze_dependency(
                 node_to_stmt.insert(stmt, *id);
 
                 let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
-                let mut ok = true;
-                for var_key in inputs {
-                    if output_set.contains(&var_key) {
+                let split_here = !atoms.is_empty()
+                    && (inputs.iter().any(|key| atoms.contains_key(key))
+                        || output_set.iter().any(|key| atoms.contains_key(key)));
+                bit_reads.clear();
+                bit_writes.clear();
+                if split_here {
+                    x.gather_reads_with_ranges(&mut bit_reads);
+                    gather_bit_aware_outputs(x, &mut bit_writes);
+                }
+
+                edges.clear();
+                edge_seen.clear();
+                let mut push = |edges: &mut Vec<(Node, Node)>, edge: (Node, Node)| {
+                    if edge_seen.insert(edge) {
+                        edges.push(edge);
+                    }
+                };
+                for var_key in &inputs {
+                    let Some(starts) = atoms.get(var_key) else {
+                        if !output_set.contains(var_key) {
+                            push(&mut edges, (Node::Var(*var_key, 0), stmt_node));
+                        }
                         continue;
-                    }
-                    let var_node = Node::Var(var_key);
-                    let var = *dag_nodes
-                        .entry(var_node)
-                        .or_insert_with(|| dag.add_node(var_node));
-                    if dag.add_edge(var, stmt, ()).is_err() {
-                        ok = false;
-                        break;
+                    };
+                    for (read_key, read) in bit_reads.iter().filter(|(k, _)| k == var_key) {
+                        for atom in atom_indices(starts, *read) {
+                            let written = bit_writes
+                                .iter()
+                                .filter(|(k, _)| k == read_key)
+                                .any(|(_, write)| atom_indices(starts, *write).contains(&atom));
+                            if !written {
+                                push(&mut edges, (Node::Var(*read_key, atom), stmt_node));
+                            }
+                        }
                     }
                 }
-                if !ok {
-                    return Err(*id);
+                for var_key in &outputs {
+                    let Some(starts) = atoms.get(var_key) else {
+                        push(&mut edges, (stmt_node, Node::Var(*var_key, 0)));
+                        continue;
+                    };
+                    for (write_key, write) in bit_writes.iter().filter(|(k, _)| k == var_key) {
+                        for atom in atom_indices(starts, *write) {
+                            push(&mut edges, (stmt_node, Node::Var(*write_key, atom)));
+                        }
+                    }
                 }
-                for var_key in outputs {
-                    let var_node = Node::Var(var_key);
-                    let var = *dag_nodes
-                        .entry(var_node)
-                        .or_insert_with(|| dag.add_node(var_node));
-                    if dag.add_edge(stmt, var, ()).is_err() {
+
+                let mut ok = true;
+                for (source, destination) in edges.iter().copied() {
+                    let source = *dag_nodes
+                        .entry(source)
+                        .or_insert_with(|| dag.add_node(source));
+                    let destination = *dag_nodes
+                        .entry(destination)
+                        .or_insert_with(|| dag.add_node(destination));
+                    if dag.add_edge(source, destination, ()).is_err() {
                         ok = false;
                         break;
                     }
@@ -1849,7 +1902,7 @@ pub(crate) fn analyze_dependency(
             if output_set.contains(var_key) {
                 continue;
             }
-            let var_node = Node::Var(*var_key);
+            let var_node = Node::Var(*var_key, 0);
             let var = *dag_nodes_relaxed
                 .entry(var_node)
                 .or_insert_with(|| dag_relaxed.add_node(var_node));
@@ -1871,7 +1924,7 @@ pub(crate) fn analyze_dependency(
             }
         }
         for var_key in &outputs {
-            let var_node = Node::Var(*var_key);
+            let var_node = Node::Var(*var_key, 0);
             let var = *dag_nodes_relaxed
                 .entry(var_node)
                 .or_insert_with(|| dag_relaxed.add_node(var_node));
@@ -1911,6 +1964,116 @@ pub(crate) fn analyze_dependency(
 /// `Assign.select` convention. Overlap: two ranges overlap if their
 /// bit intervals intersect.
 pub(crate) type BitRange = Option<(usize, usize)>;
+
+/// Bit boundaries for the variables some single statement both writes and
+/// reads. `starts[i]` opens atom `i`; the last atom is unbounded above, so the
+/// atoms tile the whole variable however wide it turns out to be.
+///
+/// Only those variables are split: everywhere else the variable-granular
+/// bipartite model is already exact, and splitting would cost nodes and edges
+/// for nothing.
+fn self_referenced_bit_atoms(
+    table: &HashMap<usize, ProtoStatement>,
+) -> HashMap<VarOffset, Vec<usize>> {
+    let mut candidates: HashSet<VarOffset> = HashSet::default();
+    let mut inputs = vec![];
+    let mut outputs = vec![];
+    for x in table.values() {
+        inputs.clear();
+        outputs.clear();
+        x.gather_variable_offsets(&mut inputs, &mut outputs);
+        let output_set: HashSet<VarOffset> = outputs.iter().copied().collect();
+        for key in inputs.iter().filter(|key| output_set.contains(key)) {
+            candidates.insert(*key);
+        }
+    }
+    // The overwhelmingly common case: nothing to split, and the bit-level
+    // scans below never run.
+    if candidates.is_empty() {
+        return HashMap::default();
+    }
+
+    // A variable whose writes or reads some statement cannot describe in bits
+    // must stay whole: a missing edge here is a lost ordering constraint.
+    let mut opaque: HashSet<VarOffset> = HashSet::default();
+    let mut bit_reads = vec![];
+    let mut bit_writes = vec![];
+    for x in table.values() {
+        inputs.clear();
+        outputs.clear();
+        x.gather_variable_offsets(&mut inputs, &mut outputs);
+        if !inputs
+            .iter()
+            .chain(outputs.iter())
+            .any(|key| candidates.contains(key))
+        {
+            continue;
+        }
+        bit_reads.clear();
+        bit_writes.clear();
+        x.gather_reads_with_ranges(&mut bit_reads);
+        gather_bit_aware_outputs(x, &mut bit_writes);
+
+        for key in outputs.iter().filter(|key| candidates.contains(key)) {
+            if !bit_writes.iter().any(|(written, _)| written == key) {
+                opaque.insert(*key);
+            }
+        }
+        for key in inputs.iter().filter(|key| candidates.contains(key)) {
+            if !bit_reads.iter().any(|(read, _)| read == key) {
+                opaque.insert(*key);
+            }
+        }
+    }
+
+    let mut bounds: HashMap<VarOffset, HashSet<usize>> = HashMap::default();
+    for x in table.values() {
+        bit_writes.clear();
+        gather_bit_aware_outputs(x, &mut bit_writes);
+        for (key, write) in bit_writes.iter() {
+            if !candidates.contains(key) || opaque.contains(key) {
+                continue;
+            }
+            let entry = bounds.entry(*key).or_default();
+            entry.insert(0);
+            // A full-width write covers every atom, so it adds no boundary.
+            if let Some((high, low)) = write {
+                entry.insert(*low);
+                entry.insert(high + 1);
+            }
+        }
+    }
+
+    bounds
+        .into_iter()
+        .filter_map(|(key, positions)| {
+            // A single atom is the unsplit variable; keep it off the map so
+            // the plain path stays plain.
+            (positions.len() > 1).then(|| {
+                let mut starts: Vec<usize> = positions.into_iter().collect();
+                starts.sort_unstable();
+                (key, starts)
+            })
+        })
+        .collect()
+}
+
+/// Atoms a bit range touches. `None` (full width or runtime-selected) touches
+/// every atom.
+fn atom_indices(starts: &[usize], range: BitRange) -> std::ops::Range<usize> {
+    match range {
+        None => 0..starts.len(),
+        Some((high, low)) => {
+            let first = starts
+                .partition_point(|start| *start <= low)
+                .saturating_sub(1);
+            let last = starts
+                .partition_point(|start| *start <= high)
+                .saturating_sub(1);
+            first..last + 1
+        }
+    }
+}
 
 pub(crate) fn ranges_overlap(a: BitRange, b: BitRange) -> bool {
     match (a, b) {
