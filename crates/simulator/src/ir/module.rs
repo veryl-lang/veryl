@@ -1755,6 +1755,7 @@ pub(crate) fn analyze_dependency(
             deep_block_of.push(block_of[key]);
         }
     }
+    split_copies_by_source_writes(&mut deep_stmts, &mut deep_block_of);
     table = deep_stmts.into_iter().enumerate().collect();
     // Versions before scheduling: each write is its own statement now, so
     // a reader between two of them can be given the earlier version's
@@ -2243,6 +2244,126 @@ fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>
             }));
             hi = lo;
         }
+    }
+}
+
+/// `dst = src` is one node, so every bit of `dst` reads as depending on every
+/// bit of `src` — enough to weld a vector written field by field on one side
+/// to one read field by field on the other, closing a cycle no bit takes.
+///
+/// Runs after the splits above, so a concatenation already counts per element;
+/// a source written with unknown bits is left alone, no cut being finer.
+fn split_copies_by_source_writes(stmts: &mut Vec<ProtoStatement>, blocks: &mut Vec<usize>) {
+    /// Same trade as `MAX_ELEMENTS`, but no design has reached it: the cut
+    /// count follows the source's write boundaries, which stay far below.
+    const MAX_PARTS: usize = 64;
+
+    let mut bounds: HashMap<VarOffset, Option<Vec<usize>>> = HashMap::default();
+    let mut outs = Vec::new();
+    for stmt in stmts.iter() {
+        outs.clear();
+        gather_bit_aware_outputs(stmt, &mut outs);
+        for (off, range) in outs.iter() {
+            let entry = bounds.entry(*off).or_insert_with(|| Some(Vec::new()));
+            match range {
+                Some((hi, lo)) => {
+                    if let Some(cuts) = entry {
+                        cuts.push(*lo);
+                        cuts.push(hi + 1);
+                    }
+                }
+                None => *entry = None,
+            }
+        }
+    }
+
+    let mut out_stmts: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
+    let mut out_blocks: Vec<usize> = Vec::with_capacity(blocks.len());
+    for (stmt, block) in std::mem::take(stmts)
+        .into_iter()
+        .zip(blocks.iter().copied())
+    {
+        let before = out_stmts.len();
+        split_one_copy(stmt, &bounds, MAX_PARTS, &mut out_stmts);
+        out_blocks.resize(out_blocks.len() + out_stmts.len() - before, block);
+    }
+    *stmts = out_stmts;
+    *blocks = out_blocks;
+}
+
+/// One statement, split when it is a whole-variable copy whose source has
+/// known write boundaries.  The parts tile the destination, so the value is
+/// identical by construction.
+fn split_one_copy(
+    stmt: ProtoStatement,
+    bounds: &HashMap<VarOffset, Option<Vec<usize>>>,
+    max_parts: usize,
+    out: &mut Vec<ProtoStatement>,
+) {
+    let ProtoStatement::Assign(a) = stmt else {
+        out.push(stmt);
+        return;
+    };
+    let ProtoExpression::Variable {
+        var_offset,
+        select: None,
+        dynamic_select: None,
+        width,
+        var_full_width,
+        expr_context,
+    } = &a.expr
+    else {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    };
+    if a.select.is_some()
+        || a.dynamic_select.is_some()
+        || a.rhs_select.is_some()
+        || *width != a.dst_width
+        || *var_full_width != a.dst_width
+    {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    let Some(Some(cuts)) = bounds.get(var_offset) else {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    };
+    let mut cuts: Vec<usize> = cuts
+        .iter()
+        .copied()
+        .chain([0, a.dst_width])
+        .filter(|b| *b <= a.dst_width)
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    if !(3..=max_parts + 1).contains(&cuts.len()) {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    let (var_offset, var_full_width, signed) = (*var_offset, *var_full_width, expr_context.signed);
+    for w in cuts.windows(2) {
+        let (lo, hi) = (w[0], w[1] - 1);
+        out.push(ProtoStatement::Assign(ProtoAssignStatement {
+            dst: a.dst,
+            dst_width: a.dst_width,
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Variable {
+                var_offset,
+                select: Some((hi, lo)),
+                dynamic_select: None,
+                width: hi - lo + 1,
+                var_full_width,
+                expr_context: crate::ir::ExpressionContext {
+                    width: hi - lo + 1,
+                    signed,
+                },
+            },
+            dst_ff_current_offset: a.dst_ff_current_offset,
+            token: a.token,
+        }));
     }
 }
 

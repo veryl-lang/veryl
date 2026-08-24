@@ -22947,6 +22947,65 @@ fn a_module_without_blocks_still_reaches_the_split() {
 }
 
 #[test]
+fn a_whole_variable_copy_is_scheduled_per_written_range() {
+    // `flat` is written one bit at a time and `s` is read one bit at a time,
+    // but the copy between them is ONE node: every bit of `s` reads as if it
+    // depended on every bit of `flat`, so `fb` (from `s[0]`) closes a loop
+    // with the write of `flat[3]`.  Per bit there is none -- `s[0]` comes
+    // from `flat[0]`, which only reads `en`.  Cutting the copy at the
+    // boundaries `flat` is actually written on is what breaks it; the
+    // concatenation split cannot, because there is no concatenation here.
+    let code = r#"
+    module Sink (
+        d: input  logic,
+        y: output logic,
+    ) {
+        assign y = d;
+    }
+    module Top (
+        en: input  logic   ,
+        q : output logic<4>,
+    ) {
+        var flat: logic<4>;
+        var s   : logic<4>;
+        var fb  : logic   ;
+
+        assign flat[0] = en;
+        assign flat[1] = en;
+        assign flat[2] = en;
+        assign flat[3] = fb;
+
+        assign s = flat;
+
+        inst u: Sink (
+            d: s[0],
+            y: fb  ,
+        );
+
+        assign q = s;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (en, q) in [(1u64, 15u64), (0, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("en", Value::new(en, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(q, 4, false),
+                "q: en={en} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
 fn a_case_deciding_a_request_and_its_next_state_is_not_one_scheduling_node() {
     // A request/acknowledge handshake: the arm raises `req` and, separately,
     // consults `ack` to advance the state.  Per VARIABLE the `case` both
