@@ -55,12 +55,38 @@ impl Conv<&IfExpression> for ir::Expression {
                 z
             } else if same_type && false_only {
                 ret
+            } else if true_only || false_only {
+                // The arms differ, so the node has to stay: its width and sign
+                // are `max` and `&` over BOTH arms.  Replace the unreachable
+                // arm with a constant of its own type instead, which keeps
+                // both while dropping reads that never happen.
+                let (z, r) = if true_only {
+                    let blank = blank_arm(&ret);
+                    (z, blank.unwrap_or(ret))
+                } else {
+                    let blank = blank_arm(&z);
+                    (blank.unwrap_or(z), ret)
+                };
+                ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(r), comptime)
             } else {
                 ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(ret), comptime)
             };
         }
         Ok(ret)
     }
+}
+
+/// A constant standing in for an arm a constant condition rules out: same
+/// type, so the ternary's width and sign do not move, and no reads at all.
+/// `None` when the arm has no single width to build one from.
+fn blank_arm(arm: &ir::Expression) -> Option<ir::Expression> {
+    let comptime = arm.comptime();
+    let width = comptime.r#type.total_width()?;
+    let signed = comptime.r#type.signed;
+    let mut blank = Comptime::create_value(Value::new(0, width, signed), comptime.token);
+    blank.r#type = comptime.r#type.clone();
+    blank.expr_context = comptime.expr_context;
+    Some(ir::Expression::Term(Box::new(ir::Factor::Value(blank))))
 }
 
 fn resolve_op(op: &Expression01Op) -> (Op, u32) {
@@ -1258,10 +1284,11 @@ mod tests {
 
         assert_eq!(format!("{x0}"), "32'sh00000002");
         assert_eq!(format!("{x1}"), "32'sh00000002");
-        assert_eq!(format!("{x2}"), "(32'sh00000001 ? 8'h02 : 16'h0003)");
+        // The ruled-out arm is a constant of its own type, not a read.
+        assert_eq!(format!("{x2}"), "(32'sh00000001 ? 8'h02 : 16'h0000)");
         assert_eq!(
             format!("{x3}"),
-            "(32'sh00000000 ? 8'h02 : (32'sh00000001 ? 8'h04 : 16'h0005))"
+            "(32'sh00000000 ? 8'h00 : (32'sh00000001 ? 8'h04 : 16'h0000))"
         );
     }
 

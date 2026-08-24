@@ -10402,6 +10402,50 @@ fn comb_loop_dead_ternary_branch() {
 }
 
 #[test]
+fn comb_loop_dead_ternary_branch_array_arm() {
+    // Same dead branch, but the live arm is an array element, so the constant
+    // ternary does NOT fold (the arms' types differ) and the read has to be
+    // dropped where the loop graph is built instead.
+    let code = r#"
+    module Pick #(
+        param DEPTH: u32 = 2,
+    ) (
+        d  : input  logic,
+        idx: input  logic,
+        o  : output logic,
+    ) {
+        var mem: logic<1> [2];
+
+        always_comb {
+            mem[0] = 1'b1;
+            mem[1] = 1'b1;
+        }
+
+        assign o = if DEPTH == 0 ? d : mem[idx];
+    }
+    module Top (
+        en : input  logic,
+        idx: input  logic,
+        q  : output logic,
+    ) {
+        var a: logic;
+        var b: logic;
+
+        inst u: Pick (
+            d  : a  ,
+            idx: idx,
+            o  : b  ,
+        );
+
+        assign a = b && en;
+        assign q = b;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn uncovered_branch() {
     let code = r#"
     module ModuleA {
