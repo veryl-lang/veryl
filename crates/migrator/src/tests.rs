@@ -11,41 +11,24 @@ fn migrate(code: &str, exp: &str) {
 }
 
 #[test]
-fn migrate_for_statement_type_specifier() {
+fn migrate_readmemh_in_initial() {
     let code = r#"
     module A {
-        always_comb {
-            for i: u32 in 0..10 {
-            }
+        var mem: logic<8> [4];
+        var other: logic<8>;
+
+        initial {
+            $readmemh("a.hex", mem);
         }
     }"#;
 
     let exp = r#"
     module A {
-        always_comb {
-            for i      in 0..10 {
-            }
-        }
-    }"#;
+        #[allow(initial_assign)] var mem: logic<8> [4];
+        var other: logic<8>;
 
-    migrate(code, exp);
-}
-
-#[test]
-fn migrate_for_statement_signed_type() {
-    let code = r#"
-    module A {
-        always_comb {
-            for i: i32 in rev 0..10 {
-            }
-        }
-    }"#;
-
-    let exp = r#"
-    module A {
-        always_comb {
-            for i      in rev 0..10 {
-            }
+        initial {
+            $readmemh("a.hex", mem);
         }
     }"#;
 

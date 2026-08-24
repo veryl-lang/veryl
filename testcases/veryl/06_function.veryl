@@ -51,6 +51,7 @@ module Module06 {
     let a: logic<ParamX> = 1;
     var b: logic<ParamX>;
     var c: logic<ParamX>;
+    #[allow(initial_assign)]
     var d: logic<ParamX>;
     var e: logic<ParamX>;
     var f: logic<ParamX>;

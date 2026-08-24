@@ -239,6 +239,8 @@ struct Pattern {
     pub missing_reset_statement: StrId,
     pub unused_variable: StrId,
     pub unassign_variable: StrId,
+    pub initial_assign: StrId,
+    pub multiple_assign: StrId,
     pub enum_encoding: StrId,
     pub sequential: StrId,
     pub onehot: StrId,
@@ -274,6 +276,8 @@ impl Pattern {
             missing_reset_statement: resource_table::insert_str("missing_reset_statement"),
             unused_variable: resource_table::insert_str("unused_variable"),
             unassign_variable: resource_table::insert_str("unassign_variable"),
+            initial_assign: resource_table::insert_str("initial_assign"),
+            multiple_assign: resource_table::insert_str("multiple_assign"),
             enum_encoding: resource_table::insert_str("enum_encoding"),
             sequential: resource_table::insert_str("sequential"),
             onehot: resource_table::insert_str("onehot"),
@@ -390,6 +394,12 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                         }
                         x if x == pat.unassign_variable => {
                             Ok(Attribute::Allow(AllowItem::UnassignVariable))
+                        }
+                        x if x == pat.initial_assign => {
+                            Ok(Attribute::Allow(AllowItem::InitialAssign))
+                        }
+                        x if x == pat.multiple_assign => {
+                            Ok(Attribute::Allow(AllowItem::MultipleAssign))
                         }
                         _ => Err(err),
                     }
@@ -579,9 +589,23 @@ pub enum AllowItem {
     MissingResetStatement,
     UnusedVariable,
     UnassignVariable,
+    InitialAssign,
+    MultipleAssign,
 }
 
 impl AllowItem {
+    /// Valid on FPGA but not on ASIC, so `[lint.portability]` gates it for
+    /// dependencies.
+    pub fn is_non_portable(&self) -> bool {
+        match self {
+            AllowItem::InitialAssign | AllowItem::MultipleAssign => true,
+            AllowItem::MissingPort
+            | AllowItem::MissingResetStatement
+            | AllowItem::UnusedVariable
+            | AllowItem::UnassignVariable => false,
+        }
+    }
+
     pub fn available() -> String {
         let mut ret = String::new();
         for (i, x) in Self::iter().enumerate() {
@@ -601,6 +625,8 @@ impl fmt::Display for AllowItem {
             AllowItem::MissingResetStatement => "missing_reset_statement",
             AllowItem::UnusedVariable => "unused_variable",
             AllowItem::UnassignVariable => "unassign_variable",
+            AllowItem::InitialAssign => "initial_assign",
+            AllowItem::MultipleAssign => "multiple_assign",
         };
         text.fmt(f)
     }

@@ -1260,9 +1260,12 @@ fn conv_function(
             // A function body is converted once and shared with RTL callers;
             // testbench-only constructs must not leak into it.
             let in_tb_block = c.in_tb_block;
+            let in_initial = c.in_initial;
             c.in_tb_block = false;
+            c.in_initial = None;
             let statements: IrResult<ir::StatementBlock> = Conv::conv(c, block);
             c.in_tb_block = in_tb_block;
+            c.in_initial = in_initial;
             c.disalbe_const_opt = disable_const_opt;
 
             vec![ir::FunctionBody {
@@ -1347,10 +1350,12 @@ impl Conv<&EnumDeclaration> for () {
 impl Conv<&InitialDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &InitialDeclaration) -> IrResult<Self> {
         context.in_tb_block = true;
+        context.in_initial = Some(context.var_id);
         context.tb_hoist = Some(Vec::new());
         let statements: IrResult<ir::StatementBlock> =
             Conv::conv(context, value.statement_block.as_ref());
         context.tb_hoist = None;
+        context.in_initial = None;
         context.in_tb_block = false;
         Ok(ir::Declaration::Initial(ir::InitialDeclaration {
             statements: statements?.0,

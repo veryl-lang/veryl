@@ -18,4 +18,4 @@ multiple_assignment (https://doc.veryl-lang.org/book/07_appendix/02_semantic_err
     ·         ╰── Assigned
  10 │     }
     ╰────
-  help:
+  help: add `#[allow(multiple_assign)]` to the declaration of "a" if it is intentional
