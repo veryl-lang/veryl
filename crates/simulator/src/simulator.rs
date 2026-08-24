@@ -61,6 +61,9 @@ pub struct Simulator {
     /// Previous-step derived-clock values (sampled at master=0).  Empty
     /// when no derived clocks; otherwise used for 0→1 edge detection.
     prev_derived_clock_values: Vec<u8>,
+    /// Scratch for the master-high sample below.  A field, not a local: the
+    /// step is the innermost loop and its length is fixed for the run.
+    derived_clock_high: Vec<u8>,
     /// Env-gated `VERYL_WRITE_LOG_DIAG=1` diagnostics for the write-log
     /// commit path.  Accumulated across the run; `dump` is invoked
     /// automatically when the cycle counter crosses a logarithmic
@@ -89,6 +92,10 @@ pub struct Simulator {
     /// The async-reset assertion edge to evaluate alongside this step's clock
     /// event, taken once.  See `step_in_reset`.
     pending_assertion_edge: Option<Event>,
+    /// Derived clocks that rose when the master fell at the end of the last
+    /// step.  Fired at the top of the next one so the edge lands in the
+    /// period that follows it, the way a negedge flop reads to a sampler.
+    pending_negedge_clocks: SmallVec<[usize; 8]>,
 }
 
 struct WatchVar {
@@ -156,6 +163,7 @@ impl Simulator {
             last_event_stmts: std::ptr::null(),
             last_whole_event: None,
             prev_derived_clock_values: vec![0u8; n_derived],
+            derived_clock_high: vec![0u8; n_derived],
             write_log_diag: WriteLogDiag {
                 enabled: env::var("VERYL_WRITE_LOG_DIAG").as_deref() == Ok("1"),
                 next_print_cycle: 1_000_000,
@@ -170,6 +178,7 @@ impl Simulator {
             trace_dump_vars: Vec::new(),
             component_event_override: None,
             pending_assertion_edge: None,
+            pending_negedge_clocks: SmallVec::new(),
         };
 
         // Reset nets start DEASSERTED: zeroed storage reads as ASSERTED on an
@@ -1011,6 +1020,37 @@ impl Simulator {
 
         let has_eval_chunk = !self.ir.derived_clock_eval_stmts.is_empty();
 
+        // The negedge the previous step ended on lands here, before this
+        // step's rising edge.
+        if !self.pending_negedge_clocks.is_empty() {
+            let pending = std::mem::take(&mut self.pending_negedge_clocks);
+            let has_components = !self.components.is_empty();
+            for &i in &pending {
+                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                if has_components {
+                    self.stage_components(&Event::Clock(vid));
+                }
+            }
+            if watch_enabled {
+                self.dump_watch("before_negedge_batch");
+            }
+            for &i in &pending {
+                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                self.eval_event_stmts(&Event::Clock(vid));
+            }
+            self.commit_event_log();
+            if watch_enabled {
+                self.dump_watch("after_negedge_batch");
+            }
+            for &i in &pending {
+                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                if has_components {
+                    self.fire_components(&Event::Clock(vid));
+                }
+            }
+            self.do_settle_comb();
+        }
+
         // Master high → gated-clock exprs see the rising edge.
         if let Some(id) = master_id_opt {
             self.set_input_clock_bit(id, 1);
@@ -1029,13 +1069,20 @@ impl Simulator {
         let n = self.ir.derived_clock_schedule.clocks.len();
         let mut fired_mask: Vec<bool> = vec![false; n];
         let mut pre_fire: SmallVec<[usize; 8]> = SmallVec::new();
+        // Master-gated values WHILE THE MASTER IS HIGH.  A clock the master
+        // inverts is low here and rises when the master falls, so that edge
+        // needs this baseline -- `prev_derived_clock_values` is the previous
+        // step's low phase, where an inversion already reads 1.
+        let mut high_values = std::mem::take(&mut self.derived_clock_high);
+        high_values.fill(0);
         if master_id_opt.is_some() {
-            for i in 0..n {
+            for (i, high) in high_values.iter_mut().enumerate() {
                 let clk = &self.ir.derived_clock_schedule.clocks[i];
                 if clk.current_offset.is_ff() || !clk.master_gated {
                     continue;
                 }
-                if self.prev_derived_clock_values[i] == 0 && self.read_derived_clock_bit(clk) == 1 {
+                *high = self.read_derived_clock_bit(clk);
+                if self.prev_derived_clock_values[i] == 0 && *high == 1 {
                     pre_fire.push(i);
                 }
             }
@@ -1180,12 +1227,36 @@ impl Simulator {
             if has_eval_chunk {
                 self.ir.partial_settle(&mut self.mask_cache);
             }
+            // A clock the master inverts rises HERE.  The pre-commit phase
+            // fires on the master's rising edge, where an inversion falls,
+            // and the post-commit loop skips master-gated clocks -- so
+            // without this a `~clk` flop never fires at all.
+            let mut fall: SmallVec<[usize; 8]> = SmallVec::new();
+            for (i, high) in high_values.iter().enumerate() {
+                let clk = &self.ir.derived_clock_schedule.clocks[i];
+                if clk.current_offset.is_ff() || !clk.master_gated {
+                    continue;
+                }
+                if *high == 0 && self.read_derived_clock_bit(clk) == 1 {
+                    fall.push(i);
+                }
+            }
+            if !fall.is_empty() {
+                // The partial settle only refreshed the clock closure.
+                self.do_settle_comb();
+                fall.retain(|i| {
+                    let clk = &self.ir.derived_clock_schedule.clocks[*i];
+                    self.read_derived_clock_bit(clk) == 1
+                });
+            }
+            self.pending_negedge_clocks = fall;
         }
 
         for i in 0..n {
             let clk = &self.ir.derived_clock_schedule.clocks[i];
             self.prev_derived_clock_values[i] = self.read_derived_clock_bit(clk);
         }
+        self.derived_clock_high = high_values;
 
         clear_event_write_log();
         self.comb_dirty = true;

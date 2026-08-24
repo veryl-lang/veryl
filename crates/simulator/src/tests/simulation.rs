@@ -23301,3 +23301,73 @@ fn a_reader_between_two_writes_gets_the_earlier_version() {
         );
     }
 }
+
+#[test]
+fn a_flop_on_an_inverted_clock_fires_one_step_later() {
+    // `~clk` reaches the master input clock, so it is classified as a gated
+    // clock and offered the master's RISING edge -- which is exactly when an
+    // inversion falls.  It used to fire never.
+    //
+    // The step it lands on is measured, not chosen: a scan-chain output
+    // flopped on an inverted clock tracks its golden over a hundred steps
+    // only if the edge takes effect at the top of the NEXT step.
+    let code = r#"
+    module Top (
+        clk: input  '_ clock,
+        d  : input  logic   ,
+        p  : output logic   ,
+        n  : output logic   ,
+    ) {
+        let clk_l: '_ clock = ~clk;
+
+        var pi: logic;
+        var ni: logic;
+
+        always_ff (clk) {
+            pi = d;
+        }
+        always_ff (clk_l) {
+            ni = pi;
+        }
+        assign p = pi;
+        assign n = ni;
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // No reset, so the flops start X and the first step reads X
+            // rather than the edge under test.
+            continue;
+        }
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("d", Value::new(1, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("p").unwrap(),
+            Value::new(1, 1, false),
+            "the posedge flop takes d on the first edge (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("n").unwrap(),
+            Value::new(0, 1, false),
+            "the inverted-clock flop has not seen its edge yet (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("n").unwrap(),
+            Value::new(1, 1, false),
+            "the inverted-clock flop fires one step later (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
