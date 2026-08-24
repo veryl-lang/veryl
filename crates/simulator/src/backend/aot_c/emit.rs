@@ -3511,6 +3511,14 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
         && a.select.is_none()
         && a.rhs_select.is_none()
         && let Some(s) = emit_event_ff_assign_wide_dynsel(a, ds)
+            .or_else(|| emit_event_ff_assign_wide_dynsel_field(a, ds))
+    {
+        return Some(s);
+    }
+    if let Some((hi, lo)) = a.select
+        && a.dynamic_select.is_none()
+        && a.rhs_select.is_none()
+        && let Some(s) = emit_event_ff_assign_wide_field(a, hi, lo)
     {
         return Some(s);
     }
@@ -3582,6 +3590,179 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
     };
     let push = emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), &format!("{cur_off:#x}"), nb);
     Some(format!("{{ {pre}{store}{push} }}"))
+}
+
+/// Read a wide FF into a fresh register and clear everything at or above its
+/// width, ready for a field merge.  The clear must precede the merge: a field
+/// may legitimately reach past the width (`ff72[idx +: 8]` at `idx = 71`) and
+/// those bits are kept, while bits past the width outside it are dropped.
+fn emit_wide_ff_rmw_prologue(
+    reg: &str,
+    dst_width: usize,
+    nb: usize,
+    nw: usize,
+    dst_raw: isize,
+) -> String {
+    let mut out = format!(
+        "uint64_t {reg}[{nw}]; \
+         vw_copy((uint8_t*){reg}, (const uint8_t*)(ff_values + {dst_raw:#x}), {nb}u); ",
+    );
+    let top = dst_width / 64;
+    if !dst_width.is_multiple_of(64) && top < nw {
+        out.push_str(&format!(
+            "{reg}[{top}] &= 0x{m:x}ULL; ",
+            m = width_mask(dst_width % 64),
+        ));
+    }
+    for w in (dst_width.div_ceil(64))..nw {
+        out.push_str(&format!("{reg}[{w}] = 0ULL; "));
+    }
+    out
+}
+
+/// Shared tail for the two wide-FF read-modify-write paths: mirror into the
+/// next slot when dual-slot, and log the WHOLE register — `eval_step` logs the
+/// merged `current`, not just the field.
+fn emit_wide_ff_rmw_tail(
+    reg: &str,
+    nb: usize,
+    packed: bool,
+    dst_raw: isize,
+    cur_off: isize,
+) -> String {
+    let mut out = String::new();
+    if !packed {
+        out.push_str(&format!(
+            "vw_copy((uint8_t*)(ff_values + {dst_raw:#x}), (const uint8_t*){reg}, {nb}u); ",
+        ));
+    }
+    out.push_str(&emit_wide_log_chunks(
+        &format!("(uint8_t*){reg}"),
+        &format!("{cur_off:#x}"),
+        nb,
+    ));
+    out
+}
+
+/// Event-path wide FF write through a static bit-select that does NOT cover
+/// whole words (`ff420[34:0] <= v`), so the aligned byte-range copy below
+/// cannot express it.  Only a field the RHS delivers as a C scalar (≤64 bits).
+fn emit_event_ff_assign_wide_field(
+    a: &ProtoAssignStatement,
+    hi: usize,
+    lo: usize,
+) -> Option<String> {
+    let nbits = hi.checked_sub(lo)?.checked_add(1)?;
+    let nb = native_bytes(a.dst_width);
+    let nw = wide_words(nb);
+    // The field may reach past `dst_width` (that is a merge, see the prologue)
+    // but never past the register's storage.
+    if nbits > 64 || nbits == 0 || hi >= nb * 8 {
+        return None;
+    }
+    let dst_raw = match a.dst {
+        VarOffset::Ff(o) => o,
+        VarOffset::Comb(_) => return None,
+    };
+    let cur_off = a.dst_ff_current_offset;
+    if cur_off < 0 || dst_raw < 0 {
+        return None;
+    }
+    let packed = dst_raw == cur_off;
+    let vmask = width_mask(nbits);
+    let rhs = emit_expr_root(&a.expr)?;
+    let d = next_wide_tmp();
+    let reg = format!("_w{d}");
+    let (w0, sh) = (lo / 64, lo % 64);
+    if w0 >= nw {
+        return None;
+    }
+    let mut body = emit_wide_ff_rmw_prologue(&reg, a.dst_width, nb, nw, dst_raw);
+    body.push_str(&format!(
+        "uint64_t _f{d} = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; ",
+    ));
+    // Clear the field's bits and drop the value in, one word at a time; both
+    // masks are compile-time constants because the select is static.
+    body.push_str(&format!(
+        "{reg}[{w0}] = ({reg}[{w0}] & ~(0x{vmask:x}ULL << {sh})) | (_f{d} << {sh}); ",
+    ));
+    if sh + nbits > 64 {
+        // `sh > 0` here (a field of at most 64 bits starting at bit 0 of a
+        // word cannot straddle), so the down-shift count stays in 1..=63.
+        if w0 + 1 >= nw {
+            return None;
+        }
+        let up = 64 - sh;
+        body.push_str(&format!(
+            "{reg}[{w1}] = ({reg}[{w1}] & ~(0x{vmask:x}ULL >> {up})) | (_f{d} >> {up}); ",
+            w1 = w0 + 1,
+        ));
+    }
+    body.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
+    Some(format!("{{ {body} }}"))
+}
+
+/// Event-path wide FF write through a RUNTIME-indexed field narrower than a
+/// word (`ff72[idx] <= bit`).  Strides by `elem_width` bits rather than whole
+/// words, so the word index and shift are computed at run time.
+fn emit_event_ff_assign_wide_dynsel_field(
+    a: &ProtoAssignStatement,
+    ds: &crate::ir::ProtoDynamicBitSelect,
+) -> Option<String> {
+    let (ew, ne, win) = (ds.elem_width, ds.num_elements, ds.window);
+    if ew == 0 || ne == 0 || win == 0 || win > 64 {
+        return None;
+    }
+    let nb = native_bytes(a.dst_width);
+    let nw = wide_words(nb);
+    // At the top index the field may reach past `dst_width` — `Value::assign`
+    // keeps those bits, so the prologue clears the width before the merge —
+    // but it must never reach past the register's storage.
+    if (ne - 1).checked_mul(ew)?.checked_add(win)? > nb * 8 {
+        return None;
+    }
+    let dst_raw = match a.dst {
+        VarOffset::Ff(o) => o,
+        VarOffset::Comb(_) => return None,
+    };
+    let cur_off = a.dst_ff_current_offset;
+    if cur_off < 0 || dst_raw < 0 {
+        return None;
+    }
+    let packed = dst_raw == cur_off;
+    let vmask = width_mask(win);
+    let idx = emit_expr(&ds.index_expr)?;
+    let rhs = emit_expr_root(&a.expr)?;
+    let d = next_wide_tmp();
+    let reg = format!("_w{d}");
+    let mut body = format!(
+        "uint64_t _di{d} = (uint64_t)({idx}); if (_di{d} > {max}ull) _di{d} = {max}ull; \
+         uint64_t _bo{d} = _di{d} * {ew}ull; \
+         uint64_t _wi{d} = _bo{d} >> 6, _sh{d} = _bo{d} & 63ull; ",
+        max = ne - 1,
+    );
+    body.push_str(&emit_wide_ff_rmw_prologue(
+        &reg,
+        a.dst_width,
+        nb,
+        nw,
+        dst_raw,
+    ));
+    body.push_str(&format!(
+        "uint64_t _f{d} = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; \
+         {reg}[_wi{d}] = ({reg}[_wi{d}] & ~(0x{vmask:x}ULL << _sh{d})) | (_f{d} << _sh{d}); ",
+    ));
+    // A field of at most a word straddles only when it starts past the word
+    // boundary, so `_sh` is nonzero there and `64 - _sh` is a legal count.
+    if win > 1 {
+        body.push_str(&format!(
+            "if (_sh{d} + {win}ull > 64ull) {{ uint64_t _up{d} = 64ull - _sh{d}; \
+             {reg}[_wi{d} + 1] = ({reg}[_wi{d} + 1] & ~(0x{vmask:x}ULL >> _up{d})) \
+             | (_f{d} >> _up{d}); }} ",
+        ));
+    }
+    body.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
+    Some(format!("{{ {body} }}"))
 }
 
 /// Runtime whole-element write into a packed wide FF (`ff[idx] <= v` on an
@@ -9170,6 +9351,199 @@ mod tests {
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
         assert!(s.contains("write_log")); // log push of the RMW result
         assert!(s.contains("ff_values + 0x40")); // RMW read of the slot
+    }
+
+    /// Run an emitted event function over a hand-built `WriteLogBuffer` and
+    /// return the wide entries it pushed, as `(offset, payload_bytes)`.
+    fn run_wide_ff_event(src: &str, what: &str, ff: &mut [u8]) -> Option<Vec<(u32, Vec<u8>)>> {
+        use crate::ir::write_log::{
+            WRITE_LOG_WIDE_ENTRY_OFFSET_NB, WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
+            WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_WIDE_ENTRY_SIZE,
+            WRITE_LOG_WIDE_OFFSET_COUNT, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
+        };
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_{what}_{}", std::process::id()));
+        let module = compile_for_test(&tmp, src, what)?;
+        // The emitted push reads only the entries pointer and the count, so a
+        // stub buffer with those two fields set is enough to observe it.
+        let esz = WRITE_LOG_WIDE_ENTRY_SIZE as usize;
+        let mut entries = vec![0u8; esz * 8];
+        let mut log = vec![0u8; 256];
+        let eptr = entries.as_mut_ptr();
+        log[WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR as usize
+            ..WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR as usize + 8]
+            .copy_from_slice(&(eptr as usize).to_le_bytes());
+        let mut comb = vec![0u8; 256];
+        unsafe {
+            (module.func)(ff.as_mut_ptr(), comb.as_mut_ptr(), log.as_mut_ptr(), 0);
+        }
+        let count = u32::from_le_bytes(
+            log[WRITE_LOG_WIDE_OFFSET_COUNT as usize..WRITE_LOG_WIDE_OFFSET_COUNT as usize + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let out = (0..count)
+            .map(|i| {
+                let e = &entries[i * esz..(i + 1) * esz];
+                let off = u32::from_le_bytes(
+                    e[WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET as usize
+                        ..WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET as usize + 4]
+                        .try_into()
+                        .unwrap(),
+                );
+                let nb = e[WRITE_LOG_WIDE_ENTRY_OFFSET_NB as usize] as usize;
+                let p = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD as usize;
+                (off, e[p..p + nb].to_vec())
+            })
+            .collect();
+        let _ = fs::remove_dir_all(&tmp);
+        Some(out)
+    }
+
+    #[test]
+    fn emit_event_ff_wide_static_field_merges_into_the_logged_register() {
+        // `ff200[34:0] <= v`: the field spans no whole word, so the emit must
+        // read, merge [34:0], and log the WHOLE merged width.
+        if !cc_available() {
+            eprintln!("emit_event_ff_wide_static_field_merges_into_the_logged_register: no cc");
+            return;
+        }
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 200,
+            select: Some((34, 0)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x5_a5a5_a5a5, 35),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let s = emit_stmt(&ProtoStatement::Assign(a.clone())).expect("wide field store must emit");
+        assert!(s.contains("ff_values + 0x0"), "must read the register: {s}");
+        let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
+
+        // Pre-load the register with a pattern the merge must preserve outside
+        // [34:0] — including the rest of the word the field sits in.  A
+        // committed register carries nothing at or above its width.
+        let mut ff = vec![0u8; 64];
+        ff[..25].fill(0xcc);
+        let Some(entries) = run_wide_ff_event(&src, "wff_static", &mut ff) else {
+            return;
+        };
+        assert_eq!(entries.len(), 1, "one wide entry for a 200-bit register");
+        let (off, payload) = &entries[0];
+        assert_eq!(*off, 0);
+        assert_eq!(payload.len(), 32, "200 bits rounds up to 4 words");
+        let lo = u64::from_le_bytes(payload[0..8].try_into().unwrap());
+        assert_eq!(lo & ((1u64 << 35) - 1), 0x5_a5a5_a5a5, "the field landed");
+        assert_eq!(
+            lo >> 35,
+            0xccccccccccccccccu64 >> 35,
+            "bits above 34 survived the merge"
+        );
+        assert_eq!(payload[8], 0xcc, "untouched words survived");
+        assert_eq!(payload[24], 0xcc, "the top in-width byte survived");
+        assert_eq!(&payload[25..32], &[0u8; 7], "nothing above the width");
+    }
+
+    #[test]
+    fn emit_event_ff_wide_dynamic_bit_merges_at_the_runtime_index() {
+        // `ff72[idx] <= bit`: a one-bit field at a runtime offset inside a
+        // register wider than a word.  The whole-element path strides by whole
+        // words and cannot express it.
+        if !cc_available() {
+            eprintln!("emit_event_ff_wide_dynamic_bit_merges_at_the_runtime_index: no cc");
+            return;
+        }
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 72,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(const_expr(70, 8)),
+                elem_width: 1,
+                window: 1,
+                num_elements: 72,
+            }),
+            rhs_select: None,
+            expr: const_expr(1, 1),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
+        let mut ff = vec![0u8; 32];
+        let Some(entries) = run_wide_ff_event(&src, "wff_dyn", &mut ff) else {
+            return;
+        };
+        assert_eq!(entries.len(), 1);
+        let (off, payload) = &entries[0];
+        assert_eq!(*off, 0);
+        assert_eq!(payload.len(), 16, "72 bits sits in the 128-bit size class");
+        let hi = u64::from_le_bytes(payload[8..16].try_into().unwrap());
+        assert_eq!(hi, 1u64 << (70 - 64), "bit 70 set, nothing else");
+        assert_eq!(
+            u64::from_le_bytes(payload[0..8].try_into().unwrap()),
+            0,
+            "the low word is untouched"
+        );
+    }
+
+    #[test]
+    fn emit_event_ff_wide_dynamic_field_keeps_the_bits_it_spills_past_the_width() {
+        // `ff72[idx +: 8]` at idx = 71 reaches past the declared 72, and those
+        // bits come from the VALUE — so the width clear must precede the merge.
+        if !cc_available() {
+            eprintln!("emit_event_ff_wide_dynamic_field_keeps_the_bits_it_spills: no cc");
+            return;
+        }
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 72,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(const_expr(71, 8)),
+                elem_width: 1,
+                window: 8,
+                num_elements: 72,
+            }),
+            rhs_select: None,
+            expr: const_expr(0xff, 8),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
+        let mut ff = vec![0u8; 32];
+        let Some(entries) = run_wide_ff_event(&src, "wff_spill", &mut ff) else {
+            return;
+        };
+        assert_eq!(entries.len(), 1);
+        let hi = u64::from_le_bytes(entries[0].1[8..16].try_into().unwrap());
+        assert_eq!(
+            hi,
+            0xffu64 << (71 - 64),
+            "all eight bits land, including the three past bit 71"
+        );
+    }
+
+    #[test]
+    fn emit_event_ff_wide_dynamic_field_outside_the_storage_declines() {
+        // Past the declared width is a merge; past the REGISTER is a buffer
+        // overrun, so that shape must bail to Cranelift.
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 72,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(const_expr(0, 8)),
+                elem_width: 8,
+                window: 8,
+                num_elements: 17, // 16 * 8 + 8 = 136 > 128 bits of storage
+            }),
+            rhs_select: None,
+            expr: const_expr(1, 8),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        assert!(emit_stmt(&ProtoStatement::Assign(a)).is_none());
     }
 
     #[test]
