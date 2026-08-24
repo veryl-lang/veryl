@@ -20629,9 +20629,8 @@ fn dynamic_index_store_into_a_65_to_128_bit_element() {
 
 #[test]
 fn dynamic_index_store_stays_compiled_above_64_bits() {
-    // The value test above passes on the interpreter too.  Pin the predicate:
-    // a comb-base element store is compiled at every width above 64, not only
-    // above 128.  An FF base keeps its own narrower gate.
+    // Pin the predicate: a comb-base element store is compiled above 64 bits,
+    // not only above 128.  An FF base keeps its own narrower gate.
     use crate::ir::{ExpressionContext, ProtoAssignDynamicStatement, ProtoExpression, VarOffset};
 
     let index = ProtoExpression::Value {

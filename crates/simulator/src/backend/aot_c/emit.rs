@@ -2181,6 +2181,29 @@ fn expr_covered(e: &ProtoExpression) -> bool {
     }
 }
 
+/// Does a concatenation element contribute no bits at all?  `{0{x}}` folds its
+/// repeat count to 0, so `eval` never runs the per-repeat concat.  Recursing
+/// rather than trusting a declared `width` of 0 is what makes this safe to act
+/// on; an unsized literal is zero-width but NOT empty.
+fn concat_elem_is_empty(sub: &ProtoExpression, repeat: usize) -> bool {
+    if repeat == 0 {
+        return true;
+    }
+    match sub {
+        ProtoExpression::Concatenation {
+            width: 0, elements, ..
+        } => concat_evaluates_empty(elements),
+        _ => false,
+    }
+}
+
+/// Does this concatenation evaluate to a zero-width value?
+fn concat_evaluates_empty(elements: &[(Box<ProtoExpression>, usize, usize)]) -> bool {
+    elements
+        .iter()
+        .all(|(sub, repeat, _)| concat_elem_is_empty(sub, *repeat))
+}
+
 /// Bare variant name of `e`, for the census breadcrumbs that describe a
 /// COVERED node (where `classify_uncovered_expr` would say nothing).
 fn diag_expr_kind(e: &ProtoExpression) -> &'static str {
@@ -8031,8 +8054,14 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             // for nested exprs `expr.width()`), not the ignored `_elem_width`.
             // Limit: total result width must fit in u64.  A repeat>1 element is
             // duplicated textually; gcc -O3 CSEs the repeated loads.
-            if *width == 0 || *width > 128 {
+            if *width > 128 {
                 return None;
+            }
+            // A zero-width concatenation (`{0{x}}`) contributes no bits.
+            // Emitting the constant keeps a module that merely mentions one on
+            // the AOT-C path; consumers size the element by `width`.
+            if *width == 0 {
+                return concat_evaluates_empty(elements).then(|| "0ULL".to_string());
             }
             // For total widths >64 the accumulator must be __uint128_t
             // to hold the full result.  Sub-element widths still fit in
@@ -8090,6 +8119,9 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 let sign_str = emit_expr(&elements[0].0)?;
                 let mut lower_width = 0usize;
                 for (sub, repeat, elem_width) in &elements[1..] {
+                    if concat_elem_is_empty(sub, *repeat) {
+                        continue;
+                    }
                     let sub_width = sub.width();
                     if sub_width == 0 || sub_width > 128 {
                         return None;
@@ -8172,6 +8204,9 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 }
             }
             for (sub, repeat, elem_width) in elements {
+                if concat_elem_is_empty(sub, *repeat) {
+                    continue;
+                }
                 // An unsized literal ('0/'1) reports width 0; the element
                 // tuple's declared width is the authoritative slot size.
                 let sub_width = if sub.width() == 0 {
@@ -9254,6 +9289,103 @@ mod tests {
             token: dummy_token(),
         });
         assert!(emit_function(&[assign]).is_none());
+    }
+
+    /// `{0{sub}}` — a replication whose count folded to zero.
+    fn zero_repeat_concat(sub: ProtoExpression) -> ProtoExpression {
+        ProtoExpression::Concatenation {
+            elements: vec![(Box::new(sub), 0, 1)],
+            width: 0,
+            expr_context: ctx(0, false),
+        }
+    }
+
+    #[test]
+    fn emit_concat_zero_repeat_element_contributes_no_bits() {
+        // `{a:8, {0{b}}, c:8}` is `{a, c}`, so `a` shifts by 8 and not by 8
+        // plus a phantom slot.
+        if !cc_available() {
+            eprintln!("emit_concat_zero_repeat_element_contributes_no_bits: cc unavailable");
+            return;
+        }
+        let e = ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(var_expr(VarOffset::Comb(0), 8)), 1, 8),
+                (
+                    Box::new(zero_repeat_concat(var_expr(VarOffset::Comb(8), 1))),
+                    1,
+                    0,
+                ),
+                (Box::new(var_expr(VarOffset::Comb(16), 8)), 1, 8),
+            ],
+            width: 16,
+            expr_context: ctx(16, false),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(32),
+            dst_width: 16,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: e,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign]).expect("a zero-repeat element must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_zrep_{}", std::process::id()));
+        let Some(module) = compile_for_test(
+            &tmp,
+            &src,
+            "emit_concat_zero_repeat_element_contributes_no_bits",
+        ) else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 64];
+        comb[0] = 0xa5; // a
+        comb[8] = 0x01; // b — must not reach the result
+        comb[16] = 0x3c; // c
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        assert_eq!(
+            u16::from_le_bytes(comb[32..34].try_into().unwrap()),
+            0xa53c,
+            "the zero-repeat element must occupy no bits"
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_concat_zero_width_node_alone_is_the_zero_constant() {
+        // `{0{b}}` standing on its own evaluates to a zero-WIDTH value, which
+        // `Value::concat` treats as the identity; the emit is the constant.
+        let e = zero_repeat_concat(var_expr(VarOffset::Comb(0), 1));
+        assert_eq!(
+            emit_expr(&e).expect("a zero-width concatenation must stay covered"),
+            "0ULL"
+        );
+    }
+
+    #[test]
+    fn emit_concat_declared_zero_width_with_real_elements_bails() {
+        // A node whose declared width disagrees with its contents must bail to
+        // Cranelift, not silently emit 0.
+        let e = ProtoExpression::Concatenation {
+            elements: vec![(Box::new(var_expr(VarOffset::Comb(0), 8)), 1, 8)],
+            width: 0,
+            expr_context: ctx(0, false),
+        };
+        assert!(
+            emit_expr(&e).is_none(),
+            "a zero width that contradicts the elements must not be trusted"
+        );
     }
 
     #[test]
