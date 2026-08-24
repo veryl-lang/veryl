@@ -362,6 +362,7 @@ pub struct ForStatement {
     pub var_signed: bool,
     pub range: RuntimeForRange,
     pub body: Vec<Statement>,
+    pub token: TokenRange,
 }
 
 #[derive(Clone)]
@@ -518,12 +519,18 @@ impl Statement {
                         if step_body(i) == ControlFlow::Break {
                             break;
                         }
-                        // Progress guard: a stalled or faulting step would
-                        // spin this delta step forever (const-bound cases are
-                        // rejected at analysis; runtime bounds reach here).
+                        // Break out rather than hang, but report it: the emitted
+                        // SystemVerilog loops here, so exiting quietly would let
+                        // a broken design pass. Const bounds are caught earlier.
                         match op.eval(i as usize, r.step as usize) {
                             Some(n) if n as u64 > i => i = n as u64,
-                            _ => break,
+                            _ => {
+                                assert_buffer::record_fatal(format!(
+                                    "for-loop step does not advance the loop variable (stuck at {i}) at {}:{}:{}",
+                                    x.token.beg.source, x.token.beg.line, x.token.beg.column
+                                ));
+                                break;
+                            }
                         }
                     }
                 } else {
@@ -1024,6 +1031,7 @@ pub struct ProtoForStatement {
     pub var_signed: bool,
     pub range: ProtoForRange,
     pub body: Vec<ProtoStatement>,
+    pub token: TokenRange,
 }
 
 #[derive(Clone, Debug, Hash)]
@@ -2315,6 +2323,7 @@ impl ProtoStatement {
                         var_signed: x.var_signed,
                         range,
                         body,
+                        token: x.token,
                     })
                 }
                 ProtoStatement::SequentialBlock(body) => {
@@ -3508,6 +3517,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     var_signed,
                     range,
                     body,
+                    token: x.token,
                 })]
             }
             air::Statement::Unsupported(token) => {
