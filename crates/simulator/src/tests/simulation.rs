@@ -22702,3 +22702,37 @@ fn two_aliases_of_one_derived_clock_are_one_edge() {
         );
     }
 }
+
+#[test]
+fn negating_a_width_64_value_wraps_instead_of_overflowing() {
+    // Two's complement is taken modulo 2^width. At width 64 the complement of
+    // zero is u64::MAX, so adding the one carries out of the top bit -- which
+    // is the value's own overflow, not a fault. The interpreter's `+= 1`
+    // panicked there; 8/32/63/65/128 were all fine because the mask left room.
+    let code = r#"
+    module Top (
+        a: input  logic<64>,
+        y: output logic<64>,
+    ) {
+        assign y = -a;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (a, want) in [(0u64, 0u64), (5, 5u64.wrapping_neg()), (1, u64::MAX)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::new(a, 64, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(want, 64, false),
+                "-{a}: JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
