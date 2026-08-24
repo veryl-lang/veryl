@@ -405,9 +405,25 @@ pub(crate) fn diag() -> bool {
     *ON.get_or_init(|| std::env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1"))
 }
 
-/// Total gated compare bytes cap: bounds the worst-case (always-dirty)
-/// per-settle overhead regardless of how many cones qualify.
-pub(crate) const MAX_TOTAL_COMPARE: usize = 256 << 10;
+/// Above this, a variable is owned as ONE span instead of one per element: no
+/// [`compare_budget`] affords comparing a variable this large, so per-element
+/// spans buy precision nothing spends.  Absolute on purpose — this caps
+/// ELABORATION cost, which grows with the modelled depth, not with the logic.
+pub(crate) const MAX_ELEMENT_OWNER_BYTES: usize = 256 << 10;
+
+/// Compare bytes the gate may spend per comb statement.  The per-segment test
+/// below wants one statement per 32 compare bytes, so a settle is worth about
+/// `32 * n`; an eighth of that caps the all-dirty worst case at a quarter of a
+/// settle, and a segment that never skips auto-offs out of even that.
+const COMPARE_BYTES_PER_STMT: usize = 8;
+
+/// The design's total compare budget, proportional to the comb statement count
+/// because that is what the gate is spending it to avoid.  An absolute cap
+/// would hand the whole budget to whichever cones the schedule reaches first
+/// and leave the rest of the design ungated.
+fn compare_budget(comb_stmts: usize) -> usize {
+    comb_stmts.saturating_mul(COMPARE_BYTES_PER_STMT)
+}
 /// A segment smaller than this is not worth its dispatch branch.
 const MIN_SEGMENT_STMTS: usize = 64;
 /// A subtree carrying fewer statements than this is not worth a cone of its
@@ -585,7 +601,7 @@ pub fn build_inputs(
             // exact and makes the table a function of the design's variables
             // rather than its array lengths.
             let (comb_bytes, comb_span_bytes) = comb_extent(&vm.elements, use_4state);
-            let fold_var = comb_bytes > MAX_TOTAL_COMPARE
+            let fold_var = comb_bytes > MAX_ELEMENT_OWNER_BYTES
                 || comb_span_bytes > crate::ir::big_array::FOLD_SPAN_BYTES;
             let mut comb_span: Option<(usize, usize)> = None;
             for el in &vm.elements {
@@ -1209,6 +1225,7 @@ fn finish_plan(
     writers: &[Vec<u32>],
 ) -> Option<ConePlan> {
     let n = order.len();
+    let budget = compare_budget(n);
     let mut in_burst = vec![false; n];
     let mut segments: Vec<Segment> = Vec::new();
     let mut total_bytes = 0usize;
@@ -1322,7 +1339,7 @@ fn finish_plan(
         // evaluating a statement, so one statement per 32 compare bytes still
         // pays off several-fold at a high skip rate — and a segment that
         // cannot skip auto-offs into a cost of zero, bounding the downside.
-        if (end - start) < bytes / 32 || total_bytes + bytes > MAX_TOTAL_COMPARE {
+        if (end - start) < bytes / 32 || total_bytes + bytes > budget {
             if diag() {
                 eprintln!(
                     "[cone_gate] drop unprofitable [{start}..{end}) stmts={} bytes={bytes} {}",
@@ -1354,12 +1371,13 @@ fn finish_plan(
     }
     if diag() {
         eprintln!(
-            "[cone_gate] stmts={} cones={} segments={} gated_stmts={} compare_bytes={}",
+            "[cone_gate] stmts={} cones={} segments={} gated_stmts={} compare_bytes={}/{}",
             n,
             cones.len(),
             segments.len(),
             segments.iter().map(|s| s.end - s.start).sum::<usize>(),
             total_bytes,
+            budget,
         );
         for s in &segments {
             eprintln!(
@@ -1506,10 +1524,10 @@ mod tests {
                 .map(|i| el(8, VarOffset::Comb((i * 8) as isize)))
                 .collect()
         };
-        let just_over = arr(MAX_TOTAL_COMPARE / 8 + 1);
-        let just_under = arr(MAX_TOTAL_COMPARE / 8);
-        assert!(comb_extent(&just_over, false).0 > MAX_TOTAL_COMPARE);
-        assert!(comb_extent(&just_under, false).0 <= MAX_TOTAL_COMPARE);
+        let just_over = arr(MAX_ELEMENT_OWNER_BYTES / 8 + 1);
+        let just_under = arr(MAX_ELEMENT_OWNER_BYTES / 8);
+        assert!(comb_extent(&just_over, false).0 > MAX_ELEMENT_OWNER_BYTES);
+        assert!(comb_extent(&just_under, false).0 <= MAX_ELEMENT_OWNER_BYTES);
         // A padded array can span past the fold's threshold while its elements
         // stay under the budget; those spans have to collapse anyway, because
         // `plan` reads such an array folded.
@@ -1522,7 +1540,7 @@ mod tests {
             })
             .collect();
         let (bytes, span) = comb_extent(&padded, false);
-        assert!(bytes <= MAX_TOTAL_COMPARE);
+        assert!(bytes <= MAX_ELEMENT_OWNER_BYTES);
         assert!(span > crate::ir::big_array::FOLD_SPAN_BYTES);
     }
 
@@ -1551,6 +1569,22 @@ mod tests {
         assert_eq!(padded.span(15), None);
         assert_eq!(padded.span(16), Some((16, 24)));
         assert_eq!(padded.span(47), None);
+    }
+
+    #[test]
+    fn the_compare_budget_tracks_the_design_size() {
+        // Under an absolute cap, replicating a design — a second core — leaves
+        // the copy ungated while the original stays gated.
+        assert_eq!(compare_budget(2 * 36_032), 2 * compare_budget(36_032));
+        // And it must stay under what the per-segment rule already implies:
+        // every kept segment brings a statement per 32 compare bytes, so the
+        // sum can never be worth more than `32 * stmts`.
+        for stmts in [1usize, 300, 4_324, 36_032, 1 << 20] {
+            assert!(compare_budget(stmts) < stmts.saturating_mul(32));
+        }
+        // A design large enough to overflow the product saturates rather than
+        // wrapping into a tiny budget.
+        assert_eq!(compare_budget(usize::MAX), usize::MAX);
     }
 
     #[test]

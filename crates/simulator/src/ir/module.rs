@@ -974,7 +974,7 @@ fn collect_event_written_comb(
                     // element owns a span and has to be named.  The fold weighs
                     // elements, not the range they stride over.
                     let least_bytes = a.dst_num_elements * MIN_ELEMENT_BYTES;
-                    if least_bytes > cone_gate::MAX_TOTAL_COMPARE {
+                    if least_bytes > cone_gate::MAX_ELEMENT_OWNER_BYTES {
                         let last = a.dst_num_elements.saturating_sub(1) as isize;
                         out.insert(a.dst_base.raw());
                         out.insert(a.dst_base.raw() + a.dst_stride * last);
@@ -1028,7 +1028,7 @@ fn collect_event_written_comb(
                     let lo = comb().map(|e| e.current.raw()).min();
                     let hi = comb().map(|e| e.current.raw()).max();
                     if let (Some(lo), Some(hi)) = (lo, hi) {
-                        if least_bytes > cone_gate::MAX_TOTAL_COMPARE {
+                        if least_bytes > cone_gate::MAX_ELEMENT_OWNER_BYTES {
                             out.insert(lo);
                             out.insert(hi);
                         } else {
