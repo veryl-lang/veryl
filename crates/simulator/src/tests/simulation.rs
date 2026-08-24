@@ -22489,3 +22489,88 @@ fn a_reduction_over_a_narrow_operand_survives_a_wide_destination() {
         }
     }
 }
+
+#[test]
+fn a_constant_index_write_after_a_dynamic_one_does_not_erase_it() {
+    // A dynamically indexed write followed by constant-indexed ones in the
+    // same `always_comb`.  The dynamic write names only the BASE offset, so
+    // elements 1.. look unwritten, get fused into one unconditional write at
+    // the later constant write, and lose what the dynamic write put there.
+    let code = r#"
+    module Top (
+        clk  : input  clock   ,
+        rst  : input  reset   ,
+        push : input  logic   ,
+        flush: input  logic   ,
+        idx  : input  logic<2>,
+        din  : input  logic<8>,
+        q0   : output logic<8>,
+        q1   : output logic<8>,
+        q2   : output logic<8>,
+        q3   : output logic<8>,
+    ) {
+        var q_n: logic<8> [4];
+        var q_q: logic<8> [4];
+
+        always_comb {
+            q_n = q_q;
+            if push {
+                q_n[idx] = din;
+            }
+            if flush {
+                for i in 0..4 {
+                    q_n[i][7] = 1'b0;
+                }
+            }
+        }
+        always_ff {
+            if_reset {
+                q_q = '{default: '0};
+            } else {
+                q_q = q_n;
+            }
+        }
+        assign q0 = q_q[0];
+        assign q1 = q_q[1];
+        assign q2 = q_q[2];
+        assign q3 = q_q[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+
+        // one real flush pulse: a `flush` that never rises folds to a constant
+        sim.set("push", Value::new(0, 1, false));
+        sim.set("flush", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("flush", Value::new(0, 1, false));
+        sim.step(&clk);
+
+        // push 0x11 into slot 0, 0x12 into slot 1, ...
+        for i in 0..4u64 {
+            sim.set("push", Value::new(1, 1, false));
+            sim.set("idx", Value::new(i, 2, false));
+            sim.set("din", Value::new(0x11 + i, 8, false));
+            sim.step(&clk);
+            sim.set("push", Value::new(0, 1, false));
+            sim.step(&clk);
+        }
+
+        for (name, want) in [("q0", 0x11u64), ("q1", 0x12), ("q2", 0x13), ("q3", 0x14)] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(want, 8, false),
+                "{name}: JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}

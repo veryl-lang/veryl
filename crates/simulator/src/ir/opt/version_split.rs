@@ -244,6 +244,13 @@ struct BlockCol {
     opaque_writes: HashSet<i64>,
     /// Comb offset -> last write position in the block (events + opaque).
     max_write_pos: HashMap<i64, u32>,
+    /// Byte spans a non-eventable statement writes / reads, with the
+    /// statement's position.  The maps above are keyed on the base offset of
+    /// each access, which names a dynamically-indexed array access only by
+    /// its first element even though it reaches every element in its span.
+    /// [`expand_opaque_spans`] folds these back in.
+    opaque_write_spans: Vec<(i64, i64, u32)>,
+    opaque_read_spans: Vec<(i64, i64, u32)>,
     pos: u32,
 }
 
@@ -356,14 +363,61 @@ fn record_opaque(stmt: &ProtoStatement, col: &mut BlockCol) {
     let pos = col.pos;
     for d in &deps.ins {
         if let VarOffset::Comb(o) = d.off {
-            col.read_pos.entry(o as i64).or_default().push(pos);
+            let o = o as i64;
+            col.read_pos.entry(o).or_default().push(pos);
+            if let Some(nb) = d.bytes {
+                col.opaque_read_spans.push((o, o + nb as i64, pos));
+            }
         }
     }
     for d in &deps.outs {
         if let VarOffset::Comb(o) = d.off {
-            col.opaque_writes.insert(o as i64);
-            let e = col.max_write_pos.entry(o as i64).or_insert(0);
+            let o = o as i64;
+            col.opaque_writes.insert(o);
+            let e = col.max_write_pos.entry(o).or_insert(0);
             *e = (*e).max(pos);
+            if let Some(nb) = d.bytes {
+                col.opaque_write_spans.push((o, o + nb as i64, pos));
+            }
+        }
+    }
+}
+
+/// Fold the opaque byte spans back into the offset-keyed maps.  A dynamically
+/// indexed access names only the array's BASE offset, so keying on the offset
+/// alone leaves elements 1.. looking unwritten and unread — and the fused
+/// write then clobbers what the dynamic write put there.
+fn expand_opaque_spans(col: &mut BlockCol, by_dst: &HashMap<i64, Vec<usize>>) {
+    let write_spans = std::mem::take(&mut col.opaque_write_spans);
+    let read_spans = std::mem::take(&mut col.opaque_read_spans);
+    if write_spans.is_empty() && read_spans.is_empty() {
+        return;
+    }
+
+    let mut offs: Vec<i64> = by_dst.keys().copied().collect();
+    for reads in col.ev_reads.values() {
+        offs.extend(reads.iter().copied());
+    }
+    offs.sort_unstable();
+    offs.dedup();
+
+    // The base offset itself is already recorded by `record_opaque`.
+    fn covered(offs: &[i64], start: i64, end: i64) -> &[i64] {
+        let lo = offs.partition_point(|&o| o <= start);
+        let hi = offs.partition_point(|&o| o < end);
+        &offs[lo..hi.max(lo)]
+    }
+
+    for (start, end, pos) in write_spans {
+        for &o in covered(&offs, start, end) {
+            col.opaque_writes.insert(o);
+            let e = col.max_write_pos.entry(o).or_insert(0);
+            *e = (*e).max(pos);
+        }
+    }
+    for (start, end, pos) in read_spans {
+        for &o in covered(&offs, start, end) {
+            col.read_pos.entry(o).or_default().push(pos);
         }
     }
 }
@@ -428,6 +482,7 @@ fn split_block(
     for (i, ev) in col.events.iter().enumerate() {
         by_dst.entry(ev.dst).or_default().push(i);
     }
+    expand_opaque_spans(&mut col, &by_dst);
 
     struct Fused {
         last_stmt_idx: usize,
