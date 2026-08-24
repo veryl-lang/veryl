@@ -23114,3 +23114,69 @@ fn a_vector_written_by_one_concat_is_scheduled_per_element() {
         );
     }
 }
+
+#[test]
+fn a_reader_between_two_writes_gets_the_earlier_version() {
+    // `f` is written twice in one block and read in between, so the reader
+    // observes the FIRST version.  Sharing one offset for both versions forces
+    // a WAR edge from that reader to the second write, and because `req`
+    // depends on the second version and `ack` on `req`, that edge closes a
+    // cycle the circuit does not have: per bit, `o` needs f_v1 and ack, while
+    // `req` needs only f_v2.  Renaming the earlier version into its own
+    // storage removes the edge -- and the value it must produce is f_v1, not
+    // the zero the second write leaves behind.
+    let code = r#"
+    module Ack (
+        req: input  logic,
+        ack: output logic,
+    ) {
+        assign ack = !req;
+    }
+    module Top (
+        d: input  logic   ,
+        q: output logic<8>,
+    ) {
+        var f  : logic   ;
+        var req: logic   ;
+        var ack: logic   ;
+        var o  : logic<8>;
+
+        inst u: Ack (
+            req: req,
+            ack: ack,
+        );
+
+        always_comb {
+            f = d;
+            o = 8'd0;
+            if ack {
+                o = {7'b0, f};
+            }
+            f   = 1'b0;
+            req = f;
+        }
+        assign q = o;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a versioned read settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        sim.set("d", Value::new(1, 1, false));
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}

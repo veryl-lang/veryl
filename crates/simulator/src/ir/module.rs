@@ -1088,8 +1088,10 @@ fn run_comb_pipeline(
 
     // Comb bytes this pass reserves for rename temps; recorded on the
     // pipeline so a cache hit — which skips this whole function — can
-    // reserve the same span (see `CombPipeline::vsplit_temp_bytes`).
-    let mut vsplit_temp_bytes = 0usize;
+    // reserve the same span (see `CombPipeline::vsplit_temp_bytes`, which
+    // covers every comb temp this function allocates, the scheduler's version
+    // renames included).
+    let temps_before = context.comb_total_bytes;
     let unified = {
         let mut unified = unified;
         if version_split::pass_enabled(context.config.use_4state) {
@@ -1103,7 +1105,7 @@ fn run_comb_pipeline(
                 off
             };
             let stats = version_split::run(&mut unified, &mut alloc);
-            vsplit_temp_bytes = context.comb_total_bytes - before;
+            let _ = before;
             version_split::accumulate(&stats);
             log::info!(
                 "version_split totals ({module_name}): {}",
@@ -1113,7 +1115,18 @@ fn run_comb_pipeline(
         unified
     };
     dump_stmt_order("post-vsplit", module_name, &unified);
-    let (unified_sorted, passes_hint) = analyze_dependency(unified)?;
+    let (unified_sorted, passes_hint) = {
+        let use_4state = context.config.use_4state;
+        let comb_total = &mut context.comb_total_bytes;
+        let mut alloc = |width: usize| -> isize {
+            let nb = crate::ir::variable::native_bytes(width);
+            let off = *comb_total as isize;
+            *comb_total += crate::ir::variable::value_size(nb, use_4state);
+            off
+        };
+        analyze_dependency(unified, &mut alloc)?
+    };
+    let vsplit_temp_bytes = context.comb_total_bytes - temps_before;
     dump_stmt_order("post-topo", module_name, &unified_sorted);
     // No DCE/inlining: unified list includes internal child comb that would be incorrectly removed.
     // reorder_by_level preserves the sort's dependency relations (readers
@@ -1433,6 +1446,7 @@ fn run_comb_pipeline(
 /// `None` means the caller must fall back to `compute_required_passes`.
 pub(crate) fn analyze_dependency(
     statements: Vec<ProtoStatement>,
+    alloc: &mut dyn FnMut(usize) -> isize,
 ) -> Result<(Vec<ProtoStatement>, Option<usize>), SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
@@ -1762,7 +1776,22 @@ pub(crate) fn analyze_dependency(
             }
         }
         table = deep_stmts.into_iter().enumerate().collect();
-        block_of = Some(deep_block_of);
+        // Versions before scheduling: each write is its own statement now, so
+        // a reader between two of them can be given the earlier version's
+        // storage and stop forcing a WAR edge to the later write.
+        {
+            let mut keys: Vec<usize> = table.keys().cloned().collect();
+            keys.sort();
+            let mut flat: Vec<ProtoStatement> =
+                keys.iter().map(|k| table.remove(k).unwrap()).collect();
+            let mut blocks = deep_block_of;
+            let renamed = rename_versions(&mut flat, &mut blocks, alloc);
+            if renamed > 0 {
+                pass_diag_phase(&format!("phase2-deep: {renamed} version(s) renamed"));
+            }
+            table = flat.into_iter().enumerate().collect();
+            block_of = Some(blocks);
+        }
 
         let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
         sorted_keys.sort();
@@ -5276,6 +5305,257 @@ pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<
     let mut acc = HashSet::default();
     walk(stmts, &mut acc);
     acc
+}
+
+/// Give the readers that sit BETWEEN two writes of one comb variable their own
+/// storage.
+///
+/// A reader between two versions observes the earlier one, but sharing one
+/// offset forces a WAR edge to the later write, which can close a cycle the
+/// circuit does not have.  Copying the earlier version into a temp right after
+/// its write removes the edge without moving any computation.  Runs on the
+/// DEEP-SPLIT table because only there is each write a separate statement.
+fn rename_versions(
+    stmts: &mut Vec<ProtoStatement>,
+    blocks: &mut Vec<usize>,
+    alloc: &mut dyn FnMut(usize) -> isize,
+) -> usize {
+    // Offsets any dynamic access touches: a temp sized for one variable cannot
+    // stand in for a base that names a whole array.
+    let mut dynamic: HashSet<VarOffset> = HashSet::default();
+    for s in stmts.iter() {
+        collect_dynamic_bases(s, &mut dynamic);
+    }
+
+    let n = stmts.len();
+    let mut writes: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+    let mut reads: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+    let mut widths: HashMap<VarOffset, usize> = HashMap::default();
+    for (i, s) in stmts.iter().enumerate() {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        for o in outs.iter().filter(|o| !o.is_ff()) {
+            let w = writes.entry(*o).or_default();
+            if w.last() != Some(&i) {
+                w.push(i);
+            }
+            if let Some(width) = assign_width_of(s, *o) {
+                widths.entry(*o).or_insert(width);
+            }
+        }
+        for o in ins.iter().filter(|o| !o.is_ff()) {
+            let r = reads.entry(*o).or_default();
+            if r.last() != Some(&i) {
+                r.push(i);
+            }
+        }
+    }
+
+    struct Plan {
+        after: usize,
+        readers: Vec<usize>,
+        from: VarOffset,
+        to: VarOffset,
+        width: usize,
+    }
+    let mut plans: Vec<Plan> = Vec::new();
+    for (off, ws) in &writes {
+        if ws.len() < 2 || dynamic.contains(off) {
+            continue;
+        }
+        let Some(&width) = widths.get(off) else {
+            continue;
+        };
+        let (first, last) = (ws[0], *ws.last().unwrap());
+        let mids: Vec<usize> = reads
+            .get(off)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&r| r > first && r < last && !ws.contains(&r))
+            .collect();
+        let (Some(&lo), Some(&hi)) = (mids.first(), mids.last()) else {
+            continue;
+        };
+        // One gap only: readers on both sides of a write would need a temp per
+        // gap, and the block they came from must be the producer's.
+        if ws.iter().any(|&w| w > lo && w < hi) {
+            continue;
+        }
+        let Some(&after) = ws.iter().rfind(|&&w| w < lo) else {
+            continue;
+        };
+        if mids.iter().any(|&r| blocks[r] != blocks[after]) {
+            continue;
+        }
+        let to = VarOffset::Comb(alloc(width));
+        plans.push(Plan {
+            after,
+            readers: mids,
+            from: *off,
+            to,
+            width,
+        });
+    }
+    if plans.is_empty() {
+        return 0;
+    }
+    // Deterministic: allocation order already follows `writes`' iteration, so
+    // sort by the position the copy lands at and then by the temp.
+    plans.sort_by_key(|p| (p.after, p.to.raw()));
+
+    let mut insert_at: HashMap<usize, Vec<ProtoStatement>> = HashMap::default();
+    for p in &plans {
+        for &r in &p.readers {
+            let (from, to) = (p.from, p.to);
+            stmts[r].remap_offsets_with(&|o| if o == from { to } else { o });
+        }
+        insert_at
+            .entry(p.after)
+            .or_default()
+            .push(ProtoStatement::Assign(ProtoAssignStatement {
+                dst: p.to,
+                dst_width: p.width,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: ProtoExpression::Variable {
+                    var_offset: p.from,
+                    select: None,
+                    dynamic_select: None,
+                    width: p.width,
+                    var_full_width: p.width,
+                    expr_context: crate::ir::ExpressionContext {
+                        width: p.width,
+                        signed: false,
+                    },
+                },
+                dst_ff_current_offset: 0,
+                token: stmts[p.after].token().unwrap_or_default(),
+            }));
+    }
+
+    let old_stmts = std::mem::take(stmts);
+    let old_blocks = std::mem::take(blocks);
+    for (i, s) in old_stmts.into_iter().enumerate() {
+        stmts.push(s);
+        blocks.push(old_blocks[i]);
+        if let Some(copies) = insert_at.remove(&i) {
+            for c in copies {
+                stmts.push(c);
+                blocks.push(old_blocks[i]);
+            }
+        }
+    }
+    debug_assert_eq!(stmts.len(), blocks.len());
+    let _ = n;
+    plans.len()
+}
+
+/// Width of the variable an `Assign` inside `stmt` writes to `off`.
+fn assign_width_of(stmt: &ProtoStatement, off: VarOffset) -> Option<usize> {
+    match stmt {
+        ProtoStatement::Assign(a) if a.dst == off => Some(a.dst_width),
+        ProtoStatement::If(x) => x
+            .true_side
+            .iter()
+            .chain(&x.false_side)
+            .find_map(|s| assign_width_of(s, off)),
+        ProtoStatement::Case(x) => x
+            .arms
+            .iter()
+            .flat_map(|a| a.body.iter())
+            .chain(x.default.iter())
+            .find_map(|s| assign_width_of(s, off)),
+        ProtoStatement::For(x) => x.body.iter().find_map(|s| assign_width_of(s, off)),
+        ProtoStatement::SequentialBlock(body) => body.iter().find_map(|s| assign_width_of(s, off)),
+        _ => None,
+    }
+}
+
+/// Offsets reached by a dynamic index, as a write base or inside a read.
+fn collect_dynamic_bases(stmt: &ProtoStatement, out: &mut HashSet<VarOffset>) {
+    fn expr(e: &ProtoExpression, out: &mut HashSet<VarOffset>) {
+        match e {
+            ProtoExpression::Variable {
+                var_offset,
+                dynamic_select: Some(d),
+                ..
+            } => {
+                out.insert(*var_offset);
+                expr(&d.index_expr, out);
+            }
+            ProtoExpression::Variable { .. } | ProtoExpression::HierVariable(_) => {}
+            ProtoExpression::Unary { x, .. } => expr(x, out),
+            ProtoExpression::Binary { x, y, .. } => {
+                expr(x, out);
+                expr(y, out);
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                expr(cond, out);
+                expr(true_expr, out);
+                expr(false_expr, out);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (e, _, _) in elements {
+                    expr(e, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    match stmt {
+        ProtoStatement::Assign(a) => {
+            if a.dynamic_select.is_some() {
+                out.insert(a.dst);
+            }
+            expr(&a.expr, out);
+        }
+        ProtoStatement::AssignDynamic(d) => {
+            out.insert(d.dst_base);
+            let last = VarOffset::new(
+                d.dst_base.is_ff(),
+                d.dst_base.raw() + d.dst_stride * (d.dst_num_elements as isize - 1),
+            );
+            out.insert(last);
+        }
+        ProtoStatement::If(x) => {
+            if let Some(c) = &x.cond {
+                expr(c, out);
+            }
+            for s in x.true_side.iter().chain(&x.false_side) {
+                collect_dynamic_bases(s, out);
+            }
+        }
+        ProtoStatement::Case(x) => {
+            for a in &x.arms {
+                expr(&a.cond, out);
+                for s in &a.body {
+                    collect_dynamic_bases(s, out);
+                }
+            }
+            for s in &x.default {
+                collect_dynamic_bases(s, out);
+            }
+        }
+        ProtoStatement::For(x) => {
+            for s in &x.body {
+                collect_dynamic_bases(s, out);
+            }
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            for s in body {
+                collect_dynamic_bases(s, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
