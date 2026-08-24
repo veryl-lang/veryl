@@ -38,7 +38,7 @@ use veryl_metadata::ClockType;
 use veryl_metadata::{Build, ResetType};
 use veryl_parser::ParolError;
 use veryl_parser::doc_comment_table;
-use veryl_parser::resource_table::{self, StrId, TokenId};
+use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::{Token, TokenSource};
@@ -129,8 +129,6 @@ enum StructOrUnion {
 struct ImplContext {
     target: Token,
     namespace: Namespace,
-    params: Vec<(Token, GenericBoundKind)>,
-    param_ids: HashSet<TokenId>,
     range: TokenRange,
 }
 
@@ -222,22 +220,10 @@ impl CreateSymbolTable {
             unreachable!("self port outside impl");
         };
 
-        let arguments: Vec<_> = ctx
-            .params
-            .iter()
-            .map(|(param, _)| GenericSymbolPath {
-                paths: vec![GenericSymbol {
-                    base: *param,
-                    arguments: Vec::new(),
-                }],
-                kind: GenericSymbolPathKind::Identifier,
-                range: (*param).into(),
-            })
-            .collect();
         let path = GenericSymbolPath {
             paths: vec![GenericSymbol {
                 base: ctx.target,
-                arguments,
+                arguments: Vec::new(),
             }],
             kind: GenericSymbolPathKind::Identifier,
             range: token.into(),
@@ -271,19 +257,6 @@ impl CreateSymbolTable {
     }
 
     fn check_impl_defs(&mut self) {
-        fn bound_eq(a: &GenericBoundKind, b: &GenericBoundKind) -> bool {
-            match (a, b) {
-                (GenericBoundKind::Type, GenericBoundKind::Type) => true,
-                (GenericBoundKind::Inst(a), GenericBoundKind::Inst(b)) => {
-                    a.to_string() == b.to_string()
-                }
-                (GenericBoundKind::Proto(a), GenericBoundKind::Proto(b)) => {
-                    a.to_string() == b.to_string()
-                }
-                _ => false,
-            }
-        }
-
         for def in std::mem::take(&mut self.impl_defs) {
             let name = def.target.to_string();
             let path = SymbolPath::new(&[def.target.text]);
@@ -295,42 +268,20 @@ impl CreateSymbolTable {
                 ));
                 continue;
             };
-            let SymbolKind::Struct(target) = &symbol.found.kind else {
+            if !matches!(symbol.found.kind, SymbolKind::Struct(_)) {
                 self.errors.push(AnalyzerError::invalid_impl_target(
                     &name,
                     &format!("it is {}", symbol.found.kind.to_kind_name()),
                     &def.range,
                 ));
                 continue;
-            };
+            }
             if symbol.found.namespace.paths != def.namespace.paths {
                 self.errors.push(AnalyzerError::invalid_impl_target(
                     &name,
                     "it is not declared in the same scope",
                     &def.range,
                 ));
-                continue;
-            }
-            let params: Vec<_> = target
-                .generic_parameters
-                .iter()
-                .map(|x| symbol_table::get(*x).unwrap())
-                .collect();
-            let matched = params.len() == def.params.len()
-                && params
-                    .iter()
-                    .zip(&def.params)
-                    .all(|(decl, (token, bound))| {
-                        let SymbolKind::GenericParameter(x) = &decl.kind else {
-                            unreachable!()
-                        };
-                        decl.token.text == token.text && bound_eq(&x.bound, bound)
-                    });
-            if !matched {
-                self.errors
-                    .push(AnalyzerError::mismatch_impl_generic_parameters(
-                        &name, &def.range,
-                    ));
             }
         }
     }
@@ -1875,13 +1826,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
         arg: &WithGenericParameterItem,
     ) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
-            if let Some(ctx) = &self.impl_context
-                && ctx
-                    .param_ids
-                    .contains(&arg.identifier.identifier_token.token.id)
-            {
-                return Ok(());
-            }
             let default_value: Option<GenericSymbolPath> =
                 if let Some(ref x) = arg.with_generic_parameter_item_opt {
                     self.needs_default_generic_argument = true;
@@ -2030,34 +1974,9 @@ impl VerylGrammarTrait for CreateSymbolTable {
         let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
-                let mut params = Vec::new();
-                let mut param_ids = HashSet::default();
-                if let Some(ref x) = arg.impl_declaration_opt {
-                    let items: Vec<&WithGenericParameterItem> = x
-                        .with_generic_parameter
-                        .with_generic_parameter_list
-                        .as_ref()
-                        .into();
-                    for item in items {
-                        let bound = match item.generic_bound.as_ref() {
-                            GenericBound::Type(_) => GenericBoundKind::Type,
-                            GenericBound::InstScopedIdentifier(x) => {
-                                GenericBoundKind::Inst(x.scoped_identifier.as_ref().into())
-                            }
-                            GenericBound::GenericProtoBound(x) => GenericBoundKind::Proto(
-                                Box::new(x.generic_proto_bound.as_ref().into()),
-                            ),
-                        };
-                        let token = item.identifier.identifier_token.token;
-                        param_ids.insert(token.id);
-                        params.push((token, bound));
-                    }
-                }
                 self.impl_context = Some(ImplContext {
                     target: arg.identifier.identifier_token.token,
                     namespace: self.current_namespace(),
-                    params,
-                    param_ids,
                     range: arg.identifier.as_ref().into(),
                 });
                 self.push_namespace(name);

@@ -19709,7 +19709,7 @@ fn impl_method_and_const() {
         struct StructA::<W: p32> {
             a: logic<W>,
         }
-        impl StructA::<W: p32> {
+        impl StructA {
             const ZERO: u32 = 0;
             function get (
                 self,
@@ -19769,28 +19769,4 @@ fn impl_invalid_target() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidImplTarget { .. }));
-}
-
-#[test]
-fn impl_mismatch_generic_parameters() {
-    let code = r#"
-    module ModuleA {
-        struct StructA::<W: p32> {
-            a: logic<W>,
-        }
-        impl StructA::<X: p32> {
-            function f (
-                self,
-            ) -> logic {
-                return 0;
-            }
-        }
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::MismatchImplGenericParameters { .. }
-    ));
 }
