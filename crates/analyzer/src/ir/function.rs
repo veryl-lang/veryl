@@ -199,9 +199,17 @@ impl FunctionCall {
         let disable_const_opt = context.disalbe_const_opt;
         context.disalbe_const_opt = true;
         let prior_overflow = context.comptime_for_overflow.take();
+        // Saved and restored around the body: a call nested in an argument or
+        // in the body itself must not inherit this frame's return state.
+        let prior_ret_var = std::mem::replace(&mut context.function_ret_var, func.ret);
+        let prior_returned = std::mem::replace(&mut context.function_returned, false);
         for x in &func.statements {
-            x.eval_value(context);
+            if x.eval_value(context) == crate::ir::ControlFlow::Break {
+                break;
+            }
         }
+        context.function_ret_var = prior_ret_var;
+        context.function_returned = prior_returned;
         let overflowed = context.comptime_for_overflow.is_some();
         if let Some(x) = prior_overflow {
             context.comptime_for_overflow.get_or_insert(x);

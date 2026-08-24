@@ -1093,7 +1093,14 @@ impl Simulator {
             // Earliest unfired clock with a real 0→1 edge.  An edge on a
             // master-gated comb clock here is a committed enable change,
             // which must not pulse (see the pre-commit phase above).
-            let mut next_fire: Option<usize> = None;
+            //
+            // ALL of them, not the first: clocks that rose from the same
+            // settled state are edges at one instant, so every `always_ff` on
+            // them samples pre-edge values.  Firing one at a time commits the
+            // first domain before the second reads it.  A clock that rises
+            // only BECAUSE an earlier fire committed is a genuine chain and
+            // waits for the next iteration.
+            let mut batch: SmallVec<[usize; 8]> = SmallVec::new();
             for i in 0..n {
                 if fired_mask[i] {
                     continue;
@@ -1103,41 +1110,66 @@ impl Simulator {
                     continue;
                 }
                 if self.prev_derived_clock_values[i] == 0 && new_values[i] == 1 {
-                    next_fire = Some(i);
-                    break;
+                    batch.push(i);
                 }
             }
 
-            match next_fire {
-                Some(i) => {
-                    // The partial settle only refreshed the clock closure
-                    // and the fired domain reads arbitrary comb, so settle
-                    // fully before firing (paid only when an edge fires).
-                    self.do_settle_comb();
-                    // Re-verify on the fully settled state: the partial
-                    // closure can show a transient that full settling
-                    // cancels.  Not marked fired — the next iteration
-                    // re-reads a consistent 0, so the loop still ends.
-                    let clk = &self.ir.derived_clock_schedule.clocks[i];
-                    if self.read_derived_clock_bit(clk) != 1 {
-                        continue;
-                    }
-                    iters += 1;
-                    debug_assert!(
-                        iters <= max_iters,
-                        "derived clock fixpoint exceeded n+1 iterations (n={n})",
-                    );
-                    let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
-                    if watch_enabled {
-                        self.dump_watch(&format!("before_derived[{i}]"));
-                    }
-                    self.step_event_inner(&Event::Clock(vid));
-                    if watch_enabled {
-                        self.dump_watch(&format!("after_derived[{i}]"));
-                    }
-                    fired_mask[i] = true;
+            if batch.is_empty() {
+                break;
+            }
+
+            // The partial settle only refreshed the clock closure and the
+            // fired domains read arbitrary comb, so settle fully before
+            // firing (paid only when an edge fires).
+            self.do_settle_comb();
+            // Re-verify on the fully settled state: the partial closure can
+            // show a transient that full settling cancels.  Those are not
+            // marked fired — the next iteration re-reads a consistent 0, so
+            // the loop still ends.
+            batch.retain(|i| {
+                let clk = &self.ir.derived_clock_schedule.clocks[*i];
+                self.read_derived_clock_bit(clk) == 1
+            });
+            if batch.is_empty() {
+                continue;
+            }
+
+            iters += 1;
+            debug_assert!(
+                iters <= max_iters,
+                "derived clock fixpoint exceeded n+1 iterations (n={n})",
+            );
+
+            // One event region for the whole batch: stage, evaluate every
+            // domain against the pre-edge state, then commit once.
+            let has_components = !self.components.is_empty();
+            for &i in &batch {
+                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                if has_components {
+                    self.stage_components(&Event::Clock(vid));
                 }
-                None => break,
+            }
+            for &i in &batch {
+                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                if watch_enabled {
+                    self.dump_watch(&format!("before_derived[{i}]"));
+                }
+                self.eval_event_stmts(&Event::Clock(vid));
+            }
+            // The async-reset assertion edge, if this step carries one.
+            if let Some(reset) = self.pending_assertion_edge.take() {
+                self.eval_event_stmts(&reset);
+            }
+            self.commit_event_log();
+            for &i in &batch {
+                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                if has_components {
+                    self.fire_components(&Event::Clock(vid));
+                }
+                if watch_enabled {
+                    self.dump_watch(&format!("after_derived[{i}]"));
+                }
+                fired_mask[i] = true;
             }
         }
 

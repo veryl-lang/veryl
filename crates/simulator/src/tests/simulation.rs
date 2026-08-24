@@ -22323,3 +22323,464 @@ fn concat_bit_repeat_run() {
         }
     }
 }
+
+#[test]
+fn a_register_read_only_as_a_write_index_keeps_its_pre_edge_value() {
+    // `ptr` is read ONLY inside another `always_ff`'s left-hand-side index.
+    // That read lives outside the expression, so `ptr` looked unread and got
+    // storage where the increment is visible to the same edge — filling the
+    // vector from bit 1 instead of bit 0.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        vec: output logic<8>,
+    ) {
+        var ptr: logic<3>;
+        var v  : logic<8>;
+        always_ff {
+            if_reset {
+                ptr = 0;
+            } else {
+                ptr = ptr + 1;
+            }
+        }
+        always_ff {
+            if_reset {
+                v = 0;
+            } else {
+                v[ptr] = 1'b1;
+            }
+        }
+        assign vec = v;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+
+        // Edges see ptr = 0, 1, 2 -- the pre-edge value every time.
+        assert_eq!(
+            sim.get("vec").unwrap(),
+            Value::new(0b0000_0111, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn an_early_return_in_a_package_function_wins() {
+    // `return` lowers to an assignment to the function's return variable, and
+    // the constant evaluator used to walk every statement of the body — so the
+    // FINAL `return` overwrote the early one. A generate-if keyed on such a
+    // function then took the wrong arm and the signals it should drive stayed
+    // at 0, with no diagnostic anywhere.
+    let code = r#"
+    package pkg {
+        function any_set (
+            cfg: input logic<4>,
+        ) -> logic {
+            for i in 0..4 {
+                if cfg[i] == 1'b1 {
+                    return 1'b1;
+                }
+            }
+            return 1'b0;
+        }
+        function bit0_set (
+            cfg: input logic<4>,
+        ) -> logic {
+            if cfg[0] == 1'b1 {
+                return 1'b1;
+            }
+            return 1'b0;
+        }
+    }
+    module Top (
+        hit : output logic,
+        low : output logic,
+        miss: output logic,
+    ) {
+        if pkg::any_set(4'b0010) == 1'b1 :g_hit {
+            assign hit = 1'b1;
+        } else :g_no_hit {
+            assign hit = 1'b0;
+        }
+        assign low  = pkg::bit0_set(4'b0001);
+        assign miss = pkg::any_set(4'b0000);
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let one = Value::new(1, 1, false);
+        let zero = Value::new(0, 1, false);
+        // The early `return 1'b1` fires for both, and the final `return 1'b0`
+        // is only reached when nothing matched.
+        assert_eq!(
+            sim.get("hit").unwrap(),
+            one,
+            "generate arm keyed on an early return"
+        );
+        assert_eq!(sim.get("low").unwrap(), one, "early return without a loop");
+        assert_eq!(
+            sim.get("miss").unwrap(),
+            zero,
+            "the final return still wins when reached"
+        );
+    }
+}
+
+#[test]
+fn a_reduction_over_a_narrow_operand_survives_a_wide_destination() {
+    // `|a` is one bit, but the node carries its consumer's width (223) and the
+    // Cranelift dispatch keyed the wide path off that.  The operand's
+    // `native_bytes` is under a limb, so the reduction ran over ZERO limbs.
+    let code = r#"
+    package pkg {
+        struct req_t {
+            v   : logic     ,
+            rest: logic<222>,
+        }
+    }
+    module Top (
+        a: input  logic<2> ,
+        y: output pkg::req_t,
+    ) {
+        always_comb {
+            y.v    = |a;
+            y.rest = '0;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (a, top) in [(0u64, 0u64), (1, 1), (2, 1), (3, 1)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::new(a, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap().select(222, 222),
+                Value::new(top, 1, false),
+                "y[222]: a={a} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_constant_index_write_after_a_dynamic_one_does_not_erase_it() {
+    // A dynamically indexed write followed by constant-indexed ones in the
+    // same `always_comb`.  The dynamic write names only the BASE offset, so
+    // elements 1.. look unwritten, get fused into one unconditional write at
+    // the later constant write, and lose what the dynamic write put there.
+    let code = r#"
+    module Top (
+        clk  : input  clock   ,
+        rst  : input  reset   ,
+        push : input  logic   ,
+        flush: input  logic   ,
+        idx  : input  logic<2>,
+        din  : input  logic<8>,
+        q0   : output logic<8>,
+        q1   : output logic<8>,
+        q2   : output logic<8>,
+        q3   : output logic<8>,
+    ) {
+        var q_n: logic<8> [4];
+        var q_q: logic<8> [4];
+
+        always_comb {
+            q_n = q_q;
+            if push {
+                q_n[idx] = din;
+            }
+            if flush {
+                for i in 0..4 {
+                    q_n[i][7] = 1'b0;
+                }
+            }
+        }
+        always_ff {
+            if_reset {
+                q_q = '{default: '0};
+            } else {
+                q_q = q_n;
+            }
+        }
+        assign q0 = q_q[0];
+        assign q1 = q_q[1];
+        assign q2 = q_q[2];
+        assign q3 = q_q[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+
+        // one real flush pulse: a `flush` that never rises folds to a constant
+        sim.set("push", Value::new(0, 1, false));
+        sim.set("flush", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("flush", Value::new(0, 1, false));
+        sim.step(&clk);
+
+        // push 0x11 into slot 0, 0x12 into slot 1, ...
+        for i in 0..4u64 {
+            sim.set("push", Value::new(1, 1, false));
+            sim.set("idx", Value::new(i, 2, false));
+            sim.set("din", Value::new(0x11 + i, 8, false));
+            sim.step(&clk);
+            sim.set("push", Value::new(0, 1, false));
+            sim.step(&clk);
+        }
+
+        for (name, want) in [("q0", 0x11u64), ("q1", 0x12), ("q2", 0x13), ("q3", 0x14)] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(want, 8, false),
+                "{name}: JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn an_array_literal_wired_to_a_port_reaches_every_element() {
+    // An array literal takes its shape from the destination, which for a port
+    // connection is the child's port.  Without that it reaches the generic
+    // expression conversion, which has no `ArrayLiteral` arm and panics —
+    // `build` and `check` stay clean, only the native simulator dies.
+    let code = r#"
+    module Sub (
+        a: input  logic<8> [4],
+        y: output logic<8>    ,
+    ) {
+        assign y = a[0] ^ a[1] ^ a[2] ^ a[3];
+    }
+    module Top (
+        y: output logic<8>,
+    ) {
+        inst u: Sub (
+            a: '{8'h12, 8'h34, default: 8'h56},
+            y: y                              ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(0x12 ^ 0x34 ^ 0x56 ^ 0x56, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn two_aliases_of_one_derived_clock_are_one_edge() {
+    // `c1` and `c2` are two `let`s of the same divided clock, so in Verilog
+    // they are one net: every `always_ff` on them samples the PRE-edge state.
+    // Firing derived clocks one at a time -- committing each domain before
+    // the next reads it -- made the flop on `c2` see the counter's NEW value,
+    // which runs a boot sequence one core edge early.
+    let code = r#"
+    module Top (
+        base: input  '_ clock          ,
+        rst : input  '_ reset_sync_high,
+        a   : output    logic<8>       , // counter, clocked by c1
+        b   : output    logic<8>       , // same alias  -> must be a-1
+        c   : output    logic<8>       , // other alias -> must be a-1
+    ) {
+        var k   : logic<2>;
+        var dclk: logic   ;
+        always_ff (base, rst) {
+            if_reset {
+                k    = 0;
+                dclk = 0;
+            } else {
+                k    = if k == 3 ? 0 : k + 1;
+                dclk = k == 2;
+            }
+        }
+        let c1: '_ clock = dclk;
+        let c2: '_ clock = dclk;
+
+        always_ff (c1, rst) {
+            if_reset {
+                a = 0;
+            } else {
+                a = a + 1;
+            }
+        }
+        always_ff (c1, rst) {
+            if_reset {
+                b = 0;
+            } else {
+                b = a;
+            }
+        }
+        always_ff (c2, rst) {
+            if_reset {
+                c = 0;
+            } else {
+                c = a;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        // 4-state only: the divided domain cannot be initialised here. Its
+        // reset arrives on `c1`/`c2`, which the base reset holds low, so
+        // a/b/c stay X and both assertions below would be vacuous. The
+        // ordering this test is about is 2-state semantics.
+        if config.use_4state {
+            continue;
+        }
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let base = sim.get_clock("base").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&base, &rst);
+
+        // four base edges per divided edge; sample after several of them
+        for _ in 0..16 {
+            sim.step(&base);
+        }
+        let a = sim.get("a").unwrap();
+        let b = sim.get("b").unwrap();
+        let c = sim.get("c").unwrap();
+        assert_eq!(
+            b, c,
+            "the two aliases must agree: a={a:?} b={b:?} c={c:?} JIT={} 4st={}",
+            config.use_jit, config.use_4state,
+        );
+        assert_ne!(
+            a, c,
+            "an alias must see the PRE-edge counter: a={a:?} c={c:?} JIT={} 4st={}",
+            config.use_jit, config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn negating_a_width_64_value_wraps_instead_of_overflowing() {
+    // Two's complement is taken modulo 2^width. At width 64 the complement of
+    // zero is u64::MAX, so adding the one carries out of the top bit -- which
+    // is the value's own overflow, not a fault. The interpreter's `+= 1`
+    // panicked there; 8/32/63/65/128 were all fine because the mask left room.
+    let code = r#"
+    module Top (
+        a: input  logic<64>,
+        y: output logic<64>,
+    ) {
+        assign y = -a;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (a, want) in [(0u64, 0u64), (5, 5u64.wrapping_neg()), (1, u64::MAX)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::new(a, 64, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(want, 64, false),
+                "-{a}: JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn an_unpacked_array_parameter_element_sizes_a_child() {
+    // `N: Regs[1]` arrives const but unfolded — the comptime of an indexed
+    // read describes the array, not the element — so no instance is
+    // specialised and the child's width stays symbolic.  `build` and `check`
+    // stay clean because SystemVerilog resolves the parameter later.
+    let code = r#"
+    module Leaf #(
+        param N: u32 = 0,
+    ) (
+        a: input  logic<8>,
+        b: output logic<8>,
+    ) {
+        var r: logic<N + 1, 8>;
+        assign r[0] = a;
+        for i in 0..N :g {
+            assign r[i + 1] = r[i];
+        }
+        assign b = r[N];
+    }
+    module Top #(
+        param Regs: u32 [3] = '{2, 3, 1},
+    ) (
+        a: input  logic<8>,
+        b: output logic<8>,
+    ) {
+        inst u: Leaf #( N: Regs[1] ) ( a, b );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x12, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // the chain is a plain copy whatever its depth
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::new(0x12, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}

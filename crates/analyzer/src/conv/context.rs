@@ -77,6 +77,12 @@ pub struct Context {
     /// complete via `set_instance_history`, which functions never call, so it
     /// would stay wedged as "active" forever.
     pub function_call_stack: Vec<Signature>,
+    /// Return variable of the function currently being constant-evaluated, and
+    /// whether one of its `return` statements has already run. A `return` is
+    /// lowered to an assignment to that variable, so without this the
+    /// evaluator walks straight past it and the LAST `return` wins.
+    pub function_ret_var: Option<VarId>,
+    pub function_returned: bool,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,

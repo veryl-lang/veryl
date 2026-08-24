@@ -10,7 +10,8 @@ use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::statement::{
-    ProtoAssignStatement, const_array_element_exprs, msb_first_window, size_literal_rhs,
+    ProtoAssignStatement, array_literal_element_exprs, const_array_element_exprs, msb_first_window,
+    size_literal_rhs,
 };
 use crate::ir::variable::{
     ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
@@ -1355,6 +1356,29 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // Array port fed by a const array (`inst u: Sub (i: pk::TBL)`).
             if let Some(exprs) = const_array_element_exprs(input_expr, child_meta.elements.len()) {
                 for (child_element, expr) in child_meta.elements.iter().zip(exprs) {
+                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: child_element.current,
+                        dst_width: child_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: 0, // not FF
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
+
+            // Array port fed by an array literal (`inst u: Sub (p: '{default: '0})`).
+            if let Some(exprs) = array_literal_element_exprs(
+                context,
+                input_expr,
+                &child_meta.r#type,
+                child_meta.elements.len(),
+            ) {
+                for (child_element, mut expr) in child_meta.elements.iter().zip(exprs) {
+                    size_literal_rhs(&mut expr, None, None, child_meta.width);
                     all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                         dst: child_element.current,
                         dst_width: child_meta.width,
