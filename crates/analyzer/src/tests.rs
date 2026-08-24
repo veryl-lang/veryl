@@ -10367,6 +10367,41 @@ fn comb_loop_ifstmt_feed_forward_array() {
 }
 
 #[test]
+fn comb_loop_dead_ternary_branch() {
+    // `DEPTH` is constant, so `o` never fetches `d` -- but the dead branch's
+    // read was still counted, and a read that never happens closed a loop.
+    // The `if`-STATEMENT form of the same circuit was already accepted.
+    let code = r#"
+    module Pick (
+        d: input  logic,
+        o: output logic,
+    ) {
+        const DEPTH: u32 = 2;
+        var m: logic;
+        assign m = 1'b1;
+        assign o = if DEPTH == 0 ? d : m;
+    }
+    module Top (
+        en: input  logic,
+        q : output logic,
+    ) {
+        var a: logic;
+        var b: logic;
+
+        inst u: Pick (
+            d: a,
+            o: b,
+        );
+
+        assign a = b && en;
+        assign q = b;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn uncovered_branch() {
     let code = r#"
     module ModuleA {
