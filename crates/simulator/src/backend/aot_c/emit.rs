@@ -4496,13 +4496,48 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
         return None;
     }
 
+    // Balance by BYTES, not chunk count: chunk sizes span orders of magnitude
+    // (a wide decode table is one chunk hundreds of times its neighbours), so
+    // an index split hands one unit most of the source while the rest idle.
+    let line_bytes = |i: usize| lines[i].len() + 1;
+    let chunk_size: Vec<usize> = chunk_starts
+        .iter()
+        .enumerate()
+        .map(|(k, &start)| {
+            let end = chunk_starts.get(k + 1).copied().unwrap_or(entry_start);
+            (start..end).map(line_bytes).sum::<usize>()
+        })
+        .collect();
+    let total: usize = chunk_size.iter().sum();
+    // `bound[p]` is the first chunk of unit `p`.  Each unit takes its share of
+    // what is LEFT, so an oversized chunk claims its unit and the rest
+    // re-divide the remainder.  The inner guard keeps every unit non-empty.
+    let mut bound = Vec::with_capacity(n);
+    bound.push(0usize);
+    let mut k = 0usize;
+    let mut remaining = total;
+    for part in 0..n - 1 {
+        let target = remaining / (n - part);
+        let reserved = n - 1 - part;
+        let mut taken = 0usize;
+        while k < chunk_starts.len() - reserved {
+            taken += chunk_size[k];
+            k += 1;
+            if taken >= target {
+                break;
+            }
+        }
+        remaining -= taken;
+        bound.push(k);
+    }
+
     let mut units = Vec::with_capacity(n);
     for part in 0..n {
-        let lo = chunk_starts[chunk_starts.len() * part / n];
+        let lo = chunk_starts[bound[part]];
         let hi = if part + 1 == n {
             entry_start
         } else {
-            chunk_starts[chunk_starts.len() * (part + 1) / n]
+            chunk_starts[bound[part + 1]]
         };
         let mut out: Vec<String> = Vec::with_capacity(header.len() + decls.len() + (hi - lo) + 16);
         for l in header {
@@ -12278,6 +12313,49 @@ mod tests {
             assert_eq!(got, i as u32 + 1, "chunk {i} did not run");
         }
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn split_balances_units_by_bytes_not_by_chunk_count() {
+        // One chunk far larger than its neighbours is the real shape (a wide
+        // decode table), and an INDEX split gives its unit the bulk of the source.
+        let mut src = String::from(
+            "// AOT-C generated (noslp); do not edit.\n\
+             #include <stdint.h>\n\
+             typedef struct { int unused; } veryl_wideops_t;\n\
+             __attribute__((visibility(\"default\"))) veryl_wideops_t veryl_wideops;\n",
+        );
+        for i in 0..12 {
+            // Chunk 1 is a hundred times the others.
+            let reps = if i == 1 { 100 } else { 1 };
+            src.push_str(&format!("{CHUNK_FN_MARKER}{i}(void) {{\n"));
+            for _ in 0..reps {
+                src.push_str("  /* body body body body body body body body */\n");
+            }
+            src.push_str("}\n");
+        }
+        src.push_str(&format!("{ENTRY_ATTR}\nvoid veryl_aot_eval(void) {{}}\n"));
+
+        let units = split_translation_units(&src, 4).expect("stub must have the chunked shape");
+        assert_eq!(units.len(), 4);
+        // The giant chunk sets the floor; what matters is that the OTHER units
+        // are not also starved of the remaining chunks.
+        let big = units.iter().map(|u| u.len()).max().unwrap();
+        let rest: usize = units.iter().map(|u| u.len()).sum::<usize>() - big;
+        assert!(
+            rest > 0,
+            "the small chunks must be spread across the other units"
+        );
+        // Chunk 1 must be alone with as few neighbours as the boundary allows:
+        // the unit holding it must not also hold the tail of the chunk list.
+        let holder = units
+            .iter()
+            .position(|u| u.contains("veryl_aot_chunk_1(void)"))
+            .expect("the giant chunk must land somewhere");
+        assert!(
+            !units[holder].contains("veryl_aot_chunk_11(void)"),
+            "the byte split must move later chunks out of the giant chunk's unit"
+        );
     }
 
     #[test]
