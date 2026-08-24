@@ -22706,3 +22706,162 @@ fn a_reduction_tree_inside_one_vector_settles_in_one_pass() {
         }
     }
 }
+
+#[test]
+fn an_if_assigning_two_variables_is_not_one_scheduling_node() {
+    // Per VARIABLE there is a cycle:
+    //   send_type_pre -> rd_en -> stall -> m0_valid -> (the if) -> send_type_pre
+    // Per STATEMENT there is none: the statement writing `send_type_pre` reads
+    // only `sel` and `t0`/`t1`. Treating the whole `if` as one scheduling node
+    // closes the loop and the design refuses to elaborate, though SV schedules
+    // the two assignments independently.
+    let code = r#"
+    module Top (
+        sel: input  logic,
+        en0: input  logic,
+        t0 : input  logic,
+        t1 : input  logic,
+        y  : output logic,
+        z  : output logic,
+    ) {
+        var m0_valid     : logic;
+        var m1_valid     : logic;
+        var send_valid   : logic;
+        var send_type_pre: logic;
+        var rd_en        : logic;
+        var stall        : logic;
+
+        always_comb {
+            if sel {
+                send_valid    = m0_valid;
+                send_type_pre = t0;
+            } else {
+                send_valid    = m1_valid;
+                send_type_pre = t1;
+            }
+        }
+        always_comb {
+            rd_en = send_type_pre && en0;
+        }
+        always_comb {
+            stall = rd_en && en0;
+        }
+        always_comb {
+            m0_valid = en0 && !stall;
+            m1_valid = en0;
+        }
+        always_comb {
+            y = send_valid;
+            z = stall;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // (sel, t0, t1) -> (y, z), with en0 = 1 throughout.
+        for (sel, t0, t1, y, z) in [(1u64, 1u64, 0u64, 0u64, 1u64), (0, 0, 0, 1, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("sel", Value::new(sel, 1, false));
+            sim.set("en0", Value::new(1, 1, false));
+            sim.set("t0", Value::new(t0, 1, false));
+            sim.set("t1", Value::new(t1, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(y, 1, false),
+                "y: sel={sel} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("z").unwrap(),
+                Value::new(z, 1, false),
+                "z: sel={sel} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_case_deciding_a_request_and_its_next_state_is_not_one_scheduling_node() {
+    // A request/acknowledge handshake: the arm raises `req` and, separately,
+    // consults `ack` to advance the state.  Per VARIABLE the `case` both
+    // writes `req` and reads `ack`, so it closes a loop with the statement
+    // deriving `ack` from `req`; per STATEMENT there is none, and SV schedules
+    // the two assignments independently.  Treating the whole `case` as one
+    // node made the design refuse to elaborate.
+    let code = r#"
+    module Top (
+        st  : input  logic<2>,
+        en  : input  logic   ,
+        full: input  logic   ,
+        y   : output logic   ,
+        z   : output logic<2>,
+    ) {
+        var req: logic   ;
+        var ack: logic   ;
+        var nxt: logic<2>;
+
+        always_comb {
+            req = 1'b0;
+            nxt = st;
+            case st {
+                2'd0: {
+                    req = en;
+                    if ack {
+                        nxt = 2'd1;
+                    }
+                }
+                default: {
+                    nxt = 2'd0;
+                }
+            }
+        }
+        always_comb {
+            ack = req && !full;
+        }
+        always_comb {
+            y = ack;
+            z = nxt;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // (st, en, full) -> (y, z)
+        for (st, en, full, y, z) in [
+            (0u64, 1u64, 0u64, 1u64, 1u64),
+            (0, 1, 1, 0, 0),
+            (0, 0, 0, 0, 0),
+            (1, 1, 0, 0, 0),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("en", Value::new(en, 1, false));
+            sim.set("full", Value::new(full, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(y, 1, false),
+                "y: st={st} en={en} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("z").unwrap(),
+                Value::new(z, 2, false),
+                "z: st={st} en={en} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}

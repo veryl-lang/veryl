@@ -25,15 +25,17 @@ use crate::ir::variable::{
     create_variable_meta, ff_cacheline_pad_enabled, value_size, write_native_value,
 };
 use crate::ir::{
-    CompiledBatchStmt, Event, ProtoDeclaration, ProtoExpression, ProtoIfStatement, ProtoStatement,
-    ProtoStatementBlock, ProtoStatements, Statement, VarId, VarPath,
+    CompiledBatchStmt, Event, ProtoCaseArm, ProtoCaseStatement, ProtoDeclaration, ProtoExpression,
+    ProtoIfStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements, Statement, VarId,
+    VarPath,
 };
 use crate::simulator_error::SimulatorError;
 use crate::{HashMap, HashSet};
 use daggy::Dag;
 use daggy::petgraph::Direction::Outgoing;
 use daggy::petgraph::algo;
-use std::collections::VecDeque;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, VecDeque};
 use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_parser::resource_table::StrId;
@@ -1639,22 +1641,6 @@ pub(crate) fn analyze_dependency(
         // On failure fall through to that full-flatten path: an atomic hazard
         // block's conflated I/O can form a phantom cross-block cycle that the
         // bipartite sort rejects but the per-statement flatten resolves.
-        fn block_has_reorder_hazard(stmts: &[ProtoStatement]) -> bool {
-            let mut seen: HashSet<VarOffset> = HashSet::default();
-            for s in stmts {
-                let mut ins = vec![];
-                let mut outs = vec![];
-                s.gather_variable_offsets(&mut ins, &mut outs);
-                ins.retain(|o| !o.is_ff());
-                outs.retain(|o| !o.is_ff());
-                if outs.iter().any(|o| seen.contains(o)) {
-                    return true;
-                }
-                seen.extend(ins);
-                seen.extend(outs);
-            }
-            false
-        }
         fn hazard_flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
             match stmt {
                 ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
@@ -1710,6 +1696,8 @@ pub(crate) fn analyze_dependency(
                         flatten(sub, out);
                     }
                 }
+                ProtoStatement::If(x) => split_if_by_write_set(x, out),
+                ProtoStatement::Case(x) => split_case_by_write_set(x, out),
                 other => out.push(other),
             }
         }
@@ -1964,6 +1952,268 @@ pub(crate) fn analyze_dependency(
 /// `Assign.select` convention. Overlap: two ranges overlap if their
 /// bit intervals intersect.
 pub(crate) type BitRange = Option<(usize, usize)>;
+
+/// A write to a comb var an earlier statement of the block read or wrote
+/// (WAR/WAW/reassignment): those statements need their program order.
+fn block_has_reorder_hazard(stmts: &[ProtoStatement]) -> bool {
+    let mut seen: HashSet<VarOffset> = HashSet::default();
+    for s in stmts {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        ins.retain(|o| !o.is_ff());
+        outs.retain(|o| !o.is_ff());
+        if outs.iter().any(|o| seen.contains(o)) {
+            return true;
+        }
+        seen.extend(ins);
+        seen.extend(outs);
+    }
+    false
+}
+
+/// Partition guarded statements so any two writing a variable in common stay
+/// together.  Returns each statement's group, numbered in first-appearance
+/// order so the emitted schedule is stable, and the group count.
+fn group_by_write_set<'a>(stmts: impl Iterator<Item = &'a ProtoStatement>) -> (Vec<usize>, usize) {
+    let mut writes: Vec<HashSet<VarOffset>> = Vec::new();
+    let mut ins = vec![];
+    let mut outs = vec![];
+    for stmt in stmts {
+        ins.clear();
+        outs.clear();
+        stmt.gather_variable_offsets(&mut ins, &mut outs);
+        writes.push(outs.iter().copied().collect());
+    }
+    let n = writes.len();
+
+    // Union statements that write any variable in common.
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if writes[i].is_disjoint(&writes[j]) {
+                continue;
+            }
+            let (a, b) = (find(&mut parent, i), find(&mut parent, j));
+            if a != b {
+                parent[a] = b;
+            }
+        }
+    }
+
+    let mut renumber: HashMap<usize, usize> = HashMap::default();
+    let mut ids = Vec::with_capacity(n);
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        let next = renumber.len();
+        ids.push(*renumber.entry(root).or_insert(next));
+    }
+    let count = renumber.len();
+    (ids, count)
+}
+
+/// The order to emit the groups in so every ordering the bodies impose
+/// survives the split, or `None` when no such order exists.
+///
+/// Groups run in emission order, so a RAW pair keeps the writer's group
+/// first and a WAR pair the reader's.  Every group re-evaluates the guard,
+/// so a body writing a variable a guard reads has no valid order at all.
+fn group_emission_order(
+    guards: &[&ProtoExpression],
+    bodies: &[&[ProtoStatement]],
+    ids: &[usize],
+    count: usize,
+) -> Option<Vec<usize>> {
+    let mut guard_reads: HashSet<VarOffset> = HashSet::default();
+    let mut ins = vec![];
+    let mut outs = vec![];
+    for g in guards {
+        ins.clear();
+        g.gather_variable_offsets(&mut ins);
+        guard_reads.extend(ins.iter().copied().filter(|o| !o.is_ff()));
+    }
+
+    let mut succ: Vec<HashSet<usize>> = vec![HashSet::default(); count];
+    let mut i = 0;
+    for body in bodies {
+        // Bodies are mutually exclusive, so each starts with a clean history.
+        let mut last_write: HashMap<VarOffset, usize> = HashMap::default();
+        let mut readers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+        for stmt in *body {
+            ins.clear();
+            outs.clear();
+            stmt.gather_variable_offsets(&mut ins, &mut outs);
+            for o in outs.iter().filter(|o| !o.is_ff()) {
+                if guard_reads.contains(o) {
+                    return None;
+                }
+                for &r in readers.get(o).into_iter().flatten() {
+                    succ[r].insert(ids[i]);
+                }
+            }
+            for o in ins.iter().filter(|o| !o.is_ff()) {
+                if let Some(&w) = last_write.get(o) {
+                    succ[w].insert(ids[i]);
+                }
+            }
+            for o in outs.iter().filter(|o| !o.is_ff()) {
+                last_write.insert(*o, ids[i]);
+            }
+            for o in ins.iter().filter(|o| !o.is_ff()) {
+                readers.entry(*o).or_default().push(ids[i]);
+            }
+            i += 1;
+        }
+    }
+
+    // Kahn over the groups, lowest group id first so the emitted order stays
+    // the statements' own order whenever nothing constrains it.
+    let mut indeg = vec![0usize; count];
+    for (g, ss) in succ.iter().enumerate() {
+        for &s in ss {
+            if s != g {
+                indeg[s] += 1;
+            }
+        }
+    }
+    let mut ready: BinaryHeap<Reverse<usize>> =
+        (0..count).filter(|&g| indeg[g] == 0).map(Reverse).collect();
+    let mut order = Vec::with_capacity(count);
+    while let Some(Reverse(g)) = ready.pop() {
+        order.push(g);
+        for &s in &succ[g] {
+            if s == g {
+                continue;
+            }
+            indeg[s] -= 1;
+            if indeg[s] == 0 {
+                ready.push(Reverse(s));
+            }
+        }
+    }
+    (order.len() == count).then_some(order)
+}
+
+/// Split one `if` into an `if` per independently-written variable set.
+///
+/// One node here, two independently scheduled assignments in SV: a feedback
+/// through either closes a cycle the design does not have.  Write sets that
+/// intersect stay together, and a split a read would be reordered across is
+/// not taken.
+fn split_if_by_write_set(x: ProtoIfStatement, out: &mut Vec<ProtoStatement>) {
+    let arm_count = x.true_side.len() + x.false_side.len();
+    if arm_count < 2 {
+        out.push(ProtoStatement::If(x));
+        return;
+    }
+    let (ids, count) = group_by_write_set(x.true_side.iter().chain(x.false_side.iter()));
+    let guards: Vec<&ProtoExpression> = x.cond.iter().collect();
+    let order = (count > 1)
+        .then(|| group_emission_order(&guards, &[&x.true_side, &x.false_side], &ids, count))
+        .flatten();
+    drop(guards);
+    let Some(order) = order else {
+        // One group: splitting would only duplicate the condition.
+        out.push(ProtoStatement::If(x));
+        return;
+    };
+
+    let mut sides: Vec<(Vec<ProtoStatement>, Vec<ProtoStatement>)> =
+        vec![Default::default(); count];
+    let true_count = x.true_side.len();
+    for (i, stmt) in x.true_side.into_iter().chain(x.false_side).enumerate() {
+        if i < true_count {
+            sides[ids[i]].0.push(stmt);
+        } else {
+            sides[ids[i]].1.push(stmt);
+        }
+    }
+    for g in order {
+        let (true_side, false_side) = std::mem::take(&mut sides[g]);
+        out.push(ProtoStatement::If(ProtoIfStatement {
+            cond: x.cond.clone(),
+            true_side,
+            false_side,
+        }));
+    }
+}
+
+/// `split_if_by_write_set` for a `case`; a whole `always_comb` lowered to one
+/// of these is a single node, so the cycle it closes is per BLOCK.
+///
+/// Only the bodies are partitioned — every group keeps every arm and its
+/// condition — so which arm fires and what an unwritten variable holds are
+/// unchanged.
+fn split_case_by_write_set(x: ProtoCaseStatement, out: &mut Vec<ProtoStatement>) {
+    let stmt_count: usize = x.arms.iter().map(|a| a.body.len()).sum::<usize>() + x.default.len();
+    if stmt_count < 2 {
+        out.push(ProtoStatement::Case(x));
+        return;
+    }
+    let (ids, count) = group_by_write_set(
+        x.arms
+            .iter()
+            .flat_map(|a| a.body.iter())
+            .chain(x.default.iter()),
+    );
+    let guards: Vec<&ProtoExpression> = x.arms.iter().map(|a| &a.cond).collect();
+    let bodies: Vec<&[ProtoStatement]> = x
+        .arms
+        .iter()
+        .map(|a| a.body.as_slice())
+        .chain(std::iter::once(x.default.as_slice()))
+        .collect();
+    let order = (count > 1)
+        .then(|| group_emission_order(&guards, &bodies, &ids, count))
+        .flatten();
+    drop((guards, bodies));
+    let Some(order) = order else {
+        out.push(ProtoStatement::Case(x));
+        return;
+    };
+
+    let empty_arms: Vec<ProtoCaseArm> = x
+        .arms
+        .iter()
+        .map(|a| ProtoCaseArm {
+            cond: a.cond.clone(),
+            body: Vec::new(),
+        })
+        .collect();
+    let mut split: Vec<ProtoCaseStatement> = (0..count)
+        .map(|_| ProtoCaseStatement {
+            arms: empty_arms.clone(),
+            default: Vec::new(),
+        })
+        .collect();
+    let mut i = 0;
+    for (a, arm) in x.arms.into_iter().enumerate() {
+        for stmt in arm.body {
+            split[ids[i]].arms[a].body.push(stmt);
+            i += 1;
+        }
+    }
+    for stmt in x.default {
+        split[ids[i]].default.push(stmt);
+        i += 1;
+    }
+    for g in order {
+        out.push(ProtoStatement::Case(std::mem::replace(
+            &mut split[g],
+            ProtoCaseStatement {
+                arms: Vec::new(),
+                default: Vec::new(),
+            },
+        )));
+    }
+}
 
 /// Bit boundaries for the variables some single statement both writes and
 /// reads. `starts[i]` opens atom `i`; the last atom is unbounded above, so the
