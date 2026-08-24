@@ -22788,6 +22788,103 @@ fn an_if_assigning_two_variables_is_not_one_scheduling_node() {
 }
 
 #[test]
+fn a_handshake_nested_in_an_arm_is_split_inside_the_arm() {
+    // The arm holds ONE statement writing both `req` and `nxt`, so splitting
+    // the `case` by write set changes nothing and the block keeps reading
+    // back its own output: it writes `req`, `ack` derives from `req`, and it
+    // reads `ack`.  Splitting inside the arm separates the two, and the
+    // relaxed order the flat split settles for is not good enough to stop at
+    // -- a synthesisable design has a one-pass order.
+    let code = r#"
+    module Ack (
+        req : input  logic,
+        full: input  logic,
+        ack : output logic,
+    ) {
+        assign ack = req && !full;
+    }
+    module Top (
+        st  : input  logic<2>,
+        en  : input  logic   ,
+        full: input  logic   ,
+        y   : output logic   ,
+        z   : output logic<2>,
+    ) {
+        var req: logic   ;
+        var ack: logic   ;
+        var nxt: logic<2>;
+
+        inst u: Ack (
+            req      ,
+            full     ,
+            ack      ,
+        );
+
+        always_comb {
+            req = 1'b0;
+            nxt = st;
+            case st {
+                2'd0: {
+                    if en {
+                        req = 1'b1;
+                        if ack {
+                            nxt = 2'd1;
+                        }
+                    }
+                }
+                default: {
+                    nxt = 2'd0;
+                }
+            }
+        }
+        always_comb {
+            y = ack;
+            z = nxt;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a handshake inside an arm settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        // (st, en, full) -> (y, z)
+        for (st, en, full, y, z) in [
+            (0u64, 1u64, 0u64, 1u64, 1u64),
+            (0, 1, 1, 0, 0),
+            (1, 1, 0, 0, 0),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("en", Value::new(en, 1, false));
+            sim.set("full", Value::new(full, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(y, 1, false),
+                "y: st={st} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("z").unwrap(),
+                Value::new(z, 2, false),
+                "z: st={st} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
 fn a_case_deciding_a_request_and_its_next_state_is_not_one_scheduling_node() {
     // A request/acknowledge handshake: the arm raises `req` and, separately,
     // consults `ack` to advance the state.  Per VARIABLE the `case` both

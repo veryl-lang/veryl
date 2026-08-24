@@ -1696,9 +1696,7 @@ pub(crate) fn analyze_dependency(
                         flatten(sub, out);
                     }
                 }
-                ProtoStatement::If(x) => split_if_by_write_set(x, out),
-                ProtoStatement::Case(x) => split_case_by_write_set(x, out),
-                other => out.push(other),
+                other => split_nested(other, out, false),
             }
         }
 
@@ -1740,6 +1738,52 @@ pub(crate) fn analyze_dependency(
             pass_diag_phase("phase2-full: flatten + stable_topo_sort");
             return Ok((sorted, passes_hint));
         }
+
+        // Still cyclic. The remaining loop may run through a conditional that
+        // decides two independent variables several levels down — a handshake
+        // raising its request in one statement of an arm and consulting the
+        // acknowledge in the next — which the flat split above cannot reach.
+        // Split inside the arms of what the flatten produced and sort once
+        // more.  Every group re-evaluates the guards it sits under, so only a
+        // design that would otherwise fail to schedule pays for that code, and
+        // splitting in place keeps the flattened program order.
+        let mut keys: Vec<usize> = table.keys().cloned().collect();
+        keys.sort();
+        let flat_block_of = block_of.take().unwrap_or_default();
+        let mut deep_stmts: Vec<ProtoStatement> = Vec::new();
+        let mut deep_block_of: Vec<usize> = Vec::new();
+        for key in keys {
+            let mut deep = Vec::new();
+            split_nested(table.remove(&key).unwrap(), &mut deep, true);
+            for sub in deep {
+                deep_stmts.push(sub);
+                deep_block_of.push(flat_block_of[key]);
+            }
+        }
+        table = deep_stmts.into_iter().enumerate().collect();
+        block_of = Some(deep_block_of);
+
+        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+        sorted_keys.sort();
+        let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
+        let blocks: Vec<usize> = sorted_keys
+            .iter()
+            .map(|k| block_of.as_ref().unwrap()[*k])
+            .collect();
+        let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
+        if !fell_back {
+            pass_diag_phase("phase2-deep: nested split + stable_topo_sort");
+            return Ok((sorted, passes_hint));
+        }
+        // Neither granularity linearized it, so no order here honours every
+        // edge.  Phase 3 below still produces one, but it is not the one-pass
+        // order a synthesisable design has: say so rather than let the extra
+        // settle passes pass for normal.
+        log::warn!(
+            "the statement order for this scope could not be linearized at either granularity; \
+             simulation stays correct but settles in more than one pass. \
+             Re-run with VERYL_PASS_DIAG=1 to see the cycle."
+        );
     }
 
     // Phase 3: Check for genuine combinational loop vs false positive
@@ -2101,13 +2145,43 @@ fn group_emission_order(
     (order.len() == count).then_some(order)
 }
 
+/// Reach a conditional nested inside a body, which the flat split does not.
+///
+/// Off unless the flat split already failed: every group re-evaluates the
+/// guards it sits under, so the extra code is only worth emitting where it
+/// buys a schedule.
+fn split_body(body: Vec<ProtoStatement>, deep: bool) -> Vec<ProtoStatement> {
+    if !deep {
+        return body;
+    }
+    let mut out = Vec::with_capacity(body.len());
+    for stmt in body {
+        split_nested(stmt, &mut out, deep);
+    }
+    out
+}
+
+/// One statement of a body, split by write set when it is a conditional.
+fn split_nested(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
+    match stmt {
+        ProtoStatement::If(x) => split_if_by_write_set(x, out, deep),
+        ProtoStatement::Case(x) => split_case_by_write_set(x, out, deep),
+        other => out.push(other),
+    }
+}
+
 /// Split one `if` into an `if` per independently-written variable set.
 ///
 /// One node here, two independently scheduled assignments in SV: a feedback
 /// through either closes a cycle the design does not have.  Write sets that
 /// intersect stay together, and a split a read would be reordered across is
 /// not taken.
-fn split_if_by_write_set(x: ProtoIfStatement, out: &mut Vec<ProtoStatement>) {
+fn split_if_by_write_set(x: ProtoIfStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
+    let x = ProtoIfStatement {
+        cond: x.cond,
+        true_side: split_body(x.true_side, deep),
+        false_side: split_body(x.false_side, deep),
+    };
     let arm_count = x.true_side.len() + x.false_side.len();
     if arm_count < 2 {
         out.push(ProtoStatement::If(x));
@@ -2151,7 +2225,18 @@ fn split_if_by_write_set(x: ProtoIfStatement, out: &mut Vec<ProtoStatement>) {
 /// Only the bodies are partitioned — every group keeps every arm and its
 /// condition — so which arm fires and what an unwritten variable holds are
 /// unchanged.
-fn split_case_by_write_set(x: ProtoCaseStatement, out: &mut Vec<ProtoStatement>) {
+fn split_case_by_write_set(x: ProtoCaseStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
+    let x = ProtoCaseStatement {
+        arms: x
+            .arms
+            .into_iter()
+            .map(|a| ProtoCaseArm {
+                cond: a.cond,
+                body: split_body(a.body, deep),
+            })
+            .collect(),
+        default: split_body(x.default, deep),
+    };
     let stmt_count: usize = x.arms.iter().map(|a| a.body.len()).sum::<usize>() + x.default.len();
     if stmt_count < 2 {
         out.push(ProtoStatement::Case(x));
