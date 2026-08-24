@@ -133,6 +133,24 @@ fn concat_element_word(builder: &mut FunctionBuilder, v: CraneliftValue) -> Cran
     }
 }
 
+/// Bring a concat element to the accumulator's type.  An element arrives at
+/// its own expression's type, which is I128 whenever that expression evaluates
+/// at a >64-bit operand's width — and `bor` of an I64 accumulator with an I128
+/// element is CLIF x64 lowering cannot put in a register.
+fn concat_element_for_acc(
+    builder: &mut FunctionBuilder,
+    v: CraneliftValue,
+    wide: bool,
+) -> CraneliftValue {
+    if !wide {
+        concat_element_word(builder, v)
+    } else if builder.func.dfg.value_type(v) != I128 {
+        builder.ins().uextend(I128, v)
+    } else {
+        v
+    }
+}
+
 /// OR one concat element into the words it occupies, `pos` being its low bit in
 /// the result.  Elements arrive masked to their own width, which is what lets
 /// the shifted copies be OR-ed together.
@@ -1951,43 +1969,17 @@ impl ProtoExpression {
                 if first_is_bit_repeat && elements.len() >= 2 {
                     let (sign_expr, sign_repeat, _) = &elements[0];
                     let (sign_payload, sign_mask_xz) = sign_expr.build_binary(context, builder)?;
-                    // Widen the sign bit to accumulator width, skipping if
-                    // the value is already I128 (unsized all_bit literal).
-                    let sign_needs_widen = wide
-                        && sign_expr.width() <= 64
-                        && builder.func.dfg.value_type(sign_payload) != I128;
-                    let sign_payload = if sign_needs_widen {
-                        builder.ins().uextend(I128, sign_payload)
-                    } else {
-                        sign_payload
-                    };
-                    let sign_mask_xz = sign_mask_xz.map(|v| {
-                        if sign_needs_widen && builder.func.dfg.value_type(v) != I128 {
-                            builder.ins().uextend(I128, v)
-                        } else {
-                            v
-                        }
-                    });
+                    let sign_payload = concat_element_for_acc(builder, sign_payload, wide);
+                    let sign_mask_xz =
+                        sign_mask_xz.map(|v| concat_element_for_acc(builder, v, wide));
 
                     // Build the lower part from remaining elements
                     let mut lower_width = 0usize;
                     for (expr, repeat, elem_width) in &elements[1..] {
                         let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
-                        let needs_widen = wide
-                            && expr.width() <= 64
-                            && builder.func.dfg.value_type(elem_payload) != I128;
-                        let elem_payload = if needs_widen {
-                            builder.ins().uextend(I128, elem_payload)
-                        } else {
-                            elem_payload
-                        };
-                        let elem_mask_xz = elem_mask_xz.map(|v| {
-                            if needs_widen && builder.func.dfg.value_type(v) != I128 {
-                                builder.ins().uextend(I128, v)
-                            } else {
-                                v
-                            }
-                        });
+                        let elem_payload = concat_element_for_acc(builder, elem_payload, wide);
+                        let elem_mask_xz =
+                            elem_mask_xz.map(|v| concat_element_for_acc(builder, v, wide));
                         let ew = *elem_width;
                         for _ in 0..*repeat {
                             acc_payload = builder.ins().ishl_imm_u(acc_payload, ew as i64);
@@ -2022,21 +2014,9 @@ impl ProtoExpression {
                 } else {
                     for (expr, repeat, elem_width) in elements {
                         let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
-                        let needs_widen = wide
-                            && expr.width() <= 64
-                            && builder.func.dfg.value_type(elem_payload) != I128;
-                        let elem_payload = if needs_widen {
-                            builder.ins().uextend(I128, elem_payload)
-                        } else {
-                            elem_payload
-                        };
-                        let elem_mask_xz = elem_mask_xz.map(|v| {
-                            if needs_widen && builder.func.dfg.value_type(v) != I128 {
-                                builder.ins().uextend(I128, v)
-                            } else {
-                                v
-                            }
-                        });
+                        let elem_payload = concat_element_for_acc(builder, elem_payload, wide);
+                        let elem_mask_xz =
+                            elem_mask_xz.map(|v| concat_element_for_acc(builder, v, wide));
                         let ew = *elem_width;
 
                         // A repeated single bit is `0 - bit` masked to the run,
@@ -3520,5 +3500,94 @@ impl ProtoExpression {
         };
 
         Some((payload, mask_xz))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::runtime::build_binary_no_cache;
+    use crate::ir::variable::VarOffset;
+    use crate::ir::{
+        Config, ExpressionContext, Op, ProtoAssignStatement, ProtoExpression, ProtoStatement, Value,
+    };
+    use veryl_analyzer::value::ValueU64;
+    use veryl_parser::token_range::TokenRange;
+
+    fn ctx(width: usize) -> ExpressionContext {
+        ExpressionContext {
+            width,
+            signed: false,
+        }
+    }
+
+    fn lit(v: u64, w: usize) -> ProtoExpression {
+        ProtoExpression::Value {
+            value: Value::U64(ValueU64 {
+                payload: v,
+                mask_xz: 0,
+                width: w as u32,
+                signed: false,
+            }),
+            width: w,
+            expr_context: ctx(w),
+        }
+    }
+
+    fn cvar(off: isize, w: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: None,
+            dynamic_select: None,
+            width: w,
+            var_full_width: w,
+            expr_context: ctx(w),
+        }
+    }
+
+    #[test]
+    fn a_concat_narrows_an_element_that_a_wide_context_built_as_i128() {
+        // A comparison carrying a >64-bit context evaluates in I128 and the
+        // one-bit mask over it stays I128, because the operand's logical width
+        // decides the type.  The concatenation's accumulator is I64, and
+        // OR-ing the two panicked x64 lowering.
+        let eq = ProtoExpression::Binary {
+            x: Box::new(cvar(0, 2)),
+            op: Op::Eq,
+            y: Box::new(lit(1, 2)),
+            width: 110,
+            expr_context: ctx(110),
+        };
+        let masked = ProtoExpression::Binary {
+            x: Box::new(eq),
+            op: Op::BitAnd,
+            y: Box::new(lit(1, 1)),
+            width: 1,
+            expr_context: ctx(1),
+        };
+        let b = cvar(8, 1);
+        let concat = ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(b.clone()), 1, 1),
+                (Box::new(masked), 1, 1),
+                (Box::new(b), 1, 1),
+            ],
+            width: 3,
+            expr_context: ctx(3),
+        };
+        let stmt = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(16),
+            dst_width: 3,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: concat,
+            dst_ff_current_offset: 0,
+            token: TokenRange::default(),
+        });
+
+        assert!(
+            build_binary_no_cache(&Config::default(), vec![stmt]).is_some(),
+            "the concat must compile"
+        );
     }
 }
