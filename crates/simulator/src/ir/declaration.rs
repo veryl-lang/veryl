@@ -189,12 +189,16 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
         let Some(ranges) = writer_ranges.get(key) else {
             continue;
         };
-        for (i, (_, a)) in ranges.iter().enumerate() {
+        // Only writes from DIFFERENT statements can clobber each other.  One
+        // statement can name the same range more than once — the gather
+        // reports it per branch it writes it in — and comparing those against
+        // each other would read a single driver as several.
+        for (i, (pa, a)) in ranges.iter().enumerate() {
             if a.is_none() {
                 continue 'next_var;
             }
-            for (_, b) in ranges.iter().skip(i + 1) {
-                if ranges_overlap(*a, *b) {
+            for (pb, b) in ranges.iter().skip(i + 1) {
+                if pa != pb && ranges_overlap(*a, *b) {
                     continue 'next_var;
                 }
             }

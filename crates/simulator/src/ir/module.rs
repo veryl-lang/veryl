@@ -20,6 +20,7 @@ use crate::ir::opt::version_split;
 use crate::ir::site_table::{SiteInfo, SiteKind, SiteTable};
 #[cfg(not(target_family = "wasm"))]
 use crate::ir::statement::CompiledBlockStatement;
+use crate::ir::statement::ProtoAssignStatement;
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableMeta, align_up_64,
     create_variable_meta, ff_cacheline_pad_enabled, value_size, write_native_value,
@@ -2019,19 +2020,32 @@ fn block_has_reorder_hazard(stmts: &[ProtoStatement]) -> bool {
 /// Partition guarded statements so any two writing a variable in common stay
 /// together.  Returns each statement's group, numbered in first-appearance
 /// order so the emitted schedule is stable, and the group count.
-fn group_by_write_set<'a>(stmts: impl Iterator<Item = &'a ProtoStatement>) -> (Vec<usize>, usize) {
-    let mut writes: Vec<HashSet<VarOffset>> = Vec::new();
-    let mut ins = vec![];
-    let mut outs = vec![];
+fn group_by_write_set<'a>(
+    stmts: impl Iterator<Item = &'a ProtoStatement>,
+    by_range: bool,
+) -> (Vec<usize>, usize) {
+    // Bit ranges, not just variables: two arms of one `case` writing disjoint
+    // slices of the same vector are independent nodes, and welding them makes
+    // every bit of the result depend on every input the block reads.  A write
+    // whose bits are unknown (`None`) still conflicts with every write of that
+    // variable, so the conservative case is unchanged.
+    let mut writes: Vec<Vec<(VarOffset, BitRange)>> = Vec::new();
     for stmt in stmts {
-        ins.clear();
-        outs.clear();
-        stmt.gather_variable_offsets(&mut ins, &mut outs);
-        writes.push(outs.iter().copied().collect());
+        let mut outs = vec![];
+        gather_bit_aware_outputs(stmt, &mut outs);
+        outs.sort_unstable_by_key(|(o, r)| (o.is_ff(), o.raw(), *r));
+        outs.dedup();
+        writes.push(outs);
     }
     let n = writes.len();
+    let conflict = |a: &[(VarOffset, BitRange)], b: &[(VarOffset, BitRange)]| {
+        a.iter().any(|(ao, ar)| {
+            b.iter()
+                .any(|(bo, br)| ao == bo && (!by_range || ranges_overlap(*ar, *br)))
+        })
+    };
 
-    // Union statements that write any variable in common.
+    // Union statements that write any bit in common.
     let mut parent: Vec<usize> = (0..n).collect();
     fn find(parent: &mut [usize], mut i: usize) -> usize {
         while parent[i] != i {
@@ -2042,7 +2056,7 @@ fn group_by_write_set<'a>(stmts: impl Iterator<Item = &'a ProtoStatement>) -> (V
     }
     for i in 0..n {
         for j in (i + 1)..n {
-            if writes[i].is_disjoint(&writes[j]) {
+            if !conflict(&writes[i], &writes[j]) {
                 continue;
             }
             let (a, b) = (find(&mut parent, i), find(&mut parent, j));
@@ -2161,12 +2175,74 @@ fn split_body(body: Vec<ProtoStatement>, deep: bool) -> Vec<ProtoStatement> {
     out
 }
 
-/// One statement of a body, split by write set when it is a conditional.
+/// One statement of a body, split by write set when it is a conditional, or
+/// by concatenation element when it is a whole-variable assign.
 fn split_nested(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
     match stmt {
         ProtoStatement::If(x) => split_if_by_write_set(x, out, deep),
         ProtoStatement::Case(x) => split_case_by_write_set(x, out, deep),
+        ProtoStatement::Assign(a) if deep => split_assign_by_concat(a, out),
         other => out.push(other),
+    }
+}
+
+/// `v = {a, b, c}` is one node, so every bit of `v` reads as depending on all
+/// three — false per element, and enough to weld a control vector to every
+/// producer its block reads.  The per-element values are identical by
+/// construction, so only the dependency model changes.
+///
+/// Only exact covers: the elements must tile `dst_width` with no select in
+/// play, so no extension or truncation rule changes.
+fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>) {
+    /// Bounded because every element becomes a statement that each settle
+    /// evaluates.  Lifting it to 256 — enough for the 109..132-element
+    /// concatenations this declines on real designs — costs 0.2-0.9% of the
+    /// run, and those schedule without the split anyway.
+    const MAX_ELEMENTS: usize = 64;
+    let ProtoExpression::Concatenation { elements, .. } = &a.expr else {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    };
+    let parts: usize = elements.iter().map(|(_, repeat, _)| *repeat).sum();
+    let total: usize = elements
+        .iter()
+        .map(|(_, repeat, width)| repeat * width)
+        .sum();
+    if a.select.is_some()
+        || a.dynamic_select.is_some()
+        || a.rhs_select.is_some()
+        || total != a.dst_width
+        || !(2..=MAX_ELEMENTS).contains(&parts)
+        || elements.iter().any(|(_, _, width)| *width == 0)
+    {
+        // Say when the bound is what stopped it: a design that needs this
+        // split to schedule would otherwise fail with no trace of why.
+        if parts > MAX_ELEMENTS && std::env::var("VERYL_PASS_DIAG").is_ok() {
+            log::info!(
+                "pass_diag: concatenation of {parts} elements left unsplit (bound {MAX_ELEMENTS})"
+            );
+        }
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    // Elements are most-significant first (the evaluator concatenates left
+    // to right), so walk `hi` downwards.
+    let mut hi = total;
+    for (expr, repeat, width) in elements {
+        for _ in 0..*repeat {
+            let lo = hi - width;
+            out.push(ProtoStatement::Assign(ProtoAssignStatement {
+                dst: a.dst,
+                dst_width: a.dst_width,
+                select: Some((hi - 1, lo)),
+                dynamic_select: None,
+                rhs_select: None,
+                expr: (**expr).clone(),
+                dst_ff_current_offset: a.dst_ff_current_offset,
+                token: a.token,
+            }));
+            hi = lo;
+        }
     }
 }
 
@@ -2187,7 +2263,7 @@ fn split_if_by_write_set(x: ProtoIfStatement, out: &mut Vec<ProtoStatement>, dee
         out.push(ProtoStatement::If(x));
         return;
     }
-    let (ids, count) = group_by_write_set(x.true_side.iter().chain(x.false_side.iter()));
+    let (ids, count) = group_by_write_set(x.true_side.iter().chain(x.false_side.iter()), deep);
     let guards: Vec<&ProtoExpression> = x.cond.iter().collect();
     let order = (count > 1)
         .then(|| group_emission_order(&guards, &[&x.true_side, &x.false_side], &ids, count))
@@ -2247,6 +2323,7 @@ fn split_case_by_write_set(x: ProtoCaseStatement, out: &mut Vec<ProtoStatement>,
             .iter()
             .flat_map(|a| a.body.iter())
             .chain(x.default.iter()),
+        deep,
     );
     let guards: Vec<&ProtoExpression> = x.arms.iter().map(|a| &a.cond).collect();
     let bodies: Vec<&[ProtoStatement]> = x

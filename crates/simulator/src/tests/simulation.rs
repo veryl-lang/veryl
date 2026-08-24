@@ -23043,3 +23043,74 @@ fn a_chain_through_a_packed_array_is_not_a_comb_cycle() {
         );
     }
 }
+
+#[test]
+fn a_vector_written_by_one_concat_is_scheduled_per_element() {
+    // `v = {y1, y0}` is one node, so the model has EVERY bit of `v` depending
+    // on both cells -- and `u1` is fed from `v`'s low half, which closes a
+    // cycle the design does not have (bit 15..8 comes from `u1`, 7..0 from
+    // `u0`, and `u0` reads nothing of `v`).  The schedule needed several
+    // settle passes for a circuit that is one pass by construction.
+    let code = r#"
+    module Cell (
+        a: input  logic<8>,
+        y: output logic<8>,
+    ) {
+        assign y = a + 8'd1;
+    }
+    module Top (
+        sel: input  logic<2> ,
+        d  : input  logic<8> ,
+        q  : output logic<16>,
+    ) {
+        var v : logic<16>;
+        var w : logic<8> ;
+        var y0: logic<8> ;
+        var y1: logic<8> ;
+
+        inst u0: Cell (
+            a: d ,
+            y: y0,
+        );
+        inst u1: Cell (
+            a: v[7:0],
+            y: y1    ,
+        );
+
+        // Two statements, so the block stays a block and the whole-vector
+        // write is a node the scheduler has to place as a unit.
+        always_comb {
+            w = d + 8'd7;
+            case sel {
+                2'b00  : v = {y1, y0};
+                default: v = {y1, y0};
+            }
+        }
+        assign q = v;
+        let _unused: logic<8> = w;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a per-element concat write settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        sim.set("sel", Value::new(0, 2, false));
+        sim.set("d", Value::new(1, 8, false));
+        // d=1 -> y0=2 -> v[7:0]=2 -> y1=3 -> v[15:8]=3
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x0302, 16, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
