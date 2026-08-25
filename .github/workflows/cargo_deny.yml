@@ -24,7 +24,7 @@ jobs:
         with:
           command: check licenses
       # The simulator's cranelift and wasmtime must stay on the same release
-      # train (cranelift 0.133 <-> wasmtime 46); diverging silently compiles
+      # train (cranelift 0.135 <-> wasmtime 48); diverging silently compiles
       # cranelift-codegen twice.
       - name: Check cranelift/wasmtime version lockstep
         run: |
