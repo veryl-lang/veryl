@@ -1077,6 +1077,31 @@ impl Conv<&FunctionDeclaration> for () {
     }
 }
 
+impl Conv<(&MethodDeclaration, Option<&FuncPath>)> for () {
+    fn conv(
+        context: &mut Context,
+        value: (&MethodDeclaration, Option<&FuncPath>),
+    ) -> IrResult<Self> {
+        let (func_def, path) = value;
+        let token: TokenRange = (&func_def.identifier.identifier_token).into();
+
+        if let Some(x) = &func_def.method_declaration_opt {
+            check_generic_bound(context, &x.with_generic_parameter);
+        }
+
+        if let Ok(symbol) = symbol_table::resolve(func_def.identifier.as_ref())
+            && let SymbolKind::Function(x) = &symbol.found.kind
+            && !x.is_proto
+        {
+            let ports = &func_def.method_port_declaration;
+            let statement_block = Some(func_def.statement_block.as_ref());
+            conv_method(context, path, &symbol.found, ports, statement_block, token)
+        } else {
+            Err(ir_error!(token))
+        }
+    }
+}
+
 impl Conv<(&ProtoFunctionDeclaration, Option<&FuncPath>)> for () {
     fn conv(
         context: &mut Context,
@@ -1104,11 +1129,78 @@ impl Conv<(&ProtoFunctionDeclaration, Option<&FuncPath>)> for () {
     }
 }
 
+fn conv_method(
+    context: &mut Context,
+    path: Option<&FuncPath>,
+    symbol: &Symbol,
+    ports: &MethodPortDeclaration,
+    statement_block: Option<&StatementBlock>,
+    token: TokenRange,
+) -> IrResult<()> {
+    let port_list = ports
+        .method_port_declaration_opt
+        .as_ref()
+        .and_then(|x| x.method_port_declaration_opt0.as_ref())
+        .map(|x| x.port_declaration_list.as_ref());
+    conv_function_parts(
+        context,
+        path,
+        symbol,
+        Some(ports.slf.as_ref()),
+        port_list,
+        statement_block,
+        token,
+    )
+}
+
+fn conv_self_port(context: &mut Context, slf: &Slf) -> IrResult<()> {
+    let token: TokenRange = slf.self_token.token.into();
+    let symbol = symbol_table::resolve(&slf.self_token.token).map_err(|_| ir_error!(token))?;
+    let SymbolKind::Port(x) = &symbol.found.kind else {
+        return Err(ir_error!(token));
+    };
+
+    let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
+    let path = VarPath::new(symbol.found.token.text);
+    eval_variable(
+        context,
+        &path,
+        VarKind::Input,
+        &r#type,
+        ClockDomain::None,
+        token,
+    );
+    Ok(())
+}
+
 fn conv_function(
     context: &mut Context,
     path: Option<&FuncPath>,
     symbol: &Symbol,
     port_declaratoin: Option<&PortDeclaration>,
+    statement_block: Option<&StatementBlock>,
+    token: TokenRange,
+) -> IrResult<()> {
+    let port_list = port_declaratoin
+        .and_then(|x| x.port_declaration_opt.as_ref())
+        .map(|x| x.port_declaration_list.as_ref());
+    conv_function_parts(
+        context,
+        path,
+        symbol,
+        None,
+        port_list,
+        statement_block,
+        token,
+    )
+}
+
+fn conv_function_parts(
+    context: &mut Context,
+    path: Option<&FuncPath>,
+    symbol: &Symbol,
+    self_port: Option<&Slf>,
+    port_list: Option<&PortDeclarationList>,
     statement_block: Option<&StatementBlock>,
     token: TokenRange,
 ) -> IrResult<()> {
@@ -1156,14 +1248,12 @@ fn conv_function(
     };
 
     let mut args = vec![];
-    let ports: Vec<_> = if let Some(port_declaratoin) = port_declaratoin
-        && let Some(ref x) = port_declaratoin.port_declaration_opt
-    {
-        x.port_declaration_list.as_ref().into()
+    let ports: Vec<_> = if let Some(port_list) = port_list {
+        port_list.into()
     } else {
         vec![]
     };
-    let arity = ports.len();
+    let arity = ports.len() + usize::from(self_port.is_some());
 
     // Mark in-progress for the body conversion only (where recursion lands);
     // kept below the `?`-bearing setup so an early error leaves no stale entry.
@@ -1211,6 +1301,22 @@ fn conv_function(
         };
 
         let mut arg_map = HashMap::default();
+
+        if let Some(slf) = self_port {
+            conv_self_port(c, slf)?;
+
+            let path = VarPath::new(slf.self_token.token.text);
+            if let Some((id, comptime)) = c.var_paths.get(&path).cloned() {
+                arg_map.insert(path.clone(), id);
+                let members = vec![(path.clone(), comptime.clone(), Direction::Input)];
+                args.push(FuncArg {
+                    name: path.first(),
+                    comptime,
+                    members,
+                });
+            }
+        }
+
         for port in ports {
             let _: IrResult<()> = Conv::conv(c, port);
 

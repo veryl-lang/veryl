@@ -350,6 +350,11 @@ impl SymbolTable {
                 _ => (),
             }
             context.set_inner(&symbol.found);
+            if let Some(head) = path.paths.last()
+                && !head.arguments.is_empty()
+            {
+                context.inst_scope = scope::inner_scope(symbol.found.scope, head.mangled());
+            }
             context.last_found_type = Some(symbol.found.id);
             context.inner = true;
             context.generic_tables = symbol.generic_tables;
@@ -931,30 +936,44 @@ impl SymbolTable {
         context: &ResolveContext,
         name: StrId,
     ) -> Option<&'a Rc<Symbol>> {
-        // For nested generic instances the member lives in the base instance's
-        // inner scope, so include those locals too.
-        let mut candidates = scope::locals_get(context.scope, name);
+        let mut candidates: Vec<(SymbolId, bool)> = scope::locals_get(context.scope, name)
+            .into_iter()
+            .map(|x| (x, false))
+            .collect();
+        if context.inst_scope != context.scope {
+            candidates.extend(
+                scope::locals_get(context.inst_scope, name)
+                    .into_iter()
+                    .map(|x| (x, true)),
+            );
+        }
         if let Some(last_found) = context.last_found
             && matches!(last_found.kind, SymbolKind::GenericInstance(_))
         {
             let inner = scope::inner_scope(last_found.scope, last_found.token.text);
-            candidates.extend(scope::locals_get(inner, name));
+            candidates.extend(
+                scope::locals_get(inner, name)
+                    .into_iter()
+                    .map(|x| (x, true)),
+            );
         }
 
-        let mut max_depth = 0;
+        let mut best = (false, 0);
         let mut found = None;
-        for id in candidates {
+        for (id, own_scope) in candidates {
             let Some(symbol) = self.symbol_table.get(&id) else {
                 continue;
             };
-            let matched = self.match_nested_generic_instance(context, symbol)
+            let matched = own_scope
+                || self.match_nested_generic_instance(context, symbol)
                 || (context.scope == symbol.scope
                     && !context
                         .define_context
                         .exclusive(&symbol.namespace.define_context));
-            if matched && symbol.namespace.depth() >= max_depth {
+            let rank = (own_scope, symbol.namespace.depth());
+            if matched && rank >= best {
                 found = Some(symbol);
-                max_depth = symbol.namespace.depth();
+                best = rank;
             }
         }
 

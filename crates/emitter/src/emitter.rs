@@ -2594,8 +2594,7 @@ impl Emitter {
         if !matches!(symbol.found.kind, SymbolKind::Function(_)) {
             return None;
         }
-        let parent = symbol_table::get_namespace_symbol(&symbol.found.namespace)?;
-        matches!(parent.kind, SymbolKind::Struct(_)).then_some(symbol)
+        impl_member_parent(&symbol.found.namespace).map(|_| symbol)
     }
 
     fn emit_method_call(
@@ -7082,6 +7081,19 @@ fn get_generic_instance(symbol: &Symbol, generic_tables: &GenericTables) -> Opti
     resolved.ok().map(|x| (*x.found).clone())
 }
 
+fn impl_member_parent(namespace: &Namespace) -> Option<Symbol> {
+    let parent = symbol_table::get_namespace_symbol(namespace)?;
+    match parent.kind {
+        SymbolKind::Struct(_) => Some(parent),
+        SymbolKind::GenericInstance(ref x) => matches!(
+            symbol_table::get(x.base).map(|x| x.kind),
+            Some(SymbolKind::Struct(_))
+        )
+        .then_some(parent),
+        _ => None,
+    }
+}
+
 pub fn symbol_string(
     token: &VerylToken,
     symbol: &Symbol,
@@ -7124,12 +7136,9 @@ pub fn symbol_string(
             unreachable!("proto typedef is not emitted as a symbol")
         }
         SymbolKind::Parameter(_) | SymbolKind::Function(_)
-            if matches!(
-                symbol_table::get_namespace_symbol(symbol_namespace).map(|x| x.kind),
-                Some(SymbolKind::Struct(_))
-            ) =>
+            if impl_member_parent(symbol_namespace).is_some() =>
         {
-            let struct_symbol = symbol_table::get_namespace_symbol(symbol_namespace).unwrap();
+            let struct_symbol = impl_member_parent(symbol_namespace).unwrap();
             let mut member_namespace = symbol_namespace.clone();
             member_namespace.pop();
 
@@ -7140,8 +7149,12 @@ pub fn symbol_string(
                     context,
                 ));
             }
-            let type_name = if let Some(inst) = get_generic_instance(&struct_symbol, generic_tables)
-            {
+            let instance = if matches!(struct_symbol.kind, SymbolKind::GenericInstance(_)) {
+                Some(struct_symbol.clone())
+            } else {
+                get_generic_instance(&struct_symbol, generic_tables)
+            };
+            let type_name = if let Some(inst) = instance {
                 if context.build_opt.hashed_mangled_name {
                     inst.generic_maps()
                         .first()
