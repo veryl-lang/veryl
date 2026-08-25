@@ -112,6 +112,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(cyclic_file_dependency),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("Cyclic dependency between \"{start}\" and \"{end}\"")]
+    CyclicFileDependency {
+        start: String,
+        end: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(duplicate_argument),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2097,6 +2114,7 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { input, .. } => input,
             AnalyzerError::CombinationalLoop { input, .. } => input,
             AnalyzerError::CyclicTypeDependency { input, .. } => input,
+            AnalyzerError::CyclicFileDependency { input, .. } => input,
             AnalyzerError::DuplicateArgument { input, .. } => input,
             AnalyzerError::DuplicatedIdentifier { input, .. } => input,
             AnalyzerError::DuplicateEnumVariant { input, .. } => input,
@@ -2217,6 +2235,7 @@ impl AnalyzerError {
             AnalyzerError::CallNonFunction { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
             AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
+            AnalyzerError::CyclicFileDependency { token_source, .. } => *token_source,
             AnalyzerError::DuplicateArgument { token_source, .. } => *token_source,
             AnalyzerError::DuplicateEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::DuplicatedIdentifier { token_source, .. } => *token_source,
@@ -2378,6 +2397,15 @@ impl AnalyzerError {
     }
     pub fn cyclic_type_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
         AnalyzerError::CyclicTypeDependency {
+            start: start.into(),
+            end: end.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn cyclic_file_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
+        AnalyzerError::CyclicFileDependency {
             start: start.into(),
             end: end.into(),
             input: source(token),

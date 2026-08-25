@@ -1143,6 +1143,77 @@ fn cyclic_type_dependency() {
 }
 
 #[test]
+fn cyclic_file_dependency() {
+    let inputs = vec![
+        r#"
+        package a_pkg {
+          const WIDTH: u32 = 8;
+        }
+        alias package pkg = c_pkg::<a_pkg::WIDTH>;
+        module a_module (
+          b: modport b_if::<pkg>::mp,
+        ) {}
+        "#,
+        r#"
+        interface b_if::<PKG: c_prot_pkg> {
+          var b: logic<PKG::WIDTH>;
+          modport mp {
+            b: input,
+          }
+        }
+        "#,
+        r#"
+        proto package c_prot_pkg {
+          const WIDTH: u32;
+        }
+        package c_pkg::<W: u32> for c_prot_pkg {
+          const WIDTH: u32 = W;
+        }
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::CyclicFileDependency { .. }
+    ));
+
+    let inputs = vec![
+        r#"
+        proto package a_prot_pkg {
+          const WIDTH: u32;
+        }
+        package a_pkg::<W: u32> for a_prot_pkg {
+          const WIDTH: u32 = W;
+        }
+        "#,
+        r#"
+        interface b_if::<PKG: a_prot_pkg> {
+          var b: logic<PKG::WIDTH>;
+          modport mp {
+            b: input,
+          }
+        }
+        "#,
+        r#"
+        package c_pkg {
+          const WIDTH: u32 = 8;
+        }
+        alias package pkg = a_pkg::<c_pkg::WIDTH>;
+        module c_module (
+          b: modport b_if::<pkg>::mp,
+        ) {}
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::CyclicFileDependency { .. }
+    ));
+}
+
+#[test]
 fn duplicated_identifier() {
     let code = r#"
     module ModuleA {

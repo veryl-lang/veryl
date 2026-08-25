@@ -1,0 +1,7 @@
+proto package c_proto_pkg {
+    const WIDTH: u32;
+}
+
+package c_pkg::<W: u32> for c_proto_pkg {
+    const WIDTH: u32 = W;
+}
