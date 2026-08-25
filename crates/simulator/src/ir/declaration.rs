@@ -105,14 +105,12 @@ fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
 ///   one pass.
 ///
 /// Offset- and statement-granularity conflation (whole `if` statements,
-/// dynamic indices, shared inlined-function scratch) can fabricate cycles
-/// out of best-effort edges, so the sort degrades gracefully: inside each
-/// cycle (SCC) those edges are dropped and the affected readers are PINNED
-/// before their write group, reading the previous pass's settled value
-/// (interleaving INTO the group would re-read the same mid-computation
-/// value on every pass, never settling).  If even the pin would close a
-/// cycle, the sort falls back to source order and the caller reports a
-/// combinational loop.
+/// dynamic indices, shared inlined-function scratch) can fabricate a cycle
+/// out of edges no wire of the circuit closes.  The sort does NOT answer
+/// one by dropping edges: a synthesisable design has an order that needs a
+/// single settle pass, so a cycle here means the statements are tracked
+/// more coarsely than the circuit, and the cure is to split them.  The
+/// cycle is reported to the caller, which splits and asks again.
 pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     stable_topo_sort_impl(statements, None).0
 }
@@ -207,11 +205,8 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
     // --- Edge construction ---------------------------------------------
     let mut adj_sem: Vec<HashSet<usize>> = vec![HashSet::default(); n];
     let mut adj_opt: Vec<HashSet<usize>> = vec![HashSet::default(); n];
-    // Settled-value reads (reader, var, read range): if degradation drops
-    // their group edges, the reader is pinned before the group instead.
-    let mut opt_groups: Vec<(usize, VarOffset, BitRange)> = Vec::new();
-    // Cross-block prior bindings (indistinguishable without block
-    // identity) and any degradation void the one-pass hint.
+    // Cross-block prior bindings are indistinguishable without block
+    // identity, and void the one-pass hint.
     let mut hint_blocked = blocks.is_none();
 
     // Without block info every prior writer binds, as before.
@@ -363,10 +358,8 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                     adj_sem[writer_idx].insert(reader_idx);
                 } else {
                     // Sole overlapping writer comes later: a settled-value
-                    // read, droppable so a fabricated cycle degrades
-                    // instead of collapsing to source order.
+                    // read, so the edge is best-effort rather than semantic.
                     adj_opt[writer_idx].insert(reader_idx);
-                    opt_groups.push((reader_idx, *key, *rr));
                 }
             } else if relevant.binary_search(&reader_idx).is_ok() {
                 // The reader itself writes overlapping bits (shared inlined
@@ -403,7 +396,6 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 for &writer_idx in &relevant {
                     adj_opt[writer_idx].insert(reader_idx);
                 }
-                opt_groups.push((reader_idx, *key, *rr));
             }
         }
     }
@@ -438,9 +430,8 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
 
     // WAW: chain consecutive writers of a reassigned var so overlapping
     // writes keep source order.  Skip only when next reaches prev over
-    // SEMANTIC edges (a genuine cycle); best-effort reachability does not
-    // skip — that cycle degrades by dropping the best-effort edges,
-    // keeping write order instead of silently inverting it.
+    // SEMANTIC edges (a genuine cycle); a best-effort path does not skip, so
+    // write order is kept instead of being silently inverted.
     {
         let mut stack: Vec<usize> = Vec::new();
         let mut visited: HashSet<usize> = HashSet::default();
@@ -488,27 +479,23 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
         }
     }
 
-    // --- Kahn with graceful degradation ---------------------------------
-    // Adjacency lists are passed per call because the degradation rung
-    // below inserts pin edges between attempts.
-    let kahn = |adj_sem: &[HashSet<usize>],
-                adj_opt: &[HashSet<usize>],
-                opt_filter: &dyn Fn(usize, usize) -> bool|
-     -> Option<Vec<usize>> {
+    // --- Kahn ------------------------------------------------------------
+    // ONE attempt, and every edge constrains it: a graph that does not
+    // linearize means the statements are tracked more coarsely than the
+    // circuit wires them, and the caller answers that by splitting them
+    // finer -- not by dropping edges for an order that needs extra passes.
+    let order = {
         let mut in_degree: Vec<usize> = vec![0; n];
         for succs in adj_sem.iter() {
             for &v in succs {
                 in_degree[v] += 1;
             }
         }
-        for (u, succs) in adj_opt.iter().enumerate() {
+        for succs in adj_opt.iter() {
             for &v in succs {
-                if opt_filter(u, v) {
-                    in_degree[v] += 1;
-                }
+                in_degree[v] += 1;
             }
         }
-
         let mut queue: VecDeque<usize> = VecDeque::new();
         for (i, &deg) in in_degree.iter().enumerate() {
             if deg == 0 {
@@ -521,7 +508,7 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
             sorted_indices.push(idx);
             successors.clear();
             successors.extend(adj_sem[idx].iter().copied());
-            successors.extend(adj_opt[idx].iter().copied().filter(|&v| opt_filter(idx, v)));
+            successors.extend(adj_opt[idx].iter().copied());
             // Index order for determinism.
             successors.sort_unstable();
             successors.dedup();
@@ -535,105 +522,38 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
         (sorted_indices.len() == n).then_some(sorted_indices)
     };
 
-    let mut order = kahn(&adj_sem, &adj_opt, &|_, _| true);
-    if order.is_none() {
-        hint_blocked = true;
-    }
-
-    if order.is_none() {
-        // Drop the best-effort edges inside each SCC of the full graph and
-        // pin the affected readers before their write groups (see the
-        // function doc); everything outside keeps its one-pass order.
-        use daggy::petgraph::Graph;
-        use daggy::petgraph::algo::tarjan_scc;
-        let mut g: Graph<(), ()> = Graph::new();
-        let nodes: Vec<_> = (0..n).map(|_| g.add_node(())).collect();
-        for (u, succs) in adj_sem.iter().enumerate() {
-            for &v in succs {
-                g.add_edge(nodes[u], nodes[v], ());
-            }
-        }
-        for (u, succs) in adj_opt.iter().enumerate() {
-            for &v in succs {
-                g.add_edge(nodes[u], nodes[v], ());
-            }
-        }
-        let mut scc_id: Vec<usize> = vec![usize::MAX; n];
-        let mut nontrivial = 0usize;
-        for (i, scc) in tarjan_scc(&g).into_iter().enumerate() {
-            if scc.len() > 1 {
-                nontrivial += 1;
-                for node in scc {
-                    scc_id[node.index()] = i;
+    let Some(sorted_indices) = order else {
+        if std::env::var("VERYL_PASS_DIAG").is_ok() {
+            use daggy::petgraph::Graph;
+            use daggy::petgraph::algo::tarjan_scc;
+            let mut g: Graph<(), ()> = Graph::new();
+            let nodes: Vec<_> = (0..n).map(|_| g.add_node(())).collect();
+            for (u, succs) in adj_sem.iter().enumerate() {
+                for &v in succs {
+                    g.add_edge(nodes[u], nodes[v], ());
                 }
             }
-        }
-        if std::env::var("VERYL_PASS_DIAG").is_ok() {
+            for (u, succs) in adj_opt.iter().enumerate() {
+                for &v in succs {
+                    g.add_edge(nodes[u], nodes[v], ());
+                }
+            }
+            let mut scc_id: Vec<usize> = vec![usize::MAX; n];
+            let mut nontrivial = 0usize;
+            for (i, scc) in tarjan_scc(&g).into_iter().enumerate() {
+                if scc.len() > 1 {
+                    nontrivial += 1;
+                    for node in scc {
+                        scc_id[node.index()] = i;
+                    }
+                }
+            }
             log::info!(
-                "pass_diag: stable_topo_sort n={n}: cycle; relaxing best-effort edges in {nontrivial} SCC(s)",
+                "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
+                 reporting it for the caller to split",
             );
             trace_first_scc_cycle(&statements, &adj_sem, &adj_opt, &scc_id);
         }
-        let opt_live = |u: usize, v: usize| scc_id[u] == usize::MAX || scc_id[u] != scc_id[v];
-
-        // A pin that would itself close a cycle in the live graph means
-        // even previous-pass semantics cannot linearize the group — bail
-        // to source order and let the caller report the loop.
-        let mut pinned: HashSet<(usize, usize)> = HashSet::default();
-        let mut stack: Vec<usize> = Vec::new();
-        let mut visited: HashSet<usize> = HashSet::default();
-        for (reader, key, rr) in &opt_groups {
-            let reader = *reader;
-            if scc_id[reader] == usize::MAX {
-                continue;
-            }
-            let mut first: Option<usize> = None;
-            let mut dropped = false;
-            for (p, wr) in &writer_ranges[key] {
-                if *p == reader || !ranges_overlap(*wr, *rr) {
-                    continue;
-                }
-                if first.is_none() {
-                    first = Some(*p);
-                }
-                if scc_id[*p] != usize::MAX && scc_id[*p] == scc_id[reader] {
-                    dropped = true;
-                }
-            }
-            let Some(first) = first else {
-                continue;
-            };
-            if !dropped || !pinned.insert((reader, first)) {
-                continue;
-            }
-            stack.clear();
-            stack.push(first);
-            visited.clear();
-            let mut reach = false;
-            while let Some(u) = stack.pop() {
-                if u == reader {
-                    reach = true;
-                    break;
-                }
-                if visited.insert(u) {
-                    stack.extend(adj_sem[u].iter().copied());
-                    stack.extend(adj_opt[u].iter().copied().filter(|&v| opt_live(u, v)));
-                }
-            }
-            if reach {
-                return (statements, None, true);
-            }
-            adj_sem[reader].insert(first);
-        }
-
-        order = kahn(&adj_sem, &adj_opt, &opt_live);
-    }
-
-    let Some(sorted_indices) = order else {
-        // Any cycle surviving the relaxation is semantic-only (a cycle lies
-        // inside one SCC whose best-effort edges were just dropped, and
-        // pins are insertion-guarded), so dropping more best-effort edges
-        // cannot help — fall back to source order.
         return (statements, None, true);
     };
 

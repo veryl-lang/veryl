@@ -21,6 +21,29 @@ fn analyze(code: &str, config: &Config) -> Ir {
 
 #[track_caller]
 fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorError> {
+    analyze_top_inner(code, config, top, false)
+}
+
+/// For the ONE test that targets the simulator's own combinational-loop
+/// detector.  The analyzer rejects such a design first, so nothing else may
+/// wave that error through: a test that needs to is testing a design Veryl
+/// does not accept.
+#[track_caller]
+fn analyze_top_allowing_comb_loop(
+    code: &str,
+    config: &Config,
+    top: &str,
+) -> Result<Ir, SimulatorError> {
+    analyze_top_inner(code, config, top, true)
+}
+
+#[track_caller]
+fn analyze_top_inner(
+    code: &str,
+    config: &Config,
+    top: &str,
+    allow_comb_loop: bool,
+) -> Result<Ir, SimulatorError> {
     symbol_table::clear();
 
     let metadata = Metadata::create_default("prj").unwrap();
@@ -43,12 +66,7 @@ fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorEr
                 x,
                 AnalyzerError::InvalidLogicalOperand { .. }
                     | AnalyzerError::UnsignedArithShift { .. }
-                    // Let simulator's analyze_dependency report combinational
-                    // loops here -- the analyzer-side check at post_pass2 is
-                    // an additional safety net but these tests target the
-                    // simulator's own detector.
-                    | AnalyzerError::CombinationalLoop { .. }
-            )
+            ) && !(allow_comb_loop && matches!(x, AnalyzerError::CombinationalLoop { .. }))
         })
         .collect();
     assert!(errors.is_empty());
