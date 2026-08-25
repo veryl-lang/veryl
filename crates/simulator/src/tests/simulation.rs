@@ -23301,3 +23301,226 @@ fn a_reader_between_two_writes_gets_the_earlier_version() {
         );
     }
 }
+
+#[test]
+fn a_flop_on_an_inverted_clock_fires_one_step_later() {
+    // `~clk` reaches the master input clock, so it is classified as a gated
+    // clock and offered the master's RISING edge -- which is exactly when an
+    // inversion falls.  It used to fire never.
+    //
+    // The step it lands on is measured, not chosen: a scan-chain output
+    // flopped on an inverted clock tracks its golden over a hundred steps
+    // only if the edge takes effect at the top of the NEXT step.
+    let code = r#"
+    module Top (
+        clk: input  '_ clock,
+        d  : input  logic   ,
+        p  : output logic   ,
+        n  : output logic   ,
+    ) {
+        let clk_l: '_ clock = ~clk;
+
+        var pi: logic;
+        var ni: logic;
+
+        always_ff (clk) {
+            pi = d;
+        }
+        always_ff (clk_l) {
+            ni = pi;
+        }
+        assign p = pi;
+        assign n = ni;
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // No reset, so the flops start X and the first step reads X
+            // rather than the edge under test.
+            continue;
+        }
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("d", Value::new(1, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("p").unwrap(),
+            Value::new(1, 1, false),
+            "the posedge flop takes d on the first edge (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("n").unwrap(),
+            Value::new(0, 1, false),
+            "the inverted-clock flop has not seen its edge yet (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("n").unwrap(),
+            Value::new(1, 1, false),
+            "the inverted-clock flop fires one step later (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn an_async_reset_the_design_produces_itself_asserts_when_it_falls() {
+    // `rst_l` falls as a consequence of the very edge that sets `f`.  SV
+    // reacts to that fall in the same time step (`always @(posedge clk or
+    // negedge rst_l)`), so `q` is already 0 when the step ends.  Nothing
+    // generated an assertion edge for a reset no testbench drives, so the
+    // level test at the NEXT clock edge was what cleared `q` -- an async
+    // reset behaving as a synchronous one, a whole cycle late.
+    let code = r#"
+    module Sub (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q    : output logic          ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_l) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q   : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) {
+            f = trig;
+        }
+        let rst_l: '_ reset_async_low = ~f;
+        inst u: Sub (clk, rst_l, q);
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // `f` starts X, so `rst_l` reads X and the first steps are about
+            // X propagation rather than the assertion under test.
+            continue;
+        }
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("trig", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 1, false),
+            "control: q is 1 while the reset is released (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        sim.set("trig", Value::new(1, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0, 1, false),
+            "the reset clears q in the step it asserts (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn an_abstract_reset_the_design_produces_itself_uses_the_configured_polarity() {
+    // Same shape as the test above, but the reset carries no declared
+    // polarity: the edge to monitor comes from the project's `reset_type`.
+    // The simulator resolves that in two places -- once to lower `if_reset`,
+    // once to decide which transition asserts -- and monitoring the opposite
+    // edge would fire a step late without failing anything else.
+    let code = r#"
+    module Sub (
+        clk: input  clock,
+        rst: input  reset,
+        q  : output logic,
+    ) {
+        var r: logic;
+        always_ff (clk, rst) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q   : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) {
+            f = trig;
+        }
+        let rst: '_ reset = ~f;
+        inst u: Sub (clk, rst, q);
+    }
+    "#;
+
+    for base in Config::all() {
+        if base.use_4state {
+            // `f` starts X, so `rst` reads X and the first steps are about
+            // X propagation rather than the assertion under test.
+            continue;
+        }
+        for active_high in [false, true] {
+            let config = Config {
+                abstract_reset_active_high: active_high,
+                ..base.clone()
+            };
+            dbg!(&config);
+
+            // `rst` is `~f`, so the asserted level is reached by driving
+            // `trig` to whichever value the configured polarity needs.
+            let (released, asserted) = if active_high { (1u64, 0u64) } else { (0, 1) };
+
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("trig", Value::new(released, 1, false));
+            for _ in 0..4 {
+                sim.step(&clk);
+            }
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(1, 1, false),
+                "control: q is 1 while the reset is released (active_high={active_high} JIT={})",
+                config.use_jit,
+            );
+
+            sim.set("trig", Value::new(asserted, 1, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(0, 1, false),
+                "the reset clears q in the step it asserts (active_high={active_high} JIT={})",
+                config.use_jit,
+            );
+        }
+    }
+}

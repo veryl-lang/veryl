@@ -2,6 +2,7 @@ use crate::backend::inst::{
     ReuseOutcome, port_alias_enabled, try_compile_inst_chunks, try_reuse_or_claim,
 };
 use crate::ir::context::{Context, Conv, ScopeContext};
+use crate::ir::derived_clock::EdgeCandidate;
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
 use crate::ir::module::{BitRange, gather_bit_aware_outputs, ranges_overlap};
@@ -758,10 +759,11 @@ pub struct ProtoDeclaration {
     /// Post-comb functions: child comb-only JIT functions for pre-event eval.
     pub post_comb_fns: Vec<ProtoStatement>,
     pub child_modules: Vec<ModuleVariableMeta>,
-    /// Clock-typed non-port variables discovered inside child instances.
-    /// Bubbled up through `Inst` declarations so the top module sees every
-    /// derived clock across the hierarchy, not just its own locals.
-    pub derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)>,
+    /// Clock-typed and async-reset-typed non-port variables discovered
+    /// inside child instances.  Bubbled up through `Inst` declarations so
+    /// the top module sees every derived clock and internally produced
+    /// reset across the hierarchy, not just its own locals.
+    pub derived_clock_candidates: Vec<EdgeCandidate>,
     /// User-defined component instances declared at this level.
     pub external_components: Vec<ProtoExternalComponent>,
 }
@@ -1207,7 +1209,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
-        let mut all_derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)> = vec![];
+        let mut all_derived_clock_candidates: Vec<EdgeCandidate> = vec![];
 
         // Cross-test DUT reuse: if this component was already converted (earlier
         // test/instance), restore its subtree relocated to this instance's
@@ -1242,7 +1244,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     intern(*v, context);
                 }
             }
-            for (v, _, _) in &reuse.derived_clock_candidates {
+            for (v, _, _, _) in &reuse.derived_clock_candidates {
                 intern(*v, context);
             }
             let rekey = |ev: Event| -> Event {
@@ -1263,7 +1265,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             all_derived_clock_candidates = reuse
                 .derived_clock_candidates
                 .into_iter()
-                .map(|(v, off, nb)| (id_map.get(&v).copied().unwrap_or(v), off, nb))
+                .map(|(v, off, nb, pol)| (id_map.get(&v).copied().unwrap_or(v), off, nb, pol))
                 .collect();
             // Reserve the full region the reference conv consumed (declared
             // vars + function-local / temporary allocations + the whole nested
@@ -1741,13 +1743,16 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // here, where the owner scope closes: VarIds are per-module-scope,
         // so a nested id can numerically equal an ancestor's input-port
         // id, and the event remap at that boundary would hijack the key
-        // onto an unrelated clock.  A reset-typed internal var gets the
-        // same re-key, and no schedule candidate: nothing generates an
-        // assertion edge for a reset a module produces itself, so its
-        // `Event::Reset` never fires — the clock-edge level test in
-        // `Event::Clock` is what serves those blocks.
+        // onto an unrelated clock.
+        //
+        // An ASYNC reset-typed internal var is a candidate too: no
+        // testbench drives it, so without one its `Event::Reset` never
+        // fires and `if_reset` waits for the next clock edge instead of
+        // asserting when the net does.  Its kind is read from the child's
+        // own declarations because this runs after the child scope closed.
         let child_port_var_set: HashSet<air::VarId> =
             child_module.ports.values().copied().collect();
+        let mut child_inst_reset_kinds = None;
         for (vid, var) in &child_module.variables {
             let is_clock = var.r#type.is_clock();
             let is_reset = var.r#type.is_reset();
@@ -1761,6 +1766,25 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(stmts) = remapped_events.remove(&Event::Reset(*vid)) {
                     let unique_id = context.alloc_internal_event_id();
                     remapped_events.insert(Event::Reset(unique_id), stmts);
+                    let inst_kinds = child_inst_reset_kinds.get_or_insert_with(|| {
+                        crate::ir::module::collect_inst_reset_kinds(&child_module.declarations)
+                    });
+                    let (active_low, is_async) = crate::ir::module::resolved_reset_kind(
+                        &var.r#type.kind,
+                        inst_kinds.get(vid).copied().flatten(),
+                        &context.config,
+                    );
+                    if is_async
+                        && let Some(meta) = child_variable_meta.get(vid)
+                        && let Some(elem) = meta.elements.first()
+                    {
+                        all_derived_clock_candidates.push((
+                            unique_id,
+                            elem.current,
+                            elem.native_bytes,
+                            Some(active_low),
+                        ));
+                    }
                 }
                 continue;
             }
@@ -1771,7 +1795,12 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid)) {
                     remapped_events.insert(Event::Clock(unique_id), stmts);
                 }
-                all_derived_clock_candidates.push((unique_id, elem.current, elem.native_bytes));
+                all_derived_clock_candidates.push((
+                    unique_id,
+                    elem.current,
+                    elem.native_bytes,
+                    None,
+                ));
             }
         }
 
