@@ -8,7 +8,7 @@ use crate::ir::{
     AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, Signature, Statement,
     ValueVariant, VarId, VarIndex, VarPath, VarPathSelect,
 };
-use crate::symbol::{Direction, FunctionWriteKind, Symbol, SymbolId, SymbolKind};
+use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind};
 use crate::value::{Value, ValueBigUint};
 use crate::{AnalyzerError, HashMap, ir_error};
 use indent::indent_all_by;
@@ -173,9 +173,6 @@ pub struct FunctionCall {
     pub inputs: CallArgs<Expression>,
     /// Output bindings that may actually be written by this specialization.
     pub outputs: CallArgs<Vec<AssignDestination>>,
-    /// Whether each retained output has a proven write or only crosses an
-    /// opaque SystemVerilog boundary.
-    pub output_write_kinds: HashMap<VarPath, FunctionWriteKind>,
 }
 
 impl FunctionCall {
@@ -254,11 +251,7 @@ impl FunctionCall {
         for expr in self.inputs.values() {
             expr.eval_assign(context, assign_table, assign_context);
         }
-        for (formal, output) in &self.outputs {
-            let maybe = self
-                .output_write_kinds
-                .get(formal)
-                .is_some_and(|kind| matches!(kind, FunctionWriteKind::Opaque));
+        for output in self.outputs.values() {
             for dst in output {
                 if let Some(index) = dst.index.eval_value(context) {
                     let Some(variable) = context.get_variable_info(dst.id) else {
@@ -272,7 +265,7 @@ impl FunctionCall {
                             &variable,
                             index,
                             mask,
-                            maybe,
+                            false,
                             false,
                             self.comptime.token,
                         );

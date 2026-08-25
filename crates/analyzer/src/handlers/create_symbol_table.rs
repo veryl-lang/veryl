@@ -104,13 +104,11 @@ fn function_call_site(callee: GenericSymbolPath, call: &FunctionCall) -> Functio
                 arguments.push(FunctionCallArgument {
                     name,
                     targets: assignment_targets(named.expression.as_ref()),
-                    assignable: named.expression.is_assignable(),
                 });
             } else {
                 arguments.push(FunctionCallArgument {
                     name: None,
                     targets: assignment_targets(item.argument_expression.expression.as_ref()),
-                    assignable: item.argument_expression.expression.is_assignable(),
                 });
             }
         }
@@ -1977,7 +1975,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     write_paths,
                     call_sites,
                     has_side_effect: false,
-                    formal_writes: HashMap::default(),
+                    formal_writes: vec![],
                     conditional_effects: Box::default(),
                     definition: Some(definition),
                 };
@@ -2664,7 +2662,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     write_paths: vec![],
                     call_sites: vec![],
                     has_side_effect: false,
-                    formal_writes: HashMap::default(),
+                    formal_writes: vec![],
                     conditional_effects: Box::default(),
                     definition: Some(definition),
                 };

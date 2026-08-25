@@ -1,4 +1,3 @@
-use crate::HashMap;
 use crate::namespace::Namespace;
 use crate::symbol::{
     Affiliation, ClockDomain, Direction, DocComment, FunctionProperty, GenericBoundKind,
@@ -110,7 +109,7 @@ fn insert_method(
         write_paths: vec![],
         call_sites: vec![],
         has_side_effect: false,
-        formal_writes: HashMap::default(),
+        formal_writes: vec![],
         conditional_effects: Box::default(),
         definition: None,
     };

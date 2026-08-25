@@ -1291,17 +1291,27 @@ fn conv_function(
             symbol_table::specialized_direct_effect(symbol, c);
         let mut effect = RuntimeFunctionEffect {
             external_write: proeprty.has_side_effect_in(&c.config.defines),
-            ..Default::default()
+            written_outputs: proeprty
+                .written_output_paths(&c.config.defines)
+                .into_iter()
+                .filter_map(|path| path.to_var_path())
+                .collect(),
         };
-        for (path, kind) in proeprty.output_writes(&c.config.defines) {
-            if let Some(path) = path.to_var_path() {
-                effect.record_write(path, kind);
-            }
-        }
         effect.external_write |= specialized_external_write;
-        for (path, kind) in specialized_formal_writes {
-            if let Some(path) = path.to_var_path() {
-                effect.record_write(path, kind);
+        effect.external_write |= output_ids.values().any(|output| output.scheduler_external);
+        effect.written_outputs.extend(
+            specialized_formal_writes
+                .into_iter()
+                .filter_map(|path| path.to_var_path()),
+        );
+
+        // SystemVerilog copies every output/inout argument back when the
+        // function returns, even when the body never explicitly assigns it.
+        for arg in &args {
+            for (path, _, direction) in &arg.members {
+                if matches!(direction, Direction::Output | Direction::Inout) {
+                    effect.written_outputs.insert(path.clone());
+                }
             }
         }
         c.begin_function_effect(path.clone(), output_ids, effect);

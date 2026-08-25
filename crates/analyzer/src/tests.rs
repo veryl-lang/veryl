@@ -12669,8 +12669,8 @@ fn clock_domain_function_call() {
         "{errors:?}"
     );
 
-    // An unwritten output argument performs no copy-out, so its destination
-    // does not participate in the call's clock-domain check.
+    // Output arguments copy out on return even when the body never assigns
+    // them, so the destination still participates in the clock-domain check.
     let code = r#"
     module ModuleA (
         i_clk_a: input  'a clock,
@@ -12693,7 +12693,7 @@ fn clock_domain_function_call() {
     "#;
     let errors = analyze(code);
     assert!(
-        !errors
+        errors
             .iter()
             .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
         "{errors:?}"
@@ -19016,7 +19016,7 @@ fn orphan_else_across_scopes() {
     );
 }
 #[test]
-fn opaque_systemverilog_call_tracks_possible_function_output_write() {
+fn function_output_always_copies_out_on_return() {
     let code = r#"
     module ModuleA (
         o: output logic,
@@ -19034,9 +19034,9 @@ fn opaque_systemverilog_call_tracks_possible_function_output_write() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 
-    // The opaque call does not prove that the formal is assigned. Without
-    // the allow, diagnose the formal once rather than repeating the same
-    // uncertainty at the caller's actual output.
+    // The SystemVerilog call does not prove that the formal has a useful
+    // value. Without the allow, diagnose the formal, but not the caller's
+    // actual: the formal is copied out on return even when it still holds X.
     let code = code.replace("        #[allow(unassign_variable)]\n", "");
     let errors = analyze(&code);
     assert!(
@@ -19052,28 +19052,8 @@ fn opaque_systemverilog_call_tracks_possible_function_output_write() {
         "{errors:?}"
     );
 
-    // A known write is absorbing; a later or earlier opaque write must not
-    // downgrade the path back to opaque.
-    let code = r#"
-    module ModuleA (
-        o: output logic,
-    ) {
-        function f (y: output logic) {
-            $sv::g(y);
-            y = 0;
-            $sv::h(y);
-        }
-        always_comb {
-            f(o);
-        }
-    }
-    "#;
-    let errors = analyze(code);
-    assert!(errors.is_empty(), "{errors:?}");
-
-    // Opaque is not a proven scheduler write. It suppresses the unassigned
-    // false positive, but must not cause always_ff output or duplicate-write
-    // errors that cannot be silenced at the SystemVerilog boundary.
+    // Copy-out behaves like a blocking assignment. In always_ff it is a
+    // scheduler-visible write even when the callee body leaves the output X.
     let code = r#"
     module ModuleA (
         clk: input clock,
@@ -19091,35 +19071,40 @@ fn opaque_systemverilog_call_tracks_possible_function_output_write() {
     "#;
     let errors = analyze(code);
     assert!(
-        !errors.iter().any(|error| matches!(
-            error,
-            AnalyzerError::FunctionOutputInAlwaysFf { .. }
-                | AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }
-                | AnalyzerError::MultipleAssignment { .. }
-                | AnalyzerError::UnassignVariable { .. }
-        )),
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::FunctionOutputInAlwaysFf { .. })),
         "{errors:?}"
     );
-
-    // An arbitrary expression is not an opaque write target.
+    // A modport argument is expanded to one SystemVerilog argument per member.
+    // Every output member therefore copies out and is a scheduler side effect.
     let code = r#"
-    module ModuleA (
-        o: output logic,
-    ) {
-        #[allow(unassign_variable)]
-        function f (y: output logic) {
-            $sv::g(y + 1);
+    interface Bus {
+        var ready: logic;
+        var valid: logic;
+        modport writer {
+            ready: input,
+            valid: output,
         }
-        always_comb {
-            f(o);
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        inst bus: Bus;
+        #[allow(unassign_variable)]
+        function inspect (x: modport Bus::writer) {
+        }
+        always_ff (clk) {
+            inspect(bus);
         }
     }
     "#;
     let errors = analyze(code);
     assert!(
-        errors.iter().any(
-            |error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "o")
-        ),
+        errors.iter().any(|error| matches!(
+            error,
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }
+        )),
         "{errors:?}"
     );
 }
@@ -19271,8 +19256,36 @@ fn function_output_in_always_ff_requires_process_local_variable() {
             .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
     );
 
-    // An output declaration is only a capability. Without an actual write in
-    // the function body it has no scheduler-visible effect.
+    // Copy-out to a process-local variable is still local to the always_ff
+    // process, including when the function leaves the formal unassigned.
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        #[allow(unassign_variable)]
+        function inspect (result: output logic) {
+        }
+        always_ff (clk) {
+            var tmp: logic;
+            inspect(tmp);
+            q = tmp;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors.iter().any(|x| matches!(
+            x,
+            AnalyzerError::FunctionOutputInAlwaysFf { .. }
+                | AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }
+        )),
+        "{errors:?}"
+    );
+
+    // SystemVerilog copies an output argument back on return even when the
+    // function body never explicitly assigns it.
     let code = r#"
     module ModuleA (
         clk: input clock,
@@ -19289,15 +19302,9 @@ fn function_output_in_always_ff_requires_process_local_variable() {
 
     let errors = analyze(code);
     assert!(
-        !errors
+        errors
             .iter()
             .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
-    );
-    assert!(
-        !errors
-            .iter()
-            .any(|x| matches!(x, AnalyzerError::MultipleAssignment { .. })),
-        "an unwritten output must not count as an assignment: {errors:?}"
     );
 }
 
@@ -19453,7 +19460,7 @@ fn finite_generic_recursion_reports_side_effect_without_recursing_forever() {
 }
 
 #[test]
-fn modport_effect_requires_an_actual_member_write() {
+fn modport_output_copyout_is_a_side_effect() {
     fn has_side_effect(code: &str, name: &str) -> bool {
         use crate::symbol::SymbolKind;
         use veryl_parser::veryl_grammar_trait::FunctionDeclaration;
@@ -19511,7 +19518,7 @@ fn modport_effect_requires_an_actual_member_write() {
     }
     "#;
 
-    assert!(!has_side_effect(code, "observe"));
+    assert!(has_side_effect(code, "observe"));
 
     let code = r#"
     interface Bus {
@@ -19534,6 +19541,25 @@ fn modport_effect_requires_an_actual_member_write() {
     "#;
 
     assert!(has_side_effect(code, "update"));
+
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport monitor {
+            data: input,
+        }
+    }
+    module ModuleA (
+        bus: modport Bus::monitor,
+    ) {
+        function observe (arg: modport Bus::monitor) {
+            var tmp: logic;
+            tmp = arg.data;
+        }
+    }
+    "#;
+
+    assert!(!has_side_effect(code, "observe"));
 }
 
 #[test]
@@ -19570,10 +19596,10 @@ fn modport_function_write_reaches_assignment_analysis() {
         "a written modport member must remain a function-call write: {errors:?}"
     );
     assert!(
-        errors
+        !errors
             .iter()
             .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "bus.valid")),
-        "an unwritten member of the same modport must not count as assigned: {errors:?}"
+        "every output member copies out on return: {errors:?}"
     );
 
     let unwritten = r#"
@@ -19597,8 +19623,14 @@ fn modport_function_write_reaches_assignment_analysis() {
     assert!(
         errors
             .iter()
-            .any(|error| matches!(error, AnalyzerError::UnassignVariable { .. })),
-        "an unwritten modport member must not count as assigned: {errors:?}"
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "inspect.arg.data")),
+        "the unwritten formal must still be diagnosed: {errors:?}"
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "bus.data")),
+        "the formal copies out to the interface member on return: {errors:?}"
     );
 }
 
@@ -19753,8 +19785,8 @@ fn diamond_connect_in_function_is_scheduler_side_effect() {
         "{errors:?}"
     );
 
-    // Output members that have no matching input member on the other operand
-    // do not expand into assignments either.
+    // Even when a diamond operation creates no body assignment, the expanded
+    // output formal still copies out when the function returns.
     let code = r#"
     interface Bus {
         var produced: logic;
@@ -19788,7 +19820,7 @@ fn diamond_connect_in_function_is_scheduler_side_effect() {
 
     let errors = analyze(code);
     assert!(
-        !errors
+        errors
             .iter()
             .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
         "{errors:?}"
@@ -19961,7 +19993,7 @@ fn inactive_function_writes_do_not_contribute_effects() {
 
     let errors = analyze_with_defines(code, &[]);
     assert!(
-        !errors
+        errors
             .iter()
             .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
     );

@@ -8,7 +8,7 @@ use crate::ir::{
 };
 use crate::namespace::Namespace;
 use crate::scope;
-use crate::symbol::{Affiliation, ClockDomain, Direction, FunctionWriteKind, GenericMap, SymbolId};
+use crate::symbol::{Affiliation, ClockDomain, Direction, GenericMap, SymbolId};
 use crate::symbol_path::GenericSymbolPath;
 use crate::value::MaskCache;
 use crate::{HashMap, HashSet};
@@ -33,33 +33,17 @@ pub struct Config {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RuntimeFunctionEffect {
     pub external_write: bool,
-    pub output_writes: HashMap<VarPath, FunctionWriteKind>,
+    pub written_outputs: HashSet<VarPath>,
 }
 
 impl RuntimeFunctionEffect {
-    pub fn write_paths_for<'a>(
-        &'a self,
-        formal: &'a VarPath,
-    ) -> impl Iterator<Item = (&'a VarPath, FunctionWriteKind)> {
-        self.output_writes
-            .iter()
-            .filter(move |(path, _)| path.0.starts_with(&formal.0))
-            .map(|(path, kind)| (path, *kind))
-    }
-
-    pub fn known_write_paths_for<'a>(
+    pub fn written_paths_for<'a>(
         &'a self,
         formal: &'a VarPath,
     ) -> impl Iterator<Item = &'a VarPath> {
-        self.write_paths_for(formal)
-            .filter_map(|(path, kind)| matches!(kind, FunctionWriteKind::Known).then_some(path))
-    }
-
-    pub fn record_write(&mut self, path: VarPath, kind: FunctionWriteKind) {
-        self.output_writes
-            .entry(path)
-            .and_modify(|current| *current = current.merge(kind))
-            .or_insert(kind);
+        self.written_outputs
+            .iter()
+            .filter(move |path| path.0.starts_with(&formal.0))
     }
 }
 
@@ -301,28 +285,20 @@ impl Context {
         };
         let caller_outputs = frame.outputs.clone();
         let mut external_write = effect.external_write;
-        let mut output_writes = HashMap::default();
+        let mut written_outputs = HashSet::default();
 
         for (formal, destinations) in outputs {
-            for (written, write_kind) in effect.write_paths_for(formal) {
+            for written in effect.written_paths_for(formal) {
                 let suffix = &written.0[formal.0.len()..];
                 for destination in destinations {
                     if let Some(output) = caller_outputs.get(&destination.id) {
                         let mut mapped = destination.path.clone();
                         mapped.0.extend_from_slice(suffix);
-                        output_writes
-                            .entry(mapped)
-                            .and_modify(|current: &mut FunctionWriteKind| {
-                                *current = current.merge(write_kind)
-                            })
-                            .or_insert(write_kind);
-                        if matches!(write_kind, FunctionWriteKind::Known) {
-                            external_write |= output.scheduler_external;
-                        }
+                        written_outputs.insert(mapped);
+                        external_write |= output.scheduler_external;
                     } else if self
                         .get_variable_info(destination.id)
                         .is_none_or(|variable| variable.affiliation != Affiliation::Function)
-                        && matches!(write_kind, FunctionWriteKind::Known)
                     {
                         external_write = true;
                     }
@@ -332,9 +308,7 @@ impl Context {
 
         if let Some(frame) = self.function_effect_stack.last_mut() {
             frame.effect.external_write |= external_write;
-            for (path, kind) in output_writes {
-                frame.effect.record_write(path, kind);
-            }
+            frame.effect.written_outputs.extend(written_outputs);
         }
     }
 
@@ -359,10 +333,7 @@ impl Context {
                     Statement::Assign(assign) => {
                         for destination in &assign.dst {
                             if let Some(output) = caller_outputs.get(&destination.id) {
-                                effect.record_write(
-                                    destination.path.clone(),
-                                    FunctionWriteKind::Known,
-                                );
+                                effect.written_outputs.insert(destination.path.clone());
                                 effect.external_write |= output.scheduler_external;
                             } else if context.get_variable_info(destination.id).is_none_or(
                                 |variable| {
@@ -404,9 +375,7 @@ impl Context {
         visit(self, statements, &caller_outputs, &mut effect);
         if let Some(frame) = self.function_effect_stack.last_mut() {
             frame.effect.external_write |= effect.external_write;
-            for (path, kind) in effect.output_writes {
-                frame.effect.record_write(path, kind);
-            }
+            frame.effect.written_outputs.extend(effect.written_outputs);
         }
     }
 
