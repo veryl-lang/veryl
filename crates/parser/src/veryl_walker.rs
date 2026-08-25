@@ -2952,9 +2952,6 @@ pub trait VerylWalker {
         before!(self, impl_declaration, arg);
         self.r#impl(&arg.r#impl);
         self.identifier(&arg.identifier);
-        if let Some(ref x) = arg.impl_declaration_opt {
-            self.with_generic_argument(&x.with_generic_argument);
-        }
         self.l_brace(&arg.l_brace);
         for x in &arg.impl_declaration_list {
             self.impl_group(&x.impl_group);

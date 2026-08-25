@@ -127,12 +127,9 @@ enum StructOrUnion {
 }
 
 struct ImplContext {
-    name: Token,
     target: Token,
-    scope: StrId,
     namespace: Namespace,
     range: TokenRange,
-    arguments: Vec<GenericSymbolPath>,
 }
 
 impl CreateSymbolTable {
@@ -226,7 +223,7 @@ impl CreateSymbolTable {
         let path = GenericSymbolPath {
             paths: vec![GenericSymbol {
                 base: ctx.target,
-                arguments: ctx.arguments.clone(),
+                arguments: Vec::new(),
             }],
             kind: GenericSymbolPathKind::Identifier,
             range: token.into(),
@@ -259,24 +256,9 @@ impl CreateSymbolTable {
         }
     }
 
-    fn unalias_impl_target(&self, name: Token) -> Option<(Token, Vec<GenericSymbolPath>)> {
-        let path = SymbolPath::new(&[name.text]);
-        let symbol = symbol_table::resolve((&path, &self.current_namespace())).ok()?;
-        let SymbolKind::TypeDef(x) = &symbol.found.kind else {
-            return None;
-        };
-        let TypeKind::UserDefined(x) = &x.r#type.as_ref()?.kind else {
-            return None;
-        };
-        let head = x.path.paths.first()?;
-        Some((head.base, head.arguments.clone()))
-    }
-
     fn check_impl_defs(&mut self) {
-        let mut seen: HashMap<(Vec<StrId>, StrId), Token> = HashMap::default();
-
         for def in std::mem::take(&mut self.impl_defs) {
-            let name = def.name.to_string();
+            let name = def.target.to_string();
             let path = SymbolPath::new(&[def.target.text]);
             let Ok(symbol) = symbol_table::resolve((&path, &def.namespace)) else {
                 self.errors.push(AnalyzerError::invalid_impl_target(
@@ -298,15 +280,6 @@ impl CreateSymbolTable {
                 self.errors.push(AnalyzerError::invalid_impl_target(
                     &name,
                     "it is not declared in the same scope",
-                    &def.range,
-                ));
-                continue;
-            }
-            let key = (def.namespace.paths.to_vec(), def.scope);
-            if let Some(prev) = seen.insert(key, def.name) {
-                self.errors.push(AnalyzerError::invalid_impl_target(
-                    &name,
-                    &format!("\"{prev}\" is already implemented"),
                     &def.range,
                 ));
             }
@@ -1998,50 +1971,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
     }
 
     fn impl_declaration(&mut self, arg: &ImplDeclaration) -> Result<(), ParolError> {
+        let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
-                let mut arguments = Vec::new();
-                if let Some(ref x) = arg.impl_declaration_opt
-                    && let Some(ref x) = x.with_generic_argument.with_generic_argument_opt
-                {
-                    let items: Vec<&WithGenericArgumentItem> =
-                        x.with_generic_argument_list.as_ref().into();
-                    for item in items {
-                        let path: GenericSymbolPath = item.into();
-                        if matches!(path.kind, GenericSymbolPathKind::Identifier) {
-                            self.errors.push(AnalyzerError::invalid_impl_argument(
-                                &path.to_string(),
-                                &path.range,
-                            ));
-                        }
-                        arguments.push(path);
-                    }
-                }
-
-                let name = arg.identifier.identifier_token.token;
-                let mut target = name;
-                if let Some((base, args)) = self.unalias_impl_target(name) {
-                    target = base;
-                    if arguments.is_empty() {
-                        arguments = args;
-                    }
-                }
-
-                let scope_name = GenericSymbol {
-                    base: target,
-                    arguments: arguments.clone(),
-                }
-                .mangled();
-
                 self.impl_context = Some(ImplContext {
-                    name,
-                    target,
-                    scope: scope_name,
+                    target: arg.identifier.identifier_token.token,
                     namespace: self.current_namespace(),
                     range: arg.identifier.as_ref().into(),
-                    arguments,
                 });
-                self.push_namespace(scope_name);
+                self.push_namespace(name);
             }
             HandlerPoint::After => {
                 self.pop_namespace();

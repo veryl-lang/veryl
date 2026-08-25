@@ -24,14 +24,6 @@ package impl_method_pkg {
 
     type fp32 = fp_t::<8, 23>;
     type fp4  = fp_t::<2, 1> ;
-
-    impl fp4 {
-        function is_nan (
-            self,
-        ) -> logic {
-            return 1'b0;
-        }
-    }
 }
 
 #[test(test_impl_method)]
@@ -51,7 +43,7 @@ module test_impl_method {
     initial {
         $assert(a.is_nan() == 1'b1);
         $assert(a.biased_exp(8'd1) == 8'd0);
-        $assert(b.is_nan() == 1'b0);
+        $assert(b.is_nan() == 1'b1);
         $assert(b.biased_exp(2'd1) == 2'd0);
         $assert(impl_method_pkg::fp_t::<8, 23>::BIAS == 32'd127);
         $assert(impl_method_pkg::fp32::BIAS == 32'd127);

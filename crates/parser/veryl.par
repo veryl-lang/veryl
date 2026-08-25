@@ -931,7 +931,7 @@ FunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclarat
 // Impl
 // ----------------------------------------------------------------------------
 
-ImplDeclaration: Impl Identifier [ WithGenericArgument ] LBrace { ImplGroup } RBrace;
+ImplDeclaration: Impl Identifier LBrace { ImplGroup } RBrace;
 
 ImplGroup: { Attribute } ( LBrace { ImplGroup } RBrace | ImplItem );
 

@@ -26,7 +26,7 @@ use veryl_analyzer::symbol::{
     Affiliation, GenericMap, GenericTables, Port, Symbol, SymbolId, SymbolKind, TestType, TypeKind,
 };
 use veryl_analyzer::symbol_path::{
-    GenericSymbol, GenericSymbolPath, GenericSymbolPathKind, SymbolPath, SymbolPathNamespace,
+    GenericSymbolPath, GenericSymbolPathKind, SymbolPath, SymbolPathNamespace,
 };
 use veryl_analyzer::symbol_table::{self, ResolveError, ResolveResult};
 use veryl_analyzer::value::calc_emitted_width;
@@ -130,7 +130,7 @@ pub struct Emitter {
     attribute: Vec<AttributeType>,
     assignment_lefthand_side: Option<ExpressionIdentifier>,
     generic_map: Vec<Vec<GenericMap>>,
-    impl_target: Option<(String, GenericMap)>,
+    impl_target: Option<(VerylToken, GenericMap)>,
     resolved_identifier: Vec<String>,
     inst_module_namespace: Option<Namespace>,
     bound_namespace: Option<Namespace>,
@@ -2594,7 +2594,8 @@ impl Emitter {
         if !matches!(symbol.found.kind, SymbolKind::Function(_)) {
             return None;
         }
-        impl_member_parent(&symbol.found.namespace).map(|_| symbol)
+        let parent = symbol_table::get_namespace_symbol(&symbol.found.namespace)?;
+        matches!(parent.kind, SymbolKind::Struct(_)).then_some(symbol)
     }
 
     fn emit_method_call(
@@ -3069,57 +3070,12 @@ impl Emitter {
         name.replace("$std_", "__std_")
     }
 
-    fn impl_target_symbol(
-        &self,
-        arg: &ImplDeclaration,
-    ) -> Option<(Rc<Symbol>, Vec<GenericSymbolPath>)> {
-        let mut arguments = Vec::new();
-        if let Some(ref x) = arg.impl_declaration_opt
-            && let Some(ref x) = x.with_generic_argument.with_generic_argument_opt
-        {
-            let items: Vec<&WithGenericArgumentItem> = x.with_generic_argument_list.as_ref().into();
-            for item in items {
-                arguments.push(GenericSymbolPath::from(item));
-            }
-        }
-
-        let symbol = symbol_table::resolve(arg.identifier.as_ref()).ok()?;
-        match &symbol.found.kind {
-            SymbolKind::Struct(_) => Some((Rc::clone(&symbol.found), arguments)),
-            SymbolKind::TypeDef(x) => {
-                let TypeKind::UserDefined(x) = &x.r#type.as_ref()?.kind else {
-                    return None;
-                };
-                let head = x.path.paths.first()?;
-                if arguments.is_empty() {
-                    arguments = head.arguments.clone();
-                }
-                let path = SymbolPath::new(&[head.base.text]);
-                let target = symbol_table::resolve((&path, &symbol.found.namespace)).ok()?;
-                Some((Rc::clone(&target.found), arguments))
-            }
-            _ => None,
-        }
-    }
-
-    fn is_specialized(&self, instance: StrId, group: &ImplGroup, target: &Symbol) -> bool {
-        let ImplGroupGroup::ImplItem(x) = group.impl_group_group.as_ref() else {
-            return false;
-        };
-        let member = match x.impl_item.as_ref() {
-            ImplItem::MethodDeclaration(x) => x.method_declaration.identifier.text(),
-            ImplItem::ConstDeclaration(x) => x.const_declaration.identifier.text(),
-        };
-        let scope = scope::inner_scope(target.scope, instance);
-        !scope::locals_get(scope, member).is_empty()
-    }
-
     fn impl_type_name(&self) -> String {
-        let (name, map) = self.impl_target.as_ref().unwrap();
+        let (token, map) = self.impl_target.as_ref().unwrap();
         if map.generic() {
             self.generic_instance_name(map, true)
         } else {
-            name.clone()
+            token.token.to_string()
         }
     }
 
@@ -6105,25 +6061,8 @@ impl VerylWalker for Emitter {
     }
 
     fn impl_declaration(&mut self, arg: &ImplDeclaration) {
-        let Some((target, arguments)) = self.impl_target_symbol(arg) else {
-            return;
-        };
-        let specialized = !arguments.is_empty();
-
-        let maps = if specialized {
-            let instance = GenericSymbol {
-                base: target.token,
-                arguments,
-            }
-            .mangled();
-            let path = SymbolPath::new(&[instance]);
-            match symbol_table::resolve((&path, &target.namespace)) {
-                Ok(x) => x.found.generic_maps(),
-                Err(_) => return,
-            }
-        } else {
-            self.get_generic_maps(&target)
-        };
+        let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
+        let maps = self.get_generic_maps(&symbol.found);
 
         self.token(&arg.r#impl.impl_token.replace(""));
         self.token(&arg.l_brace.l_brace_token.replace(""));
@@ -6133,23 +6072,14 @@ impl VerylWalker for Emitter {
                 self.newline();
             }
             self.push_generic_map(map.clone());
-            self.impl_target = Some((target.token.to_string(), map.clone()));
+            self.impl_target = Some((arg.identifier.identifier_token.clone(), map.clone()));
             self.emit_generic_instance_name_comment(map);
 
-            let instance =
-                (!specialized).then(|| resource_table::insert_str(&self.impl_type_name()));
-            let mut emitted = 0;
-            for x in &arg.impl_declaration_list {
-                if let Some(instance) = instance
-                    && self.is_specialized(instance, &x.impl_group, &target)
-                {
-                    continue;
-                }
-                if emitted != 0 {
+            for (j, x) in arg.impl_declaration_list.iter().enumerate() {
+                if j != 0 {
                     self.newline();
                 }
                 self.impl_group(&x.impl_group);
-                emitted += 1;
             }
 
             self.impl_target = None;
@@ -7081,19 +7011,6 @@ fn get_generic_instance(symbol: &Symbol, generic_tables: &GenericTables) -> Opti
     resolved.ok().map(|x| (*x.found).clone())
 }
 
-fn impl_member_parent(namespace: &Namespace) -> Option<Symbol> {
-    let parent = symbol_table::get_namespace_symbol(namespace)?;
-    match parent.kind {
-        SymbolKind::Struct(_) => Some(parent),
-        SymbolKind::GenericInstance(ref x) => matches!(
-            symbol_table::get(x.base).map(|x| x.kind),
-            Some(SymbolKind::Struct(_))
-        )
-        .then_some(parent),
-        _ => None,
-    }
-}
-
 pub fn symbol_string(
     token: &VerylToken,
     symbol: &Symbol,
@@ -7136,9 +7053,12 @@ pub fn symbol_string(
             unreachable!("proto typedef is not emitted as a symbol")
         }
         SymbolKind::Parameter(_) | SymbolKind::Function(_)
-            if impl_member_parent(symbol_namespace).is_some() =>
+            if matches!(
+                symbol_table::get_namespace_symbol(symbol_namespace).map(|x| x.kind),
+                Some(SymbolKind::Struct(_))
+            ) =>
         {
-            let struct_symbol = impl_member_parent(symbol_namespace).unwrap();
+            let struct_symbol = symbol_table::get_namespace_symbol(symbol_namespace).unwrap();
             let mut member_namespace = symbol_namespace.clone();
             member_namespace.pop();
 
@@ -7149,12 +7069,8 @@ pub fn symbol_string(
                     context,
                 ));
             }
-            let instance = if matches!(struct_symbol.kind, SymbolKind::GenericInstance(_)) {
-                Some(struct_symbol.clone())
-            } else {
-                get_generic_instance(&struct_symbol, generic_tables)
-            };
-            let type_name = if let Some(inst) = instance {
+            let type_name = if let Some(inst) = get_generic_instance(&struct_symbol, generic_tables)
+            {
                 if context.build_opt.hashed_mangled_name {
                     inst.generic_maps()
                         .first()
