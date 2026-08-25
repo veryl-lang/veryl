@@ -19016,6 +19016,115 @@ fn orphan_else_across_scopes() {
     );
 }
 #[test]
+fn opaque_systemverilog_call_tracks_possible_function_output_write() {
+    let code = r#"
+    module ModuleA (
+        o: output logic,
+    ) {
+        #[allow(unassign_variable)]
+        function f (y: output logic) {
+            $sv::g(y);
+        }
+        always_comb {
+            f(o);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // The opaque call does not prove that the formal is assigned. Without
+    // the allow, diagnose the formal once rather than repeating the same
+    // uncertainty at the caller's actual output.
+    let code = code.replace("        #[allow(unassign_variable)]\n", "");
+    let errors = analyze(&code);
+    assert!(
+        errors.iter().any(
+            |error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "f.y")
+        ),
+        "{errors:?}"
+    );
+    assert!(
+        !errors.iter().any(
+            |error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "o")
+        ),
+        "{errors:?}"
+    );
+
+    // A known write is absorbing; a later or earlier opaque write must not
+    // downgrade the path back to opaque.
+    let code = r#"
+    module ModuleA (
+        o: output logic,
+    ) {
+        function f (y: output logic) {
+            $sv::g(y);
+            y = 0;
+            $sv::h(y);
+        }
+        always_comb {
+            f(o);
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // Opaque is not a proven scheduler write. It suppresses the unassigned
+    // false positive, but must not cause always_ff output or duplicate-write
+    // errors that cannot be silenced at the SystemVerilog boundary.
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        o  : output logic,
+    ) {
+        #[allow(unassign_variable)]
+        function f (y: output logic) {
+            $sv::g(y);
+        }
+        always_ff (clk) {
+            f(o);
+            o = 0;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors.iter().any(|error| matches!(
+            error,
+            AnalyzerError::FunctionOutputInAlwaysFf { .. }
+                | AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }
+                | AnalyzerError::MultipleAssignment { .. }
+                | AnalyzerError::UnassignVariable { .. }
+        )),
+        "{errors:?}"
+    );
+
+    // An arbitrary expression is not an opaque write target.
+    let code = r#"
+    module ModuleA (
+        o: output logic,
+    ) {
+        #[allow(unassign_variable)]
+        function f (y: output logic) {
+            $sv::g(y + 1);
+        }
+        always_comb {
+            f(o);
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors.iter().any(
+            |error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "o")
+        ),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn side_effect_function_call_in_always_ff() {
     let code = r#"
     module ModuleA (

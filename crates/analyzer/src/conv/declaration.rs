@@ -1291,18 +1291,19 @@ fn conv_function(
             symbol_table::specialized_direct_effect(symbol, c);
         let mut effect = RuntimeFunctionEffect {
             external_write: proeprty.has_side_effect_in(&c.config.defines),
-            written_outputs: proeprty
-                .written_output_paths(&c.config.defines)
-                .into_iter()
-                .filter_map(|path| path.to_var_path())
-                .collect(),
+            ..Default::default()
         };
+        for (path, kind) in proeprty.output_writes(&c.config.defines) {
+            if let Some(path) = path.to_var_path() {
+                effect.record_write(path, kind);
+            }
+        }
         effect.external_write |= specialized_external_write;
-        effect.written_outputs.extend(
-            specialized_formal_writes
-                .into_iter()
-                .filter_map(|path| path.to_var_path()),
-        );
+        for (path, kind) in specialized_formal_writes {
+            if let Some(path) = path.to_var_path() {
+                effect.record_write(path, kind);
+            }
+        }
         c.begin_function_effect(path.clone(), output_ids, effect);
 
         let body = if let Some(block) = statement_block {

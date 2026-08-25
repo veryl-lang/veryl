@@ -3,7 +3,8 @@ use crate::conv::Context;
 use crate::ir::Signature;
 use crate::namespace::{DefineContext, Namespace};
 use crate::symbol::{
-    Direction, FunctionProperty, FunctionWrite, GenericMap, Symbol, SymbolId, SymbolKind,
+    Direction, FunctionProperty, FunctionWrite, FunctionWriteKind, GenericMap, Symbol, SymbolId,
+    SymbolKind,
 };
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
@@ -53,7 +54,7 @@ fn resolve_constantable(symbol: &Symbol, visited: &mut Vec<SymbolId>) -> bool {
 #[derive(Clone, Default, PartialEq, Eq)]
 struct Effect {
     external_writes: HashSet<DefineContext>,
-    formal_writes: HashSet<FunctionWrite>,
+    formal_writes: HashMap<FunctionWrite, FunctionWriteKind>,
 }
 
 #[derive(Default)]
@@ -178,15 +179,38 @@ fn path_define_context(path: &GenericSymbolPath) -> DefineContext {
         .unwrap_or_default()
 }
 
-fn add_target(effect: &mut Effect, target: WriteTarget, define_context: DefineContext) {
-    if target.external {
+fn record_formal_write(
+    writes: &mut HashMap<FunctionWrite, FunctionWriteKind>,
+    write: FunctionWrite,
+    kind: FunctionWriteKind,
+) {
+    writes
+        .entry(write)
+        .and_modify(|current| *current = current.merge(kind))
+        .or_insert(kind);
+}
+
+fn add_target(
+    effect: &mut Effect,
+    target: WriteTarget,
+    define_context: DefineContext,
+    kind: FunctionWriteKind,
+) {
+    // An opaque SystemVerilog argument is only a possible write.  Keep it for
+    // assignment completeness, but do not promote it to a scheduler-visible
+    // side effect until a real write is found.
+    if target.external && matches!(kind, FunctionWriteKind::Known) {
         effect.external_writes.insert(define_context.clone());
     }
     if let Some(path) = target.formal {
-        effect.formal_writes.insert(FunctionWrite {
-            path,
-            define_context,
-        });
+        record_formal_write(
+            &mut effect.formal_writes,
+            FunctionWrite {
+                path,
+                define_context,
+            },
+            kind,
+        );
     }
 }
 
@@ -196,13 +220,13 @@ fn add_target(effect: &mut Effect, target: WriteTarget, define_context: DefineCo
 pub fn specialized_direct_effect(
     symbol: &Symbol,
     context: &Context,
-) -> (bool, HashSet<GenericSymbolPath>) {
+) -> (bool, HashMap<GenericSymbolPath, FunctionWriteKind>) {
     let SymbolKind::Function(func) = &symbol.kind else {
-        return (false, HashSet::default());
+        return (false, HashMap::default());
     };
     let namespace = symbol.inner_namespace();
     let mut external_write = false;
-    let mut formal_writes = HashSet::default();
+    let mut formal_writes = HashMap::default();
 
     for path in &func.write_paths {
         if !path_define_context(path).is_active(&context.config.defines) {
@@ -212,7 +236,7 @@ pub fn specialized_direct_effect(
         let target = classify_write(&resolved, &namespace);
         external_write |= target.external;
         if let Some(path) = target.formal {
-            formal_writes.insert(path);
+            formal_writes.insert(path, FunctionWriteKind::Known);
         }
     }
 
@@ -451,6 +475,7 @@ fn resolve_side_effects(list: &[Symbol]) {
                 &mut effect,
                 classify_write(path, &namespace),
                 path_define_context(path),
+                FunctionWriteKind::Known,
             );
         }
         direct.insert(symbol.id, effect);
@@ -468,13 +493,32 @@ fn resolve_side_effects(list: &[Symbol]) {
             let effect = next.entry(symbol.id).or_default();
 
             for call in &func.call_sites {
+                let call_context = path_define_context(&call.callee);
+                if symbol_table::resolve(&call.callee)
+                    .is_ok_and(|resolved| matches!(resolved.found.kind, SymbolKind::SystemVerilog))
+                {
+                    for argument in &call.arguments {
+                        if !argument.assignable {
+                            continue;
+                        }
+                        for actual in &argument.targets {
+                            add_target(
+                                effect,
+                                classify_write(actual, &namespace),
+                                call_context.clone(),
+                                FunctionWriteKind::Opaque,
+                            );
+                        }
+                    }
+                    continue;
+                }
+
                 let Some(callee) = called_function(&call.callee) else {
                     continue;
                 };
                 let Some(callee_effect) = effects.get(&callee.id) else {
                     continue;
                 };
-                let call_context = path_define_context(&call.callee);
                 for callee_context in &callee_effect.external_writes {
                     if let Some(context) = call_context.conjoin(callee_context) {
                         effect.external_writes.insert(context);
@@ -484,7 +528,7 @@ fn resolve_side_effects(list: &[Symbol]) {
                 let SymbolKind::Function(callee_func) = &callee.kind else {
                     continue;
                 };
-                for formal_write in &callee_effect.formal_writes {
+                for (formal_write, write_kind) in &callee_effect.formal_writes {
                     let Some(context) = call_context.conjoin(&formal_write.define_context) else {
                         continue;
                     };
@@ -520,7 +564,12 @@ fn resolve_side_effects(list: &[Symbol]) {
                         mapped
                             .paths
                             .extend(formal_write.path.paths.iter().skip(1).cloned());
-                        add_target(effect, classify_write(&mapped, &namespace), context.clone());
+                        add_target(
+                            effect,
+                            classify_write(&mapped, &namespace),
+                            context.clone(),
+                            *write_kind,
+                        );
                     }
                 }
             }
@@ -540,15 +589,14 @@ fn resolve_side_effects(list: &[Symbol]) {
         func.conditional_effects.side_effect_contexts =
             effect.external_writes.into_iter().collect();
         func.conditional_effects.side_effect_contexts.sort();
-        func.formal_writes = effect
-            .formal_writes
-            .iter()
-            .map(|x| x.path.clone())
-            .collect();
-        func.formal_writes.sort();
-        func.formal_writes.dedup();
-        func.conditional_effects.formal_write_contexts = effect.formal_writes.into_iter().collect();
-        func.conditional_effects.formal_write_contexts.sort();
+        func.formal_writes.clear();
+        for (write, kind) in &effect.formal_writes {
+            func.formal_writes
+                .entry(write.path.clone())
+                .and_modify(|current| *current = current.merge(*kind))
+                .or_insert(*kind);
+        }
+        func.conditional_effects.formal_write_contexts = effect.formal_writes;
         symbol_table::update(symbol);
     }
 }

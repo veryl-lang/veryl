@@ -2599,7 +2599,7 @@ pub struct FunctionProperty {
     #[serde(default)]
     pub has_side_effect: bool,
     #[serde(default)]
-    pub formal_writes: Vec<GenericSymbolPath>,
+    pub formal_writes: HashMap<GenericSymbolPath, FunctionWriteKind>,
     #[serde(default)]
     pub conditional_effects: Box<ConditionalFunctionEffects>,
     pub definition: Option<DefinitionId>,
@@ -2608,7 +2608,23 @@ pub struct FunctionProperty {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConditionalFunctionEffects {
     pub side_effect_contexts: Vec<DefineContext>,
-    pub formal_write_contexts: Vec<FunctionWrite>,
+    pub formal_write_contexts: HashMap<FunctionWrite, FunctionWriteKind>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FunctionWriteKind {
+    Opaque,
+    Known,
+}
+
+impl FunctionWriteKind {
+    pub fn merge(self, other: Self) -> Self {
+        if matches!(self, Self::Known) || matches!(other, Self::Known) {
+            Self::Known
+        } else {
+            Self::Opaque
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -2629,6 +2645,8 @@ pub struct FunctionCallSite {
 pub struct FunctionCallArgument {
     pub name: Option<StrId>,
     pub targets: Vec<GenericSymbolPath>,
+    #[serde(default)]
+    pub assignable: bool,
 }
 
 impl FunctionProperty {
@@ -2647,15 +2665,21 @@ impl FunctionProperty {
         }
     }
 
-    pub fn written_output_paths(&self, defines: &HashSet<StrId>) -> Vec<&GenericSymbolPath> {
+    pub fn output_writes(
+        &self,
+        defines: &HashSet<StrId>,
+    ) -> Vec<(&GenericSymbolPath, FunctionWriteKind)> {
         if self.conditional_effects.formal_write_contexts.is_empty() {
-            self.formal_writes.iter().collect::<Vec<_>>()
+            self.formal_writes
+                .iter()
+                .map(|(path, kind)| (path, *kind))
+                .collect()
         } else {
             self.conditional_effects
                 .formal_write_contexts
                 .iter()
-                .filter(|x| x.define_context.is_active(defines))
-                .map(|x| &x.path)
+                .filter(|(write, _)| write.define_context.is_active(defines))
+                .map(|(write, kind)| (&write.path, *kind))
                 .collect()
         }
     }

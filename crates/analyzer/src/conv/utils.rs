@@ -15,8 +15,8 @@ use crate::ir::{
     VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::symbol::{
-    self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, GenericMap, ProtoBound,
-    Symbol, SymbolKind, TbComponentKind, TypeKind,
+    self, Affiliation, ClockDomain, EnumMemberValue, FunctionWriteKind, GenericBoundKind,
+    GenericMap, ProtoBound, Symbol, SymbolKind, TbComponentKind, TypeKind,
 };
 use crate::symbol_path::{
     GenericSymbolPath, GenericSymbolPathKind, SymbolPath, SymbolPathNamespace,
@@ -4043,22 +4043,26 @@ pub fn function_call(
         let mut effect = symbol
             .as_ref()
             .and_then(|symbol| match &symbol.kind {
-                SymbolKind::Function(func) => Some(RuntimeFunctionEffect {
-                    external_write: func.has_side_effect_in(&c.config.defines),
-                    written_outputs: func
-                        .written_output_paths(&c.config.defines)
-                        .into_iter()
-                        .filter_map(|path| path.to_var_path())
-                        .collect(),
-                }),
+                SymbolKind::Function(func) => {
+                    let mut effect = RuntimeFunctionEffect {
+                        external_write: func.has_side_effect_in(&c.config.defines),
+                        ..Default::default()
+                    };
+                    for (path, kind) in func.output_writes(&c.config.defines) {
+                        if let Some(path) = path.to_var_path() {
+                            effect.record_write(path, kind);
+                        }
+                    }
+                    Some(effect)
+                }
                 _ => None,
             })
             .unwrap_or_default();
         if let Some(runtime_effect) = c.function_effect(&path) {
             effect.external_write |= runtime_effect.external_write;
-            effect
-                .written_outputs
-                .extend(runtime_effect.written_outputs);
+            for (path, kind) in runtime_effect.output_writes {
+                effect.record_write(path, kind);
+            }
         }
         c.record_function_call_effect(&effect, &outputs);
 
@@ -4085,7 +4089,7 @@ pub fn function_call(
                 let Some(formal_name) = formal.0.first() else {
                     continue;
                 };
-                if effect.written_paths_for(formal).next().is_none() {
+                if effect.known_write_paths_for(formal).next().is_none() {
                     continue;
                 }
                 let output = resource_table::get_str_value(*formal_name).unwrap_or_default();
@@ -4118,7 +4122,18 @@ pub fn function_call(
             }
         }
 
-        outputs.retain(|formal| effect.written_paths_for(formal).next().is_some());
+        let mut output_write_kinds = HashMap::default();
+        for (formal, _) in &outputs {
+            for (_, kind) in effect.write_paths_for(formal) {
+                output_write_kinds
+                    .entry(formal.clone())
+                    .and_modify(|current: &mut FunctionWriteKind| {
+                        *current = current.merge(kind)
+                    })
+                    .or_insert(kind);
+            }
+        }
+        outputs.retain(|formal| output_write_kinds.contains_key(formal));
 
         let mut comptime = func.r#type.clone();
         comptime.token = token;
@@ -4145,6 +4160,7 @@ pub fn function_call(
             comptime,
             inputs,
             outputs,
+            output_write_kinds,
         })
     });
 
