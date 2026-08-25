@@ -17899,129 +17899,6 @@ fn ternary_sign_extends_narrow_signed_branch() {
     }
 }
 
-/// A logically-false feedback whose write group the sort cannot
-/// linearize even with a pin.  It must surface as a CombinationalLoop
-/// error, NOT interleave the reader into the group where it re-reads the
-/// same mid-computation value on every pass — the silent miscompute
-/// (q2 == 0 forever) this test guards against.  If a future scheduler
-/// handles the design, the Ok arm's value assertions take over.
-#[test]
-fn false_comb_cycle_unpinnable_is_rejected_not_miscomputed() {
-    let code = r#"
-    module Top (
-        en: input  logic,
-        q2: output logic,
-    ) {
-        var h: logic;
-        var s: logic;
-        var p: logic;
-        always_comb {
-            h = 0;
-            if p {
-                h = 1;
-            }
-        }
-        assign s = h;
-        assign p = en | s;
-        assign q2 = s;
-    }
-    "#;
-    for config in Config::all() {
-        if config.use_4state {
-            continue;
-        }
-        symbol_table::clear();
-        match analyze_top(code, &config, "Top") {
-            Err(SimulatorError::CombinationalLoop { .. }) => {}
-            Err(e) => panic!("unexpected error {e:?}, config={config:?}"),
-            Ok(ir) => {
-                let mut sim = Simulator::new(ir, None);
-                sim.set("en", Value::new(1, 1, false));
-                for _ in 0..3 {
-                    sim.step(&Event::Clock(VarId::SYNTHETIC));
-                }
-                assert_eq!(
-                    sim.get("q2").unwrap(),
-                    Value::new(1, 1, false),
-                    "q2 must reach the settled value, config={config:?}"
-                );
-            }
-        }
-    }
-}
-
-/// A structurally-cyclic but logically-false comb feedback (stall masks
-/// the update that feeds the stall) plus split-driver per-bit assigns:
-/// exercises the degradation path (SCC relax + reader pin) and the extra
-/// settle passes that make the feedback converge.
-#[test]
-fn false_comb_cycle_with_split_drivers() {
-    let code = r#"
-    module Top (
-        i_clk  : input  '_ clock   ,
-        i_rst  : input  '_ reset   ,
-        i_addr : input     logic<2>,
-        i_en   : input     logic   ,
-        o_stall: output    logic   ,
-        o_upd  : output    logic<4>,
-    ) {
-        var r_pend: logic<4>;
-
-        // Split-driver net: per-bit assigns of one packed vector,
-        // depending on a stall that depends on the net (false path:
-        // i_en gates the feedback off).
-        var w_upd: logic<4>;
-        for i in 0..4 :g_upd {
-            assign w_upd[i] = r_pend[i] | (i_en && !o_stall && (i_addr == i));
-        }
-
-        assign o_stall = w_upd[i_addr] && !i_en;
-        assign o_upd   = w_upd;
-
-        always_ff (i_clk, i_rst) {
-            if_reset {
-                r_pend = 0;
-            } else {
-                r_pend = w_upd;
-            }
-        }
-    }
-    "#;
-    for config in Config::all() {
-        if config.use_4state {
-            // The initial X takes more settle iterations to clear around
-            // the feedback than the schedule's pass count; 2-state is
-            // what this regression targets.
-            continue;
-        }
-        let ir = analyze(code, &config);
-        let mut sim = Simulator::new(ir, None);
-        let clk = sim.get_clock("i_clk").unwrap();
-        let rst = sim.get_reset("i_rst").unwrap();
-        sim.set("i_en", Value::new(1, 1, false));
-        sim.set("i_addr", Value::new(2, 2, false));
-        sim.step_reset(&clk, &rst);
-        sim.step(&clk);
-        assert_eq!(
-            sim.get("o_upd").unwrap(),
-            Value::new(0b0100, 4, false),
-            "bit 2 set via the enabled path, config={config:?}"
-        );
-        assert_eq!(
-            sim.get("o_stall").unwrap(),
-            Value::new(0, 1, false),
-            "stall masked while enabled, config={config:?}"
-        );
-        sim.set("i_en", Value::new(0, 1, false));
-        sim.step(&clk);
-        assert_eq!(
-            sim.get("o_stall").unwrap(),
-            Value::new(1, 1, false),
-            "pending bit 2 stalls once enable drops, config={config:?}"
-        );
-    }
-}
-
 #[test]
 fn runtime_stepped_for_stall_guard_terminates() {
     // `*= 2` from 0 stalls at 0.  With a runtime bound the loop can't be
@@ -22778,6 +22655,646 @@ fn an_unpacked_array_parameter_element_sizes_a_child() {
         assert_eq!(
             sim.get("b").unwrap(),
             Value::new(0x12, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn a_reduction_tree_inside_one_vector_settles_in_one_pass() {
+    // Every node of the tree lives in ONE packed vector, so each statement
+    // writes some bits of `node` and reads others. That read is a self
+    // reference at variable granularity and used to be dropped, which left
+    // the schedule free to keep the source order below -- level 0 first,
+    // i.e. the exact reverse of the dependency order -- and a single settle
+    // pass then read stale bits. The order is deliberate: writing the leaves
+    // last is what makes the test bite.
+    let code = r#"
+    module Top (
+        leaves: input  logic<4>,
+        root  : output logic   ,
+    ) {
+        var node: logic<7>;
+        assign node[0] = node[1] | node[2];
+        assign node[1] = node[3] | node[4];
+        assign node[2] = node[5] | node[6];
+        assign node[3] = leaves[0];
+        assign node[4] = leaves[1];
+        assign node[5] = leaves[2];
+        assign node[6] = leaves[3];
+        assign root    = node[0];
+    }
+    "#;
+
+    for config in Config::all() {
+        for leaves in 0u32..16 {
+            // Fresh sim per case: a stale `node` must not be able to satisfy
+            // the assertion by accident.
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("leaves", Value::new(u64::from(leaves), 4, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("root").unwrap(),
+                Value::new(u64::from(leaves != 0), 1, false),
+                "leaves={leaves:#x} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn an_if_assigning_two_variables_is_not_one_scheduling_node() {
+    // Per VARIABLE there is a cycle:
+    //   send_type_pre -> rd_en -> stall -> m0_valid -> (the if) -> send_type_pre
+    // Per STATEMENT there is none: the statement writing `send_type_pre` reads
+    // only `sel` and `t0`/`t1`. Treating the whole `if` as one scheduling node
+    // closes the loop and the design refuses to elaborate, though SV schedules
+    // the two assignments independently.
+    let code = r#"
+    module Top (
+        sel: input  logic,
+        en0: input  logic,
+        t0 : input  logic,
+        t1 : input  logic,
+        y  : output logic,
+        z  : output logic,
+    ) {
+        var m0_valid     : logic;
+        var m1_valid     : logic;
+        var send_valid   : logic;
+        var send_type_pre: logic;
+        var rd_en        : logic;
+        var stall        : logic;
+
+        always_comb {
+            if sel {
+                send_valid    = m0_valid;
+                send_type_pre = t0;
+            } else {
+                send_valid    = m1_valid;
+                send_type_pre = t1;
+            }
+        }
+        always_comb {
+            rd_en = send_type_pre && en0;
+        }
+        always_comb {
+            stall = rd_en && en0;
+        }
+        always_comb {
+            m0_valid = en0 && !stall;
+            m1_valid = en0;
+        }
+        always_comb {
+            y = send_valid;
+            z = stall;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // (sel, t0, t1) -> (y, z), with en0 = 1 throughout.
+        for (sel, t0, t1, y, z) in [(1u64, 1u64, 0u64, 0u64, 1u64), (0, 0, 0, 1, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("sel", Value::new(sel, 1, false));
+            sim.set("en0", Value::new(1, 1, false));
+            sim.set("t0", Value::new(t0, 1, false));
+            sim.set("t1", Value::new(t1, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(y, 1, false),
+                "y: sel={sel} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("z").unwrap(),
+                Value::new(z, 1, false),
+                "z: sel={sel} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_handshake_nested_in_an_arm_is_split_inside_the_arm() {
+    // The arm holds ONE statement writing both `req` and `nxt`, so splitting
+    // the `case` by write set changes nothing and the block keeps reading
+    // back its own output: it writes `req`, `ack` derives from `req`, and it
+    // reads `ack`.  Splitting inside the arm separates the two, and the
+    // relaxed order the flat split settles for is not good enough to stop at
+    // -- a synthesisable design has a one-pass order.
+    let code = r#"
+    module Ack (
+        req : input  logic,
+        full: input  logic,
+        ack : output logic,
+    ) {
+        assign ack = req && !full;
+    }
+    module Top (
+        st  : input  logic<2>,
+        en  : input  logic   ,
+        full: input  logic   ,
+        y   : output logic   ,
+        z   : output logic<2>,
+    ) {
+        var req: logic   ;
+        var ack: logic   ;
+        var nxt: logic<2>;
+
+        inst u: Ack (
+            req      ,
+            full     ,
+            ack      ,
+        );
+
+        always_comb {
+            req = 1'b0;
+            nxt = st;
+            case st {
+                2'd0: {
+                    if en {
+                        req = 1'b1;
+                        if ack {
+                            nxt = 2'd1;
+                        }
+                    }
+                }
+                default: {
+                    nxt = 2'd0;
+                }
+            }
+        }
+        always_comb {
+            y = ack;
+            z = nxt;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a handshake inside an arm settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        // (st, en, full) -> (y, z)
+        for (st, en, full, y, z) in [
+            (0u64, 1u64, 0u64, 1u64, 1u64),
+            (0, 1, 1, 0, 0),
+            (1, 1, 0, 0, 0),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("en", Value::new(en, 1, false));
+            sim.set("full", Value::new(full, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(y, 1, false),
+                "y: st={st} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("z").unwrap(),
+                Value::new(z, 2, false),
+                "z: st={st} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_module_without_blocks_still_reaches_the_split() {
+    // Per bit there is no loop: s[0] <- flat[0] <- a0 <- en, and a3 <- s[0]
+    // only feeds flat[3].  The whole-vector copy `s = flat` is one node, so
+    // the cycle appears at variable granularity -- and the splitting that
+    // exists to break exactly that used to be reachable only for a module
+    // owning an `always_comb`, because Phase 2 was gated on having a block to
+    // expand.  Written from `assign` alone the design was rejected outright.
+    let code = r#"
+    module Sink (
+        d: input  logic,
+        y: output logic,
+    ) {
+        assign y = d;
+    }
+    module Top (
+        en: input  logic   ,
+        q : output logic<4>,
+    ) {
+        var a0  : logic   ;
+        var a1  : logic   ;
+        var a2  : logic   ;
+        var a3  : logic   ;
+        var flat: logic<4>;
+        var s   : logic<4>;
+        var fb  : logic   ;
+
+        assign flat = {a3, a2, a1, a0};
+        assign s    = flat;
+
+        inst u: Sink (
+            d: s[0],
+            y: fb  ,
+        );
+
+        assign a0 = en;
+        assign a1 = en;
+        assign a2 = en;
+        assign a3 = fb;
+        assign q  = s;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (en, q) in [(1u64, 15u64), (0, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("en", Value::new(en, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(q, 4, false),
+                "q: en={en} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_whole_variable_copy_is_scheduled_per_written_range() {
+    // `flat` is written one bit at a time and `s` is read one bit at a time,
+    // but the copy between them is ONE node: every bit of `s` reads as if it
+    // depended on every bit of `flat`, so `fb` (from `s[0]`) closes a loop
+    // with the write of `flat[3]`.  Per bit there is none -- `s[0]` comes
+    // from `flat[0]`, which only reads `en`.  Cutting the copy at the
+    // boundaries `flat` is actually written on is what breaks it; the
+    // concatenation split cannot, because there is no concatenation here.
+    let code = r#"
+    module Sink (
+        d: input  logic,
+        y: output logic,
+    ) {
+        assign y = d;
+    }
+    module Top (
+        en: input  logic   ,
+        q : output logic<4>,
+    ) {
+        var flat: logic<4>;
+        var s   : logic<4>;
+        var fb  : logic   ;
+
+        assign flat[0] = en;
+        assign flat[1] = en;
+        assign flat[2] = en;
+        assign flat[3] = fb;
+
+        assign s = flat;
+
+        inst u: Sink (
+            d: s[0],
+            y: fb  ,
+        );
+
+        assign q = s;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (en, q) in [(1u64, 15u64), (0, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("en", Value::new(en, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(q, 4, false),
+                "q: en={en} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_case_deciding_a_request_and_its_next_state_is_not_one_scheduling_node() {
+    // A request/acknowledge handshake: the arm raises `req` and, separately,
+    // consults `ack` to advance the state.  Per VARIABLE the `case` both
+    // writes `req` and reads `ack`, so it closes a loop with the statement
+    // deriving `ack` from `req`; per STATEMENT there is none, and SV schedules
+    // the two assignments independently.  Treating the whole `case` as one
+    // node made the design refuse to elaborate.
+    let code = r#"
+    module Top (
+        st  : input  logic<2>,
+        en  : input  logic   ,
+        full: input  logic   ,
+        y   : output logic   ,
+        z   : output logic<2>,
+    ) {
+        var req: logic   ;
+        var ack: logic   ;
+        var nxt: logic<2>;
+
+        always_comb {
+            req = 1'b0;
+            nxt = st;
+            case st {
+                2'd0: {
+                    req = en;
+                    if ack {
+                        nxt = 2'd1;
+                    }
+                }
+                default: {
+                    nxt = 2'd0;
+                }
+            }
+        }
+        always_comb {
+            ack = req && !full;
+        }
+        always_comb {
+            y = ack;
+            z = nxt;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // (st, en, full) -> (y, z)
+        for (st, en, full, y, z) in [
+            (0u64, 1u64, 0u64, 1u64, 1u64),
+            (0, 1, 1, 0, 0),
+            (0, 0, 0, 0, 0),
+            (1, 1, 0, 0, 0),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("en", Value::new(en, 1, false));
+            sim.set("full", Value::new(full, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(y, 1, false),
+                "y: st={st} en={en} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("z").unwrap(),
+                Value::new(z, 2, false),
+                "z: st={st} en={en} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_chain_through_a_packed_array_is_not_a_comb_cycle() {
+    // The three elements of a PACKED array share one `VarOffset`, so a chain
+    // that walks a[0] -> s[0] -> a[1] -> s[1] -> a[2] is a cycle at
+    // whole-variable granularity even though no bit ever reaches itself.
+    // The schedule is a single pass (it really is acyclic), so the debug
+    // assertion that pairs "SCC present" with "one pass" fired and the design
+    // could not run under a debug build at all -- the release build, with the
+    // assertion compiled out, simulated it correctly the whole time.
+    let code = r#"
+    module Cell (
+        a_di  : input  logic<8>,
+        carry : output logic   ,
+        sum_do: output logic<8>,
+    ) {
+        var sum_ext: logic<9>;
+        assign sum_ext = {1'b0, a_di} + 9'd1;
+        assign carry   = sum_ext[8];
+        assign sum_do  = sum_ext[7:0];
+    }
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        q  : output logic<8>,
+    ) {
+        var a : logic<3, 8>;
+        var s : logic<3, 8>;
+        var cy: logic<3>   ;
+        var qr: logic<8>   ;
+
+        assign q    = qr;
+        assign a[0] = qr;
+        assign a[1] = {s[0][6:0], ~s[0][7]};
+        assign a[2] = {s[1][6:0], ~s[1][7]};
+
+        for i in 0..3 :g {
+            inst u: Cell (
+                a_di  : a[i] ,
+                carry : cy[i],
+                sum_do: s[i] ,
+            );
+        }
+
+        always_ff {
+            if_reset {
+                qr = '0;
+            } else {
+                qr = {s[2][6:0], cy[0] ^ cy[1] ^ cy[2]};
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.nontrivial_comb_scc, 0,
+            "a packed-array chain is not a cycle (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for _ in 0..12 {
+            sim.step(&clk);
+        }
+        // each cycle adds 3 to the low byte through the three +1 cells
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x90, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn a_vector_written_by_one_concat_is_scheduled_per_element() {
+    // `v = {y1, y0}` is one node, so the model has EVERY bit of `v` depending
+    // on both cells -- and `u1` is fed from `v`'s low half, which closes a
+    // cycle the design does not have (bit 15..8 comes from `u1`, 7..0 from
+    // `u0`, and `u0` reads nothing of `v`).  The schedule needed several
+    // settle passes for a circuit that is one pass by construction.
+    let code = r#"
+    module Cell (
+        a: input  logic<8>,
+        y: output logic<8>,
+    ) {
+        assign y = a + 8'd1;
+    }
+    module Top (
+        sel: input  logic<2> ,
+        d  : input  logic<8> ,
+        q  : output logic<16>,
+    ) {
+        var v : logic<16>;
+        var w : logic<8> ;
+        var y0: logic<8> ;
+        var y1: logic<8> ;
+
+        inst u0: Cell (
+            a: d ,
+            y: y0,
+        );
+        inst u1: Cell (
+            a: v[7:0],
+            y: y1    ,
+        );
+
+        // Two statements, so the block stays a block and the whole-vector
+        // write is a node the scheduler has to place as a unit.
+        always_comb {
+            w = d + 8'd7;
+            case sel {
+                2'b00  : v = {y1, y0};
+                default: v = {y1, y0};
+            }
+        }
+        assign q = v;
+        let _unused: logic<8> = w;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a per-element concat write settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        sim.set("sel", Value::new(0, 2, false));
+        sim.set("d", Value::new(1, 8, false));
+        // d=1 -> y0=2 -> v[7:0]=2 -> y1=3 -> v[15:8]=3
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x0302, 16, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn a_reader_between_two_writes_gets_the_earlier_version() {
+    // `f` is written twice in one block and read in between, so the reader
+    // observes the FIRST version.  Sharing one offset for both versions forces
+    // a WAR edge from that reader to the second write, and because `req`
+    // depends on the second version and `ack` on `req`, that edge closes a
+    // cycle the circuit does not have: per bit, `o` needs f_v1 and ack, while
+    // `req` needs only f_v2.  Renaming the earlier version into its own
+    // storage removes the edge -- and the value it must produce is f_v1, not
+    // the zero the second write leaves behind.
+    let code = r#"
+    module Ack (
+        req: input  logic,
+        ack: output logic,
+    ) {
+        assign ack = !req;
+    }
+    module Top (
+        d: input  logic   ,
+        q: output logic<8>,
+    ) {
+        var f  : logic   ;
+        var req: logic   ;
+        var ack: logic   ;
+        var o  : logic<8>;
+
+        inst u: Ack (
+            req: req,
+            ack: ack,
+        );
+
+        always_comb {
+            f = d;
+            o = 8'd0;
+            if ack {
+                o = {7'b0, f};
+            }
+            f   = 1'b0;
+            req = f;
+        }
+        assign q = o;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a versioned read settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        sim.set("d", Value::new(1, 1, false));
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 8, false),
             "JIT={} 4st={}",
             config.use_jit,
             config.use_4state,

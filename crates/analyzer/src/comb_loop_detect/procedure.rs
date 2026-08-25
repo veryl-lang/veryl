@@ -1338,9 +1338,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             && index.0.is_empty()
             && select.is_empty()
         {
-            return self
+            let ranges: Vec<usize> = self
                 .bit_part
                 .overlapping((*id, formal_key.1), span)
+                .collect();
+            return ranges
                 .into_iter()
                 .map(|range| self.read_key((*id, formal_key.1, range)))
                 .collect();
