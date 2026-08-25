@@ -1174,7 +1174,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(missing_clock_domain),
-        help("add clock domain annotation"),
+        help("add a clock domain annotation ('a for a named domain, '_ for the implicit one)"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("clock domain annotation is required when there are multiple clocks")]
