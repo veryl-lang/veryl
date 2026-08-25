@@ -21,7 +21,7 @@ pub(crate) mod write_log;
 pub use big_array::BigArrayFold;
 pub use context::{Context, Conv};
 pub use declaration::ProtoDeclaration;
-pub use derived_clock::{DerivedClock, DerivedClockSchedule};
+pub use derived_clock::{DerivedClock, DerivedClockSchedule, DerivedReset, EdgeCandidate};
 pub use event::Event;
 pub use expression::{Expression, ExpressionContext, ProtoDynamicBitSelect, ProtoExpression};
 pub use external::{

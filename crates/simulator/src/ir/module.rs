@@ -4176,7 +4176,7 @@ impl Conv<&air::Module> for ProtoModule {
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
-        let mut nested_derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)> = vec![];
+        let mut nested_derived_clock_candidates: Vec<crate::ir::EdgeCandidate> = vec![];
         let mut all_external_components: Vec<ProtoExternalComponent> = vec![];
 
         for decl in declarations {
@@ -4225,8 +4225,8 @@ impl Conv<&air::Module> for ProtoModule {
                 {
                     connect.event_var = nested_derived_clock_candidates
                         .iter()
-                        .find(|(_, offset, _)| offset == var_offset)
-                        .map(|(vid, _, _)| *vid)
+                        .find(|(_, offset, _, _)| offset == var_offset)
+                        .map(|(vid, _, _, _)| *vid)
                         .or_else(|| {
                             context
                                 .scope()
@@ -4291,7 +4291,7 @@ impl Conv<&air::Module> for ProtoModule {
             }
             // Child-instance clock vars: only reader is `always_ff` sensitivity
             // (invisible to DCE); dropping the writer starves partial_settle.
-            for (_, off, _) in &nested_derived_clock_candidates {
+            for (_, off, _, _) in &nested_derived_clock_candidates {
                 protect.insert(*off);
             }
             // Component input connections read these offsets but appear in no
@@ -4320,7 +4320,7 @@ impl Conv<&air::Module> for ProtoModule {
             {
                 let mut extra_offsets: Vec<VarOffset> =
                     Vec::with_capacity(nested_derived_clock_candidates.len());
-                for (_, off, _) in &nested_derived_clock_candidates {
+                for (_, off, _, _) in &nested_derived_clock_candidates {
                     extra_offsets.push(*off);
                 }
                 for external in &all_external_components {
@@ -4486,7 +4486,7 @@ impl Conv<&air::Module> for ProtoModule {
             for child in &mut all_child_modules {
                 comb_layout::translate_meta_tree(child, &sched);
             }
-            for (_, off, _) in &mut nested_derived_clock_candidates {
+            for (_, off, _, _) in &mut nested_derived_clock_candidates {
                 *off = sched.translate_off(*off);
             }
             for external in &mut all_external_components {
@@ -4713,7 +4713,7 @@ impl Conv<&air::Module> for ProtoModule {
                     }
                 }
             }
-            for (_, off, _) in &nested_derived_clock_candidates {
+            for (_, off, _, _) in &nested_derived_clock_candidates {
                 block_vo.insert(*off);
             }
             let mut block: HashSet<isize> = HashSet::default();
@@ -4925,32 +4925,61 @@ impl Conv<&air::Module> for ProtoModule {
         // testbench top whose DUT contains the gated clock would have an
         // empty `derived_clock_schedule` and `always_ff(w_gclk, ...)`
         // would never fire.
-        let has_any_clock_var = src.variables.values().any(|v| v.r#type.is_clock())
+        let has_any_edge_var = src
+            .variables
+            .values()
+            .any(|v| v.r#type.is_clock() || v.r#type.is_reset())
             || !nested_derived_clock_candidates.is_empty();
-        let (derived_clock_vars, input_clock_offsets) = if !has_any_clock_var {
+        let (derived_clock_vars, input_clock_offsets) = if !has_any_edge_var {
             (Vec::new(), HashMap::default())
         } else {
             // O(V+P) port lookup via HashSet.
             let port_var_set: crate::HashSet<VarId> = src.ports.values().copied().collect();
-            let mut dc_vars: Vec<(VarId, VarOffset, usize)> = src
+            let mut dc_vars: Vec<crate::ir::EdgeCandidate> = src
                 .variables
                 .iter()
                 .filter(|(vid, var)| var.r#type.is_clock() && !port_var_set.contains(*vid))
                 .filter_map(|(vid, _)| {
                     let meta = variable_meta.get(vid)?;
                     let elem = meta.elements.first()?;
-                    Some((*vid, elem.current, elem.native_bytes))
+                    Some((*vid, elem.current, elem.native_bytes, None))
                 })
                 .collect();
+            // The top module's own async resets, for the same reason the
+            // child ones are candidates: nothing else generates their
+            // assertion edge.  Only those an `always_ff` actually resets
+            // on — a reset with no `if_reset` has nothing to fire.
+            let mut top_inst_reset_kinds = None;
+            for (vid, var) in &src.variables {
+                if !var.r#type.is_reset()
+                    || port_var_set.contains(vid)
+                    || !event_statements.contains_key(&Event::Reset(*vid))
+                {
+                    continue;
+                }
+                let inst_kinds = top_inst_reset_kinds
+                    .get_or_insert_with(|| collect_inst_reset_kinds(declarations));
+                let (active_low, is_async) = resolved_reset_kind(
+                    &var.r#type.kind,
+                    inst_kinds.get(vid).copied().flatten(),
+                    &context.config,
+                );
+                if is_async
+                    && let Some(meta) = variable_meta.get(vid)
+                    && let Some(elem) = meta.elements.first()
+                {
+                    dc_vars.push((*vid, elem.current, elem.native_bytes, Some(active_low)));
+                }
+            }
             // Nested candidates already carry absolute (parent-rebased)
             // offsets and exclude child ports.  Dedup by (var_id, offset)
             // so a clock-typed input port re-exported through aliasing
             // can't be added twice.
             let mut seen: crate::HashSet<(VarId, VarOffset)> =
-                dc_vars.iter().map(|(v, o, _)| (*v, *o)).collect();
-            for (vid, off, nb) in nested_derived_clock_candidates.drain(..) {
+                dc_vars.iter().map(|(v, o, _, _)| (*v, *o)).collect();
+            for (vid, off, nb, polarity) in nested_derived_clock_candidates.drain(..) {
                 if seen.insert((vid, off)) {
-                    dc_vars.push((vid, off, nb));
+                    dc_vars.push((vid, off, nb, polarity));
                 }
             }
             // "Input clock" candidates: top-module clock-typed variables
@@ -5252,6 +5281,23 @@ fn record(
             }
         })
         .or_insert(Some(kind));
+}
+
+/// `(active low, asynchronous)` of a NON-PORT reset net, resolved exactly as
+/// `declaration.rs` resolves it for the blocks that read it: the declared type
+/// first, then the instance ports the net is wired to, then the project's
+/// `reset_type`.  Disagreeing with that lowering would monitor the opposite
+/// edge, so the two must stay in step.
+pub(crate) fn resolved_reset_kind(
+    kind: &air::TypeKind,
+    inst_kind: Option<(bool, bool)>,
+    config: &crate::ir::Config,
+) -> (bool, bool) {
+    let (active_low, sync) = declared_reset_kind(kind).or(inst_kind).unwrap_or((
+        !config.abstract_reset_active_high,
+        config.abstract_reset_sync,
+    ));
+    (active_low, !sync)
 }
 
 /// `(active low, synchronous)` of a declared reset type.
