@@ -1,0 +1,17 @@
+module Module68J (
+    axi4lite_m: modport $std::axi4_lite_if::<Package68I::axi4lite_pkg>::master,
+) {
+    always_comb {
+        axi4lite_m.awvalid = false;
+        axi4lite_m.awaddr  = '0;
+        axi4lite_m.awprot  = 0 as Package68I::axi4lite_pkg::proto_t;
+        axi4lite_m.wvalid  = false;
+        axi4lite_m.wdata   = '0;
+        axi4lite_m.wstrb   = '0;
+        axi4lite_m.bready  = false;
+        axi4lite_m.arvalid = false;
+        axi4lite_m.araddr  = '0;
+        axi4lite_m.arprot  = 0 as Package68I::axi4lite_pkg::proto_t;
+        axi4lite_m.rready  = false;
+    }
+}
