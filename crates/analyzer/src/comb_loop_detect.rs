@@ -32,7 +32,7 @@ use crate::ir::{
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::Graph;
-use daggy::petgraph::algo::tarjan_scc;
+use daggy::petgraph::algo::kosaraju_scc;
 use daggy::petgraph::graph::NodeIndex;
 use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
@@ -2087,7 +2087,7 @@ fn check_graph(
     graph: &Graph<NodeKey, BitDependency>,
     errors: &mut Vec<AnalyzerError>,
 ) {
-    let sccs = tarjan_scc(graph);
+    let sccs = strongly_connected_components(graph);
     let mut reported: HashSet<Vec<NodeKey>> = HashSet::default();
     for scc in sccs {
         let is_loop = scc.len() > 1 || (scc.len() == 1 && has_self_edge(graph, scc[0]));
@@ -2103,6 +2103,13 @@ fn check_graph(
             errors.push(error);
         }
     }
+}
+
+fn strongly_connected_components(graph: &Graph<NodeKey, BitDependency>) -> Vec<Vec<NodeIndex>> {
+    // Petgraph's Tarjan implementation uses recursive DFS. A long, otherwise
+    // shallow dependency chain can therefore exhaust the native stack. The
+    // Kosaraju implementation uses explicit worklists for both passes.
+    kosaraju_scc(graph)
 }
 
 fn ensure_node(
@@ -2331,6 +2338,89 @@ fn summary_region(key: NodeKey, bit_part: &BitPartition) -> Option<SummaryRegion
 #[cfg(test)]
 mod region_tests {
     use super::*;
+
+    #[test]
+    fn scc_walk_does_not_use_the_native_stack() {
+        const COUNT: usize = 100_000;
+
+        let id = VarId::from_raw(0);
+        let mut graph: Graph<NodeKey, BitDependency> = Graph::new();
+        let mut previous = None;
+        for start in 0..COUNT {
+            let current = graph.add_node((id, ArraySpan { start, length: 1 }, 0));
+            if let Some(previous) = previous {
+                graph.add_edge(previous, current, BitDependency::WHOLE);
+            }
+            previous = Some(current);
+        }
+
+        assert_eq!(strongly_connected_components(&graph).len(), COUNT);
+    }
+
+    #[test]
+    fn disjoint_array_point_queries_do_not_scan_every_partition() {
+        const COUNT: usize = 16_384;
+
+        let id = VarId::from_raw(0);
+        let packed = PackedSpan {
+            start: 0,
+            length: 32,
+        };
+        let mut accesses = HashMap::default();
+        for start in 0..COUNT {
+            accesses.insert((id, ArraySpan { start, length: 1 }), vec![packed]);
+        }
+
+        let ranges = split_array_spans(accesses, &HashMap::default());
+        let partition = BitPartition::new(ranges);
+        assert_eq!(partition.array_spans(id).len(), COUNT);
+        for start in 0..COUNT {
+            assert_eq!(
+                partition.overlapping_access(id, ArraySpan { start, length: 1 }, packed),
+                vec![(id, ArraySpan { start, length: 1 }, 0)]
+            );
+        }
+    }
+
+    #[test]
+    fn array_partition_sweep_keeps_an_access_active_until_its_own_end() {
+        let id = VarId::from_raw(0);
+        let packed = PackedSpan {
+            start: 0,
+            length: 1,
+        };
+        let mut accesses = HashMap::default();
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 0,
+                    length: 2,
+                },
+            ),
+            vec![packed],
+        );
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 1,
+                    length: 2,
+                },
+            ),
+            vec![packed],
+        );
+
+        let ranges = split_array_spans(accesses, &HashMap::default());
+        for start in 0..3 {
+            assert_eq!(
+                ranges
+                    .get(&(id, ArraySpan { start, length: 1 }))
+                    .map(Vec::as_slice),
+                Some([packed].as_slice())
+            );
+        }
+    }
 
     #[test]
     fn packed_partition_storage_depends_on_endpoints_not_declared_width() {

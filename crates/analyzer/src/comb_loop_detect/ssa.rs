@@ -365,6 +365,19 @@ mod tests {
     }
 
     #[test]
+    fn root_source_walk_does_not_use_the_native_stack() {
+        let mut ssa = SsaStore::default();
+        let source = ssa.read("source");
+        let mut version = ssa.definition(vec![source]);
+        for _ in 0..100_000 {
+            version = ssa.definition(vec![version]);
+        }
+
+        let expected = ["source"].into_iter().collect::<HashSet<_>>();
+        assert_eq!(ssa.root_sources(version).unwrap(), expected);
+    }
+
+    #[test]
     fn positional_definition_preserves_source_relation() {
         let mut ssa = SsaStore::default();
         let source = ssa.read("source");
