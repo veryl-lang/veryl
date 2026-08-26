@@ -647,11 +647,22 @@ impl Rewriter<'_> {
     }
 }
 
+/// Whether the comb fusion may inline single-reader field defs.  Default
+/// off: the extra inlining shrinks cone subtrees below the gate's
+/// profitability thresholds and can cost more gating than the merge saves
+/// (measured on a GPU-class design: an idle FP unit lost its always-skip
+/// segment).
+pub fn inline_fields() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_FIELD_UNFUSE_INLINE").as_deref() == Ok("1"))
+}
+
 /// Run the pass over the unified comb list.  `event_statements` (the initial
 /// block included) is scanned, never rewritten: whatever it touches stays
 /// packed.  `blocklist` carries the caller-known externally-visible offsets.
 /// New storage comes from `alloc` and is registered in `comb_reloc` so cone
-/// gating attributes it to the packed variable's owner.
+/// gating attributes it to the packed variable's owner.  Returns the new
+/// field offsets so the caller can shield them from downstream inlining.
 pub fn run(
     unified: &mut [ProtoStatement],
     event_statements: &HashMap<crate::ir::Event, Vec<ProtoStatement>>,
@@ -659,7 +670,7 @@ pub fn run(
     alloc: &mut dyn FnMut(usize) -> isize,
     comb_reloc: &mut Vec<(isize, isize, usize)>,
     use_4state: bool,
-) -> RunStats {
+) -> (RunStats, Vec<isize>) {
     let mut stats = RunStats::default();
     let mut c = Census::default();
     for s in unified.iter() {
@@ -671,7 +682,7 @@ pub fn run(
         }
     }
     if c.bail {
-        return stats;
+        return (stats, Vec::new());
     }
     // Coalesced into a disjoint cover so each candidate answers with one
     // binary search rather than a scan of every dynamic-access site.
@@ -773,8 +784,13 @@ pub fn run(
         if diag() {
             eprintln!("[field_unfuse] no candidates: {stats:?}");
         }
-        return stats;
+        return (stats, Vec::new());
     }
+    let mut field_offsets: Vec<isize> = map
+        .values()
+        .flat_map(|sv| sv.fields.iter().map(|&(_, _, off, _)| off))
+        .collect();
+    field_offsets.sort_unstable();
 
     let mut rw = Rewriter {
         map: &map,
@@ -797,7 +813,7 @@ pub fn run(
         );
         eprintln!("[field_unfuse] {stats:?}");
     }
-    stats
+    (stats, field_offsets)
 }
 
 #[cfg(test)]

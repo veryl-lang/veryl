@@ -4270,6 +4270,7 @@ impl Conv<&air::Module> for ProtoModule {
         // the key, and the field storage inherits its packed variable's cone
         // owner through `Context::comb_reloc`.  The allocations sit outside
         // the memoised pipeline, so a cache hit replays them identically.
+        let mut unfuse_field_offsets: Vec<isize> = Vec::new();
         let unified = {
             let mut unified = unified;
             if field_unfuse::enabled(context.config.use_4state) {
@@ -4327,7 +4328,7 @@ impl Conv<&air::Module> for ProtoModule {
                     *comb_total += crate::ir::variable::value_size(nb, use_4state);
                     off
                 };
-                let stats = field_unfuse::run(
+                let (stats, field_offsets) = field_unfuse::run(
                     &mut unified,
                     &all_event_statements,
                     &blocklist,
@@ -4335,6 +4336,7 @@ impl Conv<&air::Module> for ProtoModule {
                     &mut context.comb_reloc,
                     use_4state,
                 );
+                unfuse_field_offsets = field_offsets;
                 log::info!("field_unfuse ({}): {stats:?}", src.name);
             }
             unified
@@ -4401,6 +4403,11 @@ impl Conv<&air::Module> for ProtoModule {
                     for connect in &external.connects {
                         connect.expr.gather_variable_offsets(&mut extra_offsets);
                     }
+                }
+                // Unfused field defs stay materialized by default (see
+                // `field_unfuse::inline_fields`).
+                if !field_unfuse::inline_fields() {
+                    extra_offsets.extend(unfuse_field_offsets.iter().map(|&o| VarOffset::Comb(o)));
                 }
                 Some(extra_offsets)
             } else {

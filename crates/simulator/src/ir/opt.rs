@@ -80,6 +80,12 @@ pub(crate) mod field_unfuse {
         false
     }
     pub fn force_disable() {}
+    pub fn inline_fields() -> bool {
+        false
+    }
+    pub fn explain_offsets() -> &'static [isize] {
+        &[]
+    }
     pub fn run(
         _unified: &mut [ProtoStatement],
         _event_statements: &HashMap<Event, Vec<ProtoStatement>>,
@@ -87,8 +93,8 @@ pub(crate) mod field_unfuse {
         _alloc: &mut dyn FnMut(usize) -> isize,
         _comb_reloc: &mut Vec<(isize, isize, usize)>,
         _use_4state: bool,
-    ) -> RunStats {
-        RunStats
+    ) -> (RunStats, Vec<isize>) {
+        (RunStats, Vec::new())
     }
 }
 
