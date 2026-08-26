@@ -7262,23 +7262,20 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
         ProtoStatement::For(for_stmt) => emit_for(for_stmt),
         ProtoStatement::Break => Some("break;".to_string()),
         ProtoStatement::SystemFunctionCall(call) => {
-            // Event path: emit $display/$write as a call into the Rust formatter
-            // (veryl_sysfn_cb) so a single rare trace statement no longer forces
-            // the whole clock event onto Cranelift.  $finish/$assert/$readmemh
+            // $display/$write call into the Rust formatter so one rare
+            // trace statement no longer drops the whole event — or comb —
+            // onto Cranelift.  A comb print runs once per settle pass, and
+            // cone gating never skips a side-effecting cone
+            // (`has_side_effects`).  $finish/$assert/$readmemh
             // affect sim state / need richer handling and stay on Cranelift.
-            // Comb path has no output side effects, so bail there as before.
-            if event_mode() {
-                match call {
-                    ProtoSystemFunctionCall::Display { format_str, args } => {
-                        emit_event_print(format_str, args, true)
-                    }
-                    ProtoSystemFunctionCall::Write { format_str, args } => {
-                        emit_event_print(format_str, args, false)
-                    }
-                    _ => None,
+            match call {
+                ProtoSystemFunctionCall::Display { format_str, args } => {
+                    emit_event_print(format_str, args, true)
                 }
-            } else {
-                None
+                ProtoSystemFunctionCall::Write { format_str, args } => {
+                    emit_event_print(format_str, args, false)
+                }
+                _ => None,
             }
         }
         ProtoStatement::TbMethodCall { .. } => {

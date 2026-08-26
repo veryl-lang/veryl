@@ -20563,6 +20563,62 @@ fn wide_dynamic_bit_select_store() {
 }
 
 #[test]
+fn comb_display_output_matches_across_backends() {
+    // `$display` inside an `always_comb` is a side effect in a place the comb
+    // backends may otherwise reorder or skip.  Cone gating already refuses to
+    // skip a cone holding one (`has_side_effects`), so AOT-C emits it like the
+    // interpreter runs it — and every backend must produce the same text the
+    // same number of times, or one rare trace statement silently changes a
+    // design's log.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        a  : input  logic<8>,
+        o  : output logic<8>,
+    ) {
+        var t: logic<8>;
+        always_comb {
+            t = a + 1;
+            if a == 8'd7 {
+                $display("hit a=%h t=%h", a, t);
+            }
+        }
+        always_ff (clk) {
+            o = t;
+        }
+    }
+    "#;
+
+    // The validate dual-run replays every settle with the Cranelift
+    // reference; its AOT output must be rolled back or each print lands
+    // twice — so the same-text assertion below covers it.
+    let mut configs = Config::all();
+    if crate::backend::aot_c::cc_available() {
+        configs.push(aot_native_validate_config());
+    }
+    let mut seen: Option<String> = None;
+    for config in configs {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        for a in [5u64, 7, 7, 9] {
+            sim.set("a", Value::new(a, 8, false));
+            sim.step(&clk);
+        }
+        let output = output_buffer::take();
+        assert!(
+            output.contains("hit a=07 t=08"),
+            "config={config:?} output={output:?}"
+        );
+        match &seen {
+            None => seen = Some(output),
+            Some(first) => assert_eq!(&output, first, "config={config:?}"),
+        }
+    }
+}
+
+#[test]
 fn wide_ff_array_element_bit_select_store() {
     // `arr[idx][hi:lo] <= v` and `arr[idx][j +: w] <= v` on an array of
     // >128-bit FF elements: a runtime element index combined with a bit-select
