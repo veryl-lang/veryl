@@ -20563,6 +20563,104 @@ fn wide_dynamic_bit_select_store() {
 }
 
 #[test]
+fn signed_compare_above_64_bits() {
+    // A signed comparison whose operands are 65..128 bits is a `__uint128_t`
+    // scalar, not a wide-op pointer, so it needs its own sign extension.  The
+    // AOT-C emitter used to decline it, which dropped the whole comb of any
+    // module containing one.
+    let code = r#"
+    module Top (
+        a : input  signed logic<65>,
+        b : input  signed logic<65>,
+        lt: output logic,
+        ge: output logic,
+    ) {
+        assign lt = a <: b;
+        assign ge = a >= b;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let one = BigUint::from(1u32);
+    // -1, -2^64, 0, 1, 2^64-1 in 65-bit two's complement.
+    let neg1 = (&one << 65u32) - &one;
+    let neg_big = &one << 64u32; // most negative
+    let cases: [(BigUint, i128); 5] = [
+        (neg1.clone(), -1),
+        (neg_big.clone(), i128::from(-1i64) << 64),
+        (BigUint::from(0u32), 0),
+        (one.clone(), 1),
+        ((&one << 64u32) - &one, (1i128 << 64) - 1),
+    ];
+    for (av, ai) in &cases {
+        for (bv, bi) in &cases {
+            for config in Config::all() {
+                let ir = analyze(code, &config);
+                let mut sim = Simulator::new(ir, None);
+                sim.set("a", Value::new_biguint(av.clone(), 65, true));
+                sim.set("b", Value::new_biguint(bv.clone(), 65, true));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("lt").unwrap(),
+                    Value::new(u64::from(ai < bi), 1, false),
+                    "lt {ai} < {bi} config={config:?}"
+                );
+                assert_eq!(
+                    sim.get("ge").unwrap(),
+                    Value::new(u64::from(ai >= bi), 1, false),
+                    "ge {ai} >= {bi} config={config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn wide_select_of_a_dynamic_array_element() {
+    // `arr[idx][hi:lo]` where the element is wider than a register AND the
+    // selected window still is: the window has to be extracted out of the
+    // element alias rather than aliasing the element itself.
+    let code = r#"
+    module Top (
+        idx: input  logic<2>  ,
+        v  : input  logic<200>,
+        o  : output logic<200>,
+    ) {
+        var arr: logic<384> [4];
+        always_comb {
+            arr[0] = 0;
+            arr[1] = {v, 184'd0};
+            arr[2] = 0;
+            arr[3] = 0;
+        }
+        assign o = arr[idx][383:184];
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let v = (BigUint::from(0xfeed_faceu32) << 160u32) + BigUint::from(0x0123_4567_89abu64);
+    for idx in [0u64, 1, 2] {
+        for config in Config::all() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("idx", Value::new(idx, 2, false));
+            sim.set("v", Value::new_biguint(v.clone(), 200, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let want = if idx == 1 {
+                v.clone()
+            } else {
+                BigUint::from(0u32)
+            };
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new_biguint(want, 200, false),
+                "idx={idx} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn comb_display_output_matches_across_backends() {
     // `$display` inside an `always_comb` is a side effect in a place the comb
     // backends may otherwise reorder or skip.  Cone gating already refuses to

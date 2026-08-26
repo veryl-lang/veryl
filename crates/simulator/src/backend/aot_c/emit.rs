@@ -975,10 +975,10 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             expr_context,
             ..
         } => emit_wide_concat(elements, expr_context.width, pre),
-        // Wide (>16 native-byte) dynamic-array element, full read (no select):
-        // the element lives at `base + base_off + stride*idx`; alias it as the
-        // wide value pointer (read-only, so no copy).  Narrow/wide-result
-        // selects and dynamic bit-selects bail to the interpreter.
+        // Wide (>16 native-byte) dynamic-array element, aliased read-only (no
+        // copy).  A ≤128-bit select result is a scalar (`builds_wide_pointer`
+        // routes it away from here); a dynamic bit-select bails to the
+        // interpreter.
         ProtoExpression::DynamicVariable {
             base_offset,
             stride,
@@ -989,9 +989,19 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             dynamic_select,
             ..
         } => {
-            if select.is_some() || dynamic_select.is_some() || *num_elements == 0 {
+            if dynamic_select.is_some() || *num_elements == 0 {
                 return None;
             }
+            let sel_window = match select {
+                Some((hi, lo)) => {
+                    let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
+                    if nbits <= 128 {
+                        return None;
+                    }
+                    Some((*lo, nbits))
+                }
+                None => None,
+            };
             let off = match base_offset {
                 VarOffset::Ff(o) | VarOffset::Comb(o) => *o,
             };
@@ -1011,12 +1021,31 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                 "uint64_t _wi{t} = (uint64_t)({idx}); _wi{t} = _wi{t} < {max} ? _wi{t} : {max}; ",
                 max = max_idx,
             ));
+            let elem =
+                format!("((uint8_t*)({buf} + {off:#x} + (intptr_t){stride} * (intptr_t)_wi{t}))");
+            let Some((lo, nbits)) = sel_window else {
+                return Some(WideRef {
+                    addr: elem,
+                    nb: *element_native_bytes,
+                    width: expr.width(),
+                });
+            };
+            // Same window extraction as the plain-variable arm above, with the
+            // element address in place of a fixed offset.
+            let res_nb = native_bytes(nbits);
+            let res_nw = wide_words(res_nb);
+            let w = next_wide_tmp();
+            pre.push_str(&format!(
+                "uint64_t _w{w}[{res_nw}]; \
+                 vw_lshr_win((uint8_t*)_w{w}, (const uint8_t*){elem}, {lo}ull, {res_nb}u, {src_nb}u); \
+                 vw_apply_mask((uint8_t*)_w{w}, (const uint8_t*)0, {mask}u); ",
+                src_nb = *element_native_bytes,
+                mask = wpack(res_nb, nbits),
+            ));
             Some(WideRef {
-                addr: format!(
-                    "((uint8_t*)({buf} + {off:#x} + (intptr_t){stride} * (intptr_t)_wi{t}))"
-                ),
-                nb: *element_native_bytes,
-                width: expr.width(),
+                addr: format!("((uint8_t*)_w{w})"),
+                nb: res_nb,
+                width: nbits,
             })
         }
     }
@@ -8140,8 +8169,15 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             if is_signed_cmp || is_signed_divrem {
                 let x_w = x.width();
                 let y_w = y.width();
-                if x_w == 0 || y_w == 0 || x_w > 64 || y_w > 64 {
+                if x_w == 0 || y_w == 0 || x_w > 128 || y_w > 128 {
                     // wide / zero-width signed compare.
+                    return None;
+                }
+                // A 65..128-bit operand is a `__uint128_t` scalar; sign-extend
+                // and compare there.  Div / Rem keep the 64-bit form — their
+                // zero / INT_MIN guards below are written against int64_t.
+                let cmp_bits = if x_w > 64 || y_w > 64 { 128 } else { 64 };
+                if cmp_bits == 128 && is_signed_divrem {
                     return None;
                 }
                 let c_op = match op {
@@ -8156,11 +8192,16 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     _ => unreachable!(),
                 };
                 let sext = |s: &str, w: usize| -> String {
-                    if w == 64 {
-                        format!("((int64_t)((uint64_t)({})))", s)
+                    let (ity, uty) = if cmp_bits == 128 {
+                        ("__int128", "__uint128_t")
                     } else {
-                        let shift = 64 - w;
-                        format!("(((int64_t)((uint64_t)({}) << {})) >> {})", s, shift, shift,)
+                        ("int64_t", "uint64_t")
+                    };
+                    if w == cmp_bits {
+                        format!("(({ity})(({uty})({s})))")
+                    } else {
+                        let shift = cmp_bits - w;
+                        format!("((({ity})(({uty})({s}) << {shift})) >> {shift})")
                     }
                 };
                 let inner = format!("(({}) {} ({}))", sext(&xs, x_w), c_op, sext(&ys, y_w),);
