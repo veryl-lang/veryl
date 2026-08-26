@@ -189,6 +189,7 @@ impl CmdTest {
         if self.opt.wave {
             veryl_simulator::backend::aot_c::force_disable_localize();
             veryl_simulator::ir::force_disable_comb_fusion();
+            veryl_simulator::ir::force_disable_field_unfuse();
         }
 
         // force filelist_type to absolute which can be refered from temporary directory
