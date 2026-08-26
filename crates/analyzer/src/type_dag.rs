@@ -85,17 +85,24 @@ pub enum Context {
 
 #[derive(Debug, Clone)]
 pub enum DagError {
-    Cyclic(Box<Symbol>, Box<Symbol>),
+    CyclicType(Box<Symbol>, Box<Symbol>),
+    CyclicFile(Box<Symbol>, PathId, Box<Symbol>, PathId),
 }
 
 impl From<DagError> for AnalyzerError {
     fn from(value: DagError) -> Self {
-        let DagError::Cyclic(s, e) = value;
-        AnalyzerError::cyclic_type_dependency(
-            &s.token.to_string(),
-            &e.token.to_string(),
-            &e.token.into(),
-        )
+        match value {
+            DagError::CyclicType(ssym, esym) => AnalyzerError::cyclic_type_dependency(
+                &ssym.token.to_string(),
+                &esym.token.to_string(),
+                &esym.token.into(),
+            ),
+            DagError::CyclicFile(_, sfile, esym, efile) => AnalyzerError::cyclic_file_dependency(
+                &sfile.to_string(),
+                &efile.to_string(),
+                &esym.token.into(),
+            ),
+        }
     }
 }
 
@@ -411,7 +418,9 @@ impl TypeDag {
         if let Some(node_index) = self.nodes.get_by_left(&symbol_id) {
             Ok(*node_index)
         } else {
-            if let Some(path) = symbol.token.source.get_path() {
+            if let Some(path) = symbol.token.source.get_path()
+                && !self.file_nodes.contains_left(&path)
+            {
                 let file_node = self.file_dag.add_node(()).index() as u32;
                 self.file_nodes.insert(path, file_node);
             }
@@ -442,10 +451,7 @@ impl TypeDag {
         recursive_ref: bool,
     ) -> Result<(), DagError> {
         match self.dag.add_edge(start.into(), end.into(), edge) {
-            Ok(_) => {
-                self.insert_file_edge(start, end);
-                Ok(())
-            }
+            Ok(_) => self.insert_file_edge(start, end),
             Err(_) => {
                 let is_allowed_direct_reference = match edge {
                     Context::Module | Context::Interface | Context::Function => {
@@ -463,31 +469,48 @@ impl TypeDag {
                 } else {
                     let ssym = self.get_symbol(start);
                     let esym = self.get_symbol(end);
-                    Err(DagError::Cyclic(Box::new(ssym), Box::new(esym)))
+                    Err(DagError::CyclicType(Box::new(ssym), Box::new(esym)))
                 }
             }
         }
     }
 
-    fn insert_file_edge(&mut self, start: u32, end: u32) {
-        if start != self.source {
-            let start_path = self.paths.get(&start).map(|x| x.token);
-            let end_path = self.paths.get(&end).map(|x| x.token);
-            if let (Some(start), Some(end)) = (
-                start_path.and_then(|x| x.source.get_path()),
-                end_path.and_then(|x| x.source.get_path()),
-            ) {
-                let start = self.file_nodes.get_by_left(&start).unwrap();
-                let end = self.file_nodes.get_by_left(&end).unwrap();
-                let start: NodeIndex = (*start).into();
-                let end: NodeIndex = (*end).into();
-                if start != end && self.file_dag.find_edge(start, end).is_none() {
-                    let err = self.file_dag.add_edge(start, end, ());
-                    // cyclic error should be caught by dag
-                    err.unwrap();
-                }
+    fn insert_file_edge(&mut self, start: u32, end: u32) -> Result<(), DagError> {
+        if start == self.source {
+            return Ok(());
+        }
+
+        let ssym = start;
+        let esym = end;
+
+        let start_path = self.paths.get(&ssym).map(|x| x.token);
+        let end_path = self.paths.get(&esym).map(|x| x.token);
+        let (Some(start_file), Some(end_file)) = (
+            start_path.and_then(|x| x.source.get_path()),
+            end_path.and_then(|x| x.source.get_path()),
+        ) else {
+            return Ok(());
+        };
+
+        let start = self.file_nodes.get_by_left(&start_file).unwrap();
+        let end = self.file_nodes.get_by_left(&end_file).unwrap();
+        let start: NodeIndex = (*start).into();
+        let end: NodeIndex = (*end).into();
+        if start != end && self.file_dag.find_edge(start, end).is_none() {
+            let err = self.file_dag.add_edge(start, end, ());
+            if err.is_err() {
+                let ssym = self.get_symbol(ssym);
+                let esym = self.get_symbol(esym);
+                return Err(DagError::CyclicFile(
+                    Box::new(ssym),
+                    start_file,
+                    Box::new(esym),
+                    end_file,
+                ));
             }
         }
+
+        Ok(())
     }
 
     fn exist_edge(&self, start: u32, end: u32) -> bool {
