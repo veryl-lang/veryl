@@ -6535,6 +6535,38 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
                     let max_idx = ne - 1;
                     let idx = emit_expr(&dyn_sel.index_expr)?;
+                    // A ≤64-bit window spans at most two destination words, so
+                    // a two-word scalar RMW replaces the full-width shift/mask
+                    // RMW below — the dynamic-index counterpart of
+                    // emit_wide_narrow_field_store, byte-identical to it.
+                    if win <= 64 {
+                        let mut pre = String::new();
+                        let sv = wide_shift_amount(eff_expr, &mut pre)?;
+                        let wm: u64 = if win == 64 {
+                            u64::MAX
+                        } else {
+                            (1u64 << win) - 1
+                        };
+                        return Some(format!(
+                            "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
+                                uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
+                                uint64_t _sh = _di * {ew}ull; \
+                                if (_sh < {dw}ull) {{ \
+                                uint64_t _wi = _sh >> 6; \
+                                uint64_t _b = _sh & 63; \
+                                __uint128_t _m = ((__uint128_t){wm:#x}ULL) << _b; \
+                                __uint128_t _v = ((__uint128_t)(((uint64_t)({sv})) & {wm:#x}ULL)) << _b; \
+                                uint64_t _rem = {dw}ull - (_wi << 6); \
+                                if (_rem < 128) _m &= (((__uint128_t)1 << _rem) - 1); \
+                                uint64_t _m0 = (uint64_t)_m; \
+                                uint64_t _m1 = (uint64_t)(_m >> 64); \
+                                veryl_u64_ua* _d = ((veryl_u64_ua*)(comb_values + {store_off:#x})) + _wi; \
+                                _d[0] = (_d[0] & ~_m0) | (((uint64_t)_v) & _m0); \
+                                if (_m1) _d[1] = (_d[1] & ~_m1) | (((uint64_t)(_v >> 64)) & _m1); \
+                                }} }}",
+                            dw = a.dst_width,
+                        ));
+                    }
                     let mut pre = String::new();
                     // rhs value (masked to `win` below) as an nb-byte buffer.
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
