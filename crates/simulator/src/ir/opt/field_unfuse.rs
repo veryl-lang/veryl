@@ -742,6 +742,14 @@ pub fn run(
                 .filter(|&&(lo, hi)| lo <= msb && lsb <= hi)
                 .count();
             if n > gather_limit {
+                if diag() {
+                    eprintln!(
+                        "[field_unfuse] skip_gather off={o} w={} read=({msb},{lsb}) \
+                         fields_touched={n}/{}",
+                        v.full_width,
+                        fields.len()
+                    );
+                }
                 stats.skip_gather += 1;
                 continue 'var;
             }
