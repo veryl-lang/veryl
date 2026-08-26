@@ -8,6 +8,7 @@
 //! to Cranelift (per-module for comb, per-event for events).
 
 use crate::FuncPtr;
+use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain, same_var_read};
 use crate::ir::{
     ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement, ProtoSystemFunctionCall,
@@ -1280,6 +1281,7 @@ fn emit_wide_narrow_field_store(
     hi: usize,
     lo: usize,
     dst_width: usize,
+    se_from: Option<usize>,
     word_addr: impl Fn(usize) -> String,
 ) -> Option<String> {
     // Bits >= dst_width must be dropped — the reference paths do so (interpret
@@ -1296,6 +1298,15 @@ fn emit_wide_narrow_field_store(
     debug_assert!(nbits <= 64);
     let mut pre = String::new();
     let sv = wide_shift_amount(expr, &mut pre)?; // source's low 64 bits
+    // The store clips to the field, so for a field of at most a word,
+    // extending the signed RHS to 64 bits lands the same bits.
+    let sv = match se_from {
+        Some(w) if w > 0 && w < 64 => {
+            let sh = 64 - w;
+            format!("((uint64_t)(((int64_t)(((uint64_t)({sv})) << {sh})) >> {sh}))")
+        }
+        _ => sv,
+    };
     let k0 = lo / 64;
     let k1 = hi / 64;
     let b = lo % 64;
@@ -2078,6 +2089,20 @@ pub fn comb_uncovered_census(stmts: &[ProtoStatement]) -> Vec<String> {
     out
 }
 
+/// The same census for an EVENT statement list.  Event mode changes which
+/// arm an FF write takes, so the walk has to run under it or the report names
+/// statements the event emit never even reaches.
+pub fn event_uncovered_census(stmts: &[ProtoStatement]) -> Vec<String> {
+    let prev = event_mode();
+    set_event_mode(true);
+    let mut out = Vec::new();
+    for s in stmts {
+        collect_uncovered(s, &mut out);
+    }
+    set_event_mode(prev);
+    out
+}
+
 fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
     if emit_stmt(stmt).is_some() {
         return;
@@ -2095,6 +2120,22 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
                 out.push(format!("If-cond-expr {}", classify_uncovered_expr(c)));
             }
             for s in x.true_side.iter().chain(x.false_side.iter()) {
+                collect_uncovered(s, out);
+            }
+        }
+        ProtoStatement::Case(c) => {
+            for (n, arm) in c.arms.iter().enumerate() {
+                if emit_expr(&arm.cond).is_none() {
+                    out.push(format!(
+                        "Case-arm{n}-cond-expr {}",
+                        classify_uncovered_expr(&arm.cond)
+                    ));
+                }
+                for s in &arm.body {
+                    collect_uncovered(s, out);
+                }
+            }
+            for s in &c.default {
                 collect_uncovered(s, out);
             }
         }
@@ -2135,7 +2176,8 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
             emit_expr(&a.expr).is_some(),
         )),
         ProtoStatement::SystemFunctionCall(_) => out.push("SysFn".to_string()),
-        _ => out.push("leaf".to_string()),
+        ProtoStatement::TbMethodCall { .. } => out.push("TbMethodCall".to_string()),
+        ProtoStatement::Break => out.push("Break".to_string()),
     }
 }
 
@@ -2147,6 +2189,44 @@ fn expr_covered(e: &ProtoExpression) -> bool {
         emit_wide_expr(e, &mut String::new()).is_some()
     } else {
         emit_expr(e).is_some()
+    }
+}
+
+/// Does a concatenation element contribute no bits at all?  `{0{x}}` folds its
+/// repeat count to 0, so `eval` never runs the per-repeat concat.  Recursing
+/// rather than trusting a declared `width` of 0 is what makes this safe to act
+/// on; an unsized literal is zero-width but NOT empty.
+fn concat_elem_is_empty(sub: &ProtoExpression, repeat: usize) -> bool {
+    if repeat == 0 {
+        return true;
+    }
+    match sub {
+        ProtoExpression::Concatenation {
+            width: 0, elements, ..
+        } => concat_evaluates_empty(elements),
+        _ => false,
+    }
+}
+
+/// Does this concatenation evaluate to a zero-width value?
+fn concat_evaluates_empty(elements: &[(Box<ProtoExpression>, usize, usize)]) -> bool {
+    elements
+        .iter()
+        .all(|(sub, repeat, _)| concat_elem_is_empty(sub, *repeat))
+}
+
+/// Bare variant name of `e`, for the census breadcrumbs that describe a
+/// COVERED node (where `classify_uncovered_expr` would say nothing).
+fn diag_expr_kind(e: &ProtoExpression) -> &'static str {
+    match e {
+        ProtoExpression::HierVariable(_) => "HierVar",
+        ProtoExpression::Variable { .. } => "Var",
+        ProtoExpression::Value { .. } => "Val",
+        ProtoExpression::Unary { .. } => "Un",
+        ProtoExpression::Binary { .. } => "Bin",
+        ProtoExpression::Ternary { .. } => "Tern",
+        ProtoExpression::Concatenation { .. } => "Concat",
+        ProtoExpression::DynamicVariable { .. } => "DynVar",
     }
 }
 
@@ -2214,7 +2294,13 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
                     return format!("Concat/{}", classify_uncovered_expr(el));
                 }
             }
-            format!("Concat(w={width},n={})", elements.len())
+            let els: Vec<String> = elements
+                .iter()
+                .map(|(el, rep, ew)| {
+                    format!("{}:w={},ew={ew},rep={rep}", diag_expr_kind(el), el.width())
+                })
+                .collect();
+            format!("Concat(w={width},n={})[{}]", elements.len(), els.join(" "))
         }
         ProtoExpression::DynamicVariable {
             width,
@@ -3436,6 +3522,14 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
         && a.select.is_none()
         && a.rhs_select.is_none()
         && let Some(s) = emit_event_ff_assign_wide_dynsel(a, ds)
+            .or_else(|| emit_event_ff_assign_wide_dynsel_field(a, ds))
+    {
+        return Some(s);
+    }
+    if let Some((hi, lo)) = a.select
+        && a.dynamic_select.is_none()
+        && a.rhs_select.is_none()
+        && let Some(s) = emit_event_ff_assign_wide_field(a, hi, lo)
     {
         return Some(s);
     }
@@ -3451,8 +3545,15 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
     };
     let (Some(slice), false, None) = (aligned_slice, a.dynamic_select.is_some(), &a.rhs_select)
     else {
+        let ds = match &a.dynamic_select {
+            Some(d) => format!(
+                " ew={} window={} ne={}",
+                d.elem_width, d.window, d.num_elements
+            ),
+            None => String::new(),
+        };
         ev_diag(&format!(
-            "wide FF: select={:?} dynsel={} rhssel={:?} width={}",
+            "wide FF: select={:?} dynsel={} rhssel={:?} width={}{ds}",
             a.select,
             a.dynamic_select.is_some(),
             a.rhs_select,
@@ -3500,6 +3601,179 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
     };
     let push = emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), &format!("{cur_off:#x}"), nb);
     Some(format!("{{ {pre}{store}{push} }}"))
+}
+
+/// Read a wide FF into a fresh register and clear everything at or above its
+/// width, ready for a field merge.  The clear must precede the merge: a field
+/// may legitimately reach past the width (`ff72[idx +: 8]` at `idx = 71`) and
+/// those bits are kept, while bits past the width outside it are dropped.
+fn emit_wide_ff_rmw_prologue(
+    reg: &str,
+    dst_width: usize,
+    nb: usize,
+    nw: usize,
+    dst_raw: isize,
+) -> String {
+    let mut out = format!(
+        "uint64_t {reg}[{nw}]; \
+         vw_copy((uint8_t*){reg}, (const uint8_t*)(ff_values + {dst_raw:#x}), {nb}u); ",
+    );
+    let top = dst_width / 64;
+    if !dst_width.is_multiple_of(64) && top < nw {
+        out.push_str(&format!(
+            "{reg}[{top}] &= 0x{m:x}ULL; ",
+            m = width_mask(dst_width % 64),
+        ));
+    }
+    for w in (dst_width.div_ceil(64))..nw {
+        out.push_str(&format!("{reg}[{w}] = 0ULL; "));
+    }
+    out
+}
+
+/// Shared tail for the two wide-FF read-modify-write paths: mirror into the
+/// next slot when dual-slot, and log the WHOLE register — `eval_step` logs the
+/// merged `current`, not just the field.
+fn emit_wide_ff_rmw_tail(
+    reg: &str,
+    nb: usize,
+    packed: bool,
+    dst_raw: isize,
+    cur_off: isize,
+) -> String {
+    let mut out = String::new();
+    if !packed {
+        out.push_str(&format!(
+            "vw_copy((uint8_t*)(ff_values + {dst_raw:#x}), (const uint8_t*){reg}, {nb}u); ",
+        ));
+    }
+    out.push_str(&emit_wide_log_chunks(
+        &format!("(uint8_t*){reg}"),
+        &format!("{cur_off:#x}"),
+        nb,
+    ));
+    out
+}
+
+/// Event-path wide FF write through a static bit-select that does NOT cover
+/// whole words (`ff420[34:0] <= v`), so the aligned byte-range copy below
+/// cannot express it.  Only a field the RHS delivers as a C scalar (≤64 bits).
+fn emit_event_ff_assign_wide_field(
+    a: &ProtoAssignStatement,
+    hi: usize,
+    lo: usize,
+) -> Option<String> {
+    let nbits = hi.checked_sub(lo)?.checked_add(1)?;
+    let nb = native_bytes(a.dst_width);
+    let nw = wide_words(nb);
+    // The field may reach past `dst_width` (that is a merge, see the prologue)
+    // but never past the register's storage.
+    if nbits > 64 || nbits == 0 || hi >= nb * 8 {
+        return None;
+    }
+    let dst_raw = match a.dst {
+        VarOffset::Ff(o) => o,
+        VarOffset::Comb(_) => return None,
+    };
+    let cur_off = a.dst_ff_current_offset;
+    if cur_off < 0 || dst_raw < 0 {
+        return None;
+    }
+    let packed = dst_raw == cur_off;
+    let vmask = width_mask(nbits);
+    let rhs = emit_expr_root(&a.expr)?;
+    let d = next_wide_tmp();
+    let reg = format!("_w{d}");
+    let (w0, sh) = (lo / 64, lo % 64);
+    if w0 >= nw {
+        return None;
+    }
+    let mut body = emit_wide_ff_rmw_prologue(&reg, a.dst_width, nb, nw, dst_raw);
+    body.push_str(&format!(
+        "uint64_t _f{d} = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; ",
+    ));
+    // Clear the field's bits and drop the value in, one word at a time; both
+    // masks are compile-time constants because the select is static.
+    body.push_str(&format!(
+        "{reg}[{w0}] = ({reg}[{w0}] & ~(0x{vmask:x}ULL << {sh})) | (_f{d} << {sh}); ",
+    ));
+    if sh + nbits > 64 {
+        // `sh > 0` here (a field of at most 64 bits starting at bit 0 of a
+        // word cannot straddle), so the down-shift count stays in 1..=63.
+        if w0 + 1 >= nw {
+            return None;
+        }
+        let up = 64 - sh;
+        body.push_str(&format!(
+            "{reg}[{w1}] = ({reg}[{w1}] & ~(0x{vmask:x}ULL >> {up})) | (_f{d} >> {up}); ",
+            w1 = w0 + 1,
+        ));
+    }
+    body.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
+    Some(format!("{{ {body} }}"))
+}
+
+/// Event-path wide FF write through a RUNTIME-indexed field narrower than a
+/// word (`ff72[idx] <= bit`).  Strides by `elem_width` bits rather than whole
+/// words, so the word index and shift are computed at run time.
+fn emit_event_ff_assign_wide_dynsel_field(
+    a: &ProtoAssignStatement,
+    ds: &crate::ir::ProtoDynamicBitSelect,
+) -> Option<String> {
+    let (ew, ne, win) = (ds.elem_width, ds.num_elements, ds.window);
+    if ew == 0 || ne == 0 || win == 0 || win > 64 {
+        return None;
+    }
+    let nb = native_bytes(a.dst_width);
+    let nw = wide_words(nb);
+    // At the top index the field may reach past `dst_width` — `Value::assign`
+    // keeps those bits, so the prologue clears the width before the merge —
+    // but it must never reach past the register's storage.
+    if (ne - 1).checked_mul(ew)?.checked_add(win)? > nb * 8 {
+        return None;
+    }
+    let dst_raw = match a.dst {
+        VarOffset::Ff(o) => o,
+        VarOffset::Comb(_) => return None,
+    };
+    let cur_off = a.dst_ff_current_offset;
+    if cur_off < 0 || dst_raw < 0 {
+        return None;
+    }
+    let packed = dst_raw == cur_off;
+    let vmask = width_mask(win);
+    let idx = emit_expr(&ds.index_expr)?;
+    let rhs = emit_expr_root(&a.expr)?;
+    let d = next_wide_tmp();
+    let reg = format!("_w{d}");
+    let mut body = format!(
+        "uint64_t _di{d} = (uint64_t)({idx}); if (_di{d} > {max}ull) _di{d} = {max}ull; \
+         uint64_t _bo{d} = _di{d} * {ew}ull; \
+         uint64_t _wi{d} = _bo{d} >> 6, _sh{d} = _bo{d} & 63ull; ",
+        max = ne - 1,
+    );
+    body.push_str(&emit_wide_ff_rmw_prologue(
+        &reg,
+        a.dst_width,
+        nb,
+        nw,
+        dst_raw,
+    ));
+    body.push_str(&format!(
+        "uint64_t _f{d} = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; \
+         {reg}[_wi{d}] = ({reg}[_wi{d}] & ~(0x{vmask:x}ULL << _sh{d})) | (_f{d} << _sh{d}); ",
+    ));
+    // A field of at most a word straddles only when it starts past the word
+    // boundary, so `_sh` is nonzero there and `64 - _sh` is a legal count.
+    if win > 1 {
+        body.push_str(&format!(
+            "if (_sh{d} + {win}ull > 64ull) {{ uint64_t _up{d} = 64ull - _sh{d}; \
+             {reg}[_wi{d} + 1] = ({reg}[_wi{d} + 1] & ~(0x{vmask:x}ULL >> _up{d})) \
+             | (_f{d} >> _up{d}); }} ",
+        ));
+    }
+    body.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
+    Some(format!("{{ {body} }}"))
 }
 
 /// Runtime whole-element write into a packed wide FF (`ff[idx] <= v` on an
@@ -4382,7 +4656,13 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
     let entry_start = lines
         .iter()
         .enumerate()
-        .position(|(i, l)| i > last_chunk && l.starts_with(ENTRY_ATTR))?;
+        .position(|(i, l)| i > last_chunk && l.starts_with(ENTRY_SECTION_MARKER))
+        .or_else(|| {
+            lines
+                .iter()
+                .enumerate()
+                .position(|(i, l)| i > last_chunk && l.starts_with(ENTRY_ATTR))
+        })?;
 
     let header = &lines[..chunk_starts[0]];
     let entries = &lines[entry_start..];
@@ -4414,13 +4694,48 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
         return None;
     }
 
+    // Balance by BYTES, not chunk count: chunk sizes span orders of magnitude
+    // (a wide decode table is one chunk hundreds of times its neighbours), so
+    // an index split hands one unit most of the source while the rest idle.
+    let line_bytes = |i: usize| lines[i].len() + 1;
+    let chunk_size: Vec<usize> = chunk_starts
+        .iter()
+        .enumerate()
+        .map(|(k, &start)| {
+            let end = chunk_starts.get(k + 1).copied().unwrap_or(entry_start);
+            (start..end).map(line_bytes).sum::<usize>()
+        })
+        .collect();
+    // The entry section is not a chunk but unit 0 compiles all of it, so
+    // leaving it out of the balance makes unit 0 finish last.
+    let entry_bytes: usize = (entry_start..lines.len()).map(line_bytes).sum();
+    let total: usize = chunk_size.iter().sum::<usize>() + entry_bytes;
+    // `bound[p]` is the first chunk of unit `p`.  Each unit takes its share of
+    // what is LEFT, so an oversized chunk claims its unit and the rest
+    // re-divide the remainder.  The inner guard keeps every unit non-empty.
+    let mut bound = Vec::with_capacity(n);
+    bound.push(0usize);
+    let mut k = 0usize;
+    let mut remaining = total;
+    for part in 0..n - 1 {
+        let target = remaining / (n - part);
+        let reserved = n - 1 - part;
+        let mut taken = if part == 0 { entry_bytes } else { 0 };
+        while k < chunk_starts.len() - reserved && taken < target {
+            taken += chunk_size[k];
+            k += 1;
+        }
+        remaining -= taken;
+        bound.push(k);
+    }
+
     let mut units = Vec::with_capacity(n);
     for part in 0..n {
-        let lo = chunk_starts[chunk_starts.len() * part / n];
+        let lo = chunk_starts[bound[part]];
         let hi = if part + 1 == n {
             entry_start
         } else {
-            chunk_starts[chunk_starts.len() * (part + 1) / n]
+            chunk_starts[bound[part + 1]]
         };
         let mut out: Vec<String> = Vec::with_capacity(header.len() + decls.len() + (hi - lo) + 16);
         for l in header {
@@ -4447,6 +4762,10 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
 }
 
 const ENTRY_ATTR: &str = "__attribute__((visibility(\"default\")))";
+/// Written once, right after the last chunk function.  Everything below it is
+/// reachable only from the entry unit; locating the boundary by the first
+/// exported function would strand the `static` compare helpers elsewhere.
+const ENTRY_SECTION_MARKER: &str = "// AOT-C entry section; keep with the entry unit.";
 const WIDEOPS_DEF: &str = "veryl_wideops_t veryl_wideops;";
 const WIDEOPS_SET: &str = "void veryl_set_wideops(";
 const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
@@ -4954,6 +5273,63 @@ fn max_stmt_bytes() -> usize {
         * 1024
 }
 
+/// Bytes of dispatcher per emitted function.  Host-compiler time is not
+/// monotonic in function size — 4.6 MB took 51 s, 1.2 MB parts 59 s, and only
+/// below ~0.5 MB did it drop (29 s) — and a byte target keeps the layout a
+/// function of the text, so the artifact hash does not move with the design.
+const ENTRY_PART_BYTES: usize = 192 * 1024;
+
+/// Don't split a dispatcher that was never going to be expensive: the extra
+/// calls are free, but the emitted source and the .so both grow a little.
+const ENTRY_SPLIT_MIN_BYTES: usize = 512 * 1024;
+
+/// Lay the dispatcher's top-level units out over one or more functions and
+/// return the C for all of them.
+fn split_entry_function(prologue: &str, units: &[String], cg_dbg: bool) -> String {
+    const SIG: &str = "(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, \
+                       uint64_t *__restrict__ write_log, intptr_t ff_delta)";
+    const ARGS: &str = "(ff_values, comb_values, write_log, ff_delta)";
+    let total: usize = units.iter().map(String::len).sum();
+    // The debug prologue's counters are function-scope statics that the units
+    // reference, so that build stays whole.
+    // `VERYL_AOT_C_ENTRY_SPLIT=0` keeps one function, for A/B and bisection.
+    let split = total > ENTRY_SPLIT_MIN_BYTES
+        && !cg_dbg
+        && prologue.is_empty()
+        && std::env::var("VERYL_AOT_C_ENTRY_SPLIT").as_deref() != Ok("0");
+    if !split {
+        let mut out = format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{prologue}");
+        for u in units {
+            out.push_str(u);
+        }
+        out.push_str("}\n");
+        return out;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for u in units {
+        cur.push_str(u);
+        if cur.len() >= ENTRY_PART_BYTES {
+            parts.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        parts.push(cur);
+    }
+    let mut out = String::with_capacity(total + parts.len() * 256);
+    for (k, part) in parts.iter().enumerate() {
+        out.push_str(&format!(
+            "static __attribute__((noinline)) void veryl_aot_eval_p{k}{SIG} {{\n{part}}}\n\n"
+        ));
+    }
+    out.push_str(&format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n"));
+    for k in 0..parts.len() {
+        out.push_str(&format!("    veryl_aot_eval_p{k}{ARGS};\n"));
+    }
+    out.push_str("}\n");
+    out
+}
+
 /// Full C source for a comb statement sequence.  Signature matches the
 /// Cranelift FuncPtr ABI: `void veryl_aot_eval(uint8_t *ff, uint8_t
 /// *comb, uint64_t *log, intptr_t ff_delta)`.  Comb-target writes store
@@ -5348,6 +5724,8 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             body.push_str(cb);
             body.push_str("}\n\n");
         }
+        body.push_str(ENTRY_SECTION_MARKER);
+        body.push('\n');
         // Const-prefix chunks go to a separate run-once entry: their inputs
         // never change, so the runtime (Ir::const_cone_done) calls this once per
         // simulator instance and the main entry skips them every settle.
@@ -5425,15 +5803,16 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             f.push_str("    return 1;\n}\n\n");
             body.push_str(&f);
         }
-        body.push_str(
-            "__attribute__((visibility(\"default\")))\n\
-             void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
-        );
+        // The dispatcher is built as a list of independent top-level units —
+        // one guarded cone segment or one bare chunk call each — so
+        // `split_entry_function` can lay them out across several functions.
+        let mut entry_units: Vec<String> = Vec::new();
+        let mut entry_prologue = String::new();
         // Emit-time debug (VERYL_CONE_GATE_DIAG=1 at emit): per-segment
         // skip/run counters printed every ~1M evals.  Statics are fine for a
         // debug build of the artifact.
         if cg_dbg && !guards.is_empty() {
-            body.push_str(&format!(
+            entry_prologue.push_str(&format!(
                 "    static unsigned long long cg_sk[{n}], cg_rn[{n}]; static unsigned long long cg_calls;\n\
                  \x20   static const unsigned cg_stoff[{n}] = {{{offs}}};\n\
                  \x20   uint8_t *cg_st[{n}]; for (int z = 0; z < {n}; z++) cg_st[z] = comb_values + cg_stoff[z];\n\
@@ -5453,6 +5832,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         let mut gi = 0usize;
         let mut i = const_chunks;
         while i < chunks.len() {
+            let mut unit = String::new();
             if gi < guards.len() && guards[gi].0 == i {
                 let (k1, k2, s) = guards[gi];
                 let st = s.state_off as usize;
@@ -5468,7 +5848,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 // check, shadow/replay refresh) is skipped too — an off
                 // segment costs exactly the plain chunk calls, mirroring the
                 // Rust-side `before_run`/`refresh` early returns.
-                body.push_str(&format!(
+                unit.push_str(&format!(
                     "    {{ uint8_t *cgst = comb_values + {st:#x};\n\
                      \x20     int cg_run = 1;\n\
                      \x20     int cg_off = cgst[2];\n\
@@ -5481,18 +5861,18 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                     decay = s.off_decay,
                 ));
                 if cg_dbg {
-                    body.push_str(&format!("          cg_sk[{gi}]++;\n"));
+                    unit.push_str(&format!("          cg_sk[{gi}]++;\n"));
                 }
                 let mut acc = 0usize;
                 for &(a, b) in &s.replay {
                     let l = (b - a) as usize;
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "          __builtin_memcpy(comb_values + {a:#x}, comb_values + {src:#x}, {l});\n",
                         src = replay_abs + acc,
                     ));
                     acc += l;
                 }
-                body.push_str(
+                unit.push_str(
                     "        } else {\n\
                      \x20         uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
                      \x20         if (++cg_stk >= 1024u) cgst[2] = 1;\n\
@@ -5505,7 +5885,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let mut acc = 0usize;
                 for &(a, b) in &s.backedge {
                     let l = (b - a) as usize;
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
                         dst = prerun_abs + acc,
                     ));
@@ -5514,24 +5894,24 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let mut acc = 0usize;
                 for &(a, b) in &s.compare_pre {
                     let l = (b - a) as usize;
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
                         dst = pre_shadow_abs + acc,
                     ));
                     acc += l;
                 }
-                body.push_str("        }\n");
+                unit.push_str("        }\n");
                 for k in k1..k2 {
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "        veryl_aot_chunk_{k}(ff_values, comb_values, write_log);\n",
                     ));
                 }
-                body.push_str("        if (!cg_off) {\n        { int cg_conv = 1;\n");
+                unit.push_str("        if (!cg_off) {\n        { int cg_conv = 1;\n");
                 let mut acc = 0usize;
                 for (ri, &(a, b)) in s.backedge.iter().enumerate() {
                     let l = (b - a) as usize;
                     if cg_dbg {
-                        body.push_str(&format!(
+                        unit.push_str(&format!(
                             "          if (cg_conv && __builtin_memcmp(comb_values + {pre:#x}, comb_values + {a:#x}, {l})) {{ cg_conv = 0; cgst[3] = {ri_b}; \
                              if ((cg_calls & 0x3fff) == 1) __builtin_printf(\"[cgconv] seg_state={st:#x} range={ri} off={a:#x} pre=%016llx post=%016llx\\n\", *(unsigned long long*)(comb_values + {pre:#x}), *(unsigned long long*)(comb_values + {a:#x})); }}\n",
                             pre = prerun_abs + acc,
@@ -5540,19 +5920,19 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                             ri = ri,
                         ));
                     } else {
-                        body.push_str(&format!(
+                        unit.push_str(&format!(
                             "          cg_conv = cg_conv && !__builtin_memcmp(comb_values + {pre:#x}, comb_values + {a:#x}, {l});\n",
                             pre = prerun_abs + acc,
                         ));
                     }
                     acc += l;
                 }
-                body.push_str("          cgst[1] = (uint8_t)cg_conv; }\n");
+                unit.push_str("          cgst[1] = (uint8_t)cg_conv; }\n");
                 let mut acc = 0usize;
                 for &(is_ff, a, b) in &s.compare {
                     let l = (b - a) as usize;
                     let buf = if is_ff { "ff_values" } else { "comb_values" };
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "        __builtin_memcpy(comb_values + {dst:#x}, {buf} + {a:#x}, {l});\n",
                         dst = shadow_abs + acc,
                     ));
@@ -5561,26 +5941,27 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let mut acc = 0usize;
                 for &(a, b) in &s.replay {
                     let l = (b - a) as usize;
-                    body.push_str(&format!(
+                    unit.push_str(&format!(
                         "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
                         dst = replay_abs + acc,
                     ));
                     acc += l;
                 }
                 if cg_dbg {
-                    body.push_str(&format!("        cg_rn[{gi}]++;\n"));
+                    unit.push_str(&format!("        cg_rn[{gi}]++;\n"));
                 }
-                body.push_str("        cgst[0] = 1;\n        }\n      }\n    }\n");
+                unit.push_str("        cgst[0] = 1;\n        }\n      }\n    }\n");
                 gi += 1;
                 i = k2;
             } else {
-                body.push_str(&format!(
+                unit.push_str(&format!(
                     "    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n",
                 ));
                 i += 1;
             }
+            entry_units.push(unit);
         }
-        body.push_str("}\n");
+        body.push_str(&split_entry_function(&entry_prologue, &entry_units, cg_dbg));
     }
     if comb_noslp {
         // The marker line is the cheapest way to carry the verdict to
@@ -5593,6 +5974,391 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         );
     }
     Some(body)
+}
+
+// ---------------------------------------------------------------------------
+// Constant decode tables
+//
+// A decoder that only ever assigns constants is a lookup table spelled as
+// control flow.  Nested decoders multiply out into one index, and an arm
+// driving several signals becomes one row so a lookup lands contiguously.
+// Left as branches a wide decoder costs megabytes of C, and host-compiler
+// time grows faster still — one such statement can be most of a cold start.
+
+/// One selector of a decode table.  Its axis spans `maxv + 1` slots an arm
+/// can reach, plus one for "no arm matched" — which every value above `maxv`
+/// folds onto, so the index is total however dirty the selector is.
+struct DecodeAxis<'a> {
+    sel: &'a ProtoExpression,
+    maxv: u64,
+}
+
+/// The decision tree behind a decode table.  A `Branch` tests the axis at its
+/// own depth, so the axis order is the nesting order and a `Leaf` above the
+/// last axis is simply constant along the axes below it.
+enum DecodeNode {
+    /// One constant per destination, in the destinations' fixed order.
+    Leaf(Vec<u64>),
+    Branch {
+        arms: Vec<(u64, DecodeNode)>,
+        default: Box<DecodeNode>,
+    },
+}
+
+#[derive(Default)]
+struct DecodeScan<'a> {
+    /// The stores every leaf must repeat, in order, differing only in their
+    /// constants.  An arm writing a different set of signals is a different
+    /// row shape, which one table cannot hold.
+    anchor: Vec<&'a ProtoAssignStatement>,
+    axes: Vec<DecodeAxis<'a>>,
+    leaves: usize,
+}
+
+/// Nesting depth of selectors a table may span.  Each one multiplies the
+/// entry count, so the byte ceiling below is the real limit; this only keeps
+/// a pathological tree from being walked at all.
+const DECODE_TABLE_MAX_AXES: usize = 4;
+/// Ceiling on the emitted table, in bytes of rodata.  The table is read at one
+/// unpredictable index per settle, so it competes with the comb buffer for
+/// D-cache: half a typical L1d measured best — 256 KiB turned a 3% win into a
+/// 2% loss and 4 KiB gave back 1%.  Declining still emits the arm bodies, so a
+/// too-wide selector leaves a cascade over per-arm tables.
+const DECODE_TABLE_MAX_BYTES: usize = 16 * 1024;
+
+fn decode_table_max_bytes() -> usize {
+    #[cfg(test)]
+    if let Some(v) = TEST_DECODE_TABLE_BYTES.with(|c| c.get()) {
+        return v;
+    }
+    static V: OnceLock<usize> = OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("VERYL_AOT_C_DECODE_TABLE_KB")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .map_or(DECODE_TABLE_MAX_BYTES, |kb| kb * 1024)
+    })
+}
+
+// Thread-local so a test that pins the ceiling cannot perturb the tests
+// running beside it — the env var is process-global and libtest is
+// multi-threaded (same reasoning as `TEST_TU_SPLIT`).
+#[cfg(test)]
+thread_local! {
+    static TEST_DECODE_TABLE_BYTES: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+}
+/// Fewest leaves worth replacing.  Below this the arms are cheaper than the
+/// load, and the table is mostly its own overhead.
+const DECODE_TABLE_MIN_LEAVES: usize = 8;
+/// How many entries a table may hold per leaf it replaces.  Sparse selector
+/// values leave holes that repeat the default; past this the table is padding.
+const DECODE_TABLE_MAX_SPREAD: usize = 4;
+
+/// `VERYL_AOT_C_DECODE_TABLE=0` keeps the cascade, for A/B and bisection.
+fn decode_table_enabled() -> bool {
+    static V: OnceLock<bool> = OnceLock::new();
+    *V.get_or_init(|| std::env::var("VERYL_AOT_C_DECODE_TABLE").as_deref() != Ok("0"))
+}
+
+/// The width of a selector usable as a table index: a plain read, narrow
+/// enough that its whole range is a table dimension.
+fn decode_selector_width(sel: &ProtoExpression) -> Option<usize> {
+    match sel {
+        ProtoExpression::Variable {
+            dynamic_select: None,
+            width,
+            ..
+        } if *width >= 1 && *width <= 32 => Some(*width),
+        _ => None,
+    }
+}
+
+/// The constant one store writes, as it lands in the destination — `None`
+/// unless it is a plain scalar comb store of a constant.
+fn decode_store_value(a: &ProtoAssignStatement) -> Option<u64> {
+    if a.dst.is_ff()
+        || a.select.is_some()
+        || a.dynamic_select.is_some()
+        || a.rhs_select.is_some()
+        || a.dst_width == 0
+        || a.dst_width > 64
+    {
+        return None;
+    }
+    let VarOffset::Comb(off) = a.dst else {
+        return None;
+    };
+    if off < 0 {
+        return None;
+    }
+    // A store that sign-extends a narrow RHS writes bits the constant does
+    // not carry; leave those to the store paths that implement it.
+    if a.expr.store_sign_extend_from(a.dst_width).is_some() {
+        return None;
+    }
+    // Take the constant through the same masking `emit_value` applies, so the
+    // entry is what the arm would have stored.
+    let ProtoExpression::Value {
+        value: Value::U64(v),
+        width,
+        ..
+    } = &a.expr
+    else {
+        return None;
+    };
+    if v.mask_xz != 0 || (v.width == 0 && v.payload != 0) {
+        return None;
+    }
+    let emitted_width = (*width).min(64);
+    Some(v.payload & width_mask(emitted_width) & width_mask(a.dst_width))
+}
+
+/// One table row: the constants a leaf writes, checked against the row shape
+/// the first leaf established.
+fn decode_leaf_row<'a>(block: &'a [ProtoStatement], scan: &mut DecodeScan<'a>) -> Option<Vec<u64>> {
+    // An empty arm stores nothing, so it has no row; it also must not be
+    // mistaken for "no row shape established yet".
+    if block.is_empty() {
+        return None;
+    }
+    let mut stores = Vec::with_capacity(block.len());
+    let mut row = Vec::with_capacity(block.len());
+    for stmt in block {
+        let ProtoStatement::Assign(a) = stmt else {
+            return None;
+        };
+        row.push(decode_store_value(a)?);
+        stores.push(a);
+    }
+    if scan.anchor.is_empty() {
+        scan.anchor = stores;
+    } else if scan.anchor.len() != stores.len()
+        || scan
+            .anchor
+            .iter()
+            .zip(&stores)
+            .any(|(first, s)| first.dst != s.dst || first.dst_width != s.dst_width)
+    {
+        return None;
+    }
+    Some(row)
+}
+
+fn scan_decode_node<'a>(
+    block: &'a [ProtoStatement],
+    depth: usize,
+    scan: &mut DecodeScan<'a>,
+) -> Option<DecodeNode> {
+    // A nested decoder is the arm's only statement; anything else is a row of
+    // stores.  An arm that stores nothing leaves its destinations as they
+    // were, which no table entry can express — `decode_leaf_row` rejects the
+    // empty block because the row shape can never match.
+    if let [stmt] = block {
+        match stmt {
+            ProtoStatement::SequentialBlock(inner) => {
+                return scan_decode_node(inner, depth, scan);
+            }
+            ProtoStatement::If(x) => {
+                return scan_decode_chain(&collect_eq_chain(x, 1)?, depth, scan);
+            }
+            ProtoStatement::Case(c) => {
+                return scan_decode_chain(&case_as_eq_chain(c)?, depth, scan);
+            }
+            _ => {}
+        }
+    }
+    let row = decode_leaf_row(block, scan)?;
+    scan.leaves += 1;
+    Some(DecodeNode::Leaf(row))
+}
+
+fn scan_decode_chain<'a>(
+    chain: &EqChain<'a>,
+    depth: usize,
+    scan: &mut DecodeScan<'a>,
+) -> Option<DecodeNode> {
+    if depth >= DECODE_TABLE_MAX_AXES {
+        return None;
+    }
+    let width = decode_selector_width(chain.selector)?;
+    match scan.axes.get(depth) {
+        // Depth is the axis, so a nesting that reorders its selectors — or
+        // revisits one already spent — is not a rectangular table.
+        Some(axis) if !same_var_read(axis.sel, chain.selector) => return None,
+        Some(_) => {}
+        None => scan.axes.push(DecodeAxis {
+            sel: chain.selector,
+            maxv: 0,
+        }),
+    }
+    let mut arms = Vec::with_capacity(chain.arms.len());
+    for arm in &chain.arms {
+        // A value outside the selector's range never matches; it would still
+        // stretch the axis past the range an index can reach.
+        if width < 64 && arm.value >= (1u64 << width) {
+            return None;
+        }
+        let node = scan_decode_node(arm.body, depth + 1, scan)?;
+        scan.axes[depth].maxv = scan.axes[depth].maxv.max(arm.value);
+        arms.push((arm.value, node));
+    }
+    let default = Box::new(scan_decode_node(chain.default, depth + 1, scan)?);
+    Some(DecodeNode::Branch { arms, default })
+}
+
+/// Write the sub-table `out` — the rows whose outer indices are already fixed
+/// — from the tree below `depth`.  `out` holds `row` values per entry.
+fn fill_decode_table(node: &DecodeNode, depth: usize, dims: &[u64], row: usize, out: &mut [u64]) {
+    match node {
+        DecodeNode::Leaf(v) => {
+            for entry in out.chunks_exact_mut(row) {
+                entry.copy_from_slice(v);
+            }
+        }
+        DecodeNode::Branch { arms, default } => {
+            let dim = dims[depth] as usize;
+            let stride = out.len() / dim;
+            // Every slot no arm claims takes the default — including the
+            // holes between sparse arm values and the "no arm matched" slot.
+            for slot in 0..dim {
+                fill_decode_table(
+                    default,
+                    depth + 1,
+                    dims,
+                    row,
+                    &mut out[slot * stride..][..stride],
+                );
+            }
+            // Last first, so a value listed twice resolves to its first arm
+            // exactly as the comparisons would have.
+            for (value, child) in arms.iter().rev() {
+                let slot = *value as usize;
+                fill_decode_table(
+                    child,
+                    depth + 1,
+                    dims,
+                    row,
+                    &mut out[slot * stride..][..stride],
+                );
+            }
+        }
+    }
+}
+
+/// Emit a `case` / `if` cascade over constants as an indexed load from a
+/// `static const` table, or `None` when it is not one (or would not pay).
+fn emit_decode_table(stmt: &ProtoStatement) -> Option<String> {
+    let mut scan = DecodeScan::default();
+    let root = scan_decode_node(std::slice::from_ref(stmt), 0, &mut scan)?;
+    if scan.leaves < DECODE_TABLE_MIN_LEAVES || scan.axes.is_empty() || scan.anchor.is_empty() {
+        return None;
+    }
+    let row = scan.anchor.len();
+
+    // Slots per axis: the values an arm claims, plus the one every other
+    // value clamps onto.  That last slot is what makes the load in-bounds for
+    // a selector carrying bits above its declared width — which the arms
+    // would have missed too, landing on the same default.
+    let mut hits = Vec::with_capacity(scan.axes.len());
+    let mut entries: u64 = 1;
+    for axis in &scan.axes {
+        let hit = axis.maxv.checked_add(1)?;
+        hits.push(hit);
+        entries = entries.checked_mul(hit.checked_add(1)?)?;
+        // An element is at least one byte, so this bounds the table already.
+        if entries as usize > decode_table_max_bytes() {
+            return None;
+        }
+    }
+    let dims: Vec<u64> = hits.iter().map(|h| h + 1).collect();
+    if entries as usize > scan.leaves.saturating_mul(DECODE_TABLE_MAX_SPREAD) + 64 {
+        return None;
+    }
+
+    let cell_count = entries.checked_mul(row as u64)?;
+    if cell_count as usize > decode_table_max_bytes() {
+        return None;
+    }
+    let mut cells = vec![0u64; cell_count as usize];
+    fill_decode_table(&root, 0, &dims, row, &mut cells);
+    let widest = cells.iter().copied().max().unwrap_or(0);
+    // One element type across the whole row: a row is read as a unit, so
+    // packing it tightly per destination would only trade the padding for
+    // alignment holes, at the cost of a second array per width.
+    let (elem_ty, elem_bytes) = match widest {
+        v if v <= u8::MAX as u64 => ("uint8_t", 1),
+        v if v <= u16::MAX as u64 => ("uint16_t", 2),
+        v if v <= u32::MAX as u64 => ("uint32_t", 4),
+        _ => ("uint64_t", 8),
+    };
+    if cell_count as usize * elem_bytes > decode_table_max_bytes() {
+        return None;
+    }
+
+    // The index, most-significant axis first, so the innermost selector walks
+    // adjacent rows.
+    let id = next_wide_tmp();
+    let mut pre = String::new();
+    let mut index = String::new();
+    let mut stride = entries;
+    for (n, axis) in scan.axes.iter().enumerate() {
+        stride /= dims[n];
+        let hit = hits[n];
+        let name = format!("_dti{id}_{n}");
+        pre.push_str(&format!(
+            "uint64_t {name} = (uint64_t)({sel}); {name} = {name} < {hit}ULL ? {name} : {hit}ULL; ",
+            sel = emit_expr(axis.sel)?,
+        ));
+        if !index.is_empty() {
+            index.push_str(" + ");
+        }
+        let scale = stride * row as u64;
+        if scale > 1 {
+            index.push_str(&format!("{name} * {scale}ULL"));
+        } else {
+            index.push_str(&name);
+        }
+    }
+
+    let table = format!(
+        "static const {elem_ty} _dtbl{id}[{cell_count}] = {{{}}}; ",
+        cells
+            .iter()
+            .map(|v| format!("{v:#x}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    // The entries are already masked to each destination's width, so the
+    // stores need no further masking on either path.
+    let mut store = String::new();
+    for (k, a) in scan.anchor.iter().enumerate() {
+        let VarOffset::Comb(off) = a.dst else {
+            return None;
+        };
+        let read = if k == 0 {
+            format!("_dtbl{id}[{index}]")
+        } else {
+            format!("_dtbl{id}[{index} + {k}]")
+        };
+        if is_localized(off) {
+            store.push_str(&format!("{nm} = (uint64_t){read}; ", nm = local_name(off)));
+        } else {
+            let cty = native_c_type(native_bytes(a.dst_width))?;
+            store.push_str(&format!(
+                "*(({cty}*)(comb_values + {off:#x})) = ({cty}){read}; "
+            ));
+        }
+    }
+    if diag_enabled() {
+        eprintln!(
+            "[decode_table] dst={:#x} axes={} entries={entries} row={row} elem={elem_ty} leaves={}",
+            scan.anchor[0].dst.raw(),
+            scan.axes.len(),
+            scan.leaves,
+        );
+    }
+    Some(format!("{{ {table}{pre}{store} }}"))
 }
 
 /// One terminated C statement from a `ProtoStatement`.  `None` if the
@@ -5615,6 +6381,12 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
 }
 
 fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
+    if matches!(stmt, ProtoStatement::If(_) | ProtoStatement::Case(_))
+        && decode_table_enabled()
+        && let Some(s) = emit_decode_table(stmt)
+    {
+        return Some(s);
+    }
     match stmt {
         ProtoStatement::Assign(a) => {
             // A rhs_select on a plain variable is a bit-select on that variable
@@ -5657,11 +6429,22 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // Handled inline below for dst_width <= 128 by producing a
             // sign-extended rhs (`se_from`); wider signed stores stay on
             // Cranelift (none occur in practice).
+            //
+            // A dst bit-select no wider than the RHS discards every extended
+            // bit — `visible_store_sign_extend`'s rule, restated because the
+            // fold above can replace the RHS.
             let se_from = if eff_rhs_select.is_none() {
                 eff_expr.store_sign_extend_from(a.dst_width)
             } else {
                 None
             };
+            let se_from = se_from.filter(|from_width| {
+                let landed = match a.select {
+                    Some((hi, lo)) if a.dynamic_select.is_none() => hi.saturating_sub(lo) + 1,
+                    _ => a.dst_width,
+                };
+                landed > *from_width
+            });
             // FF stores stay on Cranelift because emit_event_ff_assign does
             // not sign-extend; comb stores are covered at every width.
             if se_from.is_some() && a.dst.is_ff() {
@@ -5757,11 +6540,6 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // rhs_select (field extract + store); the rhs_select + dst-select
             // combination stays on Cranelift.
             if a.dst_width > 128 || (a.dst_width > 64 && eff_expr.builds_wide_pointer()) {
-                // A sign-extending RHS combined with a dst bit-select isn't
-                // modelled here — only the plain-store arm sign-extends.
-                if se_from.is_some() && a.select.is_some() {
-                    return None;
-                }
                 let VarOffset::Comb(store_off) = a.dst else {
                     return None;
                 };
@@ -5821,19 +6599,41 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     // <=64-bit field → scalar word RMW (see
                     // emit_wide_narrow_field_store); wider fields fall through.
                     if nbits <= 64 {
-                        return emit_wide_narrow_field_store(eff_expr, hi, lo, a.dst_width, |k| {
-                            format!(
-                                "(veryl_u64_ua*)(comb_values + {:#x})",
-                                store_off + (k as isize) * 8
-                            )
-                        });
+                        return emit_wide_narrow_field_store(
+                            eff_expr,
+                            hi,
+                            lo,
+                            a.dst_width,
+                            se_from,
+                            |k| {
+                                format!(
+                                    "(veryl_u64_ua*)(comb_values + {:#x})",
+                                    store_off + (k as isize) * 8
+                                )
+                            },
+                        );
                     }
                     // General multi-word field — full wide RMW; see
                     // emit_wide_select_rmw_store.
                     let mut pre = String::new();
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
+                    // Same sign extension as the scalar field path: fill from
+                    // the RHS's own width so the field's upper bits carry the
+                    // sign, then let the RMW take the low `nbits`.
+                    let src = match se_from {
+                        Some(w) => {
+                            let t = next_wide_tmp();
+                            pre.push_str(&format!(
+                                "uint64_t _w{t}[{nw}]; \
+                                 vw_sext_copy((uint8_t*)_w{t}, {src}, {w}u, {nb}u); ",
+                                src = r.addr,
+                            ));
+                            format!("((uint8_t*)_w{t})")
+                        }
+                        None => r.addr.clone(),
+                    };
                     return Some(emit_wide_select_rmw_store(
-                        &r.addr,
+                        &src,
                         pre,
                         &dst,
                         nw,
@@ -6326,7 +7126,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     // <=64-bit field → scalar word RMW of the runtime-addressed
                     // element; see emit_wide_narrow_field_store.
                     if nbits <= 64 {
-                        emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, |k| {
+                        emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, None, |k| {
                             format!("(veryl_u64_ua*)(_pa + {})", k * 8)
                         })?
                     } else {
@@ -7563,6 +8363,32 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     let body = format!("((__uint128_t)(({xm}) {c_op} ({ym})))");
                     return Some(if w < 128 { mask_u128(&body, w) } else { body });
                 }
+                // Add/Sub/Mul are modular, so signedness is invisible once
+                // both operands reach `width`.  Only an operand narrower than
+                // the result needs its sign bits filled in.
+                if expr_context.signed
+                    && expr_context.width > 64
+                    && expr_context.width <= 128
+                    && matches!(op, Op::Add | Op::Sub | Op::Mul)
+                {
+                    let w = expr_context.width;
+                    let sext = |s: &str, sw: usize| -> String {
+                        if sw == 0 || sw >= w {
+                            format!("((__uint128_t)({s}))")
+                        } else {
+                            let sh = 128 - sw;
+                            format!(
+                                "((__uint128_t)(((__int128_t)(((__uint128_t)({s})) << {sh})) >> {sh}))"
+                            )
+                        }
+                    };
+                    let body = format!(
+                        "((__uint128_t)(({xe}) {c_op} ({ye})))",
+                        xe = sext(&xs, x.width()),
+                        ye = sext(&ys, y.width()),
+                    );
+                    return Some(if w < 128 { mask_u128(&body, w) } else { body });
+                }
                 let wide_truncates = match op {
                     Op::LogicShiftL | Op::ArithShiftL => x.width() <= 64,
                     _ => false,
@@ -7961,8 +8787,14 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             // for nested exprs `expr.width()`), not the ignored `_elem_width`.
             // Limit: total result width must fit in u64.  A repeat>1 element is
             // duplicated textually; gcc -O3 CSEs the repeated loads.
-            if *width == 0 || *width > 128 {
+            if *width > 128 {
                 return None;
+            }
+            // A zero-width concatenation (`{0{x}}`) contributes no bits.
+            // Emitting the constant keeps a module that merely mentions one on
+            // the AOT-C path; consumers size the element by `width`.
+            if *width == 0 {
+                return concat_evaluates_empty(elements).then(|| "0ULL".to_string());
             }
             // For total widths >64 the accumulator must be __uint128_t
             // to hold the full result.  Sub-element widths still fit in
@@ -8020,6 +8852,9 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 let sign_str = emit_expr(&elements[0].0)?;
                 let mut lower_width = 0usize;
                 for (sub, repeat, elem_width) in &elements[1..] {
+                    if concat_elem_is_empty(sub, *repeat) {
+                        continue;
+                    }
                     let sub_width = sub.width();
                     if sub_width == 0 || sub_width > 128 {
                         return None;
@@ -8102,6 +8937,9 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 }
             }
             for (sub, repeat, elem_width) in elements {
+                if concat_elem_is_empty(sub, *repeat) {
+                    continue;
+                }
                 // An unsized literal ('0/'1) reports width 0; the element
                 // tuple's declared width is the authoritative slot size.
                 let sub_width = if sub.width() == 0 {
@@ -9006,6 +9844,199 @@ mod tests {
         assert!(s.contains("ff_values + 0x40")); // RMW read of the slot
     }
 
+    /// Run an emitted event function over a hand-built `WriteLogBuffer` and
+    /// return the wide entries it pushed, as `(offset, payload_bytes)`.
+    fn run_wide_ff_event(src: &str, what: &str, ff: &mut [u8]) -> Option<Vec<(u32, Vec<u8>)>> {
+        use crate::ir::write_log::{
+            WRITE_LOG_WIDE_ENTRY_OFFSET_NB, WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
+            WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_WIDE_ENTRY_SIZE,
+            WRITE_LOG_WIDE_OFFSET_COUNT, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
+        };
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_{what}_{}", std::process::id()));
+        let module = compile_for_test(&tmp, src, what)?;
+        // The emitted push reads only the entries pointer and the count, so a
+        // stub buffer with those two fields set is enough to observe it.
+        let esz = WRITE_LOG_WIDE_ENTRY_SIZE as usize;
+        let mut entries = vec![0u8; esz * 8];
+        let mut log = vec![0u8; 256];
+        let eptr = entries.as_mut_ptr();
+        log[WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR as usize
+            ..WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR as usize + 8]
+            .copy_from_slice(&(eptr as usize).to_le_bytes());
+        let mut comb = vec![0u8; 256];
+        unsafe {
+            (module.func)(ff.as_mut_ptr(), comb.as_mut_ptr(), log.as_mut_ptr(), 0);
+        }
+        let count = u32::from_le_bytes(
+            log[WRITE_LOG_WIDE_OFFSET_COUNT as usize..WRITE_LOG_WIDE_OFFSET_COUNT as usize + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let out = (0..count)
+            .map(|i| {
+                let e = &entries[i * esz..(i + 1) * esz];
+                let off = u32::from_le_bytes(
+                    e[WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET as usize
+                        ..WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET as usize + 4]
+                        .try_into()
+                        .unwrap(),
+                );
+                let nb = e[WRITE_LOG_WIDE_ENTRY_OFFSET_NB as usize] as usize;
+                let p = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD as usize;
+                (off, e[p..p + nb].to_vec())
+            })
+            .collect();
+        let _ = fs::remove_dir_all(&tmp);
+        Some(out)
+    }
+
+    #[test]
+    fn emit_event_ff_wide_static_field_merges_into_the_logged_register() {
+        // `ff200[34:0] <= v`: the field spans no whole word, so the emit must
+        // read, merge [34:0], and log the WHOLE merged width.
+        if !cc_available() {
+            eprintln!("emit_event_ff_wide_static_field_merges_into_the_logged_register: no cc");
+            return;
+        }
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 200,
+            select: Some((34, 0)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x5_a5a5_a5a5, 35),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let s = emit_stmt(&ProtoStatement::Assign(a.clone())).expect("wide field store must emit");
+        assert!(s.contains("ff_values + 0x0"), "must read the register: {s}");
+        let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
+
+        // Pre-load the register with a pattern the merge must preserve outside
+        // [34:0] — including the rest of the word the field sits in.  A
+        // committed register carries nothing at or above its width.
+        let mut ff = vec![0u8; 64];
+        ff[..25].fill(0xcc);
+        let Some(entries) = run_wide_ff_event(&src, "wff_static", &mut ff) else {
+            return;
+        };
+        assert_eq!(entries.len(), 1, "one wide entry for a 200-bit register");
+        let (off, payload) = &entries[0];
+        assert_eq!(*off, 0);
+        assert_eq!(payload.len(), 32, "200 bits rounds up to 4 words");
+        let lo = u64::from_le_bytes(payload[0..8].try_into().unwrap());
+        assert_eq!(lo & ((1u64 << 35) - 1), 0x5_a5a5_a5a5, "the field landed");
+        assert_eq!(
+            lo >> 35,
+            0xccccccccccccccccu64 >> 35,
+            "bits above 34 survived the merge"
+        );
+        assert_eq!(payload[8], 0xcc, "untouched words survived");
+        assert_eq!(payload[24], 0xcc, "the top in-width byte survived");
+        assert_eq!(&payload[25..32], &[0u8; 7], "nothing above the width");
+    }
+
+    #[test]
+    fn emit_event_ff_wide_dynamic_bit_merges_at_the_runtime_index() {
+        // `ff72[idx] <= bit`: a one-bit field at a runtime offset inside a
+        // register wider than a word.  The whole-element path strides by whole
+        // words and cannot express it.
+        if !cc_available() {
+            eprintln!("emit_event_ff_wide_dynamic_bit_merges_at_the_runtime_index: no cc");
+            return;
+        }
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 72,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(const_expr(70, 8)),
+                elem_width: 1,
+                window: 1,
+                num_elements: 72,
+            }),
+            rhs_select: None,
+            expr: const_expr(1, 1),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
+        let mut ff = vec![0u8; 32];
+        let Some(entries) = run_wide_ff_event(&src, "wff_dyn", &mut ff) else {
+            return;
+        };
+        assert_eq!(entries.len(), 1);
+        let (off, payload) = &entries[0];
+        assert_eq!(*off, 0);
+        assert_eq!(payload.len(), 16, "72 bits sits in the 128-bit size class");
+        let hi = u64::from_le_bytes(payload[8..16].try_into().unwrap());
+        assert_eq!(hi, 1u64 << (70 - 64), "bit 70 set, nothing else");
+        assert_eq!(
+            u64::from_le_bytes(payload[0..8].try_into().unwrap()),
+            0,
+            "the low word is untouched"
+        );
+    }
+
+    #[test]
+    fn emit_event_ff_wide_dynamic_field_keeps_the_bits_it_spills_past_the_width() {
+        // `ff72[idx +: 8]` at idx = 71 reaches past the declared 72, and those
+        // bits come from the VALUE — so the width clear must precede the merge.
+        if !cc_available() {
+            eprintln!("emit_event_ff_wide_dynamic_field_keeps_the_bits_it_spills: no cc");
+            return;
+        }
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 72,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(const_expr(71, 8)),
+                elem_width: 1,
+                window: 8,
+                num_elements: 72,
+            }),
+            rhs_select: None,
+            expr: const_expr(0xff, 8),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
+        let mut ff = vec![0u8; 32];
+        let Some(entries) = run_wide_ff_event(&src, "wff_spill", &mut ff) else {
+            return;
+        };
+        assert_eq!(entries.len(), 1);
+        let hi = u64::from_le_bytes(entries[0].1[8..16].try_into().unwrap());
+        assert_eq!(
+            hi,
+            0xffu64 << (71 - 64),
+            "all eight bits land, including the three past bit 71"
+        );
+    }
+
+    #[test]
+    fn emit_event_ff_wide_dynamic_field_outside_the_storage_declines() {
+        // Past the declared width is a merge; past the REGISTER is a buffer
+        // overrun, so that shape must bail to Cranelift.
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 72,
+            select: None,
+            dynamic_select: Some(ProtoDynamicBitSelect {
+                index_expr: Box::new(const_expr(0, 8)),
+                elem_width: 8,
+                window: 8,
+                num_elements: 17, // 16 * 8 + 8 = 136 > 128 bits of storage
+            }),
+            rhs_select: None,
+            expr: const_expr(1, 8),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        assert!(emit_stmt(&ProtoStatement::Assign(a)).is_none());
+    }
+
     #[test]
     fn emit_stmt_if_else() {
         use crate::ir::ProtoIfStatement;
@@ -9167,23 +10198,200 @@ mod tests {
         );
     }
 
+    /// Emit `assign` alone, run it over a 256-byte comb preloaded with
+    /// `src_bits` at offset 0, and return the destination's 32 bytes.
+    fn run_wide_field_store(
+        assign: ProtoStatement,
+        what: &str,
+        src_bits: u128,
+    ) -> Option<[u8; 32]> {
+        let src = emit_function(&[assign]).expect("the store must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_{what}_{}", std::process::id()));
+        let module = compile_for_test(&tmp, &src, what)?;
+        let mut ff = vec![0u8; 32];
+        let mut comb = vec![0u8; 256];
+        comb[0..16].copy_from_slice(&src_bits.to_le_bytes());
+        let mut log = vec![0u64; 32];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&comb[64..96]);
+        let _ = fs::remove_dir_all(&tmp);
+        Some(out)
+    }
+
+    /// Read `[hi:lo]` (at most 128 bits) out of a little-endian byte span.
+    fn field_of(bytes: &[u8; 32], hi: usize, lo: usize) -> u128 {
+        let mut v = 0u128;
+        for b in (lo..=hi).rev() {
+            v = (v << 1) | ((bytes[b / 8] >> (b % 8)) & 1) as u128;
+        }
+        v
+    }
+
     #[test]
-    fn emit_sign_extending_store_with_dst_select_declines() {
-        // The plain-store arm is the only one that sign-extends, so the same
-        // signed RHS combined with a dst bit-select must decline rather than
-        // store an unextended value.
-        let src = var_expr_signed(VarOffset::Comb(0), 100);
+    fn emit_sign_extending_store_fills_a_multi_word_dst_select() {
+        // A signed 100-bit RHS into a 111-bit field: bits 100..110 must carry
+        // the sign, which the unextended value would leave zero.
+        if !cc_available() {
+            eprintln!("emit_sign_extending_store_fills_a_multi_word_dst_select: no cc");
+            return;
+        }
         let assign = ProtoStatement::Assign(ProtoAssignStatement {
             dst: VarOffset::Comb(64),
             dst_width: 200,
-            select: Some((150, 40)),
+            select: Some((150, 40)), // 111-bit field
             dynamic_select: None,
             rhs_select: None,
-            expr: src,
+            expr: var_expr_signed(VarOffset::Comb(0), 100),
             dst_ff_current_offset: 0,
             token: dummy_token(),
         });
-        assert!(emit_function(&[assign]).is_none());
+        // -6 in 100-bit two's complement.
+        let neg6 = ((1u128 << 100) - 6) & ((1u128 << 100) - 1);
+        let Some(dst) = run_wide_field_store(assign, "wsx_multi", neg6) else {
+            return;
+        };
+        assert_eq!(field_of(&dst, 139, 40), neg6, "the value itself landed");
+        assert_eq!(
+            field_of(&dst, 150, 140),
+            (1u128 << 11) - 1,
+            "the field's bits above the RHS width carry the sign"
+        );
+        assert_eq!(field_of(&dst, 39, 0), 0, "below the field is untouched");
+        assert_eq!(field_of(&dst, 190, 151), 0, "above the field is untouched");
+    }
+
+    #[test]
+    fn emit_sign_extending_store_fills_a_single_word_dst_select() {
+        // Same rule for a field of at most a word, which takes the scalar
+        // read-modify-write path instead of the wide-op RMW.
+        if !cc_available() {
+            eprintln!("emit_sign_extending_store_fills_a_single_word_dst_select: no cc");
+            return;
+        }
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(64),
+            dst_width: 200,
+            select: Some((105, 66)), // 40-bit field
+            dynamic_select: None,
+            rhs_select: None,
+            expr: var_expr_signed(VarOffset::Comb(0), 8),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let Some(dst) = run_wide_field_store(assign, "wsx_single", 0xfb) else {
+            return; // 8-bit -5
+        };
+        assert_eq!(
+            field_of(&dst, 105, 66),
+            (1u128 << 40) - 5,
+            "-5 fills the whole 40-bit field, not just its low byte"
+        );
+        assert_eq!(field_of(&dst, 65, 0), 0, "below the field is untouched");
+    }
+
+    /// `{0{sub}}` — a replication whose count folded to zero.
+    fn zero_repeat_concat(sub: ProtoExpression) -> ProtoExpression {
+        ProtoExpression::Concatenation {
+            elements: vec![(Box::new(sub), 0, 1)],
+            width: 0,
+            expr_context: ctx(0, false),
+        }
+    }
+
+    #[test]
+    fn emit_concat_zero_repeat_element_contributes_no_bits() {
+        // `{a:8, {0{b}}, c:8}` is `{a, c}`, so `a` shifts by 8 and not by 8
+        // plus a phantom slot.
+        if !cc_available() {
+            eprintln!("emit_concat_zero_repeat_element_contributes_no_bits: cc unavailable");
+            return;
+        }
+        let e = ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(var_expr(VarOffset::Comb(0), 8)), 1, 8),
+                (
+                    Box::new(zero_repeat_concat(var_expr(VarOffset::Comb(8), 1))),
+                    1,
+                    0,
+                ),
+                (Box::new(var_expr(VarOffset::Comb(16), 8)), 1, 8),
+            ],
+            width: 16,
+            expr_context: ctx(16, false),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(32),
+            dst_width: 16,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: e,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign]).expect("a zero-repeat element must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_zrep_{}", std::process::id()));
+        let Some(module) = compile_for_test(
+            &tmp,
+            &src,
+            "emit_concat_zero_repeat_element_contributes_no_bits",
+        ) else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 64];
+        comb[0] = 0xa5; // a
+        comb[8] = 0x01; // b — must not reach the result
+        comb[16] = 0x3c; // c
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        assert_eq!(
+            u16::from_le_bytes(comb[32..34].try_into().unwrap()),
+            0xa53c,
+            "the zero-repeat element must occupy no bits"
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_concat_zero_width_node_alone_is_the_zero_constant() {
+        // `{0{b}}` standing on its own evaluates to a zero-WIDTH value, which
+        // `Value::concat` treats as the identity; the emit is the constant.
+        let e = zero_repeat_concat(var_expr(VarOffset::Comb(0), 1));
+        assert_eq!(
+            emit_expr(&e).expect("a zero-width concatenation must stay covered"),
+            "0ULL"
+        );
+    }
+
+    #[test]
+    fn emit_concat_declared_zero_width_with_real_elements_bails() {
+        // A node whose declared width disagrees with its contents must bail to
+        // Cranelift, not silently emit 0.
+        let e = ProtoExpression::Concatenation {
+            elements: vec![(Box::new(var_expr(VarOffset::Comb(0), 8)), 1, 8)],
+            width: 0,
+            expr_context: ctx(0, false),
+        };
+        assert!(
+            emit_expr(&e).is_none(),
+            "a zero width that contradicts the elements must not be trusted"
+        );
     }
 
     #[test]
@@ -9207,6 +10415,117 @@ mod tests {
             s.contains("<< 8"),
             "the literal still occupies its 8-bit slot: {s}"
         );
+    }
+
+    #[test]
+    fn emit_signed_wide_add_stays_covered_and_matches_expand() {
+        // Signedness is invisible here (the low 66 bits are modular), but the
+        // emitter used to bail every signed >64-bit arithmetic op.
+        if !cc_available() {
+            eprintln!("emit_signed_wide_add_stays_covered_and_matches_expand: cc unavailable");
+            return;
+        }
+        let mask66 = (1u128 << 66) - 1;
+        let add = ProtoExpression::Binary {
+            x: Box::new(var_expr_signed(VarOffset::Comb(0), 66)),
+            op: Op::Add,
+            y: Box::new(var_expr_signed(VarOffset::Comb(16), 66)),
+            width: 66,
+            expr_context: ctx(66, true),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(32),
+            dst_width: 66,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: add,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign]).expect("signed 66-bit add must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_swadd_{}", std::process::id()));
+        let Some(module) = compile_for_test(
+            &tmp,
+            &src,
+            "emit_signed_wide_add_stays_covered_and_matches_expand",
+        ) else {
+            return;
+        };
+        // -3 and +5 in 66-bit two's complement.
+        let a = mask66 - 2;
+        let b = 5u128;
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 64];
+        comb[0..16].copy_from_slice(&a.to_le_bytes());
+        comb[16..32].copy_from_slice(&b.to_le_bytes());
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        assert_eq!(read_u128(&comb, 32), 2, "-3 + 5 == 2 modulo 2^66");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn emit_signed_wide_add_sign_extends_a_narrow_operand() {
+        // The one case where signedness IS visible: an operand narrower than
+        // the result is sign-extended before the add (`expand(width, signed)`
+        // in eval_value_binary), so -1 in 8 bits must fill bits 8..65.
+        if !cc_available() {
+            eprintln!("emit_signed_wide_add_sign_extends_a_narrow_operand: cc unavailable");
+            return;
+        }
+        let add = ProtoExpression::Binary {
+            x: Box::new(var_expr_signed(VarOffset::Comb(0), 66)),
+            op: Op::Add,
+            y: Box::new(var_expr_signed(VarOffset::Comb(16), 8)),
+            width: 66,
+            expr_context: ctx(66, true),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(32),
+            dst_width: 66,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: add,
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        });
+        let src = emit_function(&[assign]).expect("signed 66-bit add must stay AOT-covered");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_swadds_{}", std::process::id()));
+        let Some(module) = compile_for_test(
+            &tmp,
+            &src,
+            "emit_signed_wide_add_sign_extends_a_narrow_operand",
+        ) else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut comb = vec![0u8; 64];
+        comb[0..16].copy_from_slice(&10u128.to_le_bytes());
+        comb[16] = 0xff; // 8-bit -1
+        let mut log = vec![0u64; 16];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        assert_eq!(
+            read_u128(&comb, 32),
+            9,
+            "the 8-bit -1 must sign-extend to 66 bits, not add 255"
+        );
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -11395,6 +12714,7 @@ mod tests {
             var_width: 32,
             var_native_bytes: 4,
             var_signed: false,
+            token: TokenRange::default(),
             range: ProtoForRange::Forward {
                 start: ProtoForBound::Const(0),
                 end: ProtoForBound::Const(8),
@@ -11419,6 +12739,7 @@ mod tests {
             var_width: 8,
             var_native_bytes: 1,
             var_signed: false,
+            token: TokenRange::default(),
             range: ProtoForRange::Forward {
                 start: ProtoForBound::Const(0),
                 end: ProtoForBound::Const(7),
@@ -11440,6 +12761,7 @@ mod tests {
             var_width: 32,
             var_native_bytes: 4,
             var_signed: false,
+            token: TokenRange::default(),
             range: ProtoForRange::Forward {
                 start: ProtoForBound::Const(0),
                 end: ProtoForBound::Dynamic(const_expr(8, 32)),
@@ -11463,6 +12785,7 @@ mod tests {
             var_width: 32,
             var_native_bytes: 4,
             var_signed: false,
+            token: TokenRange::default(),
             range: ProtoForRange::Reverse {
                 start: ProtoForBound::Const(0),
                 end: ProtoForBound::Const(8),
@@ -11484,6 +12807,7 @@ mod tests {
             var_width: 32,
             var_native_bytes: 4,
             var_signed: false,
+            token: TokenRange::default(),
             range: ProtoForRange::Stepped {
                 start: ProtoForBound::Const(1),
                 end: ProtoForBound::Const(64),
@@ -11934,6 +13258,119 @@ mod tests {
             assert_eq!(got, i as u32 + 1, "chunk {i} did not run");
         }
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn split_balances_units_by_bytes_not_by_chunk_count() {
+        // One chunk far larger than its neighbours is the real shape (a wide
+        // decode table), and an INDEX split gives its unit the bulk of the source.
+        let mut src = String::from(
+            "// AOT-C generated (noslp); do not edit.\n\
+             #include <stdint.h>\n\
+             typedef struct { int unused; } veryl_wideops_t;\n\
+             __attribute__((visibility(\"default\"))) veryl_wideops_t veryl_wideops;\n",
+        );
+        for i in 0..12 {
+            // Chunk 1 is a hundred times the others.
+            let reps = if i == 1 { 100 } else { 1 };
+            src.push_str(&format!("{CHUNK_FN_MARKER}{i}(void) {{\n"));
+            for _ in 0..reps {
+                src.push_str("  /* body body body body body body body body */\n");
+            }
+            src.push_str("}\n");
+        }
+        src.push_str(&format!("{ENTRY_ATTR}\nvoid veryl_aot_eval(void) {{}}\n"));
+
+        let units = split_translation_units(&src, 4).expect("stub must have the chunked shape");
+        assert_eq!(units.len(), 4);
+        // The giant chunk sets the floor; what matters is that the OTHER units
+        // are not also starved of the remaining chunks.
+        let big = units.iter().map(|u| u.len()).max().unwrap();
+        let rest: usize = units.iter().map(|u| u.len()).sum::<usize>() - big;
+        assert!(
+            rest > 0,
+            "the small chunks must be spread across the other units"
+        );
+        // Chunk 1 must be alone with as few neighbours as the boundary allows:
+        // the unit holding it must not also hold the tail of the chunk list.
+        let holder = units
+            .iter()
+            .position(|u| u.contains("veryl_aot_chunk_1(void)"))
+            .expect("the giant chunk must land somewhere");
+        assert!(
+            !units[holder].contains("veryl_aot_chunk_11(void)"),
+            "the byte split must move later chunks out of the giant chunk's unit"
+        );
+    }
+
+    // A `static` helper the entry calls sits between the last chunk and the
+    // entry; without the section marker the byte split can strand it.
+    #[test]
+    fn entry_section_marker_keeps_the_entry_helpers_with_the_entry() {
+        let mut src = String::from(
+            "// AOT-C generated; do not edit.\n\
+             #include <stdint.h>\n\
+             typedef struct { int unused; } veryl_wideops_t;\n\
+             __attribute__((visibility(\"default\"))) veryl_wideops_t veryl_wideops;\n",
+        );
+        for i in 0..12 {
+            src.push_str(&format!("{CHUNK_FN_MARKER}{i}(void) {{\n"));
+            src.push_str("  /* body body body body body body body body */\n}\n");
+        }
+        src.push_str(ENTRY_SECTION_MARKER);
+        src.push('\n');
+        src.push_str("static int cg_cmp_0(void) { return 1; }\n");
+        src.push_str(&format!(
+            "{ENTRY_ATTR}\nvoid veryl_aot_eval(void) {{ (void)cg_cmp_0(); }}\n"
+        ));
+
+        let units = split_translation_units(&src, 4).expect("stub must have the chunked shape");
+        let entry = units
+            .iter()
+            .find(|u| u.contains("void veryl_aot_eval(void)"))
+            .expect("some unit defines the entry");
+        assert!(
+            entry.contains("static int cg_cmp_0(void)"),
+            "the entry's own helper must travel with it"
+        );
+        assert_eq!(
+            units
+                .iter()
+                .filter(|u| u.contains("static int cg_cmp_0(void)"))
+                .count(),
+            1,
+            "and only with it"
+        );
+    }
+
+    // Below the threshold the dispatcher stays one function; above it the
+    // units are laid out over several, in order, losing none.
+    #[test]
+    fn entry_splits_only_when_it_is_large() {
+        let small: Vec<String> = (0..4)
+            .map(|i| format!("    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n"))
+            .collect();
+        let out = split_entry_function("", &small, false);
+        assert_eq!(out.matches("veryl_aot_eval").count(), 1, "{out}");
+
+        // Units of ~64 KiB each: enough of them to clear both thresholds.
+        let big: Vec<String> = (0..32)
+            .map(|i| format!("    /* {i} {} */\n", "x".repeat(64 * 1024)))
+            .collect();
+        let out = split_entry_function("", &big, false);
+        // Only the definitions carry `void`; the calls do not.
+        let parts = out.matches("void veryl_aot_eval_p").count();
+        assert!(parts >= 8, "{parts} parts is too few for 2 MB");
+        for i in 0..32 {
+            assert!(out.contains(&format!("/* {i} ")), "unit {i} was dropped");
+        }
+        // The debug build keeps its function-scope counters, so it stays whole.
+        assert_eq!(
+            split_entry_function("", &big, true)
+                .matches("void veryl_aot_eval_p")
+                .count(),
+            0
+        );
     }
 
     #[test]
@@ -12488,5 +13925,256 @@ mod tests {
         clear_const_unsafe();
         let src = src.unwrap();
         assert!(src.contains("veryl_aot_eval_const"));
+    }
+    // ---- Constant decode tables ----
+
+    fn dt_case(
+        sel: ProtoExpression,
+        arms: Vec<(u64, ProtoStatement)>,
+        default: Vec<ProtoStatement>,
+    ) -> ProtoStatement {
+        ProtoStatement::Case(crate::ir::ProtoCaseStatement {
+            arms: arms
+                .into_iter()
+                .map(|(v, body)| crate::ir::ProtoCaseArm {
+                    cond: ProtoExpression::Binary {
+                        x: Box::new(sel.clone()),
+                        op: Op::Eq,
+                        y: Box::new(const_expr(v, 8)),
+                        width: 1,
+                        expr_context: ctx(1, false),
+                    },
+                    body: vec![body],
+                })
+                .collect(),
+            default,
+        })
+    }
+
+    // A `case` that only ever stores constants to one signal becomes a table
+    // plus one indexed load — no comparisons at all.
+    #[test]
+    fn constant_case_lowers_to_a_table() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms = (0..10u64)
+            .map(|v| (v, cassign(0x80, 16, const_expr(0x100 + v, 16))))
+            .collect();
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 16, const_expr(0x7, 16))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("if ("), "no comparisons should remain: {s}");
+        // The element type follows the widest entry; the store follows the
+        // destination's native storage size (4 bytes for a 16-bit signal).
+        assert!(s.contains("static const uint16_t"), "{s}");
+        assert!(s.contains("*((uint32_t*)(comb_values + 0x80))"), "{s}");
+        // Slots 0..9 hold the arms; 10 is the "no arm matched" slot, and it
+        // and every clamped value above it hold the default.
+        let body = s.split('{').nth(2).unwrap().split('}').next().unwrap();
+        let cells: Vec<u64> = body
+            .split(',')
+            .map(|t| u64::from_str_radix(t.trim().trim_start_matches("0x"), 16).unwrap())
+            .collect();
+        assert_eq!(cells.len(), 11);
+        assert_eq!(
+            &cells[..10],
+            &(0..10).map(|v| 0x100 + v).collect::<Vec<_>>()[..]
+        );
+        assert_eq!(cells[10], 0x7);
+    }
+
+    // A selector carrying bits above its declared width must still index a
+    // real slot — the clamp folds it onto the default, which is where the
+    // comparisons would have sent it.
+    #[test]
+    fn decode_table_index_is_clamped() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms = (0..16u64)
+            .map(|v| (v, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(s.contains("< 16ULL ?"), "index must clamp: {s}");
+        assert!(s.contains("[17]"), "one slot past the arms: {s}");
+    }
+
+    // Nested decoders multiply into one index; the inner selector walks
+    // adjacent entries.
+    #[test]
+    fn nested_decode_lowers_to_one_index() {
+        let outer = var_expr(VarOffset::Comb(0x40), 2);
+        let inner = var_expr(VarOffset::Comb(0x44), 2);
+        let arms = (0..3u64)
+            .map(|o| {
+                let inner_arms = (0..3u64)
+                    .map(|i| (i, cassign(0x80, 8, const_expr(o * 16 + i, 8))))
+                    .collect();
+                (
+                    o,
+                    dt_case(
+                        inner.clone(),
+                        inner_arms,
+                        vec![cassign(0x80, 8, const_expr(0xee, 8))],
+                    ),
+                )
+            })
+            .collect();
+        let stmt = dt_case(outer, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(s.contains("[16]"), "4x4 table: {s}");
+        assert!(
+            s.contains("* 4ULL"),
+            "outer axis strides by the inner dim: {s}"
+        );
+        let body = s.split('{').nth(2).unwrap().split('}').next().unwrap();
+        let cells: Vec<u64> = body
+            .split(',')
+            .map(|t| u64::from_str_radix(t.trim().trim_start_matches("0x"), 16).unwrap())
+            .collect();
+        // Row 0: three inner arms then the inner default; row 3 is the outer
+        // default, constant across the inner axis.
+        assert_eq!(&cells[..4], &[0x0, 0x1, 0x2, 0xee]);
+        assert_eq!(&cells[4..8], &[0x10, 0x11, 0x12, 0xee]);
+        assert_eq!(&cells[12..], &[0xff, 0xff, 0xff, 0xff]);
+    }
+
+    // An arm that stores nothing keeps the destination's previous value, so
+    // there is no entry to write; the cascade must survive.
+    #[test]
+    fn empty_arm_keeps_the_cascade() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let mut arms: Vec<(u64, ProtoStatement)> = (0..10u64)
+            .map(|v| (v, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        arms.push((10, ProtoStatement::SequentialBlock(vec![])));
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("static const"), "{s}");
+    }
+
+    // An arm driving several signals becomes one row, read at one index.
+    #[test]
+    fn multi_destination_arms_become_table_rows() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms = (0..10u64)
+            .map(|v| {
+                (
+                    v,
+                    ProtoStatement::SequentialBlock(vec![
+                        cassign(0x80, 8, const_expr(v, 8)),
+                        cassign(0x90, 8, const_expr(0x40 + v, 8)),
+                    ]),
+                )
+            })
+            .collect();
+        let stmt = dt_case(
+            sel,
+            arms,
+            vec![ProtoStatement::SequentialBlock(vec![
+                cassign(0x80, 8, const_expr(0xfe, 8)),
+                cassign(0x90, 8, const_expr(0xff, 8)),
+            ])],
+        );
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("if ("), "no comparisons should remain: {s}");
+        assert!(s.contains("[22]"), "11 slots of 2: {s}");
+        assert!(s.contains("*((uint32_t*)(comb_values + 0x80))"), "{s}");
+        assert!(s.contains("*((uint32_t*)(comb_values + 0x90))"), "{s}");
+        let body = s.split('{').nth(2).unwrap().split('}').next().unwrap();
+        let cells: Vec<u64> = body
+            .split(',')
+            .map(|t| u64::from_str_radix(t.trim().trim_start_matches("0x"), 16).unwrap())
+            .collect();
+        // The two destinations of one arm sit next to each other, so a lookup
+        // touches one row rather than two tables.
+        assert_eq!(&cells[..6], &[0x0, 0x40, 0x1, 0x41, 0x2, 0x42]);
+        assert_eq!(&cells[20..], &[0xfe, 0xff]);
+    }
+
+    // An arm writing a different set of signals is a different row shape.
+    #[test]
+    fn second_destination_keeps_the_cascade() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let mut arms: Vec<(u64, ProtoStatement)> = (0..10u64)
+            .map(|v| (v, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        arms.push((10, cassign(0x90, 8, const_expr(1, 8))));
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("static const"), "{s}");
+    }
+
+    // Few arms are cheaper as comparisons than as a load.
+    #[test]
+    fn short_cascade_keeps_the_cascade() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms = (0..3u64)
+            .map(|v| (v, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("static const"), "{s}");
+    }
+
+    // Sparse selector values pad the table with copies of the default; past
+    // the spread limit that padding is the whole table.
+    #[test]
+    fn sparse_values_keep_the_cascade() {
+        let sel = var_expr(VarOffset::Comb(0x40), 16);
+        let arms = (0..10u64)
+            .map(|v| (v * 1000, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        let s = emit_stmt(&stmt).unwrap();
+        assert!(!s.contains("static const"), "{s}");
+    }
+
+    // A table over the ceiling declines, but its arm bodies go through the
+    // same path — so a decoder too wide to index flat still loses its inner
+    // comparisons, which is where most of the emitted source was.
+    #[test]
+    fn oversized_table_falls_back_to_per_arm_tables() {
+        let outer = var_expr(VarOffset::Comb(0x40), 4);
+        let inner = var_expr(VarOffset::Comb(0x44), 4);
+        let arms = (0..10u64)
+            .map(|o| {
+                let inner_arms = (0..10u64)
+                    .map(|i| (i, cassign(0x80, 8, const_expr(o * 16 + i, 8))))
+                    .collect();
+                (
+                    o,
+                    dt_case(
+                        inner.clone(),
+                        inner_arms,
+                        vec![cassign(0x80, 8, const_expr(0xee, 8))],
+                    ),
+                )
+            })
+            .collect();
+        let stmt = dt_case(outer, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        // 11 x 11 entries clear a 64-byte ceiling only one axis at a time.
+        TEST_DECODE_TABLE_BYTES.with(|c| c.set(Some(64)));
+        let s = emit_stmt(&stmt).unwrap();
+        TEST_DECODE_TABLE_BYTES.with(|c| c.set(None));
+        assert!(
+            s.contains("if ("),
+            "the outer selector stays a cascade: {s}"
+        );
+        assert_eq!(
+            s.matches("static const").count(),
+            10,
+            "one table per outer arm; the outer default is a bare store: {s}"
+        );
+    }
+
+    // The lowering is one env var away from the cascade, so an A/B can
+    // attribute a change to it.
+    #[test]
+    fn decode_table_can_be_disabled() {
+        let sel = var_expr(VarOffset::Comb(0x40), 4);
+        let arms: Vec<(u64, ProtoStatement)> = (0..10u64)
+            .map(|v| (v, cassign(0x80, 8, const_expr(v, 8))))
+            .collect();
+        let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
+        assert!(emit_stmt(&stmt).unwrap().contains("static const"));
+        assert!(!decode_table_enabled() || std::env::var("VERYL_AOT_C_DECODE_TABLE").is_err());
     }
 }

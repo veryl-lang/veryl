@@ -706,6 +706,13 @@ pub trait VerylWalker {
         after!(self, lsb, arg);
     }
 
+    /// Semantic action for non-terminal 'Mixin'
+    fn mixin(&mut self, arg: &Mixin) {
+        before!(self, mixin, arg);
+        self.veryl_token(&arg.mixin_token);
+        after!(self, mixin, arg);
+    }
+
     /// Semantic action for non-terminal 'Modport'
     fn modport(&mut self, arg: &Modport) {
         before!(self, modport, arg);
@@ -1796,11 +1803,13 @@ pub trait VerylWalker {
         before!(self, let_statement, arg);
         self.r#let(&arg.r#let);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
         if let Some(ref x) = arg.let_statement_opt {
-            self.clock_domain(&x.clock_domain);
+            self.colon(&x.colon);
+            if let Some(ref y) = x.let_statement_opt0 {
+                self.clock_domain(&y.clock_domain);
+            }
+            self.array_type(&x.array_type);
         }
-        self.array_type(&arg.array_type);
         self.equ(&arg.equ);
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
@@ -2044,11 +2053,13 @@ pub trait VerylWalker {
         before!(self, let_declaration, arg);
         self.r#let(&arg.r#let);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
         if let Some(ref x) = arg.let_declaration_opt {
-            self.clock_domain(&x.clock_domain);
+            self.colon(&x.colon);
+            if let Some(ref y) = x.let_declaration_opt0 {
+                self.clock_domain(&y.clock_domain);
+            }
+            self.array_type(&x.array_type);
         }
-        self.array_type(&arg.array_type);
         self.equ(&arg.equ);
         self.expression(&arg.expression);
         self.semicolon(&arg.semicolon);
@@ -2060,11 +2071,13 @@ pub trait VerylWalker {
         before!(self, var_declaration, arg);
         self.var(&arg.var);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
         if let Some(ref x) = arg.var_declaration_opt {
-            self.clock_domain(&x.clock_domain);
+            self.colon(&x.colon);
+            if let Some(ref y) = x.var_declaration_opt0 {
+                self.clock_domain(&y.clock_domain);
+            }
+            self.array_type(&x.array_type);
         }
-        self.array_type(&arg.array_type);
         self.semicolon(&arg.semicolon);
         after!(self, var_declaration, arg);
     }
@@ -2074,13 +2087,15 @@ pub trait VerylWalker {
         before!(self, const_declaration, arg);
         self.r#const(&arg.r#const);
         self.identifier(&arg.identifier);
-        self.colon(&arg.colon);
-        match &*arg.const_declaration_group {
-            ConstDeclarationGroup::ArrayType(x) => {
-                self.array_type(&x.array_type);
-            }
-            ConstDeclarationGroup::Type(x) => {
-                self.r#type(&x.r#type);
+        if let Some(ref x) = arg.const_declaration_opt {
+            self.colon(&x.colon);
+            match &*x.const_declaration_opt_group {
+                ConstDeclarationOptGroup::ArrayType(x) => {
+                    self.array_type(&x.array_type);
+                }
+                ConstDeclarationOptGroup::Type(x) => {
+                    self.r#type(&x.r#type);
+                }
             }
         }
         self.equ(&arg.equ);
@@ -2920,10 +2935,46 @@ pub trait VerylWalker {
         self.scoped_identifier(&arg.scoped_identifier);
         if let Some(ref x) = arg.import_declaration_opt {
             self.colon_colon(&x.colon_colon);
-            self.star(&x.star);
+            match x.import_declaration_opt_group.as_ref() {
+                ImportDeclarationOptGroup::Star(x) => self.star(&x.star),
+                ImportDeclarationOptGroup::MultipleImportList(x) => {
+                    self.multiple_import_list(&x.multiple_import_list)
+                }
+            }
         }
         self.semicolon(&arg.semicolon);
         after!(self, import_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'MultipleImportList'
+    fn multiple_import_list(&mut self, arg: &MultipleImportList) {
+        before!(self, multiple_import_list, arg);
+        self.l_brace(&arg.l_brace);
+        self.multiple_import_item(&arg.multiple_import_item);
+        for x in &arg.multiple_import_list_list {
+            self.comma(&x.comma);
+            self.multiple_import_item(&x.multiple_import_item);
+        }
+        if let Some(ref x) = arg.multiple_import_list_opt {
+            self.comma(&x.comma);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, multiple_import_list, arg);
+    }
+
+    /// Semantic action for non-terminal 'MultipleImportItem'
+    fn multiple_import_item(&mut self, arg: &MultipleImportItem) {
+        before!(self, multiple_import_item, arg);
+        self.identifier(&arg.identifier);
+        after!(self, multiple_import_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'MixinDeclaration'
+    fn mixin_declaration(&mut self, arg: &MixinDeclaration) {
+        before!(self, mixin_declaration, arg);
+        self.mixin(&arg.mixin);
+        self.scoped_identifier(&arg.scoped_identifier);
+        after!(self, mixin_declaration, arg);
     }
 
     /// Semantic action for non-terminal 'UnsafeBlock'
@@ -3044,6 +3095,7 @@ pub trait VerylWalker {
         before!(self, interface_item, arg);
         match arg {
             InterfaceItem::GenerateItem(x) => self.generate_item(&x.generate_item),
+            InterfaceItem::MixinDeclaration(x) => self.mixin_declaration(&x.mixin_declaration),
             InterfaceItem::ModportDeclaration(x) => {
                 self.modport_declaration(&x.modport_declaration)
             }
@@ -3520,6 +3572,9 @@ pub trait VerylWalker {
 
     /// Semantic action for non-terminal 'DescriptionGroup'
     fn description_group(&mut self, arg: &DescriptionGroup) {
+        if self.skip_description_group(arg) {
+            return;
+        }
         before!(self, description_group, arg);
         for x in &arg.description_group_list {
             self.attribute(&x.attribute);
@@ -3595,6 +3650,11 @@ pub trait VerylWalker {
 
     fn get_handlers(&mut self) -> Option<Vec<&mut dyn Handler>> {
         None
+    }
+
+    /// Returning `true` skips the group and its whole subtree.
+    fn skip_description_group(&mut self, _arg: &DescriptionGroup) -> bool {
+        false
     }
 }
 

@@ -21,7 +21,7 @@ pub(crate) mod write_log;
 pub use big_array::BigArrayFold;
 pub use context::{Context, Conv};
 pub use declaration::ProtoDeclaration;
-pub use derived_clock::{DerivedClock, DerivedClockSchedule};
+pub use derived_clock::{DerivedClock, DerivedClockSchedule, DerivedReset, EdgeCandidate};
 pub use event::Event;
 pub use expression::{Expression, ExpressionContext, ProtoDynamicBitSelect, ProtoExpression};
 pub use external::{
@@ -31,11 +31,12 @@ pub use module::{Module, ProtoModule};
 pub use opt::comb_fusion::force_disable as force_disable_comb_fusion;
 pub use statement::{
     CompiledBatchStmt, CompiledBlockStatement, CompiledStmt, ComponentArg,
-    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoComponentArg,
-    ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
-    ProtoStatementBlock, ProtoStatements, ProtoSystemFunctionCall, RetWidthCheck, RuntimeForBound,
-    RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind, format_assert_message,
-    format_output, parse_hex_content, patch_stmt_log_buf, veryl_aot_sysfn_print,
+    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseArm, ProtoCaseStatement,
+    ProtoComponentArg, ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement,
+    ProtoStatement, ProtoStatementBlock, ProtoStatements, ProtoSystemFunctionCall, RetWidthCheck,
+    RuntimeForBound, RuntimeForRange, Statement, SystemFunctionCall, TbMethodKind,
+    format_assert_message, format_output, parse_hex_content, patch_stmt_log_buf,
+    veryl_aot_sysfn_print,
 };
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,

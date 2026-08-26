@@ -5,6 +5,7 @@ use crate::analyzer_error::{
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_refereence;
+use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
@@ -28,6 +29,7 @@ use std::sync::Arc;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::Token;
 
 /// True for "atomic" expressions whose result type is unambiguous:
 /// variable references, sized / real / boolean literals, function
@@ -549,6 +551,29 @@ pub fn eval_size(
     }
 }
 
+/// A write to a variable declared further down is invisible to every analysis,
+/// while the emitter still emits it.
+pub fn check_assign_before_definition<T: Into<SymbolPathNamespace>>(
+    context: &mut Context,
+    identifier: T,
+    token: Token,
+) {
+    if let Ok(symbol) = symbol_table::resolve(identifier)
+        && let SymbolKind::Variable(x) = &symbol.found.kind
+        && x.affiliation == Affiliation::Module
+        // A module-level variable is registered under its bare name, so a miss
+        // means the declaration is still ahead of the write.
+        && context
+            .find_path(&VarPath::new(symbol.found.token.text))
+            .is_none()
+    {
+        context.insert_error(AnalyzerError::referring_before_definition(
+            &token.text.to_string(),
+            &token.into(),
+        ));
+    }
+}
+
 /// Per-destination clock/CDC checks for an assignment (invalid clock assign,
 /// Implicit-domain inference, dst-vs-RHS and dst-vs-always_ff domain). Shared
 /// by the scalar and concatenation-LHS paths, which build AssignStatement directly.
@@ -719,9 +744,11 @@ pub fn eval_array_range_assign(
 
     // Pair each outer literal item with one element dst; `eval_assign_statement`
     // recurses the element's inner dims. (A flat `eval_array_literal` would over-
-    // recurse and mis-decompose a multi-dim element.) Non-literal RHS: defer.
+    // recurse and mis-decompose a multi-dim element.) A non-literal RHS has no
+    // lowering: the scalar path can't take a range either.
     let ir::Expression::ArrayLiteral(items, _) = &mut rhs_expr else {
-        return Ok(None);
+        context.insert_error(AnalyzerError::invalid_range_assign(&token));
+        return Ok(Some(vec![]));
     };
     let mut outer: Vec<ir::Expression> = Vec::new();
     let mut default: Option<ir::Expression> = None;
@@ -899,6 +926,15 @@ pub fn eval_const_assign(
     expr: &mut (ir::Comptime, ir::Expression),
 ) -> IrResult<()> {
     let (comptime, expr) = expr;
+    // Same unfolded form `get_overridden_params` handles: an indexed read of
+    // an unpacked-array const arrives const but valueless, and left alone the
+    // const stays unresolved.  An array literal keeps its own path.
+    if comptime.value.is_unknown()
+        && comptime.is_const
+        && let Some(value) = expr.eval_value(context)
+    {
+        comptime.value = ValueVariant::Numeric(value);
+    }
     let comptime = comptime.clone();
     let path = &dst.path;
     let r#type = &dst.comptime.r#type;
@@ -1968,6 +2004,7 @@ pub fn eval_function_call(
             SymbolKind::SystemFunction(_) => {
                 let name = symbol.found.token.text;
                 let args = args.to_system_function_args(context, &symbol.found);
+                check_initial_assign_system_function_args(context, &symbol.found, &args);
                 let ret = ir::SystemFunctionCall::new(context, name, args, token)?;
                 Ok(ir::Expression::Term(Box::new(
                     ir::Factor::SystemFunctionCall(ret),
@@ -3566,6 +3603,16 @@ pub fn get_overridden_params(
             && let Some(values) = resolve_array_value(context, r#type, &expr.1)
         {
             expr.0.value = ValueVariant::NumericArray(values);
+        }
+
+        // An element of an unpacked-array parameter arrives const but
+        // unfolded, so no instance is specialised and a width derived from it
+        // stays symbolic — which the simulator cannot elaborate.
+        if expr.0.value.is_unknown()
+            && expr.0.is_const
+            && let Some(value) = expr.1.eval_value(context)
+        {
+            expr.0.value = ValueVariant::Numeric(value);
         }
 
         let is_type_param = matches!(

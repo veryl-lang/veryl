@@ -77,6 +77,12 @@ pub struct Context {
     /// complete via `set_instance_history`, which functions never call, so it
     /// would stay wedged as "active" forever.
     pub function_call_stack: Vec<Signature>,
+    /// Return variable of the function currently being constant-evaluated, and
+    /// whether one of its `return` statements has already run. A `return` is
+    /// lowered to an assignment to that variable, so without this the
+    /// evaluator walks straight past it and the LAST `return` wins.
+    pub function_ret_var: Option<VarId>,
+    pub function_returned: bool,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
@@ -90,6 +96,10 @@ pub struct Context {
     pub in_if_reset: bool,
     /// Inside an initial/final block (testbench statement context).
     pub in_tb_block: bool,
+    /// Inside an `initial` block, holding the next `VarId` at its entry so the
+    /// block's own procedural locals can be told from the module's state.
+    /// `in_tb_block` is unusable here: it also covers `final` and connections.
+    pub in_initial: Option<VarId>,
     /// Sink for component method calls hoisted out of the current
     /// testbench statement's expressions; `Some` only while initial/final
     /// statements convert. Each hoisted call runs as its own zero-time
@@ -760,35 +770,35 @@ impl Context {
     }
 
     pub fn drain_var_paths(&mut self) -> HashMap<VarPath, (VarId, Comptime)> {
-        self.var_paths.drain().collect()
+        std::mem::take(&mut self.var_paths)
     }
 
     pub fn drain_func_paths(&mut self) -> HashMap<FuncPath, VarId> {
-        self.func_paths.drain().collect()
+        std::mem::take(&mut self.func_paths)
     }
 
     pub fn drain_variables(&mut self) -> HashMap<VarId, Variable> {
-        self.variables.drain().collect()
+        std::mem::take(&mut self.variables)
     }
 
     pub fn drain_port_types(&mut self) -> HashMap<VarPath, (Type, ClockDomain)> {
-        self.port_types.drain().collect()
+        std::mem::take(&mut self.port_types)
     }
 
     pub fn drain_functions(&mut self) -> HashMap<VarId, Function> {
-        self.functions.drain().collect()
+        std::mem::take(&mut self.functions)
     }
 
     pub fn drain_modports(&mut self) -> HashMap<StrId, Vec<(StrId, Direction)>> {
-        self.modports.drain().collect()
+        std::mem::take(&mut self.modports)
     }
 
     pub fn drain_declarations(&mut self) -> Vec<Declaration> {
-        self.declarations.drain(..).collect()
+        std::mem::take(&mut self.declarations)
     }
 
     pub fn drain_errors(&mut self) -> Vec<AnalyzerError> {
-        self.errors.drain(..).collect()
+        std::mem::take(&mut self.errors)
     }
 }
 

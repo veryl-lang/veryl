@@ -88,6 +88,43 @@ pub(crate) fn const_array_element_exprs(
     )
 }
 
+/// An array literal wired straight to an unpacked-array port, e.g.
+/// `inst u: Sub (p: '{default: '0})`.  The literal carries no width of its
+/// own, so it takes the child port's shape; the generic expression conversion
+/// has no `ArrayLiteral` arm.  `None` unless one expression lands per element.
+pub(crate) fn array_literal_element_exprs(
+    context: &mut Context,
+    expr: &air::Expression,
+    r#type: &air::Type,
+    elements: usize,
+) -> Option<Vec<ProtoExpression>> {
+    if !matches!(expr, air::Expression::ArrayLiteral(..)) {
+        return None;
+    }
+    let mut expr = expr.clone();
+    let array_exprs = eval_array_literal(
+        &mut context.scope().analyzer_context,
+        Some(&r#type.array),
+        Some(r#type.width()),
+        &mut expr,
+    )
+    .ok()??;
+
+    // The expansion emits one entry per element in flattened order, so the
+    // k-th entry belongs to the k-th element.  A non-empty `select` means the
+    // literal filled a packed vector rather than the array; that is not this
+    // wiring.
+    if array_exprs.len() != elements || array_exprs.iter().any(|x| !x.select.is_empty()) {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(elements);
+    for array_expr in &array_exprs {
+        out.push(Conv::conv(context, &array_expr.expr).ok()?);
+    }
+    Some(out)
+}
+
 #[derive(Clone)]
 pub enum ProtoStatementBlock {
     Interpreted(Vec<ProtoStatement>),
@@ -362,6 +399,7 @@ pub struct ForStatement {
     pub var_signed: bool,
     pub range: RuntimeForRange,
     pub body: Vec<Statement>,
+    pub token: TokenRange,
 }
 
 #[derive(Clone)]
@@ -518,12 +556,18 @@ impl Statement {
                         if step_body(i) == ControlFlow::Break {
                             break;
                         }
-                        // Progress guard: a stalled or faulting step would
-                        // spin this delta step forever (const-bound cases are
-                        // rejected at analysis; runtime bounds reach here).
+                        // Break out rather than hang, but report it: the emitted
+                        // SystemVerilog loops here, so exiting quietly would let
+                        // a broken design pass. Const bounds are caught earlier.
                         match op.eval(i as usize, r.step as usize) {
                             Some(n) if n as u64 > i => i = n as u64,
-                            _ => break,
+                            _ => {
+                                assert_buffer::record_fatal(format!(
+                                    "for-loop step does not advance the loop variable (stuck at {i}) at {}:{}:{}",
+                                    x.token.beg.source, x.token.beg.line, x.token.beg.column
+                                ));
+                                break;
+                            }
                         }
                     }
                 } else {
@@ -1024,6 +1068,7 @@ pub struct ProtoForStatement {
     pub var_signed: bool,
     pub range: ProtoForRange,
     pub body: Vec<ProtoStatement>,
+    pub token: TokenRange,
 }
 
 #[derive(Clone, Debug, Hash)]
@@ -2315,6 +2360,7 @@ impl ProtoStatement {
                         var_signed: x.var_signed,
                         range,
                         body,
+                        token: x.token,
                     })
                 }
                 ProtoStatement::SequentialBlock(body) => {
@@ -2787,6 +2833,22 @@ impl std::hash::Hash for ProtoAssignStatement {
 }
 
 impl ProtoAssignStatement {
+    /// The RHS width a store's sign extension must actually reach, or `None`
+    /// when it cannot be observed: `Value::assign` clips to `[end..beg]`, so a
+    /// static field no wider than the RHS discards every extended bit.
+    /// Runtime-indexed destinations are reported as visible regardless.
+    pub fn visible_store_sign_extend(&self) -> Option<usize> {
+        if self.rhs_select.is_some() {
+            return None;
+        }
+        let from_width = self.expr.store_sign_extend_from(self.dst_width)?;
+        let landed = match self.select {
+            Some((beg, end)) if self.dynamic_select.is_none() => beg.saturating_sub(end) + 1,
+            _ => self.dst_width,
+        };
+        (landed > from_width).then_some(from_width)
+    }
+
     /// # Safety
     /// `ff_values_ptr` and `comb_values_ptr` must point to valid buffers.
     pub unsafe fn apply_values_ptr(
@@ -3508,6 +3570,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     var_signed,
                     range,
                     body,
+                    token: x.token,
                 })]
             }
             air::Statement::Unsupported(token) => {

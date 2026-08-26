@@ -101,6 +101,6 @@ module Module68F {
     );
 }
 
-package Pkg68G {
+package Package68G {
     const WIDTH: u32 = 32;
 }

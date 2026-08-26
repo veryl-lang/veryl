@@ -4,6 +4,8 @@ mod function;
 mod msb;
 
 use crate::analyzer_error::DuplicatedIdentifierKind;
+use crate::attribute::IfdefCondition;
+use crate::attribute_table;
 use crate::namespace::{DefineContext, Namespace};
 use crate::scope;
 use crate::sv_system_function;
@@ -28,6 +30,7 @@ use std::fmt;
 use std::rc::Rc;
 use veryl_parser::resource_table::{self, PathId, StrId};
 use veryl_parser::token_collector::TokenCollector;
+use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{Expression, ExpressionIdentifier, HierarchicalIdentifier};
 use veryl_parser::veryl_token::{Token, TokenSource};
 use veryl_parser::veryl_walker::VerylWalker;
@@ -1924,7 +1927,7 @@ impl SymbolTable {
         // apply import which borrows `&mut self`.
         self.skip_generic_args = true;
 
-        let import_list: Vec<_> = self.import_list.drain(0..).collect();
+        let import_list: Vec<_> = std::mem::take(&mut self.import_list);
         for import in &import_list {
             let context = ResolveContext::new(&import.path.1);
             let Ok((symbol, imported)) = self
@@ -2059,7 +2062,7 @@ impl SymbolTable {
         for modport in &modports {
             self.link_modport_members(*modport, &members);
         }
-        self.link_modports(if_symbol, &members, &modports);
+        self.link_modports(if_symbol, &members, &modports, errors);
     }
 
     fn collect_interface_members(
@@ -2212,10 +2215,11 @@ impl SymbolTable {
                 continue;
             };
             match mp_member.kind {
-                SymbolKind::ModportFunctionMember(_) => {
+                SymbolKind::ModportFunctionMember(x) => {
                     mp_member.kind =
                         SymbolKind::ModportFunctionMember(ModportFunctionMemberProperty {
                             function: *target_id,
+                            generated_from: x.generated_from,
                         });
                     self.update(mp_member);
                 }
@@ -2224,6 +2228,7 @@ impl SymbolTable {
                         SymbolKind::ModportVariableMember(ModportVariableMemberProperty {
                             variable: *target_id,
                             direction: x.direction,
+                            generated_from: x.generated_from,
                         });
                     self.update(mp_member);
                 }
@@ -2237,23 +2242,52 @@ impl SymbolTable {
         if_symbol: &Symbol,
         members: &HashMap<StrId, SymbolId>,
         modports: &Vec<SymbolId>,
+        errors: &mut Vec<AnalyzerError>,
     ) {
         for mp_id in modports {
             if let Some(mut mp_symbol) = self.get(*mp_id)
                 && let SymbolKind::Modport(mp) = &mp_symbol.kind
             {
                 let mut default_members = self.collect_modport_default_members(&mp_symbol, members);
-                let mut members = mp.members.clone();
-                members.append(&mut default_members);
+                let mut mp_members = mp.members.clone();
+                mp_members.append(&mut default_members);
+
+                // The last member has no trailing comma to drop with it, so a
+                // guarded one there would strand the previous member's comma.
+                // Same rule `last_item_with_define` applies to a written list.
+                if let Some(last) = mp_members.last()
+                    && let Some(last_symbol) = self.get(*last)
+                    && matches!(last_symbol.token.source, TokenSource::Generated(_))
+                    && let Some(source) = self.guard_source(&last_symbol)
+                {
+                    // The declaration the guard came from is legal on its own;
+                    // only the modport says which generated list ends with it.
+                    let token: TokenRange = (&mp_symbol.token).into();
+                    let member_source: TokenRange = (&source.token).into();
+                    errors.push(AnalyzerError::last_item_with_define_in_modport(
+                        &source.token.to_string(),
+                        &mp_symbol.token.to_string(),
+                        &token,
+                        &member_source,
+                    ));
+                }
 
                 mp_symbol.kind = SymbolKind::Modport(ModportProperty {
                     interface: if_symbol.id,
-                    members,
+                    members: mp_members,
                     default: mp.default.clone(),
                 });
                 self.update(mp_symbol);
             }
         }
+    }
+
+    /// The declaration a modport member takes its guard from, if any. Resolves
+    /// through `self`, so it can run while the table is borrowed mutably.
+    fn guard_source(&self, member: &Symbol) -> Option<Symbol> {
+        collect_guard_sources(member, |id| self.get(id))
+            .into_iter()
+            .find(|x| !attribute_table::ifdef_conditions(&x.token).is_empty())
     }
 
     fn collect_modport_default_members(
@@ -2295,17 +2329,17 @@ impl SymbolTable {
 
             let namespace = modport_symbol.inner_namespace();
             for (text, id) in default_members {
+                let target = default_member_directions.get(text);
                 let direction = match default {
                     ModportDefault::Input => Some(Direction::Input),
                     ModportDefault::Output => Some(Direction::Output),
-                    ModportDefault::Same(_) => default_member_directions.get(text).copied(),
-                    ModportDefault::Converse(_) => {
-                        default_member_directions.get(text).map(|x| x.converse())
-                    }
+                    ModportDefault::Same(_) => target.map(|x| x.0),
+                    ModportDefault::Converse(_) => target.map(|x| x.0.converse()),
                 };
                 let Some(direction) = direction else {
                     continue;
                 };
+                let generated_from = target.map(|x| x.1);
 
                 let source_path = modport_symbol.token.source.get_path().unwrap();
                 let token = Token::generate(*text, source_path);
@@ -2315,11 +2349,13 @@ impl SymbolTable {
                 let kind = if matches!(direction, Direction::Import) {
                     SymbolKind::ModportFunctionMember(ModportFunctionMemberProperty {
                         function: *id,
+                        generated_from,
                     })
                 } else {
                     SymbolKind::ModportVariableMember(ModportVariableMemberProperty {
                         direction,
                         variable: *id,
+                        generated_from,
                     })
                 };
                 let symbol = Symbol::new(&token, kind, &namespace, false, DocComment::default());
@@ -2332,11 +2368,13 @@ impl SymbolTable {
         ret
     }
 
+    /// The direction each member of the `..same`/`..converse` targets is declared
+    /// with, paired with the target member so its guard can be inherited.
     fn collect_modport_default_member_target_directions(
         &self,
         default: &ModportDefault,
         members: &HashMap<StrId, SymbolId>,
-    ) -> HashMap<StrId, Direction> {
+    ) -> HashMap<StrId, (Direction, SymbolId)> {
         let mut ret = HashMap::default();
 
         match default {
@@ -2357,12 +2395,18 @@ impl SymbolTable {
                             continue;
                         };
 
-                        if let SymbolKind::ModportVariableMember(member) = member_symbol.kind {
-                            ret.insert(member_symbol.token.text, member.direction);
+                        if let SymbolKind::ModportVariableMember(ref member) = member_symbol.kind {
+                            ret.insert(
+                                member_symbol.token.text,
+                                (member.direction, member_symbol.id),
+                            );
                         } else if matches!(default, ModportDefault::Same(_))
                             && matches!(member_symbol.kind, SymbolKind::ModportFunctionMember(_))
                         {
-                            ret.insert(member_symbol.token.text, Direction::Import);
+                            ret.insert(
+                                member_symbol.token.text,
+                                (Direction::Import, member_symbol.id),
+                            );
                         }
                     }
                 }
@@ -2380,7 +2424,7 @@ impl SymbolTable {
     pub fn apply_bind(&mut self) -> Vec<AnalyzerError> {
         let mut errors = Vec::new();
 
-        let bind_list: Vec<Bind> = self.bind_list.drain(0..).collect();
+        let bind_list: Vec<Bind> = std::mem::take(&mut self.bind_list);
         for bind in bind_list {
             let Ok(target) = self.resolve_generic_path(&bind.target.0, &bind.target.1) else {
                 continue;
@@ -2425,7 +2469,7 @@ impl SymbolTable {
     }
 
     fn get_msb(&mut self) -> Vec<Msb> {
-        self.msb_list.drain(0..).collect()
+        std::mem::take(&mut self.msb_list)
     }
 
     fn add_connect(&mut self, connect: Connect) {
@@ -2433,7 +2477,7 @@ impl SymbolTable {
     }
 
     fn get_connect(&mut self) -> Vec<Connect> {
-        self.connect_list.drain(0..).collect()
+        std::mem::take(&mut self.connect_list)
     }
 
     fn resolve_generic_path(
@@ -3190,6 +3234,46 @@ pub fn insert_sv_member(token: &Token, symbol: Symbol) {
 
 pub fn get(id: SymbolId) -> Option<Symbol> {
     SYMBOL_TABLE.with(|f| f.borrow().get(id))
+}
+
+/// The declarations whose guards a modport member is subject to, outermost
+/// first. `..same`/`..converse` can chain, so `generated_from` is followed to
+/// the end.
+fn collect_guard_sources(member: &Symbol, get: impl Fn(SymbolId) -> Option<Symbol>) -> Vec<Symbol> {
+    let mut ret = Vec::new();
+    let mut visited = Vec::new();
+    let mut current = Some(member.clone());
+
+    while let Some(member) = current {
+        if visited.contains(&member.id) {
+            break;
+        }
+        visited.push(member.id);
+
+        let (target, generated_from) = match member.kind {
+            SymbolKind::ModportVariableMember(ref x) => (x.variable, x.generated_from),
+            SymbolKind::ModportFunctionMember(ref x) => (x.function, x.generated_from),
+            _ => break,
+        };
+        ret.push(member);
+        ret.extend(get(target));
+        current = generated_from.and_then(&get);
+    }
+
+    ret
+}
+
+/// The conditions a modport member must be emitted under, outermost first.
+pub fn modport_member_conditions(member: &Symbol) -> Vec<IfdefCondition> {
+    let mut ret: Vec<IfdefCondition> = Vec::new();
+    for source in collect_guard_sources(member, get) {
+        for condition in attribute_table::ifdef_conditions(&source.token) {
+            if !ret.contains(&condition) {
+                ret.push(condition);
+            }
+        }
+    }
+    ret
 }
 
 pub fn get_rc(id: SymbolId) -> Option<Rc<Symbol>> {

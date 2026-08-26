@@ -103,6 +103,49 @@ impl fmt::Display for Attribute {
     }
 }
 
+/// One condition an item is guarded by. `#[elsif]`/`#[else]` yield several, all
+/// of which must hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IfdefCondition {
+    pub define: StrId,
+    pub negated: bool,
+}
+
+impl IfdefCondition {
+    pub fn directive(&self) -> &'static str {
+        if self.negated { "ifndef" } else { "ifdef" }
+    }
+}
+
+impl Attribute {
+    /// An `elsif`/`else` branch is flattened into a standalone nested guard, since
+    /// there is no preceding `` `ifdef `` to attach it to.
+    pub fn ifdef_conditions(&self) -> Vec<IfdefCondition> {
+        let pos = |x: &StrId| IfdefCondition {
+            define: *x,
+            negated: false,
+        };
+        let neg = |x: &StrId| IfdefCondition {
+            define: *x,
+            negated: true,
+        };
+        let preceding = |p: &[StrId], n: &[StrId]| -> Vec<IfdefCondition> {
+            p.iter().map(pos).chain(n.iter().map(neg)).collect()
+        };
+        match self {
+            Attribute::Ifdef(x) => vec![pos(x)],
+            Attribute::Ifndef(x) => vec![neg(x)],
+            Attribute::Elsif(x, p, n) => {
+                let mut ret = preceding(p, n);
+                ret.push(pos(x));
+                ret
+            }
+            Attribute::Else(p, n) => preceding(p, n),
+            _ => Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum AttributeError {
     UnknownAttribute,
@@ -196,6 +239,8 @@ struct Pattern {
     pub missing_reset_statement: StrId,
     pub unused_variable: StrId,
     pub unassign_variable: StrId,
+    pub initial_assign: StrId,
+    pub multiple_assign: StrId,
     pub enum_encoding: StrId,
     pub sequential: StrId,
     pub onehot: StrId,
@@ -231,6 +276,8 @@ impl Pattern {
             missing_reset_statement: resource_table::insert_str("missing_reset_statement"),
             unused_variable: resource_table::insert_str("unused_variable"),
             unassign_variable: resource_table::insert_str("unassign_variable"),
+            initial_assign: resource_table::insert_str("initial_assign"),
+            multiple_assign: resource_table::insert_str("multiple_assign"),
             enum_encoding: resource_table::insert_str("enum_encoding"),
             sequential: resource_table::insert_str("sequential"),
             onehot: resource_table::insert_str("onehot"),
@@ -347,6 +394,12 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                         }
                         x if x == pat.unassign_variable => {
                             Ok(Attribute::Allow(AllowItem::UnassignVariable))
+                        }
+                        x if x == pat.initial_assign => {
+                            Ok(Attribute::Allow(AllowItem::InitialAssign))
+                        }
+                        x if x == pat.multiple_assign => {
+                            Ok(Attribute::Allow(AllowItem::MultipleAssign))
                         }
                         _ => Err(err),
                     }
@@ -536,9 +589,23 @@ pub enum AllowItem {
     MissingResetStatement,
     UnusedVariable,
     UnassignVariable,
+    InitialAssign,
+    MultipleAssign,
 }
 
 impl AllowItem {
+    /// Valid on FPGA but not on ASIC, so `[lint.portability]` gates it for
+    /// dependencies.
+    pub fn is_non_portable(&self) -> bool {
+        match self {
+            AllowItem::InitialAssign | AllowItem::MultipleAssign => true,
+            AllowItem::MissingPort
+            | AllowItem::MissingResetStatement
+            | AllowItem::UnusedVariable
+            | AllowItem::UnassignVariable => false,
+        }
+    }
+
     pub fn available() -> String {
         let mut ret = String::new();
         for (i, x) in Self::iter().enumerate() {
@@ -558,6 +625,8 @@ impl fmt::Display for AllowItem {
             AllowItem::MissingResetStatement => "missing_reset_statement",
             AllowItem::UnusedVariable => "unused_variable",
             AllowItem::UnassignVariable => "unassign_variable",
+            AllowItem::InitialAssign => "initial_assign",
+            AllowItem::MultipleAssign => "multiple_assign",
         };
         text.fmt(f)
     }

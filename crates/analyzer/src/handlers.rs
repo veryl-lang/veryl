@@ -36,7 +36,7 @@ impl Pass1Handlers {
         project_name: StrId,
     ) -> Self {
         Self {
-            check_attribute: CheckAttribute::new(),
+            check_attribute: CheckAttribute::new(lint_opt, is_dependency, project_name),
             check_embed_include: CheckEmbedInclude::new(),
             check_identifier: CheckIdentifier::new(lint_opt, is_dependency),
             check_statement: CheckStatement::new(),

@@ -1,4 +1,10 @@
 interface veryl_testcase_Interface75;
+    `ifdef TRACE
+    logic f;
+    `else
+    logic g;
+    `endif
+
     logic a;
     logic b;
     logic c;
@@ -31,8 +37,13 @@ interface veryl_testcase_Interface75;
     endfunction
 
     modport master_ac (
-        input  a    ,
-        output c    ,
+        input  a,
+        output c,
+        `ifdef TRACE
+        input f,
+        `else
+        input  g    ,
+        `endif
         import get_a,
         import set_c
     );
@@ -45,6 +56,12 @@ interface veryl_testcase_Interface75;
     );
 
     modport master (
+        `ifdef TRACE
+        input  f    ,
+        `endif
+        `ifndef TRACE
+        input  g    ,
+        `endif
         input  a    ,
         input  b    ,
         output c    ,
@@ -56,6 +73,12 @@ interface veryl_testcase_Interface75;
     );
 
     modport slave_ac (
+        `ifdef TRACE
+        output f,
+        `endif
+        `ifndef TRACE
+        output g,
+        `endif
         output a,
         input  c
     );
@@ -66,6 +89,12 @@ interface veryl_testcase_Interface75;
     );
 
     modport slave (
+        `ifdef TRACE
+        output f,
+        `endif
+        `ifndef TRACE
+        output g,
+        `endif
         output a,
         output b,
         input  c,
@@ -73,6 +102,12 @@ interface veryl_testcase_Interface75;
     );
 
     modport all_input (
+        `ifdef TRACE
+        input f,
+        `endif
+        `ifndef TRACE
+        input g,
+        `endif
         input a,
         input b,
         input c,
@@ -80,6 +115,12 @@ interface veryl_testcase_Interface75;
     );
 
     modport all_output (
+        `ifdef TRACE
+        input f,
+        `endif
+        `ifndef TRACE
+        input g,
+        `endif
         input a,
         input b,
         input c,
@@ -88,6 +129,12 @@ interface veryl_testcase_Interface75;
 
     modport partial_converse (
         input  a,
+        `ifdef TRACE
+        output f,
+        `endif
+        `ifndef TRACE
+        output g,
+        `endif
         output b,
         input  c,
         input  d
@@ -95,6 +142,12 @@ interface veryl_testcase_Interface75;
 
     modport partial_input (
         output c,
+        `ifdef TRACE
+        input  f,
+        `endif
+        `ifndef TRACE
+        input  g,
+        `endif
         input  a,
         input  b,
         input  d
@@ -102,6 +155,12 @@ interface veryl_testcase_Interface75;
 
     modport partial_same (
         output a    ,
+        `ifdef TRACE
+        input  f    ,
+        `endif
+        `ifndef TRACE
+        input  g    ,
+        `endif
         input  b    ,
         output c    ,
         output d    ,
@@ -109,6 +168,32 @@ interface veryl_testcase_Interface75;
         import get_b,
         import set_c,
         import set_d
+    );
+endinterface
+
+interface veryl_testcase_Interface75MemberDefine;
+    logic b;
+    logic a;
+
+    modport master (
+        `ifdef TRACE
+        input b,
+        `endif
+        input a
+    );
+
+    modport slave (
+        `ifdef TRACE
+        output b,
+        `endif
+        output a
+    );
+
+    modport relay (
+        `ifdef TRACE
+        output b,
+        `endif
+        output a
     );
 endinterface
 //# sourceMappingURL=../map/75_modport_default.sv.map

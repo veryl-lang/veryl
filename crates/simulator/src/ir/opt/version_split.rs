@@ -244,6 +244,13 @@ struct BlockCol {
     opaque_writes: HashSet<i64>,
     /// Comb offset -> last write position in the block (events + opaque).
     max_write_pos: HashMap<i64, u32>,
+    /// Byte spans a non-eventable statement writes / reads, with the
+    /// statement's position.  The maps above are keyed on the base offset of
+    /// each access, which names a dynamically-indexed array access only by
+    /// its first element even though it reaches every element in its span.
+    /// [`expand_opaque_spans`] folds these back in.
+    opaque_write_spans: Vec<(i64, i64, u32)>,
+    opaque_read_spans: Vec<(i64, i64, u32)>,
     pos: u32,
 }
 
@@ -356,14 +363,61 @@ fn record_opaque(stmt: &ProtoStatement, col: &mut BlockCol) {
     let pos = col.pos;
     for d in &deps.ins {
         if let VarOffset::Comb(o) = d.off {
-            col.read_pos.entry(o as i64).or_default().push(pos);
+            let o = o as i64;
+            col.read_pos.entry(o).or_default().push(pos);
+            if let Some(nb) = d.bytes {
+                col.opaque_read_spans.push((o, o + nb as i64, pos));
+            }
         }
     }
     for d in &deps.outs {
         if let VarOffset::Comb(o) = d.off {
-            col.opaque_writes.insert(o as i64);
-            let e = col.max_write_pos.entry(o as i64).or_insert(0);
+            let o = o as i64;
+            col.opaque_writes.insert(o);
+            let e = col.max_write_pos.entry(o).or_insert(0);
             *e = (*e).max(pos);
+            if let Some(nb) = d.bytes {
+                col.opaque_write_spans.push((o, o + nb as i64, pos));
+            }
+        }
+    }
+}
+
+/// Fold the opaque byte spans back into the offset-keyed maps.  A dynamically
+/// indexed access names only the array's BASE offset, so keying on the offset
+/// alone leaves elements 1.. looking unwritten and unread — and the fused
+/// write then clobbers what the dynamic write put there.
+fn expand_opaque_spans(col: &mut BlockCol, by_dst: &HashMap<i64, Vec<usize>>) {
+    let write_spans = std::mem::take(&mut col.opaque_write_spans);
+    let read_spans = std::mem::take(&mut col.opaque_read_spans);
+    if write_spans.is_empty() && read_spans.is_empty() {
+        return;
+    }
+
+    let mut offs: Vec<i64> = by_dst.keys().copied().collect();
+    for reads in col.ev_reads.values() {
+        offs.extend(reads.iter().copied());
+    }
+    offs.sort_unstable();
+    offs.dedup();
+
+    // The base offset itself is already recorded by `record_opaque`.
+    fn covered(offs: &[i64], start: i64, end: i64) -> &[i64] {
+        let lo = offs.partition_point(|&o| o <= start);
+        let hi = offs.partition_point(|&o| o < end);
+        &offs[lo..hi.max(lo)]
+    }
+
+    for (start, end, pos) in write_spans {
+        for &o in covered(&offs, start, end) {
+            col.opaque_writes.insert(o);
+            let e = col.max_write_pos.entry(o).or_insert(0);
+            *e = (*e).max(pos);
+        }
+    }
+    for (start, end, pos) in read_spans {
+        for &o in covered(&offs, start, end) {
+            col.read_pos.entry(o).or_default().push(pos);
         }
     }
 }
@@ -428,6 +482,7 @@ fn split_block(
     for (i, ev) in col.events.iter().enumerate() {
         by_dst.entry(ev.dst).or_default().push(i);
     }
+    expand_opaque_spans(&mut col, &by_dst);
 
     struct Fused {
         last_stmt_idx: usize,
@@ -689,6 +744,15 @@ impl Fe {
         }
     }
 
+    /// True when this operand is a bare read of `dst` — the form an interval
+    /// no write covers carries.  A composed value that reads `dst` inside a
+    /// merge is not one: only an unfired guard puts it there, and a variable
+    /// a guard may leave unwritten depends on its own previous value however
+    /// the fold spells it.
+    fn is_self_read(&self, dst: i64) -> bool {
+        matches!(self, Fe::Var { var_offset: VarOffset::Comb(o), .. } if *o as i64 == dst)
+    }
+
     fn to_expr(&self, width: usize) -> Option<ProtoExpression> {
         let ctx = ExpressionContext {
             width,
@@ -747,11 +811,14 @@ struct IMap {
     /// LSB-first, contiguous, covering [0, width).
     iv: Vec<Interval>,
     next_ver: u32,
+    /// The variable being folded; the only offset the map may self-read.
+    dst: i64,
 }
 
 impl IMap {
     fn new(width: usize, dst: i64) -> IMap {
         IMap {
+            dst,
             iv: vec![Interval {
                 hi: width.saturating_sub(1) as u32,
                 lo: 0,
@@ -771,6 +838,11 @@ impl IMap {
     /// self-reads can slice it cheaply.  No-op when the map is already one
     /// full-width variable read (the initial self-read state or a previous
     /// snapshot).  The temp assign lands just before the fused write.
+    ///
+    /// Self-read intervals stay put and the temp holds zero over their bits.
+    /// The fused write is `dst`'s only writer, so a self-read inside the temp
+    /// becomes a read that write answers — turning a self-loop into a
+    /// two-statement cycle the comb scheduler rejects.
     fn snapshot_to_temp(
         &mut self,
         width: usize,
@@ -791,7 +863,21 @@ impl IMap {
         {
             return Some(());
         }
-        let expr = self.to_expr(width)?;
+        let keep: Vec<bool> = self
+            .iv
+            .iter()
+            .map(|iv| iv.fe.is_self_read(self.dst))
+            .collect();
+        if keep.iter().all(|&k| k) {
+            return Some(());
+        }
+        let mut snap = self.clone();
+        for (iv, &k) in snap.iv.iter_mut().zip(&keep) {
+            if k {
+                iv.fe = Fe::Val(Value::new(0, (iv.hi - iv.lo + 1) as usize, false));
+            }
+        }
+        let expr = snap.to_expr(width)?;
         let off = alloc(width);
         temps.push(ProtoAssignStatement {
             dst: VarOffset::Comb(off),
@@ -805,18 +891,73 @@ impl IMap {
         });
         let ver = self.next_ver;
         self.next_ver += 1;
-        self.iv = vec![Interval {
-            hi: width.saturating_sub(1) as u32,
-            lo: 0,
-            fe: Fe::Var {
-                var_offset: VarOffset::Comb(off),
-                var_full_width: width,
-                hi: width.saturating_sub(1) as u32,
-                lo: 0,
-            },
-            ver,
-        }];
+        // Adjacent snapshotted intervals coalesce: the temp holds them at
+        // their own bit positions, so one read spans the whole run — and an
+        // all-snapshotted map collapses back to the single full-width read.
+        let mut iv: Vec<Interval> = Vec::with_capacity(self.iv.len());
+        let mut snapped: Vec<bool> = Vec::with_capacity(self.iv.len());
+        for (old, &k) in self.iv.iter().zip(&keep) {
+            if !k && snapped.last() == Some(&true) {
+                iv.last_mut()?.hi = old.hi;
+                continue;
+            }
+            iv.push(Interval {
+                hi: old.hi,
+                lo: old.lo,
+                fe: old.fe.clone(),
+                ver: if k { old.ver } else { ver },
+            });
+            snapped.push(!k);
+        }
+        for (iv, &s) in iv.iter_mut().zip(&snapped) {
+            if s {
+                iv.fe = Fe::Var {
+                    var_offset: VarOffset::Comb(off),
+                    var_full_width: width,
+                    hi: iv.hi,
+                    lo: iv.lo,
+                };
+            }
+        }
+        self.iv = iv;
         Some(())
+    }
+
+    /// The accumulated value's bits [hi:lo] as one operand: a slice when one
+    /// interval covers the range, a concatenation of the pieces otherwise.
+    fn fe_range(&self, hi: u32, lo: u32) -> Option<Fe> {
+        if hi < lo || hi as usize >= self.total_width() {
+            return None;
+        }
+        let slice = |iv: &Interval, hi: u32, lo: u32| -> Option<Fe> {
+            if iv.lo == lo && iv.hi == hi {
+                Some(iv.fe.clone())
+            } else {
+                iv.fe.split(hi - iv.lo, lo - iv.lo)
+            }
+        };
+        if let Some(iv) = self.iv.iter().find(|iv| iv.lo <= lo && hi <= iv.hi) {
+            return slice(iv, hi, lo);
+        }
+        let width = (hi - lo + 1) as usize;
+        // MSB-first concatenation, matching `to_expr`.
+        let mut elements = Vec::new();
+        for iv in self.iv.iter().rev() {
+            if iv.hi < lo || iv.lo > hi {
+                continue;
+            }
+            let (phi, plo) = (iv.hi.min(hi), iv.lo.max(lo));
+            let w = (phi - plo + 1) as usize;
+            elements.push((Box::new(slice(iv, phi, plo)?.to_expr(w)?), 1usize, w));
+        }
+        Some(Fe::Op(ProtoExpression::Concatenation {
+            elements,
+            width,
+            expr_context: ExpressionContext {
+                width,
+                signed: false,
+            },
+        }))
     }
 
     fn total_width(&self) -> usize {
@@ -1369,10 +1510,11 @@ fn try_lut_compress(
     Some((temps, out))
 }
 
-/// Replace plain / statically-selected reads of `dst` with reads of the
-/// materialized snapshot `base` (a full-width `Fe::Var`).  Dynamic selects
-/// on the destination are unsupported (None).
-fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &Fe) -> Option<()> {
+/// Replace plain / statically-selected reads of `dst` with the value `base`
+/// has accumulated over the same bits — a snapshot read for bits a write
+/// covers, `dst` itself for bits none does.  Dynamic selects on the
+/// destination are unsupported (None).
+fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &IMap) -> Option<()> {
     use ProtoExpression as PE;
     if let PE::Variable {
         var_offset,
@@ -1388,14 +1530,11 @@ fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &Fe) -> Option<()>
             return None;
         }
         let w = *width;
-        let sub = match select {
-            None => base.clone(),
-            Some((a, b)) => {
-                let (hi, lo) = ((*a).max(*b) as u32, (*a).min(*b) as u32);
-                base.split(hi, lo)?
-            }
+        let (hi, lo) = match select {
+            None => (w.saturating_sub(1) as u32, 0),
+            Some((a, b)) => ((*a).max(*b) as u32, (*a).min(*b) as u32),
         };
-        *e = sub.to_expr(w)?;
+        *e = base.fe_range(hi, lo)?.to_expr(w)?;
         return Some(());
     }
     match e {
@@ -1572,8 +1711,7 @@ fn fold_stmt(
             // self-read would see the previous pass.
             if expr_reads_dst(&expr, dst) {
                 map.snapshot_to_temp(x.dst_width, temps, alloc, x.token)?;
-                let base = map.iv[0].fe.clone();
-                replace_dst_reads(&mut expr, dst, &base)?;
+                replace_dst_reads(&mut expr, dst, map)?;
             }
             map.write(hi, lo, Fe::from_expr(expr))
         }
@@ -1738,6 +1876,36 @@ mod tests {
         })
     }
 
+    fn assign_bits(
+        dst: isize,
+        w: usize,
+        hi: usize,
+        lo: usize,
+        expr: ProtoExpression,
+    ) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(dst),
+            dst_width: w,
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: 0,
+            token: TokenRange::default(),
+        })
+    }
+
+    fn cvar_bits(off: isize, full_w: usize, hi: usize, lo: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            width: hi - lo + 1,
+            var_full_width: full_w,
+            expr_context: ctx(hi - lo + 1),
+        }
+    }
+
     fn cond_write(cond_off: isize, dst: isize, w: usize, val: u64) -> ProtoStatement {
         ProtoStatement::If(ProtoIfStatement {
             cond: Some(cvar(cond_off, 1)),
@@ -1857,6 +2025,50 @@ mod tests {
         assert_eq!(stats.skip_budget, 0);
         assert_eq!(stats.fused_vars, 1, "a large cap must still fuse");
         TEST_MAX_NODES.with(|c| c.set(None));
+    }
+
+    #[test]
+    fn a_field_chain_reading_an_earlier_field_leaves_no_read_of_its_own_destination() {
+        // `v[2:0] = a; v[5:3] = v[2:0] + 1` writes every bit of `v` and the
+        // self-read names bits an earlier write covers, so the pair is
+        // acyclic.  The rename temp must not read `v`: the fused write is
+        // `v`'s only writer, so a read there closes a two-statement cycle
+        // and the comb scheduler refuses to elaborate the design.
+        let mut body = vec![
+            assign_bits(0x0, 6, 2, 0, cvar(0x100, 3)),
+            assign_bits(
+                0x0,
+                6,
+                5,
+                3,
+                ProtoExpression::Binary {
+                    x: Box::new(cvar_bits(0x0, 6, 2, 0)),
+                    op: Op::Add,
+                    y: Box::new(lit(1, 3)),
+                    width: 3,
+                    expr_context: ctx(3),
+                },
+            ),
+        ];
+        let mut alloc_at = 0x1000isize;
+        let mut alloc = |w: usize| -> isize {
+            let off = alloc_at;
+            alloc_at += crate::ir::variable::native_bytes(w) as isize;
+            off
+        };
+        let mut stats = RunStats::default();
+        split_block(&mut body, &mut stats, &mut alloc);
+
+        assert_eq!(stats.fused_vars, 1, "the chain must fuse");
+        for s in &body {
+            let ProtoStatement::Assign(a) = s else {
+                continue;
+            };
+            assert!(
+                !a.expr.reads_offset(VarOffset::Comb(0x0)),
+                "a fused statement reads the destination the chain fully covers"
+            );
+        }
     }
 
     #[test]
