@@ -970,16 +970,6 @@ pub(crate) fn returns_wide_pointer(expr: &ProtoExpression) -> bool {
         ProtoExpression::Binary { expr_context, .. } => {
             expr.builds_wide_pointer() && expr_context.width > 128
         }
-        // The funnel-load path for a dynamic element read of a wide
-        // variable (no combined static select) hands back a register while
-        // the window fits one; the shared predicate still reports a pointer
-        // because the AOT-C emitter keeps that shape on the interpreter.
-        ProtoExpression::Variable {
-            dynamic_select: Some(ds),
-            select: None,
-            var_full_width,
-            ..
-        } if is_wide_ptr(*var_full_width) && ds.window <= 128 => false,
         _ => expr.builds_wide_pointer(),
     }
 }

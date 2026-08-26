@@ -2159,13 +2159,18 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
             } else {
                 format!(" rhs={}", classify_uncovered_expr(&a.expr))
             };
+            let range = |r: &Option<(usize, usize)>| match r {
+                Some((hi, lo)) => format!("{hi}:{lo}"),
+                None => "-".to_string(),
+            };
             out.push(format!(
-                "Assign(ff={},dw={},sel={},dynsel={},rhssel={},exprOK={}){why}",
+                "Assign(ff={},dw={},sel={},dynsel={},rhssel={},rhsw={},exprOK={}){why}",
                 a.dst.is_ff(),
                 a.dst_width,
-                a.select.is_some(),
+                range(&a.select),
                 a.dynamic_select.is_some(),
-                a.rhs_select.is_some(),
+                range(&a.rhs_select),
+                a.expr.width(),
                 expr_ok,
             ))
         }
