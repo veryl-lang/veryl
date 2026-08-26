@@ -66,6 +66,18 @@ pub fn explain_offsets() -> &'static [isize] {
     })
 }
 
+/// `VERYL_FIELD_UNFUSE_BLOCK=off1,off2,...`: keep the listed offsets packed.
+/// An A/B probe for attributing a whole-run delta to a subset of the split
+/// set; not a tuning surface.
+fn blocked_offsets() -> &'static [isize] {
+    static V: std::sync::OnceLock<Vec<isize>> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        std::env::var("VERYL_FIELD_UNFUSE_BLOCK")
+            .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
+            .unwrap_or_default()
+    })
+}
+
 /// Most fields a single spanning read may gather; past this the concat costs
 /// more than the split saves and the variable is left packed.
 fn gather_limit() -> usize {
@@ -91,6 +103,8 @@ pub struct RunStats {
     pub skip_whole_write: usize,
     pub skip_gather: usize,
     pub skip_blocklist: usize,
+    pub skip_self_ref: usize,
+    pub skip_const_writes: usize,
     pub skip_dyn_span: usize,
 }
 
@@ -104,6 +118,13 @@ struct VarInfo {
     read_ranges: Vec<(usize, usize)>,
     whole_write: bool,
     disqualified: bool,
+    /// A field write whose RHS reads another field of the same variable — the
+    /// shape of a reduction-tree net (a leading-zero count, a find-first
+    /// chain), where every level feeds the next.
+    self_ref: bool,
+    /// A field write whose RHS is not a literal.  When no write sets this,
+    /// the variable is a constant lookup table.
+    nonconst_write: bool,
     /// First disqualification cause, for `VERYL_FIELD_UNFUSE_EXPLAIN`.
     disq_why: Option<&'static str>,
 }
@@ -160,14 +181,22 @@ impl Census {
         }
         self.note_width(off, w);
         match sel {
-            Some((msb, lsb)) if msb >= lsb && msb < w => {
-                self.var(off).read_ranges.push((msb, lsb))
-            }
+            Some((msb, lsb)) if msb >= lsb && msb < w => self.var(off).read_ranges.push((msb, lsb)),
             Some(_) => self.disq_why(off, "out-of-range read select"),
             None if w > 0 => self.var(off).read_ranges.push((w - 1, 0)),
             None => self.disq_why(off, "zero-width read"),
         }
     }
+}
+
+/// The expression reads storage rooted at comb offset `off`.  Built on
+/// `gather_variable_offsets` so a new expression variant cannot silently
+/// escape the self-reference check; its extra conservatism (dynamic bases)
+/// is harmless — dyn-overlapping variables are disqualified anyway.
+fn expr_reads_offset(e: &ProtoExpression, off: isize) -> bool {
+    let mut ins: Vec<VarOffset> = Vec::new();
+    e.gather_variable_offsets(&mut ins);
+    ins.contains(&VarOffset::Comb(off))
 }
 
 fn census_expr(e: &ProtoExpression, c: &mut Census, poison: bool) {
@@ -248,6 +277,14 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                     c.disq(o);
                 } else {
                     c.write(o, a.dst_width, a.select, poison);
+                    if !poison {
+                        if expr_reads_offset(&a.expr, o) {
+                            c.var(o).self_ref = true;
+                        }
+                        if !matches!(a.expr, ProtoExpression::Value { .. }) {
+                            c.var(o).nonconst_write = true;
+                        }
+                    }
                 }
             }
             if let Some(ds) = &a.dynamic_select {
@@ -754,7 +791,7 @@ pub fn run(
             stats.skip_disq += 1;
             continue;
         }
-        if blocklist.contains(&o) {
+        if blocklist.contains(&o) || blocked_offsets().contains(&o) {
             if exp {
                 eprintln!("[field_unfuse] explain off={o}: skip_blocklist");
             }
@@ -769,6 +806,29 @@ pub fn run(
                 );
             }
             stats.skip_whole_write += 1;
+            continue;
+        }
+        // A wide reduction tree — every field def reads sibling fields of the
+        // same variable (an lzc, a find-first chain) — loses by splitting:
+        // measured on three designs, splitting the >64-bit trees alone costs
+        // 3-7% of the whole run, active or idle, while the narrow (<=64-bit)
+        // trees win.  The narrow side stays as it was.
+        if v.full_width > 64 && v.self_ref {
+            if exp {
+                eprintln!("[field_unfuse] explain off={o}: skip_self_ref");
+            }
+            stats.skip_self_ref += 1;
+            continue;
+        }
+        // A wide constant lookup table (every write stores a literal): the
+        // packed RMWs it would retire were already folded away by the C
+        // compiler, so a split only adds field stores.  Measured next to the
+        // reduction trees above: leaving these packed is worth ~3% of a run.
+        if v.full_width > 64 && !v.nonconst_write {
+            if exp {
+                eprintln!("[field_unfuse] explain off={o}: skip_const_writes");
+            }
+            stats.skip_const_writes += 1;
             continue;
         }
         let footprint = value_size(native_bytes(v.full_width), use_4state) as isize;
