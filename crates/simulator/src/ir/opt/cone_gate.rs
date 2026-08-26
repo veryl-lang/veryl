@@ -405,6 +405,23 @@ pub(crate) fn diag() -> bool {
     *ON.get_or_init(|| std::env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1"))
 }
 
+/// One statement's eval cost expressed in compare bytes — the exchange rate
+/// behind [`Segment::off_decay`]'s break-even skip rate (VERYL_CONE_GATE_COST
+/// overrides it for calibration).  At 5, segments with bytes just above
+/// 2.5×stmts get decay 0 — a decay-0 streak never drains, so any such segment
+/// that runs 1024 times TOTAL auto-offs for good, even one skipping 80-90% of
+/// evals once past its boot phase.  15 keeps those alive while segments that
+/// genuinely cannot skip still expire.
+fn stmt_cost_bytes() -> usize {
+    static V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("VERYL_CONE_GATE_COST")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(15)
+    })
+}
+
 /// Above this, a variable is owned as ONE span instead of one per element: no
 /// [`compare_budget`] affords comparing a variable this large, so per-element
 /// spans buy precision nothing spends.  Absolute on purpose — this caps
@@ -1353,7 +1370,7 @@ fn finish_plan(
         // Break-even skip rate of that bet.  With +1 per dirty check and
         // -decay per skip, the streak drifts into auto-off exactly below it;
         // a free compare (bytes = 0) never expires.
-        let off_decay = ((5 * (end - start)).checked_div(bytes))
+        let off_decay = ((stmt_cost_bytes() * (end - start)).checked_div(bytes))
             .map_or(u32::MAX, |r| r.saturating_sub(1).min(1 << 20) as u32);
         segments.push(Segment {
             start,
