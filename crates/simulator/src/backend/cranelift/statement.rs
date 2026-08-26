@@ -95,11 +95,19 @@ impl ProtoAssignDynamicStatement {
             return false;
         }
         if let Some(dyn_sel) = &self.dynamic_select {
-            let full_width = dyn_sel.elem_width * dyn_sel.num_elements;
-            if full_width > 128 || !dyn_sel.index_expr.can_build_binary() {
+            if !dyn_sel.index_expr.can_build_binary() {
                 return false;
             }
-            return full_width <= 64;
+            // A wide element is the RMW in `build_binary_dynamic_wide_ff`;
+            // `build_binary_dynamic_wide` (comb base) declines a dynamic bit
+            // select, and the narrow path below needs the whole span in a
+            // register.
+            if self.dst_width > 64 {
+                return self.dst_base.is_ff()
+                    && self.select.is_none()
+                    && self.rhs_select.is_none();
+            }
+            return dyn_sel.elem_width * dyn_sel.num_elements <= 64;
         }
         // build_binary's rhs_select slicing assumes a ≤64-bit scalar
         // payload; wider sources stay on the interpreter (rare).
@@ -112,14 +120,13 @@ impl ProtoAssignDynamicStatement {
         if self.dst_width > 64 && !self.dst_base.is_ff() && self.rhs_select.is_none() {
             return true;
         }
-        // Wide (>64-bit) FF-base full-element dynamic store:
+        // Wide (>64-bit) FF-base element store, whole or bit-selected:
         // `build_binary_dynamic_wide_ff`.  A 4-state dst bails there (→ module
         // falls back), so the gate here is optimistic.
         if self.dst_width > 64
             && self.dst_base.is_ff()
             && self.select.is_none()
             && self.rhs_select.is_none()
-            && self.dynamic_select.is_none()
         {
             return true;
         }
@@ -139,13 +146,12 @@ impl ProtoAssignDynamicStatement {
         {
             return self.build_binary_dynamic_wide(context, builder);
         }
-        // Wide (>64-bit) FF-base full-element dynamic write: see
+        // Wide (>64-bit) FF-base element write, whole or bit-selected: see
         // `build_binary_dynamic_wide_ff`.
         if self.dst_width > 64
             && self.dst_base.is_ff()
             && self.select.is_none()
             && self.rhs_select.is_none()
-            && self.dynamic_select.is_none()
         {
             return self.build_binary_dynamic_wide_ff(context, builder);
         }
@@ -530,11 +536,7 @@ impl ProtoAssignDynamicStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
-        if context.use_4state
-            || self.select.is_some()
-            || self.rhs_select.is_some()
-            || self.dynamic_select.is_some()
-        {
+        if context.use_4state || self.select.is_some() || self.rhs_select.is_some() {
             return None;
         }
         if !self.dst_base.is_ff() || self.dst_num_elements == 0 {
@@ -569,6 +571,14 @@ impl ProtoAssignDynamicStatement {
         // Mask the source to dst_width (the source may alias a flat read).
         emit_wide_apply_mask(context, builder, src_ptr, nb, self.dst_width);
 
+        // A dynamic bit select needs the shift built before the element index
+        // so the two index expressions are evaluated in the same order as
+        // `AssignDynamicStatement::eval_step`.
+        let dyn_shift = match self.dynamic_select.as_ref() {
+            Some(dyn_sel) => Some(build_dynamic_select_shift(dyn_sel, context, builder)?),
+            None => None,
+        };
+
         let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
         let max_idx = builder
             .ins()
@@ -584,6 +594,33 @@ impl ProtoAssignDynamicStatement {
         // read-OLD (NBA). Not "idempotent with the log" — it landed mid-event, so a
         // same-event reader saw read-NEW. Unpacked keeps it for multi-RMW forwarding.
         let ff_is_packed = self.dst_base.raw() == self.dst_ff_current_base_offset;
+
+        // `arr[idx][sel +: w] <= v`: read the element back and merge the
+        // window in, so the store/log below still deliver a whole element.
+        // The read is from `dst_base`, which is the element the interpreter
+        // reads too — the current slot when packed, the next slot when not.
+        let src_ptr = if let Some(dyn_sel) = self.dynamic_select.as_ref() {
+            use super::helpers::emit_wide_select_rmw_at;
+            let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
+            let old_ptr = builder.ins().iadd(context.ff_values, base);
+            let old_ptr = builder.ins().iadd(old_ptr, byte_offset);
+            let merged = emit_wide_select_rmw_at(
+                context,
+                builder,
+                old_ptr,
+                src_ptr,
+                dyn_shift?,
+                dyn_sel.window,
+                nb,
+            );
+            // The index clamp is to the last element, so a window on the last
+            // one can overhang; `clip_window_to_width` drops those bits.
+            emit_wide_apply_mask(context, builder, merged, nb, self.dst_width);
+            merged
+        } else {
+            src_ptr
+        };
+
         if !ff_is_packed {
             let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
             let addr = builder.ins().iadd(context.ff_values, base);
