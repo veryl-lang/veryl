@@ -1,4 +1,4 @@
-package veryl_testcase_Package92;
+package veryl_testcase_Package93;
     typedef struct packed {
         logic          sign;
         logic [5-1:0]  exp ;
@@ -29,8 +29,8 @@ package veryl_testcase_Package92;
     typedef __FpT__8__23 Fp32;
 endpackage
 
-module veryl_testcase_Module92 (
-    input  var veryl_testcase_Package92::Fp32 i_x  ,
+module veryl_testcase_Module93 (
+    input  var veryl_testcase_Package93::Fp32 i_x  ,
     output var logic                          o_nan,
     output var int unsigned                   o_b  
 );
@@ -71,14 +71,14 @@ module veryl_testcase_Module92 (
     logic        [8-1:0] _t; always_comb _t = PairT_add(p, 8'd1);
     logic        [8-1:0] _u; always_comb _u = PairT_sum(p);
     int unsigned         _v; always_comb _v = PairT_WIDTH;
-    int unsigned         _w; always_comb _w = veryl_testcase_Package92::__FpT__5__10_BIAS;
+    int unsigned         _w; always_comb _w = veryl_testcase_Package93::__FpT__5__10_BIAS;
 
-    always_comb o_nan = veryl_testcase_Package92::__FpT__8__23_is_nan(i_x);
-    always_comb o_b   = veryl_testcase_Package92::__FpT__8__23_BIAS;
+    always_comb o_nan = veryl_testcase_Package93::__FpT__8__23_is_nan(i_x);
+    always_comb o_b   = veryl_testcase_Package93::__FpT__8__23_BIAS;
 
     initial begin
         PairT_log(p);
         PairT_log(p);
     end
 endmodule
-//# sourceMappingURL=../map/92_impl.sv.map
+//# sourceMappingURL=../map/93_impl.sv.map
