@@ -561,14 +561,6 @@ impl ProtoAssignDynamicStatement {
         // Mask the source to dst_width (the source may alias a flat read).
         emit_wide_apply_mask(context, builder, src_ptr, nb, self.dst_width);
 
-        // A dynamic bit select needs the shift built before the element index
-        // so the two index expressions are evaluated in the same order as
-        // `AssignDynamicStatement::eval_step`.
-        let dyn_shift = match self.dynamic_select.as_ref() {
-            Some(dyn_sel) => Some(build_dynamic_select_shift(dyn_sel, context, builder)?),
-            None => None,
-        };
-
         let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
         let max_idx = builder
             .ins()
@@ -595,15 +587,21 @@ impl ProtoAssignDynamicStatement {
             let old_ptr = builder.ins().iadd(context.ff_values, base);
             let old_ptr = builder.ins().iadd(old_ptr, byte_offset);
             let merged = match self.dynamic_select.as_ref() {
-                Some(dyn_sel) => emit_wide_select_rmw_at(
-                    context,
-                    builder,
-                    old_ptr,
-                    src_ptr,
-                    dyn_shift?,
-                    dyn_sel.window,
-                    nb,
-                ),
+                Some(dyn_sel) => {
+                    // Built here, after the element index, so the two index
+                    // expressions are evaluated in the same order as
+                    // `AssignDynamicStatement::eval_step`.
+                    let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+                    emit_wide_select_rmw_at(
+                        context,
+                        builder,
+                        old_ptr,
+                        src_ptr,
+                        shift,
+                        dyn_sel.window,
+                        nb,
+                    )
+                }
                 None => {
                     let (beg, end) = self.select?;
                     emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
