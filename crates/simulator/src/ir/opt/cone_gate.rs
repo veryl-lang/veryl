@@ -175,6 +175,14 @@ pub struct RtSegment {
 /// compare cost is pure loss, and the streak proves it cannot pay here.
 const AUTO_OFF_STREAK: u32 = 1024;
 
+/// Every this many settle passes, auto-offed segments get re-armed for one
+/// more try.  Off is a per-phase verdict, not a per-workload one: a segment
+/// trained during boot churn (a core spinning through reset toggles every
+/// input) can skip 40-90% of evals in steady state, and without a retry the
+/// boot verdict is permanent.  A re-armed hopeless segment re-expires after
+/// `AUTO_OFF_STREAK` dirty checks, bounding the retry at ~0.1% of evals.
+pub(crate) const REARM_EVALS: u64 = 1 << 20;
+
 /// Per-`Ir` runtime state: one shadow of the compare bytes per segment.
 pub struct ConeGateState {
     shadows: Vec<Vec<u8>>,
@@ -190,6 +198,8 @@ pub struct ConeGateState {
     streak: Vec<u32>,
     /// Pre-run backedge snapshot scratch (reused across segments).
     prerun: Vec<u8>,
+    /// Settle passes seen, driving the `REARM_EVALS` retry of off segments.
+    evals: u64,
     pub skipped: u64,
     pub ran: u64,
     pub next_report: u64,
@@ -208,10 +218,44 @@ impl ConeGateState {
             off: vec![false; nseg],
             streak: vec![0; nseg],
             prerun: Vec::new(),
+            evals: 0,
             skipped: 0,
             ran: 0,
             next_report: 1 << 18,
             per_seg: vec![(0, 0); nseg],
+        }
+    }
+
+    /// Once per settle pass: every `REARM_EVALS` passes, give auto-offed
+    /// segments a fresh unprimed start (see `REARM_EVALS`).
+    /// `VERYL_CONE_GATE_REARM` overrides the interval (0 disables), matching
+    /// the AOT-C entry preamble.
+    #[inline]
+    pub fn tick_rearm(&mut self) {
+        static INTERVAL: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+        let interval = *INTERVAL.get_or_init(|| {
+            std::env::var("VERYL_CONE_GATE_REARM")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .map_or(REARM_EVALS, |v| {
+                    if v == 0 {
+                        u64::MAX
+                    } else {
+                        v.next_power_of_two()
+                    }
+                })
+        });
+        self.evals += 1;
+        if interval == u64::MAX || !self.evals.is_multiple_of(interval) {
+            return;
+        }
+        for si in 0..self.off.len() {
+            if self.off[si] {
+                self.off[si] = false;
+                self.primed[si] = false;
+                self.converged[si] = false;
+                self.streak[si] = 0;
+            }
         }
     }
 
@@ -1416,6 +1460,25 @@ fn finish_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rearm_retries_offed_segments_each_epoch() {
+        let mut st = ConeGateState::new(2);
+        st.off[0] = true;
+        st.primed[0] = true;
+        st.converged[0] = true;
+        st.streak[0] = AUTO_OFF_STREAK;
+        st.streak[1] = 7;
+        for _ in 0..REARM_EVALS - 1 {
+            st.tick_rearm();
+        }
+        assert!(st.off[0], "re-arm fired before the epoch boundary");
+        st.tick_rearm();
+        assert!(!st.off[0] && !st.primed[0] && !st.converged[0]);
+        assert_eq!(st.streak[0], 0);
+        // A live segment's streak is untouched by the epoch tick.
+        assert_eq!(st.streak[1], 7);
+    }
 
     /// Deterministic pseudo-random intervals, including the shapes the sort
     /// has to special-case: repeated starts (storage aliases), starts sharing
