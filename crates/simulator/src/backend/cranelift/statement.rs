@@ -103,9 +103,7 @@ impl ProtoAssignDynamicStatement {
             // select, and the narrow path below needs the whole span in a
             // register.
             if self.dst_width > 64 {
-                return self.dst_base.is_ff()
-                    && self.select.is_none()
-                    && self.rhs_select.is_none();
+                return self.dst_base.is_ff() && self.rhs_select.is_none();
             }
             return dyn_sel.elem_width * dyn_sel.num_elements <= 64;
         }
@@ -123,11 +121,7 @@ impl ProtoAssignDynamicStatement {
         // Wide (>64-bit) FF-base element store, whole or bit-selected:
         // `build_binary_dynamic_wide_ff`.  A 4-state dst bails there (→ module
         // falls back), so the gate here is optimistic.
-        if self.dst_width > 64
-            && self.dst_base.is_ff()
-            && self.select.is_none()
-            && self.rhs_select.is_none()
-        {
+        if self.dst_width > 64 && self.dst_base.is_ff() && self.rhs_select.is_none() {
             return true;
         }
         self.dst_width <= 64
@@ -148,11 +142,7 @@ impl ProtoAssignDynamicStatement {
         }
         // Wide (>64-bit) FF-base element write, whole or bit-selected: see
         // `build_binary_dynamic_wide_ff`.
-        if self.dst_width > 64
-            && self.dst_base.is_ff()
-            && self.select.is_none()
-            && self.rhs_select.is_none()
-        {
+        if self.dst_width > 64 && self.dst_base.is_ff() && self.rhs_select.is_none() {
             return self.build_binary_dynamic_wide_ff(context, builder);
         }
         // Plain store re-masks the payload to dst_width (istoreN truncation
@@ -536,7 +526,7 @@ impl ProtoAssignDynamicStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
-        if context.use_4state || self.select.is_some() || self.rhs_select.is_some() {
+        if context.use_4state || self.rhs_select.is_some() {
             return None;
         }
         if !self.dst_base.is_ff() || self.dst_num_elements == 0 {
@@ -595,26 +585,33 @@ impl ProtoAssignDynamicStatement {
         // same-event reader saw read-NEW. Unpacked keeps it for multi-RMW forwarding.
         let ff_is_packed = self.dst_base.raw() == self.dst_ff_current_base_offset;
 
-        // `arr[idx][sel +: w] <= v`: read the element back and merge the
-        // window in, so the store/log below still deliver a whole element.
-        // The read is from `dst_base`, which is the element the interpreter
-        // reads too — the current slot when packed, the next slot when not.
-        let src_ptr = if let Some(dyn_sel) = self.dynamic_select.as_ref() {
-            use super::helpers::emit_wide_select_rmw_at;
+        // `arr[idx][hi:lo] <= v`: read the element back and merge the window
+        // in, so the store/log below still deliver a whole element.  The read
+        // source and the dynamic-over-static precedence follow
+        // `AssignDynamicStatement::eval_step`.
+        let src_ptr = if self.dynamic_select.is_some() || self.select.is_some() {
+            use super::helpers::{emit_wide_select_rmw, emit_wide_select_rmw_at};
             let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
             let old_ptr = builder.ins().iadd(context.ff_values, base);
             let old_ptr = builder.ins().iadd(old_ptr, byte_offset);
-            let merged = emit_wide_select_rmw_at(
-                context,
-                builder,
-                old_ptr,
-                src_ptr,
-                dyn_shift?,
-                dyn_sel.window,
-                nb,
-            );
-            // The index clamp is to the last element, so a window on the last
-            // one can overhang; `clip_window_to_width` drops those bits.
+            let merged = match self.dynamic_select.as_ref() {
+                Some(dyn_sel) => emit_wide_select_rmw_at(
+                    context,
+                    builder,
+                    old_ptr,
+                    src_ptr,
+                    dyn_shift?,
+                    dyn_sel.window,
+                    nb,
+                ),
+                None => {
+                    let (beg, end) = self.select?;
+                    emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
+                }
+            };
+            // `Value::assign` confines the result to the declared width: a
+            // dynamic window on the last element can overhang, and the padding
+            // above `dst_width` is cleared either way.
             emit_wide_apply_mask(context, builder, merged, nb, self.dst_width);
             merged
         } else {

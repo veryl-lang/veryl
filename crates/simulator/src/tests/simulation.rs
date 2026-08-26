@@ -20563,6 +20563,92 @@ fn wide_dynamic_bit_select_store() {
 }
 
 #[test]
+fn wide_ff_array_element_bit_select_store() {
+    // `arr[idx][hi:lo] <= v` and `arr[idx][j +: w] <= v` on an array of
+    // >128-bit FF elements: a runtime element index combined with a bit-select
+    // window.  The element is read back, merged, and delivered whole through
+    // the wide write log, so the untouched bits must survive the cycle.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        idx: input  logic<2>,
+        j  : input  logic<8>,
+        v  : input  logic<8>,
+        os : output logic<138>,
+        od : output logic<138>,
+    ) {
+        var a: logic<138> [4];
+        var b: logic<138> [4];
+        always_ff (clk, rst) {
+            if_reset {
+                a[0] = 0;
+                a[1] = 0;
+                a[2] = 0;
+                a[3] = 0;
+                b[0] = 0;
+                b[1] = 0;
+                b[2] = 0;
+                b[3] = 0;
+            } else {
+                a[idx][15:8] = v;
+                b[idx][j +: 8] = v;
+            }
+        }
+        assign os = a[1];
+        assign od = b[1];
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    for (idx, j) in [(1u64, 0u64), (1, 100), (1, 130), (2, 8)] {
+        for config in Config::all() {
+            // The wide element RMW declines 4-state, so only the 2-state
+            // engines exercise the merge under test.
+            if config.use_4state {
+                continue;
+            }
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            let rst = sim.get_reset("rst").unwrap();
+            sim.step_reset(&clk, &rst);
+            sim.set("idx", Value::new(idx, 2, false));
+            sim.set("j", Value::new(j, 8, false));
+            sim.set("v", Value::new(0xa5, 8, false));
+            sim.step(&clk);
+            // Only element 1 is observable; a write to another element must
+            // leave it at its reset zero.
+            let want_s = if idx == 1 {
+                BigUint::from(0xa5u32) << 8u32
+            } else {
+                BigUint::from(0u32)
+            };
+            let mut want_d = BigUint::from(0u32);
+            if idx == 1 {
+                let lo = (j as usize).min(137);
+                for bit in 0..8u64 {
+                    let at = lo as u64 + bit;
+                    if (at as usize) < 138 {
+                        want_d.set_bit(at, (0xa5u64 >> bit) & 1 == 1);
+                    }
+                }
+            }
+            assert_eq!(
+                sim.get("os").unwrap(),
+                Value::new_biguint(want_s, 138, false),
+                "os idx={idx} config={config:?}"
+            );
+            assert_eq!(
+                sim.get("od").unwrap(),
+                Value::new_biguint(want_d, 138, false),
+                "od idx={idx} j={j} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn dynamic_part_select_into_an_array_element_clips_rhs_to_the_window() {
     // `a[i][j +: 4] = ~v` on narrow unpacked elements: the RHS temp is
     // computed at register width, so bits above the window must be masked

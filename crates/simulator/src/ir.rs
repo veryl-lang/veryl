@@ -351,10 +351,11 @@ impl Ir {
                         .unwrap_or_default(),
                 ),
                 Statement::AssignDynamic(a) => format!(
-                    "AssignDynamic dst_width={} n_elem={} full={}{}",
+                    "AssignDynamic dst_width={} n_elem={} full={}{}{}",
                     a.dst_width,
                     a.dst_num_elements,
                     a.dst_width * a.dst_num_elements,
+                    if a.select.is_some() { " select" } else { "" },
                     a.dynamic_select
                         .as_ref()
                         .map(|d| format!(
