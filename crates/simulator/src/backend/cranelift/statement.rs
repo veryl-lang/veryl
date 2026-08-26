@@ -8,8 +8,8 @@ use super::runtime::{
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain};
 use crate::ir::variable::native_bytes as calc_native_bytes;
 use crate::ir::{
-    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoForBound,
-    ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
+    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoDynamicBitSelect,
+    ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
 };
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Value as CraneliftValue;
@@ -928,13 +928,47 @@ impl ProtoAssignStatement {
         {
             return false;
         }
-        if let Some(dyn_sel) = &self.dynamic_select
-            && (dyn_sel.elem_width * dyn_sel.num_elements > 128
-                || !dyn_sel.index_expr.can_build_binary())
-        {
-            return false;
+        if let Some(dyn_sel) = &self.dynamic_select {
+            if !dyn_sel.index_expr.can_build_binary() {
+                return false;
+            }
+            // A destination wider than a register goes through
+            // `build_binary_wide`; anything narrower uses the register RMW
+            // below, which holds the whole span in an I64/I128.
+            if self.dst_width > 128 {
+                if !self.wide_dynamic_select_emittable(dyn_sel) {
+                    return false;
+                }
+            } else if dyn_sel.elem_width * dyn_sel.num_elements > 128 {
+                return false;
+            }
         }
         true
+    }
+
+    /// Whether [`Self::build_binary_wide`] has an emitter for this
+    /// dynamic-index store.
+    ///
+    /// The index clamp is to the last ELEMENT, so a multi-bit window on the
+    /// last element can reach past `dst_width`.  There
+    /// `AssignStatement::eval_step` neither replaces nor drops the overhang:
+    /// `Value::assign` leaves bits at or above the width out of its
+    /// keep-mask, so they end up OR-ed into the storage padding.  No emitter
+    /// here reproduces that, so such a store stays interpreted.
+    fn wide_dynamic_select_emittable(&self, dyn_sel: &ProtoDynamicBitSelect) -> bool {
+        dynamic_select_top_bit(dyn_sel) < self.dst_width
+    }
+
+    /// Gate for the limb form, shared by the emitter and the gate above so the
+    /// two cannot drift.  `use_4state` is not visible here; that config bails
+    /// at the top of `build_binary_wide` instead.
+    fn wide_dynamic_limb_form(&self, dyn_sel: &ProtoDynamicBitSelect) -> bool {
+        !self.dst.is_ff()
+            && self.rhs_select.is_none()
+            && dyn_sel.window > 0
+            && dyn_sel.window <= 64
+            && dyn_sel.num_elements > 0
+            && self.wide_dynamic_select_emittable(dyn_sel)
     }
 
     pub fn build_binary(
@@ -1486,7 +1520,7 @@ impl ProtoAssignStatement {
         // Wide-dst bit-select WRITE (RMW) in 4-state mode needs mask-aware
         // read-modify-write semantics; keep that on the interpreter (rare).
         // 2-state dst-select and any rhs_select are handled below.
-        if self.select.is_some() && context.use_4state {
+        if (self.select.is_some() || self.dynamic_select.is_some()) && context.use_4state {
             return None;
         }
 
@@ -1526,6 +1560,44 @@ impl ProtoAssignStatement {
                 self.dst.raw() as i32,
                 beg,
                 end,
+                self.dst_width,
+                sv,
+            );
+            return Some(());
+        }
+
+        // Same collapse for a DYNAMIC ≤64-bit bit-select into a wide COMB
+        // value: the index only moves the word the RMW lands on, so one or
+        // two computed-address words replace the full-width wide-op sequence.
+        if let Some(dyn_sel) = self.dynamic_select.as_ref()
+            && self.wide_dynamic_limb_form(dyn_sel)
+        {
+            let (raw, _mask_xz) = self.expr.build_binary(context, builder)?;
+            // A `builds_wide_pointer` expr returns a pointer; the field is its
+            // low word. A scalar IS that word. (cf. `wide_shift_amount`.)
+            let sv = if returns_wide_pointer(&self.expr) {
+                builder.ins().load(I64, MemFlagsData::trusted(), raw, 0)
+            } else {
+                raw
+            };
+            // The field is ≤64 bits and `emit_wide_dynamic_field_store` clips
+            // to it, so extending in I64 lands exactly the bits that survive.
+            let sv = match self.visible_store_sign_extend() {
+                Some(from_width) => {
+                    let reg_bits = builder.func.dfg.value_type(sv).bits() as usize;
+                    let sh = (reg_bits - from_width) as i64;
+                    let v = builder.ins().ishl_imm_u(sv, sh);
+                    builder.ins().sshr_imm_u(v, sh)
+                }
+                None => sv,
+            };
+            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+            emit_wide_dynamic_field_store(
+                builder,
+                context.comb_values,
+                self.dst.raw() as i32,
+                shift,
+                dyn_sel,
                 self.dst_width,
                 sv,
             );
@@ -1639,12 +1711,31 @@ impl ProtoAssignStatement {
         // read-modify-write the [beg:end] range (2-state; 4-state bailed
         // above).  `src_ptr` becomes the full post-RMW wide value that the
         // store/log path below writes to the canonical dst.
-        let src_ptr = if let Some((beg, end)) = self.select {
+        //
+        // The read source per storage class matches the interpreter: comb =
+        // live value, packed FF = last-cycle current slot, unpacked multi-RMW
+        // FF = next slot with prior in-event writes forwarded.  Dynamic index
+        // wins over static `select` as in `AssignStatement::eval_step`.
+        let src_ptr = if let Some(dyn_sel) = self.dynamic_select.as_ref() {
+            use super::helpers::emit_wide_select_rmw_at;
+            // Mirrors the `can_build_binary` gate (see
+            // `wide_dynamic_select_emittable`).
+            if !self.wide_dynamic_select_emittable(dyn_sel) {
+                return None;
+            }
+            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+            let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
+            emit_wide_select_rmw_at(
+                context,
+                builder,
+                old_ptr,
+                src_ptr,
+                shift,
+                dyn_sel.window,
+                nb,
+            )
+        } else if let Some((beg, end)) = self.select {
             use super::helpers::emit_wide_select_rmw;
-            // Read the current dst value from `dst.raw()` (= `dst_offset`):
-            // for comb that is the live value, for a packed FF the old
-            // (last-cycle) current slot, and for an unpacked multi-RMW FF the
-            // next slot that already holds prior in-event writes (forwarding).
             let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
             emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
         } else {
@@ -1878,6 +1969,104 @@ fn emit_wide_narrow_field_store(
         let result1 = builder.ins().bor(cleared1, masked1);
         builder.ins().store(flags, result1, base_addr, off1);
     }
+}
+
+/// Highest bit a dynamic bit-select can reach.  Both the interpreter and
+/// [`build_dynamic_select_shift`] clamp the index to the last element, so the
+/// top of the last window bounds every write.
+fn dynamic_select_top_bit(dyn_sel: &ProtoDynamicBitSelect) -> usize {
+    (dyn_sel.num_elements.saturating_sub(1)) * dyn_sel.elem_width + dyn_sel.window.saturating_sub(1)
+}
+
+/// Whether any reachable index puts the selected window across a 64-bit word
+/// boundary.  `(i * elem_width) % 64` repeats with a period dividing 64, so the
+/// first 64 indices already show every residue that can occur.
+fn dynamic_select_spans_two_words(dyn_sel: &ProtoDynamicBitSelect) -> bool {
+    (0..dyn_sel.num_elements.min(64)).any(|i| (i * dyn_sel.elem_width) % 64 + dyn_sel.window > 64)
+}
+
+/// Runtime-offset sibling of [`emit_wide_narrow_field_store`]: RMW a ≤64-bit
+/// field at runtime low bit `lo_val` into the wide value at
+/// `base_addr + base_off`.
+///
+/// When the field can span a word boundary, the upper word is updated
+/// unconditionally with a mask that is zero for a non-spanning offset — the
+/// write is then a read-back of what the lower-word store just deposited,
+/// which is why it must come *after* it, with the index clamped to the last
+/// word to stay inside the allocation.
+///
+/// 2-state, comb dst (no write-log).  The caller guarantees the highest
+/// reachable bit is inside `dst_width`, so no width clamp is needed.
+fn emit_wide_dynamic_field_store(
+    builder: &mut FunctionBuilder,
+    base_addr: cranelift::prelude::Value,
+    base_off: i32,
+    lo_val: cranelift::prelude::Value,
+    dyn_sel: &ProtoDynamicBitSelect,
+    dst_width: usize,
+    sv: cranelift::prelude::Value,
+) {
+    let nbits = dyn_sel.window;
+    let n_words = calc_native_bytes(dst_width) / 8;
+    let flags = MemFlagsData::trusted();
+    let base_mask: u64 = if nbits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << nbits) - 1
+    };
+    // `sv` may be I128 (e.g. an unsized literal); the field is ≤64-bit so the
+    // low word carries it.
+    let sv = if builder.func.dfg.value_type(sv) == I128 {
+        builder.ins().ireduce(I64, sv)
+    } else {
+        sv
+    };
+    let sv = builder.ins().band_imm_u(sv, base_mask as i64);
+
+    let word = builder.ins().ushr_imm_u(lo_val, 6);
+    let bit = builder.ins().band_imm_u(lo_val, 63);
+    let byte_off = builder.ins().ishl_imm_u(word, 3);
+    let addr0 = builder.ins().iadd(base_addr, byte_off);
+
+    let mask_val = builder.ins().iconst(I64, base_mask as i64);
+    let m0 = builder.ins().ishl(mask_val, bit);
+    let s0 = builder.ins().ishl(sv, bit);
+    let d0 = builder.ins().load(I64, flags, addr0, base_off);
+    let not_m0 = builder.ins().bnot(m0);
+    let cleared0 = builder.ins().band(d0, not_m0);
+    let result0 = builder.ins().bor(cleared0, s0);
+    builder.ins().store(flags, result0, addr0, base_off);
+
+    if !dynamic_select_spans_two_words(dyn_sel) {
+        return;
+    }
+    // `(x >> 1) >> (63 - bit)` is `x >> (64 - bit)` without the shift-amount
+    // wraparound at `bit == 0`.
+    let c63 = builder.ins().iconst(I64, 63);
+    let sh = builder.ins().isub(c63, bit);
+    let spill = |builder: &mut FunctionBuilder, x| {
+        let x1 = builder.ins().ushr_imm_u(x, 1);
+        builder.ins().ushr(x1, sh)
+    };
+    let m1 = spill(builder, mask_val);
+    let s1 = spill(builder, sv);
+    // Clamp to the last word: a field that does not actually span leaves
+    // `m1 == 0`, so the store below is a no-op rewrite of whatever word it
+    // lands on, and clamping keeps that inside the allocation.
+    let next = builder.ins().iadd_imm_s(word, 1);
+    let n_words_val = builder.ins().iconst(I64, n_words as i64);
+    let last = builder.ins().iconst(I64, (n_words - 1) as i64);
+    let in_range = builder
+        .ins()
+        .icmp(IntCC::UnsignedLessThan, next, n_words_val);
+    let word1 = builder.ins().select(in_range, next, last);
+    let byte_off1 = builder.ins().ishl_imm_u(word1, 3);
+    let addr1 = builder.ins().iadd(base_addr, byte_off1);
+    let d1 = builder.ins().load(I64, flags, addr1, base_off);
+    let not_m1 = builder.ins().bnot(m1);
+    let cleared1 = builder.ins().band(d1, not_m1);
+    let result1 = builder.ins().bor(cleared1, s1);
+    builder.ins().store(flags, result1, addr1, base_off);
 }
 
 /// Emit one or more wide write-log entries covering `nb` bytes starting

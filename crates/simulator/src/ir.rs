@@ -342,8 +342,9 @@ impl Ir {
                     a.dynamic_select
                         .as_ref()
                         .map(|d| format!(
-                            " dynsel(elem={} n={} full={})",
+                            " dynsel(elem={} win={} n={} full={})",
                             d.elem_width,
+                            d.window,
                             d.num_elements,
                             d.elem_width * d.num_elements
                         ))
@@ -357,8 +358,9 @@ impl Ir {
                     a.dynamic_select
                         .as_ref()
                         .map(|d| format!(
-                            " dynsel(elem={} n={} full={})",
+                            " dynsel(elem={} win={} n={} full={})",
                             d.elem_width,
+                            d.window,
                             d.num_elements,
                             d.elem_width * d.num_elements
                         ))

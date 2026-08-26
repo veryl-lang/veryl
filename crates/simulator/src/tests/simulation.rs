@@ -20505,6 +20505,117 @@ fn dynamic_index_store_into_a_65_to_128_bit_element() {
 }
 
 #[test]
+fn wide_dynamic_bit_select_store() {
+    // A runtime-indexed bit / part-select WRITE into a >128-bit value.  Both
+    // the single-bit form and a part-select that straddles a 64-bit word
+    // boundary must land exactly, and the runtime index must clamp to the last
+    // element rather than run off the value.
+    let code = r#"
+    module Top (
+        i: input  logic<10>,
+        j: input  logic<10>,
+        b: input  logic,
+        v: input  logic<54>,
+        o: output logic<576>,
+        p: output logic<864>,
+    ) {
+        var a: logic<576>;
+        var c: logic<16, 54>;
+        always_comb {
+            a    = 0;
+            a[i] = b;
+        }
+        always_comb {
+            c    = 0;
+            c[j] = v;
+        }
+        assign o = a;
+        assign p = c;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let v = (BigUint::from(0x2a_u32) << 48u32) + BigUint::from(0xfedc_ba98_7654_u64);
+    // j=1 puts the 54-bit window at bits 54..107, across the word-0/1 seam;
+    // j=15 is the last element, ending exactly at the top bit.
+    // i=999 is past the end and must clamp to bit 575.
+    for (i, j, bit_pos, win_pos) in [(0u32, 0u32, 0u32, 0u32), (7, 1, 7, 54), (999, 15, 575, 810)] {
+        for config in Config::all() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("i", Value::new(i as u64, 10, false));
+            sim.set("j", Value::new(j as u64, 10, false));
+            sim.set("b", Value::new(1, 1, false));
+            sim.set("v", Value::new_biguint(v.clone(), 54, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new_biguint(BigUint::from(1u32) << bit_pos, 576, false),
+                "o i={i} config={config:?}"
+            );
+            assert_eq!(
+                sim.get("p").unwrap(),
+                Value::new_biguint(v.clone() << win_pos, 864, false),
+                "p j={j} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_dynamic_bit_select_store_gate() {
+    // Pin the predicate the emitter and `can_build_binary` share: a span wider
+    // than a register is compiled once the destination is a flat wide buffer,
+    // but a window whose clamped top overhangs `dst_width` stays interpreted —
+    // `Value::assign` OR-s that overhang into the storage padding and no
+    // emitter here reproduces it.
+    use crate::ir::{
+        ExpressionContext, ProtoAssignStatement, ProtoDynamicBitSelect, ProtoExpression, VarOffset,
+    };
+    use veryl_parser::token_range::TokenRange;
+
+    let index = ProtoExpression::Value {
+        value: Value::new(3, 10, false),
+        width: 10,
+        expr_context: ExpressionContext {
+            width: 10,
+            signed: false,
+        },
+    };
+    let assign = |window: usize, num_elements: usize, dst_width: usize| ProtoAssignStatement {
+        dst: VarOffset::Comb(0),
+        dst_width,
+        select: None,
+        dynamic_select: Some(ProtoDynamicBitSelect {
+            index_expr: Box::new(index.clone()),
+            elem_width: 1,
+            window,
+            num_elements,
+        }),
+        rhs_select: None,
+        expr: ProtoExpression::Value {
+            value: Value::new(1, 1, false),
+            width: 1,
+            expr_context: ExpressionContext {
+                width: 1,
+                signed: false,
+            },
+        },
+        dst_ff_current_offset: -1,
+        token: TokenRange::default(),
+    };
+
+    // Span > 128 bits into a wide destination: the wide emitter takes it.
+    assert!(assign(1, 576, 576).can_build_binary());
+    // A 40-bit window over 537 bit positions ends exactly at bit 575.
+    assert!(assign(40, 537, 576).can_build_binary());
+    // One position further and the clamped window overhangs the width.
+    assert!(!assign(40, 538, 576).can_build_binary());
+    // A span that wide with a register-sized destination has no emitter.
+    assert!(!assign(1, 576, 128).can_build_binary());
+}
+
+#[test]
 fn dynamic_index_store_stays_compiled_above_64_bits() {
     // Pin the predicate: a comb-base element store is compiled above 64 bits,
     // not only above 128.  An FF base keeps its own narrower gate.
