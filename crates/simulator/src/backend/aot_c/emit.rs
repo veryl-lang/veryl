@@ -6502,9 +6502,9 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     let srcsh = next_wide_tmp();
                     let newv = next_wide_tmp();
                     // Mirror AssignStatement::eval_step's dynamic_select +
-                    // Value::assign(beg=_sh+win-1, end=_sh) EXACTLY, including
-                    // the out-of-width spill (no final width clamp), so AOT and
-                    // the interpreter stay byte-identical.
+                    // Value::assign(beg=_sh+win-1, end=_sh) EXACTLY.  The width
+                    // mask drops the overhang a last-element window can have
+                    // past `dst_width`, as `clip_window_to_width` does.
                     return Some(format!(
                         "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
                             uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
@@ -6514,6 +6514,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                             vw_shl((uint8_t*)_w{wmsk}, (const uint8_t*)_w{wmsk}, _sh, {nb}u); \
                             uint64_t _w{widm}[{nw}]; \
                             vw_fill_ones((uint8_t*)_w{widm}, (const uint8_t*)0, {pkd}u); \
+                            vw_band((uint8_t*)_w{wmsk}, (const uint8_t*)_w{wmsk}, (const uint8_t*)_w{widm}, {nb}u); \
                             uint64_t _w{keep}[{nw}]; \
                             vw_band_not((uint8_t*)_w{keep}, (const uint8_t*)_w{widm}, (const uint8_t*)_w{wmsk}, {nb}u); \
                             uint64_t _w{srcsh}[{nw}]; \
@@ -6886,19 +6887,25 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                 } else {
                     (1u64 << dyn_sel.window) - 1
                 };
+                // A window on the clamped last element can run past
+                // `dst_width`; clip the field mask as `clip_window_to_width`
+                // does.
+                let dwmask = width_mask(a.dst_width);
                 return Some(format!(
                     "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
                         uint64_t _sh = _idx * {ew}; \
+                        uint64_t _m = (0x{vmask:x}ULL << _sh) & 0x{dwmask:x}ULL; \
                         uint64_t _v = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; \
                         {ct} _o = *(({ct}*)({b} + {o:#x})); \
                         *(({ct}*)({b} + {o:#x})) = \
-                          ({ct})((_o & ({ct})(~(0x{vmask:x}ULL << _sh))) | ({ct})(_v << _sh)); }}",
+                          ({ct})((_o & ({ct})(~_m)) | ({ct})((_v << _sh) & _m)); }}",
                     idx = idx_str,
                     max = max_idx,
                     ew = dyn_sel.elem_width,
                     rhs = rhs_str,
                     vmask = vmask,
+                    dwmask = dwmask,
                     ct = cty,
                     b = buf,
                     o = store_off,

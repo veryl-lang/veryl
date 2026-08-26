@@ -272,12 +272,17 @@ impl ProtoAssignDynamicStatement {
         if let Some(dyn_sel) = &self.dynamic_select {
             let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
 
-            let payload = builder.ins().ishl(payload, shift);
-
+            // Clip mask and payload to the element width: a last-element
+            // window can overhang, and RHS bits above the window must not
+            // leak into neighbouring bits the interpreter leaves alone.
             let elem_mask = gen_mask_for_width(dyn_sel.window);
             let mask_val = builder.ins().iconst(I64, elem_mask as i64);
             let dyn_mask = builder.ins().ishl(mask_val, shift);
+            let dyn_mask = band_const(builder, dyn_mask, gen_mask_for_width(self.dst_width), false);
             let not_mask = builder.ins().bnot(dyn_mask);
+
+            let payload = builder.ins().ishl(payload, shift);
+            let payload = builder.ins().band(payload, dyn_mask);
 
             let org = load_native_to_i64(builder, addr, 0);
             let org = builder.ins().band(org, not_mask);
@@ -287,6 +292,7 @@ impl ProtoAssignDynamicStatement {
             }
             let mask_result = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
+                let mask_xz = builder.ins().band(mask_xz, dyn_mask);
                 let org = load_native_to_i64(builder, addr, nb_i32);
                 let org = builder.ins().band(org, not_mask);
                 let result_m = builder.ins().bor(mask_xz, org);
@@ -902,12 +908,14 @@ impl ProtoAssignStatement {
     /// can materialize: it happens in an I64/I128 register and is clipped to
     /// the field, so both must fit.  Anything else stays on the interpreter.
     fn wide_select_sign_extend_field(&self, from_width: usize) -> Option<usize> {
-        if from_width > 64
-            || self.dynamic_select.is_some()
-            || self.rhs_select.is_some()
-            || returns_wide_pointer(&self.expr)
-        {
+        if from_width > 64 || self.rhs_select.is_some() || returns_wide_pointer(&self.expr) {
             return None;
+        }
+        // A dynamic index moves the field but not its width, so the window is
+        // what the extension has to fit — and it takes precedence over a
+        // static `select` here exactly as it does in the emitters.
+        if let Some(dyn_sel) = &self.dynamic_select {
+            return (dyn_sel.window <= 128).then_some(dyn_sel.window);
         }
         let (beg, end) = self.select?;
         let nbits = beg.checked_sub(end)?.checked_add(1)?;
@@ -932,35 +940,22 @@ impl ProtoAssignStatement {
             if !dyn_sel.index_expr.can_build_binary() {
                 return false;
             }
-            // A destination wider than a register goes through
-            // `build_binary_wide`; anything narrower uses the register RMW
-            // below, which holds the whole span in an I64/I128.
-            if self.dst_width > 128 {
-                if !self.wide_dynamic_select_emittable(dyn_sel) {
-                    return false;
-                }
-            } else if dyn_sel.elem_width * dyn_sel.num_elements > 128 {
+            // Wider than a register → `build_binary_wide`'s width-generic
+            // RMW; narrower → the register RMW below, which needs the whole
+            // span in an I64/I128.
+            if self.dst_width <= 128 && dyn_sel.elem_width * dyn_sel.num_elements > 128 {
                 return false;
             }
         }
         true
     }
 
-    /// Whether [`Self::build_binary_wide`] has an emitter for this
-    /// dynamic-index store.
+    /// Gate for the limb form of a wide dynamic-index store, shared by the
+    /// emitter and its caller so the two cannot drift.
     ///
-    /// The index clamp is to the last ELEMENT, so a multi-bit window on the
-    /// last element can reach past `dst_width`.  There
-    /// `AssignStatement::eval_step` neither replaces nor drops the overhang:
-    /// `Value::assign` leaves bits at or above the width out of its
-    /// keep-mask, so they end up OR-ed into the storage padding.  No emitter
-    /// here reproduces that, so such a store stays interpreted.
-    fn wide_dynamic_select_emittable(&self, dyn_sel: &ProtoDynamicBitSelect) -> bool {
-        dynamic_select_top_bit(dyn_sel) < self.dst_width
-    }
-
-    /// Gate for the limb form, shared by the emitter and the gate above so the
-    /// two cannot drift.  `use_4state` is not visible here; that config bails
+    /// A window on the clamped last element can reach past `dst_width`; the
+    /// limb form has no width mask to drop those bits, so that case is left
+    /// to the general wide RMW, which masks to `dst_width`.  4-state bails
     /// at the top of `build_binary_wide` instead.
     fn wide_dynamic_limb_form(&self, dyn_sel: &ProtoDynamicBitSelect) -> bool {
         !self.dst.is_ff()
@@ -968,7 +963,7 @@ impl ProtoAssignStatement {
             && dyn_sel.window > 0
             && dyn_sel.window <= 64
             && dyn_sel.num_elements > 0
-            && self.wide_dynamic_select_emittable(dyn_sel)
+            && dynamic_select_top_bit(dyn_sel) < self.dst_width
     }
 
     pub fn build_binary(
@@ -1182,9 +1177,9 @@ impl ProtoAssignStatement {
         if let Some(dyn_sel) = &self.dynamic_select {
             let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
 
-            let payload = builder.ins().ishl(payload, shift);
-
-            // Dynamic mask: elem_mask << shift, then invert
+            // Clip mask and payload to the declared width: a last-element
+            // window can overhang, and `clip_window_to_width` drops those
+            // bits on the interpreter side.
             let elem_mask = gen_mask_for_width(dyn_sel.window);
             let mask_val = if wide {
                 iconst_128(builder, elem_mask)
@@ -1192,7 +1187,11 @@ impl ProtoAssignStatement {
                 builder.ins().iconst(I64, elem_mask as i64)
             };
             let dyn_mask = builder.ins().ishl(mask_val, shift);
+            let dyn_mask = band_const(builder, dyn_mask, gen_mask_for_width(self.dst_width), wide);
             let not_mask = builder.ins().bnot(dyn_mask);
+
+            let payload = builder.ins().ishl(payload, shift);
+            let payload = builder.ins().band(payload, dyn_mask);
 
             let (org_payload, org_mask_xz) = if !context.disable_load_cache
                 && let Some(&(cached_p, cached_m)) = context.load_cache.get(&cache_key)
@@ -1216,6 +1215,7 @@ impl ProtoAssignStatement {
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
+                let mask_xz = builder.ins().band(mask_xz, dyn_mask);
                 let z = if wide { context.zero_128 } else { context.zero };
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
@@ -1718,11 +1718,6 @@ impl ProtoAssignStatement {
         // wins over static `select` as in `AssignStatement::eval_step`.
         let src_ptr = if let Some(dyn_sel) = self.dynamic_select.as_ref() {
             use super::helpers::emit_wide_select_rmw_at;
-            // Mirrors the `can_build_binary` gate (see
-            // `wide_dynamic_select_emittable`).
-            if !self.wide_dynamic_select_emittable(dyn_sel) {
-                return None;
-            }
             let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
             let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
             emit_wide_select_rmw_at(

@@ -20563,12 +20563,128 @@ fn wide_dynamic_bit_select_store() {
 }
 
 #[test]
+fn dynamic_part_select_into_an_array_element_clips_rhs_to_the_window() {
+    // `a[i][j +: 4] = ~v` on narrow unpacked elements: the RHS temp is
+    // computed at register width, so bits above the window must be masked
+    // off at the store, and a window overhanging the element top must drop
+    // the excess.  The interpreter clips both; every compiled RMW must
+    // agree.
+    let code = r#"
+    module Top (
+        i: input  logic<2> ,
+        j: input  logic<5> ,
+        v: input  logic<4> ,
+        o: output logic<30>,
+    ) {
+        var a: logic<30> [4];
+        always_comb {
+            a[0] = 0;
+            a[1] = 0;
+            a[2] = 0;
+            a[3] = 0;
+            a[i][j +: 4] = ~v;
+        }
+        assign o = a[1];
+    }
+    "#;
+    for (j, want) in [(8u64, 0xa00u64), (28, 0x2000_0000)] {
+        for config in Config::all() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("i", Value::new(1, 2, false));
+            sim.set("j", Value::new(j, 5, false));
+            sim.set("v", Value::new(0x5, 4, false));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(want, 30, false),
+                "j={j} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dynamic_part_select_store_out_of_range_is_dropped() {
+    // `x[i +: 4]` clamps `i` to the last ELEMENT, not the last legal window
+    // start, so on the last few positions the window runs off the top of `x`.
+    // SystemVerilog does not write the out-of-range bits; every backend must
+    // agree, and must leave the rest of `x` alone.  The four widths pick four
+    // different store emitters (scalar, __uint128_t, wide RMW, wide RMW again).
+    let code = r#"
+    module Top (
+        i : input  logic<10>,
+        v : input  logic<4>,
+        on: output logic<30> ,
+        om: output logic<100>,
+        ow: output logic<134>,
+        ox: output logic<576>,
+    ) {
+        var an: logic<30> ;
+        var am: logic<100>;
+        var aw: logic<134>;
+        var ax: logic<576>;
+        always_comb {
+            an        = '1;
+            an[i +: 4] = v;
+        }
+        always_comb {
+            am        = '1;
+            am[i +: 4] = v;
+        }
+        always_comb {
+            aw        = '1;
+            aw[i +: 4] = v;
+        }
+        always_comb {
+            ax        = '1;
+            ax[i +: 4] = v;
+        }
+        assign on = an;
+        assign om = am;
+        assign ow = aw;
+        assign ox = ax;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    // All ones, then the in-range bits of the 4-bit window replaced by `v`.
+    let expect = |width: usize, i: u64, v: u64| {
+        let lo = (i as usize).min(width - 1);
+        let mut x = (BigUint::from(1u32) << width) - BigUint::from(1u32);
+        for b in 0..4u64 {
+            let bit = lo as u64 + b;
+            if (bit as usize) < width {
+                x.set_bit(bit, (v >> b) & 1 == 1);
+            }
+        }
+        x
+    };
+
+    let v = 0b1010u64;
+    for i in [5u64, 96, 999] {
+        for config in Config::all() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("i", Value::new(i, 10, false));
+            sim.set("v", Value::new(v, 4, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (name, width) in [("on", 30usize), ("om", 100), ("ow", 134), ("ox", 576)] {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new_biguint(expect(width, i, v), width, false),
+                    "{name} i={i} config={config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn wide_dynamic_bit_select_store_gate() {
-    // Pin the predicate the emitter and `can_build_binary` share: a span wider
-    // than a register is compiled once the destination is a flat wide buffer,
-    // but a window whose clamped top overhangs `dst_width` stays interpreted —
-    // `Value::assign` OR-s that overhang into the storage padding and no
-    // emitter here reproduces it.
+    // Pin the predicate: a span wider than a register is compiled once the
+    // destination is a flat wide buffer, whatever the window does — the wide
+    // RMW masks its result to `dst_width`, which is what
+    // `clip_window_to_width` does on the interpreter.
     use crate::ir::{
         ExpressionContext, ProtoAssignStatement, ProtoDynamicBitSelect, ProtoExpression, VarOffset,
     };
@@ -20607,10 +20723,10 @@ fn wide_dynamic_bit_select_store_gate() {
 
     // Span > 128 bits into a wide destination: the wide emitter takes it.
     assert!(assign(1, 576, 576).can_build_binary());
-    // A 40-bit window over 537 bit positions ends exactly at bit 575.
+    // A 40-bit window over 537 bit positions ends exactly at bit 575; one
+    // position further it overhangs, and the general wide RMW still takes it.
     assert!(assign(40, 537, 576).can_build_binary());
-    // One position further and the clamped window overhangs the width.
-    assert!(!assign(40, 538, 576).can_build_binary());
+    assert!(assign(40, 538, 576).can_build_binary());
     // A span that wide with a register-sized destination has no emitter.
     assert!(!assign(1, 576, 128).can_build_binary());
 }
