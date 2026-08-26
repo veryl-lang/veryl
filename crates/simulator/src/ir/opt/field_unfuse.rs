@@ -55,6 +55,17 @@ fn diag() -> bool {
     *ON.get_or_init(|| std::env::var("VERYL_FIELD_UNFUSE_DIAG").as_deref() == Ok("1"))
 }
 
+/// `VERYL_FIELD_UNFUSE_EXPLAIN=off1,off2,...`: report why each listed comb
+/// offset was or was not split.  Read-only; the plan is unchanged.
+pub fn explain_offsets() -> &'static [isize] {
+    static V: std::sync::OnceLock<Vec<isize>> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        std::env::var("VERYL_FIELD_UNFUSE_EXPLAIN")
+            .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
+            .unwrap_or_default()
+    })
+}
+
 /// Most fields a single spanning read may gather; past this the concat costs
 /// more than the split saves and the variable is left packed.
 fn gather_limit() -> usize {
@@ -80,6 +91,7 @@ pub struct RunStats {
     pub skip_whole_write: usize,
     pub skip_gather: usize,
     pub skip_blocklist: usize,
+    pub skip_dyn_span: usize,
 }
 
 /// Per-offset access census.  Ranges are `(msb, lsb)` absolute bit indices,
@@ -92,6 +104,8 @@ struct VarInfo {
     read_ranges: Vec<(usize, usize)>,
     whole_write: bool,
     disqualified: bool,
+    /// First disqualification cause, for `VERYL_FIELD_UNFUSE_EXPLAIN`.
+    disq_why: Option<&'static str>,
 }
 
 #[derive(Default)]
@@ -108,7 +122,14 @@ impl Census {
         self.vars.entry(off).or_default()
     }
     fn disq(&mut self, off: isize) {
-        self.var(off).disqualified = true;
+        self.disq_why(off, "dynamic-or-unbounded access");
+    }
+    fn disq_why(&mut self, off: isize, why: &'static str) {
+        let v = self.var(off);
+        v.disqualified = true;
+        if v.disq_why.is_none() {
+            v.disq_why = Some(why);
+        }
     }
     fn note_width(&mut self, off: isize, w: usize) {
         let v = self.var(off);
@@ -120,29 +141,31 @@ impl Census {
     }
     fn write(&mut self, off: isize, w: usize, sel: Option<(usize, usize)>, poison: bool) {
         if poison {
-            self.disq(off);
+            self.disq_why(off, "event/initial write");
             return;
         }
         self.note_width(off, w);
-        let v = self.var(off);
         match sel {
-            Some((msb, lsb)) if msb >= lsb && msb < w => v.write_ranges.push((msb, lsb)),
-            Some(_) => v.disqualified = true,
-            None => v.whole_write = true,
+            Some((msb, lsb)) if msb >= lsb && msb < w => {
+                self.var(off).write_ranges.push((msb, lsb))
+            }
+            Some(_) => self.disq_why(off, "out-of-range write select"),
+            None => self.var(off).whole_write = true,
         }
     }
     fn read(&mut self, off: isize, w: usize, sel: Option<(usize, usize)>, poison: bool) {
         if poison {
-            self.disq(off);
+            self.disq_why(off, "event/initial read");
             return;
         }
         self.note_width(off, w);
-        let v = self.var(off);
         match sel {
-            Some((msb, lsb)) if msb >= lsb && msb < w => v.read_ranges.push((msb, lsb)),
-            Some(_) => v.disqualified = true,
-            None if w > 0 => v.read_ranges.push((w - 1, 0)),
-            None => v.disqualified = true,
+            Some((msb, lsb)) if msb >= lsb && msb < w => {
+                self.var(off).read_ranges.push((msb, lsb))
+            }
+            Some(_) => self.disq_why(off, "out-of-range read select"),
+            None if w > 0 => self.var(off).read_ranges.push((w - 1, 0)),
+            None => self.disq_why(off, "zero-width read"),
         }
     }
 }
@@ -703,26 +726,62 @@ pub fn run(
     };
 
     let gather_limit = gather_limit();
+    let explain = explain_offsets();
     let mut offsets: Vec<isize> = c.vars.keys().copied().collect();
     offsets.sort_unstable();
     let mut map: HashMap<isize, SplitVar> = HashMap::default();
     'var: for o in offsets {
         let v = &c.vars[&o];
+        let exp = explain.contains(&o);
+        if exp {
+            eprintln!(
+                "[field_unfuse] explain off={o}: w={} writes={} reads={} whole_write={} \
+                 blocklisted={}",
+                v.full_width,
+                v.write_ranges.len(),
+                v.read_ranges.len(),
+                v.whole_write,
+                blocklist.contains(&o),
+            );
+        }
         if v.disqualified || v.width_conflict || v.full_width == 0 {
+            if exp {
+                eprintln!(
+                    "[field_unfuse] explain off={o}: skip_disq why={:?} width_conflict={}",
+                    v.disq_why, v.width_conflict
+                );
+            }
             stats.skip_disq += 1;
             continue;
         }
         if blocklist.contains(&o) {
+            if exp {
+                eprintln!("[field_unfuse] explain off={o}: skip_blocklist");
+            }
             stats.skip_blocklist += 1;
             continue;
         }
         if v.whole_write || v.write_ranges.is_empty() {
+            if exp {
+                eprintln!(
+                    "[field_unfuse] explain off={o}: skip_whole_write whole_write={}",
+                    v.whole_write
+                );
+            }
             stats.skip_whole_write += 1;
             continue;
         }
         let footprint = value_size(native_bytes(v.full_width), use_4state) as isize;
         if in_dyn_span(o, o + footprint) {
-            stats.skip_disq += 1;
+            if exp {
+                let hits: Vec<_> = c
+                    .dyn_spans
+                    .iter()
+                    .filter(|&&(s, e)| s < o + footprint && e > o)
+                    .collect();
+                eprintln!("[field_unfuse] explain off={o}: skip_dyn_span hits={hits:?}");
+            }
+            stats.skip_dyn_span += 1;
             continue;
         }
         // Merge overlapping (not merely adjacent) write ranges into fields.
@@ -736,10 +795,16 @@ pub fn run(
             }
         }
         if fields.len() < 2 {
+            if exp {
+                eprintln!("[field_unfuse] explain off={o}: skip_few_fields fields={fields:?}");
+            }
             stats.skip_few_fields += 1;
             continue;
         }
         if fields.iter().any(|&(lo, hi)| hi - lo + 1 > 64) {
+            if exp {
+                eprintln!("[field_unfuse] explain off={o}: skip_wide_field fields={fields:?}");
+            }
             stats.skip_wide_field += 1;
             continue;
         }
@@ -753,6 +818,13 @@ pub fn run(
                 .filter(|&&(lo, hi)| lo <= msb && lsb <= hi)
                 .count();
             if n > gather_limit {
+                if exp {
+                    eprintln!(
+                        "[field_unfuse] explain off={o}: skip_gather read=({msb},{lsb}) \
+                         fields_touched={n}/{} fields={fields:?}",
+                        fields.len()
+                    );
+                }
                 if diag() {
                     eprintln!(
                         "[field_unfuse] skip_gather off={o} w={} read=({msb},{lsb}) \
@@ -764,6 +836,9 @@ pub fn run(
                 stats.skip_gather += 1;
                 continue 'var;
             }
+        }
+        if exp {
+            eprintln!("[field_unfuse] explain off={o}: SPLIT fields={fields:?}");
         }
         let split = SplitVar {
             fields: fields
