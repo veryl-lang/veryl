@@ -4281,17 +4281,26 @@ impl Conv<&air::Module> for ProtoModule {
                 // zero, so a conditionally-written non-zero-initial field
                 // would read differently before its first write).
                 let mut blocklist: HashSet<isize> = HashSet::default();
+                let explain = field_unfuse::explain_offsets();
                 let note_meta = |vars: &HashMap<VarId, VariableMeta>,
                                  top: bool,
                                  blocklist: &mut HashSet<isize>| {
                     for meta in vars.values() {
-                        let nonzero_init =
-                            meta.initial_values.iter().any(|v| v.to_u64() != Some(0));
+                        let nonzero_init = meta.initial_values.iter().any(|v| !v.is_zero());
                         if !(top || nonzero_init) {
                             continue;
                         }
                         for el in &meta.elements {
                             if let VarOffset::Comb(o) = el.current {
+                                if explain.contains(&o) {
+                                    eprintln!(
+                                        "[field_unfuse] explain off={o}: blocklisted by meta \
+                                         path={} top={top} nonzero_init={nonzero_init} \
+                                         initial_values={:?}",
+                                        meta.path,
+                                        meta.initial_values.iter().take(4).collect::<Vec<_>>()
+                                    );
+                                }
                                 blocklist.insert(o);
                             }
                         }
