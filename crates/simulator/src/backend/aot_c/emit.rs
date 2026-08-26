@@ -5395,6 +5395,14 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
          typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
          typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n",
     );
+    // `split_translation_units` repeats this header in every unit, so both
+    // symbols are weak: the linker keeps one definition and `-fPIC` default
+    // visibility routes every unit's reference to it.
+    body.push_str(
+        "typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
+         __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
+         __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
+    );
     body.push_str(WIDEOPS_C_DECLS);
     body.push_str(WIDEOPS_C_INLINE);
     body.push('\n');

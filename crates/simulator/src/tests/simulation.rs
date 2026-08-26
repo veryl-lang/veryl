@@ -20687,6 +20687,18 @@ fn comb_display_output_matches_across_backends() {
     }
     "#;
 
+    // The comb source has to DECLARE the formatter hook, not just call it:
+    // without it the whole-comb translation units fail to compile and the
+    // module silently drops back to per-chunk dispatch — invisible in the
+    // values, so pin the native coverage explicitly.
+    if crate::backend::aot_c::cc_available() {
+        let ir = analyze(code, &aot_native_validate_config());
+        assert!(
+            ir.whole_comb.is_some(),
+            "a comb $display must stay AOT-C-native"
+        );
+    }
+
     // The validate dual-run replays every settle with the Cranelift
     // reference; its AOT output must be rolled back or each print lands
     // twice — so the same-text assertion below covers it.
