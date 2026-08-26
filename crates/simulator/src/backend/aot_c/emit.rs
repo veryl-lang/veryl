@@ -66,51 +66,54 @@ __attribute__((visibility(\"default\"))) void veryl_set_wideops(const void* t) {
 const WIDEOPS_C_INLINE: &str = r##"
 #define VW_RD(p,i) (((const veryl_u64_ua*)(p))[(i)])
 #define VW_WR(p,i,v) (((veryl_u64_ua*)(p))[(i)] = (v))
+/* `native_bytes` returns 4 for widths <= 32, so a truncating `/ 8` would
+   make every helper below a silent no-op.  Mirrors Rust-side `wide_words`. */
+#define VW_NW(nb) (((nb) + 7) / 8)
 static inline void vw_band(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) & VW_RD(b,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) & VW_RD(b,i)); }
 static inline void vw_bor(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) | VW_RD(b,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) | VW_RD(b,i)); }
 static inline void vw_bxor(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) ^ VW_RD(b,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) ^ VW_RD(b,i)); }
 static inline void vw_bxor_not(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, ~(VW_RD(a,i) ^ VW_RD(b,i))); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, ~(VW_RD(a,i) ^ VW_RD(b,i))); }
 static inline void vw_band_not(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) & ~VW_RD(b,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) & ~VW_RD(b,i)); }
 static inline void vw_bnot(uint8_t* d,const uint8_t* a,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, ~VW_RD(a,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, ~VW_RD(a,i)); }
 static inline void vw_add(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; uint64_t carry=0;
+  unsigned n=VW_NW(nb); uint64_t carry=0;
   for(unsigned i=0;i<n;i++){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
     uint64_t s1=ai+bi; uint64_t c1=(s1<ai); uint64_t s2=s1+carry; uint64_t c2=(s2<s1);
     VW_WR(d,i,s2); carry=c1+c2; } }
 static inline void vw_sub(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; uint64_t borrow=0;
+  unsigned n=VW_NW(nb); uint64_t borrow=0;
   for(unsigned i=0;i<n;i++){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
     uint64_t d1=ai-bi; uint64_t b1=(ai<bi); uint64_t d2=d1-borrow; uint64_t b2=(d1<borrow);
     VW_WR(d,i,d2); borrow=b1+b2; } }
 static inline void vw_mul(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i,0);
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i,0);
   for(unsigned i=0;i<n;i++){ uint64_t ai=VW_RD(a,i); if(ai==0) continue; __uint128_t carry=0;
     for(unsigned j=0;j<n;j++){ if(i+j>=n) break;
       __uint128_t prod=(__uint128_t)ai*(__uint128_t)VW_RD(b,j)+(__uint128_t)VW_RD(d,i+j)+carry;
       VW_WR(d,i+j,(uint64_t)prod); carry=prod>>64; } } }
 static inline void vw_negate(uint8_t* d,const uint8_t* a,uint32_t nb){
-  unsigned n=nb/8; uint64_t carry=1;
+  unsigned n=VW_NW(nb); uint64_t carry=1;
   for(unsigned i=0;i<n;i++){ uint64_t t=~VW_RD(a,i); uint64_t s=t+carry; uint64_t c=(s<t);
     VW_WR(d,i,s); carry=c; } }
 static inline void vw_copy(uint8_t* d,const uint8_t* s,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(s,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(s,i)); }
 static inline uint64_t vw_sext_word(const uint8_t* p,unsigned i,uint32_t w,int sign);
 static inline void vw_sext_copy(uint8_t* d,const uint8_t* s,uint32_t sw,uint32_t dnb){
-  unsigned n=dnb/8; if(sw==0){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
+  unsigned n=VW_NW(dnb); if(sw==0){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
   int sign=(int)((VW_RD(s,(sw-1)/64)>>((sw-1)%64))&1);
   for(unsigned i=0;i<n;i++) VW_WR(d,i, vw_sext_word(s,i,sw,sign)); }
 static inline int64_t vw_eq(const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 0; } return 1; }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 0; } return 1; }
 static inline int64_t vw_ne(const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 1; } return 0; }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 1; } return 0; }
 static inline int64_t vw_ucmp(const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=n;i-->0;){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
+  unsigned n=VW_NW(nb); for(unsigned i=n;i-->0;){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
     if(ai<bi) return -1; if(ai>bi) return 1; } return 0; }
 static inline int64_t vw_scmp(const uint8_t* a,const uint8_t* b,uint32_t packed){
   uint32_t nb=packed&0xFFFF, width=packed>>16; if(width==0||nb==0) return 0;
@@ -127,18 +130,18 @@ static inline int64_t vw_scmp_asym(const uint8_t* a,const uint8_t* b,uint32_t ap
   int as=(int)((VW_RD(a,(aw-1)/64)>>((aw-1)%64))&1);
   int bs=(int)((VW_RD(b,(bw-1)/64)>>((bw-1)%64))&1);
   if(as!=bs){ return as==1? -1 : 1; }
-  unsigned anw=anb/8, bnw=bnb/8, words=anw>bnw?anw:bnw;
+  unsigned anw=VW_NW(anb), bnw=VW_NW(bnb), words=anw>bnw?anw:bnw;
   for(unsigned i=words;i-->0;){ uint64_t av=vw_sext_word(a,i,aw,as), bv=vw_sext_word(b,i,bw,bs);
     if(av<bv) return -1; if(av>bv) return 1; } return 0; }
 static inline void vw_shl(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t nb){
-  unsigned n=nb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
+  unsigned n=VW_NW(nb); unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
   if(ws>=n){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
   for(unsigned i=n;i-->0;){ long si=(long)i-(long)ws;
     uint64_t lo = si>=0 ? VW_RD(a,(unsigned)si) : 0;
     uint64_t hi = si>0 ? VW_RD(a,(unsigned)si-1) : 0;
     VW_WR(d,i, bs==0 ? lo : (lo<<bs)|(hi>>(64-bs))); } }
 static inline void vw_lshr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t nb){
-  unsigned n=nb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
+  unsigned n=VW_NW(nb); unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
   if(ws>=n){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
   for(unsigned i=0;i<n;i++){ unsigned si=i+ws;
     uint64_t lo = si<n ? VW_RD(a,si) : 0;
@@ -148,14 +151,14 @@ static inline void vw_lshr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t 
    bit-select needs only its own result window, not the whole shifted
    source. */
 static inline void vw_lshr_win(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t dnb,uint32_t anb){
-  unsigned dn=dnb/8, an=anb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
+  unsigned dn=VW_NW(dnb), an=VW_NW(anb); unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
   for(unsigned i=0;i<dn;i++){ unsigned si=i+ws;
     uint64_t lo = si<an ? VW_RD(a,si) : 0;
     uint64_t hi = si+1<an ? VW_RD(a,si+1) : 0;
     VW_WR(d,i, bs==0 ? lo : (lo>>bs)|(hi<<(64-bs))); } }
 static inline void vw_ashr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t packed){
   uint32_t nb=packed&0xFFFF, width=packed>>16; if(nb==0||width==0) return;
-  unsigned n=nb/8; unsigned sw=(width-1)/64, sb=(width-1)%64;
+  unsigned n=VW_NW(nb); unsigned sw=(width-1)/64, sb=(width-1)%64;
   uint64_t sign=(VW_RD(a,sw)>>sb)&1;
   vw_lshr(d,a,amount,nb);
   if(sign==1 && amount>0){
@@ -163,7 +166,7 @@ static inline void vw_ashr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t 
     for(unsigned bp=fill_start; bp<width; bp++){ unsigned w=bp/64, b=bp%64;
       if(w<n) VW_WR(d,w, VW_RD(d,w) | ((uint64_t)1<<b)); } } }
 static inline int64_t vw_is_nonzero(const uint8_t* a,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=0) return 1; } return 0; }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=0) return 1; } return 0; }
 static inline int64_t vw_is_all_ones(const uint8_t* a,uint32_t packed){
   uint32_t width=packed>>16; if(width==0) return 1;
   unsigned fw=width/64; uint32_t rem=width%64;
@@ -171,17 +174,17 @@ static inline int64_t vw_is_all_ones(const uint8_t* a,uint32_t packed){
   if(rem>0){ uint64_t m=((uint64_t)1<<rem)-1; if((VW_RD(a,fw)&m)!=m) return 0; }
   return 1; }
 static inline int64_t vw_popcnt_parity(const uint8_t* a,uint32_t nb){
-  unsigned n=nb/8; uint32_t total=0;
+  unsigned n=VW_NW(nb); uint32_t total=0;
   for(unsigned i=0;i<n;i++) total^=(uint32_t)__builtin_popcountll(VW_RD(a,i));
   return total&1; }
 static inline void vw_apply_mask(uint8_t* d,const uint8_t* unused,uint32_t packed){
   (void)unused; uint32_t nb=packed&0xFFFF, width=packed>>16; if(width==0||nb==0) return;
-  unsigned n=nb/8; unsigned fw=width/64; uint32_t rem=width%64;
+  unsigned n=VW_NW(nb); unsigned fw=width/64; uint32_t rem=width%64;
   if(rem>0 && fw<n){ uint64_t m=((uint64_t)1<<rem)-1; VW_WR(d,fw, VW_RD(d,fw)&m); }
   for(unsigned i=fw+(rem>0?1u:0u); i<n; i++) VW_WR(d,i,0); }
 static inline void vw_fill_ones(uint8_t* d,const uint8_t* unused,uint32_t packed){
   (void)unused; uint32_t nb=packed&0xFFFF, width=packed>>16; if(nb==0) return;
-  unsigned n=nb/8; unsigned fw=width/64; uint32_t rem=width%64;
+  unsigned n=VW_NW(nb); unsigned fw=width/64; uint32_t rem=width%64;
   unsigned lim = fw<n?fw:n; for(unsigned i=0;i<lim;i++) VW_WR(d,i,~(uint64_t)0);
   if(rem>0 && fw<n) VW_WR(d,fw, ((uint64_t)1<<rem)-1);
   for(unsigned i=fw+(rem>0?1u:0u); i<n; i++) VW_WR(d,i,0); }
@@ -12979,6 +12982,74 @@ mod tests {
             }
             Err(e) => panic!("{what}: {e}"),
         }
+    }
+
+    #[test]
+    fn wide_helpers_act_on_a_sub_word_byte_count() {
+        // `native_bytes` returns 4 for widths <= 32, so `nb = 4` really does
+        // reach these helpers.  A truncating `nb / 8` made them no-ops there,
+        // leaving the destination at whatever it held — uninitialized stack
+        // for a scratch declared without `= {0}`.
+        if Command::new(std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string()))
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("wide_helpers_act_on_a_sub_word_byte_count: cc unavailable, skipping");
+            return;
+        }
+        let mut src = String::from(
+            "// AOT-C test; do not edit.\n\
+             #include <stdint.h>\n\
+             typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
+             typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
+             typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
+             typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n",
+        );
+        src.push_str(WIDEOPS_C_DECLS);
+        src.push_str(WIDEOPS_C_INLINE);
+        src.push_str(
+            "\n__attribute__((visibility(\"default\")))\n\
+             void veryl_aot_eval(uint8_t *ff_values, uint8_t *comb_values, uint64_t *write_log, intptr_t ff_delta) {\n\
+               (void)ff_values; (void)write_log; (void)ff_delta;\n\
+               vw_copy(comb_values + 64, comb_values, 4u);\n\
+               vw_lshr(comb_values + 128, comb_values, 4ull, 4u);\n\
+               vw_copy(comb_values + 192, comb_values, 4u);\n\
+               vw_apply_mask(comb_values + 192, (const uint8_t*)0, (9u << 16) | 4u);\n\
+             }\n",
+        );
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_subword_{}", std::process::id()));
+        let Some(module) =
+            compile_for_test(&tmp, &src, "wide_helpers_act_on_a_sub_word_byte_count")
+        else {
+            return;
+        };
+        let mut ff = vec![0u8; 32];
+        let mut comb = vec![0u8; 256];
+        let input: u64 = 0x0123_4567_89ab_cdef;
+        comb[0..8].copy_from_slice(&input.to_le_bytes());
+        let mut log = vec![0u64; 32];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let word = |off: usize| u64::from_le_bytes(comb[off..off + 8].try_into().unwrap());
+        assert_eq!(word(64), input, "vw_copy left the destination untouched");
+        assert_eq!(
+            word(128),
+            input >> 4,
+            "vw_lshr left the destination untouched"
+        );
+        assert_eq!(
+            word(192),
+            input & 0x1ff,
+            "vw_apply_mask did not clip to width"
+        );
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
