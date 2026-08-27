@@ -20803,6 +20803,141 @@ fn wide_select_of_a_dynamic_array_element() {
 }
 
 #[test]
+fn dual_driven_variable_keeps_the_comb_value_across_quiet_steps() {
+    // `#[allow(multiple_assign)]` lets a comb statement and an always_ff
+    // drive one variable; the comb side's write rides the FF write log and
+    // is regenerated only by a settle.  The settle filter must not leave
+    // the event's value standing where the comb's belongs: comb outs are
+    // in `comb_touched_offsets`, so the event-side change dirties the comb
+    // through the commit compare and the settle wins the value back.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        en : input  logic   ,
+        o  : output logic<8>,
+    ) {
+        #[allow(multiple_assign)]
+        var x: logic<8>;
+        always_comb {
+            x = 8'd5;
+        }
+        always_ff (clk) {
+            if en {
+                x = 8'd9;
+            }
+            o = x;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("en", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("en", Value::new(0, 1, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        // The quiet steps re-settle: the comb drive wins x back and the FF
+        // samples it.
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(5, 8, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn settle_filter_auto_off_boundary_keeps_comb_updated() {
+    // A design whose FF state reaches the comb every cycle never skips a
+    // settle; the filter disarms after its miss streak (auto-off) and the
+    // comb must keep updating across that boundary on unconditional
+    // dirtying alone.
+    let code = r#"
+    module Top (
+        clk: input  clock    ,
+        rst: input  reset    ,
+        o  : output logic<32>,
+    ) {
+        var cnt: logic<32>;
+        always_ff (clk) {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt = cnt + 1;
+            }
+        }
+        always_comb {
+            o = cnt + 1;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for _ in 0..1500 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(1501, 32, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn ff_outside_comb_reach_commits_without_settling() {
+    // No comb statement reads any FF here, so the filter proves every
+    // commit invisible (`ff_never_reaches_comb`) and skips both the
+    // compares and the settles — the FF side must still advance and the
+    // comb keep its settled value.
+    let code = r#"
+    module Top (
+        clk: input  clock    ,
+        rst: input  reset    ,
+        o  : output logic<8> ,
+        cnt: output logic<32>,
+    ) {
+        always_ff (clk) {
+            if_reset {
+                cnt = 0;
+            } else {
+                cnt = cnt + 1;
+            }
+        }
+        always_comb {
+            o = 8'd7;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for _ in 0..100 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("cnt").unwrap(),
+            Value::new(100, 32, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(7, 8, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn comb_display_output_matches_across_backends() {
     // `$display` inside an `always_comb` is a side effect in a place the comb
     // backends may otherwise reorder or skip.  Cone gating already refuses to
