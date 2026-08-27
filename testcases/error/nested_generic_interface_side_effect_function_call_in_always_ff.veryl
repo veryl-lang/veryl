@@ -1,0 +1,35 @@
+proto package ProtoPkg {
+    function update(
+        result: output logic,
+    ) ;
+}
+
+package Pkg for ProtoPkg {
+    function update (
+        result: output logic,
+    ) {
+        result = 1;
+    }
+}
+
+interface Bus::<PKG: ProtoPkg> {
+    var data: logic;
+
+    function update () {
+        PKG::update(data);
+    }
+}
+
+module nested_generic_interface_side_effect_function_call_in_always_ff (
+    clk: input clock,
+) {
+    inst bus: Bus::<Pkg>;
+
+    function outer () {
+        bus.update();
+    }
+
+    always_ff (clk) {
+        outer();
+    }
+}

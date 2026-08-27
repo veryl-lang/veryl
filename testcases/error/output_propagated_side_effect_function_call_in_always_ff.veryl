@@ -1,0 +1,18 @@
+module output_propagated_side_effect_function_call_in_always_ff (
+    clk: input  clock,
+    q  : output logic,
+) {
+    function inner (
+        result: output logic,
+    ) {
+        result = 1;
+    }
+
+    function hidden_write () {
+        inner(q);
+    }
+
+    always_ff (clk) {
+        hidden_write();
+    }
+}

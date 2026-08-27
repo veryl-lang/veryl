@@ -1,0 +1,14 @@
+module function_output_in_always_ff (
+    clk: input  clock,
+    q  : output logic,
+) {
+    function calculate (
+        result: output logic,
+    ) {
+        result = 1;
+    }
+
+    always_ff (clk) {
+        calculate(q);
+    }
+}
