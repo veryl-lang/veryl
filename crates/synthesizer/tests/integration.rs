@@ -3211,6 +3211,7 @@ fn inferred_ram_does_not_materialize_storage_bits_as_nets() {
         .filter(|net| net.origin.is_some_and(|(name, _)| name == arr))
         .count();
 
+    // One word rather than zero: the count must not scale with the depth.
     assert!(
         arr_nets <= ram_width,
         "inferred RAM unexpectedly materialized {arr_nets} variable-origin nets \
