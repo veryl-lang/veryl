@@ -1,0 +1,32 @@
+proto package ProtoPkg {
+    function update(
+        result: output logic,
+    ) ;
+}
+
+package Pkg for ProtoPkg {
+    function update (
+        result: output logic,
+    ) {
+        result = 1;
+    }
+}
+
+module nested_generic_side_effect_function_call_in_always_ff (
+    clk: input  clock,
+    q  : output logic,
+) {
+    function inner::<PKG: ProtoPkg> (
+        result: output logic,
+    ) {
+        PKG::update(result);
+    }
+
+    function outer () {
+        inner::<Pkg>(q);
+    }
+
+    always_ff (clk) {
+        outer();
+    }
+}

@@ -1,0 +1,34 @@
+interface DiamondBus {
+    var ready: logic;
+    var valid: logic;
+
+    modport master {
+        ready: input ,
+        valid: output,
+    }
+
+    modport slave {
+        ready: output,
+        valid: input ,
+    }
+}
+
+module diamond_connect_function_call_in_always_ff (
+    clk: input clock,
+) {
+    #[allow(unassign_variable)]
+    inst a: DiamondBus;
+    #[allow(unassign_variable)]
+    inst b: DiamondBus;
+
+    function wire_bus (
+        master: modport DiamondBus::master,
+        slave : modport DiamondBus::slave ,
+    ) {
+        master <> slave;
+    }
+
+    always_ff (clk) {
+        wire_bus(a, b);
+    }
+}

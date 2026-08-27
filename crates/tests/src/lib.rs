@@ -333,10 +333,24 @@ mod error {
 
     const PLATFORM_DEPENDENT_TESTS: [&str; 1] = ["include_failure"];
 
+    /// A dependency cycle between files needs more than one file, so these are
+    /// analyzed together. Only the first one runs the check.
+    const CYCLIC_FILE_DEPENDENCY_TESTS: [&str; 3] = [
+        "cyclic_file_dependency_1",
+        "cyclic_file_dependency_2",
+        "cyclic_file_dependency_3",
+    ];
+
     fn test(name: &str) {
         let name = name.to_string();
 
         if PLATFORM_DEPENDENT_TESTS.contains(&name.as_str()) && !cfg!(target_os = "linux") {
+            return;
+        }
+
+        if CYCLIC_FILE_DEPENDENCY_TESTS.contains(&name.as_str())
+            && CYCLIC_FILE_DEPENDENCY_TESTS[0] != name
+        {
             return;
         }
 
@@ -348,20 +362,36 @@ mod error {
                 let metadata_path = Metadata::search_from_current().unwrap();
                 let metadata = Metadata::load(&metadata_path).unwrap();
 
-                let file = format!("../../testcases/error/{}.veryl", name);
-                let input = fs::read_to_string(&file).unwrap();
+                let files = if CYCLIC_FILE_DEPENDENCY_TESTS.contains(&name.as_str()) {
+                    CYCLIC_FILE_DEPENDENCY_TESTS.to_vec()
+                } else {
+                    vec![name.as_str()]
+                };
 
                 let mut out = String::new();
                 let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor())
                     .with_links(false);
 
-                let ret = Parser::parse(&input, &file);
-                match ret {
-                    Err(err) => {
+                let mut parsed = Vec::new();
+                let mut parse_error = None;
+                for file in &files {
+                    let file = format!("../../testcases/error/{}.veryl", file);
+                    let input = fs::read_to_string(&file).unwrap();
+                    match Parser::parse(&input, &file) {
+                        Err(err) => {
+                            parse_error = Some(err);
+                            break;
+                        }
+                        Ok(ret) => parsed.push(ret),
+                    }
+                }
+
+                match parse_error {
+                    Some(err) => {
                         let err = Report::from(err);
                         handler.render_report(&mut out, err.as_ref()).unwrap();
                     }
-                    Ok(ret) => {
+                    None => {
                         let prj = &metadata.project.name;
 
                         let mut context = Context::default();
@@ -369,13 +399,17 @@ mod error {
                         let mut errors = vec![];
                         let mut ir = Ir::default();
 
-                        errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
+                        for ret in &parsed {
+                            errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
+                        }
                         errors.append(&mut Analyzer::analyze_post_pass1());
-                        errors.append(&mut analyzer.analyze_pass2(
-                            &ret.veryl,
-                            &mut context,
-                            Some(&mut ir),
-                        ));
+                        for ret in &parsed {
+                            errors.append(&mut analyzer.analyze_pass2(
+                                &ret.veryl,
+                                &mut context,
+                                Some(&mut ir),
+                            ));
+                        }
                         errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
                         if !errors.is_empty() {

@@ -1,0 +1,6 @@
+interface b_if::<PKG: c_proto_pkg> {
+    var b: logic<PKG::WIDTH>;
+    modport mp {
+        b: input,
+    }
+}

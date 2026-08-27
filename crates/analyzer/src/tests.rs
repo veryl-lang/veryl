@@ -6,6 +6,7 @@ use std::thread;
 use veryl_metadata::{Lint, Metadata, NonPortableItem, ProjectProperty};
 use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
+use veryl_parser::resource_table;
 
 mod comb_loop_diagnostic_tests;
 
@@ -37,6 +38,31 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(&metadata);
     let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    let mut errors = vec![];
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+    dbg!(&errors);
+    errors
+}
+
+#[track_caller]
+fn analyze_with_defines(code: &str, defines: &[&str]) -> Vec<AnalyzerError> {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    context.config.defines = defines
+        .iter()
+        .map(|x| resource_table::insert_str(x))
+        .collect();
     let mut ir = Ir::default();
 
     let mut errors = vec![];
@@ -1143,6 +1169,77 @@ fn cyclic_type_dependency() {
 }
 
 #[test]
+fn cyclic_file_dependency() {
+    let inputs = vec![
+        r#"
+        package a_pkg {
+          const WIDTH: u32 = 8;
+        }
+        alias package pkg = c_pkg::<a_pkg::WIDTH>;
+        module a_module (
+          b: modport b_if::<pkg>::mp,
+        ) {}
+        "#,
+        r#"
+        interface b_if::<PKG: c_prot_pkg> {
+          var b: logic<PKG::WIDTH>;
+          modport mp {
+            b: input,
+          }
+        }
+        "#,
+        r#"
+        proto package c_prot_pkg {
+          const WIDTH: u32;
+        }
+        package c_pkg::<W: u32> for c_prot_pkg {
+          const WIDTH: u32 = W;
+        }
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::CyclicFileDependency { .. }
+    ));
+
+    let inputs = vec![
+        r#"
+        proto package a_prot_pkg {
+          const WIDTH: u32;
+        }
+        package a_pkg::<W: u32> for a_prot_pkg {
+          const WIDTH: u32 = W;
+        }
+        "#,
+        r#"
+        interface b_if::<PKG: a_prot_pkg> {
+          var b: logic<PKG::WIDTH>;
+          modport mp {
+            b: input,
+          }
+        }
+        "#,
+        r#"
+        package c_pkg {
+          const WIDTH: u32 = 8;
+        }
+        alias package pkg = a_pkg::<c_pkg::WIDTH>;
+        module c_module (
+          b: modport b_if::<pkg>::mp,
+        ) {}
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::CyclicFileDependency { .. }
+    ));
+}
+
+#[test]
 fn duplicated_identifier() {
     let code = r#"
     module ModuleA {
@@ -2110,6 +2207,25 @@ fn invalid_import() {
         1,
         "{errors:?}"
     );
+
+    // A proto package can be imported as a namespace so it can be used as
+    // a generic constraint without a fully qualified name.
+    let code = r#"
+    proto package ProtoPkg {
+        const WIDTH: u32;
+    }
+    package Impl for ProtoPkg {
+        const WIDTH: u32 = 8;
+    }
+    import prj::ProtoPkg;
+    module ModuleN::<P: ProtoPkg = Impl> {
+        var x: logic<P::WIDTH>;
+        assign x = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 
     let code = r#"
     package a_pkg::<a: u32> {
@@ -10367,6 +10483,85 @@ fn comb_loop_ifstmt_feed_forward_array() {
 }
 
 #[test]
+fn comb_loop_dead_ternary_branch() {
+    // `DEPTH` is constant, so `o` never fetches `d` -- but the dead branch's
+    // read was still counted, and a read that never happens closed a loop.
+    // The `if`-STATEMENT form of the same circuit was already accepted.
+    let code = r#"
+    module Pick (
+        d: input  logic,
+        o: output logic,
+    ) {
+        const DEPTH: u32 = 2;
+        var m: logic;
+        assign m = 1'b1;
+        assign o = if DEPTH == 0 ? d : m;
+    }
+    module Top (
+        en: input  logic,
+        q : output logic,
+    ) {
+        var a: logic;
+        var b: logic;
+
+        inst u: Pick (
+            d: a,
+            o: b,
+        );
+
+        assign a = b && en;
+        assign q = b;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn comb_loop_dead_ternary_branch_array_arm() {
+    // Same dead branch, but the live arm is an array element, so the constant
+    // ternary does NOT fold (the arms' types differ) and the read has to be
+    // dropped where the loop graph is built instead.
+    let code = r#"
+    module Pick #(
+        param DEPTH: u32 = 2,
+    ) (
+        d  : input  logic,
+        idx: input  logic,
+        o  : output logic,
+    ) {
+        var mem: logic<1> [2];
+
+        always_comb {
+            mem[0] = 1'b1;
+            mem[1] = 1'b1;
+        }
+
+        assign o = if DEPTH == 0 ? d : mem[idx];
+    }
+    module Top (
+        en : input  logic,
+        idx: input  logic,
+        q  : output logic,
+    ) {
+        var a: logic;
+        var b: logic;
+
+        inst u: Pick (
+            d  : a  ,
+            idx: idx,
+            o  : b  ,
+        );
+
+        assign a = b && en;
+        assign q = b;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn uncovered_branch() {
     let code = r#"
     module ModuleA {
@@ -13214,6 +13409,36 @@ fn clock_domain_function_call() {
         }
         always_comb {
             FuncG(i_a, t);
+        }
+        assign o_b = t;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+
+    // Output arguments copy out on return even when the body never assigns
+    // them, so the destination still participates in the clock-domain check.
+    let code = r#"
+    module ModuleA (
+        i_clk_a: input  'a clock,
+        i_clk_b: input  'b clock,
+        i_a    : input  'a logic,
+        o_b    : output 'b logic,
+    ) {
+        var t: 'b logic;
+        function Inspect (
+            x: input  logic,
+            y: output logic,
+        ) {
+        }
+        always_comb {
+            Inspect(i_a, t);
+            t = 0;
         }
         assign o_b = t;
     }
@@ -19621,4 +19846,1162 @@ fn orphan_else_across_scopes() {
             .any(|e| matches!(e, AnalyzerError::AmbiguousElsif { .. })),
         "{errors:?}"
     );
+}
+#[test]
+fn function_output_always_copies_out_on_return() {
+    let code = r#"
+    module ModuleA (
+        o: output logic,
+    ) {
+        #[allow(unassign_variable)]
+        function f (y: output logic) {
+            $sv::g(y);
+        }
+        always_comb {
+            f(o);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // The SystemVerilog call does not prove that the formal has a useful
+    // value. Without the allow, diagnose the formal, but not the caller's
+    // actual: the formal is copied out on return even when it still holds X.
+    let code = code.replace("        #[allow(unassign_variable)]\n", "");
+    let errors = analyze(&code);
+    assert!(
+        errors.iter().any(
+            |error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "f.y")
+        ),
+        "{errors:?}"
+    );
+    assert!(
+        !errors.iter().any(
+            |error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "o")
+        ),
+        "{errors:?}"
+    );
+
+    // Copy-out behaves like a blocking assignment. In always_ff it is a
+    // scheduler-visible write even when the callee body leaves the output X.
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        o  : output logic,
+    ) {
+        #[allow(unassign_variable)]
+        function f (y: output logic) {
+            $sv::g(y);
+        }
+        always_ff (clk) {
+            f(o);
+            o = 0;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::FunctionOutputInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+    // A modport argument is expanded to one SystemVerilog argument per member.
+    // Every output member therefore copies out and is a scheduler side effect.
+    let code = r#"
+    interface Bus {
+        var ready: logic;
+        var valid: logic;
+        modport writer {
+            ready: input,
+            valid: output,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        inst bus: Bus;
+        #[allow(unassign_variable)]
+        function inspect (x: modport Bus::writer) {
+        }
+        always_ff (clk) {
+            inspect(bus);
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors.iter().any(|error| matches!(
+            error,
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }
+        )),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn side_effect_function_call_in_always_ff() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function update () {
+            q = 1;
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn systemverilog_hierarchical_write_is_scheduler_side_effect() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+    ) {
+        inst u: $sv::IF;
+        function update () {
+            u.a = 1;
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn transitive_side_effect_function_call_in_always_ff() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function write_q () {
+            q = 1;
+        }
+        function update () {
+            write_q();
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn function_local_write_has_no_scheduler_side_effect() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+    ) {
+        function calculate () {
+            var tmp: logic;
+            tmp = 1;
+            $display("%b", tmp);
+        }
+        always_ff (clk) {
+            calculate();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn function_output_in_always_ff_requires_process_local_variable() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function calculate (result: output logic) {
+            result = 1;
+        }
+        always_ff (clk) {
+            calculate(q);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function calculate (result: output logic) {
+            result = 1;
+        }
+        always_ff (clk) {
+            var tmp: logic;
+            calculate(tmp);
+            q = tmp;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+
+    // Copy-out to a process-local variable is still local to the always_ff
+    // process, including when the function leaves the formal unassigned.
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        #[allow(unassign_variable)]
+        function inspect (result: output logic) {
+        }
+        always_ff (clk) {
+            var tmp: logic;
+            inspect(tmp);
+            q = tmp;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors.iter().any(|x| matches!(
+            x,
+            AnalyzerError::FunctionOutputInAlwaysFf { .. }
+                | AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }
+        )),
+        "{errors:?}"
+    );
+
+    // SystemVerilog copies an output argument back on return even when the
+    // function body never explicitly assigns it.
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function inspect (result: output logic) {
+        }
+        always_ff (clk) {
+            inspect(q);
+            q = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn function_output_write_propagates_through_wrappers() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function inner (result: output logic) {
+            result = 1;
+        }
+        function hidden_write () {
+            inner(q);
+        }
+        always_ff (clk) {
+            hidden_write();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function inner (result: output logic) {
+            result = 1;
+        }
+        function forward (result: output logic) {
+            inner(result);
+        }
+        always_ff (clk) {
+            forward(q);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn external_write_trace_terminates_on_recursive_call_graph() {
+    use crate::symbol::SymbolKind;
+    use veryl_parser::veryl_grammar_trait::FunctionDeclaration;
+    use veryl_parser::veryl_walker::VerylWalker;
+
+    let code = r#"
+    module ModuleA (
+        q: output logic,
+    ) {
+        function write_q () {
+            q = 1;
+        }
+        function first () {
+            second();
+        }
+        function second () {
+            first();
+            write_q();
+        }
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    assert!(analyzer.analyze_pass1("prj", &parser.veryl).is_empty());
+
+    // Mutual recursion is rejected separately as a cyclic type dependency,
+    // but diagnostic provenance must still terminate if it inspects the graph.
+    let _ = Analyzer::analyze_post_pass1();
+
+    #[derive(Default)]
+    struct Functions(Vec<FunctionDeclaration>);
+    impl VerylWalker for Functions {
+        fn function_declaration(&mut self, arg: &FunctionDeclaration) {
+            self.0.push(arg.clone());
+        }
+    }
+
+    let mut functions = Functions::default();
+    functions.veryl(&parser.veryl);
+    let first = functions
+        .0
+        .iter()
+        .find(|x| x.identifier.text().to_string() == "first")
+        .unwrap();
+    let symbol = symbol_table::resolve(first.identifier.as_ref()).unwrap();
+    assert!(matches!(symbol.found.kind, SymbolKind::Function(_)));
+
+    let signature = crate::ir::Signature::new(symbol.found.id);
+    let mut context = Context::default();
+    let trace = symbol_table::find_external_write(symbol.found.as_ref(), &signature, &mut context)
+        .expect("the search should continue after cutting the first -> second -> first cycle");
+
+    assert_eq!(trace.calls.len(), 2);
+    assert_eq!(trace.calls[0].beg.line, 9); // first -> second
+    assert_eq!(trace.calls[1].beg.line, 13); // second -> write_q
+    assert_eq!(trace.write.beg.line, 6); // q = 1
+}
+
+#[test]
+fn finite_generic_recursion_reports_side_effect_without_recursing_forever() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function recurse::<N: u32> () {
+            gen M: u32 = N - 1;
+            if N == 1 {
+                q = 1;
+            } else {
+                recurse::<M>();
+            }
+        }
+        always_ff (clk) {
+            recurse::<2>();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_large_stack(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InfiniteRecursion { .. })),
+        "finite generic recursion must remain finite: {errors:?}"
+    );
+}
+
+#[test]
+fn modport_output_copyout_is_a_side_effect() {
+    fn has_side_effect(code: &str, name: &str) -> bool {
+        use crate::symbol::SymbolKind;
+        use veryl_parser::veryl_grammar_trait::FunctionDeclaration;
+        use veryl_parser::veryl_walker::VerylWalker;
+
+        symbol_table::clear();
+        attribute_table::clear();
+        doc_comment_table::clear();
+        let metadata = Metadata::create_default("prj").unwrap();
+        let parser = Parser::parse(code, &"").unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        assert!(analyzer.analyze_pass1("prj", &parser.veryl).is_empty());
+        assert!(Analyzer::analyze_post_pass1().is_empty());
+
+        #[derive(Default)]
+        struct Functions(Vec<FunctionDeclaration>);
+        impl VerylWalker for Functions {
+            fn function_declaration(&mut self, arg: &FunctionDeclaration) {
+                self.0.push(arg.clone());
+            }
+        }
+
+        let mut functions = Functions::default();
+        functions.veryl(&parser.veryl);
+        let function = functions
+            .0
+            .iter()
+            .find(|x| x.identifier.text().to_string() == name)
+            .unwrap();
+        let symbol = symbol_table::resolve(function.identifier.as_ref()).unwrap();
+        let SymbolKind::Function(function) = &symbol.found.kind else {
+            unreachable!();
+        };
+        function.has_side_effect
+    }
+
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport master {
+            data: output,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+        bus: modport Bus::master,
+    ) {
+        function observe (arg: modport Bus::master) {
+            var tmp: logic;
+            tmp = arg.data;
+        }
+        always_ff (clk) {
+            observe(bus);
+        }
+    }
+    "#;
+
+    assert!(has_side_effect(code, "observe"));
+
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport master {
+            data: output,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+        bus: modport Bus::master,
+    ) {
+        function update (arg: modport Bus::master) {
+            arg.data = 1;
+        }
+        always_ff (clk) {
+            update(bus);
+        }
+    }
+    "#;
+
+    assert!(has_side_effect(code, "update"));
+
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport monitor {
+            data: input,
+        }
+    }
+    module ModuleA (
+        bus: modport Bus::monitor,
+    ) {
+        function observe (arg: modport Bus::monitor) {
+            var tmp: logic;
+            tmp = arg.data;
+        }
+    }
+    "#;
+
+    assert!(!has_side_effect(code, "observe"));
+}
+
+#[test]
+fn modport_function_write_reaches_assignment_analysis() {
+    let written = r#"
+    interface Bus {
+        var ready: logic;
+        var data: logic;
+        var valid: logic;
+        modport master {
+            data: output,
+            valid: output,
+        }
+    }
+    module ModuleA {
+        inst bus: Bus;
+        function write_data (arg: modport Bus::master) {
+            arg.data = 1;
+        }
+        function update (arg: modport Bus::master) {
+            write_data(arg);
+        }
+        always_comb {
+            update(bus);
+        }
+    }
+    "#;
+
+    let errors = analyze(written);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "bus.data")),
+        "a written modport member must remain a function-call write: {errors:?}"
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "bus.valid")),
+        "every output member copies out on return: {errors:?}"
+    );
+
+    let unwritten = r#"
+    interface Bus {
+        var data: logic;
+        modport master {
+            data: output,
+        }
+    }
+    module ModuleA {
+        inst bus: Bus;
+        function inspect (arg: modport Bus::master) {
+        }
+        always_comb {
+            inspect(bus);
+        }
+    }
+    "#;
+
+    let errors = analyze(unwritten);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "inspect.arg.data")),
+        "the unwritten formal must still be diagnosed: {errors:?}"
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "bus.data")),
+        "the formal copies out to the interface member on return: {errors:?}"
+    );
+}
+
+#[test]
+fn generic_instance_direct_write_is_scheduler_side_effect() {
+    let code = r#"
+    interface Bus {
+        var data: logic;
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(unassign_variable)]
+        inst bus: Bus;
+        function update::<IF: inst Bus> () {
+            IF.data = 1;
+        }
+        always_ff (clk) {
+            update::<bus>();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let Some((external_writes, function_definition)) =
+        errors.iter().find_map(|error| match error {
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf {
+                external_writes,
+                function_definition,
+                ..
+            } => Some((external_writes, function_definition)),
+            _ => None,
+        })
+    else {
+        panic!("expected side-effect diagnostic: {errors:?}");
+    };
+    assert_eq!(external_writes.len(), 1, "{errors:?}");
+    assert!(function_definition.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn diamond_connect_in_function_is_scheduler_side_effect() {
+    let code = r#"
+    interface Bus {
+        var ready: logic;
+        var valid: logic;
+        modport master {
+            ready: input,
+            valid: output,
+        }
+        modport slave {
+            ready: output,
+            valid: input,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(unassign_variable)]
+        inst a: Bus;
+        #[allow(unassign_variable)]
+        inst b: Bus;
+        function wire_bus (
+            master: modport Bus::master,
+            slave : modport Bus::slave,
+        ) {
+            master <> slave;
+        }
+        always_ff (clk) {
+            wire_bus(a, b);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let Some((external_writes, function_definition)) =
+        errors.iter().find_map(|error| match error {
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf {
+                external_writes,
+                function_definition,
+                ..
+            } => Some((external_writes, function_definition)),
+            _ => None,
+        })
+    else {
+        panic!("expected side-effect diagnostic: {errors:?}");
+    };
+    assert_eq!(external_writes.len(), 1, "{errors:?}");
+    assert!(function_definition.is_empty(), "{errors:?}");
+
+    // A diamond connection only contributes an effect when expansion creates
+    // an actual write. An all-input modport connected to a constant is a no-op.
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport monitor {
+            data: input,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(unassign_variable)]
+        inst bus: Bus;
+        function observe (arg: modport Bus::monitor) {
+            arg <> 0;
+        }
+        always_ff (clk) {
+            observe(bus);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+
+    // An expression on the RHS is read, not written. With no writable member
+    // on the LHS, it must not become an external write merely because it is an
+    // HDL object declared outside the function.
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport monitor {
+            data: input,
+        }
+    }
+    module ModuleA (
+        clk   : input clock,
+        source: input logic,
+    ) {
+        #[allow(unassign_variable)]
+        inst bus: Bus;
+        function observe (arg: modport Bus::monitor) {
+            arg <> source;
+        }
+        always_ff (clk) {
+            observe(bus);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+
+    // Even when a diamond operation creates no body assignment, the expanded
+    // output formal still copies out when the function returns.
+    let code = r#"
+    interface Bus {
+        var produced: logic;
+        var consumed: logic;
+        modport producer {
+            produced: output,
+        }
+        modport consumer {
+            consumed: input,
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(unassign_variable)]
+        inst producer_if: Bus;
+        #[allow(unassign_variable)]
+        inst consumer_if: Bus;
+        #[allow(unassign_variable)]
+        function wire_bus (
+            lhs: modport Bus::producer,
+            rhs: modport Bus::consumer,
+        ) {
+            lhs <> rhs;
+        }
+        always_ff (clk) {
+            wire_bus(producer_if, consumer_if);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn side_effect_survives_repeated_post_pass1() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function update () {
+            q = 1;
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn concatenation_assignment_contributes_function_effects() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+        r  : output logic,
+    ) {
+        function update () {
+            {q, r} = 2'b11;
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+        r  : output logic,
+    ) {
+        function update (
+            a: output logic,
+            b: output logic,
+        ) {
+            {a, b} = 2'b11;
+        }
+        always_ff (clk) {
+            update(q, r);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn inactive_function_writes_do_not_contribute_effects() {
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function update () {
+            #[ifdef(FEATURE)]
+            q = 1;
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_defines(code, &[]);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let errors = analyze_with_defines(code, &["FEATURE"]);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function write_q () {
+            q = 1;
+        }
+        function update () {
+            #[ifdef(FEATURE)]
+            write_q();
+        }
+        always_ff (clk) {
+            update();
+        }
+    }
+    "#;
+
+    let errors = analyze_with_defines(code, &[]);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let errors = analyze_with_defines(code, &["FEATURE"]);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function update (result: output logic) {
+            #[ifdef(FEATURE)]
+            result = 1;
+        }
+        always_ff (clk) {
+            update(q);
+        }
+    }
+    "#;
+
+    let errors = analyze_with_defines(code, &[]);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+
+    let errors = analyze_with_defines(code, &["FEATURE"]);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. }))
+    );
+}
+
+#[test]
+fn proto_function_effect_propagates_through_generic_wrapper() {
+    let code = r#"
+    proto package ProtoPkg {
+        function update (result: output logic);
+    }
+    package Pkg for ProtoPkg {
+        function update (result: output logic) {
+            result = 1;
+        }
+    }
+    module Generic::<PKG: ProtoPkg> (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function forward () {
+            PKG::update(q);
+        }
+        always_ff (clk) {
+            forward();
+        }
+    }
+    module Top (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        inst u: Generic::<Pkg> (
+            clk: clk,
+            q  : q,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    proto package ProtoPkg {
+        function update (result: output logic);
+    }
+    package Pkg for ProtoPkg {
+        function update (result: output logic) {
+            result = 1;
+        }
+    }
+    module Generic::<PKG: ProtoPkg> (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function forward (result: output logic) {
+            PKG::update(result);
+        }
+        always_ff (clk) {
+            forward(q);
+        }
+    }
+    module Top (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        inst u: Generic::<Pkg> (
+            clk: clk,
+            q  : q,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::FunctionOutputInAlwaysFf { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn nested_generic_function_effect_trace_uses_callee_specialization() {
+    let code = r#"
+    proto package ProtoPkg {
+        function update (result: output logic);
+    }
+    package Pkg for ProtoPkg {
+        function update (result: output logic) {
+            result = 1;
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+        q  : output logic,
+    ) {
+        function inner::<PKG: ProtoPkg> (result: output logic) {
+            PKG::update(result);
+        }
+        function outer () {
+            inner::<Pkg>(q);
+        }
+        always_ff (clk) {
+            outer();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let Some((call_stack, external_writes)) = errors.iter().find_map(|error| match error {
+        AnalyzerError::SideEffectFunctionCallInAlwaysFf {
+            call_stack,
+            external_writes,
+            ..
+        } => Some((call_stack, external_writes)),
+        _ => None,
+    }) else {
+        panic!("expected side-effect diagnostic: {errors:?}");
+    };
+    assert_eq!(call_stack.len(), 2, "{errors:?}");
+    assert_eq!(external_writes.len(), 1, "{errors:?}");
+}
+
+#[test]
+fn nested_generic_interface_effect_trace_uses_parent_specialization() {
+    let code = r#"
+    proto package ProtoPkg {
+        function update (result: output logic);
+    }
+    package Pkg for ProtoPkg {
+        function update (result: output logic) {
+            result = 1;
+        }
+    }
+    interface Bus::<PKG: ProtoPkg> {
+        var data: logic;
+        function update () {
+            PKG::update(data);
+        }
+    }
+    module ModuleA (
+        clk: input clock,
+    ) {
+        inst bus: Bus::<Pkg>;
+        function outer () {
+            bus.update();
+        }
+        always_ff (clk) {
+            outer();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    let Some((call_stack, external_writes)) = errors.iter().find_map(|error| match error {
+        AnalyzerError::SideEffectFunctionCallInAlwaysFf {
+            call_stack,
+            external_writes,
+            ..
+        } => Some((call_stack, external_writes)),
+        _ => None,
+    }) else {
+        panic!("expected side-effect diagnostic: {errors:?}");
+    };
+    assert_eq!(call_stack.len(), 2, "{errors:?}");
+    assert_eq!(external_writes.len(), 1, "{errors:?}");
 }

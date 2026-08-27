@@ -38,11 +38,16 @@ use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
 use veryl_parser::resource_table::StrId;
 
-/// `feedthrough[child_in_id] = { child_out_ids reachable purely combinationally }`.
-/// Port-level only -- the parent keeps bit precision via `BitPartition`.
+/// Bits of one child port, in the child's own coordinates.
+type PortBits = (VarId, ArraySpan, PackedSpan);
+
+/// `feedthrough[child_in_bits] = { child_out_bits reachable purely
+/// combinationally }`. Bit-precise on both sides: a child carrying some input
+/// bits to some output bits must not read as all-in -> all-out, or a ring that
+/// is acyclic per bit closes in the parent.
 #[derive(Clone, Debug, Default)]
 struct ModuleCombSummary {
-    feedthrough: HashMap<VarId, HashSet<VarId>>,
+    feedthrough: HashMap<PortBits, HashSet<PortBits>>,
 }
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
@@ -57,9 +62,9 @@ pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
             if module.suppress_unassigned {
                 continue;
             }
-            let graph = build_module_graph(module, &summaries);
+            let (graph, bit_part) = build_module_graph(module, &summaries);
             check_graph(module, &graph, &mut errors);
-            let summary = compute_module_summary(module, &graph);
+            let summary = compute_module_summary(module, &graph, &bit_part);
             summaries.insert(module.name, summary);
         }
     }
@@ -353,7 +358,12 @@ fn propagate_packed_endpoints(
     endpoints
 }
 
-fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
+fn build_bit_partition(
+    module: &Module,
+    summaries: &HashMap<StrId, ModuleCombSummary>,
+    port_maps: &[PortMaps],
+    ctx: &mut Context,
+) -> BitPartition {
     let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
 
     for declaration in &module.declarations {
@@ -363,7 +373,8 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
     }
 
     // Inst input expressions are not represented by procedure statements.
-    for inst in walk_insts(module) {
+    let mut seeded: HashSet<(IdxKey, PackedSpan)> = HashSet::default();
+    for (inst, maps) in walk_insts(module).zip(port_maps) {
         for inp in &inst.inputs {
             for expr in &inp.exprs {
                 collect_expr_spans(expr, &mut accesses, ctx);
@@ -382,6 +393,28 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
                         ))
                         .or_default()
                         .push(packed);
+                }
+            }
+        }
+
+        // A child's feedthrough names bits, so the parent needs atoms at those
+        // boundaries. Without them one whole-port node absorbs both ends of a
+        // ring that is acyclic per bit.
+        let Component::Module(child) = inst.component.as_ref() else {
+            continue;
+        };
+        let Some(summary) = summaries.get(&child.name) else {
+            continue;
+        };
+        for (input, outputs) in &summary.feedthrough {
+            for (port, key) in std::iter::once((input, &maps.inputs))
+                .chain(outputs.iter().map(|output| (output, &maps.outputs)))
+            {
+                let Some(key) = key.get(&port.0) else {
+                    continue;
+                };
+                if seeded.insert((*key, port.2)) {
+                    accesses.entry(*key).or_default().push(port.2);
                 }
             }
         }
@@ -970,11 +1003,19 @@ fn eval_dst_span(
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<StrId, ModuleCombSummary>,
-) -> Graph<NodeKey, ()> {
+) -> (Graph<NodeKey, ()>, BitPartition) {
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.functions = module.functions.clone();
-    let bit_part = build_bit_partition(module, &mut ctx);
+    // Both the partition and the edges need each instance's parent wiring, and
+    // `walk_insts` is the shared order the two iterate in.
+    let port_maps: Vec<PortMaps> = walk_insts(module)
+        .map(|inst| match inst.component.as_ref() {
+            Component::Module(child) => plain_port_maps(inst, child, &module.variables),
+            _ => PortMaps::default(),
+        })
+        .collect();
+    let bit_part = build_bit_partition(module, summaries, &port_maps, &mut ctx);
 
     let mut graph: Graph<NodeKey, ()> = Graph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
@@ -999,7 +1040,7 @@ fn build_module_graph(
         }
     }
 
-    for inst in walk_insts(module) {
+    for (inst, maps) in walk_insts(module).zip(&port_maps) {
         match inst.component.as_ref() {
             Component::Module(child) => {
                 let Some(summary) = summaries.get(&child.name) else {
@@ -1009,6 +1050,7 @@ fn build_module_graph(
                     inst,
                     child,
                     summary,
+                    maps,
                     &bit_part,
                     &mut graph,
                     &mut node_map,
@@ -1025,7 +1067,7 @@ fn build_module_graph(
         }
     }
 
-    graph
+    (graph, bit_part)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1033,6 +1075,7 @@ fn add_inst_feedthrough_edges<'a>(
     inst: &InstDeclaration,
     child: &Module,
     summary: &ModuleCombSummary,
+    maps: &PortMaps,
     bit_part: &'a BitPartition,
     graph: &mut Graph<NodeKey, ()>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
@@ -1080,23 +1123,136 @@ fn add_inst_feedthrough_edges<'a>(
         }
     }
 
-    for (child_in_id, out_set) in &summary.feedthrough {
-        let Some(parent_reads) = input_reads.get(child_in_id) else {
+    let mut sources: Vec<NodeIndex> = Vec::new();
+    let mut destinations: Vec<NodeIndex> = Vec::new();
+    // One parent node pair is named by many feedthrough entries once both
+    // sides are split into bits; the SCC walk gains nothing from the copies.
+    let mut added: HashSet<(NodeIndex, NodeIndex)> = HashSet::default();
+    for (input, outputs) in &summary.feedthrough {
+        sources.clear();
+        collect_port_nodes(
+            input,
+            &maps.inputs,
+            &input_reads,
+            bit_part,
+            graph,
+            node_map,
+            &mut sources,
+        );
+        if sources.is_empty() {
             continue;
-        };
-        for child_out_id in out_set {
-            let Some(parent_dsts) = output_dsts.get(child_out_id) else {
-                continue;
-            };
-            for r in parent_reads {
-                for d in parent_dsts {
-                    let s = ensure_node(graph, node_map, *r);
-                    let t = ensure_node(graph, node_map, *d);
-                    graph.add_edge(s, t, ());
+        }
+        for output in outputs {
+            destinations.clear();
+            collect_port_nodes(
+                output,
+                &maps.outputs,
+                &output_dsts,
+                bit_part,
+                graph,
+                node_map,
+                &mut destinations,
+            );
+            for s in &sources {
+                for d in &destinations {
+                    if added.insert((*s, *d)) {
+                        graph.add_edge(*s, *d, ());
+                    }
                 }
             }
         }
     }
+}
+
+/// Parent nodes a child port's bits reach. A plain whole-variable connection
+/// carries the bit span across; anything else falls back to every node the
+/// actual reads or the destination writes.
+fn collect_port_nodes(
+    port: &PortBits,
+    maps: &HashMap<VarId, IdxKey>,
+    fallback: &HashMap<VarId, Vec<NodeKey>>,
+    bit_part: &BitPartition,
+    graph: &mut Graph<NodeKey, ()>,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+    out: &mut Vec<NodeIndex>,
+) {
+    if let Some(key) = maps.get(&port.0) {
+        for range in bit_part.overlapping(*key, port.2) {
+            out.push(ensure_node(graph, node_map, (key.0, key.1, range)));
+        }
+    } else if let Some(keys) = fallback.get(&port.0) {
+        for key in keys {
+            out.push(ensure_node(graph, node_map, *key));
+        }
+    }
+}
+
+/// Parent variable each child port is wired to, for the connections where bit
+/// `k` of the port is exactly bit `k` of that variable. Ports absent here keep
+/// the conservative whole-actual treatment.
+#[derive(Default)]
+struct PortMaps {
+    inputs: HashMap<VarId, IdxKey>,
+    outputs: HashMap<VarId, IdxKey>,
+}
+
+/// Those connections are the whole-variable actuals: no index, no select, same
+/// shape. Only they let a bit-precise feedthrough entry cross the boundary.
+fn plain_port_maps(
+    inst: &InstDeclaration,
+    child: &Module,
+    parent_vars: &HashMap<VarId, Variable>,
+) -> PortMaps {
+    let whole = ArraySpan {
+        start: 0,
+        length: 1,
+    };
+    let same_shape = |child_id: VarId, parent_id: VarId| -> Option<IdxKey> {
+        let child_var = child.variables.get(&child_id)?;
+        let parent_var = parent_vars.get(&parent_id)?;
+        // An array port would need its element mapping carried too.
+        (child_var.r#type.total_array() == Some(1)
+            && parent_var.r#type.total_array() == Some(1)
+            && child_var.total_width()? == parent_var.total_width()?)
+        .then_some((parent_id, whole))
+    };
+
+    let mut inputs: HashMap<VarId, IdxKey> = HashMap::default();
+    for input in &inst.inputs {
+        if !is_pure_input_or_output(input.id, &child.variables, Direction::Input) {
+            continue;
+        }
+        let Some(Expression::Term(factor)) = input.single() else {
+            continue;
+        };
+        let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+            continue;
+        };
+        if !index.0.is_empty() || !select.is_empty() {
+            continue;
+        }
+        if let Some(key) = same_shape(input.id, *id) {
+            inputs.insert(input.id, key);
+        }
+    }
+
+    let mut outputs: HashMap<VarId, IdxKey> = HashMap::default();
+    for output in &inst.outputs {
+        if !is_pure_input_or_output(output.id, &child.variables, Direction::Output) {
+            continue;
+        }
+        let [dst] = output.dst.as_slice() else {
+            continue;
+        };
+        if !dst.index.0.is_empty() || !dst.select.is_empty() {
+            continue;
+        }
+        if let Some(key) = same_shape(output.id, dst.id) {
+            outputs.insert(output.id, key);
+        }
+    }
+
+    PortMaps { inputs, outputs }
 }
 
 fn add_sparse_whole_port_copy_edges(
@@ -1491,7 +1647,11 @@ fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool 
     }
 }
 
-fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> ModuleCombSummary {
+fn compute_module_summary(
+    module: &Module,
+    graph: &Graph<NodeKey, ()>,
+    bit_part: &BitPartition,
+) -> ModuleCombSummary {
     use crate::ir::VarKind;
 
     let mut input_ids: HashSet<VarId> = HashSet::default();
@@ -1508,14 +1668,32 @@ fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> Module
         }
     }
 
-    let mut feedthrough: HashMap<VarId, HashSet<VarId>> = HashMap::default();
+    // The walk below revisits most nodes once per input node, so resolve each
+    // node's port bits up front rather than hashing them on every visit.
+    let node_bits: Vec<Option<PortBits>> = graph
+        .node_indices()
+        .map(|ni| {
+            let key = graph[ni];
+            if !input_ids.contains(&key.0) && !output_ids.contains(&key.0) {
+                return None;
+            }
+            bit_part
+                .ranges_of((key.0, key.1))
+                .get(key.2)
+                .map(|span| (key.0, key.1, *span))
+        })
+        .collect();
+
+    let mut feedthrough: HashMap<PortBits, HashSet<PortBits>> = HashMap::default();
     let mut visited: HashSet<NodeIndex> = HashSet::default();
     let mut stack: Vec<NodeIndex> = Vec::new();
     for ni in graph.node_indices() {
-        let key = graph[ni];
-        if !input_ids.contains(&key.0) {
+        if !input_ids.contains(&graph[ni].0) {
             continue;
         }
+        let Some(input) = node_bits[ni.index()] else {
+            continue;
+        };
         visited.clear();
         stack.clear();
         stack.push(ni);
@@ -1523,9 +1701,10 @@ fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> Module
             if !visited.insert(n) {
                 continue;
             }
-            let nk = graph[n];
-            if output_ids.contains(&nk.0) {
-                feedthrough.entry(key.0).or_default().insert(nk.0);
+            if output_ids.contains(&graph[n].0)
+                && let Some(output) = node_bits[n.index()]
+            {
+                feedthrough.entry(input).or_default().insert(output);
             }
             for e in graph.edges(n) {
                 stack.push(e.target());

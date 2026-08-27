@@ -101,7 +101,6 @@ fn comb_loop_modport_ff_output_breaks_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; disjoint bits through modport feedthrough"]
 fn comb_loop_modport_feedthrough_keeps_disjoint_bits_independent() {
     let code = modport_feedthrough_code("assign bus.response[0] = bus.request[0];");
     let code = code.replace(

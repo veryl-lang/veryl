@@ -77,6 +77,52 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(side_effect_function_call_in_always_ff),
+        help("move the external write into this always_ff, or use an output argument connected to a variable declared inside it"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error(
+        "function \"{identifier}\" can't be called in always_ff because it may write an HDL object declared outside the function"
+    )]
+    SideEffectFunctionCallInAlwaysFf {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("called from always_ff")]
+        error_location: SourceSpan,
+        #[label(collection, "called from here")]
+        call_stack: Vec<SourceSpan>,
+        #[label(collection, "external write occurs here")]
+        external_writes: Vec<SourceSpan>,
+        #[label(collection, "function declared here")]
+        function_definition: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(function_output_in_always_ff),
+        help("connect \"{output}\" to a variable declared inside this always_ff, then assign that variable to \"{destination}\""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error(
+        "output \"{output}\" of function \"{function}\" can't write \"{destination}\" directly from always_ff"
+    )]
+    FunctionOutputInAlwaysFf {
+        function: String,
+        output: String,
+        destination: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("\"{destination}\" is declared outside this always_ff")]
+        error_location: SourceSpan,
+        #[label(collection, "\"{output}\" is declared as an output here")]
+        output_declaration: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(combinational_loop),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -101,6 +147,23 @@ pub enum AnalyzerError {
     )]
     #[error("Cyclic dependency between \"{start}\" and \"{end}\"")]
     CyclicTypeDependency {
+        start: String,
+        end: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(cyclic_file_dependency),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("Cyclic dependency between \"{start}\" and \"{end}\"")]
+    CyclicFileDependency {
         start: String,
         end: String,
         #[source_code]
@@ -2095,8 +2158,11 @@ impl AnalyzerError {
             AnalyzerError::AmbiguousIdentifier { input, .. } => input,
             AnalyzerError::AnonymousIdentifierUsage { input, .. } => input,
             AnalyzerError::CallNonFunction { input, .. } => input,
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { input, .. } => input,
+            AnalyzerError::FunctionOutputInAlwaysFf { input, .. } => input,
             AnalyzerError::CombinationalLoop { input, .. } => input,
             AnalyzerError::CyclicTypeDependency { input, .. } => input,
+            AnalyzerError::CyclicFileDependency { input, .. } => input,
             AnalyzerError::DuplicateArgument { input, .. } => input,
             AnalyzerError::DuplicatedIdentifier { input, .. } => input,
             AnalyzerError::DuplicateEnumVariant { input, .. } => input,
@@ -2215,8 +2281,11 @@ impl AnalyzerError {
             AnalyzerError::AmbiguousIdentifier { token_source, .. } => *token_source,
             AnalyzerError::AnonymousIdentifierUsage { token_source, .. } => *token_source,
             AnalyzerError::CallNonFunction { token_source, .. } => *token_source,
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { token_source, .. } => *token_source,
+            AnalyzerError::FunctionOutputInAlwaysFf { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
             AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
+            AnalyzerError::CyclicFileDependency { token_source, .. } => *token_source,
             AnalyzerError::DuplicateArgument { token_source, .. } => *token_source,
             AnalyzerError::DuplicateEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::DuplicatedIdentifier { token_source, .. } => *token_source,
@@ -2362,6 +2431,55 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
+    pub fn side_effect_function_call_in_always_ff(
+        identifier: &str,
+        token: &TokenRange,
+        definition: &TokenRange,
+        calls: &[TokenRange],
+        writes: &[TokenRange],
+    ) -> Self {
+        let (input, call_stack, external_writes, function_definition) = if writes.is_empty() {
+            let (input, function_definition) =
+                source_with_context(token, std::slice::from_ref(definition));
+            (input, vec![], vec![], function_definition)
+        } else {
+            // `source_with_context` reverses its context so diagnostics render
+            // from the always_ff call through the call stack to the write.
+            let mut context = writes.iter().rev().copied().collect::<Vec<_>>();
+            context.extend(calls.iter().rev().copied());
+            let (input, context_spans) = source_with_context(token, &context);
+            let (call_stack, external_writes) = context_spans.split_at(calls.len());
+            (input, call_stack.to_vec(), external_writes.to_vec(), vec![])
+        };
+        AnalyzerError::SideEffectFunctionCallInAlwaysFf {
+            identifier: identifier.to_string(),
+            input,
+            error_location: token.into(),
+            call_stack,
+            external_writes,
+            function_definition,
+            token_source: token.source(),
+        }
+    }
+    pub fn function_output_in_always_ff(
+        function: &str,
+        output: &str,
+        destination: &str,
+        token: &TokenRange,
+        declaration: Option<&TokenRange>,
+    ) -> Self {
+        let declarations = declaration.into_iter().copied().collect::<Vec<_>>();
+        let (input, output_declaration) = source_with_context(token, &declarations);
+        AnalyzerError::FunctionOutputInAlwaysFf {
+            function: function.to_string(),
+            output: output.to_string(),
+            destination: destination.to_string(),
+            input,
+            error_location: token.into(),
+            output_declaration,
+            token_source: token.source(),
+        }
+    }
     pub fn combinational_loop(
         identifier: &str,
         token: &TokenRange,
@@ -2378,6 +2496,15 @@ impl AnalyzerError {
     }
     pub fn cyclic_type_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
         AnalyzerError::CyclicTypeDependency {
+            start: start.into(),
+            end: end.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn cyclic_file_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
+        AnalyzerError::CyclicFileDependency {
             start: start.into(),
             end: end.into(),
             input: source(token),

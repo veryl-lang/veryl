@@ -536,7 +536,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
     }
 }
 
-fn check_true_false(comptime: &Comptime) -> (bool, bool) {
+pub(crate) fn check_true_false(comptime: &Comptime) -> (bool, bool) {
     if comptime.is_const
         && let Ok(value) = comptime.get_value()
     {

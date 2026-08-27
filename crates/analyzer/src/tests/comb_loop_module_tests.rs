@@ -829,7 +829,6 @@ fn comb_loop_preserves_unpacked_port_element_positions_an_unpacked_array_module_
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_module_boundary_region_mapping_a_child_port_summary_must_not_turn_bit_disjoint_feedthrough_into_a_loop()
  {
     assert_comb_loop(
@@ -934,7 +933,6 @@ fn comb_loop_module_boundary_region_mapping_a_top_input_to_output_path_has_no_in
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; module feedthrough and instance mapping"]
 fn comb_loop_module_boundary_region_mapping_bit_precision_survives_two_module_boundaries() {
     assert_comb_loop(
         "bit precision survives two module boundaries",
@@ -1222,5 +1220,109 @@ fn many_comb_declarations_build_the_module_context_once() {
     assert!(
         crate::comb_loop_detect::module_context_entries() <= COUNT + 4,
         "module variable/function maps must not be cloned per declaration",
+    );
+}
+
+fn instance_ring_code(feedback_bits: &str) -> String {
+    format!(
+        r#"
+        module RingA (b_in: input logic<4>, a_out: output logic<4>) {{
+            assign a_out[3:2] = b_in[1:0];
+            assign a_out[1:0] = 2'b01;
+        }}
+        module RingB (a_in: input logic<4>, b_out: output logic<4>) {{
+            assign b_out[1:0] = a_in[{feedback_bits}];
+            assign b_out[3:2] = 2'b10;
+        }}
+        module Top (o: output logic<4>) {{
+            var a_net: logic<4>;
+            var b_net: logic<4>;
+            inst u_a: RingA (b_in: b_net, a_out: a_net);
+            inst u_b: RingB (a_in: a_net, b_out: b_net);
+            assign o = a_net;
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_instance_ring_acyclic_per_bit_is_not_a_loop() {
+    // `RingB` reads back the constant half, so no bit reaches itself.
+    assert_comb_loop(
+        "a whole-port instance ring that is acyclic per bit is not a loop",
+        &instance_ring_code("1:0"),
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_instance_ring_cyclic_per_bit_is_a_loop() {
+    // Same wiring, but now `RingB` reads the very bits `RingA` derives from it.
+    assert_comb_loop(
+        "the same ring closed over its own bits is a loop",
+        &instance_ring_code("3:2"),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_module_boundary_struct_members_of_one_port_are_bit_disjoint() {
+    // The response struct's `ready` is a constant and its `rdata` depends on
+    // the request; the consumer computes the request from `ready` alone. The
+    // graph is acyclic at any granularity finer than "the whole struct", so a
+    // per-variable child-port summary reports a loop that is not there.
+    assert_comb_loop(
+        "struct members of one port are bit-disjoint across a module boundary",
+        r#"
+        package pk {
+            struct req_t {
+                addr : logic<8>,
+                valid: logic   ,
+            }
+            struct rsp_t {
+                rdata: logic<8>,
+                ready: logic   ,
+            }
+        }
+        module Regs (
+            req_i : input  pk::req_t,
+            resp_o: output pk::rsp_t,
+        ) {
+            always_comb {
+                resp_o.ready = 1'b1;
+                resp_o.rdata = '0;
+                if req_i.valid {
+                    resp_o.rdata = req_i.addr;
+                }
+            }
+        }
+        module Top (
+            i_clk: input  clock   ,
+            i_rst: input  reset   ,
+            o_d  : output logic<8>,
+        ) {
+            var rq: pk::req_t;
+            var rs: pk::rsp_t;
+            inst u: Regs (req_i: rq, resp_o: rs);
+
+            var st: logic<8>;
+            always_comb {
+                rq.valid = 0;
+                rq.addr  = st;
+                if rs.ready {
+                    rq.valid = 1;
+                }
+            }
+            always_ff {
+                if_reset {
+                    st = 0;
+                } else {
+                    st = st + {1'b0 repeat 7, rs.rdata[0]};
+                }
+            }
+            assign o_d = st;
+        }
+        "#,
+        false,
     );
 }

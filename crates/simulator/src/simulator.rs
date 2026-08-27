@@ -61,6 +61,15 @@ pub struct Simulator {
     /// Previous-step derived-clock values (sampled at master=0).  Empty
     /// when no derived clocks; otherwise used for 0→1 edge detection.
     prev_derived_clock_values: Vec<u8>,
+    /// Scratch for the master-high sample below.  A field, not a local: the
+    /// step is the innermost loop and its length is fixed for the run.
+    derived_clock_high: Vec<u8>,
+    /// Whether each derived reset READ AS ASSERTED at the last check, so a
+    /// 0→1 here is the assertion whichever polarity the net has.  Checked
+    /// after every commit within a step, not once per step: the assertion
+    /// is a consequence of a commit, and the block it reaches must run
+    /// before anything samples the state that commit produced.
+    prev_derived_reset_asserted: Vec<u8>,
     /// Env-gated `VERYL_WRITE_LOG_DIAG=1` diagnostics for the write-log
     /// commit path.  Accumulated across the run; `dump` is invoked
     /// automatically when the cycle counter crosses a logarithmic
@@ -89,6 +98,10 @@ pub struct Simulator {
     /// The async-reset assertion edge to evaluate alongside this step's clock
     /// event, taken once.  See `step_in_reset`.
     pending_assertion_edge: Option<Event>,
+    /// Derived clocks that rose when the master fell at the end of the last
+    /// step.  Fired at the top of the next one so the edge lands in the
+    /// period that follows it, the way a negedge flop reads to a sampler.
+    pending_negedge_clocks: SmallVec<[usize; 8]>,
 }
 
 struct WatchVar {
@@ -142,6 +155,7 @@ impl WriteLogDiag {
 impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
         let n_derived = ir.derived_clock_schedule.clocks.len();
+        let n_derived_resets = ir.derived_clock_schedule.resets.len();
         let components_pending = !ir.external_components.is_empty();
         let mut ret = Self {
             ir,
@@ -156,6 +170,8 @@ impl Simulator {
             last_event_stmts: std::ptr::null(),
             last_whole_event: None,
             prev_derived_clock_values: vec![0u8; n_derived],
+            derived_clock_high: vec![0u8; n_derived],
+            prev_derived_reset_asserted: vec![0u8; n_derived_resets],
             write_log_diag: WriteLogDiag {
                 enabled: env::var("VERYL_WRITE_LOG_DIAG").as_deref() == Ok("1"),
                 next_print_cycle: 1_000_000,
@@ -170,6 +186,7 @@ impl Simulator {
             trace_dump_vars: Vec::new(),
             component_event_override: None,
             pending_assertion_edge: None,
+            pending_negedge_clocks: SmallVec::new(),
         };
 
         // Reset nets start DEASSERTED: zeroed storage reads as ASSERTED on an
@@ -285,12 +302,16 @@ impl Simulator {
         }
 
         // Seed prev values from the initial post-settle state.
-        if n_derived > 0 {
+        if n_derived > 0 || n_derived_resets > 0 {
             ret.do_settle_comb();
             ret.comb_dirty = false;
             for i in 0..n_derived {
                 let clk = &ret.ir.derived_clock_schedule.clocks[i];
                 ret.prev_derived_clock_values[i] = ret.read_derived_clock_bit(clk);
+            }
+            for i in 0..n_derived_resets {
+                let rst = &ret.ir.derived_clock_schedule.resets[i];
+                ret.prev_derived_reset_asserted[i] = ret.read_derived_reset_asserted(rst);
             }
         }
 
@@ -299,12 +320,71 @@ impl Simulator {
 
     /// LSB of a 1-bit derived clock.  X/Z → 0 (matches posedge SV rule).
     fn read_derived_clock_bit(&self, clk: &crate::ir::DerivedClock) -> u8 {
-        let raw = clk.current_offset.raw();
+        self.read_edge_bit(clk.current_offset, clk.native_bytes)
+    }
+
+    /// 1 while a derived reset reads its ASSERTED level, so the assertion
+    /// is a 0→1 transition whichever polarity the net has.
+    fn read_derived_reset_asserted(&self, rst: &crate::ir::DerivedReset) -> u8 {
+        let bit = self.read_edge_bit(rst.current_offset, rst.native_bytes);
+        if rst.active_low { 1 - bit } else { bit }
+    }
+
+    /// Re-arm every derived reset against the state as it now reads.
+    fn snapshot_derived_reset_levels(&mut self) {
+        for i in 0..self.ir.derived_clock_schedule.resets.len() {
+            let rst = &self.ir.derived_clock_schedule.resets[i];
+            self.prev_derived_reset_asserted[i] = self.read_derived_reset_asserted(rst);
+        }
+    }
+
+    /// Fire `Event::Reset` for every derived reset that has just reached its
+    /// asserted level, then settle and look again (an assertion can produce
+    /// another).  The caller must have settled first.
+    fn fire_asserted_derived_resets(&mut self) {
+        let n = self.ir.derived_clock_schedule.resets.len();
+        for _ in 0..=n {
+            let mut fired: SmallVec<[usize; 4]> = SmallVec::new();
+            for i in 0..n {
+                let rst = &self.ir.derived_clock_schedule.resets[i];
+                let asserted = self.read_derived_reset_asserted(rst);
+                if self.prev_derived_reset_asserted[i] == 0 && asserted == 1 {
+                    fired.push(i);
+                }
+                self.prev_derived_reset_asserted[i] = asserted;
+            }
+            if fired.is_empty() {
+                return;
+            }
+            let has_components = !self.components.is_empty();
+            if has_components {
+                for &i in &fired {
+                    let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+                    self.stage_components(&Event::Reset(vid));
+                }
+            }
+            for &i in &fired {
+                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+                self.eval_event_stmts(&Event::Reset(vid));
+            }
+            self.commit_event_log();
+            for &i in &fired {
+                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+                if has_components {
+                    self.fire_components(&Event::Reset(vid));
+                }
+            }
+            self.do_settle_comb();
+        }
+    }
+
+    fn read_edge_bit(&self, offset: crate::ir::variable::VarOffset, native_bytes: usize) -> u8 {
+        let raw = offset.raw();
         if raw < 0 {
             return 0;
         }
         let off = raw as usize;
-        let buf: &[u8] = if clk.current_offset.is_ff() {
+        let buf: &[u8] = if offset.is_ff() {
             &self.ir.ff_values
         } else {
             &self.ir.comb_values
@@ -314,7 +394,7 @@ impl Simulator {
         }
         let payload_bit = buf[off] & 1;
         if self.ir.use_4state {
-            let mask_off = off + clk.native_bytes;
+            let mask_off = off + native_bytes;
             if mask_off < buf.len() && (buf[mask_off] & 1) != 0 {
                 return 0;
             }
@@ -1011,6 +1091,40 @@ impl Simulator {
 
         let has_eval_chunk = !self.ir.derived_clock_eval_stmts.is_empty();
 
+        // The negedge the previous step ended on lands here, before this
+        // step's rising edge.
+        if !self.pending_negedge_clocks.is_empty() {
+            let pending = std::mem::take(&mut self.pending_negedge_clocks);
+            let has_components = !self.components.is_empty();
+            for &i in &pending {
+                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                if has_components {
+                    self.stage_components(&Event::Clock(vid));
+                }
+            }
+            if watch_enabled {
+                self.dump_watch("before_negedge_batch");
+            }
+            for &i in &pending {
+                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                self.eval_event_stmts(&Event::Clock(vid));
+            }
+            self.commit_event_log();
+            if watch_enabled {
+                self.dump_watch("after_negedge_batch");
+            }
+            for &i in &pending {
+                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+                if has_components {
+                    self.fire_components(&Event::Clock(vid));
+                }
+            }
+            self.do_settle_comb();
+            // The batch can have asserted an async reset; that reaches its
+            // blocks here, not at the master edge that follows.
+            self.fire_asserted_derived_resets();
+        }
+
         // Master high → gated-clock exprs see the rising edge.
         if let Some(id) = master_id_opt {
             self.set_input_clock_bit(id, 1);
@@ -1029,13 +1143,20 @@ impl Simulator {
         let n = self.ir.derived_clock_schedule.clocks.len();
         let mut fired_mask: Vec<bool> = vec![false; n];
         let mut pre_fire: SmallVec<[usize; 8]> = SmallVec::new();
+        // Master-gated values WHILE THE MASTER IS HIGH.  A clock the master
+        // inverts is low here and rises when the master falls, so that edge
+        // needs this baseline -- `prev_derived_clock_values` is the previous
+        // step's low phase, where an inversion already reads 1.
+        let mut high_values = std::mem::take(&mut self.derived_clock_high);
+        high_values.fill(0);
         if master_id_opt.is_some() {
-            for i in 0..n {
+            for (i, high) in high_values.iter_mut().enumerate() {
                 let clk = &self.ir.derived_clock_schedule.clocks[i];
                 if clk.current_offset.is_ff() || !clk.master_gated {
                     continue;
                 }
-                if self.prev_derived_clock_values[i] == 0 && self.read_derived_clock_bit(clk) == 1 {
+                *high = self.read_derived_clock_bit(clk);
+                if self.prev_derived_clock_values[i] == 0 && *high == 1 {
                     pre_fire.push(i);
                 }
             }
@@ -1079,7 +1200,8 @@ impl Simulator {
         // suffice; the debug_assert catches bookkeeping regressions.
         let mut new_values: SmallVec<[u8; 8]> = SmallVec::new();
         new_values.resize(n, 0);
-        let max_iters = n + 1;
+        let n_rst = self.ir.derived_clock_schedule.resets.len();
+        let max_iters = n + n_rst + 1;
         let mut iters = 0;
         loop {
             if has_eval_chunk {
@@ -1114,7 +1236,20 @@ impl Simulator {
                 }
             }
 
-            if batch.is_empty() {
+            // Resets that have just reached their asserted level, from the
+            // same refreshed closure.  A reset asserts BECAUSE a commit put
+            // it there, so it belongs in this loop and not once per step.
+            let mut rst_batch: SmallVec<[usize; 4]> = SmallVec::new();
+            for i in 0..n_rst {
+                let rst = &self.ir.derived_clock_schedule.resets[i];
+                if self.prev_derived_reset_asserted[i] == 0
+                    && self.read_derived_reset_asserted(rst) == 1
+                {
+                    rst_batch.push(i);
+                }
+            }
+
+            if batch.is_empty() && rst_batch.is_empty() {
                 break;
             }
 
@@ -1130,14 +1265,22 @@ impl Simulator {
                 let clk = &self.ir.derived_clock_schedule.clocks[*i];
                 self.read_derived_clock_bit(clk) == 1
             });
-            if batch.is_empty() {
+            rst_batch.retain(|i| {
+                let rst = &self.ir.derived_clock_schedule.resets[*i];
+                self.read_derived_reset_asserted(rst) == 1
+            });
+            // Record what the SETTLED state says about every reset, before
+            // firing: an assertion is then seen once, and a level that fell
+            // back re-arms.  This is also what makes the loop terminate.
+            self.snapshot_derived_reset_levels();
+            if batch.is_empty() && rst_batch.is_empty() {
                 continue;
             }
 
             iters += 1;
             debug_assert!(
                 iters <= max_iters,
-                "derived clock fixpoint exceeded n+1 iterations (n={n})",
+                "derived clock fixpoint exceeded n+n_rst+1 iterations (n={n}, n_rst={n_rst})",
             );
 
             // One event region for the whole batch: stage, evaluate every
@@ -1149,6 +1292,12 @@ impl Simulator {
                     self.stage_components(&Event::Clock(vid));
                 }
             }
+            if has_components {
+                for &i in &rst_batch {
+                    let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+                    self.stage_components(&Event::Reset(vid));
+                }
+            }
             for &i in &batch {
                 let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
                 if watch_enabled {
@@ -1156,11 +1305,23 @@ impl Simulator {
                 }
                 self.eval_event_stmts(&Event::Clock(vid));
             }
+            // Resets last, so a net that both clocks and resets this
+            // instant takes the reset value SV gives it.
+            for &i in &rst_batch {
+                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+                self.eval_event_stmts(&Event::Reset(vid));
+            }
             // The async-reset assertion edge, if this step carries one.
             if let Some(reset) = self.pending_assertion_edge.take() {
                 self.eval_event_stmts(&reset);
             }
             self.commit_event_log();
+            for &i in &rst_batch {
+                let vid = self.ir.derived_clock_schedule.resets[i].var_id;
+                if has_components {
+                    self.fire_components(&Event::Reset(vid));
+                }
+            }
             for &i in &batch {
                 let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
                 if has_components {
@@ -1180,12 +1341,37 @@ impl Simulator {
             if has_eval_chunk {
                 self.ir.partial_settle(&mut self.mask_cache);
             }
+            // A clock the master inverts rises HERE.  The pre-commit phase
+            // fires on the master's rising edge, where an inversion falls,
+            // and the post-commit loop skips master-gated clocks -- so
+            // without this a `~clk` flop never fires at all.
+            let mut fall: SmallVec<[usize; 8]> = SmallVec::new();
+            for (i, high) in high_values.iter().enumerate() {
+                let clk = &self.ir.derived_clock_schedule.clocks[i];
+                if clk.current_offset.is_ff() || !clk.master_gated {
+                    continue;
+                }
+                if *high == 0 && self.read_derived_clock_bit(clk) == 1 {
+                    fall.push(i);
+                }
+            }
+            if !fall.is_empty() {
+                // The partial settle only refreshed the clock closure.
+                self.do_settle_comb();
+                fall.retain(|i| {
+                    let clk = &self.ir.derived_clock_schedule.clocks[*i];
+                    self.read_derived_clock_bit(clk) == 1
+                });
+            }
+            self.pending_negedge_clocks = fall;
         }
 
         for i in 0..n {
             let clk = &self.ir.derived_clock_schedule.clocks[i];
             self.prev_derived_clock_values[i] = self.read_derived_clock_bit(clk);
         }
+        self.derived_clock_high = high_values;
+        self.snapshot_derived_reset_levels();
 
         clear_event_write_log();
         self.comb_dirty = true;
@@ -1277,6 +1463,10 @@ impl Simulator {
             wide_count_before,
             aot_wide_count,
         );
+        // The is_ff refinement can demote an `always_ff` variable to comb, and
+        // the event path then writes it directly rather than through the log —
+        // invisible to the committed-FF compare below.
+        let aot_comb = self.ir.comb_values.to_vec();
 
         // Restore inputs + log count, then run the Cranelift event.
         unsafe {
@@ -1308,6 +1498,30 @@ impl Simulator {
             wide_count_before,
             cr_wide_count,
         );
+
+        let comb_diff = aot_comb
+            .iter()
+            .zip(self.ir.comb_values.iter())
+            .filter(|(a, c)| a != c)
+            .count();
+        if comb_diff > 0 {
+            eprintln!(
+                "[aot_event_validate] DIVERGENCE module={} event={:?}: comb storage differs ({comb_diff} bytes)",
+                self.ir.name, self.last_event,
+            );
+            let mut shown = 0;
+            for (off, (a, c)) in aot_comb.iter().zip(self.ir.comb_values.iter()).enumerate() {
+                if a != c {
+                    eprintln!("  comb off={off:#x}: aot={a:#04x} cranelift={c:#04x}");
+                    shown += 1;
+                    if shown == 32 {
+                        eprintln!("  ... (further differing bytes suppressed)");
+                        break;
+                    }
+                }
+            }
+            panic!("AOT-C event validate divergence in comb storage (see above)");
+        }
 
         // Backends may log different byte SETS for one committed effect: a
         // full-width select RMW (Cranelift) re-logs untouched bytes with
