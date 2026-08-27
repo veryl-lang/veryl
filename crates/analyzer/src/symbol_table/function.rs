@@ -50,6 +50,11 @@ fn resolve_constantable(symbol: &Symbol, visited: &mut Vec<SymbolId>) -> bool {
     constantable
 }
 
+/// `f(o.a)` inside `f(o: output S)` appends one member per fixed-point round,
+/// so the mapped path needs a bound to converge. Truncating keeps the root,
+/// which is what `classify_write` keys on.
+const FORMAL_WRITE_DEPTH_LIMIT: usize = 16;
+
 #[derive(Clone, Default, PartialEq, Eq)]
 struct Effect {
     external_writes: HashSet<DefineContext>,
@@ -576,6 +581,7 @@ fn resolve_side_effects(list: &[Symbol]) {
                         mapped
                             .paths
                             .extend(formal_write.path.paths.iter().skip(1).cloned());
+                        mapped.paths.truncate(FORMAL_WRITE_DEPTH_LIMIT);
                         add_target(effect, classify_write(&mapped, &namespace), context.clone());
                     }
                 }
@@ -592,17 +598,9 @@ fn resolve_side_effects(list: &[Symbol]) {
         let SymbolKind::Function(func) = &mut symbol.kind else {
             unreachable!();
         };
-        func.has_side_effect = !effect.external_writes.is_empty();
         func.conditional_effects.side_effect_contexts =
             effect.external_writes.into_iter().collect();
         func.conditional_effects.side_effect_contexts.sort();
-        func.formal_writes = effect
-            .formal_writes
-            .iter()
-            .map(|x| x.path.clone())
-            .collect();
-        func.formal_writes.sort();
-        func.formal_writes.dedup();
         func.conditional_effects.formal_write_contexts = effect.formal_writes.into_iter().collect();
         func.conditional_effects.formal_write_contexts.sort();
         symbol_table::update(symbol);

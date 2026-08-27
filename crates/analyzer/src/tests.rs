@@ -20256,6 +20256,65 @@ fn external_write_trace_terminates_on_recursive_call_graph() {
 }
 
 #[test]
+fn formal_write_mapping_terminates_on_self_member_argument() {
+    let code = r#"
+    module ModuleA (
+        q: output logic,
+    ) {
+        struct StructA {
+            a: logic,
+        }
+
+        function f (
+            o: output StructA,
+        ) {
+            f(o.a);
+        }
+
+        assign q = 0;
+    }
+    "#;
+
+    // The unassigned formal is unrelated; the point is that analysis returns.
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|x| matches!(x, AnalyzerError::UnassignVariable { .. }))
+    );
+}
+
+#[test]
+fn formal_write_mapping_terminates_on_cyclic_member_type() {
+    // The type DAG runs after the fixed point, so the cycle is only reported
+    // if the fixed point terminated.
+    let code = r#"
+    module ModuleA (
+        q: output logic,
+    ) {
+        struct StructA {
+            a: StructA,
+        }
+
+        function f (
+            o: output StructA,
+        ) {
+            f(o.a);
+        }
+
+        assign q = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::CyclicTypeDependency { .. }))
+    );
+}
+
+#[test]
 fn finite_generic_recursion_reports_side_effect_without_recursing_forever() {
     let code = r#"
     module ModuleA (
@@ -20326,7 +20385,7 @@ fn modport_output_copyout_is_a_side_effect() {
         let SymbolKind::Function(function) = &symbol.found.kind else {
             unreachable!();
         };
-        function.has_side_effect
+        function.has_side_effect_in(&Default::default())
     }
 
     let code = r#"
@@ -20463,6 +20522,39 @@ fn modport_function_write_reaches_assignment_analysis() {
             .iter()
             .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "bus.data")),
         "the formal copies out to the interface member on return: {errors:?}"
+    );
+}
+
+#[test]
+fn single_member_modport_argument_binds_the_member() {
+    // A modport with one member used to take the scalar argument path, which
+    // bound the interface root instead of the member.
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport master {
+            data: output,
+        }
+    }
+    module ModuleA (
+        i: input logic,
+    ) {
+        inst bus: Bus;
+        function write_data (arg: modport Bus::master, x: input logic) {
+            arg.data = x;
+        }
+        always_comb {
+            write_data(bus, i);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "bus.data")),
+        "the member must be bound to the actual: {errors:?}"
     );
 }
 

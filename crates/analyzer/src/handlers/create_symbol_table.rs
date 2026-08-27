@@ -1976,8 +1976,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     constantable: None,
                     write_paths,
                     call_sites,
-                    has_side_effect: false,
-                    formal_writes: vec![],
                     conditional_effects: Box::default(),
                     definition: Some(definition),
                 };
@@ -2663,8 +2661,6 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     constantable: None,
                     write_paths: vec![],
                     call_sites: vec![],
-                    has_side_effect: false,
-                    formal_writes: vec![],
                     conditional_effects: Box::default(),
                     definition: Some(definition),
                 };
