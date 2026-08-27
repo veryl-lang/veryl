@@ -20526,6 +20526,39 @@ fn modport_function_write_reaches_assignment_analysis() {
 }
 
 #[test]
+fn single_member_modport_argument_binds_the_member() {
+    // A modport with one member used to take the scalar argument path, which
+    // bound the interface root instead of the member.
+    let code = r#"
+    interface Bus {
+        var data: logic;
+        modport master {
+            data: output,
+        }
+    }
+    module ModuleA (
+        i: input logic,
+    ) {
+        inst bus: Bus;
+        function write_data (arg: modport Bus::master, x: input logic) {
+            arg.data = x;
+        }
+        always_comb {
+            write_data(bus, i);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "bus.data")),
+        "the member must be bound to the actual: {errors:?}"
+    );
+}
+
+#[test]
 fn generic_instance_direct_write_is_scheduler_side_effect() {
     let code = r#"
     interface Bus {
