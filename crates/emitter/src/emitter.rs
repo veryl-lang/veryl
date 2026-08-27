@@ -237,6 +237,21 @@ fn enum_list_has_conditional_attribute(list: &EnumList) -> bool {
             .any(|x| enum_group_has_conditional_attribute(&x.enum_group))
 }
 
+/// `base::{a, b}` and `a` -> `base::a`
+fn import_item_path(
+    base: &ScopedIdentifier,
+    colon_colon: &ColonColon,
+    item: &MultipleImportItem,
+) -> ScopedIdentifier {
+    let mut ret = base.clone();
+    ret.scoped_identifier_list.push(ScopedIdentifierList {
+        colon_colon: Box::new(colon_colon.clone()),
+        identifier: item.identifier.clone(),
+        scoped_identifier_opt0: None,
+    });
+    ret
+}
+
 // SV `import` only accepts `package::symbol` or `package::*`, so suppress
 // imports whose target is an enum (wildcard), an enum member, an alias
 // outside a package, or a bare component (package/module/interface or their
@@ -1309,6 +1324,29 @@ impl Emitter {
             return;
         }
 
+        // `base::{a, b}` is a shorthand for individual imports of `base::a` and
+        // `base::b`, so each item is filtered on its own. This matters when the
+        // base is not a package (e.g. a project namespace), because then an item
+        // can be a component or a proto package, which has no SystemVerilog
+        // counterpart. The whole declaration is skipped when nothing is left.
+        let mut import_items: Vec<&MultipleImportItem> = Vec::new();
+        if let Some(x) = arg.import_declaration_opt.as_ref()
+            && let ImportDeclarationOptGroup::MultipleImportList(list) =
+                x.import_declaration_opt_group.as_ref()
+        {
+            let items: Vec<&MultipleImportItem> = list.multiple_import_list.as_ref().into();
+            import_items = items
+                .into_iter()
+                .filter(|item| {
+                    let path = import_item_path(&arg.scoped_identifier, &x.colon_colon, item);
+                    !should_skip_import(&path, false)
+                })
+                .collect();
+            if import_items.is_empty() {
+                return;
+            }
+        }
+
         if moved {
             self.clear_adjust_line();
         }
@@ -1325,12 +1363,8 @@ impl Emitter {
             Some((x, ImportDeclarationOptGroup::Star(star))) => {
                 self.emit_wildcard_import(&arg.scoped_identifier, &x.colon_colon, &star.star);
             }
-            Some((x, ImportDeclarationOptGroup::MultipleImportList(list))) => {
-                self.emit_multiple_import(
-                    &arg.scoped_identifier,
-                    &x.colon_colon,
-                    &list.multiple_import_list,
-                );
+            Some((x, ImportDeclarationOptGroup::MultipleImportList(_))) => {
+                self.emit_multiple_import(&arg.scoped_identifier, &x.colon_colon, &import_items);
             }
             None => {
                 self.scoped_identifier(&arg.scoped_identifier);
@@ -1385,18 +1419,16 @@ impl Emitter {
     }
 
     // `import pkg::{a, b};` is emitted as a comma-separated SystemVerilog import
-    // list (`import pkg::a, pkg::b;`). Whether the whole declaration is skipped
-    // is decided from the base by `should_skip_import`, treating it as a limited
-    // wildcard, so no per-item filtering is needed here.
+    // list (`import pkg::a, pkg::b;`). `items` is already filtered by
+    // `emit_import_declaration`, so every item given here is emitted.
     fn emit_multiple_import(
         &mut self,
         base: &ScopedIdentifier,
         colon_colon: &ColonColon,
-        list: &MultipleImportList,
+        items: &[&MultipleImportItem],
     ) {
         // Width-driven: the list stays flat when it fits and wraps (one item
         // per line, indented) otherwise, like a function-call argument list.
-        let items: Vec<&MultipleImportItem> = list.into();
         self.group_begin();
         self.group_nest_begin();
         for (i, item) in items.iter().enumerate() {
@@ -1404,14 +1436,7 @@ impl Emitter {
                 self.str(",");
                 self.soft_line();
             }
-            let mut scoped_identifier = base.clone();
-            scoped_identifier
-                .scoped_identifier_list
-                .push(ScopedIdentifierList {
-                    colon_colon: Box::new(colon_colon.clone()),
-                    identifier: item.identifier.clone(),
-                    scoped_identifier_opt0: None,
-                });
+            let scoped_identifier = import_item_path(base, colon_colon, item);
             // The base package repeats per item; mark all but the first as
             // duplicated so their comments / source mappings are not re-emitted.
             self.force_duplicated = i != 0;
