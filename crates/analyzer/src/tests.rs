@@ -2275,6 +2275,43 @@ fn invalid_import() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    // A single-segment `import` carries no qualifier of its own, so the
+    // reference is expanded through the wildcard instead.
+    let code = r#"
+    package a_pkg {
+        const A: u32 = 1;
+    }
+    package b_pkg {
+        alias package a = a_pkg;
+    }
+    module c_module {
+        import b_pkg::*;
+        import a;
+        const C: u32 = a::A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // The same shape with a non-importable target is still rejected.
+    let code = r#"
+    package a_pkg {
+        const A: u32 = 1;
+    }
+    module b_module {
+        import a_pkg::*;
+        import A;
+        const _C: u32 = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors.first(), Some(AnalyzerError::InvalidImport { .. })),
+        "{errors:?}"
+    );
 }
 
 #[test]
