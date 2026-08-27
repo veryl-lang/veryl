@@ -7,7 +7,7 @@ use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::veryl_token::{Token, VerylToken};
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct DefineContext {
     pos: BTreeSet<StrId>,
     neg: BTreeSet<StrId>,
@@ -25,6 +25,17 @@ impl DefineContext {
     pub fn is_active(&self, defines: &HashSet<StrId>) -> bool {
         self.pos.iter().all(|x| defines.contains(x))
             && self.neg.iter().all(|x| !defines.contains(x))
+    }
+
+    pub fn conjoin(&self, value: &DefineContext) -> Option<DefineContext> {
+        if self.exclusive(value) {
+            return None;
+        }
+
+        let mut ret = self.clone();
+        ret.pos.extend(value.pos.iter().copied());
+        ret.neg.extend(value.neg.iter().copied());
+        Some(ret)
     }
 }
 

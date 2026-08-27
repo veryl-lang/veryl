@@ -17,6 +17,24 @@ pub fn take() -> String {
     BUFFER.with(|b| b.borrow_mut().take().unwrap_or_default())
 }
 
+/// Byte length of the buffered output — a rollback point for a speculative
+/// run (the AOT-C validate dual-run) whose `$display` output must not land
+/// twice.  Unbuffered output cannot roll back; 0 keeps `truncate_to` a no-op.
+pub fn mark() -> usize {
+    BUFFER.with(|b| b.borrow().as_ref().map_or(0, |buf| buf.len()))
+}
+
+/// Drop everything buffered after `mark`.  No-op when unbuffered.
+pub fn truncate_to(mark: usize) {
+    BUFFER.with(|b| {
+        if let Some(buf) = b.borrow_mut().as_mut()
+            && mark <= buf.len()
+        {
+            buf.truncate(mark);
+        }
+    });
+}
+
 pub fn print(s: &str) {
     BUFFER.with(|b| {
         let mut borrow = b.borrow_mut();

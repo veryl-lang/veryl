@@ -1,0 +1,37 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 425
+expression: out
+---
+side_effect_function_call_in_always_ff (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#side_effect_function_call_in_always_ff)
+
+  × function "outer" can't be called in always_ff because it may write an HDL object declared outside the function
+    ╭─[../../testcases/error/nested_generic_interface_side_effect_function_call_in_always_ff.veryl:33:9]
+ 32 │     always_ff (clk) {
+ 33 │         outer();
+    ·         ────┬───
+    ·             ╰── called from always_ff
+ 34 │     }
+    ╰────
+    ╭─[../../testcases/error/nested_generic_interface_side_effect_function_call_in_always_ff.veryl:29:9]
+ 28 │     function outer () {
+ 29 │         bus.update();
+    ·         ──────┬─────
+    ·               ╰── called from here
+ 30 │     }
+    ╰────
+    ╭─[../../testcases/error/nested_generic_interface_side_effect_function_call_in_always_ff.veryl:19:9]
+ 18 │     function update () {
+ 19 │         PKG::update(data);
+    ·         ────────┬────────
+    ·                 ╰── called from here
+ 20 │     }
+    ╰────
+    ╭─[../../testcases/error/nested_generic_interface_side_effect_function_call_in_always_ff.veryl:11:9]
+ 10 │     ) {
+ 11 │         result = 1;
+    ·         ───┬──
+    ·            ╰── external write occurs here
+ 12 │     }
+    ╰────
+  help: move the external write into this always_ff, or use an output argument connected to a variable declared inside it

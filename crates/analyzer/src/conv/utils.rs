@@ -6,6 +6,7 @@ use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_refereence;
 use crate::conv::checker::portability::check_initial_assign_system_function_args;
+use crate::conv::context::RuntimeFunctionEffect;
 use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
@@ -4053,9 +4054,8 @@ pub fn function_call(
 
     check_generic_refereence(context, &generic_path);
 
-    let mut parent_path = generic_path.clone();
-    parent_path.paths.pop();
-    let mut sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
+    let mut sig =
+        Signature::from_path(context, generic_path.clone()).ok_or_else(|| ir_error!(token))?;
     sig.normalize();
 
     // same signature re-entered => true infinite recursion
@@ -4077,27 +4077,7 @@ pub fn function_call(
         sig: sig.clone(),
     };
 
-    let mut map = sig.to_generic_map();
-
-    if !parent_path.is_empty()
-        && let Ok(symbol) = symbol_table::resolve(&parent_path)
-    {
-        match &symbol.found.kind {
-            SymbolKind::Instance(x) => {
-                let mut parent_map = x.type_name.to_generic_maps();
-                parent_map.append(&mut map);
-                map = parent_map;
-            }
-            SymbolKind::Port(x) => {
-                if let Some(x) = x.r#type.get_user_defined() {
-                    let mut parent_map = x.path.to_generic_maps();
-                    parent_map.append(&mut map);
-                    map = parent_map;
-                }
-            }
-            _ => (),
-        }
-    }
+    let map = symbol_table::function_call_generic_maps(&sig, &generic_path);
 
     context.push_generic_map(map);
     context.function_call_stack.push(sig.clone());
@@ -4105,6 +4085,85 @@ pub fn function_call(
     let ret = context.block(|c| {
         let func = get_function(c, &path, token)?;
         let (mut inputs, outputs) = args.to_function_args(c, &func, token)?;
+
+        let symbol = symbol_table::get(sig.symbol);
+        let mut effect = symbol
+            .as_ref()
+            .and_then(|symbol| match &symbol.kind {
+                SymbolKind::Function(func) => Some(RuntimeFunctionEffect {
+                    external_write: func.has_side_effect_in(&c.config.defines),
+                    written_outputs: func
+                        .written_output_paths(&c.config.defines)
+                        .into_iter()
+                        .filter_map(|path| path.to_var_path())
+                        .collect(),
+                }),
+                _ => None,
+            })
+            .unwrap_or_default();
+        if let Some(runtime_effect) = c.function_effect(&path) {
+            effect.external_write |= runtime_effect.external_write;
+            effect
+                .written_outputs
+                .extend(runtime_effect.written_outputs);
+        }
+        c.record_function_call_effect(&effect, &outputs);
+
+        if c.is_affiliated(Affiliation::AlwaysFf)
+            && effect.external_write
+            && let Some(symbol) = &symbol
+        {
+            let definition = TokenRange::from(&symbol.token);
+            let external_write = symbol_table::find_external_write(symbol, &sig, c);
+            let (calls, external_writes) = external_write
+                .map(|trace| (trace.calls, vec![trace.write]))
+                .unwrap_or_default();
+            c.insert_error(AnalyzerError::side_effect_function_call_in_always_ff(
+                &symbol.token.text.to_string(),
+                &token,
+                &definition,
+                &calls,
+                &external_writes,
+            ));
+        }
+
+        if c.is_affiliated(Affiliation::AlwaysFf) {
+            for (formal, dsts) in &outputs {
+                let Some(formal_name) = formal.0.first() else {
+                    continue;
+                };
+                if effect.written_paths_for(formal).next().is_none() {
+                    continue;
+                }
+                let output = resource_table::get_str_value(*formal_name).unwrap_or_default();
+                let output_port = symbol.as_ref().and_then(|symbol| match &symbol.kind {
+                    SymbolKind::Function(function) => function.ports.iter().find(|port| {
+                        port.token.token.text == *formal_name
+                            && symbol_table::get(port.symbol).is_some_and(|symbol| {
+                                matches!(symbol.kind, SymbolKind::Port(ref port) if port.direction == symbol::Direction::Output)
+                            })
+                    }),
+                    _ => None,
+                });
+                let Some(output_port) = output_port else {
+                    continue;
+                };
+                let declaration = TokenRange::from(&output_port.token.token);
+                for dst in dsts {
+                    if c.get_variable_info(dst.id)
+                        .is_some_and(|variable| variable.affiliation != Affiliation::AlwaysFf)
+                    {
+                        c.insert_error(AnalyzerError::function_output_in_always_ff(
+                            &func.name.to_string(),
+                            &output,
+                            &dst.path.to_string(),
+                            &dst.token,
+                            Some(&declaration),
+                        ));
+                    }
+                }
+            }
+        }
 
         let mut comptime = func.r#type.clone();
         comptime.token = token;

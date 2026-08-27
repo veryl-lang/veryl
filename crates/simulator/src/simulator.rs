@@ -1463,6 +1463,10 @@ impl Simulator {
             wide_count_before,
             aot_wide_count,
         );
+        // The is_ff refinement can demote an `always_ff` variable to comb, and
+        // the event path then writes it directly rather than through the log —
+        // invisible to the committed-FF compare below.
+        let aot_comb = self.ir.comb_values.to_vec();
 
         // Restore inputs + log count, then run the Cranelift event.
         unsafe {
@@ -1494,6 +1498,30 @@ impl Simulator {
             wide_count_before,
             cr_wide_count,
         );
+
+        let comb_diff = aot_comb
+            .iter()
+            .zip(self.ir.comb_values.iter())
+            .filter(|(a, c)| a != c)
+            .count();
+        if comb_diff > 0 {
+            eprintln!(
+                "[aot_event_validate] DIVERGENCE module={} event={:?}: comb storage differs ({comb_diff} bytes)",
+                self.ir.name, self.last_event,
+            );
+            let mut shown = 0;
+            for (off, (a, c)) in aot_comb.iter().zip(self.ir.comb_values.iter()).enumerate() {
+                if a != c {
+                    eprintln!("  comb off={off:#x}: aot={a:#04x} cranelift={c:#04x}");
+                    shown += 1;
+                    if shown == 32 {
+                        eprintln!("  ... (further differing bytes suppressed)");
+                        break;
+                    }
+                }
+            }
+            panic!("AOT-C event validate divergence in comb storage (see above)");
+        }
 
         // Backends may log different byte SETS for one committed effect: a
         // full-width select RMW (Cranelift) re-logs untouched bytes with

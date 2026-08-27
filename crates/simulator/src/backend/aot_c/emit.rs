@@ -66,51 +66,54 @@ __attribute__((visibility(\"default\"))) void veryl_set_wideops(const void* t) {
 const WIDEOPS_C_INLINE: &str = r##"
 #define VW_RD(p,i) (((const veryl_u64_ua*)(p))[(i)])
 #define VW_WR(p,i,v) (((veryl_u64_ua*)(p))[(i)] = (v))
+/* `native_bytes` returns 4 for widths <= 32, so a truncating `/ 8` would
+   make every helper below a silent no-op.  Mirrors Rust-side `wide_words`. */
+#define VW_NW(nb) (((nb) + 7) / 8)
 static inline void vw_band(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) & VW_RD(b,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) & VW_RD(b,i)); }
 static inline void vw_bor(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) | VW_RD(b,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) | VW_RD(b,i)); }
 static inline void vw_bxor(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) ^ VW_RD(b,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) ^ VW_RD(b,i)); }
 static inline void vw_bxor_not(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, ~(VW_RD(a,i) ^ VW_RD(b,i))); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, ~(VW_RD(a,i) ^ VW_RD(b,i))); }
 static inline void vw_band_not(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) & ~VW_RD(b,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(a,i) & ~VW_RD(b,i)); }
 static inline void vw_bnot(uint8_t* d,const uint8_t* a,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, ~VW_RD(a,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, ~VW_RD(a,i)); }
 static inline void vw_add(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; uint64_t carry=0;
+  unsigned n=VW_NW(nb); uint64_t carry=0;
   for(unsigned i=0;i<n;i++){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
     uint64_t s1=ai+bi; uint64_t c1=(s1<ai); uint64_t s2=s1+carry; uint64_t c2=(s2<s1);
     VW_WR(d,i,s2); carry=c1+c2; } }
 static inline void vw_sub(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; uint64_t borrow=0;
+  unsigned n=VW_NW(nb); uint64_t borrow=0;
   for(unsigned i=0;i<n;i++){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
     uint64_t d1=ai-bi; uint64_t b1=(ai<bi); uint64_t d2=d1-borrow; uint64_t b2=(d1<borrow);
     VW_WR(d,i,d2); borrow=b1+b2; } }
 static inline void vw_mul(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i,0);
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i,0);
   for(unsigned i=0;i<n;i++){ uint64_t ai=VW_RD(a,i); if(ai==0) continue; __uint128_t carry=0;
     for(unsigned j=0;j<n;j++){ if(i+j>=n) break;
       __uint128_t prod=(__uint128_t)ai*(__uint128_t)VW_RD(b,j)+(__uint128_t)VW_RD(d,i+j)+carry;
       VW_WR(d,i+j,(uint64_t)prod); carry=prod>>64; } } }
 static inline void vw_negate(uint8_t* d,const uint8_t* a,uint32_t nb){
-  unsigned n=nb/8; uint64_t carry=1;
+  unsigned n=VW_NW(nb); uint64_t carry=1;
   for(unsigned i=0;i<n;i++){ uint64_t t=~VW_RD(a,i); uint64_t s=t+carry; uint64_t c=(s<t);
     VW_WR(d,i,s); carry=c; } }
 static inline void vw_copy(uint8_t* d,const uint8_t* s,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(s,i)); }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++) VW_WR(d,i, VW_RD(s,i)); }
 static inline uint64_t vw_sext_word(const uint8_t* p,unsigned i,uint32_t w,int sign);
 static inline void vw_sext_copy(uint8_t* d,const uint8_t* s,uint32_t sw,uint32_t dnb){
-  unsigned n=dnb/8; if(sw==0){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
+  unsigned n=VW_NW(dnb); if(sw==0){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
   int sign=(int)((VW_RD(s,(sw-1)/64)>>((sw-1)%64))&1);
   for(unsigned i=0;i<n;i++) VW_WR(d,i, vw_sext_word(s,i,sw,sign)); }
 static inline int64_t vw_eq(const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 0; } return 1; }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 0; } return 1; }
 static inline int64_t vw_ne(const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 1; } return 0; }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=VW_RD(b,i)) return 1; } return 0; }
 static inline int64_t vw_ucmp(const uint8_t* a,const uint8_t* b,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=n;i-->0;){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
+  unsigned n=VW_NW(nb); for(unsigned i=n;i-->0;){ uint64_t ai=VW_RD(a,i),bi=VW_RD(b,i);
     if(ai<bi) return -1; if(ai>bi) return 1; } return 0; }
 static inline int64_t vw_scmp(const uint8_t* a,const uint8_t* b,uint32_t packed){
   uint32_t nb=packed&0xFFFF, width=packed>>16; if(width==0||nb==0) return 0;
@@ -127,18 +130,18 @@ static inline int64_t vw_scmp_asym(const uint8_t* a,const uint8_t* b,uint32_t ap
   int as=(int)((VW_RD(a,(aw-1)/64)>>((aw-1)%64))&1);
   int bs=(int)((VW_RD(b,(bw-1)/64)>>((bw-1)%64))&1);
   if(as!=bs){ return as==1? -1 : 1; }
-  unsigned anw=anb/8, bnw=bnb/8, words=anw>bnw?anw:bnw;
+  unsigned anw=VW_NW(anb), bnw=VW_NW(bnb), words=anw>bnw?anw:bnw;
   for(unsigned i=words;i-->0;){ uint64_t av=vw_sext_word(a,i,aw,as), bv=vw_sext_word(b,i,bw,bs);
     if(av<bv) return -1; if(av>bv) return 1; } return 0; }
 static inline void vw_shl(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t nb){
-  unsigned n=nb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
+  unsigned n=VW_NW(nb); unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
   if(ws>=n){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
   for(unsigned i=n;i-->0;){ long si=(long)i-(long)ws;
     uint64_t lo = si>=0 ? VW_RD(a,(unsigned)si) : 0;
     uint64_t hi = si>0 ? VW_RD(a,(unsigned)si-1) : 0;
     VW_WR(d,i, bs==0 ? lo : (lo<<bs)|(hi>>(64-bs))); } }
 static inline void vw_lshr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t nb){
-  unsigned n=nb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
+  unsigned n=VW_NW(nb); unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
   if(ws>=n){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
   for(unsigned i=0;i<n;i++){ unsigned si=i+ws;
     uint64_t lo = si<n ? VW_RD(a,si) : 0;
@@ -148,14 +151,14 @@ static inline void vw_lshr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t 
    bit-select needs only its own result window, not the whole shifted
    source. */
 static inline void vw_lshr_win(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t dnb,uint32_t anb){
-  unsigned dn=dnb/8, an=anb/8; unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
+  unsigned dn=VW_NW(dnb), an=VW_NW(anb); unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
   for(unsigned i=0;i<dn;i++){ unsigned si=i+ws;
     uint64_t lo = si<an ? VW_RD(a,si) : 0;
     uint64_t hi = si+1<an ? VW_RD(a,si+1) : 0;
     VW_WR(d,i, bs==0 ? lo : (lo>>bs)|(hi<<(64-bs))); } }
 static inline void vw_ashr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t packed){
   uint32_t nb=packed&0xFFFF, width=packed>>16; if(nb==0||width==0) return;
-  unsigned n=nb/8; unsigned sw=(width-1)/64, sb=(width-1)%64;
+  unsigned n=VW_NW(nb); unsigned sw=(width-1)/64, sb=(width-1)%64;
   uint64_t sign=(VW_RD(a,sw)>>sb)&1;
   vw_lshr(d,a,amount,nb);
   if(sign==1 && amount>0){
@@ -163,7 +166,7 @@ static inline void vw_ashr(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t 
     for(unsigned bp=fill_start; bp<width; bp++){ unsigned w=bp/64, b=bp%64;
       if(w<n) VW_WR(d,w, VW_RD(d,w) | ((uint64_t)1<<b)); } } }
 static inline int64_t vw_is_nonzero(const uint8_t* a,uint32_t nb){
-  unsigned n=nb/8; for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=0) return 1; } return 0; }
+  unsigned n=VW_NW(nb); for(unsigned i=0;i<n;i++){ if(VW_RD(a,i)!=0) return 1; } return 0; }
 static inline int64_t vw_is_all_ones(const uint8_t* a,uint32_t packed){
   uint32_t width=packed>>16; if(width==0) return 1;
   unsigned fw=width/64; uint32_t rem=width%64;
@@ -171,17 +174,17 @@ static inline int64_t vw_is_all_ones(const uint8_t* a,uint32_t packed){
   if(rem>0){ uint64_t m=((uint64_t)1<<rem)-1; if((VW_RD(a,fw)&m)!=m) return 0; }
   return 1; }
 static inline int64_t vw_popcnt_parity(const uint8_t* a,uint32_t nb){
-  unsigned n=nb/8; uint32_t total=0;
+  unsigned n=VW_NW(nb); uint32_t total=0;
   for(unsigned i=0;i<n;i++) total^=(uint32_t)__builtin_popcountll(VW_RD(a,i));
   return total&1; }
 static inline void vw_apply_mask(uint8_t* d,const uint8_t* unused,uint32_t packed){
   (void)unused; uint32_t nb=packed&0xFFFF, width=packed>>16; if(width==0||nb==0) return;
-  unsigned n=nb/8; unsigned fw=width/64; uint32_t rem=width%64;
+  unsigned n=VW_NW(nb); unsigned fw=width/64; uint32_t rem=width%64;
   if(rem>0 && fw<n){ uint64_t m=((uint64_t)1<<rem)-1; VW_WR(d,fw, VW_RD(d,fw)&m); }
   for(unsigned i=fw+(rem>0?1u:0u); i<n; i++) VW_WR(d,i,0); }
 static inline void vw_fill_ones(uint8_t* d,const uint8_t* unused,uint32_t packed){
   (void)unused; uint32_t nb=packed&0xFFFF, width=packed>>16; if(nb==0) return;
-  unsigned n=nb/8; unsigned fw=width/64; uint32_t rem=width%64;
+  unsigned n=VW_NW(nb); unsigned fw=width/64; uint32_t rem=width%64;
   unsigned lim = fw<n?fw:n; for(unsigned i=0;i<lim;i++) VW_WR(d,i,~(uint64_t)0);
   if(rem>0 && fw<n) VW_WR(d,fw, ((uint64_t)1<<rem)-1);
   for(unsigned i=fw+(rem>0?1u:0u); i<n; i++) VW_WR(d,i,0); }
@@ -972,10 +975,10 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             expr_context,
             ..
         } => emit_wide_concat(elements, expr_context.width, pre),
-        // Wide (>16 native-byte) dynamic-array element, full read (no select):
-        // the element lives at `base + base_off + stride*idx`; alias it as the
-        // wide value pointer (read-only, so no copy).  Narrow/wide-result
-        // selects and dynamic bit-selects bail to the interpreter.
+        // Wide (>16 native-byte) dynamic-array element, aliased read-only (no
+        // copy).  A ≤128-bit select result is a scalar (`builds_wide_pointer`
+        // routes it away from here); a dynamic bit-select bails to the
+        // interpreter.
         ProtoExpression::DynamicVariable {
             base_offset,
             stride,
@@ -986,9 +989,19 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             dynamic_select,
             ..
         } => {
-            if select.is_some() || dynamic_select.is_some() || *num_elements == 0 {
+            if dynamic_select.is_some() || *num_elements == 0 {
                 return None;
             }
+            let sel_window = match select {
+                Some((hi, lo)) => {
+                    let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
+                    if nbits <= 128 {
+                        return None;
+                    }
+                    Some((*lo, nbits))
+                }
+                None => None,
+            };
             let off = match base_offset {
                 VarOffset::Ff(o) | VarOffset::Comb(o) => *o,
             };
@@ -1008,12 +1021,31 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                 "uint64_t _wi{t} = (uint64_t)({idx}); _wi{t} = _wi{t} < {max} ? _wi{t} : {max}; ",
                 max = max_idx,
             ));
+            let elem =
+                format!("((uint8_t*)({buf} + {off:#x} + (intptr_t){stride} * (intptr_t)_wi{t}))");
+            let Some((lo, nbits)) = sel_window else {
+                return Some(WideRef {
+                    addr: elem,
+                    nb: *element_native_bytes,
+                    width: expr.width(),
+                });
+            };
+            // Same window extraction as the plain-variable arm above, with the
+            // element address in place of a fixed offset.
+            let res_nb = native_bytes(nbits);
+            let res_nw = wide_words(res_nb);
+            let w = next_wide_tmp();
+            pre.push_str(&format!(
+                "uint64_t _w{w}[{res_nw}]; \
+                 vw_lshr_win((uint8_t*)_w{w}, (const uint8_t*){elem}, {lo}ull, {res_nb}u, {src_nb}u); \
+                 vw_apply_mask((uint8_t*)_w{w}, (const uint8_t*)0, {mask}u); ",
+                src_nb = *element_native_bytes,
+                mask = wpack(res_nb, nbits),
+            ));
             Some(WideRef {
-                addr: format!(
-                    "((uint8_t*)({buf} + {off:#x} + (intptr_t){stride} * (intptr_t)_wi{t}))"
-                ),
-                nb: *element_native_bytes,
-                width: expr.width(),
+                addr: format!("((uint8_t*)_w{w})"),
+                nb: res_nb,
+                width: nbits,
             })
         }
     }
@@ -2156,13 +2188,18 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
             } else {
                 format!(" rhs={}", classify_uncovered_expr(&a.expr))
             };
+            let range = |r: &Option<(usize, usize)>| match r {
+                Some((hi, lo)) => format!("{hi}:{lo}"),
+                None => "-".to_string(),
+            };
             out.push(format!(
-                "Assign(ff={},dw={},sel={},dynsel={},rhssel={},exprOK={}){why}",
+                "Assign(ff={},dw={},sel={},dynsel={},rhssel={},rhsw={},exprOK={}){why}",
                 a.dst.is_ff(),
                 a.dst_width,
-                a.select.is_some(),
+                range(&a.select),
                 a.dynamic_select.is_some(),
-                a.rhs_select.is_some(),
+                range(&a.rhs_select),
+                a.expr.width(),
                 expr_ok,
             ))
         }
@@ -5285,20 +5322,28 @@ const ENTRY_SPLIT_MIN_BYTES: usize = 512 * 1024;
 
 /// Lay the dispatcher's top-level units out over one or more functions and
 /// return the C for all of them.
-fn split_entry_function(prologue: &str, units: &[String], cg_dbg: bool) -> String {
+fn split_entry_function(
+    prologue: &str,
+    entry_preamble: &str,
+    units: &[String],
+    cg_dbg: bool,
+) -> String {
     const SIG: &str = "(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, \
                        uint64_t *__restrict__ write_log, intptr_t ff_delta)";
     const ARGS: &str = "(ff_values, comb_values, write_log, ff_delta)";
     let total: usize = units.iter().map(String::len).sum();
     // The debug prologue's counters are function-scope statics that the units
-    // reference, so that build stays whole.
+    // reference, so that build stays whole.  The entry preamble runs once per
+    // eval and so belongs to `veryl_aot_eval` itself in both layouts — never
+    // to a part function.
     // `VERYL_AOT_C_ENTRY_SPLIT=0` keeps one function, for A/B and bisection.
     let split = total > ENTRY_SPLIT_MIN_BYTES
         && !cg_dbg
         && prologue.is_empty()
         && std::env::var("VERYL_AOT_C_ENTRY_SPLIT").as_deref() != Ok("0");
     if !split {
-        let mut out = format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{prologue}");
+        let mut out =
+            format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{entry_preamble}{prologue}");
         for u in units {
             out.push_str(u);
         }
@@ -5322,7 +5367,9 @@ fn split_entry_function(prologue: &str, units: &[String], cg_dbg: bool) -> Strin
             "static __attribute__((noinline)) void veryl_aot_eval_p{k}{SIG} {{\n{part}}}\n\n"
         ));
     }
-    out.push_str(&format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n"));
+    out.push_str(&format!(
+        "{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{entry_preamble}"
+    ));
     for k in 0..parts.len() {
         out.push_str(&format!("    veryl_aot_eval_p{k}{ARGS};\n"));
     }
@@ -5357,6 +5404,14 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
          typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
          typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
          typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n",
+    );
+    // `split_translation_units` repeats this header in every unit, so both
+    // symbols are weak: the linker keeps one definition and `-fPIC` default
+    // visibility routes every unit's reference to it.
+    body.push_str(
+        "typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
+         __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
+         __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
     );
     body.push_str(WIDEOPS_C_DECLS);
     body.push_str(WIDEOPS_C_INLINE);
@@ -5961,7 +6016,48 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             }
             entry_units.push(unit);
         }
-        body.push_str(&split_entry_function(&entry_prologue, &entry_units, cg_dbg));
+        // Epoch re-arm: every 2^20 evals give auto-offed segments one more
+        // try (mirrors ConeGateState::tick_rearm and its rationale).  The
+        // preserved snapshot/replay pair stays coherent across the off
+        // period — off segments never touch their shadows — so clearing the
+        // off flag and streak is sufficient.  VERYL_CONE_GATE_REARM
+        // overrides the interval for calibration; 0 disables.
+        let rearm_mask: u64 = std::env::var("VERYL_CONE_GATE_REARM")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .map_or(crate::ir::opt::cone_gate::REARM_EVALS - 1, |v| {
+                if v == 0 {
+                    u64::MAX // disabled
+                } else {
+                    v.next_power_of_two() - 1
+                }
+            });
+        let entry_preamble = if guards.is_empty() || rearm_mask == u64::MAX {
+            String::new()
+        } else {
+            format!(
+                "    {{ static unsigned long long cg_ep;\n\
+                 \x20     if (((++cg_ep) & {rearm_mask:#x}ULL) == 0) {{\n\
+                 \x20       static const unsigned cg_ro[{n}] = {{{offs}}};\n\
+                 \x20       for (unsigned _z = 0; _z < {n}; _z++) {{\n\
+                 \x20         uint8_t *st = comb_values + cg_ro[_z];\n\
+                 \x20         if (st[2]) {{ st[2] = 0; __builtin_memset(st + 4, 0, 4); }}\n\
+                 \x20       }}\n\
+                 \x20     }} }}\n",
+                n = guards.len(),
+                offs = guards
+                    .iter()
+                    .map(|&(_, _, s)| format!("{:#x}", s.state_off))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+        };
+        body.push_str(&split_entry_function(
+            &entry_prologue,
+            &entry_preamble,
+            &entry_units,
+            cg_dbg,
+        ));
     }
     if comb_noslp {
         // The marker line is the cheapest way to carry the verdict to
@@ -6490,6 +6586,38 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
                     let max_idx = ne - 1;
                     let idx = emit_expr(&dyn_sel.index_expr)?;
+                    // A ≤64-bit window spans at most two destination words, so
+                    // a two-word scalar RMW replaces the full-width shift/mask
+                    // RMW below — the dynamic-index counterpart of
+                    // emit_wide_narrow_field_store, byte-identical to it.
+                    if win <= 64 {
+                        let mut pre = String::new();
+                        let sv = wide_shift_amount(eff_expr, &mut pre)?;
+                        let wm: u64 = if win == 64 {
+                            u64::MAX
+                        } else {
+                            (1u64 << win) - 1
+                        };
+                        return Some(format!(
+                            "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
+                                uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
+                                uint64_t _sh = _di * {ew}ull; \
+                                if (_sh < {dw}ull) {{ \
+                                uint64_t _wi = _sh >> 6; \
+                                uint64_t _b = _sh & 63; \
+                                __uint128_t _m = ((__uint128_t){wm:#x}ULL) << _b; \
+                                __uint128_t _v = ((__uint128_t)(((uint64_t)({sv})) & {wm:#x}ULL)) << _b; \
+                                uint64_t _rem = {dw}ull - (_wi << 6); \
+                                if (_rem < 128) _m &= (((__uint128_t)1 << _rem) - 1); \
+                                uint64_t _m0 = (uint64_t)_m; \
+                                uint64_t _m1 = (uint64_t)(_m >> 64); \
+                                veryl_u64_ua* _d = ((veryl_u64_ua*)(comb_values + {store_off:#x})) + _wi; \
+                                _d[0] = (_d[0] & ~_m0) | (((uint64_t)_v) & _m0); \
+                                if (_m1) _d[1] = (_d[1] & ~_m1) | (((uint64_t)(_v >> 64)) & _m1); \
+                                }} }}",
+                            dw = a.dst_width,
+                        ));
+                    }
                     let mut pre = String::new();
                     // rhs value (masked to `win` below) as an nb-byte buffer.
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
@@ -6499,9 +6627,9 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     let srcsh = next_wide_tmp();
                     let newv = next_wide_tmp();
                     // Mirror AssignStatement::eval_step's dynamic_select +
-                    // Value::assign(beg=_sh+win-1, end=_sh) EXACTLY, including
-                    // the out-of-width spill (no final width clamp), so AOT and
-                    // the interpreter stay byte-identical.
+                    // Value::assign(beg=_sh+win-1, end=_sh) EXACTLY.  The width
+                    // mask drops the overhang a last-element window can have
+                    // past `dst_width`, as `clip_window_to_width` does.
                     return Some(format!(
                         "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
                             uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
@@ -6511,6 +6639,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                             vw_shl((uint8_t*)_w{wmsk}, (const uint8_t*)_w{wmsk}, _sh, {nb}u); \
                             uint64_t _w{widm}[{nw}]; \
                             vw_fill_ones((uint8_t*)_w{widm}, (const uint8_t*)0, {pkd}u); \
+                            vw_band((uint8_t*)_w{wmsk}, (const uint8_t*)_w{wmsk}, (const uint8_t*)_w{widm}, {nb}u); \
                             uint64_t _w{keep}[{nw}]; \
                             vw_band_not((uint8_t*)_w{keep}, (const uint8_t*)_w{widm}, (const uint8_t*)_w{wmsk}, {nb}u); \
                             uint64_t _w{srcsh}[{nw}]; \
@@ -6883,19 +7012,25 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                 } else {
                     (1u64 << dyn_sel.window) - 1
                 };
+                // A window on the clamped last element can run past
+                // `dst_width`; clip the field mask as `clip_window_to_width`
+                // does.
+                let dwmask = width_mask(a.dst_width);
                 return Some(format!(
                     "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
                         uint64_t _sh = _idx * {ew}; \
+                        uint64_t _m = (0x{vmask:x}ULL << _sh) & 0x{dwmask:x}ULL; \
                         uint64_t _v = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; \
                         {ct} _o = *(({ct}*)({b} + {o:#x})); \
                         *(({ct}*)({b} + {o:#x})) = \
-                          ({ct})((_o & ({ct})(~(0x{vmask:x}ULL << _sh))) | ({ct})(_v << _sh)); }}",
+                          ({ct})((_o & ({ct})(~_m)) | ({ct})((_v << _sh) & _m)); }}",
                     idx = idx_str,
                     max = max_idx,
                     ew = dyn_sel.elem_width,
                     rhs = rhs_str,
                     vmask = vmask,
+                    dwmask = dwmask,
                     ct = cty,
                     b = buf,
                     o = store_off,
@@ -7252,23 +7387,20 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
         ProtoStatement::For(for_stmt) => emit_for(for_stmt),
         ProtoStatement::Break => Some("break;".to_string()),
         ProtoStatement::SystemFunctionCall(call) => {
-            // Event path: emit $display/$write as a call into the Rust formatter
-            // (veryl_sysfn_cb) so a single rare trace statement no longer forces
-            // the whole clock event onto Cranelift.  $finish/$assert/$readmemh
+            // $display/$write call into the Rust formatter so one rare
+            // trace statement no longer drops the whole event — or comb —
+            // onto Cranelift.  A comb print runs once per settle pass, and
+            // cone gating never skips a side-effecting cone
+            // (`has_side_effects`).  $finish/$assert/$readmemh
             // affect sim state / need richer handling and stay on Cranelift.
-            // Comb path has no output side effects, so bail there as before.
-            if event_mode() {
-                match call {
-                    ProtoSystemFunctionCall::Display { format_str, args } => {
-                        emit_event_print(format_str, args, true)
-                    }
-                    ProtoSystemFunctionCall::Write { format_str, args } => {
-                        emit_event_print(format_str, args, false)
-                    }
-                    _ => None,
+            match call {
+                ProtoSystemFunctionCall::Display { format_str, args } => {
+                    emit_event_print(format_str, args, true)
                 }
-            } else {
-                None
+                ProtoSystemFunctionCall::Write { format_str, args } => {
+                    emit_event_print(format_str, args, false)
+                }
+                _ => None,
             }
         }
         ProtoStatement::TbMethodCall { .. } => {
@@ -8128,8 +8260,15 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             if is_signed_cmp || is_signed_divrem {
                 let x_w = x.width();
                 let y_w = y.width();
-                if x_w == 0 || y_w == 0 || x_w > 64 || y_w > 64 {
+                if x_w == 0 || y_w == 0 || x_w > 128 || y_w > 128 {
                     // wide / zero-width signed compare.
+                    return None;
+                }
+                // A 65..128-bit operand is a `__uint128_t` scalar; sign-extend
+                // and compare there.  Div / Rem keep the 64-bit form — their
+                // zero / INT_MIN guards below are written against int64_t.
+                let cmp_bits = if x_w > 64 || y_w > 64 { 128 } else { 64 };
+                if cmp_bits == 128 && is_signed_divrem {
                     return None;
                 }
                 let c_op = match op {
@@ -8144,11 +8283,16 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     _ => unreachable!(),
                 };
                 let sext = |s: &str, w: usize| -> String {
-                    if w == 64 {
-                        format!("((int64_t)((uint64_t)({})))", s)
+                    let (ity, uty) = if cmp_bits == 128 {
+                        ("__int128", "__uint128_t")
                     } else {
-                        let shift = 64 - w;
-                        format!("(((int64_t)((uint64_t)({}) << {})) >> {})", s, shift, shift,)
+                        ("int64_t", "uint64_t")
+                    };
+                    if w == cmp_bits {
+                        format!("(({ity})(({uty})({s})))")
+                    } else {
+                        let shift = cmp_bits - w;
+                        format!("((({ity})(({uty})({s}) << {shift})) >> {shift})")
                     }
                 };
                 let inner = format!("(({}) {} ({}))", sext(&xs, x_w), c_op, sext(&ys, y_w),);
@@ -12982,6 +13126,74 @@ mod tests {
     }
 
     #[test]
+    fn wide_helpers_act_on_a_sub_word_byte_count() {
+        // `native_bytes` returns 4 for widths <= 32, so `nb = 4` really does
+        // reach these helpers.  A truncating `nb / 8` made them no-ops there,
+        // leaving the destination at whatever it held — uninitialized stack
+        // for a scratch declared without `= {0}`.
+        if Command::new(std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string()))
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("wide_helpers_act_on_a_sub_word_byte_count: cc unavailable, skipping");
+            return;
+        }
+        let mut src = String::from(
+            "// AOT-C test; do not edit.\n\
+             #include <stdint.h>\n\
+             typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
+             typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
+             typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
+             typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n",
+        );
+        src.push_str(WIDEOPS_C_DECLS);
+        src.push_str(WIDEOPS_C_INLINE);
+        src.push_str(
+            "\n__attribute__((visibility(\"default\")))\n\
+             void veryl_aot_eval(uint8_t *ff_values, uint8_t *comb_values, uint64_t *write_log, intptr_t ff_delta) {\n\
+               (void)ff_values; (void)write_log; (void)ff_delta;\n\
+               vw_copy(comb_values + 64, comb_values, 4u);\n\
+               vw_lshr(comb_values + 128, comb_values, 4ull, 4u);\n\
+               vw_copy(comb_values + 192, comb_values, 4u);\n\
+               vw_apply_mask(comb_values + 192, (const uint8_t*)0, (9u << 16) | 4u);\n\
+             }\n",
+        );
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_subword_{}", std::process::id()));
+        let Some(module) =
+            compile_for_test(&tmp, &src, "wide_helpers_act_on_a_sub_word_byte_count")
+        else {
+            return;
+        };
+        let mut ff = vec![0u8; 32];
+        let mut comb = vec![0u8; 256];
+        let input: u64 = 0x0123_4567_89ab_cdef;
+        comb[0..8].copy_from_slice(&input.to_le_bytes());
+        let mut log = vec![0u64; 32];
+        unsafe {
+            (module.func)(
+                ff.as_mut_ptr(),
+                comb.as_mut_ptr(),
+                log.as_mut_ptr() as *mut u8,
+                0,
+            );
+        }
+        let word = |off: usize| u64::from_le_bytes(comb[off..off + 8].try_into().unwrap());
+        assert_eq!(word(64), input, "vw_copy left the destination untouched");
+        assert_eq!(
+            word(128),
+            input >> 4,
+            "vw_lshr left the destination untouched"
+        );
+        assert_eq!(
+            word(192),
+            input & 0x1ff,
+            "vw_apply_mask did not clip to width"
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn emit_function_dynamic_variable_compiles() {
         // End-to-end: emit a DynamicVariable read into a function body
         // (write the loaded element to a fixed comb slot), compile,
@@ -13350,14 +13562,14 @@ mod tests {
         let small: Vec<String> = (0..4)
             .map(|i| format!("    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n"))
             .collect();
-        let out = split_entry_function("", &small, false);
+        let out = split_entry_function("", "", &small, false);
         assert_eq!(out.matches("veryl_aot_eval").count(), 1, "{out}");
 
         // Units of ~64 KiB each: enough of them to clear both thresholds.
         let big: Vec<String> = (0..32)
             .map(|i| format!("    /* {i} {} */\n", "x".repeat(64 * 1024)))
             .collect();
-        let out = split_entry_function("", &big, false);
+        let out = split_entry_function("", "", &big, false);
         // Only the definitions carry `void`; the calls do not.
         let parts = out.matches("void veryl_aot_eval_p").count();
         assert!(parts >= 8, "{parts} parts is too few for 2 MB");
@@ -13366,7 +13578,7 @@ mod tests {
         }
         // The debug build keeps its function-scope counters, so it stays whole.
         assert_eq!(
-            split_entry_function("", &big, true)
+            split_entry_function("", "", &big, true)
                 .matches("void veryl_aot_eval_p")
                 .count(),
             0

@@ -1,0 +1,22 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+side_effect_function_call_in_always_ff (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#side_effect_function_call_in_always_ff)
+
+  × function "wire_bus" can't be called in always_ff because it may write an HDL object declared outside the function
+    ╭─[../../testcases/error/diamond_connect_function_call_in_always_ff.veryl:32:9]
+ 31 │     always_ff (clk) {
+ 32 │         wire_bus(a, b);
+    ·         ───────┬───────
+    ·                ╰── called from always_ff
+ 33 │     }
+    ╰────
+    ╭─[../../testcases/error/diamond_connect_function_call_in_always_ff.veryl:28:9]
+ 27 │     ) {
+ 28 │         master <> slave;
+    ·         ───┬──
+    ·            ╰── external write occurs here
+ 29 │     }
+    ╰────
+  help: move the external write into this always_ff, or use an output argument connected to a variable declared inside it

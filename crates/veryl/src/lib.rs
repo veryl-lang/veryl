@@ -415,6 +415,10 @@ pub struct OptDump {
     /// output IR
     #[arg(long)]
     pub ir: bool,
+
+    /// Define a name visible to `#[ifdef]` (can be specified multiple times)
+    #[arg(short = 'D', long = "define", value_name = "NAME")]
+    pub define: Vec<String>,
 }
 
 /// Synthesize to a simple gate-level netlist and report area / critical path.
