@@ -20256,6 +20256,65 @@ fn external_write_trace_terminates_on_recursive_call_graph() {
 }
 
 #[test]
+fn formal_write_mapping_terminates_on_self_member_argument() {
+    let code = r#"
+    module ModuleA (
+        q: output logic,
+    ) {
+        struct StructA {
+            a: logic,
+        }
+
+        function f (
+            o: output StructA,
+        ) {
+            f(o.a);
+        }
+
+        assign q = 0;
+    }
+    "#;
+
+    // The unassigned formal is unrelated; the point is that analysis returns.
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|x| matches!(x, AnalyzerError::UnassignVariable { .. }))
+    );
+}
+
+#[test]
+fn formal_write_mapping_terminates_on_cyclic_member_type() {
+    // The type DAG runs after the fixed point, so the cycle is only reported
+    // if the fixed point terminated.
+    let code = r#"
+    module ModuleA (
+        q: output logic,
+    ) {
+        struct StructA {
+            a: StructA,
+        }
+
+        function f (
+            o: output StructA,
+        ) {
+            f(o.a);
+        }
+
+        assign q = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::CyclicTypeDependency { .. }))
+    );
+}
+
+#[test]
 fn finite_generic_recursion_reports_side_effect_without_recursing_forever() {
     let code = r#"
     module ModuleA (
