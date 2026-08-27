@@ -168,6 +168,8 @@ pub(crate) enum VarDriverKind {
 
 #[derive(Clone)]
 pub(crate) struct VarSlot {
+    /// One net per bit — empty for a RAM-inferred array, whose storage is the
+    /// `RamBlock`.
     pub nets: Vec<NetId>,
     /// Total number of bits (`scalar_width * shape.total()`).
     pub width: usize,
@@ -655,6 +657,8 @@ impl ConvContext {
                 let mut current = init_current_comb(self, decl_idx);
                 process_statements(self, &x.statements, &mut current)?;
                 for (vid, nets) in current {
+                    // Kept out of `current` by `init_current_comb`/`write_to_dst`.
+                    debug_assert!(!self.ram_vars.contains_key(&vid));
                     let slot = match self.variables.get(&vid) {
                         Some(s) => s.clone(),
                         None => continue,
@@ -729,6 +733,8 @@ impl ConvContext {
                 let mut current = init_current_comb(self, decl_idx);
                 self.flatten_inst(inst, &mut current, module_token)?;
                 for (vid, nets) in current {
+                    // Kept out of `current` by `init_current_comb`/`write_to_dst`.
+                    debug_assert!(!self.ram_vars.contains_key(&vid));
                     let slot = match self.variables.get(&vid) {
                         Some(s) => s.clone(),
                         None => continue,

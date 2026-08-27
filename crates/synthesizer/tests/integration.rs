@@ -3211,11 +3211,67 @@ fn inferred_ram_does_not_materialize_storage_bits_as_nets() {
         .filter(|net| net.origin.is_some_and(|(name, _)| name == arr))
         .count();
 
+    // One word rather than zero: the count must not scale with the depth.
     assert!(
         arr_nets <= ram_width,
         "inferred RAM unexpectedly materialized {arr_nets} variable-origin nets \
-       for a {ram_width}-bit-wide memory"
+         for a {ram_width}-bit-wide memory"
     );
+}
+
+#[test]
+fn array_port_stays_flip_flops() {
+    // An array port inferred as RAM carries no nets, leaving an instantiating
+    // parent with nothing to connect to it.
+    let code = r#"
+        module Mem (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<64> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<64> ,
+            mem:   output logic<64> [64],
+        ) {
+            always_ff (clk) {
+                if we {
+                    mem[waddr] = wdata;
+                }
+            }
+            assign rdata = mem[raddr];
+        }
+        module Top (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<6>  ,
+            wdata: input  logic<64> ,
+            raddr: input  logic<6>  ,
+            rdata: output logic<64> ,
+            probe: output logic<64> ,
+        ) {
+            var mem: logic<64> [64];
+            inst u: Mem (
+                clk, we, waddr, wdata, raddr, rdata, mem,
+            );
+            assign probe = mem[0];
+        }
+    "#;
+
+    let (ir, top) = analyze(code, "Mem");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+    let m = &result.gate_ir.module;
+    assert_eq!(m.ram_blocks.len(), 0, "an array port must not infer as RAM");
+    let mem = resource_table::insert_str("mem");
+    let port = m.ports.iter().find(|p| p.name == mem).expect("mem port");
+    assert_eq!(
+        port.nets.len(),
+        64 * 64,
+        "array port must keep one net per stored bit"
+    );
+
+    // Flattening the instance connects the parent array to those port nets.
+    let (ir, top) = analyze(code, "Top");
+    synthesize(&ir, top, Library::default()).expect("synthesize");
 }
 
 #[test]
