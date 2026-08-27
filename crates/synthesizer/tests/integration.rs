@@ -3172,6 +3172,53 @@ fn large_reset_less_array_still_infers_ram() {
 }
 
 #[test]
+fn inferred_ram_does_not_materialize_storage_bits_as_nets() {
+    // Regression for #3232: an inferred RAM must not materialize one ordinary
+    // variable-origin net for every stored bit.
+    let code = r#"
+        module Big (
+            clk:   input  clock     ,
+            we:    input  logic     ,
+            waddr: input  logic<12> ,
+            wdata: input  logic<64> ,
+            raddr: input  logic<12> ,
+            rdata: output logic<64> ,
+        ) {
+            var arr: logic<64> [4096];
+            always_ff (clk) {
+                if we {
+                    arr[waddr] = wdata;
+                }
+            }
+            assign rdata = arr[raddr];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Big");
+    let result = synthesize(&ir, top, Library::default()).expect("synthesize");
+
+    let m = &result.gate_ir.module;
+    assert_eq!(
+        m.ram_blocks.len(),
+        1,
+        "test input must infer exactly one RAM block"
+    );
+    let ram_width = m.ram_blocks[0].width;
+
+    let arr = resource_table::insert_str("arr");
+    let arr_nets = m
+        .nets
+        .iter()
+        .filter(|net| net.origin.is_some_and(|(name, _)| name == arr))
+        .count();
+
+    assert!(
+        arr_nets <= ram_width,
+        "inferred RAM unexpectedly materialized {arr_nets} variable-origin nets \
+       for a {ram_width}-bit-wide memory"
+    );
+}
+
+#[test]
 fn ram_min_bits_config_lowers_inference_floor() {
     // A 512-bit array is below the default 1024-bit floor. Lowering `min_bits`
     // makes it infer as a RAM instead of flip-flops.

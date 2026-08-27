@@ -409,7 +409,11 @@ impl ConvContext {
             } else {
                 None
             };
-            let nets = if let Some(bits) = const_bits {
+            let nets = if self.ram_vars.contains_key(&v.id) {
+                // Inferred RAM storage is represented by RamBlock, so do not allocate a
+                // VarSlot net for every stored bit.
+                Vec::new()
+            } else if let Some(bits) = const_bits {
                 bits.into_iter()
                     .map(|b| if b { NET_CONST1 } else { NET_CONST0 })
                     .collect()
