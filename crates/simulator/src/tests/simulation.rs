@@ -20505,6 +20505,485 @@ fn dynamic_index_store_into_a_65_to_128_bit_element() {
 }
 
 #[test]
+fn wide_dynamic_bit_select_store() {
+    // A runtime-indexed bit / part-select WRITE into a >128-bit value.  Both
+    // the single-bit form and a part-select that straddles a 64-bit word
+    // boundary must land exactly, and the runtime index must clamp to the last
+    // element rather than run off the value.
+    let code = r#"
+    module Top (
+        i: input  logic<10>,
+        j: input  logic<10>,
+        b: input  logic,
+        v: input  logic<54>,
+        o: output logic<576>,
+        p: output logic<864>,
+    ) {
+        var a: logic<576>;
+        var c: logic<16, 54>;
+        always_comb {
+            a    = 0;
+            a[i] = b;
+        }
+        always_comb {
+            c    = 0;
+            c[j] = v;
+        }
+        assign o = a;
+        assign p = c;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let v = (BigUint::from(0x2a_u32) << 48u32) + BigUint::from(0xfedc_ba98_7654_u64);
+    // j=1 puts the 54-bit window at bits 54..107, across the word-0/1 seam;
+    // j=15 is the last element, ending exactly at the top bit.
+    // i=999 is past the end and must clamp to bit 575.
+    for (i, j, bit_pos, win_pos) in [(0u32, 0u32, 0u32, 0u32), (7, 1, 7, 54), (999, 15, 575, 810)] {
+        for config in Config::all() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("i", Value::new(i as u64, 10, false));
+            sim.set("j", Value::new(j as u64, 10, false));
+            sim.set("b", Value::new(1, 1, false));
+            sim.set("v", Value::new_biguint(v.clone(), 54, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new_biguint(BigUint::from(1u32) << bit_pos, 576, false),
+                "o i={i} config={config:?}"
+            );
+            assert_eq!(
+                sim.get("p").unwrap(),
+                Value::new_biguint(v.clone() << win_pos, 864, false),
+                "p j={j} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn signed_compare_above_64_bits() {
+    // A signed comparison whose operands are 65..128 bits is a `__uint128_t`
+    // scalar, not a wide-op pointer, so it needs its own sign extension.  The
+    // AOT-C emitter used to decline it, which dropped the whole comb of any
+    // module containing one.
+    let code = r#"
+    module Top (
+        a : input  signed logic<65>,
+        b : input  signed logic<65>,
+        lt: output logic,
+        ge: output logic,
+    ) {
+        assign lt = a <: b;
+        assign ge = a >= b;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let one = BigUint::from(1u32);
+    // -1, -2^64, 0, 1, 2^64-1 in 65-bit two's complement.
+    let neg1 = (&one << 65u32) - &one;
+    let neg_big = &one << 64u32; // most negative
+    let cases: [(BigUint, i128); 5] = [
+        (neg1.clone(), -1),
+        (neg_big.clone(), i128::from(-1i64) << 64),
+        (BigUint::from(0u32), 0),
+        (one.clone(), 1),
+        ((&one << 64u32) - &one, (1i128 << 64) - 1),
+    ];
+    for (av, ai) in &cases {
+        for (bv, bi) in &cases {
+            for config in Config::all() {
+                let ir = analyze(code, &config);
+                let mut sim = Simulator::new(ir, None);
+                sim.set("a", Value::new_biguint(av.clone(), 65, true));
+                sim.set("b", Value::new_biguint(bv.clone(), 65, true));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("lt").unwrap(),
+                    Value::new(u64::from(ai < bi), 1, false),
+                    "lt {ai} < {bi} config={config:?}"
+                );
+                assert_eq!(
+                    sim.get("ge").unwrap(),
+                    Value::new(u64::from(ai >= bi), 1, false),
+                    "ge {ai} >= {bi} config={config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn wide_select_of_a_dynamic_array_element() {
+    // `arr[idx][hi:lo]` where the element is wider than a register AND the
+    // selected window still is: the window has to be extracted out of the
+    // element alias rather than aliasing the element itself.
+    let code = r#"
+    module Top (
+        idx: input  logic<2>  ,
+        v  : input  logic<200>,
+        o  : output logic<200>,
+    ) {
+        var arr: logic<384> [4];
+        always_comb {
+            arr[0] = 0;
+            arr[1] = {v, 184'd0};
+            arr[2] = 0;
+            arr[3] = 0;
+        }
+        assign o = arr[idx][383:184];
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let v = (BigUint::from(0xfeed_faceu32) << 160u32) + BigUint::from(0x0123_4567_89abu64);
+    for idx in [0u64, 1, 2] {
+        for config in Config::all() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("idx", Value::new(idx, 2, false));
+            sim.set("v", Value::new_biguint(v.clone(), 200, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let want = if idx == 1 {
+                v.clone()
+            } else {
+                BigUint::from(0u32)
+            };
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new_biguint(want, 200, false),
+                "idx={idx} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn comb_display_output_matches_across_backends() {
+    // `$display` inside an `always_comb` is a side effect in a place the comb
+    // backends may otherwise reorder or skip.  Cone gating already refuses to
+    // skip a cone holding one (`has_side_effects`), so AOT-C emits it like the
+    // interpreter runs it — and every backend must produce the same text the
+    // same number of times, or one rare trace statement silently changes a
+    // design's log.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        a  : input  logic<8>,
+        o  : output logic<8>,
+    ) {
+        var t: logic<8>;
+        always_comb {
+            t = a + 1;
+            if a == 8'd7 {
+                $display("hit a=%h t=%h", a, t);
+            }
+        }
+        always_ff (clk) {
+            o = t;
+        }
+    }
+    "#;
+
+    // The comb source has to DECLARE the formatter hook, not just call it:
+    // without it the whole-comb translation units fail to compile and the
+    // module silently drops back to per-chunk dispatch — invisible in the
+    // values, so pin the native coverage explicitly.
+    if crate::backend::aot_c::cc_available() {
+        let ir = analyze(code, &aot_native_validate_config());
+        assert!(
+            ir.whole_comb.is_some(),
+            "a comb $display must stay AOT-C-native"
+        );
+    }
+
+    // The validate dual-run replays every settle with the Cranelift
+    // reference; its AOT output must be rolled back or each print lands
+    // twice — so the same-text assertion below covers it.
+    let mut configs = Config::all();
+    if crate::backend::aot_c::cc_available() {
+        configs.push(aot_native_validate_config());
+    }
+    let mut seen: Option<String> = None;
+    for config in configs {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        for a in [5u64, 7, 7, 9] {
+            sim.set("a", Value::new(a, 8, false));
+            sim.step(&clk);
+        }
+        let output = output_buffer::take();
+        assert!(
+            output.contains("hit a=07 t=08"),
+            "config={config:?} output={output:?}"
+        );
+        match &seen {
+            None => seen = Some(output),
+            Some(first) => assert_eq!(&output, first, "config={config:?}"),
+        }
+    }
+}
+
+#[test]
+fn wide_ff_array_element_bit_select_store() {
+    // `arr[idx][hi:lo] <= v` and `arr[idx][j +: w] <= v` on an array of
+    // >128-bit FF elements: a runtime element index combined with a bit-select
+    // window.  The element is read back, merged, and delivered whole through
+    // the wide write log, so the untouched bits must survive the cycle.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        idx: input  logic<2>,
+        j  : input  logic<8>,
+        v  : input  logic<8>,
+        os : output logic<138>,
+        od : output logic<138>,
+    ) {
+        var a: logic<138> [4];
+        var b: logic<138> [4];
+        always_ff (clk, rst) {
+            if_reset {
+                a[0] = 0;
+                a[1] = 0;
+                a[2] = 0;
+                a[3] = 0;
+                b[0] = 0;
+                b[1] = 0;
+                b[2] = 0;
+                b[3] = 0;
+            } else {
+                a[idx][15:8] = v;
+                b[idx][j +: 8] = v;
+            }
+        }
+        assign os = a[1];
+        assign od = b[1];
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    for (idx, j) in [(1u64, 0u64), (1, 100), (1, 130), (2, 8)] {
+        for config in Config::all() {
+            // The wide element RMW declines 4-state, so only the 2-state
+            // engines exercise the merge under test.
+            if config.use_4state {
+                continue;
+            }
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            let rst = sim.get_reset("rst").unwrap();
+            sim.step_reset(&clk, &rst);
+            sim.set("idx", Value::new(idx, 2, false));
+            sim.set("j", Value::new(j, 8, false));
+            sim.set("v", Value::new(0xa5, 8, false));
+            sim.step(&clk);
+            // Only element 1 is observable; a write to another element must
+            // leave it at its reset zero.
+            let want_s = if idx == 1 {
+                BigUint::from(0xa5u32) << 8u32
+            } else {
+                BigUint::from(0u32)
+            };
+            let mut want_d = BigUint::from(0u32);
+            if idx == 1 {
+                let lo = (j as usize).min(137);
+                for bit in 0..8u64 {
+                    let at = lo as u64 + bit;
+                    if (at as usize) < 138 {
+                        want_d.set_bit(at, (0xa5u64 >> bit) & 1 == 1);
+                    }
+                }
+            }
+            assert_eq!(
+                sim.get("os").unwrap(),
+                Value::new_biguint(want_s, 138, false),
+                "os idx={idx} config={config:?}"
+            );
+            assert_eq!(
+                sim.get("od").unwrap(),
+                Value::new_biguint(want_d, 138, false),
+                "od idx={idx} j={j} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dynamic_part_select_into_an_array_element_clips_rhs_to_the_window() {
+    // `a[i][j +: 4] = ~v` on narrow unpacked elements: the RHS temp is
+    // computed at register width, so bits above the window must be masked
+    // off at the store, and a window overhanging the element top must drop
+    // the excess.  The interpreter clips both; every compiled RMW must
+    // agree.
+    let code = r#"
+    module Top (
+        i: input  logic<2> ,
+        j: input  logic<5> ,
+        v: input  logic<4> ,
+        o: output logic<30>,
+    ) {
+        var a: logic<30> [4];
+        always_comb {
+            a[0] = 0;
+            a[1] = 0;
+            a[2] = 0;
+            a[3] = 0;
+            a[i][j +: 4] = ~v;
+        }
+        assign o = a[1];
+    }
+    "#;
+    for (j, want) in [(8u64, 0xa00u64), (28, 0x2000_0000)] {
+        for config in Config::all() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("i", Value::new(1, 2, false));
+            sim.set("j", Value::new(j, 5, false));
+            sim.set("v", Value::new(0x5, 4, false));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(want, 30, false),
+                "j={j} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dynamic_part_select_store_out_of_range_is_dropped() {
+    // `x[i +: 4]` clamps `i` to the last ELEMENT, not the last legal window
+    // start, so on the last few positions the window runs off the top of `x`.
+    // SystemVerilog does not write the out-of-range bits; every backend must
+    // agree, and must leave the rest of `x` alone.  The four widths pick four
+    // different store emitters (scalar, __uint128_t, wide RMW, wide RMW again).
+    let code = r#"
+    module Top (
+        i : input  logic<10>,
+        v : input  logic<4>,
+        on: output logic<30> ,
+        om: output logic<100>,
+        ow: output logic<134>,
+        ox: output logic<576>,
+    ) {
+        var an: logic<30> ;
+        var am: logic<100>;
+        var aw: logic<134>;
+        var ax: logic<576>;
+        always_comb {
+            an        = '1;
+            an[i +: 4] = v;
+        }
+        always_comb {
+            am        = '1;
+            am[i +: 4] = v;
+        }
+        always_comb {
+            aw        = '1;
+            aw[i +: 4] = v;
+        }
+        always_comb {
+            ax        = '1;
+            ax[i +: 4] = v;
+        }
+        assign on = an;
+        assign om = am;
+        assign ow = aw;
+        assign ox = ax;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    // All ones, then the in-range bits of the 4-bit window replaced by `v`.
+    let expect = |width: usize, i: u64, v: u64| {
+        let lo = (i as usize).min(width - 1);
+        let mut x = (BigUint::from(1u32) << width) - BigUint::from(1u32);
+        for b in 0..4u64 {
+            let bit = lo as u64 + b;
+            if (bit as usize) < width {
+                x.set_bit(bit, (v >> b) & 1 == 1);
+            }
+        }
+        x
+    };
+
+    let v = 0b1010u64;
+    for i in [5u64, 96, 999] {
+        for config in Config::all() {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("i", Value::new(i, 10, false));
+            sim.set("v", Value::new(v, 4, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (name, width) in [("on", 30usize), ("om", 100), ("ow", 134), ("ox", 576)] {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new_biguint(expect(width, i, v), width, false),
+                    "{name} i={i} config={config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn wide_dynamic_bit_select_store_gate() {
+    // Pin the predicate: a span wider than a register is compiled once the
+    // destination is a flat wide buffer, whatever the window does — the wide
+    // RMW masks its result to `dst_width`, which is what
+    // `clip_window_to_width` does on the interpreter.
+    use crate::ir::{
+        ExpressionContext, ProtoAssignStatement, ProtoDynamicBitSelect, ProtoExpression, VarOffset,
+    };
+    use veryl_parser::token_range::TokenRange;
+
+    let index = ProtoExpression::Value {
+        value: Value::new(3, 10, false),
+        width: 10,
+        expr_context: ExpressionContext {
+            width: 10,
+            signed: false,
+        },
+    };
+    let assign = |window: usize, num_elements: usize, dst_width: usize| ProtoAssignStatement {
+        dst: VarOffset::Comb(0),
+        dst_width,
+        select: None,
+        dynamic_select: Some(ProtoDynamicBitSelect {
+            index_expr: Box::new(index.clone()),
+            elem_width: 1,
+            window,
+            num_elements,
+        }),
+        rhs_select: None,
+        expr: ProtoExpression::Value {
+            value: Value::new(1, 1, false),
+            width: 1,
+            expr_context: ExpressionContext {
+                width: 1,
+                signed: false,
+            },
+        },
+        dst_ff_current_offset: -1,
+        token: TokenRange::default(),
+    };
+
+    // Span > 128 bits into a wide destination: the wide emitter takes it.
+    assert!(assign(1, 576, 576).can_build_binary());
+    // A 40-bit window over 537 bit positions ends exactly at bit 575; one
+    // position further it overhangs, and the general wide RMW still takes it.
+    assert!(assign(40, 537, 576).can_build_binary());
+    assert!(assign(40, 538, 576).can_build_binary());
+    // A span that wide with a register-sized destination has no emitter.
+    assert!(!assign(1, 576, 128).can_build_binary());
+}
+
+#[test]
 fn dynamic_index_store_stays_compiled_above_64_bits() {
     // Pin the predicate: a comb-base element store is compiled above 64 bits,
     // not only above 128.  An FF base keeps its own narrower gate.

@@ -22,6 +22,93 @@ use veryl_analyzer::value::ValueU64;
 /// needed; otherwise the value is copied into a fresh slot via
 /// `wide_ops::wide_resize` (zero- or sign-extending).
 #[allow(clippy::too_many_arguments)]
+/// Dynamic element read of a wide variable whose window is WIDER than one
+/// limb: `wide[idx * e +: w]`, `w > 64`, as `ceil(w / 64)` two-limb funnels
+/// instead of an interpreter round trip through `BigUint`.
+///
+/// The result form follows the representation contract keyed by `w`
+/// (`returns_wide_pointer`).  Source limbs at or past the storage read as
+/// zero, which is what `Value::select` yields for a window that runs off
+/// the end.
+fn emit_wide_dynsel_read_multi(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    ptr: CraneliftValue,
+    nb: usize,
+    dyn_sel: &crate::ir::ProtoDynamicBitSelect,
+) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
+    let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+    let flags = MemFlagsData::trusted();
+    let n_limbs = (nb / 8) as i64;
+    let word_idx = builder.ins().ushr_imm_s(shift, 6);
+    let bit_off = builder.ins().band_imm_s(shift, 63);
+    let c63 = builder.ins().iconst(I64, 63);
+    let inv = builder.ins().isub(c63, bit_off);
+    let out_bits = dyn_sel.window;
+    let out_limbs = out_bits.div_ceil(64);
+
+    // Source limb `word_idx + k`, or zero once that runs past the storage.
+    // The address is clamped as well as the value selected, so the load itself
+    // stays inside the allocation.
+    let limb = |builder: &mut FunctionBuilder, base: CraneliftValue, k: i64| {
+        let idx = builder.ins().iadd_imm_s(word_idx, k);
+        let ok = builder
+            .ins()
+            .icmp_imm_s(IntCC::UnsignedLessThan, idx, n_limbs);
+        let last = builder.ins().iconst(I64, n_limbs - 1);
+        let idxc = builder.ins().select(ok, idx, last);
+        let off = builder.ins().ishl_imm_s(idxc, 3);
+        let addr = builder.ins().iadd(base, off);
+        let raw = builder.ins().load(I64, flags, addr, 0);
+        let zero = builder.ins().iconst(I64, 0);
+        builder.ins().select(ok, raw, zero)
+    };
+    // `(hi << 1) << (63 - bit_off)` is `hi << (64 - bit_off)` without the
+    // shift-amount wraparound a plain shift has at `bit_off == 0`.
+    let funnel = |builder: &mut FunctionBuilder, base: CraneliftValue, j: i64| {
+        let lo = limb(builder, base, j);
+        let hi = limb(builder, base, j + 1);
+        let lo_sh = builder.ins().ushr(lo, bit_off);
+        let hi1 = builder.ins().ishl_imm_s(hi, 1);
+        let hi_sh = builder.ins().ishl(hi1, inv);
+        builder.ins().bor(lo_sh, hi_sh)
+    };
+    let top_mask = {
+        let rem = out_bits % 64;
+        if rem == 0 {
+            u64::MAX
+        } else {
+            (1u64 << rem) - 1
+        }
+    };
+    let plane = |builder: &mut FunctionBuilder, base: CraneliftValue| {
+        if out_bits <= 128 {
+            let lo = funnel(builder, base, 0);
+            let hi = funnel(builder, base, 1);
+            let hi = builder.ins().band_imm_u(hi, top_mask as i64);
+            builder.ins().iconcat(lo, hi)
+        } else {
+            let slot = alloc_wide_slot(builder, calc_native_bytes(out_bits));
+            for j in 0..out_limbs {
+                let mut v = funnel(builder, base, j as i64);
+                if j + 1 == out_limbs {
+                    v = builder.ins().band_imm_u(v, top_mask as i64);
+                }
+                builder.ins().store(flags, v, slot, (j * 8) as i32);
+            }
+            slot
+        }
+    };
+    let payload = plane(builder, ptr);
+    let mask_xz = if context.use_4state {
+        let mask_base = builder.ins().iadd_imm_s(ptr, nb as i64);
+        Some(plane(builder, mask_base))
+    } else {
+        None
+    };
+    Some((payload, mask_xz))
+}
+
 /// Kill switch for the wide-source dynamic-select JIT path
 /// (`VERYL_WIDE_DYNSEL=0` falls back to the interpreter).
 fn wide_dynsel_enabled() -> bool {
@@ -198,15 +285,20 @@ impl ProtoExpression {
                 Some(dyn_sel) => {
                     let span = dyn_sel.elem_width * dyn_sel.num_elements;
                     // Narrow sources load into a register; wide (>128-bit)
-                    // sources take the funnel-load path (window ≤ 64, no
-                    // combined static select, span within the storage).
+                    // sources take the funnel-load path (no combined static
+                    // select, span within the storage).  The window sets the
+                    // result form: ≤64 a scalar, ≤128 an I128, wider a slot.
                     let ok_narrow = span <= 128;
                     let ok_wide = wide_dynsel_enabled()
                         && is_wide_ptr(*var_full_width)
-                        && dyn_sel.window <= 64
+                        && dyn_sel.window > 0
                         && select.is_none()
                         && span <= calc_native_bytes(*var_full_width) * 8;
-                    (ok_narrow || ok_wide) && dyn_sel.index_expr.can_build_binary()
+                    // A window > 64 always takes the multi-limb emitter, so
+                    // the kill switch must gate the `ok_narrow` route too.
+                    (ok_narrow || ok_wide)
+                        && (dyn_sel.window <= 64 || wide_dynsel_enabled())
+                        && dyn_sel.index_expr.can_build_binary()
                 }
                 None => true,
             },
@@ -390,9 +482,16 @@ impl ProtoExpression {
                         // the result is a narrow register — this keeps the
                         // packed-lane muxes (`bus[idx*w +: w]` on a >128-bit
                         // bus) out of the interpreter.
-                        if dyn_sel.window > 64 || dyn_sel.elem_width * dyn_sel.num_elements > nb * 8
-                        {
+                        if dyn_sel.elem_width * dyn_sel.num_elements > nb * 8 {
                             return None;
+                        }
+                        if dyn_sel.window > 64 {
+                            // A span ≤ 128 gets here through `ok_narrow`
+                            // without consulting the kill switch.
+                            if !wide_dynsel_enabled() {
+                                return None;
+                            }
+                            return emit_wide_dynsel_read_multi(context, builder, ptr, nb, dyn_sel);
                         }
                         let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
                         let n_limbs = (nb / 8) as i64;

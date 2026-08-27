@@ -1108,7 +1108,9 @@ impl ProtoExpression {
             ProtoExpression::HierVariable(_) => false,
             // A static bit-select with a ≤128-bit result extracts into a
             // register, so only a >128-bit result is a pointer.  A dynamic
-            // select on a wide var is interpreter-only, so never a producer.
+            // select reads its window out of the wide source the same way, so
+            // its result form is keyed on the WINDOW: ≤128 bits is a register
+            // (a funnel load in both backends), wider is a slot.
             ProtoExpression::Variable {
                 var_full_width,
                 select,
@@ -1116,8 +1118,15 @@ impl ProtoExpression {
                 width,
                 ..
             } => {
-                is_wide_ptr(*var_full_width)
-                    && !(select.is_some() && dynamic_select.is_none() && !is_wide_ptr(*width))
+                if !is_wide_ptr(*var_full_width) {
+                    return false;
+                }
+                match (select, dynamic_select) {
+                    (None, Some(ds)) => is_wide_ptr(ds.window),
+                    (Some(_), None) => is_wide_ptr(*width),
+                    // No emitter covers the combination; the value is unused.
+                    _ => true,
+                }
             }
             // The all-bit sentinel materializes wider than its 0 `width` field
             // (see `materialized_width`); key on that.

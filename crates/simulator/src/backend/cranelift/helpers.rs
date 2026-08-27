@@ -152,6 +152,11 @@ pub(crate) fn build_dynamic_select_shift(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
 ) -> Option<CraneliftValue> {
+    // A zero-element select has no clamp target; leave the statement to the
+    // interpreter rather than underflow `num_elements - 1` below.
+    if dyn_sel.num_elements == 0 {
+        return None;
+    }
     let (idx_payload, _) = dyn_sel.index_expr.build_binary(context, builder)?;
     let num_elem = builder.ins().iconst(I64, dyn_sel.num_elements as i64);
     let max_idx = builder.ins().iconst(I64, (dyn_sel.num_elements - 1) as i64);
@@ -817,8 +822,22 @@ pub(crate) fn emit_wide_select_rmw(
         return dst;
     }
     let amount = builder.ins().iconst(I64, end as i64);
+    emit_wide_select_rmw_at(context, builder, old_ptr, src_ptr, amount, width, nb)
+}
+
+/// [`emit_wide_select_rmw`] with a runtime low bit: `dst[amount +: width] =
+/// src`.  A runtime offset rules out the constant-folded limb form, so this
+/// is always the wide-helper sequence.
+pub(crate) fn emit_wide_select_rmw_at(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    old_ptr: CraneliftValue,
+    src_ptr: CraneliftValue,
+    amount: CraneliftValue,
+    width: usize,
+    nb: usize,
+) -> CraneliftValue {
     let nb_val = builder.ins().iconst(I32, nb as i64);
-    // rangemask = fill_ones(width) << end
     let rmask = emit_wide_fill_ones(context, builder, nb, width);
     call_helper_void(
         context,
@@ -827,7 +846,6 @@ pub(crate) fn emit_wide_select_rmw(
         wide_fn_addrs::shl(),
         &[rmask, rmask, amount, nb_val],
     );
-    // src_in_range = (src << end) & rangemask
     let src_sh = alloc_wide_slot(builder, nb);
     call_helper_void(
         context,
@@ -952,16 +970,6 @@ pub(crate) fn returns_wide_pointer(expr: &ProtoExpression) -> bool {
         ProtoExpression::Binary { expr_context, .. } => {
             expr.builds_wide_pointer() && expr_context.width > 128
         }
-        // The funnel-load path for a dynamic element read of a wide
-        // variable (window ≤ 64, no combined static select) hands back a
-        // narrow scalar; the shared predicate still reports a pointer
-        // because the AOT-C emitter keeps that shape on the interpreter.
-        ProtoExpression::Variable {
-            dynamic_select: Some(ds),
-            select: None,
-            var_full_width,
-            ..
-        } if is_wide_ptr(*var_full_width) && ds.window <= 64 => false,
         _ => expr.builds_wide_pointer(),
     }
 }
