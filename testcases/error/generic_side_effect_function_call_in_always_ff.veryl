@@ -1,0 +1,36 @@
+proto package ProtoPkg {
+    function update(
+        result: output logic,
+    ) ;
+}
+
+package Pkg for ProtoPkg {
+    function update (
+        result: output logic,
+    ) {
+        result = 1;
+    }
+}
+
+module Generic::<PKG: ProtoPkg> (
+    clk: input  clock,
+    q  : output logic,
+) {
+    function forward () {
+        PKG::update(q);
+    }
+
+    always_ff (clk) {
+        forward();
+    }
+}
+
+module generic_side_effect_function_call_in_always_ff (
+    clk: input  clock,
+    q  : output logic,
+) {
+    inst u: Generic::<Pkg> (
+        clk: clk,
+        q  : q  ,
+    );
+}

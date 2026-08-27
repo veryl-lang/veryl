@@ -847,7 +847,10 @@ pub fn import_package_path(
     let mut current = Some(query_scope);
     while let Some(scope) = current {
         for binding in imports_get(scope, name) {
-            if binding.symbol == symbol {
+            // A single-segment `import name;` records an empty package path.
+            // Skip it: the wildcard that made `name` visible carries the
+            // qualifier.
+            if binding.symbol == symbol && !binding.package_path.paths.is_empty() {
                 return Some((*binding.package_path).clone());
             }
         }

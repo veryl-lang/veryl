@@ -1,0 +1,18 @@
+interface GenericWriteBus {
+    var data: logic;
+}
+
+module generic_instance_direct_write_in_always_ff (
+    clk: input clock,
+) {
+    #[allow(unassign_variable)]
+    inst bus: GenericWriteBus;
+
+    function update::<IF: inst GenericWriteBus> () {
+        IF.data = 1;
+    }
+
+    always_ff (clk) {
+        update::<bus>();
+    }
+}

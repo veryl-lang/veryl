@@ -342,23 +342,26 @@ impl Ir {
                     a.dynamic_select
                         .as_ref()
                         .map(|d| format!(
-                            " dynsel(elem={} n={} full={})",
+                            " dynsel(elem={} win={} n={} full={})",
                             d.elem_width,
+                            d.window,
                             d.num_elements,
                             d.elem_width * d.num_elements
                         ))
                         .unwrap_or_default(),
                 ),
                 Statement::AssignDynamic(a) => format!(
-                    "AssignDynamic dst_width={} n_elem={} full={}{}",
+                    "AssignDynamic dst_width={} n_elem={} full={}{}{}",
                     a.dst_width,
                     a.dst_num_elements,
                     a.dst_width * a.dst_num_elements,
+                    if a.select.is_some() { " select" } else { "" },
                     a.dynamic_select
                         .as_ref()
                         .map(|d| format!(
-                            " dynsel(elem={} n={} full={})",
+                            " dynsel(elem={} win={} n={} full={})",
                             d.elem_width,
+                            d.window,
                             d.num_elements,
                             d.elem_width * d.num_elements
                         ))
@@ -609,6 +612,7 @@ impl Ir {
         let state = slot.get_or_insert_with(|| {
             crate::ir::opt::cone_gate::ConeGateState::new(self.cone_segments.len())
         });
+        state.tick_rearm();
         // `VERYL_CONE_GATE_DIAG=1`: periodic segment-dispatch statistics.
         static DIAG: OnceLock<bool> = OnceLock::new();
         let diag = *DIAG.get_or_init(|| env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1"));

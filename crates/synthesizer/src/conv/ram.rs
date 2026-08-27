@@ -9,7 +9,7 @@
 //!
 //! Criteria (thresholds come from [`RamConfig`], set in `Veryl.toml`'s
 //! `[synth]` section):
-//!   * array variable, at least `min_bits` stored bits and depth ≥ 2;
+//!   * non-port array variable, at least `min_bits` stored bits and depth ≥ 2;
 //!   * 1..=`max_write_ports` *clocked* writes, each a single destination and
 //!     single dynamic index dimension. A write is either whole-word
 //!     `mem[addr] = data` or a compile-time-constant sub-word `mem[addr][lane]
@@ -27,6 +27,9 @@
 //!
 //! A *dynamic* (runtime-indexed) sub-word write is not a fixed lane and keeps
 //! the array as flip-flops.
+//!
+//! A port stays flip-flops too: its storage is observable at the module
+//! boundary, so it needs one net per stored bit and a RAM macro has none.
 //!
 //! A dynamically-indexed array that fails inference but exceeds `max_ff_bits`
 //! is rejected rather than expanded into the `O(depth × width)` gates that
@@ -69,6 +72,10 @@ pub(crate) fn infer_ram_vars(
         let Some(var) = module.variables.get(&vid) else {
             continue;
         };
+        // A port needs one net per stored bit at the module boundary.
+        if var.kind.is_port() {
+            continue;
+        }
         let Some(width) = var.r#type.total_width() else {
             continue;
         };

@@ -2545,6 +2545,16 @@ pub struct AssignStatement {
     pub rhs_sign_extend: bool,
 }
 
+/// Clip a dynamic part-select write to the destination's declared width.
+///
+/// The runtime index is clamped to the last ELEMENT, not the last legal
+/// window start, so `dst[i +: w]` can overhang `dst_width`.  SystemVerilog
+/// does not write those bits; `Value::assign` would OR them into the storage
+/// padding.  `None` = the whole window is out of range.
+fn clip_window_to_width(beg: usize, end: usize, dst_width: usize) -> Option<(usize, usize)> {
+    (end < dst_width).then(|| (beg.min(dst_width - 1), end))
+}
+
 impl AssignStatement {
     pub fn eval_step(&self, mask_cache: &mut MaskCache) {
         let value = self.expr.eval(mask_cache);
@@ -2567,6 +2577,9 @@ impl AssignStatement {
                 .min(dyn_sel.num_elements.saturating_sub(1));
             let end = idx * dyn_sel.elem_width;
             let beg = end + dyn_sel.window - 1;
+            let Some((beg, end)) = clip_window_to_width(beg, end, self.dst_width) else {
+                return;
+            };
             let mut current = unsafe {
                 read_native_value(
                     self.dst,
@@ -2703,6 +2716,9 @@ impl AssignDynamicStatement {
                 .min(dyn_sel.num_elements.saturating_sub(1));
             let end = dyn_idx * dyn_sel.elem_width;
             let beg = end + dyn_sel.window - 1;
+            let Some((beg, end)) = clip_window_to_width(beg, end, self.dst_width) else {
+                return;
+            };
             let mut current = unsafe {
                 read_native_value(
                     dst,

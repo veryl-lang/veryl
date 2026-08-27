@@ -1,0 +1,13 @@
+module systemverilog_side_effect_function_call_in_always_ff (
+    clk: input clock,
+) {
+    inst u: $sv::IF;
+
+    function update () {
+        u.a = 1;
+    }
+
+    always_ff (clk) {
+        update();
+    }
+}
