@@ -20385,7 +20385,7 @@ fn modport_output_copyout_is_a_side_effect() {
         let SymbolKind::Function(function) = &symbol.found.kind else {
             unreachable!();
         };
-        function.has_side_effect
+        function.has_side_effect_in(&Default::default())
     }
 
     let code = r#"

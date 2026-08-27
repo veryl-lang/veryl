@@ -410,10 +410,6 @@ impl<T> CallArgs<T> {
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.0.iter_mut().map(|(_, v)| v)
     }
-
-    pub(crate) fn retain(&mut self, mut f: impl FnMut(&VarPath) -> bool) {
-        self.0.retain(|(path, _)| f(path));
-    }
 }
 
 impl<T> std::ops::Deref for CallArgs<T> {

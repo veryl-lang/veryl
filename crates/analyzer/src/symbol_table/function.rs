@@ -598,17 +598,9 @@ fn resolve_side_effects(list: &[Symbol]) {
         let SymbolKind::Function(func) = &mut symbol.kind else {
             unreachable!();
         };
-        func.has_side_effect = !effect.external_writes.is_empty();
         func.conditional_effects.side_effect_contexts =
             effect.external_writes.into_iter().collect();
         func.conditional_effects.side_effect_contexts.sort();
-        func.formal_writes = effect
-            .formal_writes
-            .iter()
-            .map(|x| x.path.clone())
-            .collect();
-        func.formal_writes.sort();
-        func.formal_writes.dedup();
         func.conditional_effects.formal_write_contexts = effect.formal_writes.into_iter().collect();
         func.conditional_effects.formal_write_contexts.sort();
         symbol_table::update(symbol);

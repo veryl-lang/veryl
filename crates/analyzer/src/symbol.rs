@@ -2597,10 +2597,6 @@ pub struct FunctionProperty {
     #[serde(default)]
     pub call_sites: Vec<FunctionCallSite>,
     #[serde(default)]
-    pub has_side_effect: bool,
-    #[serde(default)]
-    pub formal_writes: Vec<GenericSymbolPath>,
-    #[serde(default)]
     pub conditional_effects: Box<ConditionalFunctionEffects>,
     pub definition: Option<DefinitionId>,
 }
@@ -2637,27 +2633,19 @@ impl FunctionProperty {
     }
 
     pub fn has_side_effect_in(&self, defines: &HashSet<StrId>) -> bool {
-        if self.conditional_effects.side_effect_contexts.is_empty() {
-            self.has_side_effect
-        } else {
-            self.conditional_effects
-                .side_effect_contexts
-                .iter()
-                .any(|x| x.is_active(defines))
-        }
+        self.conditional_effects
+            .side_effect_contexts
+            .iter()
+            .any(|x| x.is_active(defines))
     }
 
     pub fn written_output_paths(&self, defines: &HashSet<StrId>) -> Vec<&GenericSymbolPath> {
-        if self.conditional_effects.formal_write_contexts.is_empty() {
-            self.formal_writes.iter().collect::<Vec<_>>()
-        } else {
-            self.conditional_effects
-                .formal_write_contexts
-                .iter()
-                .filter(|x| x.define_context.is_active(defines))
-                .map(|x| &x.path)
-                .collect()
-        }
+        self.conditional_effects
+            .formal_write_contexts
+            .iter()
+            .filter(|x| x.define_context.is_active(defines))
+            .map(|x| &x.path)
+            .collect()
     }
 }
 
