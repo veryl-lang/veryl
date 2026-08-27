@@ -6,20 +6,43 @@ use veryl_parser::Parser;
 
 #[track_caller]
 fn emit(metadata: &Metadata, code: &str) -> String {
+    emit_project(metadata, "prj", code)
+}
+
+#[track_caller]
+fn emit_project(metadata: &Metadata, project: &str, code: &str) -> String {
+    emit_projects(metadata, &[(project, code)])
+}
+
+#[track_caller]
+fn emit_projects(metadata: &Metadata, inputs: &[(&str, &str)]) -> String {
     symbol_table::clear();
     attribute_table::clear();
 
-    let parser = Parser::parse(code, &"").unwrap();
-    let analyzer = Analyzer::new(metadata);
-    let mut context = Context::default();
+    let parsers: Vec<_> = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, (project, input))| {
+            let path = format!("test_{i}.veryl");
+            let parser = Parser::parse(input, &path).unwrap();
+            let analyzer = Analyzer::new(metadata);
+            analyzer.analyze_pass1(project, &parser.veryl);
+            (parser, analyzer)
+        })
+        .collect();
 
-    analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&parser.veryl, &mut context, None);
 
+    let mut context = Context::default();
+    for (parser, analyzer) in &parsers {
+        analyzer.analyze_pass2(&parser.veryl, &mut context, None);
+    }
+
+    let (project, code) = inputs.last().copied().unwrap();
+    let (parser, _) = parsers.last().unwrap();
     let mut emitter = Emitter::new(
         metadata,
-        "prj",
+        project,
         &PathBuf::from("test.veryl"),
         &PathBuf::from("test.sv"),
         &PathBuf::from("test.sv.map"),
@@ -3884,6 +3907,68 @@ module M {
     assert!(
         ret.contains("__project_func__8"),
         "function must be emitted: {ret}"
+    );
+}
+
+#[test]
+fn dependency_global_function_reference_uses_local_name() {
+    let code = r#"
+function global_func() -> u32 {
+    return 2;
+}
+module M {
+    var value: u32;
+    assign value = global_func();
+}
+"#;
+
+    let metadata = Metadata::create_default("root").unwrap();
+    let ret = emit_project(&metadata, "dep", code);
+    assert!(
+        ret.contains("always_comb value = global_func();"),
+        "a dependency must use its local function name: {ret}"
+    );
+    assert!(
+        ret.contains("function automatic int unsigned global_func()"),
+        "the call and definition must use the same name: {ret}"
+    );
+    assert!(
+        !ret.contains("dep_global_func()"),
+        "a dependency must not qualify its own function: {ret}"
+    );
+}
+
+#[test]
+fn copied_dependency_global_function_qualifies_nested_calls() {
+    let dependency = r#"
+pub function outer_func() -> u32 {
+    return inner_func();
+}
+pub function inner_func() -> u32 {
+    return 2;
+}
+"#;
+    let root = r#"
+module M {
+    import dep::outer_func;
+    var value: u32;
+    assign value = outer_func();
+}
+"#;
+
+    let metadata = Metadata::create_default("root").unwrap();
+    let ret = emit_projects(&metadata, &[("dep", dependency), ("root", root)]);
+    assert!(
+        ret.contains("always_comb value = dep_outer_func();"),
+        "a copied dependency function must be called with its project prefix: {ret}"
+    );
+    assert!(
+        ret.contains("return dep_inner_func();"),
+        "nested dependency calls must match their copied definitions: {ret}"
+    );
+    assert!(
+        ret.contains("function automatic int unsigned dep_inner_func()"),
+        "the nested function definition must retain its project prefix: {ret}"
     );
 }
 

@@ -6851,12 +6851,15 @@ pub fn symbol_string(
                     &symbol.namespace.define_context,
                 )
             };
-            // A project-scope function from another project is emitted with its
-            // project prefix (`dep_foo_func_2`), so a reference to it must add
-            // the namespace even when the imported name is locally visible.
-            let global_func = symbol.namespace.paths[0] != context.project_name.unwrap()
-                && symbol.is_global_function();
-            if !global_func
+            let global_function_visible_local =
+                if let Some(bound_namespace) = &context.bound_namespace {
+                    bound_namespace.included(symbol_namespace)
+                } else {
+                    namespace.included(symbol_namespace)
+                };
+            let global_function_requires_prefix =
+                symbol.is_global_function() && !global_function_visible_local;
+            if !global_function_requires_prefix
                 && (scope_depth == 1) & (visible_local | is_imported) & !context.in_import
             {
                 ret.push_str(&token_text);
