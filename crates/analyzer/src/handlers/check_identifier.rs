@@ -471,6 +471,17 @@ impl VerylGrammarTrait for CheckIdentifier {
         Ok(())
     }
 
+    fn method_declaration(&mut self, arg: &MethodDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => {
+                self.check(&arg.identifier.identifier_token.token, Kind::Function);
+                self.in_function = true;
+            }
+            HandlerPoint::After => self.in_function = false,
+        }
+        Ok(())
+    }
+
     fn module_declaration(&mut self, arg: &ModuleDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.check(&arg.identifier.identifier_token.token, Kind::Module);
@@ -501,7 +512,10 @@ impl VerylGrammarTrait for CheckIdentifier {
 }
 
 fn is_local_block_var(expr: &ExpressionIdentifier) -> bool {
-    let Ok(symbol) = symbol_table::resolve(expr.scoped_identifier.as_ref()) else {
+    let Some(scoped_identifier) = expr.scoped_identifier() else {
+        return false;
+    };
+    let Ok(symbol) = symbol_table::resolve(scoped_identifier) else {
         return false;
     };
     let SymbolKind::Variable(prop) = &symbol.found.kind else {

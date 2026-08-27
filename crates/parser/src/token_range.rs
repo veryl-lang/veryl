@@ -381,6 +381,7 @@ impl_token_range_singular!(I32);
 impl_token_range_singular!(I64);
 impl_token_range_singular!(If);
 impl_token_range_singular!(IfReset);
+impl_token_range_singular!(Impl);
 impl_token_range_singular!(Import);
 impl_token_range_singular!(In);
 impl_token_range_singular!(Include);
@@ -412,6 +413,16 @@ impl_token_range_singular!(ResetSyncLow);
 impl_token_range_singular!(Return);
 impl_token_range_singular!(Same);
 impl_token_range_singular!(Signed);
+
+impl From<&Slf> for TokenRange {
+    fn from(value: &Slf) -> Self {
+        let beg = value.self_token.token;
+        let end = beg;
+        TokenRange { beg, end }
+    }
+}
+impl_token_ext!(Slf);
+
 impl_token_range_singular!(Step);
 
 impl From<&Strin> for TokenRange {
@@ -500,7 +511,10 @@ impl_token_ext!(ScopedIdentifier);
 
 impl From<&ExpressionIdentifier> for TokenRange {
     fn from(value: &ExpressionIdentifier) -> Self {
-        let mut ret: TokenRange = value.scoped_identifier.as_ref().into();
+        let mut ret: TokenRange = match value.expression_identifier_group.as_ref() {
+            ExpressionIdentifierGroup::ScopedIdentifier(x) => x.scoped_identifier.as_ref().into(),
+            ExpressionIdentifierGroup::Slf(x) => x.slf.as_ref().into(),
+        };
         if let Some(x) = &value.expression_identifier_opt {
             ret.set_end(x.width.as_ref().into());
         }
@@ -1418,6 +1432,7 @@ impl_token_range_enum!(
     type_def_declaration,
     enum_declaration,
     struct_union_declaration,
+    impl_declaration,
     import_declaration,
     alias_declaration,
     initial_declaration,
@@ -1430,6 +1445,12 @@ impl_token_range_enum!(
 // Package
 // ----------------------------------------------------------------------------
 
+impl_token_range!(ImplDeclaration, r#impl, r_brace);
+impl_token_range_group!(ImplGroup, ImplItem);
+impl_token_range_enum!(ImplItem, method_declaration, const_declaration);
+impl_token_range!(MethodDeclaration, function, statement_block);
+impl_token_range!(MethodPortDeclaration, l_paren, r_paren);
+
 impl_token_range!(PackageDeclaration, package, r_brace);
 impl_token_range_group!(PackageGroup, PackageItem);
 impl_token_range_enum!(
@@ -1440,6 +1461,7 @@ impl_token_range_enum!(
     enum_declaration,
     struct_union_declaration,
     function_declaration,
+    impl_declaration,
     import_declaration,
     alias_declaration,
     embed_declaration

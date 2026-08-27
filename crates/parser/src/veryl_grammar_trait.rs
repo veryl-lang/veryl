@@ -204,7 +204,11 @@ impl From<&Identifier> for ExpressionIdentifier {
 impl From<&ScopedIdentifier> for ExpressionIdentifier {
     fn from(value: &ScopedIdentifier) -> Self {
         Self {
-            scoped_identifier: Box::new(value.clone()),
+            expression_identifier_group: Box::new(ExpressionIdentifierGroup::ScopedIdentifier(
+                ExpressionIdentifierGroupScopedIdentifier {
+                    scoped_identifier: Box::new(value.clone()),
+                },
+            )),
             expression_identifier_opt: None,
             expression_identifier_list: vec![],
             expression_identifier_list0: vec![],
@@ -224,7 +228,11 @@ impl From<&GenericArgIdentifier> for ExpressionIdentifier {
             })
             .collect();
         Self {
-            scoped_identifier: value.scoped_identifier.clone(),
+            expression_identifier_group: Box::new(ExpressionIdentifierGroup::ScopedIdentifier(
+                ExpressionIdentifierGroupScopedIdentifier {
+                    scoped_identifier: value.scoped_identifier.clone(),
+                },
+            )),
             expression_identifier_opt: None,
             expression_identifier_list: vec![],
             expression_identifier_list0: exp_identifier_list,
@@ -539,7 +547,9 @@ impl Expression {
                     return false;
                 }
 
-                let scoped_identifier = &*exp_identifier.scoped_identifier;
+                let Some(scoped_identifier) = exp_identifier.scoped_identifier() else {
+                    return false;
+                };
                 if !scoped_identifier.scoped_identifier_list.is_empty() {
                     return false;
                 }

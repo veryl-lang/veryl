@@ -1,0 +1,52 @@
+package impl_method_pkg {
+    struct fp_t::<EXP_W: p32, MTS_W: p32> {
+        sign: logic       ,
+        exp : logic<EXP_W>,
+        mts : logic<MTS_W>,
+    }
+
+    impl fp_t {
+        const BIAS: u32 = (1 << (EXP_W - 1)) - 1;
+
+        function is_nan (
+            self,
+        ) -> logic {
+            return (self.exp == '1) && (self.mts != '0);
+        }
+
+        function biased_exp (
+            self,
+            offset: input logic<EXP_W>,
+        ) -> logic<EXP_W> {
+            return self.exp + offset;
+        }
+    }
+
+    type fp32 = fp_t::<8, 23>;
+    type fp4  = fp_t::<2, 1> ;
+}
+
+#[test(test_impl_method)]
+module test_impl_method {
+    var a: impl_method_pkg::fp32;
+    var b: impl_method_pkg::fp4 ;
+
+    always_comb {
+        a.sign = 0;
+        a.exp  = 8'hff;
+        a.mts  = 23'd1;
+        b.sign = 0;
+        b.exp  = 2'b11;
+        b.mts  = 1'b1;
+    }
+
+    initial {
+        $assert(a.is_nan() == 1'b1);
+        $assert(a.biased_exp(8'd1) == 8'd0);
+        $assert(b.is_nan() == 1'b1);
+        $assert(b.biased_exp(2'd1) == 2'd0);
+        $assert(impl_method_pkg::fp_t::<8, 23>::BIAS == 32'd127);
+        $assert(impl_method_pkg::fp32::BIAS == 32'd127);
+        $finish();
+    }
+}

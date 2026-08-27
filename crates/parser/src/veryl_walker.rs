@@ -622,6 +622,13 @@ pub trait VerylWalker {
         after!(self, if_reset, arg);
     }
 
+    /// Semantic action for non-terminal 'Impl'
+    fn r#impl(&mut self, arg: &Impl) {
+        before!(self, r#impl, arg);
+        self.veryl_token(&arg.impl_token);
+        after!(self, r#impl, arg);
+    }
+
     /// Semantic action for non-terminal 'Import'
     fn import(&mut self, arg: &Import) {
         before!(self, import, arg);
@@ -844,6 +851,13 @@ pub trait VerylWalker {
         before!(self, same, arg);
         self.veryl_token(&arg.same_token);
         after!(self, same, arg);
+    }
+
+    /// Semantic action for non-terminal 'Slf'
+    fn slf(&mut self, arg: &Slf) {
+        before!(self, slf, arg);
+        self.veryl_token(&arg.self_token);
+        after!(self, slf, arg);
     }
 
     /// Semantic action for non-terminal 'Signed'
@@ -1075,7 +1089,12 @@ pub trait VerylWalker {
     /// Semantic action for non-terminal 'ExpressionIdentifier'
     fn expression_identifier(&mut self, arg: &ExpressionIdentifier) {
         before!(self, expression_identifier, arg);
-        self.scoped_identifier(&arg.scoped_identifier);
+        match arg.expression_identifier_group.as_ref() {
+            ExpressionIdentifierGroup::ScopedIdentifier(x) => {
+                self.scoped_identifier(&x.scoped_identifier)
+            }
+            ExpressionIdentifierGroup::Slf(x) => self.slf(&x.slf),
+        }
         if let Some(ref x) = arg.expression_identifier_opt {
             self.width(&x.width);
         }
@@ -2928,6 +2947,80 @@ pub trait VerylWalker {
         after!(self, function_declaration, arg);
     }
 
+    /// Semantic action for non-terminal 'ImplDeclaration'
+    fn impl_declaration(&mut self, arg: &ImplDeclaration) {
+        before!(self, impl_declaration, arg);
+        self.r#impl(&arg.r#impl);
+        self.identifier(&arg.identifier);
+        self.l_brace(&arg.l_brace);
+        for x in &arg.impl_declaration_list {
+            self.impl_group(&x.impl_group);
+        }
+        self.r_brace(&arg.r_brace);
+        after!(self, impl_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'ImplGroup'
+    fn impl_group(&mut self, arg: &ImplGroup) {
+        before!(self, impl_group, arg);
+        for x in &arg.impl_group_list {
+            self.attribute(&x.attribute);
+        }
+        match &*arg.impl_group_group {
+            ImplGroupGroup::LBraceImplGroupGroupListRBrace(x) => {
+                self.l_brace(&x.l_brace);
+                for x in &x.impl_group_group_list {
+                    self.impl_group(&x.impl_group);
+                }
+                self.r_brace(&x.r_brace);
+            }
+            ImplGroupGroup::ImplItem(x) => self.impl_item(&x.impl_item),
+        }
+        after!(self, impl_group, arg);
+    }
+
+    /// Semantic action for non-terminal 'ImplItem'
+    fn impl_item(&mut self, arg: &ImplItem) {
+        before!(self, impl_item, arg);
+        match arg {
+            ImplItem::MethodDeclaration(x) => self.method_declaration(&x.method_declaration),
+            ImplItem::ConstDeclaration(x) => self.const_declaration(&x.const_declaration),
+        }
+        after!(self, impl_item, arg);
+    }
+
+    /// Semantic action for non-terminal 'MethodDeclaration'
+    fn method_declaration(&mut self, arg: &MethodDeclaration) {
+        before!(self, method_declaration, arg);
+        self.function(&arg.function);
+        self.identifier(&arg.identifier);
+        if let Some(ref x) = arg.method_declaration_opt {
+            self.with_generic_parameter(&x.with_generic_parameter);
+        }
+        self.method_port_declaration(&arg.method_port_declaration);
+        if let Some(ref x) = arg.method_declaration_opt0 {
+            self.minus_g_t(&x.minus_g_t);
+            self.scalar_type(&x.scalar_type);
+        }
+        self.statement_block(&arg.statement_block);
+        after!(self, method_declaration, arg);
+    }
+
+    /// Semantic action for non-terminal 'MethodPortDeclaration'
+    fn method_port_declaration(&mut self, arg: &MethodPortDeclaration) {
+        before!(self, method_port_declaration, arg);
+        self.l_paren(&arg.l_paren);
+        self.slf(&arg.slf);
+        if let Some(ref x) = arg.method_port_declaration_opt {
+            self.comma(&x.comma);
+            if let Some(ref x) = x.method_port_declaration_opt0 {
+                self.port_declaration_list(&x.port_declaration_list);
+            }
+        }
+        self.r_paren(&arg.r_paren);
+        after!(self, method_port_declaration, arg);
+    }
+
     /// Semantic action for non-terminal 'ImportDeclaration'
     fn import_declaration(&mut self, arg: &ImportDeclaration) {
         before!(self, import_declaration, arg);
@@ -3238,6 +3331,7 @@ pub trait VerylWalker {
             GenerateItem::FinalDeclaration(x) => self.final_declaration(&x.final_declaration),
             GenerateItem::UnsafeBlock(x) => self.unsafe_block(&x.unsafe_block),
             GenerateItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
+            GenerateItem::ImplDeclaration(x) => self.impl_declaration(&x.impl_declaration),
         };
         after!(self, generate_item, arg);
     }
@@ -3300,6 +3394,7 @@ pub trait VerylWalker {
             PackageItem::ImportDeclaration(x) => self.import_declaration(&x.import_declaration),
             PackageItem::AliasDeclaration(x) => self.alias_declaration(&x.alias_declaration),
             PackageItem::EmbedDeclaration(x) => self.embed_declaration(&x.embed_declaration),
+            PackageItem::ImplDeclaration(x) => self.impl_declaration(&x.impl_declaration),
         }
         after!(self, package_item, arg);
     }

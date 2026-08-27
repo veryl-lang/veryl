@@ -5,8 +5,8 @@ use crate::conv::utils::{
     build_for_statement, case_patterns, check_assign_before_definition, check_assign_clock_domain,
     eval_array_range_assign, eval_assign_statement, eval_expr, eval_variable, expand_connect,
     expand_connect_const, function_call, get_return_str, hoist_component_method_call,
-    single_function_call_factor, switch_condition, tb_method_call, try_infer_decl_type,
-    try_infer_var_assign,
+    is_impl_member, prepend_self_arg, single_function_call_factor, switch_condition,
+    tb_method_call, try_infer_decl_type, try_infer_var_assign,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -479,6 +479,11 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                         )]))
                     }
                     SymbolKind::Function(x) if !x.is_proto => {
+                        let args = if is_impl_member(&symbol.found) {
+                            prepend_self_arg(context, value.expression_identifier.as_ref(), args)?
+                        } else {
+                            args
+                        };
                         let ret = function_call(
                             context,
                             value.expression_identifier.as_ref(),

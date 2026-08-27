@@ -127,7 +127,6 @@ impl Migrator {
                 }
                 let text = arg
                     .expression_identifier
-                    .scoped_identifier
                     .identifier()
                     .token
                     .text

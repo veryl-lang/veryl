@@ -1,0 +1,9 @@
+module impl_unknown_target {
+    impl StructA {
+        function f (
+            self,
+        ) -> logic {
+            return 0;
+        }
+    }
+}

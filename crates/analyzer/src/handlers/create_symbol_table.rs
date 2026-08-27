@@ -21,9 +21,12 @@ use crate::symbol::{
     ModportProperty, ModportVariableMemberProperty, ModuleProperty, PackageProperty, Parameter,
     ParameterKind, ParameterProperty, Port, PortProperty, StructMemberProperty, StructProperty,
     Symbol, SymbolId, SymbolKind, TestProperty, TestType, TypeDefProperty, TypeKind,
-    TypeModifierKind, UnionMemberProperty, UnionProperty, VariableProperty,
+    TypeModifierKind, UnionMemberProperty, UnionProperty, UserDefinedType, VariableProperty,
 };
-use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamespace, SymbolPathNamespace};
+use crate::symbol_path::{
+    GenericSymbol, GenericSymbolPath, GenericSymbolPathKind, GenericSymbolPathNamespace,
+    SymbolPath, SymbolPathNamespace,
+};
 use crate::symbol_table;
 use crate::symbol_table::Bind as SymBind;
 use crate::symbol_table::Connect as SymConnect;
@@ -113,12 +116,20 @@ pub struct CreateSymbolTable {
     in_select: bool,
     reference_functions: Vec<GenericSymbolPath>,
     reference_candidates: Vec<Vec<ReferenceCandidate>>,
+    impl_context: Option<ImplContext>,
+    impl_defs: Vec<ImplContext>,
 }
 
 #[derive(Clone)]
 enum StructOrUnion {
     InStruct,
     InUnion,
+}
+
+struct ImplContext {
+    target: Token,
+    namespace: Namespace,
+    range: TokenRange,
 }
 
 impl CreateSymbolTable {
@@ -133,6 +144,145 @@ impl CreateSymbolTable {
             build_opt: build_opt.clone(),
             project_name,
             ..Default::default()
+        }
+    }
+
+    fn enter_function(&mut self, name: StrId) {
+        self.push_namespace(name);
+        self.generic_context.push();
+        self.ports.push(Vec::new());
+        self.reference_paths.push(Vec::new());
+        self.affiliation.push(Affiliation::Function);
+        self.push_type_dag_cand();
+    }
+
+    fn leave_function(
+        &mut self,
+        identifier: &Identifier,
+        ret: Option<SymType>,
+        range: TokenRange,
+        definition: Definition,
+    ) {
+        self.pop_namespace();
+        self.affiliation.pop();
+
+        let (generic_parameters, generic_consts) = self.generic_context.pop();
+        let ports: Vec<_> = self.ports.pop().unwrap();
+        let reference_paths: Vec<_> = self.reference_paths.pop().unwrap();
+
+        if let Some(ret) = &ret
+            && !self.check_identifer_with_type(identifier, ret)
+        {
+            self.pop_type_dag_cand(None);
+            return;
+        }
+
+        let affiliation = self
+            .affiliation
+            .last()
+            .cloned()
+            .unwrap_or(Affiliation::ProjectNamespace);
+
+        let definition = definition_table::insert(self.project_name, definition);
+        let property = FunctionProperty {
+            affiliation,
+            is_proto: false,
+            range,
+            generic_parameters,
+            generic_consts,
+            generic_references: vec![],
+            ports,
+            ret,
+            reference_paths,
+            constantable: None,
+            definition: Some(definition),
+        };
+
+        if let Some(id) = self.insert_symbol(
+            &identifier.identifier_token.token,
+            SymbolKind::Function(property),
+            false,
+        ) {
+            self.push_declaration_item(id);
+            self.pop_type_dag_cand(Some((id, Context::Function, false)));
+            if affiliation == Affiliation::ProjectNamespace {
+                self.insert_reference_functions(id);
+            }
+        } else {
+            self.pop_type_dag_cand(None);
+            self.reference_functions.clear();
+        }
+    }
+
+    fn insert_self_port(&mut self, slf: &Slf) {
+        let token = slf.self_token.token;
+        let Some(ctx) = &self.impl_context else {
+            unreachable!("self port outside impl");
+        };
+
+        let path = GenericSymbolPath {
+            paths: vec![GenericSymbol {
+                base: ctx.target,
+                arguments: Vec::new(),
+            }],
+            kind: GenericSymbolPathKind::Identifier,
+            range: token.into(),
+        };
+        let r#type = SymType {
+            kind: TypeKind::UserDefined(UserDefinedType { path, symbol: None }),
+            modifier: vec![],
+            width: vec![],
+            array: vec![],
+            array_type: None,
+            is_const: false,
+            token: token.into(),
+        };
+        let property = PortProperty {
+            token,
+            r#type,
+            direction: SymDirection::Input,
+            prefix: None,
+            suffix: None,
+            clock_domain: SymClockDomain::None,
+            default_value: None,
+            is_proto: self.in_proto,
+        };
+        if let Some(id) = self.insert_symbol(&token, SymbolKind::Port(property), false) {
+            let port = Port {
+                token: slf.self_token.clone(),
+                symbol: id,
+            };
+            self.ports.last_mut().unwrap().push(port);
+        }
+    }
+
+    fn check_impl_defs(&mut self) {
+        for def in std::mem::take(&mut self.impl_defs) {
+            let name = def.target.to_string();
+            let path = SymbolPath::new(&[def.target.text]);
+            let Ok(symbol) = symbol_table::resolve((&path, &def.namespace)) else {
+                self.errors.push(AnalyzerError::invalid_impl_target(
+                    &name,
+                    "it is not defined",
+                    &def.range,
+                ));
+                continue;
+            };
+            if !matches!(symbol.found.kind, SymbolKind::Struct(_)) {
+                self.errors.push(AnalyzerError::invalid_impl_target(
+                    &name,
+                    &format!("it is {}", symbol.found.kind.to_kind_name()),
+                    &def.range,
+                ));
+                continue;
+            }
+            if symbol.found.namespace.paths != def.namespace.paths {
+                self.errors.push(AnalyzerError::invalid_impl_target(
+                    &name,
+                    "it is not declared in the same scope",
+                    &def.range,
+                ));
+            }
         }
     }
 
@@ -585,6 +735,22 @@ impl VerylGrammarTrait for CreateSymbolTable {
         Ok(())
     }
 
+    fn slf(&mut self, arg: &Slf) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.insert_namespace(&arg.self_token.token);
+
+            if self.is_in_expression_identifier() {
+                self.identifier_path
+                    .last_mut()
+                    .unwrap()
+                    .0
+                    .push(arg.self_token.token.text);
+                self.identifier_path.last_mut().unwrap().1 = self.current_namespace();
+            }
+        }
+        Ok(())
+    }
+
     fn hierarchical_identifier(&mut self, arg: &HierarchicalIdentifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.add_reference_candidate(arg.into());
@@ -708,7 +874,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         .last()
                         .map(|p| !p.arguments.is_empty())
                         .unwrap_or(false);
-                    if !has_generic_args {
+                    let is_method_call = !arg
+                        .expression_identifier
+                        .expression_identifier_list0
+                        .is_empty();
+                    if !has_generic_args && !is_method_call {
                         let arg_exprs: Vec<_> =
                             if let Some(list) = &fc.function_call.function_call_opt {
                                 let items: Vec<&ArgumentItem> = list.argument_list.as_ref().into();
@@ -720,11 +890,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                             } else {
                                 Vec::new()
                             };
-                        let call_token = arg
-                            .expression_identifier
-                            .scoped_identifier
-                            .identifier()
-                            .token;
+                        let call_token = arg.expression_identifier.identifier().token;
                         let namespace = self.current_namespace();
                         generic_inference_table::push_pending(PendingEntry {
                             call_token_id: call_token.id,
@@ -877,7 +1043,11 @@ impl VerylGrammarTrait for CreateSymbolTable {
                         .last()
                         .map(|p| !p.arguments.is_empty())
                         .unwrap_or(false);
-                    if !has_generic_args {
+                    let is_method_call = !arg
+                        .expression_identifier
+                        .expression_identifier_list0
+                        .is_empty();
+                    if !has_generic_args && !is_method_call {
                         let arg_exprs: Vec<_> =
                             if let Some(list) = &fc.function_call.function_call_opt {
                                 let items: Vec<&ArgumentItem> = list.argument_list.as_ref().into();
@@ -889,11 +1059,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                             } else {
                                 Vec::new()
                             };
-                        let call_token = arg
-                            .expression_identifier
-                            .scoped_identifier
-                            .identifier()
-                            .token;
+                        let call_token = arg.expression_identifier.identifier().token;
                         let namespace = self.current_namespace();
                         generic_inference_table::push_pending(PendingEntry {
                             call_token_id: call_token.id,
@@ -1804,78 +1970,68 @@ impl VerylGrammarTrait for CreateSymbolTable {
         Ok(())
     }
 
-    fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<(), ParolError> {
+    fn impl_declaration(&mut self, arg: &ImplDeclaration) -> Result<(), ParolError> {
         let name = arg.identifier.text();
         match self.point {
             HandlerPoint::Before => {
+                self.impl_context = Some(ImplContext {
+                    target: arg.identifier.identifier_token.token,
+                    namespace: self.current_namespace(),
+                    range: arg.identifier.as_ref().into(),
+                });
                 self.push_namespace(name);
-                self.generic_context.push();
-                self.ports.push(Vec::new());
-                self.reference_paths.push(Vec::new());
-                self.affiliation.push(Affiliation::Function);
-                self.push_type_dag_cand();
             }
             HandlerPoint::After => {
                 self.pop_namespace();
-                self.affiliation.pop();
+                if let Some(ctx) = self.impl_context.take() {
+                    self.impl_defs.push(ctx);
+                }
+            }
+        }
+        Ok(())
+    }
 
-                let (generic_parameters, generic_consts) = self.generic_context.pop();
-                let ports: Vec<_> = self.ports.pop().unwrap();
-                let reference_paths: Vec<_> = self.reference_paths.pop().unwrap();
-
+    fn function_declaration(&mut self, arg: &FunctionDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.enter_function(arg.identifier.text()),
+            HandlerPoint::After => {
                 let ret = arg
                     .function_declaration_opt1
                     .as_ref()
                     .map(|x| (&*x.scalar_type).into());
-                if let Some(ret) = &ret
-                    && !self.check_identifer_with_type(&arg.identifier, ret)
-                {
-                    self.pop_type_dag_cand(None);
-                    return Ok(());
-                }
-
-                let affiliation = self
-                    .affiliation
-                    .last()
-                    .cloned()
-                    .unwrap_or(Affiliation::ProjectNamespace);
-
                 let range = TokenRange::new(
                     &arg.function.function_token,
                     &arg.statement_block.r_brace.r_brace_token,
                 );
-
-                let definition =
-                    definition_table::insert(self.project_name, Definition::Function(arg.clone()));
-                let property = FunctionProperty {
-                    affiliation,
-                    is_proto: false,
-                    range,
-                    generic_parameters,
-                    generic_consts,
-                    generic_references: vec![],
-                    ports,
-                    ret,
-                    reference_paths,
-                    constantable: None,
-                    definition: Some(definition),
-                };
-
-                if let Some(id) = self.insert_symbol(
-                    &arg.identifier.identifier_token.token,
-                    SymbolKind::Function(property),
-                    false,
-                ) {
-                    self.push_declaration_item(id);
-                    self.pop_type_dag_cand(Some((id, Context::Function, false)));
-                    if affiliation == Affiliation::ProjectNamespace {
-                        self.insert_reference_functions(id);
-                    }
-                } else {
-                    self.pop_type_dag_cand(None);
-                    self.reference_functions.clear();
-                }
+                let definition = Definition::Function(arg.clone());
+                self.leave_function(&arg.identifier, ret, range, definition);
             }
+        }
+        Ok(())
+    }
+
+    fn method_declaration(&mut self, arg: &MethodDeclaration) -> Result<(), ParolError> {
+        match self.point {
+            HandlerPoint::Before => self.enter_function(arg.identifier.text()),
+            HandlerPoint::After => {
+                let ret = arg
+                    .method_declaration_opt0
+                    .as_ref()
+                    .map(|x| (&*x.scalar_type).into());
+                let range = TokenRange::new(
+                    &arg.function.function_token,
+                    &arg.statement_block.r_brace.r_brace_token,
+                );
+                let definition = Definition::Method(arg.clone());
+                self.leave_function(&arg.identifier, ret, range, definition);
+            }
+        }
+        Ok(())
+    }
+
+    fn method_port_declaration(&mut self, arg: &MethodPortDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.insert_self_port(&arg.slf);
         }
         Ok(())
     }
@@ -2732,6 +2888,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
             }
             HandlerPoint::After => {
                 self.pop_type_dag_cand(None);
+                self.check_impl_defs();
             }
         }
 

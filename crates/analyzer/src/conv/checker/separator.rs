@@ -29,6 +29,11 @@ fn check_path(
         matches!(
             preceed_symbol.kind,
             SymbolKind::Instance(_) // member function of interface
+            | SymbolKind::Port(_) // method call on a value of the impl target type
+            | SymbolKind::Variable(_)
+            | SymbolKind::StructMember(_)
+            | SymbolKind::UnionMember(_)
+            | SymbolKind::ModportVariableMember(_)
         )
     } else {
         matches!(
@@ -54,7 +59,11 @@ pub fn check_separator(context: &mut Context, value: &ExpressionIdentifier) {
     if let Ok(symbol) = symbol_table::resolve(value) {
         let mut full_path: Vec<_> = symbol.full_path.clone().into_iter().rev().collect();
 
-        for x in &value.scoped_identifier.scoped_identifier_list {
+        for x in value
+            .scoped_identifier()
+            .map(|x| x.scoped_identifier_list.as_slice())
+            .unwrap_or_default()
+        {
             check_path(
                 context,
                 &mut full_path,

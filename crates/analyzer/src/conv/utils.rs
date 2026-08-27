@@ -2023,6 +2023,11 @@ pub fn eval_function_call(
                 }
             }
             SymbolKind::Function(_) | SymbolKind::ModportFunctionMember(_) => {
+                let args = if is_impl_member(&symbol.found) {
+                    prepend_self_arg(context, value.expression_identifier.as_ref(), args)?
+                } else {
+                    args
+                };
                 let ret =
                     function_call(context, value.expression_identifier.as_ref(), args, token)?;
 
@@ -2488,7 +2493,16 @@ fn eval_factor_path_inner(
                 token,
             )?
         } else {
-            let maps = generic_path.to_generic_maps();
+            let mut maps = generic_path.to_generic_maps();
+            if is_impl_member(&symbol.found) {
+                let mut parent_path = generic_path.clone();
+                parent_path.paths.pop();
+                if let Ok(parent) = symbol_table::resolve(&parent_path) {
+                    let mut parent_maps = target_generic_maps(&parent.found);
+                    parent_maps.append(&mut maps);
+                    maps = parent_maps;
+                }
+            }
             eval_factor_symbol_external(
                 context,
                 generic_path,
@@ -2748,7 +2762,8 @@ pub fn eval_factor_symbol(
     match &symbol.found.kind {
         SymbolKind::Parameter(x) if !x.is_proto => {
             // Parameter should be found through context.find_path from the defined namespace
-            if let Some(namespace) = context.current_namespace()
+            if !is_impl_member(&symbol.found)
+                && let Some(namespace) = context.current_namespace()
                 && symbol.found.namespace.included(&namespace)
             {
                 context.insert_error(AnalyzerError::referring_before_definition(
@@ -3958,6 +3973,7 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
         match definition.as_ref() {
             Definition::Function(x) => Conv::conv(context, (x, Some(path))),
             Definition::ProtoFunction(x) => Conv::conv(context, (x, Some(path))),
+            Definition::Method(x) => Conv::conv(context, (x, Some(path))),
             _ => unreachable!(),
         }
     }
@@ -4043,6 +4059,61 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
         .ok_or_else(|| ir_error!(token))
 }
 
+pub fn is_impl_member(symbol: &Symbol) -> bool {
+    match symbol_table::get_namespace_symbol(&symbol.namespace).map(|x| x.kind) {
+        Some(SymbolKind::Struct(_)) => true,
+        Some(SymbolKind::GenericInstance(x)) => matches!(
+            symbol_table::get(x.base).map(|x| x.kind),
+            Some(SymbolKind::Struct(_))
+        ),
+        _ => false,
+    }
+}
+
+fn target_generic_maps(symbol: &Symbol) -> Vec<GenericMap> {
+    if let Some(x) = symbol.kind.get_type()
+        && let Some((x, _)) = x.trace_user_defined(Some(&symbol.namespace))
+        && let Some(x) = x.get_user_defined()
+    {
+        x.path.to_generic_maps()
+    } else {
+        Vec::new()
+    }
+}
+
+pub fn prepend_self_arg(
+    context: &mut Context,
+    path: &ExpressionIdentifier,
+    args: Arguments,
+) -> IrResult<Arguments> {
+    if path.expression_identifier_list0.is_empty() {
+        return Ok(args);
+    }
+
+    let mut receiver = path.clone();
+    receiver.expression_identifier_list0.pop();
+    let receiver: Expression = (&receiver).into();
+
+    let token: TokenRange = (&receiver).into();
+    let expr: ir::Expression = Conv::conv(context, &receiver)?;
+    let dst: Vec<VarPathSelect> = Conv::conv(context, &receiver)?;
+    let slf = (expr, dst, token);
+
+    let ret = match args {
+        Arguments::Null => Arguments::Positional(vec![slf]),
+        Arguments::Positional(mut x) => {
+            x.insert(0, slf);
+            Arguments::Positional(x)
+        }
+        Arguments::Named(x) => Arguments::Mixed(vec![slf], x),
+        Arguments::Mixed(mut x, y) => {
+            x.insert(0, slf);
+            Arguments::Mixed(x, y)
+        }
+    };
+    Ok(ret)
+}
+
 pub fn function_call(
     context: &mut Context,
     path: &ExpressionIdentifier,
@@ -4088,14 +4159,11 @@ pub fn function_call(
                 parent_map.append(&mut map);
                 map = parent_map;
             }
-            SymbolKind::Port(x) => {
-                if let Some(x) = x.r#type.get_user_defined() {
-                    let mut parent_map = x.path.to_generic_maps();
-                    parent_map.append(&mut map);
-                    map = parent_map;
-                }
+            _ => {
+                let mut parent_map = target_generic_maps(&symbol.found);
+                parent_map.append(&mut map);
+                map = parent_map;
             }
-            _ => (),
         }
     }
 

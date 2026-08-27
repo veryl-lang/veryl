@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 425
+expression: out
+---
+invalid_impl_target (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_impl_target)
+
+  × "EnumA" can't be implemented because it is enum
+   ╭─[../../testcases/error/impl_invalid_target.veryl:7:10]
+ 6 │ 
+ 7 │     impl EnumA {
+   ·          ──┬──
+   ·            ╰── Error location
+ 8 │         function f (
+   ╰────
+  help:

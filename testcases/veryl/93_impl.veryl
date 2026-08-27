@@ -1,0 +1,75 @@
+package Package93 {
+    struct FpT::<EXP_W: p32, MTS_W: p32> {
+        sign: logic       ,
+        exp : logic<EXP_W>,
+        mts : logic<MTS_W>,
+    }
+
+    impl FpT {
+        const BIAS: u32 = (1 << (EXP_W - 1)) - 1;
+
+        function is_nan (
+            self,
+        ) -> logic {
+            return (self.exp == '1) && (self.mts != '0);
+        }
+    }
+
+    type Fp16 = FpT::<5, 10>;
+    type Fp32 = FpT::<8, 23>;
+}
+
+module Module93 (
+    i_x  : input  Package93::Fp32,
+    o_nan: output logic          ,
+    o_b  : output u32            ,
+) {
+    struct PairT {
+        a: logic<8>,
+        b: logic<8>,
+    }
+
+    impl PairT {
+        const WIDTH: u32 = 16;
+
+        function sum (
+            self,
+        ) -> logic<8> {
+            return self.a + self.b;
+        }
+
+        function add (
+            self,
+            x: input logic<8>,
+        ) -> logic<8> {
+            return self.a + x;
+        }
+
+        function log (
+            self,
+        ) {
+            $display("%d", self.a);
+        }
+    }
+
+    var p: PairT;
+
+    always_comb {
+        p.a = 8'd1;
+        p.b = 8'd2;
+    }
+
+    let _s: logic<8> = p.sum();
+    let _t: logic<8> = p.add(8'd1);
+    let _u: logic<8> = PairT::sum(p);
+    let _v: u32      = PairT::WIDTH;
+    let _w: u32      = Package93::FpT::<5, 10>::BIAS;
+
+    assign o_nan = i_x.is_nan();
+    assign o_b   = Package93::Fp32::BIAS;
+
+    initial {
+        p.log();
+        PairT::log(p);
+    }
+}

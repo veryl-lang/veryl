@@ -1,0 +1,14 @@
+module impl_invalid_target {
+    enum EnumA {
+        A,
+        B,
+    }
+
+    impl EnumA {
+        function f (
+            self,
+        ) -> logic {
+            return 0;
+        }
+    }
+}

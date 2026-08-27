@@ -240,7 +240,7 @@ fn factor_to_width_expr(
             {
                 return None;
             }
-            let name = scoped.scoped_identifier.identifier().token.text;
+            let name = scoped.identifier().token.text;
             if generic_params.iter().any(|(p, _)| *p == name) {
                 Some(WidthExpr::Param(name))
             } else {
@@ -310,7 +310,7 @@ fn resolve_argument_width(expr: &Expression) -> Option<usize> {
     {
         return None;
     }
-    let symbol = symbol_table::resolve(scoped.scoped_identifier.as_ref()).ok()?;
+    let symbol = symbol_table::resolve(scoped.scoped_identifier()?).ok()?;
     let var_type = match &symbol.found.kind {
         SymbolKind::Variable(x) => &x.r#type,
         SymbolKind::Port(x) => &x.r#type,
