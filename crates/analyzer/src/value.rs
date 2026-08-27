@@ -1368,6 +1368,16 @@ impl Value {
         }
     }
 
+    /// All-zero with no X/Z bits, at any width.  `to_u64() == Some(0)` is
+    /// not this test: a wide value always converts to `None`.
+    #[inline(always)]
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Self::U64(x) => x.mask_xz == 0 && x.payload == 0,
+            Self::BigUint(x) => x.mask_xz.is_zero() && x.payload.is_zero(),
+        }
+    }
+
     pub fn format_hex(&self) -> String {
         match self {
             Self::U64(x) => x.format_hex(),

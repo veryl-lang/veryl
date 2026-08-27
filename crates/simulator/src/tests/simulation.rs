@@ -713,6 +713,148 @@ fn word_straddling_field_store_keeps_its_value() {
     }
 }
 
+/// A child variable accessed only as static bit-fields is split into
+/// per-field words (field unfuse).  The tree writes three 6-bit fields — two
+/// selected from the input, one selected from the other two — and reads the
+/// vector back whole, exercising contained reads, reads of the variable's
+/// own fields, and the spanning gather.  The variable must sit in a child:
+/// the top module's surface is excluded from the pass.
+const FIELD_UNFUSE_TREE: &str = r#"
+    module Leaf (
+        a: input  logic<12>,
+        s: input  logic<3>,
+        o: output logic<6>,
+        w: output logic<18>,
+    ) {
+        var nodes: logic<18>;
+        assign nodes[5:0]   = if s[0] == 1'b1 ? a[5:0] : a[11:6];
+        assign nodes[11:6]  = if s[1] == 1'b1 ? a[11:6] : a[5:0];
+        assign nodes[17:12] = if s[2] == 1'b1 ? nodes[5:0] : nodes[11:6];
+        assign o = nodes[17:12];
+        assign w = nodes;
+    }
+    module Top (
+        a: input  logic<12>,
+        s: input  logic<3>,
+        o: output logic<6>,
+        w: output logic<18>,
+    ) {
+        inst u: Leaf (a, s, o, w);
+    }
+    "#;
+
+#[test]
+fn field_unfuse_static_field_tree_matches_reference() {
+    let a = 0xa93u64; // a[5:0] = 0x13, a[11:6] = 0x2a
+    for s in [0b000u64, 0b101, 0b111, 0b010] {
+        let lo = if s & 1 != 0 {
+            a & 0x3f
+        } else {
+            (a >> 6) & 0x3f
+        };
+        let mid = if s & 2 != 0 {
+            (a >> 6) & 0x3f
+        } else {
+            a & 0x3f
+        };
+        let hi = if s & 4 != 0 { lo } else { mid };
+        let w = (hi << 12) | (mid << 6) | lo;
+        for config in Config::all() {
+            let ir = analyze(FIELD_UNFUSE_TREE, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::new(a, 12, false));
+            sim.set("s", Value::new(s, 3, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(hi, 6, false),
+                "s={s:03b} config={config:?}"
+            );
+            assert_eq!(
+                sim.get("w").unwrap(),
+                Value::new(w, 18, false),
+                "s={s:03b} config={config:?}"
+            );
+        }
+    }
+}
+
+/// The split retires the packed word: nothing writes it any more, so a
+/// meta-pointer read (`get_var`) sees the zeroed initial storage while the
+/// design's own readers see the live fields.  That is the observability
+/// trade the pass ships with (`--wave` and the step watcher disable it) —
+/// and the probe fails if the pass silently stops firing.
+#[test]
+fn field_unfuse_retires_the_packed_storage() {
+    for config in Config::all() {
+        // 4-state disables the pass; the storage stays live there.
+        if config.use_4state {
+            continue;
+        }
+        let ir = analyze(FIELD_UNFUSE_TREE, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0xa93, 12, false));
+        sim.set("s", Value::new(0b111, 3, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_ne!(sim.get("w").unwrap(), Value::new(0, 18, false));
+        assert_eq!(
+            sim.get_var("u.nodes").unwrap(),
+            Value::new(0, 18, false),
+            "packed storage still written — did the pass stop firing? config={config:?}"
+        );
+    }
+}
+
+/// A variable an always_ff reads stays packed: events are never rewritten,
+/// so anything they touch is disqualified and its storage keeps carrying the
+/// live value.
+#[test]
+fn field_unfuse_leaves_event_read_variables_packed() {
+    let code = r#"
+    module Leaf (
+        clk: input  clock,
+        a  : input  logic<12>,
+        q  : output logic<6>,
+    ) {
+        var nodes: logic<12>;
+        assign nodes[5:0]  = a[11:6];
+        assign nodes[11:6] = a[5:0];
+        var qq: logic<6>;
+        always_ff {
+            qq = nodes[5:0];
+        }
+        assign q = qq;
+    }
+    module Top (
+        clk: input  clock,
+        a  : input  logic<12>,
+        q  : output logic<6>,
+    ) {
+        inst u: Leaf (clk, a, q);
+    }
+    "#;
+    for config in Config::all() {
+        if config.use_4state {
+            continue;
+        }
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0xa93, 12, false));
+        let clk = sim.get_clock("clk").unwrap();
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x2a, 6, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get_var("u.nodes").unwrap(),
+            Value::new((0x13 << 6) | 0x2a, 12, false),
+            "an event-read variable must keep its packed storage live config={config:?}"
+        );
+    }
+}
+
 #[test]
 fn wide_signed_literal_store_sign_extends() {
     // Holds with and without the build-time sizing: what the store produces

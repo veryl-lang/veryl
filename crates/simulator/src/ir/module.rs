@@ -14,6 +14,7 @@ use crate::ir::opt::comb_fusion;
 use crate::ir::opt::cone_gate;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
+use crate::ir::opt::field_unfuse;
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
@@ -4264,7 +4265,91 @@ impl Conv<&air::Module> for ProtoModule {
                 comb_layout::expand_compiled_blocks(stmts);
             }
         }
-        let unified = unified;
+        // Field unfuse (see `opt::field_unfuse`).  Runs BEFORE the pipeline
+        // key and the cone-gate node tables: the rewritten statements flavor
+        // the key, and the field storage inherits its packed variable's cone
+        // owner through `Context::comb_reloc`.  The allocations sit outside
+        // the memoised pipeline, so a cache hit replays them identically.
+        let mut unfuse_field_offsets: Vec<isize> = Vec::new();
+        let unified = {
+            let mut unified = unified;
+            if field_unfuse::enabled(context.config.use_4state) {
+                // Offsets the statement census cannot see: the testbench-facing
+                // top-level surface (`Simulator::set`/`get`, wavedrom), external
+                // component connects, derived-clock candidates, and storage
+                // whose initial value is not zero (a split field starts at
+                // zero, so a conditionally-written non-zero-initial field
+                // would read differently before its first write).
+                let mut blocklist: HashSet<isize> = HashSet::default();
+                let explain = field_unfuse::explain_offsets();
+                let note_meta = |vars: &HashMap<VarId, VariableMeta>,
+                                 top: bool,
+                                 blocklist: &mut HashSet<isize>| {
+                    for meta in vars.values() {
+                        let nonzero_init = meta.initial_values.iter().any(|v| !v.is_zero());
+                        if !(top || nonzero_init) {
+                            continue;
+                        }
+                        for el in &meta.elements {
+                            if let VarOffset::Comb(o) = el.current {
+                                if explain.contains(&o) {
+                                    eprintln!(
+                                        "[field_unfuse] explain off={o}: blocklisted by meta \
+                                         path={} top={top} nonzero_init={nonzero_init} \
+                                         initial_values={:?}",
+                                        meta.path,
+                                        meta.initial_values.iter().take(4).collect::<Vec<_>>()
+                                    );
+                                }
+                                blocklist.insert(o);
+                            }
+                        }
+                    }
+                };
+                note_meta(&variable_meta, true, &mut blocklist);
+                let mut stack: Vec<&ModuleVariableMeta> = all_child_modules.iter().collect();
+                while let Some(m) = stack.pop() {
+                    note_meta(&m.variable_meta, false, &mut blocklist);
+                    stack.extend(m.children.iter());
+                }
+                for (_, off, _, _) in &nested_derived_clock_candidates {
+                    if let VarOffset::Comb(o) = off {
+                        blocklist.insert(*o);
+                    }
+                }
+                let mut ins = vec![];
+                for external in &all_external_components {
+                    for connect in &external.connects {
+                        connect.expr.gather_variable_offsets(&mut ins);
+                    }
+                }
+                for o in &ins {
+                    if let VarOffset::Comb(x) = o {
+                        blocklist.insert(*x);
+                    }
+                }
+                let use_4state = context.config.use_4state;
+                let context = &mut *context;
+                let comb_total = &mut context.comb_total_bytes;
+                let mut alloc = |width: usize| -> isize {
+                    let nb = crate::ir::variable::native_bytes(width);
+                    let off = *comb_total as isize;
+                    *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                    off
+                };
+                let (stats, field_offsets) = field_unfuse::run(
+                    &mut unified,
+                    &all_event_statements,
+                    &blocklist,
+                    &mut alloc,
+                    &mut context.comb_reloc,
+                    use_4state,
+                );
+                unfuse_field_offsets = field_offsets;
+                log::info!("field_unfuse ({}): {stats:?}", src.name);
+            }
+            unified
+        };
 
         // Dead-var DCE protect set (also folded into the cache key): offsets
         // that must survive DCE.  `comb_to_ff_hoist` only rewrites `VarKind::Let`,
@@ -4327,6 +4412,11 @@ impl Conv<&air::Module> for ProtoModule {
                     for connect in &external.connects {
                         connect.expr.gather_variable_offsets(&mut extra_offsets);
                     }
+                }
+                // Unfused field defs stay materialized by default (see
+                // `field_unfuse::inline_fields`).
+                if !field_unfuse::inline_fields() {
+                    extra_offsets.extend(unfuse_field_offsets.iter().map(|&o| VarOffset::Comb(o)));
                 }
                 Some(extra_offsets)
             } else {
