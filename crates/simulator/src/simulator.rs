@@ -65,6 +65,10 @@ pub struct Simulator {
     /// Scratch for the master-high sample below.  A field, not a local: the
     /// step is the innermost loop and its length is fixed for the run.
     derived_clock_high: Vec<u8>,
+    /// Same rationale: per-step scratch for the fired flags and the
+    /// refreshed clock values of `step_with_derived_clocks`.
+    fired_mask_scratch: Vec<bool>,
+    new_values_scratch: Vec<u8>,
     /// Whether each derived reset READ AS ASSERTED at the last check, so a
     /// 0→1 here is the assertion whichever polarity the net has.  Checked
     /// after every commit within a step, not once per step: the assertion
@@ -398,6 +402,8 @@ impl Simulator {
             last_whole_event: None,
             prev_derived_clock_values: vec![0u8; n_derived],
             derived_clock_high: vec![0u8; n_derived],
+            fired_mask_scratch: vec![false; n_derived],
+            new_values_scratch: vec![0u8; n_derived],
             prev_derived_reset_asserted: vec![0u8; n_derived_resets],
             write_log_diag: WriteLogDiag {
                 enabled: env::var("VERYL_WRITE_LOG_DIAG").as_deref() == Ok("1"),
@@ -1755,7 +1761,8 @@ impl Simulator {
         // them).  FF-driven clocks fire post-commit instead, matching
         // SV's NBA-driven edge propagation.
         let n = self.ir.derived_clock_schedule.clocks.len();
-        let mut fired_mask: Vec<bool> = vec![false; n];
+        let mut fired_mask = std::mem::take(&mut self.fired_mask_scratch);
+        fired_mask.fill(false);
         let mut pre_fire: SmallVec<[usize; 8]> = SmallVec::new();
         // Master-gated values WHILE THE MASTER IS HIGH.  A clock the master
         // inverts is low here and rises when the master falls, so that edge
@@ -1812,8 +1819,8 @@ impl Simulator {
         // Convergence: each clock fires at most once (`fired_mask`) and
         // `analyze_dependency` rejects comb cycles, so n+1 iterations
         // suffice; the debug_assert catches bookkeeping regressions.
-        let mut new_values: SmallVec<[u8; 8]> = SmallVec::new();
-        new_values.resize(n, 0);
+        let mut new_values = std::mem::take(&mut self.new_values_scratch);
+        new_values.fill(0);
         let n_rst = self.ir.derived_clock_schedule.resets.len();
         let max_iters = n + n_rst + 1;
         let mut iters = 0;
@@ -1821,9 +1828,9 @@ impl Simulator {
             if has_eval_chunk {
                 self.ir.partial_settle(&mut self.mask_cache);
             }
-            for i in 0..n {
+            for (i, v) in new_values.iter_mut().enumerate().take(n) {
                 let clk = &self.ir.derived_clock_schedule.clocks[i];
-                new_values[i] = self.read_derived_clock_bit(clk);
+                *v = self.read_derived_clock_bit(clk);
             }
 
             // Earliest unfired clock with a real 0→1 edge.  An edge on a
@@ -1985,6 +1992,8 @@ impl Simulator {
             self.prev_derived_clock_values[i] = self.read_derived_clock_bit(clk);
         }
         self.derived_clock_high = high_values;
+        self.fired_mask_scratch = fired_mask;
+        self.new_values_scratch = new_values;
         self.snapshot_derived_reset_levels();
 
         clear_event_write_log();
